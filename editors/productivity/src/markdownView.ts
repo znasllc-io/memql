@@ -179,6 +179,7 @@ function renderDraftProgress() {
   const whole=emptyDocument || (revision?.proposal?.comments ?? []).some((row:ReviewRow)=>row.anchor?.kind==="document");
   byId("draft-preview").hidden=!show;
   document.body.classList.toggle("draft-whole",show&&whole);
+  document.body.classList.toggle("has-draft",show);
   if(!show)return;
   const running=documentProcessing();
   const ready=revision?.status==="waiting" && revision?.approvalId && !revision?.decision && !!revision?.items?.length;
@@ -369,6 +370,7 @@ byId("empty-create").addEventListener("click", () => {
   selectionRange = undefined;
   openComposer({kind:"document",quote:"Entire document"}, byId("empty-create").getBoundingClientRect());
 });
+byId("draft-open-review").addEventListener("click",()=>{showNotes(false);showHistory(false);showReview(true);});
 byId("empty-source").addEventListener("click", () => api.postMessage({type:"source"}));
 byId("extend").addEventListener("click",() => openComposer({kind:"document-end",quote:"End of document"},byId("extend").getBoundingClientRect()));
 byId("dictate").addEventListener("click",()=>dictate("feedback"));

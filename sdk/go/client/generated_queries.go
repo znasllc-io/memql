@@ -12944,6 +12944,28 @@ func WorkDocumentRevisionRequestBuild(args WorkDocumentRevisionRequestArgs) stri
 	return b.String()
 }
 
+// WorkDraftsForOwnerRun -- Latest public-output snapshots, owned and bounded independently of tool history.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workDraftsForOwnerRun"] in generated_concepts.go).
+type WorkDraftsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkDraftsForOwnerRun calls the engine query workDraftsForOwnerRun.
+func (qc *QueryClient) WorkDraftsForOwnerRun(ctx context.Context, args WorkDraftsForOwnerRunArgs) (*Result, error) {
+	call := WorkDraftsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workDraftsForOwnerRun", call)
+}
+
+func WorkDraftsForOwnerRunBuild(args WorkDraftsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workDraftsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkGoalForOwner -- One of the caller's goals by id.
 //
 // Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalForOwner"] in generated_concepts.go).

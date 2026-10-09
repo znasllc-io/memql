@@ -13,6 +13,7 @@ export class ReportedError extends Error {
 export function userMessage(error: unknown, operation: string): string {
   if (error instanceof UserInputError) return error.message;
   const detail = error instanceof Error ? error.message : String(error);
+  if (/context checkpoint|context.*(?:window|budget).*exceed/i.test(detail)) return "MemQL couldn’t make enough room to continue this request. Your work is saved. Use the troubleshooting reference if retrying doesn’t help.";
   if (/idle ceiling|idle.timeout|stopped producing output/i.test(detail)) return "The AI stopped responding. Try again.";
   if (/(?:model|local runtime).*?(?:timeout|timed? out|deadline)|model_call_timeout/i.test(detail)) return "The AI couldn’t finish within the time allowed. Try a smaller request, or choose another model in Fleet.";
   if (/every_door_shut|speech recognition|transcription is not configured/i.test(detail)) return "No suitable AI model is available for this request. Check the models in Fleet, then try again.";
