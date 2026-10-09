@@ -13,7 +13,7 @@
 // GRANT is declarable since epic memql#5288, a rank FLOOR is not). Executors
 // live in component/logstore. Design: docs/superpowers/specs/2026-09-03-logs-design.md.
 
-@description("Lines inside [windowStart, windowEnd), newest first, narrowed by every facet given. `apps` and `subjectConcepts` together form ONE scope predicate ORed -- an app's slice is 'lines tagged with me OR about the things I own' -- and every other facet ANDs. `text` is a case-insensitive substring of the message. Keyset-paged: pass the oldest row's occurredAt and id back as beforeAt and beforeId for the next page. `limit` defaults to 200 and is capped at 500. Admin and above; the handler repeats the floor.")
+@description("Lines inside [windowStart, windowEnd), newest first, narrowed by every facet given. `apps` and `subjectConcepts` together form ONE scope predicate ORed -- an app's slice is 'lines tagged with me OR about the things I own' -- and every other facet ANDs. `text` is a case-insensitive substring of the message, subject, or structured attributes (including troubleshooting references). Keyset-paged: pass the oldest row's occurredAt and id back as beforeAt and beforeId for the next page. `limit` defaults to 200 and is capped at 500. Admin and above; the handler repeats the floor.")
 @sdk
 @executor("integration.logs.search")
 builtin logsSearch {
@@ -29,7 +29,7 @@ builtin logsSearch {
   subjectConcepts  []string   @description("Concept ids an app owns; ORed with `apps` into the scope predicate.")
   session          string     @description("Only lines from this OS tab session.")
   userId           string     @description("Only OS lines written by this user.")
-  text             string     @description("Case-insensitive substring of the message.")
+  text             string     @description("Case-insensitive substring of the message, subject, or structured attributes (including troubleshooting references).")
   limit            int        @description("Rows per page: 1 to 500, default 200.")
   beforeAt         datetime   @description("Keyset cursor: the occurredAt of the oldest row already seen.")
   beforeId         string     @description("Keyset cursor: the id of that row.")
@@ -49,7 +49,7 @@ builtin logsTail {
   subjectConcepts  []string   @description("Concept ids an app owns; ORed with `apps`.")
   session          string     @description("Only lines from this OS tab session.")
   userId           string     @description("Only OS lines written by this user.")
-  text             string     @description("Case-insensitive substring of the message.")
+  text             string     @description("Case-insensitive substring of the message, subject, or structured attributes (including troubleshooting references).")
   limit            int        @description("Rows per answer: 1 to 500, default 200.")
   afterAt          datetime   @description("Keyset cursor: the occurredAt of the newest row already seen.")
   afterId          string     @description("Keyset cursor: the id of that row.")

@@ -1,3 +1,4 @@
+import { renderProblem } from "./problemView.js";
 export {};
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void; getState(): unknown; setState(state: unknown): void };
 const api = acquireVsCodeApi();
@@ -143,7 +144,7 @@ byId("history-current").addEventListener("click",()=>api.postMessage({type:"hist
 byId("history-fork").addEventListener("click",()=>historyRequest({type:"historyFork",name:branchName.value.trim()}));
 branchName.addEventListener("input",historyControls);
 
-let dictationPhase="idle", dictatedBase="", dictationTarget="feedback", dictationError="";
+let dictationPhase="idle", dictatedBase="", dictationTarget="feedback", dictationError="", dictationReference="";
 let dictationAvailable=false;
 let reviewRequested = state.reviewOpen ?? false;
 let activeAnchor: Anchor | undefined;
@@ -484,16 +485,21 @@ function renderRevisionContent() {
   const status = revision, proposal = status.proposal ?? {};
   const terminal = !!status.cancelRequested || ["succeeded", "failed", "cancelled"].includes(status.status);
   const awaiting = !terminal && !!status.approvalId && !status.decision && status.status === "waiting";
-  const paused = !terminal && !awaiting && !status.decision && status.prepared !== false && status.status === "waiting";
+  const retrying = !terminal && !awaiting && (["retry","replan","repair"].includes(status.waitingOn?.kind) || status.status === "running" && Number(status.retryCount)>0);
+  const paused = !retrying && !terminal && !awaiting && !status.decision && status.prepared !== false && status.status === "waiting";
   let panel: HTMLElement = root;
   if (terminal && pending) {
     const previous = document.createElement("details"); previous.className = "earlier";
     previous.append(textElement("summary", "Previous review")); root.append(previous); panel = previous;
   }
   const phase = status.cancelRequested ? "Stop requested" : status.decision === "rejected" ? "Changes declined" : status.status === "succeeded" ? status.result?.applied ? "Changes applied" : "No changes needed"
-    : status.status === "failed" || status.status === "cancelled" ? "Couldn’t prepare changes" : awaiting ? "Proposed changes" : paused ? "Preparation paused" : status.decision === "approved" ? "Applying changes…" : "Preparing changes…";
+    : status.status === "failed" || status.status === "cancelled" ? "Couldn’t prepare changes" : awaiting ? "Proposed changes" : retrying ? "Retrying automatically…" : paused ? "Preparation paused" : status.decision === "approved" ? "Applying changes…" : "Preparing changes…";
   panel.append(textElement("h3", phase, !terminal && !awaiting && !paused ? "phase busy" : ""));
-  if (status.errorMessage && (paused || ["failed","cancelled"].includes(status.status))) panel.append(textElement("p", String(status.errorMessage), "review-error"));
+  if (status.problem && (retrying || paused || ["failed","cancelled"].includes(status.status))) {
+    const notice=textElement("div","","review-error");
+    renderProblem(notice, {...status.problem, message: retrying ? "The last attempt couldn’t finish. MemQL will retry automatically. Your feedback is saved." : paused ? `${status.problem.message} Your feedback is saved. Stop this attempt, then propose changes again.` : status.problem.message}, value=>api.postMessage(value));
+    panel.append(notice);
+  }
   const requested: ReviewRow[] = Array.isArray(proposal.comments) ? proposal.comments : rows.filter(row => proposal.commentIds?.includes(row.id));
   const edits: Record<string, any>[] = Array.isArray(proposal.edits) ? proposal.edits.filter((edit: any) => edit.before !== edit.after) : [];
   const addressed = new Set(edits.flatMap(edit => edit.commentIds ?? []));
@@ -533,6 +539,7 @@ function renderRevisionContent() {
         send.addEventListener("click",()=>{if(send.disabled)return;revisionBusy=true;api.postMessage({type:"modifyRevisionItem",approvalId:status.approvalId,itemId:item.id,instruction:input.value});renderRevision();});
         const mic=textElement("button","Dictate","secondary") as HTMLButtonElement;mic.dataset.focusKey=`${item.id}:dictate`;dictationControl(mic,item.id);mic.addEventListener("click",()=>dictate(item.id));
         const voiceStatus=textElement("small",dictationStatus(item.id),"dictation-status");voiceStatus.setAttribute("role","status");
+        if(dictationTarget===item.id&&dictationError)renderProblem(voiceStatus,{message:dictationError,reference:dictationReference},value=>api.postMessage(value));
         const actions=textElement("div","","composer-actions");actions.append(send,mic,voiceStatus);editor.append(input,actions);card.append(editor);
       }
     }
@@ -564,7 +571,7 @@ function renderRevisionContent() {
     const apply=action(accepted.length ? `Apply accepted (${accepted.length})` : "Finish review","decideRevision",accepted.length?"approved":"rejected",true,{acceptedItemIds:accepted,proposalHash:status.proposalHash});
     apply.disabled=dictationPhase!=="idle"||revisionBusy||!connected||remaining>0||items.length===0;actions.append(apply);
   }
-  else if (!terminal && status.approvalId && status.decision === "approved" && status.status === "waiting") {
+  else if (!terminal && !retrying && status.approvalId && status.decision === "approved" && status.status === "waiting") {
     actions.append(textElement("p", "Your approval is saved. Resume to apply the accepted changes.", "review-progress"));
     actions.append(action("Resume approved changes", "decideRevision", "approved", true, status.answer));
   }
@@ -575,20 +582,20 @@ window.addEventListener("message",event=>{
   if(message.type==="selectionNote"&&contextSelection&&connected&&!historyPreview){openComposer(contextSelection.anchor,contextSelection.rect,"note");contextSelection=undefined;}
   if(message.type==="find")showFind(true);
   if(message.type==="notes"){personalNotes=message.rows??[];byId("notes-status").textContent=message.hasMore?"Showing your 500 most recent notes. Older notes remain saved.":"";byId("notes-retry").hidden=true;renderNotes();}
-  if(message.type==="notesError"){byId("notes-status").textContent=message.message;byId("notes-retry").hidden=false;}
+  if(message.type==="notesError"){renderProblem(byId("notes-status"),message,value=>api.postMessage(value));byId("notes-retry").hidden=false;}
   if(message.type==="noteSaved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();controls();showNotes(true);}
   if(message.type==="selectionFeedback" && contextSelection && connected && mode==="review") {
     openComposer(contextSelection.anchor,contextSelection.rect);contextSelection=undefined;
   }
   if(message.type==="dictationAvailable"){dictationAvailable=!!message.available;controls();renderRevision();}
   if(message.type==="dictation"){
-    dictationPhase=message.phase;dictationError=message.error??"";
+    dictationPhase=message.phase;dictationError=message.error??"";dictationReference=message.reference??"";
     if(typeof message.text==="string"){
       const text=dictatedBase+(dictatedBase&&!/\s$/.test(dictatedBase)?" ":"")+message.text;
       if(dictationTarget==="feedback")feedback.value=text;else modifications[dictationTarget]=text;
       saveState();
     }
-    if(message.error&&dictationTarget==="feedback")byId("composer-status").textContent=message.error;
+    if(message.error&&dictationTarget==="feedback")renderProblem(byId("composer-status"),{message:message.error,reference:message.reference},value=>api.postMessage(value));
     controls();renderRevision();
   }
   if(message.type==="restoreDraft") {
@@ -621,7 +628,7 @@ window.addEventListener("message",event=>{
     if(latestDocument)window.dispatchEvent(new MessageEvent("message",{data:latestDocument}));renderHistory();showReview(reviewRequested);
   }
   if(message.type==="historyIdle"){historyBusy=false;historyControls();}
-  if(message.type==="historyError"){byId("history-status").textContent=message.message;byId("history-retry").hidden=false;}
+  if(message.type==="historyError"){renderProblem(byId("history-status"),message,value=>api.postMessage(value));byId("history-retry").hidden=false;}
   if(message.type==="document") {
     latestDocument=message;historyControls();if(historyPreview)return;
     contextSelection=undefined;
@@ -656,7 +663,7 @@ window.addEventListener("message",event=>{
     const changed=message.status?.approvalId&&message.status.approvalId!==revision?.approvalId;const different=JSON.stringify(message.status)!==JSON.stringify(revision);revision=message.status;if(different)renderRevision();controls();if(changed){byId("status").textContent="";showReview(true);}saveState();}
   if(message.type==="revisionIdle"){revisionBusy=false;preparing=false;renderRevision();controls();}
   if(message.type==="saved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();byId("status").textContent="Added to review.";controls();showReview(true);}
-  if(message.type==="error"){commentBusy=false;revisionBusy=false;preparing=false;renderRevision();controls();if(!byId("composer").hidden)byId("composer-status").textContent=message.message;else{byId("status").textContent=message.message;showReview(true);}}
+  if(message.type==="error"){commentBusy=false;revisionBusy=false;preparing=false;renderRevision();controls();if(!byId("composer").hidden)renderProblem(byId("composer-status"),message,value=>api.postMessage(value));else{renderProblem(byId("status"),message,value=>api.postMessage(value));showReview(true);}}
   if(message.type==="notice")byId("status").textContent=message.message;
 });
 showReview(state.reviewOpen??false);controls();api.postMessage({type:"ready"});

@@ -21,6 +21,7 @@ import (
 
 type outcomeProvider struct {
 	steps    [][]common.ToolCall
+	texts    []string
 	calls    int
 	messages []common.ChatMessage
 }
@@ -31,8 +32,12 @@ func (p *outcomeProvider) CallChatWithTools(_ context.Context, messages []common
 		return nil, fmt.Errorf("unexpected model call")
 	}
 	calls := p.steps[p.calls]
+	text := ""
+	if p.calls < len(p.texts) {
+		text = p.texts[p.calls]
+	}
 	p.calls++
-	return &common.ToolCallingChatResult{ToolCalls: calls}, nil
+	return &common.ToolCallingChatResult{AssistantText: text, ToolCalls: calls}, nil
 }
 
 func (p *outcomeProvider) CallChatStreamWithTools(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition) (<-chan common.StreamToolChunk, error) {
@@ -40,10 +45,13 @@ func (p *outcomeProvider) CallChatStreamWithTools(ctx context.Context, messages 
 	if err != nil {
 		return nil, err
 	}
-	ch := make(chan common.StreamToolChunk, 2)
+	ch := make(chan common.StreamToolChunk, 3)
 	var deltas []common.ToolCallDelta
 	for i, call := range result.ToolCalls {
 		deltas = append(deltas, common.ToolCallDelta{Index: i, ID: call.ID, Name: call.Name, Arguments: call.Arguments})
+	}
+	if result.AssistantText != "" {
+		ch <- common.StreamToolChunk{Content: result.AssistantText}
 	}
 	ch <- common.StreamToolChunk{ToolCalls: deltas}
 	ch <- common.StreamToolChunk{Done: true}
@@ -207,7 +215,7 @@ func TestWorkQuestionMatchesTheShippedToolSchema(t *testing.T) {
 		`{"status":"needs_input","question":{"text":"Which supplier?","kind":"text"}}`,
 		`{"status":"needs_input","question":{"text":"Which region?","kind":"choice","options":[{"label":"West","value":"west"}]}}`,
 	} {
-		calls, err := normalizeWorkOutcome(outcomeCall(raw))
+		calls, err := normalizeWorkOutcome(outcomeCall(raw), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -224,5 +232,52 @@ func TestWorkQuestionMatchesTheShippedToolSchema(t *testing.T) {
 		if err = schema.Validate(decoded); err != nil {
 			t.Fatalf("serialized question rejected by real contract: %v", err)
 		}
+	}
+}
+
+func TestOwnedWorkStreamsAnswerBeforeShortCompletionInBothLanes(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		t.Run(fmt.Sprint(streaming), func(t *testing.T) {
+			ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), "owner"), common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner"})
+			answer := strings.Repeat("Supported finding with a source.\n", 400)
+			p := &outcomeProvider{texts: []string{answer}, steps: [][]common.ToolCall{outcomeCall(`{"status":"complete","responseFromText":true}`)}}
+			r := testReplier()
+			r.engine = &workPromptEngine{}
+			sink := &captureSink{}
+			turn := turnContext{AgentId: "assistant", RunId: "run", OwnerUserId: "owner", IsWorkExecution: true}
+			var result *TurnResult
+			var err error
+			if streaming {
+				result, err = r.runStreamingToolLoop(ctx, p, nil, []common.ToolDefinition{workResponseToolDefinition()}, sink, time.Now(), "stream-answer", turn)
+			} else {
+				result, err = r.runNonStreamingToolLoop(ctx, p, nil, nil, []common.ToolDefinition{workResponseToolDefinition()}, sink, time.Now(), "stream-answer", turn)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.FinalText != strings.TrimSpace(answer) || p.calls != 1 || result.TextChunks == 0 {
+				t.Fatalf("answer did not complete once: calls=%d result=%+v", p.calls, result)
+			}
+		})
+	}
+}
+
+func TestStreamedCompletionRequiresExplicitSameResponseAnswer(t *testing.T) {
+	for _, tc := range []struct{ raw, text string }{
+		{`{"status":"complete","responseFromText":true}`, ""},
+		{`{"status":"complete","responseFromText":true,"response":"ambiguous"}`, "answer"},
+		{`{"status":"needs_input","responseFromText":true,"question":{"text":"Which?","kind":"text"}}`, "answer"},
+		{`{"status":"complete"}`, "plain text is not implicitly complete"},
+	} {
+		if _, err := normalizeWorkOutcome(outcomeCall(tc.raw), tc.text); err == nil {
+			t.Fatalf("accepted invalid completion: %s", tc.raw)
+		}
+	}
+	if _, err := normalizeWorkOutcome(nil, "unmarked answer"); err == nil {
+		t.Fatal("free text bypassed completion marker")
+	}
+	calls := append(outcomeCall(`{"status":"complete","responseFromText":true}`), common.ToolCall{Name: "writeFile", Arguments: `{}`})
+	if _, err := normalizeWorkOutcome(calls, "answer"); err == nil {
+		t.Fatal("completion mixed with side effect")
 	}
 }

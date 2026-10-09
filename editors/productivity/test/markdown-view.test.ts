@@ -178,7 +178,7 @@ test("dictation appends cumulative transcripts once and leaves submission to the
 });
 
 test("a paused preparation does not look like an active model call",()=>{
- const f=fixture();f.document();f.send({type:"revision",status:{prepared:true,status:"waiting",errorMessage:"The local model stopped responding.",proposal:{comments:[],edits:[]}}});
+ const f=fixture();f.document();f.send({type:"revision",status:{prepared:true,status:"waiting",problem:{message:"The AI stopped responding.",reference:"review-run-test"},proposal:{comments:[],edits:[]}}});
  assert.equal(f.doc.querySelector("#revision h3")!.textContent,"Preparation paused");assert.equal(f.doc.querySelector("#revision .busy"),null);assert.match(f.el("revision").textContent!,/stopped responding/);assert.match(f.el("review-actions").textContent!,/Stop preparing/);f.dom.window.close();
 });
 
@@ -303,4 +303,18 @@ test("recovered and applied proposals do not retain an error from an earlier mod
  const status={prepared:true,status:"waiting",approvalId:"ready",errorMessage:"Earlier attempt timed out",proposal:{comments:[],edits:[{before:"old",after:"new"}]}};
  f.send({type:"revision",status});assert.equal(f.doc.querySelector("#revision .review-error"),null);assert.match(f.el("revision").textContent!,/Proposed changes/);
  f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",result:{applied:true}}});assert.equal(f.doc.querySelector("#revision .review-error"),null);assert.match(f.el("revision").textContent!,/Changes applied/);f.dom.window.close();
+});
+
+
+test("automatic retries have a stable details panel and never offer manual resume",async()=>{
+ const f=fixture();f.document();
+ const status={prepared:true,status:"waiting",approvalId:"approved",decision:"approved",waitingOn:{kind:"retry"},problem:{message:"The AI stopped responding.",reference:"review-run-test"},proposal:{comments:[],edits:[]}};
+ f.send({type:"revision",status});assert.match(f.el("revision").textContent!,/Retrying automatically/);assert.doesNotMatch(f.el("review-actions").textContent!,/Resume/);
+ const details=f.doc.querySelector<HTMLDetailsElement>(".problem-details")!;details.open=true;
+ await new Promise(resolve=>setTimeout(resolve,0));
+ f.send({type:"revision",status:{...status,retryCount:2}});assert.equal(f.doc.querySelector<HTMLDetailsElement>(".problem-details")!.open,true);
+ f.doc.querySelector<HTMLButtonElement>(".problem-details button")!.click();assert.deepEqual(JSON.parse(JSON.stringify(f.messages.at(-1))),{type:"copyProblemReference",reference:"review-run-test"});
+ f.send({type:"revision",status:{...status,status:"running",waitingOn:null,retryCount:1}});assert.match(f.el("revision").textContent!,/Retrying automatically/);
+ f.send({type:"revision",status:{...status,status:"running",waitingOn:null,retryCount:0}});assert.equal(f.doc.querySelector(".problem-details"),null);
+ f.dom.window.close();
 });

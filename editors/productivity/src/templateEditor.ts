@@ -1,3 +1,5 @@
+import { reportProblem, UserInputError } from "./problems.js";
+import { showProblem } from "./problemUI.js";
 import * as vscode from "vscode";
 import { escapeHTML } from "./markdown.js";
 import { readTemplate } from "./templates.js";
@@ -31,7 +33,7 @@ export class TemplateEditor implements vscode.CustomTextEditorProvider {
   }
   async show(mode: "source" | "preview" | "split", uri?: vscode.Uri): Promise<void> {
     const target = uri ?? vscode.window.activeTextEditor?.document.uri ?? this.active?.document.uri;
-    if (!target) throw new Error("Open an email template first.");
+    if (!target) throw new UserInputError("Open an email template first.");
     const document = await vscode.workspace.openTextDocument(target);
     readTemplate(document.getText());
     const current = this.active?.document.uri.toString() === target.toString() ? this.active : undefined;
@@ -60,20 +62,21 @@ export class TemplateEditor implements vscode.CustomTextEditorProvider {
       }
       catch (error) {
         state.error = (error as Error).message;
-        await panel.webview.postMessage({ type: "error", message: state.error });
+        await panel.webview.postMessage({ type: "error", ...reportProblem(error, "preview the email") });
       }
     };
     const subscriptions = [
       panel.onDidChangeViewState(() => { if (panel.active) this.active = { document, panel }; }),
       vscode.workspace.onDidChangeTextDocument(event => { if (event.document === document) void render(); }),
       panel.webview.onDidReceiveMessage(async message => {
+      if(message?.type === "copyProblemReference" && typeof message.reference === "string" && /^tools-[a-zA-Z0-9-]{1,100}$/.test(message.reference)) { await vscode.env.clipboard.writeText(message.reference); return; }
         try {
           if (message?.type === "ready") { state.ready++; await render(); }
           else if (message?.type === "source" || message?.type === "split") await this.show(message.type, document.uri);
           else if (message?.type === "publish") await this.publish?.(document);
           else if (message?.type === "examples") await vscode.commands.executeCommand("memql.productivity.templateFromExamples");
           else if (message?.type === "rendered" && message.version === document.version && typeof message.subject === "string") this.rendered.set(document.uri.toString(), { version: message.version, subject: message.subject });
-        } catch (error) { void vscode.window.showErrorMessage((error as Error).message); }
+        } catch (error) { void showProblem(error, "update the email"); }
       }),
     ];
     panel.onDidDispose(() => {

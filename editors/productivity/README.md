@@ -203,3 +203,20 @@ the exact proposal and source revision; intervening edits or revoked authority
 refuse the save. Repeated submissions and decisions recover existing receipts,
 and resumption on another replica reuses the journaled AI result. Feedback-driven
 revision currently supports Markdown; email composition uses separate controls.
+
+
+Unexpected errors throughout Productivity Tools use a short message and a
+**Details** action containing a troubleshooting reference. Search that reference
+in **MemQL OS → Logs** to find the technical error and related backend events.
+Logs access keeps its existing permissions. File-save errors include the
+reference in the native VS Code notification. When offline or when cluster
+logging is unavailable, the **MemQL Productivity Tools** Output channel retains
+the same reference locally. Diagnostic messages redact credentials; polling
+errors are deduplicated and logging never retries the failed user action.
+
+Review distinguishes an automatic retry from a paused preparation. Details stay
+expanded across status updates and disappear when the request recovers. The
+harness can stream a completed answer followed by a small explicit completion
+marker, avoiding a long answer buffered inside tool arguments. Unmarked text,
+missing answers, questions, and completion mixed with side-effect calls retain
+the existing validation and human-review boundaries.

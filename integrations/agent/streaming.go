@@ -550,7 +550,7 @@ StreamLoop:
 			workOutcomeRequired = false
 		}
 		if workOutcomeRequired {
-			normalized, outcomeErr := normalizeWorkOutcome(turnCalls)
+			normalized, outcomeErr := normalizeWorkOutcome(turnCalls, turnText)
 			if outcomeErr != nil {
 				invalidOutcomes++
 				messages = rejectedWorkOutcome(messages, turnText, turnCalls, outcomeErr, sink)

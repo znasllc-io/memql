@@ -19,6 +19,7 @@ func workResponseToolDefinition() common.ToolDefinition {
 		"If a necessary fact or decision is still missing after checking relevant available sources, choose status=needs_input and supply the actual question. " +
 		"An unknown personal preference needs input from that person; it is not a completed lookup. " +
 		"Do not put an invitation to tell you later in a completed response. " +
+		"For a completed answer, write the answer as ordinary assistant text, then call this tool with status=complete and responseFromText=true in the same response. Do not repeat the answer in tool arguments. " +
 		"The runtime presents a needs_input question in Ask and pauses this task until answered. " +
 		"Use kind=text for an open answer. When offering alternatives or requested suggestions, use choice/multi and supply options; every choice also accepts custom text. Reuse earlier answers and avoid questions about minor preferences. " +
 		"Call this tool alone. Computer-access approval uses requestComputerUseScope instead."
@@ -26,7 +27,8 @@ func workResponseToolDefinition() common.ToolDefinition {
 	schema["required"] = []string{"status"}
 	props := schema["properties"].(map[string]any)
 	props["status"] = map[string]any{"type": "string", "enum": []string{"complete", "needs_input"}}
-	props["response"].(map[string]any)["description"] = "Required for complete: the supported answer or confirmed result. Omit for needs_input."
+	props["response"].(map[string]any)["description"] = "The supported answer or confirmed result, only when not using responseFromText. Omit for needs_input."
+	props["responseFromText"] = map[string]any{"type": "boolean", "description": "For complete: use the ordinary assistant text in THIS response as the final answer. Requires nonempty text and no response argument. Never uses earlier commentary or tool output."}
 	props["question"] = map[string]any{
 		"type": "object", "required": []string{"text", "kind"},
 		"description": "Required for needs_input. Explain the missing information briefly and ask a self-contained question.",
@@ -69,7 +71,7 @@ func isDelegatedWorkSession(provider any) bool {
 	return completed
 }
 
-func normalizeWorkOutcome(calls []common.ToolCall) ([]common.ToolCall, error) {
+func normalizeWorkOutcome(calls []common.ToolCall, turnText string) ([]common.ToolCall, error) {
 	if len(calls) == 0 {
 		return nil, fmt.Errorf("use respondToUser with status=complete and response, or status=needs_input and question; free text does not complete this task")
 	}
@@ -81,9 +83,10 @@ func normalizeWorkOutcome(calls []common.ToolCall) ([]common.ToolCall, error) {
 			return nil, fmt.Errorf("respondToUser must be called alone; no calls in this response were executed")
 		}
 		var outcome struct {
-			Status   string `json:"status"`
-			Response string `json:"response"`
-			Question *struct {
+			Status           string `json:"status"`
+			Response         string `json:"response"`
+			ResponseFromText bool   `json:"responseFromText"`
+			Question         *struct {
 				Text    string `json:"text"`
 				Kind    string `json:"kind"`
 				Options []struct {
@@ -97,6 +100,28 @@ func normalizeWorkOutcome(calls []common.ToolCall) ([]common.ToolCall, error) {
 		}
 		switch outcome.Status {
 		case "complete":
+			// Some runtimes buffer an entire tool call before emitting any of
+			// it. Keep long answers streaming, while still requiring an explicit
+			// completion marker. Only this model response's text is eligible;
+			// previous rounds, tool results and private reasoning are never used.
+			if outcome.ResponseFromText {
+				if strings.TrimSpace(turnText) == "" || outcome.Response != "" || outcome.Question != nil {
+					return nil, fmt.Errorf("responseFromText requires nonempty assistant text in this response and no response or question argument")
+				}
+				var envelope map[string]any
+				if err := json.Unmarshal([]byte(call.Arguments), &envelope); err != nil {
+					return nil, err
+				}
+				envelope["response"] = turnText
+				delete(envelope, "responseFromText")
+				encoded, err := json.Marshal(envelope)
+				if err != nil {
+					return nil, err
+				}
+				call.Arguments = string(encoded)
+				outcome.Response = turnText
+				calls = []common.ToolCall{call}
+			}
 			if strings.TrimSpace(outcome.Response) == "" || outcome.Question != nil {
 				return nil, fmt.Errorf("complete requires a nonempty response and no question; choose needs_input when an answer is missing")
 			}
@@ -104,6 +129,9 @@ func normalizeWorkOutcome(calls []common.ToolCall) ([]common.ToolCall, error) {
 				return nil, fmt.Errorf("invalid completed response: %w", err)
 			}
 		case "needs_input":
+			if outcome.ResponseFromText {
+				return nil, fmt.Errorf("needs_input cannot use responseFromText")
+			}
 			q := outcome.Question
 			if q == nil || strings.TrimSpace(q.Text) == "" || strings.TrimSpace(outcome.Response) != "" {
 				return nil, fmt.Errorf("needs_input requires question.text and question.kind; omit response")

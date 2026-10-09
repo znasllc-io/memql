@@ -1,3 +1,5 @@
+import { reportProblem, UserInputError } from "./problems.js";
+import { showProblem } from "./problemUI.js";
 import * as vscode from "vscode";
 import { changePDF, type PDFChange } from "./pdf.js";
 
@@ -10,7 +12,7 @@ export interface PDFFileAccess {
 }
 const backupMetadata = (uri: vscode.Uri) => uri.with({ path: `${uri.path}.memql-base.json` });
 
-class PDFDocument implements vscode.CustomDocument {
+export class PDFDocument implements vscode.CustomDocument {
   readonly panels = new Set<vscode.WebviewPanel>();
   constructor(readonly uri: vscode.Uri, public bytes: Uint8Array, public base: PDFBase | undefined,
     public recovered: boolean, private readonly closed: () => void) {}
@@ -45,7 +47,7 @@ export class PDFEditor implements vscode.CustomEditorProvider<PDFDocument> {
   constructor(private readonly context: vscode.ExtensionContext, private readonly files: PDFFileAccess) { context.subscriptions.push(this.change); }
   async openCustomDocument(uri: vscode.Uri, backup: vscode.CustomDocumentOpenContext): Promise<PDFDocument> {
     const bytes = await vscode.workspace.fs.readFile(backup.backupId ? vscode.Uri.parse(backup.backupId) : uri);
-    if (bytes.byteLength > 32 * 1024 * 1024) throw new Error("This PDF exceeds the 32 MiB editor limit.");
+    if (bytes.byteLength > 32 * 1024 * 1024) throw new UserInputError("This PDF exceeds the 32 MiB editor limit.");
     let base: PDFBase | undefined;
     if (uri.scheme === "memql-file") {
       if (backup.backupId) {
@@ -74,11 +76,12 @@ export class PDFEditor implements vscode.CustomEditorProvider<PDFDocument> {
     const worker = panel.webview.asWebviewUri(vscode.Uri.joinPath(media, "pdf.worker.mjs"));
     const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), x => x.toString(16).padStart(2, "0")).join("");
     panel.webview.onDidReceiveMessage(async message => {
+      if(message?.type === "copyProblemReference" && typeof message.reference === "string" && /^tools-[a-zA-Z0-9-]{1,100}$/.test(message.reference)) { await vscode.env.clipboard.writeText(message.reference); return; }
       if (message?.type === "rendered" && Number(message.width) > 0 && Number(message.height) > 0) {
         const key = document.uri.toString(); this.rendered.add(key);
         for (const done of this.waiting.get(key) ?? []) done(); this.waiting.delete(key); return;
       }
-      if (message?.type === "renderError" && typeof message.message === "string") { state.error = message.message; return; }
+      if (message?.type === "renderError" && typeof message.message === "string") { state.error = message.message; await panel.webview.postMessage({type: "problem", ...reportProblem(new Error(message.message), "display this PDF")}); return; }
       if (message?.type === "ready") {
         state.ready++;
         state.sent = await panel.webview.postMessage({ type: "document", bytes: Array.from(document.bytes) });
@@ -89,11 +92,11 @@ export class PDFEditor implements vscode.CustomEditorProvider<PDFDocument> {
         // Edits are serialized against the exact in-memory revision too.
         const before = document.bytes;
         const after = await changePDF(before, message.change as PDFChange);
-        if (before !== document.bytes) throw new Error("The PDF changed while this edit was being prepared. Try again.");
+        if (before !== document.bytes) throw new UserInputError("The PDF changed while this edit was being prepared. Try again.");
         document.update(after);
         this.change.fire({ document, label: message.change.kind === "rotate" ? "Rotate page" : "Add text",
           undo: async () => document.update(before), redo: async () => document.update(after) });
-      } catch (error) { void vscode.window.showErrorMessage((error as Error).message); }
+      } catch (error) { void showProblem(error, "edit the PDF"); }
     });
     panel.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; worker-src blob: ${panel.webview.cspSource}; connect-src ${panel.webview.cspSource}; style-src 'unsafe-inline'; img-src data: blob:;"><style>
       body{font:var(--vscode-font-size) var(--vscode-font-family);color:var(--vscode-foreground);background:var(--vscode-editor-background);margin:0}
@@ -103,7 +106,7 @@ export class PDFEditor implements vscode.CustomEditorProvider<PDFDocument> {
   }
   async saveCustomDocument(document: PDFDocument): Promise<void> {
     if (document.recovered && document.uri.scheme === "memql-file") {
-      if (!document.base) throw new Error("This backup has no original revision. Save As a local PDF to preserve it, then compare with the latest MemQL file.");
+      if (!document.base) throw new UserInputError("This backup has no original revision. Save As a local PDF to preserve it, then compare with the latest MemQL file.");
       await this.files.recover(document.uri, document.base);
     }
     await vscode.workspace.fs.writeFile(document.uri, document.bytes);

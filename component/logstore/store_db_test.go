@@ -103,7 +103,7 @@ func TestWriteThroughTheHandlerChainAndReadBackWithEveryFacet(t *testing.T) {
 	log := logger.New(common.ComponentName("dbtest"), io.Discard, slog.LevelInfo)
 	before := time.Now().UTC().Add(-time.Second)
 	log.Info("alpha "+sfx, "component", comp, logger.Subject("v1:test:thing", "thing-"+sfx), "token", "mql_pat_secret", "count", 3)
-	log.Warn("beta "+sfx, "component", comp)
+	log.Warn("beta "+sfx, "component", comp, "run", "review-run-"+sfx)
 	log.Error("gamma "+sfx, "component", comp2, "app", "files")
 	after := time.Now().UTC().Add(time.Second)
 	flushSink(t, s)
@@ -158,6 +158,8 @@ func TestWriteThroughTheHandlerChainAndReadBackWithEveryFacet(t *testing.T) {
 	facet("subjectConcept", Query{Subject: "thing-" + sfx, SubjectConcept: "v1:test:thing"}, "alpha "+sfx)
 	facet("subjectConcept miss", Query{Subject: "thing-" + sfx, SubjectConcept: "v1:test:other"})
 	facet("text", Query{Text: "BETA " + sfx[:8]}, "beta "+sfx)
+	facet("text reference", Query{Text: "review-run-" + sfx}, "beta "+sfx)
+	facet("text subject", Query{Text: "thing-" + sfx}, "alpha "+sfx)
 	facet("text escaped", Query{Text: "100%"})
 	facet("apps", Query{Apps: []string{"files"}}, "gamma "+sfx)
 	// THE SCOPE RULE: apps OR subjectConcepts, one predicate.

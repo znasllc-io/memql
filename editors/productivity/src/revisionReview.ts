@@ -1,3 +1,4 @@
+import { UserInputError } from "./problems.js";
 import * as vscode from "vscode";
 import { Documents, type OpenDocument } from "./documents.js";
 
@@ -5,7 +6,7 @@ interface SavedRequest { fingerprint: string; requestId: string }
 
 export function assertRevisionBase(base: OpenDocument, source: string, proposal: Record<string, unknown>): void {
   if (base.resource.id !== proposal.artifactId || base.revision !== proposal.revision || base.version !== proposal.version || source !== proposal.content) {
-    throw new Error("This document changed after the proposal. Prepare a new request against its current revision.");
+    throw new UserInputError("This document changed after the proposal. Prepare a new request against its current revision.");
   }
 }
 
@@ -49,10 +50,10 @@ export class RevisionReview {
     try { await recovery; } finally { if (this.recoveries.get(key) === recovery) this.recoveries.delete(key); }
   }
   async prepare(document: vscode.TextDocument, commentIds: string[], instruction: string): Promise<Record<string, unknown>> {
-    if (document.isDirty || document.uri.scheme !== "memql-file") throw new Error("Save the MemQL document before requesting a revision.");
+    if (document.isDirty || document.uri.scheme !== "memql-file") throw new UserInputError("Save the MemQL document before requesting a revision.");
     const base = await this.load(document.uri);
     await this.recover(document, base);
-    if (new TextDecoder().decode(base.content) !== document.getText()) throw new Error("Compare with the saved document before requesting changes.");
+    if (new TextDecoder().decode(base.content) !== document.getText()) throw new UserInputError("Compare with the saved document before requesting changes.");
     const fingerprint = JSON.stringify([base.revision, base.version, [...commentIds].sort(), instruction.trim()]);
     let pending = this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
     // A deliberate new submission may retry a terminal attempt. An uncertain
@@ -83,7 +84,7 @@ export class RevisionReview {
   }
   async resumePreparation(document: vscode.TextDocument): Promise<void> {
     const saved = this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
-    if (!saved) throw new Error("Prepare a revision request first.");
+    if (!saved) throw new UserInputError("Prepare a revision request first.");
     const base = await this.load(document.uri);
     const status = await this.files.revision(base, saved.requestId);
     const proposal = status.proposal as Record<string, unknown>;
@@ -97,13 +98,13 @@ export class RevisionReview {
   }
   async cancel(document:vscode.TextDocument):Promise<void>{
     const saved=this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
-    if(!saved)throw new Error("This document has no active revision.");
+    if(!saved)throw new UserInputError("This document has no active revision.");
     await this.files.cancelRevision(await this.load(document.uri),saved.requestId);
   }
   async modify(document: vscode.TextDocument, approvalId: string, itemId: string, instruction: string): Promise<void> {
-    if (document.isDirty) throw new Error("Save or discard local edits before modifying this proposal.");
+    if (document.isDirty) throw new UserInputError("Save or discard local edits before modifying this proposal.");
     const key = this.key(document.uri), saved = this.context.workspaceState.get<SavedRequest>(key);
-    if (!saved) throw new Error("Prepare a proposal first.");
+    if (!saved) throw new UserInputError("Prepare a proposal first.");
     const base = await this.load(document.uri);
     const status = await this.files.revision(base, saved.requestId);
     assertRevisionBase(base, document.getText(), status.proposal as Record<string, unknown>);
@@ -116,10 +117,10 @@ export class RevisionReview {
   }
   async retryModification(document:vscode.TextDocument):Promise<void>{
     const key=this.key(document.uri),saved=this.context.workspaceState.get<SavedRequest>(key);
-    if(!saved)throw new Error("Open the failed revision first.");
+    if(!saved)throw new UserInputError("Open the failed revision first.");
     const base=await this.load(document.uri),status=await this.files.revision(base,saved.requestId);
     const proposal=status.proposal as Record<string,any>,amendment=proposal.amendment;
-    if(!amendment || !(status.cancelRequested || ["failed","cancelled"].includes(String(status.status))))throw new Error("This modification is still running.");
+    if(!amendment || !(status.cancelRequested || ["failed","cancelled"].includes(String(status.status))))throw new UserInputError("This modification is still running.");
     assertRevisionBase(base,document.getText(),proposal);
     const retryKey=`${key}:retry`,fingerprint=saved.requestId;
     let pending=this.context.workspaceState.get<SavedRequest>(retryKey);
@@ -129,10 +130,10 @@ export class RevisionReview {
   }
   async decide(document: vscode.TextDocument, approvalId: string, decision: "approved" | "rejected", answer?: Record<string, unknown>): Promise<void> {
     const saved = this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
-    if (!saved) throw new Error("Prepare and review a revision request first.");
+    if (!saved) throw new UserInputError("Prepare and review a revision request first.");
     const base = await this.load(document.uri);
     if (decision === "approved") {
-      if (document.isDirty) throw new Error("Save or discard local edits before approving this request.");
+      if (document.isDirty) throw new UserInputError("Save or discard local edits before approving this request.");
       const status = await this.files.revision(base, saved.requestId);
       assertRevisionBase(base, document.getText(), status.proposal as Record<string, unknown>);
     }
@@ -140,11 +141,11 @@ export class RevisionReview {
   }
   async compare(document: vscode.TextDocument): Promise<void> {
     const saved = this.context.workspaceState.get<SavedRequest>(this.key(document.uri));
-    if (!saved) throw new Error("Prepare a revision request first.");
+    if (!saved) throw new UserInputError("Prepare a revision request first.");
     const base = await this.load(document.uri);
     const status = await this.files.revision(base, saved.requestId);
     const proposal = status.proposal as Record<string, unknown>;
-    if (typeof proposal.revisedContent !== "string") throw new Error("The proposed changes are not ready yet.");
+    if (typeof proposal.revisedContent !== "string") throw new UserInputError("The proposed changes are not ready yet.");
     const sourceURI = vscode.Uri.parse(`memql-revision-preview:/source-${++this.count}.md`);
     const draftURI = vscode.Uri.parse(`memql-revision-preview:/draft-${this.count}.md`);
     this.snapshots.set(sourceURI.toString(), String(proposal.content));

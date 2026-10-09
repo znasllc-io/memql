@@ -508,3 +508,30 @@ func TestDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas(t *testing.T) 
 		t.Fatal("evidence or edits reran on approval")
 	}
 }
+
+func TestDocumentRevisionStatusCarriesRetryAcrossReplicas(t *testing.T) {
+	f := newRevisionDB(t)
+	artifact, doc := f.document("# Guide\n\nOriginal content.\n")
+	request, _ := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Expand the guide.")
+	ids, _ := revisionIdentity(f.ctx, asString(request["requestId"]))
+	resumeAt := time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)
+	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{
+		"runId": ids.RunID, "status": "waiting", "waitingOn": map[string]any{"kind": "retry", "resumeAt": resumeAt, "reason": "internal provider detail"}, "spent": map[string]any{"retries": 2}, "errorMessage": "idle ceiling",
+	})
+	rows, err := f.second.handleDocumentRevisionStatus(f.ctx, map[string]any{"requestId": request["requestId"]}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	_ = json.Unmarshal(rows[0].Payload, &payload)
+	waiting := revisionMap(payload["waitingOn"])
+	if payload["status"] != "waiting" || waiting["kind"] != "retry" || waiting["resumeAt"] != resumeAt || payload["retryCount"] != float64(2) {
+		t.Fatalf("retry metadata lost: %+v", payload)
+	}
+	if waiting["reason"] != nil {
+		t.Fatal("status unnecessarily copied internal wait details")
+	}
+	if payload["approvalId"] != "" {
+		t.Fatal("retry appeared to be document approval")
+	}
+}

@@ -1,3 +1,4 @@
+import { renderProblem } from "./problemView.js";
 import { safeEmailHTML, sampleFields, sampleTemplate } from "./templatePreview.js";
 import type { EmailTemplate } from "./templates.js";
 declare function acquireVsCodeApi(): { postMessage(message: unknown): void };
@@ -22,7 +23,7 @@ const renderPreview = () => {
 for (const mode of ["source", "split", "examples", "publish"]) document.getElementById(mode)!.addEventListener("click", () => api.postMessage({ type: mode }));
 window.addEventListener("message", event => {
   const message = event.data;
-  if (message?.type === "error") { status.textContent = message.message; return; }
+  if (message?.type === "error") { renderProblem(status,message,value=>api.postMessage(value)); return; }
   if (message?.type !== "document") return;
   version = message.version;
   template = message.template;

@@ -1,3 +1,4 @@
+import { UserInputError } from "./problems.js";
 import * as vscode from "vscode";
 import {
   buildClientAccountsAll, buildLibraryFilesForOwner, buildComposeMaterialize, buildCompositionById,
@@ -19,7 +20,7 @@ export class TemplateExamples {
   }
   private async create(): Promise<void> {
     const lease = this.api.current();
-    if (!lease) throw new Error("Connect and sign in using the MemQL extension before creating from examples.");
+    if (!lease) throw new UserInputError("Connect and sign in using the MemQL extension before creating from examples.");
     const accounts = await this.api.execute(lease, "clientAccountsAll", buildClientAccountsAll({}));
     const organization = await vscode.window.showQuickPick(accounts.filter(row => value(row, "status") === "active").map(row => ({ label: value(row, "name") || value(row, "id"), id: value(row, "id") })),
       { title: "Create email · Organization", placeHolder: "Choose the client this template belongs to", ignoreFocusOut: true });
@@ -32,11 +33,11 @@ export class TemplateExamples {
       const selected = await vscode.window.showOpenDialog({ canSelectMany: true, canSelectFiles: true, canSelectFolders: false,
         title: "Choose examples and resources", openLabel: "Use as references", filters: { References: ["png", "jpg", "jpeg", "gif", "zip", "txt", "md", "html", "css", "json", "csv", "svg"] } });
       if (!selected?.length) return;
-      if (selected.length > 64) throw new Error("Choose up to 64 reference files.");
+      if (selected.length > 64) throw new UserInputError("Choose up to 64 reference files.");
       let total = 0;
       // Validate all selected sizes before uploading the first file.
       for (const uri of selected) { total += (await vscode.workspace.fs.stat(uri)).size; }
-      if (total > 16 * 1024 * 1024) throw new Error("Reference files must total 16 MiB or less. ZIP contents have the same expanded limit.");
+      if (total > 16 * 1024 * 1024) throw new UserInputError("Reference files must total 16 MiB or less. ZIP contents have the same expanded limit.");
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Saving references to MemQL Files" }, async progress => {
         for (const uri of selected) {
           const name = uri.path.split("/").pop() || "reference";
@@ -82,7 +83,7 @@ export class TemplateExamples {
   }
   async resume(): Promise<void> {
     const saved = this.context.workspaceState.get<{ domain: string; compositionId: string }>("memql.lastEmailComposition");
-    if (!saved) throw new Error("No email composition has been started in this workspace.");
+    if (!saved) throw new UserInputError("No email composition has been started in this workspace.");
     await this.follow(await this.api.connect(saved.domain), saved.compositionId);
   }
   private async follow(lease: ConnectionLease, compositionId: string): Promise<void> {
@@ -93,7 +94,7 @@ export class TemplateExamples {
           return;
         }
         const row = (await this.api.execute(lease, "compositionById", buildCompositionById({ compositionId })))[0];
-        if (!row) throw new Error("The composition is no longer readable. Your work remains in Materializer and Nexus.");
+        if (!row) throw new UserInputError("The composition is no longer readable. Your work remains in Materializer and Nexus.");
         const status = value(row, "status");
         progress.report({ message: status === "composing" ? "Studying references and composing the draft" : status });
         if (status === "failed") throw new Error(value(row, "failureReason") || "Materializer could not finish this draft.");
