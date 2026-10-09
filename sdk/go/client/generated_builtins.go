@@ -1409,7 +1409,7 @@ type DecideApprovalArgs struct {
 	ApprovalId string
 	// approved, rejected, or answered (for a feedback question).
 	Decision string
-	// The person's answer, for a feedback approval.
+	// The person's answer. A budget approval may supply {newLimit: number} to raise only its named ceiling above recorded usage before resuming, preserving all other ceilings and spent counters. Count and time limits must be whole numbers.
 	Answer map[string]any
 }
 

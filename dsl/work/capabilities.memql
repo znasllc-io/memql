@@ -89,7 +89,7 @@ builtin workRecallHistory {
 @handler(type="query", query="query workRecallHistory(search: args.search, checkpoint: args.checkpoint, messageIndex: args.messageIndex, offset: args.offset, maxChars: args.maxChars, cursor: args.cursor)")
 @requiresAgentRole("assistant", "specialist")
 tool recallWorkHistory {
- search string @description("A name, word, identifier or phrase from earlier conversation or tool output. Omit when reading an exact checkpoint.")
+ search string @description("A name, word, identifier or phrase from earlier conversation or tool output. Combine with checkpoint and messageIndex to jump to that phrase inside one archived message; omit offset for the initial match. Omit search to read from offset zero.")
  checkpoint string @description("Exact archived reference returned by a checkpoint or previous search; with messageIndex selects one original message.")
  messageIndex int @description("Zero-based source message index, default 0, for an exact checkpoint read. Inspect sources[].messages to select the original tool result; message zero may be a derived summary. nextMessageIndex continues the source directory.")
  offset int @description("Unicode character offset in the serialized source message, default 0 for exact reads. Use nextOffset to continue.")

@@ -132,7 +132,7 @@ func (e *MemQLEngine) recallWorkHistoryBuiltin(ctx context.Context, args map[str
 			matchLimitReached = true
 			return
 		}
-		page, found := workHistoryPage(entry, search, offset, min(limit, remaining), explicitOffset || fingerprint != "")
+		page, found := workHistoryPage(entry, search, offset, min(limit, remaining), explicitOffset)
 		if !found {
 			return
 		}
