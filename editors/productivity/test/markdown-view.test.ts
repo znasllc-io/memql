@@ -282,3 +282,10 @@ test("search highlights all matches and keeps an indexed active match through na
  f.input("find-query","absent");assert.equal(f.highlights.has("memql-find-active"),false);assert.equal(f.el("find-marker").hidden,true);
  f.input("find-query","Alice");f.el("find-close").click();assert.equal(f.highlights.has("memql-find"),false);assert.equal(f.highlights.has("memql-find-active"),false);assert.equal(f.el("find-marker").hidden,true);f.dom.window.close();
 });
+
+test("recovered and applied proposals do not retain an error from an earlier model attempt",()=>{
+ const f=fixture();f.document();
+ const status={prepared:true,status:"waiting",approvalId:"ready",errorMessage:"Earlier attempt timed out",proposal:{comments:[],edits:[{before:"old",after:"new"}]}};
+ f.send({type:"revision",status});assert.equal(f.doc.querySelector("#revision .review-error"),null);assert.match(f.el("revision").textContent!,/Proposed changes/);
+ f.send({type:"revision",status:{...status,status:"succeeded",decision:"approved",result:{applied:true}}});assert.equal(f.doc.querySelector("#revision .review-error"),null);assert.match(f.el("revision").textContent!,/Changes applied/);f.dom.window.close();
+});

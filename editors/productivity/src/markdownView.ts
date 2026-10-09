@@ -493,7 +493,7 @@ function renderRevisionContent() {
   const phase = status.cancelRequested ? "Stop requested" : status.decision === "rejected" ? "Changes declined" : status.status === "succeeded" ? status.result?.applied ? "Changes applied" : "No changes needed"
     : status.status === "failed" || status.status === "cancelled" ? "Couldn’t prepare changes" : awaiting ? "Proposed changes" : paused ? "Preparation paused" : status.decision === "approved" ? "Applying changes…" : "Preparing changes…";
   panel.append(textElement("h3", phase, !terminal && !awaiting && !paused ? "phase busy" : ""));
-  if (status.errorMessage) panel.append(textElement("p", String(status.errorMessage), "review-error"));
+  if (status.errorMessage && (paused || ["failed","cancelled"].includes(status.status))) panel.append(textElement("p", String(status.errorMessage), "review-error"));
   const requested: ReviewRow[] = Array.isArray(proposal.comments) ? proposal.comments : rows.filter(row => proposal.commentIds?.includes(row.id));
   const edits: Record<string, any>[] = Array.isArray(proposal.edits) ? proposal.edits.filter((edit: any) => edit.before !== edit.after) : [];
   const addressed = new Set(edits.flatMap(edit => edit.commentIds ?? []));
