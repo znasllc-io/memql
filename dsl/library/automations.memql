@@ -264,7 +264,7 @@ automation reviseLibraryDocument {
     priorEvidence := []
    }
    report := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
-    priorEvidence: priorEvidence, document: captured.content, passages: captured.passagesJSON,
+    priorEvidence: priorEvidence.select(receipt => receipt.result.value.reply), document: captured.content, passages: captured.passagesJSON,
     instruction: captured.amendment.instruction ?? captured.instruction,
     previous: captured.amendment.edits
    })

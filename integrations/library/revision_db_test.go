@@ -53,7 +53,12 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return nil, fmt.Errorf("DSL omitted evidence stage context")
 			}
 			a.researchCalls.Add(1)
-			if strings.Contains(fmt.Sprint(data["priorEvidence"]), "Independent app evidence") {
+			var priorEvidence []string
+			raw, _ := json.Marshal(data["priorEvidence"])
+			if err := json.Unmarshal(raw, &priorEvidence); err != nil {
+				return nil, fmt.Errorf("research prompt contains receipt envelopes instead of evidence: %w", err)
+			}
+			if strings.Contains(strings.Join(priorEvidence, "\n"), "Independent app evidence") {
 				a.retainedEvidenceCalls.Add(1)
 			}
 			return reviewResult(map[string]any{"reply": "Evidence report for the selected feedback."})
