@@ -2104,6 +2104,13 @@ jobs:
       # test, so the never-retry-a-test rule does not apply.
       - name: package extension (build binary + compile + vsce package)
         run: scripts/ci/retry.sh -- bash scripts/vscode/package.sh --out="$RUNNER_TEMP/memql.vsix"
+      - name: preserve the tested extension for Linux manual verification
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: memql-vscode-linux-x64
+          path: ${{ runner.temp }}/memql.vsix
+          if-no-files-found: error
+          retention-days: 7
 
   # VS Code EXTENSION DEVELOPMENT HOST smoke lane (memql#3302).
   #
