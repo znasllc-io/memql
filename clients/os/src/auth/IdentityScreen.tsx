@@ -136,7 +136,8 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       if (!value(data, "ClientID") && initialPath !== "/login" && initialPath !== "/authorize") window.location.reload();
       else { setLeaving(true); await completeSignIn(destination); }
     }, true)}
-    onLegal={next => void load(next)} />;
+    onLegal={next => void load(next)}
+    onSetup={() => void load(`/setup?${new URLSearchParams(oauthFields(data))}`)} />;
 
   let title = data.Layout?.Title || "Identity";
   let body: ReactNode;
@@ -144,9 +145,13 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     case "setup_resume":
       title = "Resume ownership setup";
       body = <><p>Ownership setup has started but is not complete.</p>
-        {data.HasProof === true && act("Resume with your passkey", () => void run(async () => window.location.assign(await loginWithPasskey(config, {}))))}
-        {data.Local !== true && <>{field("email", "Original owner email", "email")}{act("Verify email again", () => submit("/auth/setup/resume", fields))}</>}
-        {data.Local === true && <p>Use the passkey already created for this setup. A different browser cannot replace that claim.</p>}</>;
+        {data.HasProof === true && act("Resume with your passkey", () => void run(async () => window.location.assign(await loginWithPasskey(config, oauthFields(data)))))}
+        {(data.Local !== true || data.HasProof !== true) && <form className="os-signin-form" onSubmit={event => { event.preventDefault(); if (!busy) submit("/auth/setup/resume", { ...oauthFields(data), ...fields }); }}>
+          <p>{data.Local === true ? "Enter the owner email used during installation to register your first passkey. No email will be sent." : "Enter the owner email used during installation. Open the verification link in your email before registering a passkey."}</p>
+          {field("email", "Owner email", "email")}
+          <Button type="submit" tone="primary" disabled={busy} busy={busy}>{data.Local === true ? "Continue to passkey" : "Send verification link"}</Button>
+        </form>}
+        {data.Local === true && data.HasProof === true && <p>Your passkey was already created. Use it to finish setup.</p>}</>;
       break;
     case "check_email":
       title = data.Action === "access_request_created" ? "Request received" : "Check your email";

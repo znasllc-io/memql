@@ -43,6 +43,11 @@ import (
 const appFakeKubectl = `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 case "$*" in
+  *"rollout status"*)
+    case "$*" in *"${FAKE_ROLLOUT_FAILURE:-no-such-resource}"*) echo 'ImagePullBackOff' >&2; exit 1 ;; esac
+    exit 0 ;;
+  *"get deployment"*)
+    [ "${FAKE_OPERATOR_ABSENT:-}" != 1 ] ;;
   *"get namespace"*)
     if [ "${FAKE_ARGOCD_ABSENT:-}" = 1 ]; then exit 1; fi
     exit 0 ;;

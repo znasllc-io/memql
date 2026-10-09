@@ -672,14 +672,19 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 	if nativeRequest(r) && s.bootstrapPage(w, r) {
 		return
 	}
-	if nativeRequest(r) && s.Store != nil {
-		pending, err := s.Store.ReservedBootstrap(r.Context())
+	if s.Store != nil {
+		pending, err := s.Store.PendingOwnerSetup(r.Context(), s.Cfg)
 		if err != nil {
 			s.renderError(w, r, http.StatusServiceUnavailable, "Ownership enrollment is temporarily unavailable.")
 			return
 		}
 		if pending != nil && !pending.Complete {
-			writeNative(w, map[string]any{"page": "setup_resume", "csrf": CSRFTokenFromRequest(r), "data": map[string]any{"Local": s.Cfg.LocalPasskeyOnly(), "HasProof": len(pending.Proof) > 0}})
+			if !nativeRequest(r) {
+				// nativeUI sends browser entries to the OS ownership page.
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				return
+			}
+			writeNative(w, map[string]any{"page": "setup_resume", "csrf": CSRFTokenFromRequest(r), "data": map[string]any{"Local": s.Cfg.LocalPasskeyOnly(), "HasProof": len(pending.Proof) > 0, "ReturnTo": r.URL.Query().Get("return_to"), "ClientID": r.URL.Query().Get("client_id"), "RedirectURI": r.URL.Query().Get("redirect_uri"), "OAuthState": r.URL.Query().Get("state"), "CodeChallenge": r.URL.Query().Get("code_challenge"), "CodeChallengeMethod": r.URL.Query().Get("code_challenge_method")}})
 			return
 		}
 	}
@@ -770,6 +775,13 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer release()
+	}
+	if s.Store != nil {
+		pending, err := s.Store.PendingOwnerSetup(r.Context(), s.Cfg)
+		if err != nil || pending != nil {
+			s.renderError(w, r, http.StatusConflict, "Return to setup and enter the owner email used during installation.")
+			return
+		}
 	}
 	if s.setupSealed(r) {
 		http.NotFound(w, r)

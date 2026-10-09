@@ -699,6 +699,10 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, c t
 			return
 		}
 		nativeData["Local"] = s.Cfg.LocalPasskeyOnly()
+		if name == "login" && s.Store != nil && s.Store.DirectDB != nil {
+			pending, err := s.Store.PendingOwnerSetup(r.Context(), s.Cfg)
+			nativeData["CanResumeSetup"] = err == nil && pending != nil
+		}
 		writeNative(w, map[string]any{"page": name, "data": nativeData, "csrf": CSRFTokenFromRequest(r)})
 		return
 	}

@@ -182,6 +182,18 @@ func (s *Server) handleSetupState(w http.ResponseWriter, r *http.Request) {
 		writeNative(w, map[string]string{"error": "Ownership state is unavailable"})
 		return
 	}
+	if s.Store != nil {
+		pending, err := s.Store.PendingOwnerSetup(r.Context(), s.Cfg)
+		if err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			writeNative(w, map[string]string{"error": "Ownership state is unavailable"})
+			return
+		}
+		if pending != nil {
+			n = 0
+			claimed = false
+		}
+	}
 	state := "claimed"
 	if n == 0 && !claimed {
 		state = "unclaimed"

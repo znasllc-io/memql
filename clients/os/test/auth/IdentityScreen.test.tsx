@@ -90,3 +90,44 @@ describe("ownership setup through IdentityScreen and native transport", () => {
     expect(attempts).toBe(2);
   });
 });
+
+it.each([true, false])("recovers a skipped passkey with the original owner email (local=%s)", async local => {
+  const fetcher = vi.fn(async (input: URL, init?: RequestInit) => {
+    if (init?.method === "POST") return json({ redirect: local ? "/auth/setup/passkey" : "/check-email?request=verify" });
+    if (input.pathname === "/auth/setup/passkey") return json({ page: "setup_passkey", data: { Local: true, EnrollmentToken: "renewed" } });
+    if (input.pathname === "/check-email") return json({ page: "check_email", data: { Email: "ada@example.test", ExpiresIn: "10 minutes" } });
+    return json({ page: "setup_resume", csrf: "resume-csrf", data: { Local: local, HasProof: false, ClientID: "editor", CodeChallenge: "challenge", CodeChallengeMethod: "S256" } });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  render(<IdentityScreen initialPath="/setup" />);
+  fireEvent.change(await screen.findByLabelText("Owner email"), { target: { value: "ada@example.test" } });
+  fireEvent.click(screen.getByRole("button", { name: local ? "Continue to passkey" : "Send verification link" }));
+  if (local) await screen.findByRole("button", { name: "Create passkey and finish" });
+  else await screen.findByRole("heading", { name: "Check your email" });
+  const posts = fetcher.mock.calls.filter(([, init]) => init?.method === "POST");
+  expect(posts).toHaveLength(1);
+  expect(posts[0]?.[0].pathname).toBe("/auth/setup/resume");
+  expect(Object.fromEntries(posts[0]?.[1]?.body as URLSearchParams)).toMatchObject({ email: "ada@example.test", client_id: "editor", code_challenge: "challenge", code_challenge_method: "S256" });
+});
+
+it("keeps a local claim with attestation on its existing passkey", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_resume", data: { Local: true, HasProof: true } })));
+  render(<IdentityScreen initialPath="/setup" />);
+  await screen.findByRole("button", { name: "Resume with your passkey" });
+  expect(screen.queryByLabelText("Owner email")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Continue to passkey" })).toBeNull();
+});
+
+it("reaches unfinished owner setup from sign-in without losing the editor request", async () => {
+  const fetcher = vi.fn(async (input: URL) => input.pathname === "/login"
+    ? json({ page: "login", data: { Stage: "email", Local: true, CanResumeSetup: true, ClientID: "editor", OAuthState: "pending-state", CodeChallenge: "challenge", CodeChallengeMethod: "S256" } })
+    : json({ page: "setup_resume", data: { Local: true } }));
+  vi.stubGlobal("fetch", fetcher);
+  render(<IdentityScreen initialPath="/login" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Finish ownership setup" }));
+  await screen.findByLabelText("Owner email");
+  const request = fetcher.mock.calls.find(([url]) => url.pathname === "/setup")?.[0];
+  expect(request?.searchParams.get("client_id")).toBe("editor");
+  expect(request?.searchParams.get("state")).toBe("pending-state");
+  expect(request?.searchParams.get("code_challenge")).toBe("challenge");
+});

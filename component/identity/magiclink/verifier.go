@@ -249,30 +249,7 @@ func (v *Verifier) Finish(ctx context.Context, fin FinishInput) (*VerifyResult, 
 		if current == nil || !current.ConsumedAt.IsZero() {
 			return nil, ErrTokenAlreadyUsed
 		}
-		claimed, err := v.Store.IsClusterBootstrappedE(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if claimed {
-			return nil, ErrTokenAlreadyUsed
-		}
-		owner, err := v.Store.HasOwnerUser(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if owner {
-			return nil, ErrTokenAlreadyUsed
-		}
-		settings, err := v.Store.ReadClusterSettings(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if settings == nil || !strings.EqualFold(settings.BootstrapEmail, row.Email) {
-			return nil, ErrInvalidToken
-		}
-		// Reserve enrollment before consuming. A storage failure leaves the link
-		// usable; a later delivery failure can be resumed by re-verifying email.
-		token, err := v.Store.BeginBootstrapEnrollmentLocked(ctx, v.Cfg, *settings, map[string]string{
+		token, err := v.Store.ResumeOwnerSetupLocked(ctx, v.Cfg, row.Email, map[string]string{
 			"client_id": clientId, "redirect_uri": redirectURI, "state": state,
 			"code_challenge": codeChallenge, "code_challenge_method": codeChallengeMethod,
 		}, true)

@@ -752,40 +752,21 @@ function wait_for_workloads() {
     kubectl get events -n "$NAMESPACE" --sort-by=.lastTimestamp 2>/dev/null | tail -15 >&2 || true
 }
 
-# Wait for ArgoCD to become ready. argocd-server is the gate, but it depends on
-# argocd-repo-server + argocd-redis, and on a fresh cluster every component
-# pulls its image concurrently -- so `rollout status` can legitimately need
-# several minutes the first time. We guard the wait (set -e would otherwise
-# abort on a timeout) and, if it does time out, re-check the Deployment's
-# Available condition before giving up: the rollout frequently flips ready a
-# beat after the status watch returns.
+# All reconciliation dependencies must be ready before operator Applications
+# receive their own budget. A serving UI alone cannot fetch or apply manifests.
 function wait_for_argocd() {
-    info "Waiting for ArgoCD server to become ready (timeout: ${ARGOCD_TIMEOUT}s)..."
-
-    if kubectl rollout status deployment/argocd-server \
-        -n "${ARGOCD_NAMESPACE}" \
-        --timeout="${ARGOCD_TIMEOUT}s" >&2; then
-        info "ArgoCD ${ARGOCD_VERSION} is ready."
-        ARGOCD_READY=true
-        return 0
-    fi
-
-    warn "rollout status timed out; re-checking the Available condition directly..."
-    if kubectl wait --for=condition=Available deployment/argocd-server \
-        -n "${ARGOCD_NAMESPACE}" \
-        --timeout=60s >&2; then
-        info "ArgoCD ${ARGOCD_VERSION} is ready (became Available just after the rollout wait)."
-        ARGOCD_READY=true
-        return 0
-    fi
-
-    error "ArgoCD server did not become ready within ${ARGOCD_TIMEOUT}s."
-    error "Image pulls may still be in flight on a slow connection. Inspect with:"
-    error "  kubectl get pods -n ${ARGOCD_NAMESPACE}"
-    error "  kubectl describe deployment/argocd-server -n ${ARGOCD_NAMESPACE}"
-    error "Then re-run 'make up' (it is idempotent) or raise the timeout:"
-    error "  MEMQL_K3D_ARGOCD_TIMEOUT=600 make up"
-    cap_fail 5 "ArgoCD server did not become ready within ${ARGOCD_TIMEOUT}s"
+    local resource remaining deadline=$((SECONDS + ARGOCD_TIMEOUT))
+    for resource in deployment/argocd-redis deployment/argocd-repo-server statefulset/argocd-application-controller deployment/argocd-server; do
+        remaining=$((deadline - SECONDS))
+        info "Waiting for ${resource} (remaining: ${remaining}s)..."
+        if ((remaining <= 0)) || ! kubectl rollout status "$resource" -n "$ARGOCD_NAMESPACE" --timeout="${remaining}s" >&2; then
+            kubectl get pods -n "$ARGOCD_NAMESPACE" >&2 || true
+            kubectl get events -n "$ARGOCD_NAMESPACE" --sort-by=.lastTimestamp 2>/dev/null | tail -15 >&2 || true
+            cap_fail 5 "ArgoCD ${resource} did not become ready within ${ARGOCD_TIMEOUT}s. Retry repair after resolving the pod or image-pull error above."
+        fi
+    done
+    ARGOCD_READY=true
+    info "ArgoCD ${ARGOCD_VERSION} is ready."
 }
 
 #=============================================================================
@@ -1011,7 +992,7 @@ function _register_operator_app() {
     fi
 }
 
-# _wait_for_operator <namespace> <deployment...> -- wait for ArgoCD to have
+# _wait_for_operator <namespace> <application> <deployment...> -- wait for ArgoCD to have
 # created the Deployments AND for them to be available.
 #
 # Two waits, not one, because they fail for different reasons and `kubectl
@@ -1020,8 +1001,8 @@ function _register_operator_app() {
 # rather than waiting. Polling for existence first turns "Argo has not synced
 # yet" into a wait instead of a spurious failure.
 function _wait_for_operator() {
-    local ns="$1"
-    shift
+    local ns="$1" APP_NAME="$2"
+    shift 2
     local timeout="${MEMQL_K3D_OPERATOR_TIMEOUT:-300}"
     local d deadline
     deadline=$((SECONDS + timeout))
@@ -1029,7 +1010,10 @@ function _wait_for_operator() {
     for d in "$@"; do
         while ! kubectl get deployment "$d" -n "$ns" &>/dev/null; do
             if ((SECONDS >= deadline)); then
-                cap_fail 5 "timed out after ${timeout}s waiting for ArgoCD to create deployment/${d} in ${ns} (check: kubectl -n ${ARGOCD_NAMESPACE} get application)"
+                local reason
+                reason="$(argocd_app_state)"
+                operator_diagnostics "$ns"
+                cap_fail 5 "timed out after ${timeout}s waiting for deployment/${d} in ${ns}. ${reason}"
             fi
             sleep 3
         done
@@ -1044,12 +1028,24 @@ function _wait_for_operator() {
     for d in "$@"; do
         local remaining=$((deadline - SECONDS))
         if ((remaining <= 0)); then
-            cap_fail 5 "ran out of the ${timeout}s operator budget before deployment/${d} in ${ns} became available"
+            operator_diagnostics "$ns"
+            cap_fail 5 "ran out of the ${timeout}s operator budget before deployment/${d} in ${ns} became available. $(argocd_app_state)"
         fi
         kubectl rollout status "deployment/${d}" -n "$ns" --timeout="${remaining}s" >&2 \
-            || cap_fail 5 "deployment/${d} in ${ns} did not become available"
+            || { operator_diagnostics "$ns"; cap_fail 5 "deployment/${d} in ${ns} did not become available. $(argocd_app_state)"; }
     done
     info "  ${ns}: $* ready"
+}
+
+function operator_diagnostics() {
+    local ns="$1"
+    argocd_app_state >&2
+    printf '\n' >&2
+    kubectl get application "$APP_NAME" -n "$ARGOCD_NAMESPACE" \
+        -o jsonpath='{.status.operationState.phase}{": "}{.status.operationState.message}{"\n"}{range .status.operationState.syncResult.resources[*]}{.kind}{"/"}{.name}{": "}{.message}{"\n"}{end}' >&2 || true
+    kubectl get pods -n "$ARGOCD_NAMESPACE" >&2 || true
+    kubectl get pods -n "$ns" >&2 || true
+    kubectl get events -n "$ns" --sort-by=.lastTimestamp 2>/dev/null | tail -15 >&2 || true
 }
 
 # install_operator_stack -- register cert-manager and CloudNativePG, in that
@@ -1075,11 +1071,11 @@ function install_operator_stack() {
 
     info "cert-manager -> deploy/cert-manager/install"
     _register_operator_app cert-manager
-    _wait_for_operator cert-manager cert-manager cert-manager-cainjector cert-manager-webhook
+    _wait_for_operator cert-manager cert-manager cert-manager cert-manager-cainjector cert-manager-webhook
 
     info "CloudNativePG + Barman Cloud plugin -> deploy/cnpg/install"
     _register_operator_app cnpg-operator
-    _wait_for_operator cnpg-system cnpg-controller-manager barman-cloud
+    _wait_for_operator cnpg-system cnpg-operator cnpg-controller-manager barman-cloud
 
     OPERATOR_STACK_READY=true
 }

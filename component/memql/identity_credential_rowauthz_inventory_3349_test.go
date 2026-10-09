@@ -239,7 +239,9 @@ var credentialReadInventory = map[string]struct {
 	// --- BOOT PREDICATE: early, but it resolves nobody. ---
 	"signInIdentitiesForUser": {classBootPredicate,
 		"filter (identityIsMagicLink || identityIsPasskey) && userId==args.userId && " +
-			"isActiveRecord (memql#3591). Backs Store.HasClaimedOwner, which the " +
+			"isActiveRecord by default (memql#3591). includeHistory also returns revoked " +
+			"routes and OIDC credentials for the same named owner, so first-passkey " +
+			"recovery cannot replace previous credentials. Backs Store.HasClaimedOwner, which the " +
 			"auto-bootstrap guard calls during identity boot to ask whether the cluster's " +
 			"owner has ever authenticated -- the same actorless window as activeUsers and " +
 			"CountActiveUsers, so actor.userId is circular here too. NOT classPreActor: it " +

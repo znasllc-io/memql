@@ -35,11 +35,11 @@ function isOsDestination(data: IdentityData, clientId: string): boolean {
   } catch { return false; }
 }
 
-export function SignInPage({ data, clientId, fields, busy, passkeyPending, problem, onField, onSubmit, onPasskey, onLegal }: {
+export function SignInPage({ data, clientId, fields, busy, passkeyPending, problem, onField, onSubmit, onPasskey, onLegal, onSetup }: {
   data: IdentityData; clientId: string; fields: Record<string, string>;
   busy: boolean; passkeyPending: boolean; problem?: SignInProblem;
   onField: (name: string, text: string) => void;
-  onSubmit: () => void; onPasskey: () => void; onLegal: (path: string) => void;
+  onSubmit: () => void; onPasskey: () => void; onLegal: (path: string) => void; onSetup?: () => void;
 }) {
   const stage = value(data, "Stage");
   const local = data.Local === true;
@@ -69,6 +69,7 @@ export function SignInPage({ data, clientId, fields, busy, passkeyPending, probl
       {stage === "email" ? <Button tone={local ? "primary" : "quiet"} disabled={busy} busy={passkeyPending} busyLabel="Waiting for your passkey…" onClick={onPasskey}>
         <Fingerprint size={20} aria-hidden="true" />{problem ? "Try passkey again" : "Sign in with a passkey"}
       </Button> : null}
+      {data.CanResumeSetup === true && onSetup ? <Button tone="quiet" disabled={busy} onClick={onSetup}>Finish ownership setup</Button> : null}
       {passkeyPending ? <p className="os-signin-pending" role="status">Follow your browser’s prompt to use your passkey.</p> : null}
       <p className="os-signin-legal">By continuing, you agree to the <button type="button" className="os-link" disabled={busy} onClick={() => onLegal("/legal/tos")}>Terms of Service</button> and <button type="button" className="os-link" disabled={busy} onClick={() => onLegal("/legal/privacy")}>Privacy Notice</button>.</p>
   </IdentityFrame>;
