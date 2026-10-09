@@ -297,6 +297,9 @@ import {
 import { languagePin } from './state/languageReference.js';
 
 let client: LanguageClient | undefined;
+// Run/training surfaces need both workspace trust and a ready language client;
+// either can arrive first. registerRunSurface installs this once trust is given.
+let attachLanguageRuntime: () => void = () => {};
 let connections: ConnectionManager | undefined;
 let editorConnection: EditorConnection | undefined;
 
@@ -789,7 +792,7 @@ function startLanguageClient(context: ExtensionContext): void {
   // start() is async; surface a start failure instead of leaving an unhandled
   // rejection (the LanguageClient shows its own UI too, but this makes the
   // failure explicit and actionable).
-  void client.start().catch((err) => {
+  void client.start().then(() => attachLanguageRuntime()).catch((err) => {
     const detail = err instanceof Error ? err.message : String(err);
     noteDiagnostic(connectionOutput, 'the language server failed to start', detail);
     void offerDetails('error', connectionOutput, "MemQL: The language server didn't start.");
@@ -3679,7 +3682,10 @@ function registerRunSurface(
   // line with everything else in the runtime surface -- an untrusted window
   // renders no Run affordance at all, so there is nothing to click and no
   // implication that there could be.
-  if (client !== undefined) {
+  let languageRuntimeAttached = false;
+  attachLanguageRuntime = () => {
+    if (languageRuntimeAttached || client?.initializeResult === undefined) return;
+    languageRuntimeAttached = true;
     const lspBridge = {
       sendRequest: (method: string, params: unknown, token?: CancellationToken) =>
         token === undefined
@@ -3786,7 +3792,8 @@ function registerRunSurface(
       trainingLens.setClient(lspBridge);
       void trainingDecorations.refresh(window.activeTextEditor);
     };
-  }
+  };
+  attachLanguageRuntime();
 
   context.subscriptions.push(
     // Palette-hidden ("when": false): it takes a RunTarget the palette cannot
@@ -4483,6 +4490,17 @@ async function constructForConfig(
   workspaceRoot: string | undefined
 ): Promise<{ uri: string; construct: ReturnType<typeof parseRunnableConstructs>[number] } | undefined> {
   if (config.file === undefined || workspaceRoot === undefined) return undefined;
+  // Opening the source also starts the language client when a saved run is
+  // the first use of a local MemQL file in this window.
+  const uri = Uri.file(path.join(workspaceRoot, config.file.split('/').join(path.sep)));
+  let document;
+  try {
+    document = await workspace.openTextDocument(uri);
+  } catch (err) {
+    noteDiagnostic(connectionOutput, `opening ${config.file} failed`, err instanceof Error ? err.message : String(err));
+    void offerDetails('error', connectionOutput, `MemQL: Couldn't open ${config.file}.`);
+    return undefined;
+  }
   // SAID, never silent. This returned without a word, so Run on a saved run
   // did nothing at all in a window whose language server was missing.
   if (client === undefined) {
@@ -4492,15 +4510,6 @@ async function constructForConfig(
       settings
     );
     if (answer === settings) await commands.executeCommand('workbench.action.openSettings', 'memql.lsp.serverPath');
-    return undefined;
-  }
-  const uri = Uri.file(path.join(workspaceRoot, config.file.split('/').join(path.sep)));
-  let document;
-  try {
-    document = await workspace.openTextDocument(uri);
-  } catch (err) {
-    noteDiagnostic(connectionOutput, `opening ${config.file} failed`, err instanceof Error ? err.message : String(err));
-    void offerDetails('error', connectionOutput, `MemQL: Couldn't open ${config.file}.`);
     return undefined;
   }
   // The one call in this extension that asks the server for constructs OUTSIDE

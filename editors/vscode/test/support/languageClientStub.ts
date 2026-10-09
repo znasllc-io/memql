@@ -8,10 +8,9 @@
 // 8,000-line client package loads would mean modelling most of vscode.d.ts to
 // test an ordering decision in activate(), which is the wrong trade.
 //
-// WHAT IT ASSERTS BY EXISTING. The activation cases arrange for NO memql-lsp
-// binary, so a correct activate() never reaches `new LanguageClient(...)` at
-// all. `constructed` records the calls, and a case that expects the language
-// server to stay down can say so directly.
+// Records whether activation starts a client and how it was configured.
+// Missing-binary cases expect none; deferred-start cases supply a binary and
+// expect a client only after opening a local MemQL document.
 
 export const TransportKind = {
   stdio: 0,
