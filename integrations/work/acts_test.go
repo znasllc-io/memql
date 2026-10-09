@@ -109,6 +109,7 @@ func (r *stepRows) Next(dest []driver.Value) error {
 func newActsIntegration(t *testing.T) (*Integration, *recordingEngine, *stepStore) {
 	t.Helper()
 	i, eng := newTestIntegration(t)
+	eng.reply("workGoalForOwner", map[string]any{"id": actGoalId, "ownerUserId": actOwner, "status": "open"})
 	store := &stepStore{}
 	db := bun.NewDB(sql.OpenDB(store), pgdialect.New())
 	t.Cleanup(func() { _ = db.Close() })

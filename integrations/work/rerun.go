@@ -6,8 +6,9 @@ package work
 // THE ACT WRITES A REQUEST AND RUNS NOTHING. It validates, decides what the
 // re-run executes (component/work.PlanRerun: the step and every step after it,
 // each as a new version, the prefix served from its current versions), and
-// writes ONE run update: the run back to `running`, the request on run.rerun,
-// and the steps that will get new versions on run.staleSteps. The agent that
+// reopens its owned goal when necessary, then writes the run back to
+// `running`, the request on run.rerun, and the steps that will get new
+// versions on run.staleSteps. The agent that
 // claims the run's `running` event serves the request off the row -- this
 // replica holds nothing the executing one needs, and is not asked to.
 //
@@ -20,6 +21,7 @@ import (
 	"fmt"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 )
 
@@ -40,6 +42,19 @@ func (i *Integration) handleRerunStep(ctx context.Context, args map[string]any, 
 	}
 
 	run, err := i.readActRun(ctx, runId)
+	if err != nil {
+		return nil, err
+	}
+	// A retry is an explicit continuation of the owned goal. Serialize it
+	// with cancellation so another replica cannot close the goal between
+	// reopening it and dispatching the new run version.
+	release, err := i.decisionGate(ctx, "goal-lifecycle-"+memql.BareShortId(rowString(run.row, "goalId")))
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	ctx = memql.ContextWithFreshRead(ctx)
+	run, err = i.readActRun(ctx, runId)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +106,24 @@ func (i *Integration) handleRerunStep(ctx context.Context, args map[string]any, 
 	override.WholePrompt = snapshot != nil
 
 	now := i.clock().UTC()
+	goalID := rowString(run.row, "goalId")
+	goal, err := i.store().goalForOwner(ctx, goalID)
+	if err != nil {
+		return nil, err
+	}
+	if goal == nil || memql.BareShortId(rowString(goal, "ownerUserId")) != memql.BareShortId(run.owner) {
+		return nil, fmt.Errorf("work: the run's owned goal is unavailable")
+	}
+	if rowString(goal, "status") == "closed" {
+		if err := i.store().writeInternal(ownerActor(ctx, run.owner), "mutation "+call("updateWorkGoal", map[string]any{
+			"goalId": goalID, "status": "open", "closedAt": "", "closeReason": "",
+			"versionTime": rfc(workRowVersionAfter(goal["createdAt"], now)),
+		})); err != nil {
+			return nil, err
+		}
+	}
 	fields := reopenFields(now)
+	fields["versionTime"] = rfc(workRowVersionAfter(run.row["createdAt"], now))
 	fields["rerun"] = rerunRequest(rerunReasonRerun, stepKey, override, plan.Versions, snapshot, workspace, requestedBy, now)
 	fields["staleSteps"] = plan.Stale
 	if err := i.store().updateRun(ownerActor(ctx, run.owner), run.id, fields); err != nil {
