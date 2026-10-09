@@ -48,6 +48,22 @@ The header’s **Find in document** button and ⌘F/Ctrl+F search rendered docum
 in Read and Review, with highlighted matches, counts and next/previous navigation. Source uses the native
 VS Code text editor, including Find/Replace, selection, Cut/Copy/Paste and undo.
 
+**New Markdown Document** in the command palette creates a blank file in the
+connected cluster and opens Review. Describe the content with the whole-document
+feedback button, propose changes, and review the generated text before applying.
+**Markdown: Insert Image** in Source uploads a PNG, JPEG, GIF, or WebP (up to
+8 MiB and 24 million pixels) to the same cluster and inserts its Markdown link with an accessible
+description. Save the document to retain that link in its version history.
+Images stay in Files if you later remove their link; removing text never deletes
+an attachment. Local documents can display images within their own directory.
+
+Read and Review support CommonMark text blocks and inline formatting, fenced
+code, tables, strikethrough, read-only task lists, footnotes, and images. Heading
+links and footnote references move focus to a highlighted destination. Repeated
+headings receive numeric suffixes (for example, `#methods-1`). Raw HTML remains
+escaped; embedded scripts, arbitrary iframes, math and Mermaid rendering are not
+enabled. Markdown dialect extensions are not all interchangeable.
+
 **Version history** opens retained versions without replacing the current head.
 Choose a version, preview it, then **Start branch** to create a separate Markdown
 document with its own history and a durable link to the exact parent revision.

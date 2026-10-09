@@ -6,6 +6,19 @@ import { Documents, isZip, resourceFrom } from "../src/documents.js";
 import { newTemplate, readTemplate } from "../src/templates.js";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
+test("creating a file resolves its indexed upload receipt without uploading twice", async () => {
+  const lease = {domain:"client.example",name:"client",generation:1};
+  let uploads = 0, reads = 0;
+  const api = { uploadFile: async (actual: unknown) => { assert.equal(actual,lease); uploads++; return {fileId:"saved-file",artifactId:""}; },
+    execute: async (actual: unknown, name: string, call: string) => {
+      assert.equal(actual,lease); assert.equal(name,"libraryArtifactForFile"); assert.match(call,/saved-file/);
+      return ++reads === 1 ? [] : [{id:"indexed-file"}];
+    } } as unknown as EditorConnectionAPI;
+  const uri = await new Documents(api).createFile(lease,"Figure 1.png","image/png",new Uint8Array([1]));
+  assert.equal(uri,"memql-file://client.example/artifacts/indexed-file/Figure%201.png");
+  assert.equal(uploads,1); assert.equal(reads,2);
+});
+
 test("ZIP detection handles misleading names and never extracts content", () => {
   assert.ok(isZip("backup.ZIP"));
   assert.ok(isZip("renamed.pdf", "application/zip"));

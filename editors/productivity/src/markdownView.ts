@@ -291,7 +291,22 @@ views.forEach((button,index) => button.addEventListener("keydown",event => {
   const next = event.key === "ArrowRight" ? (index+1)%views.length : event.key === "ArrowLeft" ? (index+views.length-1)%views.length : event.key === "Home" ? 0 : event.key === "End" ? views.length-1 : undefined;
   if (next !== undefined) { event.preventDefault(); views[next].focus(); }
 }));
-content.addEventListener("click",event => { const link = (event.target as Element).closest<HTMLElement>("[data-external]"); if (link) { event.preventDefault(); api.postMessage({type:"external",href:link.dataset.external}); } });
+content.addEventListener("click", event => {
+  const link = (event.target as Element).closest<HTMLAnchorElement>("a");
+  if (!link) return;
+  event.preventDefault();
+  if (link.dataset.external) { api.postMessage({type:"external",href:link.dataset.external}); return; }
+  const href = link.getAttribute("href");
+  if (!href?.startsWith("#")) return;
+  let anchor: string;
+  try { anchor = decodeURIComponent(href.slice(1)); } catch { return; }
+  // Search inside the rendered document, never in the editor's controls.
+  const target = Array.from(content.querySelectorAll<HTMLElement>("[id]")).find(el => el.dataset.headingAnchor === anchor || el.id === anchor);
+  if (!target) return;
+  for (const previous of content.querySelectorAll(".anchor-target")) previous.classList.remove("anchor-target");
+  target.classList.add("anchor-target"); target.tabIndex = -1;
+  target.focus({preventScroll:true}); target.scrollIntoView?.({block:"start",behavior:"instant"});
+});
 function textElement(tag: string, text: string, className = "") { const element = document.createElement(tag); element.textContent = text; element.className = className; return element; }
 function rangeFor(anchor: Anchor): Range | undefined {
   if (anchor.kind === "document-end" || anchor.kind === "document") return;

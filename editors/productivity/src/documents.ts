@@ -1,5 +1,6 @@
 import { UserInputError } from "./problems.js";
 import {
+  buildLibraryArtifactForFile,
   buildLibraryDocumentNotes, buildLibraryAddDocumentNote, buildLibraryDocumentHistory, buildLibraryDocumentVersion, buildLibraryForkDocumentVersion, buildCancelGoal, buildLibraryModifyRevisionItem, buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
   buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment, buildLibraryRequestDocumentRevision, buildLibraryDocumentRevisionStatus, buildDecideApproval,
 } from "@znasllc-io/memql-sdk-core/client";
@@ -29,6 +30,23 @@ const text = (row: Record<string, unknown>, field: string) => typeof row[field] 
 
 export class Documents {
   constructor(private readonly api: EditorConnectionAPI) {}
+  async createFile(lease: ConnectionLease, name: string, mime: string, content: Uint8Array): Promise<string> {
+    if (!name.trim() || name.length > 160 || /[\\/\u0000-\u001f]/.test(name)) throw new UserInputError("Use a file name without slashes or control characters.");
+    const result = await this.api.uploadFile(lease, name, mime, content);
+    // The upload receipt precedes the asynchronously indexed Files artifact.
+    // Resolve that exact receipt; never upload again while waiting for its link.
+    let artifactId = result.artifactId;
+    for (let attempt = 0; !artifactId && attempt < 10; attempt++) {
+      const rows = await this.api.execute(lease, "libraryArtifactForFile", buildLibraryArtifactForFile({ fileId: result.fileId }));
+      artifactId = text(rows[0] ?? {}, "id");
+      if (!artifactId) await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    if (!artifactId) throw new UserInputError("The file is saved in Files, but its editor link is still being prepared. Open it from Files when it appears.");
+    if (!/^[\w-]{1,160}$/.test(artifactId)) throw new Error("The cluster returned an invalid file link. The uploaded file remains in Files.");
+    const uri = `memql-file://${lease.domain}/artifacts/${artifactId}/${encodeURIComponent(name)}`;
+    resourceFrom(uri);
+    return uri;
+  }
   async read(uri: string, openedLease?: ConnectionLease): Promise<OpenDocument> {
     const resource = resourceFrom(uri);
     const lease = openedLease ?? await this.api.connect(resource.domain);

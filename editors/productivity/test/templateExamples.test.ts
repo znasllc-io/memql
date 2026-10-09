@@ -14,7 +14,7 @@ test("example-led creation distinguishes inspiration from included images and ke
       case "libraryFilesForOwner": return [{id:"layout",name:"example.png"},{id:"logo",name:"logo.png"}];
       case "composeMaterialize": return [{compositionId:"composition"}];
       case "compositionById": return [{status:"ready",outputFileId:"file",name:"Welcome"}];
-      case "libraryArtifactBySourceConceptRef": return [{id:"artifact",title:"Welcome.email.json"}];
+      case "libraryArtifactForFile": return [{id:"artifact",title:"Welcome.email.json"}];
       default: return [];
     }
   } };

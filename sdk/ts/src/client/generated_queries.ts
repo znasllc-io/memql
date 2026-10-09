@@ -4297,6 +4297,28 @@ QueryClient.prototype.libraryArtifactBySourceConceptRef = function (this: QueryC
   return this.executeNamed("libraryArtifactBySourceConceptRef", buildLibraryArtifactBySourceConceptRef(args), opts);
 };
 
+/** Resolve a newly uploaded file's artifact using the bare file ID from its receipt. The polymorphic sourceConceptRef query is for canonical internal references; clients cannot infer a concept from a bare ID. */
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactForFile"] in generated_concepts.ts).
+export interface LibraryArtifactForFileArgs {
+  fileId: string;
+}
+
+export function buildLibraryArtifactForFile(args: LibraryArtifactForFileArgs): string {
+  const parts: string[] = [];
+  parts.push("fileId: " + renderMemQLValue(args.fileId));
+  return "query libraryArtifactForFile(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryArtifactForFile(args: LibraryArtifactForFileArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryArtifactForFile = function (this: QueryClient, args: LibraryArtifactForFileArgs = {} as LibraryArtifactForFileArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryArtifactForFile", buildLibraryArtifactForFile(args), opts);
+};
+
 /** List the caller's entire Library (artifacts + records). Owned: the row set is gated by `row.ownerUserId == actor.userId` server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifacts"] in generated_concepts.ts).
 export interface LibraryArtifactsArgs {

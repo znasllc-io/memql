@@ -226,7 +226,7 @@ describe("the provenance chain", () => {
     const link = new URL(tab.navigate.mock.calls[0]![0]);
     expect(link.origin).toBe("https://vscode.memql.example.com");
     expect(link.searchParams.get("resource")).toBe("memql-file://memql.example.com/artifacts/artifact-output/Q3%20report.pdf");
-    expect(conn.query.libraryArtifactBySourceConceptRef).toHaveBeenCalledWith({ sourceConceptRef: "f-output" });
+    expect(conn.query.libraryArtifactForFile).toHaveBeenCalledWith({ fileId: "f-output" });
     expect(tab.close).not.toHaveBeenCalled();
   });
 

@@ -19,6 +19,21 @@ function fixture(initial: any = {}) {
   const input=(id:string,value:string)=>{(el(id) as HTMLTextAreaElement).value=value;el(id).dispatchEvent(new dom.window.Event("input"));};
   return {dom,doc,el,send,document,select,input,messages,highlights,state:()=>state};
 }
+test("section and footnote links focus and highlight their destination without closing review", () => {
+  const f = fixture();
+  f.document("# Paper\n\n[Methods](#methods) and evidence.[^e]\n\n## Methods\n\nA procedure.\n\n[^e]: A source.\n");
+  if (f.el("review-panel").hidden) f.el("review-toggle").click();
+  f.doc.querySelector<HTMLAnchorElement>('a[data-internal="methods"]')!.click();
+  assert.equal(f.doc.activeElement?.id, "heading-methods");
+  assert.ok(f.doc.querySelector("#heading-methods.anchor-target"));
+  assert.equal(f.el("review-panel").hidden, false);
+  f.doc.querySelector<HTMLAnchorElement>(".footnote-ref a")!.click();
+  assert.equal(f.doc.activeElement?.id, "fn1");
+  f.doc.querySelector<HTMLAnchorElement>(".footnote-backref")!.click();
+  assert.equal(f.doc.activeElement?.id, "fnref1");
+  assert.equal(f.messages.filter(m => m.type === "external").length, 0);
+  f.dom.window.close();
+});
 test("selection tools appear contextually and preserve exact rendered offsets",()=>{
   const f=fixture();f.document();assert.equal(f.doc.querySelector("#feedback-toggle"),null);assert.equal((f.el("annotate") as HTMLButtonElement).disabled,true);
   f.select();assert.equal(f.el("selection-tools").hidden,false);f.el("selection-feedback").click();assert.equal(f.el("composer").hidden,false);

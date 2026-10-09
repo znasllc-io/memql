@@ -2,7 +2,7 @@
   "name": "memql-productivity-tools",
   "displayName": "MemQL Productivity Tools",
   "description": "Documents, campaign templates, PDFs and human-reviewed suggestions connected to MemQL.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -130,6 +130,17 @@
         "command": "memql.productivity.markdown.note",
         "title": "Add note",
         "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.newMarkdown",
+        "title": "New Markdown Document",
+        "category": "MemQL Productivity"
+      },
+      {
+        "command": "memql.productivity.markdown.insertImage",
+        "title": "Markdown: Insert Image",
+        "category": "MemQL Productivity",
+        "icon": "$(file-media)"
       }
     ],
     "customEditors": [
@@ -237,6 +248,11 @@
           "command": "memql.productivity.template.split",
           "when": "resourceFilename =~ /\\.email\\.json$/",
           "group": "navigation"
+        },
+        {
+          "command": "memql.productivity.markdown.insertImage",
+          "when": "resourceScheme == memql-file && resourceLangId == markdown && activeCustomEditorId != memql.productivity.markdown",
+          "group": "2_markdown@5"
         }
       ]
     },
@@ -270,7 +286,10 @@
   },
   "dependencies": {
     "@znasllc-io/memql-sdk-core": "file:../../sdk/ts",
+    "image-size": "2.0.4",
     "markdown-it": "14.3.1",
+    "markdown-it-footnote": "4.0.0",
+    "markdown-it-task-lists": "2.1.1",
     "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.3.289"
   },
