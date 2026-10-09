@@ -803,8 +803,7 @@ function renderRevisionContent() {
   if (preparing) { root.append(textElement("p", "Preparing changes…", "phase busy")); return; }
   if (!revision || revision.result?.applied) {
     root.append(textElement("p","No proposal awaiting review.","empty"));
-    const links=textElement("div","","review-empty-actions");
-    for(const [tab,label] of [["requests","View requests"],["history","View history"]] as const){const link=textElement("button",label,"passage");link.addEventListener("click",()=>selectReviewTab(tab,true));links.append(link);}root.append(links);return;
+    return;
   }
   if(revision.removedCommentIds?.length){
     root.append(textElement("p","A request was deleted. Propose changes again with the remaining requests.","muted"));
