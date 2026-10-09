@@ -600,10 +600,11 @@ function main() {
     # Read ONCE, before anything is written: after issue_cert the old names are
     # gone (mkcert overwrites in place), and they are the useful half of the
     # reissue message -- they name WHICH stale domain the operator had.
-    local coverage_before old_sans
+    local coverage_before old_sans pair_status
     coverage_before="$(cert_coverage "$cert")"
     old_sans="$(cert_sans_oneline "$cert")"
-    if [[ -f "$cert" && -f "$key" && -z "$force" && "$coverage_before" != "missing" ]]; then
+    pair_status="$(localtls_pair_status "$cert" "$key" "${caroot}/rootCA.pem")"
+    if [[ -f "$cert" && -f "$key" && -z "$force" && "$coverage_before" != "missing" && "$pair_status" != "invalid" ]]; then
         if [[ "$coverage_before" == "covers" ]]; then
             cap_info "certificate already present at ${cert} and covers ${HOSTNAMES[*]} -- pass --force to reissue."
         else
@@ -614,6 +615,9 @@ function main() {
             cap_warn "its names could NOT be read, so coverage of ${HOSTNAMES[*]} is unverified"
             cap_warn "  (openssl absent, or ${cert} does not parse as a certificate)."
         fi
+        if [[ "$pair_status" == "unknown" ]]; then
+            cap_warn "the certificate's CA, validity dates and matching key could not be verified"
+        fi
     else
         if [[ -f "$cert" && -z "$force" && "$coverage_before" == "missing" ]]; then
             reissued=true
@@ -623,7 +627,14 @@ function main() {
             cap_warn "certificate at ${cert} carries ${old_sans}"
             cap_warn "  which does not cover ${HOSTNAMES[*]} -- reissuing."
         fi
+        if [[ "$pair_on_disk" == "true" && "$pair_status" == "invalid" ]]; then
+            reissued=true
+            cap_warn "certificate/key at ${cert} is expired, mismatched, or not signed by ${caroot}/rootCA.pem -- reissuing."
+        fi
         issue_cert "$bin" "$caroot" "$cert" "$key"
+        if [[ "$(localtls_pair_status "$cert" "$key" "${caroot}/rootCA.pem")" == "invalid" ]]; then
+            cap_fail 5 "issued certificate/key does not verify against ${caroot}/rootCA.pem"
+        fi
         cert_issued=true
         cap_changed
         if [[ "$pair_on_disk" != "true" ]]; then

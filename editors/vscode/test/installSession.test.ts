@@ -1563,6 +1563,11 @@ test("clusterUp issues the front-door certificate from the CA localCA created", 
       `default root: absent on a clean machine (the install fails at clusterUp), somebody ` +
       `else's CA on a developer machine (it succeeds and says nothing)`,
   );
+  assert.equal(
+    paramsFor(plan, "frontDoor", "install.verifyFrontDoor")["caroot"],
+    ca,
+    "TLS diagnostics must use the installation CA, not mkcert's default root",
+  );
 });
 
 // The inverse of the required-params audit above, and the half that was missing.
