@@ -301,15 +301,3 @@ shape documentComment documentCommentFull {
   requestId
   row.createdAt
 }
-
-/// Save identity only: no document bytes cross the annotation deletion gate.
-@row
-shape documentVersion libraryDocumentSaveReceipt {
- producedByRunId
-}
-
-@row
-shape fileVersion libraryFileSaveReceipt {
- sha256
- blobUrl
-}

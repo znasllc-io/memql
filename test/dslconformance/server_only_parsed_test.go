@@ -1182,6 +1182,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "library/mutations.memql", Name: "removeDocumentAnnotation"}: true,
 		{Path: "library/queries.memql", Name: "removedDocumentComments"}:    true,
 
+		// actor.userId scoping would hide reviews applied by collaborators.
+		// Library admits the artifact and backing row before the fixed system
+		// audit read; only applied booleans leave the capability boundary.
+		{Path: "work/queries.memql", Name: "workDocumentApprovedRevisions"}: true,
+
 		// Note reads borrow the backing owner only after artifact authorization.
 		// actor.userId cannot attest the original caller under that authority;
 		// only the integration may supply authorUserId, or a caller could ask

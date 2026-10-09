@@ -478,7 +478,9 @@ query run workActiveDocumentRevisionRequests {
 }
 
 /// Internal audit lookup after Library admits the artifact and backing document.
-/// Across authors: another collaborator may have applied the person's feedback.
+/// actor.userId scoping would hide applications made by another collaborator.
+/// Client callers must not read those decisions directly: the native boundary
+/// verifies current artifact and backing-row access and exposes only applied flags.
 @serverOnly
 @actor
 query approval workDocumentApprovedRevisions {

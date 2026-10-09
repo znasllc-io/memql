@@ -83,13 +83,11 @@ func ApprovedRevisions(ctx context.Context, engine memql.IntegrationEngineAccess
 }
 
 func VersionReceipt(ctx context.Context, engine memql.IntegrationEngineAccess, owner, source string, version int, file bool) (*memql.ExecuteResult, error) {
-	name := "libraryDocumentRevisionReceipt"
+	name := "libraryDocumentVersionByNumber"
+	args := map[string]any{"documentId": memql.BareShortId(source), "documentIdAlias": "v1:library:generatedOutput:" + memql.BareShortId(source), "versionNumber": version}
 	if file {
-		name = "libraryFileRevisionReceipt"
-	}
-	args := map[string]any{"sourceId": memql.BareShortId(source), "versionNumber": version}
-	if !file {
-		args["sourceAlias"] = "v1:library:generatedOutput:" + memql.BareShortId(source)
+		name = "libraryFileVersionByNumber"
+		args = map[string]any{"fileId": memql.BareShortId(source), "versionNumber": version}
 	}
 	call, err := langparser.RenderCall(name, args)
 	if err != nil {

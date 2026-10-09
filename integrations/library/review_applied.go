@@ -96,7 +96,7 @@ func (i *Integration) appliedReviewComments(ctx context.Context, doc reviewDocum
 						return nil, err
 					}
 					if rows := extractRows(raw); len(rows) == 1 {
-						stored = rows[0]
+						stored = map[string]any{"producedByRunId": rows[0]["producedByRunId"], "sha256": rows[0]["sha256"], "blobUrl": rows[0]["blobUrl"]}
 					}
 				}
 				versions[version] = stored
