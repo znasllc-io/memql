@@ -1,4 +1,13 @@
 import './style.css';
+import { readEditorAppearance } from '../../../brand/editorAppearance';
+const appearance = readEditorAppearance(new URL(location.href).searchParams.get('appearance'));
+if (appearance) {
+  document.documentElement.dataset.theme = appearance.mode;
+  document.documentElement.style.colorScheme = appearance.mode;
+  for (const [token, key] of Object.entries({ surface: 'plate', fg: 'ink', 'surface-raised': 'raised', 'border-strong': 'line', accent: 'accent', 'accent-subtle': 'accent-soft' } as const)) {
+    document.documentElement.style.setProperty(`--memql-${token}`, appearance.colors[key]);
+  }
+}
 const setup = document.querySelector<HTMLElement>('#setup')!;
 const status = document.querySelector<HTMLElement>('#setup-status')!;
 const retry = document.querySelector<HTMLButtonElement>('#retry')!;

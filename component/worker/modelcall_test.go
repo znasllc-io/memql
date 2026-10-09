@@ -102,22 +102,23 @@ func TestModelCallDropsDuplicateDeltas(t *testing.T) {
 
 // A keepalive proves liveness without being output. It takes a seq (so
 // it can never be confused with a replayed content delta) but is not
-// forwarded to the consumer and contributes nothing to the text.
+// treated as output and contributes nothing to the text. It must reach
+// downstream watchdogs, including across a replica hop.
 func TestModelCallKeepaliveIsNotOutput(t *testing.T) {
 	h, _ := newTestModelCall(t, ModelCallLimits{})
 
 	h.deliverDelta(ModelCallDelta{Seq: 1, Content: "hello"})
-	h.deliverDelta(ModelCallDelta{Seq: 2, Keepalive: true})
+	h.deliverDelta(ModelCallDelta{Seq: 2, Keepalive: true, Content: "NOT OUTPUT", ToolCalls: []ModelCallToolCall{{Index: 0, Name: "NOT A TOOL"}}})
 	h.deliverDelta(ModelCallDelta{Seq: 3, Content: " world"})
 
 	got := drain(h)
-	if len(got) != 2 {
-		t.Fatalf("expected keepalive to be withheld from the consumer, got %+v", got)
+	if len(got) != 3 || !got[1].Keepalive || got[1].Content != "" || len(got[1].ToolCalls) != 0 {
+		t.Fatalf("expected explicit liveness without output or tools, got %+v", got)
 	}
 	h.finish(ModelCallOutcome{FinishReason: ModelFinishStop}, nil)
 	out, _ := h.Wait(context.Background())
-	if out.Content != "hello world" {
-		t.Fatalf("assembled content = %q", out.Content)
+	if out.Content != "hello world" || len(out.ToolCalls) != 0 {
+		t.Fatalf("assembled result includes keepalive output: %+v", out)
 	}
 }
 

@@ -457,15 +457,15 @@ func TestEditDocument_TwoEditsRetainBothVersions(t *testing.T) {
 	}
 
 	// Both versions retained: nothing overwritten.
-	if len(eng.versions) != 2 {
-		t.Fatalf("expected 2 retained versions, got %d", len(eng.versions))
+	if len(eng.versions) != 3 {
+		t.Fatalf("expected initial snapshot and 2 retained edits, got %d", len(eng.versions))
 	}
 	nums := versionNumbers(eng)
-	if nums[0] != 1 || nums[1] != 2 {
-		t.Fatalf("retained version numbers = %v, want [1 2]", nums)
+	if nums[0] != 0 || nums[1] != 1 || nums[2] != 2 {
+		t.Fatalf("retained version numbers = %v, want [0 1 2]", nums)
 	}
 	// v2 chains back to v1.
-	if eng.versions[1]["parentVersionId"] != eng.versions[0]["id"] {
+	if eng.versions[2]["parentVersionId"] != eng.versions[1]["id"] {
 		t.Fatalf("v2 parentVersionId = %v, want v1 id %v", eng.versions[1]["parentVersionId"], eng.versions[0]["id"])
 	}
 	// Latest pointer reflects newest content.
@@ -628,8 +628,8 @@ func TestEditDocument_OptimisticConflict(t *testing.T) {
 	if !r.Conflict {
 		t.Fatalf("expected Conflict=true, got %+v", r)
 	}
-	if len(eng.versions) != 1 {
-		t.Fatalf("conflict must NOT append: have %d versions, want 1", len(eng.versions))
+	if len(eng.versions) != 2 {
+		t.Fatalf("conflict must NOT append: have %d versions, want initial + 1 edit", len(eng.versions))
 	}
 
 	// Correct expectedVersion (1) succeeds.
@@ -700,7 +700,7 @@ func TestRestore_AppendsNewLatestEqualToChosen(t *testing.T) {
 	}, 0); err != nil {
 		t.Fatal(err)
 	}
-	v1Id := eng.versions[0]["id"].(string)
+	v1Id := eng.versions[1]["id"].(string)
 
 	// Restore v1 -> appends v3 with v1's content.
 	out, err := i.handleRestoreDocumentVersion(ctx, map[string]any{
@@ -719,10 +719,10 @@ func TestRestore_AppendsNewLatestEqualToChosen(t *testing.T) {
 		t.Fatalf("restore AuthorKind = %q, want system", r.AuthorKind)
 	}
 	// History intact: 3 versions retained.
-	if len(eng.versions) != 3 {
-		t.Fatalf("expected 3 versions after restore (non-destructive), got %d", len(eng.versions))
+	if len(eng.versions) != 4 {
+		t.Fatalf("expected initial + 3 versions after restore (non-destructive), got %d", len(eng.versions))
 	}
-	v3 := eng.versions[2]
+	v3 := eng.versions[3]
 	// New latest content equals the chosen version's content.
 	if v3["content"] != "apple" {
 		t.Fatalf("restored v3 content = %v, want 'apple' (equal to v1)", v3["content"])

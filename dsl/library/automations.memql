@@ -1,3 +1,5 @@
+use agents.builtins.{ ai, runAgentTurn }
+
 // library domain -- promotion triggers.
 //
 // Event-driven population of the Library index. Each backing-row creation
@@ -242,14 +244,36 @@ automation archiveFileOnArtifactArchive {
   archiveBackingFile := mutation archiveLibraryFile(fileId: args.sourceConceptRef)
 }
 
-/// A captured Markdown revision executes only after its Nexus approval.
+/// Analyze passage feedback, review exact replacements, then apply only what the
+/// person approved. Every step is journaled, so a resume reuses the AI result.
+@actor
 @template
 automation reviseLibraryDocument {
- args {
-  requestId string!
-  proposal object!
+ args { requestId string! proposal object! }
+ captured := builtin libraryRevisionInput(requestId: args.requestId)
+ evidence := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
+  document: captured.content, passages: captured.passagesJSON,
+  instruction: captured.amendment.instruction ?? captured.instruction,
+  previous: captured.amendment.edits
+ })
+
+ if captured.amendment != nil {
+  analysis := builtin ai(templateId: "libraryRevisionItem", data: {
+   document: captured.content, passages: captured.passagesJSON, instruction: captured.amendment.instruction,
+   previous: captured.amendment.edits, evidence: evidence.reply
+  })
+ } else {
+  analysis := builtin ai(templateId: "libraryRevisionPassages", data: {
+   document: captured.content, passages: captured.passagesJSON, instruction: captured.instruction, evidence: evidence.reply
+  })
  }
- revise := builtin libraryExecuteDocumentRevision(requestId: args.requestId)
+ proposed := builtin libraryRevisionProposal(requestId: args.requestId, response: analysis.reply)
+ if proposed.changed {
+  review := builtin libraryReviewRevision(requestId: args.requestId, proposal: proposed.proposal,
+   question: "Apply these proposed changes to the document?")
+  return builtin libraryExecuteDocumentRevision(requestId: args.requestId)
+ }
+ return {changed: false, summary: proposed.summary}
 }
 
 /// Read and index one upload. Native operations retain its owner's authority,

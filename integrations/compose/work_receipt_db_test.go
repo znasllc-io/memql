@@ -20,6 +20,9 @@ import (
 
 type workReceiptRunner func(context.Context, *memqlv1.AgentGenerateTurnMsg) (string, error)
 
+func (f workReceiptRunner) ResolveOwnerAgent(_ context.Context, owner string) (string, error) {
+	return "plannerAgent-" + owner, nil
+}
 func (f workReceiptRunner) RunTurn(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg) (string, error) {
 	return f(ctx, msg)
 }

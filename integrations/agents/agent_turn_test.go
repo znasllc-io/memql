@@ -25,6 +25,28 @@ type fakeTurnRunner struct {
 	saw   []*memqlv1.AgentGenerateTurnMsg
 }
 
+func (f *fakeTurnRunner) ResolveOwnerAgent(_ context.Context, owner string) (string, error) {
+	return "reasoning-" + owner, nil
+}
+
+func TestRunAgentTurnDefaultsOnlyToItsAuthenticatedRunOwner(t *testing.T) {
+	runner := &fakeTurnRunner{reply: "evidence"}
+	i := &Integration{}
+	i.SetAgentTurnRunner(runner)
+	ctx := auth.ContextWithUserActor(context.Background(), "owner")
+	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "run", GoalId: "goal", OwnerUserId: "owner", StepKey: "research"})
+	if _, err := i.handleRunAgentTurn(ctx, map[string]any{"prompt": "Collect evidence"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if runner.saw[0].AgentId != "reasoning-owner" {
+		t.Fatal("did not use the owner's shared reasoning agent")
+	}
+	ctx = auth.ContextWithUserActor(ctx, "another-owner")
+	if _, err := i.handleRunAgentTurn(ctx, map[string]any{"prompt": "Collect evidence"}, 0); err == nil {
+		t.Fatal("borrowed another owner's reasoning agent")
+	}
+}
+
 func (f *fakeTurnRunner) RunTurn(_ context.Context, msg *memqlv1.AgentGenerateTurnMsg) (string, error) {
 	f.saw = append(f.saw, msg)
 	return f.reply, f.err

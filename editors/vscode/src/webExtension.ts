@@ -25,8 +25,9 @@ export function activate(context: vscode.ExtensionContext) {
     void vscode.commands.executeCommand("setContext", "memql.connectionState", keys.connectionState);
   }, { delaysMs: DEFAULT_RECONNECT_DELAYS_MS, reload: name => registry.read(name) });
   const connection = new EditorConnection({
+    scope: () => manager.editorSessionScope,
     session: () => selected && manager.state.status === "connected" && manager.query && manager.bearer
-      ? { cluster: selected, query: manager.query, bearer: manager.bearer } : undefined,
+      ? { cluster: selected, query: manager.query, bearer: manager.bearer, dispatcher: manager.dispatcher } : undefined,
     connect: async domain => {
       requireTrust();
       if (selected?.domain !== domain) {

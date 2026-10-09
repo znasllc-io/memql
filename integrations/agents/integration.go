@@ -129,8 +129,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Run one agent turn and return its reply. SYNCHRONOUS: the asynchrony belongs to the work run that calls it, which is already detached. Requires an agent runtime, so it answers only on an agent node. Returns {agentId, requestId, reply}.",
 			Handler:     i.handleRunAgentTurn,
 			ArgsSchema: map[string]string{
-				"agentId":     "string (required) -- v1:agents:agent.id to run",
-				"prompt":      "string (required) -- the user-role turn to send",
+				"agentId":     "string -- agent to run; an owned work run defaults to its owner's reasoning agent",
+				"prompt":      "string -- the user-role turn, mutually exclusive with templateId",
+				"templateId":  "string -- a registered prompt template to render",
+				"data":        "object -- validated input for the named prompt template",
 				"scopeId":     "string -- optional scope the turn runs in",
 				"requireFile": "bool -- require a ready Library file produced by the current owned work run",
 			},

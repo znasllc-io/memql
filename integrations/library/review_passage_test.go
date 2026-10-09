@@ -77,3 +77,27 @@ func TestReviewAnchorRefusesFractionalLineClaims(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewAnchorValidatesExtensionIntent(t *testing.T) {
+	for _, tc := range []struct {
+		intent, scope string
+		valid         bool
+	}{
+		{"", "section", true}, {"", "unknown", false}, {"extend", "section", true}, {"extend", "", true}, {"replace", "section", false}, {"extend", "unknown", false},
+	} {
+		anchor := map[string]any{"kind": "markdown", "startLine": 0, "endLine": 1, "quote": "Heading", "sourceQuote": "# Heading"}
+		if tc.intent != "" {
+			anchor["intent"] = tc.intent
+		}
+		if tc.scope != "" {
+			anchor["scope"] = tc.scope
+		}
+		got, err := validateReviewAnchor(anchor)
+		if (err == nil) != tc.valid {
+			t.Fatalf("%+v: %v", tc, err)
+		}
+		if tc.valid && (got["intent"] != anchor["intent"] || got["scope"] != anchor["scope"]) {
+			t.Fatalf("lost intent: %v", got)
+		}
+	}
+}

@@ -12,6 +12,7 @@ import {
   env,
   ExtensionContext,
   ExtensionMode,
+  extensions,
   languages,
   OutputChannel,
   Position,
@@ -497,10 +498,11 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
   const registryHelper = resolveServerPath(context, false);
   if (registryHelper) configureRegistryWriter(nativeRegistryWriter(registryHelper));
   editorConnection = new EditorConnection({
+    scope: () => connections?.editorSessionScope ?? context,
     session: () => {
       if (!workspace.isTrusted || connections?.state.status !== 'connected' || !connections.query || !connections.bearer) return undefined;
       const cluster = clusterCache.get(connections.state.clusterName);
-      return cluster ? { cluster, query: connections.query, bearer: connections.bearer } : undefined;
+      return cluster ? { cluster, query: connections.query, bearer: connections.bearer, dispatcher: connections.dispatcher } : undefined;
     },
     connect: async domain => {
       if (!workspace.isTrusted || !handoffSurface) throw new Error('Trust this workspace before connecting MemQL.');
@@ -540,13 +542,14 @@ export function activate(context: ExtensionContext): MemqlExtensionApi {
 
   startLanguageClient(context);
 
-  // The one-time offer to wear the brand in the workbench too (memql#4421).
+  // Productivity owns its contextual OS-matching offer when installed.
+  // Standalone development installs keep the one-time brand offer (#4421).
   //
   // OUTSIDE THE TRUST GATE, deliberately. It reads two editor settings and
   // writes one; it touches no credential, opens no connection and looks at
   // nothing in the workspace. Putting it behind the gate would mean an
   // operator in a restricted folder never learns the themes exist.
-  offerMemqlThemeOnce(context);
+  if (!extensions.getExtension("znasllc.memql-productivity-tools")) offerMemqlThemeOnce(context);
 
   registerLanguageReference(context);
 

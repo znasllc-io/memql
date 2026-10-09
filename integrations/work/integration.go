@@ -53,10 +53,11 @@ const resultConcept = "v1:work:result"
 
 // Integration exposes the work capabilities.
 type Integration struct {
-	engine           Engine
-	decisionGate     func(context.Context, string) (func(), error)
-	reviewValidators map[string]func(context.Context, map[string]any) error
-	logger           *slog.Logger
+	engine                 Engine
+	decisionGate           func(context.Context, string) (func(), error)
+	reviewValidators       map[string]func(context.Context, map[string]any) error
+	reviewAnswerValidators map[string]func(context.Context, map[string]any, map[string]any) error
+	logger                 *slog.Logger
 
 	// bunDB is the raw handle the two sweeps need. Both ask questions the
 	// work namespace has no query for -- "every run in flight, whoever owns

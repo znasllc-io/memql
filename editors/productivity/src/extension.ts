@@ -7,6 +7,7 @@ import { TemplatePublisher } from "./templatePublish.js";
 import { TemplateExamples } from "./templateExamples.js";
 import { MarkdownEditor } from "./markdownEditor.js";
 import { PDFEditor } from "./pdfEditor.js";
+import { syncDesktopAppearance } from "./themeSync.js";
 
 class MemQLFiles implements vscode.FileSystemProvider {
   readonly changed = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
@@ -62,7 +63,15 @@ export async function activate(context: vscode.ExtensionContext) {
   if (connection?.version !== 1) throw new Error("Update the MemQL extension to use Productivity Tools.");
   const files = new Documents(connection);
   const provider = new MemQLFiles(files);
-  const markdown = new MarkdownEditor(context, files, uri => provider.load(uri));
+  const markdown = new MarkdownEditor(context, files, uri => provider.load(uri), async document => {
+    if (document.isDirty) return false;
+    const version = document.version;
+    const latest = await provider.latest(document.uri);
+    if (document.isDirty || document.version !== version) return false;
+    provider.useBase(document.uri, latest);
+    provider.changed.fire([{type:vscode.FileChangeType.Changed,uri:document.uri}]);
+    return true;
+  });
   const pdf = new PDFEditor(context, {
     base: async uri => { const doc = await provider.load(uri); return { version: doc.version, revision: doc.revision, sourceId: doc.sourceId }; },
     recover: async (uri, base) => {
@@ -100,10 +109,13 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("memql.productivity.resumeEmailComposition", async () => {
       try { await examples.resume(); } catch (error) { void vscode.window.showErrorMessage((error as Error).message); }
     }),
-    vscode.window.registerCustomEditorProvider("memql.productivity.markdown", markdown, { supportsMultipleEditorsPerDocument: true }),
-    ...(["source", "reading", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.markdown.${mode}`, async (uri?: vscode.Uri) => {
+    vscode.window.registerCustomEditorProvider("memql.productivity.markdown", markdown, { supportsMultipleEditorsPerDocument: true, webviewOptions: { enableFindWidget: false } }),
+    ...(["source", "reading", "review", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.markdown.${mode}`, async (uri?: vscode.Uri) => {
       try { await markdown.show(mode, uri); } catch (error) { void vscode.window.showErrorMessage((error as Error).message); }
     })),
+    vscode.commands.registerCommand("memql.productivity.markdown.note", () => markdown.feedbackSelection("selectionNote")),
+    vscode.commands.registerCommand("memql.productivity.markdown.feedback", () => markdown.feedbackSelection()),
+    vscode.commands.registerCommand("memql.productivity.markdown.copy", () => vscode.commands.executeCommand("editor.action.clipboardCopyAction")),
     vscode.workspace.registerTextDocumentContentProvider("memql-review", { provideTextDocumentContent: uri => snapshots.get(uri.toString()) ?? "" }),
     vscode.commands.registerCommand("memql.productivity.compareLatest", async () => {
       try {
@@ -144,8 +156,12 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     vscode.window.registerUriHandler({ handleUri: async uri => {
       try {
-        const resource = new URLSearchParams(uri.query).get("resource");
+        const params = new URLSearchParams(uri.query);
+        const resource = params.get("resource");
         if (uri.path !== "/open" || !resource) throw new Error("Invalid MemQL file link.");
+        resourceFrom(resource);
+        try { await syncDesktopAppearance(params.get("appearance")); }
+        catch { void vscode.window.showWarningMessage("The editor theme could not be matched. You can change it in Settings."); }
         await open(resource);
       } catch (error) { void vscode.window.showErrorMessage((error as Error).message); }
     } }),

@@ -529,6 +529,7 @@ export interface DecideApprovalState extends WriteState {
     approvalId: string,
     decision: Decision,
     answer?: Record<string, unknown>,
+    documentReview?: { requestId: string; proposalHash: string },
   ) => Promise<boolean>;
 }
 
@@ -556,6 +557,7 @@ export function useDecideApproval(): DecideApprovalState {
       approvalId: string,
       decision: Decision,
       answer?: Record<string, unknown>,
+      documentReview?: { requestId: string; proposalHash: string },
     ): Promise<boolean> => {
       const query = connection?.query ?? null;
       if (query === null) {
@@ -565,6 +567,13 @@ export function useDecideApproval(): DecideApprovalState {
       setDeciding(idTail(approvalId));
       setError("");
       try {
+        if (decision === "approved" && documentReview) {
+          const status = (await query.libraryDocumentRevisionStatus({ requestId: documentReview.requestId })).rows()[0];
+          if (!status || status.approvalId !== approvalId || status.proposalHash !== documentReview.proposalHash || status.supersededBy || !Array.isArray(status.items) || status.items.length === 0) {
+            throw new Error("This document proposal changed. Open its current review before applying changes.");
+          }
+          answer = { acceptedItemIds: status.items.map(item => (item as { id: string }).id), proposalHash: status.proposalHash };
+        }
         await query.decideApproval({
           approvalId,
           decision,

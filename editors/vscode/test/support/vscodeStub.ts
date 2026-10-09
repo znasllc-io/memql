@@ -1056,3 +1056,5 @@ export const languages = {
 };
 
 export enum ExtensionMode { Production = 1, Development = 2, Test = 3 }
+
+export const extensions = { getExtension: (_id: string) => undefined };

@@ -1,5 +1,5 @@
 import {
-  buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
+  buildLibraryDocumentNotes, buildLibraryAddDocumentNote, buildLibraryDocumentHistory, buildLibraryDocumentVersion, buildLibraryForkDocumentVersion, buildCancelGoal, buildLibraryModifyRevisionItem, buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
   buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment, buildLibraryRequestDocumentRevision, buildLibraryDocumentRevisionStatus, buildDecideApproval,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
@@ -70,10 +70,46 @@ export class Documents {
     }
     return { resource, lease, sourceId, kind, content, mime, version, revision };
   }
+  async history(document: OpenDocument, beforeVersion?: number): Promise<Record<string, unknown>> {
+    const rows = await this.api.execute(document.lease, "libraryDocumentHistory", buildLibraryDocumentHistory({artifactId:document.resource.id,beforeVersion}));
+    if (!rows[0]) throw new Error("Version history could not be loaded.");
+    return rows[0];
+  }
+  async version(document: OpenDocument, versionNumber: number): Promise<{version:number;revision:string;content:string}> {
+    const row = (await this.api.execute(document.lease,"libraryDocumentVersion",buildLibraryDocumentVersion({artifactId:document.resource.id,versionNumber})))[0];
+    if (!row || row.version !== versionNumber || typeof row.content !== "string" || typeof row.revision !== "string") throw new Error("This version could not be opened.");
+    return row as {version:number;revision:string;content:string};
+  }
+  async fork(document: OpenDocument, versionNumber:number, revision:string, name:string, requestId:string):Promise<string> {
+    const row=(await this.api.execute(document.lease,"libraryForkDocumentVersion",buildLibraryForkDocumentVersion({artifactId:document.resource.id,versionNumber,revision,name,requestId})))[0];
+    if (!row || typeof row.artifactId!=="string" || !/^[\w-]{1,160}$/.test(row.artifactId) || typeof row.name!=="string") throw new Error("The branch was not confirmed. Retry to recover it.");
+    return this.artifactURI(document, row.artifactId, row.name);
+  }
+  artifactURI(document: OpenDocument, id:string, name:string):string {
+    if (!/^[\w-]{1,160}$/.test(id)) throw new Error("Invalid document link.");
+    const filename=/\.(md|markdown)$/i.test(name)?name:name+".md";
+    return `memql-file://${document.resource.domain}/artifacts/${id}/${encodeURIComponent(filename)}`;
+  }
+  async notes(document:OpenDocument):Promise<Record<string,unknown>> {
+    const row=(await this.api.execute(document.lease,"libraryDocumentNotes",buildLibraryDocumentNotes({artifactId:document.resource.id})))[0];
+    if(!row)throw new Error("Your notes could not be loaded.");return row;
+  }
+  async note(document:OpenDocument,anchor:Record<string,unknown>,body:string,requestId:string):Promise<void>{
+    const row=(await this.api.execute(document.lease,"libraryAddDocumentNote",buildLibraryAddDocumentNote({artifactId:document.resource.id,expectedVersion:document.version,expectedRevision:document.revision??"",anchor,body,requestId})))[0];
+    if(!row?.saved)throw new Error("Your note was not confirmed. Retry to recover it.");
+  }
   async review(document: OpenDocument): Promise<Record<string, unknown>> {
     const rows = await this.api.execute(document.lease, "libraryDocumentReview", buildLibraryDocumentReview({ artifactId: document.resource.id }));
     if (!rows[0]) throw new Error("The cluster did not return document feedback.");
     return rows[0];
+  }
+  async transcribe(document:OpenDocument,audio:ReadableStream<Uint8Array>,signal:AbortSignal,onPartial:(text:string)=>void):Promise<string>{
+    return this.api.transcribe(document.lease,audio,signal,onPartial);
+  }
+  async cancelRevision(document:OpenDocument,requestId:string):Promise<void>{
+    const status=await this.revision(document,requestId);
+    if(typeof status.goalId!=="string")throw new Error("This revision has no work receipt.");
+    await this.api.execute(document.lease,"cancelGoal",buildCancelGoal({goalId:status.goalId,reason:"Stopped document revision preparation."}));
   }
   async comment(document: OpenDocument, anchor: Record<string, unknown>, body: string, requestId: string): Promise<void> {
     const result = await this.api.execute(document.lease, "libraryAddDocumentComment", buildLibraryAddDocumentComment({
@@ -86,7 +122,7 @@ export class Documents {
     const result = (await this.api.execute(document.lease, "libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision({
       artifactId: document.resource.id, expectedVersion: document.version, expectedRevision: document.revision ?? "", commentIds, instruction, requestId,
     })))[0];
-    if (!result?.approvalId || !result.proposal) throw new Error("The cluster did not confirm the review request. Retry to recover it.");
+    if (!result?.runId || !result.proposal) throw new Error("The cluster did not confirm the review request. Retry to recover it.");
     return result;
   }
   async revision(document: OpenDocument, requestId: string): Promise<Record<string, unknown>> {
@@ -95,17 +131,18 @@ export class Documents {
     if (!proposal || proposal.artifactId !== document.resource.id) throw new Error("This revision request does not belong to the open document.");
     return result;
   }
-  async decideRevision(document: OpenDocument, requestId: string, approvalId: string, decision: "approved" | "rejected"): Promise<void> {
+  async modifyRevision(document: OpenDocument, requestId: string, approvalId: string, itemId: string, instruction: string, newRequestId: string): Promise<void> {
+    const result = (await this.api.execute(document.lease, "libraryModifyRevisionItem", buildLibraryModifyRevisionItem({requestId, approvalId, itemId, instruction, newRequestId})))[0];
+    if (result?.requestId !== newRequestId) throw new Error("The cluster did not confirm the modified request. Retry to recover it.");
+  }
+  async decideRevision(document: OpenDocument, requestId: string, approvalId: string, decision: "approved" | "rejected", answer?: Record<string, unknown>): Promise<void> {
     const current = await this.revision(document, requestId);
     if (current.approvalId !== approvalId) throw new Error("The approval changed. Review the request again.");
-    const result = (await this.api.execute(document.lease, "decideApproval", buildDecideApproval({ approvalId, decision })))[0];
+    if (current.cancelRequested || current.status === "cancelled") throw new Error("This review was stopped. Submit a new proposal to continue.");
+    if (["succeeded", "failed"].includes(String(current.status))) throw new Error("This review has finished. Refresh to see its result.");
+    const result = (await this.api.execute(document.lease, "decideApproval", buildDecideApproval({ approvalId, decision, answer })))[0];
     if (result?.decision !== decision) throw new Error("The cluster did not confirm your decision. Refresh or retry to recover it.");
     if (result.resumeError) throw new Error("Your decision was saved, but the job could not start. Retry to recover the same job.");
-  }
-  async revisionDraft(document: OpenDocument, status: Record<string, unknown>): Promise<OpenDocument> {
-    if (status.compositionStatus !== "ready" || typeof status.outputArtifactId !== "string") throw new Error("The revised draft is not ready yet. Refresh its status.");
-    const name = typeof status.outputName === "string" ? status.outputName : "revised.md";
-    return this.read(`memql-file://${document.resource.domain}/artifacts/${encodeURIComponent(status.outputArtifactId)}/${encodeURIComponent(name.replace(/[\\/]/g, "_"))}`, document.lease);
   }
   async save(document: OpenDocument, content: Uint8Array): Promise<void> {
     if (isZip(document.resource.name, document.mime, document.content)) throw new Error("ZIP files are downloads; they cannot be edited or extracted here.");

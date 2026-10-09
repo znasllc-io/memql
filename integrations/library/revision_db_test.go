@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,52 +20,73 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/steps"
-	pure "github.com/znasllc-io/memql/component/compose"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
-	composeint "github.com/znasllc-io/memql/integrations/compose"
 	"github.com/znasllc-io/memql/integrations/work"
 )
 
-type revisionComposer struct{ calls atomic.Int32 }
-
-func (c *revisionComposer) Compose(_ context.Context, r composeint.ComposeRequest) (composeint.ComposeReply, error) {
-	c.calls.Add(1)
-	if r.Draft != "# Heading\n\nA paragraph." || !strings.Contains(r.Statement, "Clarify this paragraph") {
-		return composeint.ComposeReply{}, fmt.Errorf("lost the captured input")
-	}
-	return composeint.ComposeReply{Draft: pure.Draft{Title: "Revised", Body: "# Heading\n\nA clearer paragraph."}}, nil
+// Only the model boundary is replaced. The installed DSL, journal, authorization,
+// two independent engines, approvals and version writes run against PostgreSQL.
+type revisionAI struct {
+	calls         atomic.Int32
+	researchCalls atomic.Int32
+	answer        revisionAnswer
 }
 
-type revisionUpload struct {
-	mu     sync.Mutex
-	bodies [][]byte
+func (*revisionAI) IntegrationName() string { return "agents" }
+func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
+	return []memql.IntegrationCapability{
+		{Name: "ensureForGoal", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			return reviewResult(map[string]any{"agentId": "review-test-agent"})
+		}},
+		{Name: "runAgentTurn", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			data := revisionMap(args["data"])
+			if args["templateId"] != "libraryRevisionResearch" || data["document"] == nil || data["passages"] == nil {
+				return nil, fmt.Errorf("DSL omitted evidence stage context")
+			}
+			a.researchCalls.Add(1)
+			return reviewResult(map[string]any{"reply": "Evidence report for the selected feedback."})
+		}},
+		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+			data := revisionMap(args["data"])
+			passages, valid := data["passages"].(string)
+			if (args["templateId"] != "libraryRevisionPassages" && args["templateId"] != "libraryRevisionItem") || data["evidence"] != "Evidence report for the selected feedback." || !valid || !json.Valid([]byte(passages)) || data["document"] == nil {
+				return nil, fmt.Errorf("DSL lost the review prompt or captured feedback")
+			}
+			a.calls.Add(1)
+			body, _ := json.Marshal(a.answer)
+			return reviewResult(map[string]any{"reply": string(body)})
+		}}}
 }
 
-func (u *revisionUpload) Upload(_ context.Context, _, name string, body []byte, _ string) (string, error) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.bodies = append(u.bodies, append([]byte(nil), body...))
-	return "https://blob.test/" + name, nil
+type revisionDB struct {
+	t             *testing.T
+	ai            *revisionAI
+	first, second *Integration
+	engine, other *memql.MemQLEngine
+	ctx           context.Context
+	owner         string
 }
 
-func TestDocumentRevisionRequiresExactHumanApprovalAcrossReplicas(t *testing.T) {
+func newRevisionDB(t *testing.T) *revisionDB {
+	t.Helper()
 	available, err := dbtest.EnsureSchema(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !available {
 		dbtest.Unreachable(t, "document revisions", dbtest.DSN(), nil)
-		return
+		return nil
 	}
 	if _, err = memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatal(err)
 	}
-	composer := &revisionComposer{}
-	uploader := &revisionUpload{}
+	f := &revisionDB{t: t, ai: &revisionAI{}, owner: fmt.Sprintf("revision-%d", time.Now().UnixNano())}
+	f.ctx = revisionActor(f.owner, auth.RoleWriter)
 	open := func() (*Integration, *memql.MemQLEngine) {
 		db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
 		t.Cleanup(func() { _ = db.Close() })
@@ -79,172 +101,410 @@ func TestDocumentRevisionRequiresExactHumanApprovalAcrossReplicas(t *testing.T) 
 		lib := NewIntegration(e, func() *sql.DB { return db.DB })
 		w := work.New(e, e.Logger, func() *bun.DB { return db })
 		lib.SetReviewGoals(w)
-		materializer := composeint.New(e, e.Logger)
-		materializer.SetUploader(uploader, "files")
-		materializer.SetComposer(composer)
-		for _, integration := range []memql.IntegrationProvider{lib, w, materializer} {
+		for _, integration := range []memql.IntegrationProvider{lib, w, f.ai} {
 			if err = e.RegisterIntegration(integration); err != nil {
 				t.Fatal(err)
 			}
 		}
 		return lib, e
 	}
-	first, e := open()
-	second, other := open()
-	owner := fmt.Sprintf("revision-%d", time.Now().UnixNano())
-	actor := func(user string, role auth.Role) context.Context {
-		return auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: role})
+	f.first, f.engine = open()
+	f.second, f.other = open()
+	return f
+}
+func revisionActor(user string, role auth.Role) context.Context {
+	return auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: role})
+}
+func (f *revisionDB) query(e *memql.MemQLEngine, ctx context.Context, kind, name string, args map[string]any) []map[string]any {
+	f.t.Helper()
+	call, err := langparser.RenderCall(name, args)
+	if err != nil {
+		f.t.Fatal(err)
 	}
-	ctx := actor(owner, auth.RoleWriter)
-	query := func(engine *memql.MemQLEngine, ctx context.Context, kind, name string, args map[string]any) []map[string]any {
-		t.Helper()
-		call, err := langparser.RenderCall(name, args)
-		if err != nil {
-			t.Fatal(err)
-		}
-		raw, err := engine.Execute(ctx, kind+" "+call)
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		return extractRows(raw)
+	raw, err := e.Execute(ctx, kind+" "+call)
+	if err != nil {
+		f.t.Fatalf("%s: %v", name, err)
 	}
-	source := owner + "-document"
-	query(e, ctx, "mutation", "createGeneratedOutput", map[string]any{"outputId": source, "title": "Document", "body": "# Heading\n\nA paragraph.", "format": "markdown", "source": "user_created"})
-	artifact := query(e, ctx, "mutation", "createArtifact", map[string]any{"sourceConceptRef": source, "ownerUserId": owner, "lens": "artifact", "kind": "generated_output", "source": "user_created", "title": "Document", "format": "markdown"})[0]
+	return extractRows(raw)
+}
+func (f *revisionDB) document(source string) (string, reviewDocument) {
+	f.t.Helper()
+	id := fmt.Sprintf("%s-document-%d", f.owner, time.Now().UnixNano())
+	f.query(f.engine, f.ctx, "mutation", "createGeneratedOutput", map[string]any{"outputId": id, "title": "Review fixture.md", "body": source, "format": "markdown", "source": "user_created"})
+	artifact := f.query(f.engine, f.ctx, "mutation", "createArtifact", map[string]any{"sourceConceptRef": id, "ownerUserId": f.owner, "lens": "artifact", "kind": "generated_output", "source": "user_created", "title": "Review fixture.md", "format": "markdown"})[0]
 	artifactID := asString(artifact["id"])
-	doc, err := first.reviewDocument(ctx, artifactID)
+	doc, err := f.first.reviewDocument(f.ctx, artifactID)
 	if err != nil {
-		t.Fatal(err)
+		f.t.Fatal(err)
 	}
-	rows, err := first.handleAddDocumentComment(ctx, map[string]any{"artifactId": artifactID, "expectedVersion": 0, "expectedRevision": doc.revision, "body": "Clarify this paragraph", "requestId": "revision-feedback", "anchor": map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "paragraph", "sourceQuote": "A paragraph."}}, 0)
+	return artifactID, doc
+}
+func (f *revisionDB) submit(artifact string, doc reviewDocument, anchor map[string]any, body string) (map[string]any, string) {
+	f.t.Helper()
+	rows, err := f.first.handleAddDocumentComment(f.ctx, map[string]any{"artifactId": artifact, "expectedVersion": doc.version, "expectedRevision": doc.revision, "anchor": anchor, "body": body, "requestId": "note-" + fmt.Sprint(time.Now().UnixNano())}, 0)
 	if err != nil {
-		t.Fatal(err)
+		f.t.Fatal(err)
 	}
-	var comment map[string]any
-	if err = json.Unmarshal(rows[0].Payload, &comment); err != nil {
-		t.Fatal(err)
-	}
-	args := map[string]any{"artifactId": artifactID, "expectedVersion": 0, "expectedRevision": doc.revision, "commentIds": []string{asString(comment["commentId"])}, "instruction": "Use plain language", "requestId": "revision-first-request"}
+	var saved map[string]any
+	_ = json.Unmarshal(rows[0].Payload, &saved)
+	commentID := asString(saved["commentId"])
+	args := map[string]any{"artifactId": artifact, "expectedVersion": doc.version, "expectedRevision": doc.revision, "commentIds": []string{commentID}, "instruction": "", "requestId": "request-" + fmt.Sprint(time.Now().UnixNano())}
 	var wg sync.WaitGroup
-	failures := make(chan error, 2)
-	for _, lib := range []*Integration{first, second} {
+	errs := make(chan error, 2)
+	for _, lib := range []*Integration{f.first, f.second} {
 		wg.Add(1)
 		go func(lib *Integration) {
 			defer wg.Done()
-			_, err := lib.handleRequestDocumentRevision(ctx, args, 0)
-			failures <- err
+			_, err := lib.handleRequestDocumentRevision(f.ctx, args, 0)
+			errs <- err
 		}(lib)
 	}
 	wg.Wait()
-	close(failures)
-	for err := range failures {
+	close(errs)
+	for err := range errs {
 		if err != nil {
+			f.t.Fatal(err)
+		}
+	}
+	return args, commentID
+}
+func (f *revisionDB) execute(engine *memql.MemQLEngine, request string, resume bool) error {
+	f.t.Helper()
+	ids, _ := revisionIdentity(f.ctx, request)
+	journal, err := automations.LoadRunJournal(f.ctx, engine, ids.RunID)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	loader := automations.NewLoader(automations.LoaderOptions{Logger: engine.Logger})
+	auto, err := loader.LoadByName(documentRevisionTemplate)
+	if err != nil || auto == nil {
+		f.t.Fatalf("template: %v", err)
+	}
+	// No originating process's local state crosses this hop. Authority is restored
+	// from the persisted run exactly as the receiving agent does.
+	ctx, err := auth.ContextWithPersistedOwner(context.Background(), "v1:identity:user:"+f.owner, journal.ExecutionAuthority, auth.NewIdentityResolver(auth.QueryRunnerFunc(func(context.Context, string) (any, error) { return map[string]any{"role": "writer"}, nil }), nil))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: journal.RunId, GoalId: journal.GoalId, OwnerUserId: journal.OwnerUserId, Mode: journal.Mode})
+	executor := automations.NewExecutor(automations.ExecutorOptions{Engine: engine, Logger: engine.Logger, StepRegistry: steps.NewRegistry()})
+	defer executor.Close()
+	if resume {
+		_, err = executor.ResumeFrom(ctx, journal, auto, &automations.ResumeOptions{})
+	} else {
+		_, err = executor.ExecuteAdopted(ctx, auto, automations.RunAdoption{RunId: journal.RunId, Variables: journal.Variables, Journal: journal})
+	}
+	return err
+}
+func TestDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas(t *testing.T) {
+	f := newRevisionDB(t)
+	for _, tc := range []struct {
+		name, source, quote, feedback, want string
+		extension, section, whole           bool
+		edits                               []revisionReplacement
+	}{
+		{name: "document-wide name correction", whole: true, source: "# Guide\n\n**Alice** opens the workshop.\n\n## Close\n\nThank Alice at the end.\n", feedback: "Replace Alice with Morgan throughout.", want: "# Guide\n\n**Morgan** opens the workshop.\n\n## Close\n\nThank Morgan at the end.\n", edits: []revisionReplacement{{Before: "**Alice**", After: "**Morgan**", Reason: "Correct the name"}, {Before: "Thank Alice", After: "Thank Morgan", Reason: "Correct the second reference"}}},
+		{name: "requested full rewrite", whole: true, source: "# Workshop\n\nAlice prepares tools.\n", feedback: "Rewrite as a first-person checklist.", want: "# Workshop checklist\n\n- I prepare the tools.\n", edits: []revisionReplacement{{Before: "# Workshop\n\nAlice prepares tools.\n", After: "# Workshop checklist\n\n- I prepare the tools.\n", Reason: "Apply the requested perspective and structure"}}},
+		{name: "precise rephrase", source: "# Guide\n\nKeep the opening. This bit is verbose. Keep the ending.\n", quote: "This bit is verbose.", feedback: "Rephrase only this sentence.", want: "# Guide\n\nKeep the opening. This is clear. Keep the ending.\n", edits: []revisionReplacement{{Before: "This bit is verbose.", After: "This is clear.", Reason: "Shorten the selected sentence"}}},
+		{name: "delete", source: "# Guide\n\nKeep this. Remove this. Keep that.\n", quote: "Remove this.", feedback: "Delete this sentence.", want: "# Guide\n\nKeep this. Keep that.\n", edits: []revisionReplacement{{Before: "Remove this. ", After: "", Reason: "Remove the selected sentence"}}},
+		{name: "move and expand", source: "# Guide\n\nMove this example. Keep the intro.\n\n## Examples\n\nExisting example.\n", quote: "Move this example.", feedback: "Move this into Examples and explain it.", want: "# Guide\n\nKeep the intro.\n\n## Examples\n\nExisting example.\n\nMoved example, with an explanation.\n", edits: []revisionReplacement{{Before: "Move this example. ", After: "", Reason: "Remove from intro"}, {Before: "Existing example.", After: "Existing example.\n\nMoved example, with an explanation.", Reason: "Move into Examples and explain"}}},
+		{name: "extend existing section", source: "# Guide\n\n## Examples\n\nAn existing example.\n\n## Next\n\nKeep this.\n", quote: "Examples", section: true, feedback: "Add a practical exercise.", want: "# Guide\n\n## Examples\n\nAn existing example.\n\nTry a practical exercise.\n\n## Next\n\nKeep this.\n", edits: []revisionReplacement{{Before: "An existing example.", After: "An existing example.\n\nTry a practical exercise.", Reason: "Extend the selected section"}}},
+		{name: "extend selected passage", source: "# Guide\n\nKeep the introduction. An existing example. Keep the conclusion.\n", quote: "An existing example.", feedback: "Add a practical exercise here.", want: "# Guide\n\nKeep the introduction. An existing example. Try a practical exercise. Keep the conclusion.\n", edits: []revisionReplacement{{Before: "An existing example.", After: "An existing example. Try a practical exercise.", Reason: "Expand the selected passage"}}},
+		{name: "extend imported document", source: "# Imported note\n\nOriginal content.\n", extension: true, feedback: "Add next steps.", want: "# Imported note\n\nOriginal content.\n\n## Next steps\n\nTry the example.\n", edits: []revisionReplacement{{Before: "Original content.", After: "Original content.\n\n## Next steps\n\nTry the example.", Reason: "Extend with requested next steps"}}},
+		{name: "extend schedule after lunch", source: "# Workshop\n\n## Schedule\n\n- 12:00 PM: Lunch break\n\n## Activities\n\nRead an excerpt.\n", extension: true, feedback: "Extend the workshop after the lunch break with time for asking questions.", want: "# Workshop\n\n## Schedule\n\n- 12:00 PM: Lunch break\n- 1:00 PM: Questions and discussion\n\n## Activities\n\nRead an excerpt.\n", edits: []revisionReplacement{{Before: "- 12:00 PM: Lunch break", After: "- 12:00 PM: Lunch break\n- 1:00 PM: Questions and discussion", Reason: "Add question time after lunch in the schedule"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			artifact, doc := f.document(tc.source)
+			anchor := map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": tc.quote, "sourceQuote": strings.Split(tc.source, "\n")[2]}
+			if tc.whole {
+				anchor = map[string]any{"kind": "document"}
+			}
+			if tc.extension {
+				anchor = map[string]any{"kind": "document-end"}
+			}
+			if tc.section {
+				anchor["scope"] = "section"
+			}
+			args, note := f.submit(artifact, doc, anchor, tc.feedback)
+			request := asString(args["requestId"])
+			recovered := f.query(f.other, f.ctx, "query", "libraryDocumentReview", map[string]any{"artifactId": artifact})
+			if len(recovered) != 1 || recovered[0]["requestId"] != request {
+				t.Fatalf("new editor on another replica cannot recover the review: %v", recovered)
+			}
+			f.ai.answer = revisionAnswer{Summary: tc.name, Edits: tc.edits}
+			for n := range f.ai.answer.Edits {
+				f.ai.answer.Edits[n].CommentIDs = []string{note}
+			}
+			calls := f.ai.calls.Load()
+			ids, captured, run, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+			if err != nil || run["status"] != "running" || approval != nil {
+				t.Fatalf("analysis did not start before approval: %v %v", run, err)
+			}
+			if tc.section {
+				passages, err := revisionPassages(captured)
+				if err != nil || len(passages) != 1 || passages[0].Comments[0]["scope"] != "section" || passages[0].Comments[0]["kind"] != "feedback" {
+					t.Fatalf("section context lost or forced into an extension: %v %v", passages, err)
+				}
+			}
+			if _, err = f.first.handleExecuteDocumentRevision(common.ContextWithRun(f.ctx, common.RunContext{RunId: ids.RunID, GoalId: ids.GoalID, OwnerUserId: f.owner}), map[string]any{"requestId": request}, 0); err == nil {
+				t.Fatal("applied without approval")
+			}
+			var wait *workstate.HumanWait
+			if err = f.execute(f.engine, request, false); !errors.As(err, &wait) {
+				t.Fatalf("DSL did not wait for a person: %v", err)
+			}
+			if f.ai.calls.Load() != calls+1 {
+				t.Fatal("analysis did not make exactly one model call")
+			}
+			_, _, run, approval, err = f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+			if err != nil || run["status"] != "waiting" {
+				t.Fatalf("missing durable wait: %v %v", run, err)
+			}
+			if revisionMap(approval["subject"])["revisedContent"] != tc.want {
+				t.Fatalf("proposal lost precise edits: %v", approval["subject"])
+			}
+			unchanged, err := f.second.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
+			if err != nil || unchanged.backing["body"] != tc.source {
+				t.Fatal("changed source before approval")
+			}
+			if _, err = f.second.handleDocumentRevisionStatus(revisionActor("outsider", auth.RoleWriter), map[string]any{"requestId": request}, 0); err == nil {
+				t.Fatal("outsider read review")
+			}
+			if err = f.second.ValidateRevisionProposal(revisionActor(f.owner, auth.RoleReader), captured); err == nil {
+				t.Fatal("reader approved write")
+			}
+			decision := map[string]any{"approvalId": memql.BareShortId(asString(approval["id"])), "decision": "approved", "answer": f.accepted(request)}
+			f.query(f.other, f.ctx, "query", "decideApproval", decision)
+			f.query(f.engine, f.ctx, "query", "decideApproval", decision)
+			if err = f.execute(f.other, request, true); err != nil {
+				t.Fatalf("resume on second replica: %v", err)
+			}
+			if f.ai.calls.Load() != calls+1 {
+				t.Fatal("resume repeated AI analysis")
+			}
+			changed, err := f.first.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
+			if err != nil || changed.backing["body"] != tc.want || changed.version != doc.version+1 {
+				t.Fatalf("approved result not saved exactly once: body=%v version=%d err=%v", changed.backing["body"], changed.version, err)
+			}
+			if _, err = f.first.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
+				t.Fatal(err)
+			}
+			status, err := f.second.handleDocumentRevisionStatus(f.ctx, map[string]any{"requestId": request}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			_ = json.Unmarshal(status[0].Payload, &payload)
+			if payload["status"] != "succeeded" || revisionMap(payload["result"])["applied"] != true {
+				t.Fatalf("missing completion receipt: %v", payload)
+			}
+		})
+	}
+}
+func TestDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess(t *testing.T) {
+	f := newRevisionDB(t)
+	artifact, doc := f.document("# Guide\n\nOriginal content.\n")
+	anchor := map[string]any{"kind": "document-end"}
+	old, note := f.submit(artifact, doc, anchor, "Add next steps.")
+	latest, _ := f.submit(artifact, doc, anchor, "Add practice questions.")
+	// Finishing analysis on an older request creates newer row versions. Those
+	// writes must not hide a request admitted later on another replica.
+	f.ai.answer = revisionAnswer{Summary: "Next steps", Edits: []revisionReplacement{{Before: "Original content.", After: "Original content.\n\nTry an example.", Reason: "Add next steps", CommentIDs: []string{note}}}}
+	var wait *workstate.HumanWait
+	if err := f.execute(f.engine, asString(old["requestId"]), false); !errors.As(err, &wait) {
+		t.Fatalf("older analysis: %v", err)
+	}
+	rows := f.query(f.other, f.ctx, "query", "libraryDocumentReview", map[string]any{"artifactId": artifact})
+	if len(rows) != 1 || rows[0]["requestId"] != latest["requestId"] {
+		t.Fatalf("older row update hid latest request: %v", rows)
+	}
+	head := f.query(f.other, f.ctx, "query", "workDocumentRevisionRequest", map[string]any{"artifactId": memql.BareShortId(artifact)})
+	if len(head) != 1 || len(head[0]) != 1 || head[0]["requestId"] != latest["requestId"] {
+		t.Fatalf("recovery must project only the latest request identity: %v", head)
+	}
+	if _, err := f.second.handleDocumentReview(revisionActor("outsider", auth.RoleWriter), map[string]any{"artifactId": artifact}, 0); err == nil {
+		t.Fatal("outsider recovered a private document review")
+	}
+	rows = f.query(f.other, revisionActor("outsider", auth.RoleWriter), "query", "workDocumentRevisionRequest", map[string]any{"artifactId": memql.BareShortId(artifact)})
+	if len(rows) != 0 {
+		t.Fatal("outsider discovered another person's review receipt")
+	}
+}
+
+func TestDocumentRevisionRefusesStaleApprovalAndAllowsDecline(t *testing.T) {
+	f := newRevisionDB(t)
+	source := "# Guide\n\nA paragraph."
+	artifact, doc := f.document(source)
+	args, note := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "paragraph", "sourceQuote": "A paragraph."}, "Clarify this")
+	f.ai.answer = revisionAnswer{Summary: "Clarify", Edits: []revisionReplacement{{Before: "A paragraph.", After: "A clearer paragraph.", Reason: "Clarify", CommentIDs: []string{note}}}}
+	request := asString(args["requestId"])
+	var wait *workstate.HumanWait
+	if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	if _, err := f.first.handleEditDocument(f.ctx, map[string]any{"documentId": doc.source, "content": "A concurrent edit", "expectedVersion": doc.version, "expectedRevision": doc.revision}, 0); err != nil {
+		t.Fatal(err)
+	}
+	approvalArgs := map[string]any{"approvalId": wait.ApprovalID, "decision": "approved"}
+	call, _ := langparser.RenderCall("decideApproval", approvalArgs)
+	if _, err := f.other.Execute(f.ctx, "query "+call); err == nil || !strings.Contains(err.Error(), "document changed") {
+		t.Fatalf("stale approval allowed: %v", err)
+	}
+	approvalArgs["decision"] = "rejected"
+	f.query(f.other, f.ctx, "query", "decideApproval", approvalArgs)
+	_, _, run, _, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+	if err != nil || run["status"] != "failed" {
+		t.Fatalf("decline did not stop run: %v %v", run, err)
+	}
+}
+
+func TestDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove(t *testing.T) {
+	f := newRevisionDB(t)
+	source := "# Recovery\n\nOriginal text.\n"
+	artifact, doc := f.document(source)
+	args, note := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "Original text.", "sourceQuote": "Original text."}, "Clarify this")
+	f.ai.answer = revisionAnswer{Summary: "Clarify", Edits: []revisionReplacement{{Before: "Original text.", After: "Clear text.", Reason: "Clarify", CommentIDs: []string{note}}}}
+	request := asString(args["requestId"])
+	var wait *workstate.HumanWait
+	if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	f.query(f.other, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
+	ids, _, _, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := revisionMap(approval["subject"])
+	// Inject the real durable boundary: history committed, backing write absent.
+	latest, _, err := f.first.latestVersion(f.ctx, doc.source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.first.appendVersion(f.ctx, appendArgs{versionAt: nextDocumentTime(doc.backing, latest), versionId: "revision-" + ids.RunID, documentId: doc.source, versionNumber: doc.version + 1, content: asString(proposal["revisedContent"]), authorKind: "assistant", note: "Clarify", parentVersionId: stringField(latest, "id"), producedByRunId: ids.RunID, partitionId: stringField(doc.backing, "partitionId")}); err != nil {
+		t.Fatal(err)
+	}
+	// Reconcile the bounded apply operation on another replica. The separate
+	// workflow tests above exercise journal continuation at the approval gate.
+	ctx := common.ContextWithRun(f.ctx, common.RunContext{RunId: ids.RunID, GoalId: ids.GoalID, OwnerUserId: f.owner})
+	for _, lib := range []*Integration{f.second, f.first} {
+		if _, err = lib.handleExecuteDocumentRevision(ctx, map[string]any{"requestId": request}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if composer.calls.Load() != 0 {
-		t.Fatal("AI ran before approval")
+	current, err := f.second.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
+	if err != nil || current.version != doc.version+1 || current.backing["body"] != "# Recovery\n\nClear text.\n" {
+		t.Fatalf("did not recover the single version: %+v %v", current, err)
 	}
-	receipt, proposal, run, approval, err := second.revisionRequest(memql.ContextWithFreshRead(ctx), asString(args["requestId"]))
+	if f.ai.calls.Load() != 1 {
+		t.Fatal("recovery called the model again")
+	}
+}
+
+func (f *revisionDB) accepted(request string) map[string]any {
+	f.t.Helper()
+	status := f.query(f.other, f.ctx, "query", "libraryDocumentRevisionStatus", map[string]any{"requestId": request})[0]
+	items, err := revisionItems(revisionMap(status["proposal"]))
 	if err != nil {
+		f.t.Fatal(err)
+	}
+	ids := []string{}
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return map[string]any{"acceptedItemIds": ids, "proposalHash": status["proposalHash"]}
+}
+
+func TestDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas(t *testing.T) {
+	f := newRevisionDB(t)
+	source := "# Plan\n\nFirst paragraph.\n\nSecond paragraph.\n"
+	artifact, doc := f.document(source)
+	a, noteA := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "quote": "First paragraph.", "sourceQuote": "First paragraph."}, "Clarify the first paragraph")
+	_, noteB := f.submit(artifact, doc, map[string]any{"kind": "markdown", "startLine": 4, "endLine": 5, "quote": "Second paragraph.", "sourceQuote": "Second paragraph."}, "Clarify the second paragraph")
+	a["requestId"] = "combined-" + fmt.Sprint(time.Now().UnixNano())
+	a["commentIds"] = []string{noteA, noteB}
+	if _, err := f.first.handleRequestDocumentRevision(f.ctx, a, 0); err != nil {
 		t.Fatal(err)
 	}
-	if run["status"] != "waiting" || approval["decision"] != "" || proposal["content"] != "# Heading\n\nA paragraph." {
-		t.Fatalf("bad pending request: %v %v", run, approval)
-	}
-	executeCtx := common.ContextWithRun(ctx, common.RunContext{RunId: receipt.RunID, GoalId: receipt.GoalID, OwnerUserId: owner, Mode: common.RunModeLive, StepKey: "revise"})
-	if _, err = second.handleExecuteDocumentRevision(executeCtx, map[string]any{"requestId": args["requestId"]}, 0); err == nil {
-		t.Fatal("unapproved run executed")
-	}
-	if _, err = second.handleDocumentRevisionStatus(actor(owner+"-outsider", auth.RoleWriter), map[string]any{"requestId": args["requestId"]}, 0); err == nil {
-		t.Fatal("outsider read private proposal")
-	}
-	for concept, id := range map[string]string{"goal": receipt.GoalID, "run": receipt.RunID, "approval": receipt.ApprovalID} {
-		if _, err = e.Execute(ctx, fmt.Sprintf(`insert("v1:work:%s", id=%q, payload={"decision":"approved"})`, concept, id)); err == nil || !strings.Contains(err.Error(), "internal origin") {
-			t.Fatalf("raw review forgery %s: %v", concept, err)
+	request := asString(a["requestId"])
+	recordModel := func(request, model string) {
+		t.Helper()
+		ids, err := revisionIdentity(f.ctx, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = work.NewModelJournal(f.engine).Record(f.ctx, f.owner, memql.JournaledCall{RunId: ids.RunID, StepKey: "analysis", RequestHash: request, Provider: "fixture", Model: model, PromptRef: "libraryRevisionPassages", Served: "live"}); err != nil {
+			t.Fatal(err)
 		}
 	}
-	// Revoked write capability is rechecked even when document reads still work.
-	if err = second.ValidateRevisionProposal(actor(owner, auth.RoleReader), proposal); err == nil {
-		t.Fatal("reader accepted for revision")
+	recordModel(request, "initial-model")
+	f.ai.answer = revisionAnswer{Summary: "Two changes", Edits: []revisionReplacement{{Before: "First paragraph.", After: "First clear paragraph.", Reason: "Clarify first", CommentIDs: []string{noteA}}, {Before: "Second paragraph.", After: "Second clear paragraph.", Reason: "Clarify second", CommentIDs: []string{noteB}}}}
+	var wait *workstate.HumanWait
+	if err := f.execute(f.engine, request, false); !errors.As(err, &wait) {
+		t.Fatal(err)
 	}
-	query(other, ctx, "query", "decideApproval", map[string]any{"approvalId": receipt.ApprovalID, "decision": "approved"})
-	// Repeated approval returns its receipt without duplicating the run.
-	recovered := query(e, ctx, "query", "decideApproval", map[string]any{"approvalId": receipt.ApprovalID, "decision": "approved"})
-	if len(recovered) != 1 || recovered[0]["recovered"] != true {
-		t.Fatalf("lost decision receipt: %v", recovered)
-	}
-	loader := automations.NewLoader(automations.LoaderOptions{Logger: other.Logger})
-	auto, err := loader.LoadByName(documentRevisionTemplate)
-	if err != nil || auto == nil {
-		t.Fatalf("template: %v", err)
-	}
-	journal, err := automations.LoadRunJournal(ctx, other, receipt.RunID)
+	_, _, _, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Reconstruct execution on a fresh replica from the persisted authority,
-	// whose relationship owner uses the canonical representation.
-	restored, err := auth.ContextWithPersistedOwner(context.Background(), "v1:identity:user:"+owner, revisionMap(run["executionAuthority"]), auth.NewIdentityResolver(auth.QueryRunnerFunc(func(context.Context, string) (any, error) { return map[string]any{"role": "writer"}, nil }), nil))
+	proposal := revisionMap(approval["subject"])
+	items, err := revisionItems(proposal)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("items: %v %v", items, err)
+	}
+	inherited := revisionMap(revisionMap(proposal["attribution"])["items"])[items[1].ID]
+	invalid, _ := langparser.RenderCall("decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": map[string]any{"acceptedItemIds": []string{"invented"}, "proposalHash": workstate.ArtifactHash(proposal)}})
+	if _, err = f.other.Execute(f.ctx, "query "+invalid); err == nil {
+		t.Fatal("invalid item decision accepted")
+	}
+	newer := "modified-" + fmt.Sprint(time.Now().UnixNano())
+	args := map[string]any{"requestId": request, "approvalId": wait.ApprovalID, "itemId": items[0].ID, "instruction": "Research the first passage and use the evidence", "newRequestId": newer}
+	for _, lib := range []*Integration{f.first, f.second} {
+		if _, err = lib.handleModifyRevisionItem(f.ctx, args, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = f.second.ValidateRevisionProposal(f.ctx, proposal); err == nil {
+		t.Fatal("superseded proposal still applicable")
+	}
+	recordModel(newer, "replacement-model")
+	f.ai.answer = revisionAnswer{Summary: "A researched first passage", Edits: []revisionReplacement{{Before: "First paragraph.", After: "First verified paragraph.", Reason: "Verified against fixture evidence", CommentIDs: []string{noteA}}}}
+	if err = f.execute(f.other, newer, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	_, _, _, approval, err = f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), newer)
 	if err != nil {
 		t.Fatal(err)
 	}
-	executeCtx = common.ContextWithRun(restored, common.RunContext{RunId: journal.RunId, GoalId: journal.GoalId, OwnerUserId: journal.OwnerUserId, Mode: journal.Mode, StepKey: "revise"})
-	executor := automations.NewExecutor(automations.ExecutorOptions{Engine: other, Logger: other.Logger, StepRegistry: steps.NewRegistry()})
-	defer executor.Close()
-	result, err := executor.ExecuteAdopted(executeCtx, auto, automations.RunAdoption{RunId: journal.RunId, Variables: journal.Variables, Journal: journal})
-	if err != nil || result.Status != "completed" {
-		t.Fatalf("approved template: %+v %v", result, err)
+	proposal = revisionMap(approval["subject"])
+	modified, err := revisionItems(proposal)
+	if err != nil || len(modified) != 2 {
+		t.Fatalf("modified items: %v %v", modified, err)
 	}
-	if composer.calls.Load() != 1 || len(uploader.bodies) != 1 {
-		t.Fatalf("AI calls=%d uploaded=%d", composer.calls.Load(), len(uploader.bodies))
+	if modified[1].ID != items[1].ID {
+		t.Fatal("unmodified proposal item was regenerated")
 	}
-	unchanged, err := first.reviewDocument(memql.ContextWithFreshRead(ctx), artifactID)
-	if err != nil || unchanged.revision != doc.revision || unchanged.backing["body"] != "# Heading\n\nA paragraph." {
-		t.Fatalf("original overwritten: %v %v", unchanged, err)
+	attributed := revisionMap(revisionMap(proposal["attribution"])["items"])
+	if workstate.ArtifactHash(revisionMap(inherited)) != workstate.ArtifactHash(revisionMap(attributed[items[1].ID])) {
+		t.Fatal("unchanged item lost its original model attribution")
 	}
-	// The request stays the same after completion; no new AI or work identity.
-	if _, err = first.handleRequestDocumentRevision(ctx, args, 0); err != nil {
+	modelJSON, _ := json.Marshal(attributed[modified[0].ID])
+	if !strings.Contains(string(modelJSON), "replacement-model") || strings.Contains(string(modelJSON), "initial-model") {
+		t.Fatalf("replacement attribution: %s", modelJSON)
+	}
+	decision := map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": map[string]any{"acceptedItemIds": []string{modified[0].ID}, "proposalHash": workstate.ArtifactHash(proposal)}}
+	f.query(f.other, f.ctx, "query", "decideApproval", decision)
+	f.query(f.engine, f.ctx, "query", "decideApproval", decision)
+	if err = f.execute(f.engine, newer, true); err != nil {
 		t.Fatal(err)
 	}
-	if composer.calls.Load() != 1 {
-		t.Fatal("request retry spent another model call")
-	}
-	// A new proposal approved before an intervening save must fail before AI.
-	args["requestId"] = "revision-second-request"
-	if _, err = first.handleRequestDocumentRevision(ctx, args, 0); err != nil {
-		t.Fatal(err)
-	}
-	secondReceipt, secondProposal, _, _, err := second.revisionRequest(ctx, asString(args["requestId"]))
+	changed, err := f.second.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
 	if err != nil {
 		t.Fatal(err)
 	}
-	query(e, ctx, "query", "decideApproval", map[string]any{"approvalId": secondReceipt.ApprovalID, "decision": "approved"})
-	args["requestId"] = "revision-pending-request"
-	if _, err = first.handleRequestDocumentRevision(ctx, args, 0); err != nil {
-		t.Fatal(err)
+	if changed.backing["body"] != "# Plan\n\nFirst verified paragraph.\n\nSecond paragraph.\n" {
+		t.Fatalf("declined paragraph changed: %q", changed.backing["body"])
 	}
-	pendingReceipt, _, _, _, err := second.revisionRequest(ctx, asString(args["requestId"]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	args["requestId"] = "revision-second-request"
-	if _, err = first.handleEditDocument(ctx, map[string]any{"documentId": source, "content": "# New content", "expectedVersion": 0, "expectedRevision": doc.revision}, 0); err != nil {
-		t.Fatal(err)
-	}
-	declineCall, _ := langparser.RenderCall("decideApproval", map[string]any{"approvalId": pendingReceipt.ApprovalID, "decision": "approved"})
-	if _, err = other.Execute(ctx, "query "+declineCall); err == nil || !strings.Contains(err.Error(), "document changed") {
-		t.Fatalf("source changed before approval was admitted: %v", err)
-	}
-	query(other, ctx, "query", "decideApproval", map[string]any{"approvalId": pendingReceipt.ApprovalID, "decision": "rejected"})
-	if err = second.ValidateRevisionProposal(ctx, secondProposal); err == nil {
-		t.Fatal("stale source accepted")
-	}
-	staleCtx := common.ContextWithRun(ctx, common.RunContext{RunId: secondReceipt.RunID, GoalId: secondReceipt.GoalID, OwnerUserId: owner, Mode: common.RunModeLive, StepKey: "revise"})
-	if _, err = second.handleExecuteDocumentRevision(staleCtx, map[string]any{"requestId": args["requestId"]}, 0); err == nil {
-		t.Fatal("changed source executed")
-	}
-	if composer.calls.Load() != 1 {
-		t.Fatal("changed source spent AI")
+	if f.ai.researchCalls.Load() != 2 || f.ai.calls.Load() != 2 {
+		t.Fatal("evidence or edits reran on approval")
 	}
 }

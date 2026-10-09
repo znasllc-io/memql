@@ -2,10 +2,15 @@ import MarkdownIt from "markdown-it";
 
 export interface MarkdownAnchor {
   kind: "markdown";
+  intent?: "extend";
+  scope?: "section";
   startLine: number;
   endLine: number;
   sourceQuote: string;
   quote: string;
+  prefix?: string;
+  suffix?: string;
+  sectionPath?: string[];
   startBlock?: number;
   endBlock?: number;
   startTextOffset?: number;
@@ -54,7 +59,21 @@ for (const name of ["fence", "code_block"] as const) {
 }
 export function renderMarkdown(source: string): string {
   if (source.length > MAX_MARKDOWN_CHARS) throw new Error("This Markdown document exceeds the 2 MiB reading-view limit. Open its source instead.");
-  return markdown.render(source);
+  const tokens = markdown.parse(source, {});
+  // Generated files carry YAML front matter. Keep it in Source, not as a
+  // giant setext heading above the document. Assign ranges/block IDs BEFORE
+  // filtering so existing revision-bound comments keep their exact anchors.
+  const header = source.match(/^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!header || !/^[\w-]+\s*:/m.test(header[1])) return markdown.renderer.render(tokens, markdown.options, {});
+  const endLine = header[0].split("\n").length - (header[0].endsWith("\n") ? 1 : 0);
+  const hidden: boolean[] = [];
+  const body = tokens.filter(token => {
+    if (token.nesting === -1) return !hidden.pop();
+    const hide = token.map ? token.map[0] < endLine : hidden.at(-1) ?? false;
+    if (token.nesting === 1) hidden.push(hide);
+    return !hide;
+  });
+  return markdown.renderer.render(body, markdown.options, {});
 }
 export function markdownAnchor(source: string, input: unknown): MarkdownAnchor {
   if (!input || typeof input !== "object") throw new Error("Select a passage in the document first.");
@@ -74,7 +93,17 @@ export function markdownAnchor(source: string, input: unknown): MarkdownAnchor {
     if (!Number.isSafeInteger(value) || value < 0 || value > MAX_MARKDOWN_CHARS) throw new Error("Select the passage again.");
     position[key] = value;
   }
-  return { kind: "markdown", startLine, endLine, sourceQuote, quote, ...position };
+  const sectionPath: string[] = [];
+  let inFence = false;
+  for (const line of lines.slice(0,startLine+1)) {
+    if (/^\s*(`{3,}|~{3,})/.test(line)) inFence = !inFence;
+    const heading = !inFence && line.match(/^(#{1,6})\s+(.+?)\s*#*$/);
+    if (heading) { sectionPath.length = Math.min(sectionPath.length,heading[1].length-1); sectionPath.push(heading[2]); }
+  }
+  return { kind: "markdown", startLine, endLine, sourceQuote, quote, ...position,
+    ...(row.intent === "extend" ? { intent: "extend" as const, ...(row.scope === "section" ? { scope: "section" as const } : {}) } : {}),
+    prefix: typeof row.prefix === "string" ? row.prefix.slice(-80) : "", suffix: typeof row.suffix === "string" ? row.suffix.slice(0,80) : "", sectionPath };
+
 }
 export function anchorStillMatches(source: string, anchor: MarkdownAnchor): boolean {
   return source.split(/\r?\n/).slice(anchor.startLine, anchor.endLine).join("\n") === anchor.sourceQuote;

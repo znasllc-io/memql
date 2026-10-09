@@ -2,12 +2,18 @@ import * as vscode from "vscode";
 import { PDFDocument } from "pdf-lib";
 
 function check(value: unknown, detail: string): asserts value { if (!value) throw new Error(detail); }
+async function until(predicate: () => boolean, detail: string): Promise<void> {
+  const deadline = Date.now() + 5000;
+  while (!predicate() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 40));
+  check(predicate(), detail);
+}
 export async function run(): Promise<void> {
   const core = vscode.extensions.getExtension("znasllc.memql");
   const productivity = vscode.extensions.getExtension("znasllc.memql-productivity-tools");
   check(core && productivity, "Both extensions must be installed in this host.");
   const api = await core.activate();
   check(api.connection?.version === 1, "The core extension must export the connection API on this host.");
+  check(typeof api.connection.transcribe === 'function', 'The core connection must expose shared dictation.');
   const tools = await productivity.activate();
   check(tools.connectionVersion === 1, "Productivity must use the core connection API.");
   const commands = await vscode.commands.getCommands(true);
@@ -49,15 +55,29 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand("memql.productivity.markdown.split", markdownURI);
   const markdownDocument = await vscode.workspace.openTextDocument(markdownURI);
   check(vscode.window.visibleTextEditors.some(editor => editor.document === markdownDocument), "Split view must include the same source document.");
+  const readingTabs = () => vscode.window.tabGroups.all.flatMap(group => group.tabs).filter(tab =>
+    tab.input instanceof vscode.TabInputCustom && tab.input.uri.toString() === markdownURI.toString());
+  await until(() => readingTabs().length === 1, "Split retained a duplicate reading tab.");
+  const groups = vscode.window.tabGroups.all.length;
+  await vscode.commands.executeCommand("memql.productivity.markdown.split", markdownURI);
+  check(vscode.window.tabGroups.all.length === groups, "Repeated Split created another editor group.");
   const edit = new vscode.WorkspaceEdit();
   edit.insert(markdownURI, new vscode.Position(2, 0), "Unsaved ");
   check(await vscode.workspace.applyEdit(edit), "Source edit failed.");
   check((await tools.markdownReady(markdownURI, markdownDocument.version)).includes("Unsaved A rendered passage."), "Reading view must follow unsaved source edits.");
+  await vscode.commands.executeCommand("memql.productivity.markdown.reading", markdownURI);
+  await until(() => !vscode.window.visibleTextEditors.some(editor => editor.document === markdownDocument), "Read mode left the source pane open.");
+  await until(() => readingTabs().length === 1, "Read mode duplicated the reading pane.");
+  check(markdownDocument.isDirty && markdownDocument.getText().includes("Unsaved"), "Read mode discarded the shared dirty buffer.");
   await vscode.commands.executeCommand("memql.productivity.markdown.source", markdownURI);
   check(vscode.window.activeTextEditor?.document.getText().includes("Unsaved A **rendered** passage."), "Source mode discarded the dirty buffer.");
   await markdownDocument.save();
   await vscode.commands.executeCommand("memql.productivity.markdown.reading", markdownURI);
   await tools.markdownReady(markdownURI);
+  await vscode.commands.executeCommand("memql.productivity.markdown.review", markdownURI);
+  check((await tools.markdownReady(markdownURI)).includes("Unsaved A rendered passage."), "Review mode must preserve the same document.");
+  await until(() => readingTabs().length === 1, "Review mode duplicated the document tab.");
+  await vscode.commands.executeCommand("memql.productivity.markdown.reading", markdownURI);
   const pdf = await PDFDocument.create(); pdf.addPage([400, 600]);
   const uri = vscode.Uri.joinPath(root, "host-smoke.pdf");
   await vscode.workspace.fs.writeFile(uri, await pdf.save());

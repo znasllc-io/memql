@@ -1,0 +1,22 @@
+import {test} from "node:test";
+import assert from "node:assert/strict";
+import {syncDesktopAppearance} from "../src/themeSync.js";
+import {window,workspace} from "./support/vscode.js";
+import {EDITOR_COLOR_KEYS} from "../../../brand/editorAppearance.js";
+const raw=JSON.stringify({version:1,mode:"light",colors:Object.fromEntries(EDITOR_COLOR_KEYS.map(k=>[k,"#aabbcc"]))});
+test("desktop offers once, follows a saved choice, and preserves high contrast",async()=>{
+  let choice="ask", offers=0, answer="Match MemQL OS";
+  const writes: any[]=[];
+  Object.assign(window,{activeColorTheme:{kind:2},showInformationMessage:async()=>{offers++;return answer;}});
+  Object.assign(workspace,{getConfiguration:(section:string)=>({get:()=>choice,inspect:()=>({globalValue:{"[Other Theme]":{"editor.background":"#123456"}}}),update:async(key:string,value:any,target:any)=>{writes.push({section,key,value,target});if(key==="osTheme")choice=value;}})});
+  await syncDesktopAppearance(raw);
+  assert.equal(offers,1);assert.equal(choice,"match");
+  assert.equal(writes.at(-1).value,"MemQL Light");assert.equal(writes.at(-1).target,1);
+  assert.deepEqual(writes.find(w=>w.key==="colorCustomizations").value["[Other Theme]"],{"editor.background":"#123456"});
+  await syncDesktopAppearance(raw);assert.equal(offers,1);
+  writes.length=0; Object.assign(window,{activeColorTheme:{kind:3}});
+  await syncDesktopAppearance(raw);assert.equal(writes.length,0);
+  Object.assign(window,{activeColorTheme:{kind:2}});choice="ask";answer="Keep editor theme";
+  await syncDesktopAppearance(raw);assert.equal(choice,"keep");assert.equal(writes.length,1);
+  writes.length=0;await syncDesktopAppearance(raw);await syncDesktopAppearance("bad");assert.equal(writes.length,0);assert.equal(offers,2);
+});

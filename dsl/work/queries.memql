@@ -430,3 +430,40 @@ query approval workComputerScopesForOwnerRun {
  filter row => row.ownerUserId == actor.userId && row.runId == args.runId && row.kind == "scopeElevation"
  shape workApprovalFull
 }
+
+/// Durable decisions for one of the caller's runs, including decided reviews.
+@actor
+@unbounded("approvals bounded by one owned run")
+query approval workApprovalsForOwnedRun {
+ args { runId string! }
+ filter row => row.runId == args.runId && row.ownerUserId == actor.userId
+ shape workApprovalFull
+}
+
+/// Recover this person's latest document review across editor windows and restarts.
+/// Returns only an owned request identifier; Library checks the backing document
+/// before retrieving its review. This lookup exposes no captured document bytes.
+/// startedAt orders requests by admission, not by a later approval or heartbeat.
+@actor
+query run workDocumentRevisionRequest {
+  args { artifactId string! }
+  filter row => row.ownerUserId == actor.userId
+              && row.automationName == "reviseLibraryDocument"
+              && row.?input.proposal.artifactId == args.artifactId
+  shape workRevisionRequest
+  sort "startedAt", "desc"
+  paginate 1
+}
+
+/// A successor invalidates the earlier immutable proposal for application.
+/// Ordering is by admission, never a mutable heartbeat or decision timestamp.
+@actor
+query goal workDocumentRevisionAmendment {
+ args { requestId string! }
+ filter row => row.ownerUserId == actor.userId
+             && row.?input.proposal.reviewType == "library-document"
+             && row.?input.proposal.amendment.requestId == args.requestId
+ shape workRevisionAmendment
+ sort "row.createdAt", "desc"
+ paginate 1
+}

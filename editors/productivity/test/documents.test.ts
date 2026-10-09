@@ -71,10 +71,11 @@ test("revision requests and decisions stay on the document lease and refuse anot
   const lease = { domain: "client.example", name: "client", generation: 9 };
   const calls: { name: string; call: string }[] = [];
   let wrong = false;
+  let cancelRequested = false;
   const api = { execute: async (actual: unknown, name: string, call: string) => {
     assert.equal(actual, lease); calls.push({ name, call });
-    if (name === "libraryRequestDocumentRevision") return [{ approvalId: "approval", proposal: { artifactId: "abc" } }];
-    if (name === "libraryDocumentRevisionStatus") return [{ approvalId: "approval", proposal: { artifactId: wrong ? "another" : "abc" } }];
+    if (name === "libraryRequestDocumentRevision") return [{ runId: "run", proposal: { artifactId: "abc" } }];
+    if (name === "libraryDocumentRevisionStatus") return [{ status: "waiting", cancelRequested, approvalId: "approval", proposal: { artifactId: wrong ? "another" : "abc" } }];
     return [{ decision: "approved" }];
   } } as unknown as EditorConnectionAPI;
   const files = new Documents(api);
@@ -85,6 +86,9 @@ test("revision requests and decisions stay on the document lease and refuse anot
   assert.match(calls[0].call, /requestId: "same-request"/);
   await files.decideRevision(doc, "same-request", "approval", "approved");
   assert.equal(calls.filter(call => call.name === "decideApproval").length, 1);
+  cancelRequested = true;
+  await assert.rejects(files.decideRevision(doc, "same-request", "approval", "approved"), /stopped/);
+  assert.equal(calls.filter(call => call.name === "decideApproval").length, 1, "a stale button must not try to resume a cancelled job");
   wrong = true;
   await assert.rejects(files.decideRevision(doc, "same-request", "approval", "approved"), /does not belong/);
   assert.equal(calls.filter(call => call.name === "decideApproval").length, 1);

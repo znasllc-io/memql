@@ -1,0 +1,30 @@
+/// Propose bounded Markdown replacements from the person's passage feedback.
+@level("strong")
+@templateFile("prompts/libraryRevisionPassages.tmpl")
+prompt libraryRevisionPassages {
+ evidence string
+ document string!
+ passages string!
+ instruction string!
+}
+
+/// One human-requested alternative to one proposal item, bounded to one call.
+@level("strong")
+@templateFile("prompts/libraryRevisionItem.tmpl")
+prompt libraryRevisionItem {
+ evidence string
+ document string!
+ passages string!
+ instruction string!
+ previous []object!
+}
+
+/// Carry out the research, verification or reasoning called for by document feedback before proposing edits.
+@level("strong")
+@templateFile("prompts/libraryRevisionResearch.tmpl")
+prompt libraryRevisionResearch {
+ document string!
+ passages string!
+ instruction string
+ previous []object
+}

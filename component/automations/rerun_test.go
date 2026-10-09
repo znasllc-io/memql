@@ -767,3 +767,33 @@ func TestAReplayedOverrideNeverReachesAnotherStep(t *testing.T) {
 		t.Fatal("the resumed replay lost publish's recorded override")
 	}
 }
+
+// A failure retry can be planned before the downstream steps exist. After
+// recovery reaches human review, another replica must serve those newly
+// completed steps, not interpret their absent version floors as a fresh rerun.
+func TestPartialRerunPlanPreservesCompletedDownstreamSteps(t *testing.T) {
+	for _, status := range []string{"done", "skipped"} {
+		t.Run(status, func(t *testing.T) {
+			run, steps := finishedRun("partial-plan")
+			req := rerunRequest(RerunReasonRerun, "a", nil)
+			req["versions"] = map[string]any{"a": float64(2)}
+			run["status"], run["rerun"], run["staleSteps"] = "running", req, []any{}
+			steps[0]["attempt"], steps[0]["version"] = float64(2), float64(2)
+			steps[1]["status"] = status
+			if status == "skipped" {
+				steps[1]["result"] = map[string]any{"stepId": "b", "status": "skipped"}
+			}
+			steps[2]["status"] = "waiting"
+			probe, rec, _ := runAgain(t, run, steps)
+			if got := probe.callees(); !reflect.DeepEqual(got, []string{"publish"}) {
+				t.Fatalf("resumed calls %v: completed downstream steps must be served from their receipts", got)
+			}
+			for _, c := range rec.all() {
+				name, args := argsOf(t, c)
+				if name == "createWorkStep" && (args["key"] == "a" || args["key"] == "b") {
+					t.Fatalf("a completed step received another intent: %s", c)
+				}
+			}
+		})
+	}
+}

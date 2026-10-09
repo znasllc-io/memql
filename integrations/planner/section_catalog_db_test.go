@@ -87,6 +87,9 @@ type sectionCatalogTurns struct {
 	prompts []string
 }
 
+func (p *sectionCatalogTurns) ResolveOwnerAgent(_ context.Context, owner string) (string, error) {
+	return "plannerAgent-" + owner, nil
+}
 func (p *sectionCatalogTurns) RunTurn(_ context.Context, msg *memqlv1.AgentGenerateTurnMsg) (string, error) {
 	prompt := msg.History[len(msg.History)-1].Content
 	p.mu.Lock()

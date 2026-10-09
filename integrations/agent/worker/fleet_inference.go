@@ -351,7 +351,7 @@ func (f *FleetInference) attempt(
 				cand.Label(), cand.ConnectedNodeId)
 	}
 	out, err := f.forward.ForwardModelCall(ctx, cand.ConnectedNodeId, cand.RegistrationId,
-		req.ActingUserId, start, workerservice.ModelCallTimeoutDefault, deltaSink(req.OnDelta))
+		req.ActingUserId, start, workerservice.ModelCallTimeoutDefault, deltaSink(req.OnDelta, req.OnActivity))
 	if err != nil {
 		outcome := ForwardCompleted
 		if out.RefusedBeforeStart {
@@ -406,7 +406,7 @@ func (f *FleetInference) attemptLocal(
 		target := strings.TrimSpace(cand.ConnectedNodeId)
 		if target != "" && target != f.selfNodeId && f.forward != nil {
 			out, err := f.forward.ForwardModelCall(ctx, target, cand.RegistrationId,
-				req.ActingUserId, start, workerservice.ModelCallTimeoutDefault, deltaSink(req.OnDelta))
+				req.ActingUserId, start, workerservice.ModelCallTimeoutDefault, deltaSink(req.OnDelta, req.OnActivity))
 			if err != nil {
 				outcome := ForwardCompleted
 				if out.RefusedBeforeStart {
@@ -454,6 +454,12 @@ func (f *FleetInference) attemptLocal(
 	go func() {
 		defer wg.Done()
 		for d := range handle.Deltas() {
+			if d.Keepalive {
+				if req.OnActivity != nil {
+					req.OnActivity()
+				}
+				continue
+			}
 			if req.OnDelta != nil && d.Content != "" {
 				req.OnDelta(d.Content)
 			}
@@ -494,12 +500,18 @@ func machineOwnerAttribution(cand Candidate, actingUserId string) string {
 // ledger's executionSurface, mirroring `cockpit-app:<appId>` (memql#4362).
 const FleetSurfacePrefix = "fleet:"
 
-func deltaSink(onDelta func(string)) func(uint64, string) {
-	if onDelta == nil {
+func deltaSink(onDelta func(string), onActivity func()) func(uint64, string, bool) {
+	if onDelta == nil && onActivity == nil {
 		return nil
 	}
-	return func(_ uint64, content string) {
-		if content != "" {
+	return func(_ uint64, content string, keepalive bool) {
+		if keepalive {
+			if onActivity != nil {
+				onActivity()
+			}
+			return
+		}
+		if onDelta != nil && content != "" {
 			onDelta(content)
 		}
 	}

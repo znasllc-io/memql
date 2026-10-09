@@ -11,6 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { ConnectionManager, type ConnectionState, type DialFn } from "../src/connection/manager.js";
+import { EditorConnection } from "../src/connection/api.js";
 import type { ClusterConfig } from "../src/clusters/model.js";
 import type { Connection } from "@znasllc-io/memql-sdk-core/client";
 
@@ -934,6 +935,38 @@ test("a drop is retried, and a successful retry is connected again", async () =>
   assert.deepEqual(manager.state, { status: "connected", clusterName: "a", nodeId: "n2" });
   assert.equal(manager.isRetrying("a"), false);
   assert.equal(timers.pending(), 0);
+});
+
+test("editor approvals survive a transport retry but never an account, target or explicit connection change", async () => {
+  for (const change of ["transport", "credential", "endpoint", "domain", "explicit"] as const) {
+    const first = fakeConn("n1"), second = fakeConn("n2"), timers = fakeTimers();
+    let writes = 0;
+    for (const conn of [first, second]) Object.assign(conn.query, { executeNamed: async () => { writes++; return { rows: () => [{ decision: "approved" }] }; } });
+    const original = cluster("a", { domain: "a.example" });
+    let activeCluster = original;
+    const replacement = { ...original, ...(change === "credential" ? { token: liveJwt(7200) } : change === "endpoint" ? { endpoint: "api.other.example:443" } : change === "domain" ? { domain: "other.example" } : {}) };
+    const conns = [first, second];
+    const manager = new ConnectionManager(async () => conns.shift()!, undefined, undefined, undefined,
+      { delaysMs: [10], setTimer: timers.setTimer, clearTimer: timers.clearTimer, reload: async () => replacement });
+    const api = new EditorConnection({ scope: () => manager.editorSessionScope,
+      session: () => manager.state.status === "connected" ? { cluster: activeCluster, query: manager.query!, bearer: manager.bearer! } : undefined,
+      connect: async () => {} });
+    manager.onDidChangeState(() => api.changed());
+    await manager.connect(original);
+    const lease = api.current()!;
+    first.terminate(); await flush();
+    await assert.rejects(api.execute(lease, "decideApproval", "mutation decideApproval()"), /connection changed/);
+    activeCluster = replacement;
+    if (change === "explicit") await manager.connect(original); else await timers.fire();
+    if (change === "transport") {
+      await api.execute(lease, "decideApproval", "mutation decideApproval()");
+      assert.equal(writes, 1, "the existing review can apply after an automatic reconnect");
+    } else {
+      await assert.rejects(api.execute(lease, "decideApproval", "mutation decideApproval()"), /connection changed/, change);
+      assert.equal(writes, 0, change);
+    }
+    await manager.disconnect();
+  }
 });
 
 test("the retries stop after the policy's tries, and then say so", async () => {

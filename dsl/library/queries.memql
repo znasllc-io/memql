@@ -286,8 +286,9 @@ query documentVersion documentVersionById {
 query documentVersion documentVersionsForOwner {
   args {
     documentId  string!
+    documentIdAlias string
   }
-  filter  row => row.ownerUserId == actor.userId && row.documentId == args.documentId
+  filter  row => row.ownerUserId == actor.userId && (row.documentId == args.documentId || (args.documentIdAlias != nil && row.documentId == args.documentIdAlias))
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -703,7 +704,7 @@ query watchedFolder libraryWatchedFolders {
 @actor
 query documentComment documentCommentsForArtifact {
   args { artifactId string! }
-  filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true) && row.artifactId == args.artifactId
+  filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true) && row.artifactId == args.artifactId && row.purpose != "note"
   shape documentCommentFull
   sort "row.createdAt", "desc"
   paginate 501
@@ -719,4 +720,59 @@ query documentComment documentCommentById {
   args { commentId string! }
   filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true) && row.id == args.commentId
   shape documentCommentFull
+}
+
+
+/// Cursor-based retained document history. Bodies are fetched only on selection.
+@actor
+query documentVersion libraryDocumentHistoryPage {
+  args { documentId string! documentIdAlias string beforeVersion int! }
+  filter row => row.ownerUserId == actor.userId && (row.documentId == args.documentId || (args.documentIdAlias != nil && row.documentId == args.documentIdAlias)) && row.versionNumber < args.beforeVersion
+  sort "versionNumber", "desc"
+  paginate 50
+  shape documentVersionSummary
+}
+
+/// One owned immutable snapshot, including the initial version zero.
+@actor
+query documentVersion libraryDocumentVersionByNumber {
+  args { documentId string! documentIdAlias string versionNumber int! }
+  filter row => row.ownerUserId == actor.userId && (row.documentId == args.documentId || (args.documentIdAlias != nil && row.documentId == args.documentIdAlias)) && row.versionNumber == args.versionNumber
+  paginate 1
+  shape documentVersionFull
+}
+
+/// Cursor-based retained file history, with content resolved through owned storage.
+@actor
+query fileVersion libraryFileHistoryPage {
+  args { fileId string! beforeVersion int! }
+  filter row => row.ownerUserId == actor.userId && row.fileId == args.fileId && row.versionNumber < args.beforeVersion
+  sort "versionNumber", "desc"
+  paginate 50
+  shape libraryFileVersionFull
+}
+
+/// Branch roots retain their exact parent link even after their document changes.
+@actor
+query documentVersion libraryDocumentBranches {
+  args { rootArtifactId string! }
+  filter row => row.ownerUserId == actor.userId && row.branchRootArtifactId == args.rootArtifactId
+  sort "row.createdAt", "desc"
+  paginate 100
+  shape documentVersionSummary
+}
+
+
+/// Personal annotations, after artifact authorization. The original caller's
+/// identity is supplied by the integration, never borrowed from the document owner.
+/// actor.userId scopes the backing owner, not the note's author; exposing the
+/// authorUserId argument would let callers request another person's private notes.
+@serverOnly
+@actor
+query documentComment documentNotesForArtifact {
+  args { artifactId string! authorUserId string! }
+  filter row => row.ownerUserId == actor.userId && row.artifactId == args.artifactId && row.authorUserId == args.authorUserId && row.purpose == "note"
+  shape documentCommentFull
+  sort "row.createdAt", "desc"
+  paginate 501
 }

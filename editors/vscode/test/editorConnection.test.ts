@@ -6,6 +6,27 @@ import { BrowserRegistry } from "../src/clusters/browserRegistry.js";
 import { generateWebPkcePair } from "../src/auth/webPkce.js";
 import { createHash } from "node:crypto";
 
+test("dictation uses Ask's stream format and aborts across a connection change", {timeout:5000}, async () => {
+  const sent:any[]=[];
+  let handler:((message:any)=>void)|undefined, cancelled=false;
+  const dispatcher={send:(message:any)=>{sent.push(message);return 'sent';},registerStream:(_id:string,callback:(message:any)=>void)=>{handler=callback;return()=>{handler=undefined;};}};
+  let session:EditorSession|undefined={cluster:{name:'a',domain:'a.example',endpoint:'api.a.example:443'},query:{} as EditorSession['query'],bearer:'private',dispatcher:dispatcher as unknown as EditorSession['dispatcher']};
+  const api=new EditorConnection({session:()=>session,connect:async()=>{}});
+  const lease=api.current()!;
+  const audio=new ReadableStream<Uint8Array>({start(c){c.enqueue(new Uint8Array([0,1]));},cancel(){cancelled=true;}});
+  const partials:string[]=[];
+  const pending=api.transcribe(lease,audio,new AbortController().signal,text=>partials.push(text));
+  await new Promise(resolve=>setTimeout(resolve,0));
+  const start=sent.find(message=>message.aiTranscribeStreamStart).aiTranscribeStreamStart;
+  assert.equal(start.format,'pcm16');assert.equal(start.sampleRate,16000);assert.equal(start.channels,1);
+  handler!({aiTranscribeStreamDelta:{requestId:start.requestId,text:'Make this clearer'}});
+  assert.deepEqual(partials,['Make this clearer']);
+  const rejected=assert.rejects(pending,/aborted|connection changed/);
+  session=undefined;api.changed();await rejected;
+  assert.equal(cancelled,true);assert.equal(handler,undefined);
+  await assert.rejects(api.transcribe(lease,new ReadableStream(),new AbortController().signal,()=>{}),/connection changed/);
+});
+
 test("a retained file cannot read or write through a switched or reconnected session", async () => {
   let writes = 0;
   const query = { executeNamed: async () => { writes++; return { rows: () => [] }; } } as unknown as EditorSession["query"];

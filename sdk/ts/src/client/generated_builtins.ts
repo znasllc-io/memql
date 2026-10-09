@@ -1893,6 +1893,81 @@ QueryClient.prototype.libraryAddDocumentComment = function (this: QueryClient, a
   return this.executeNamed("libraryAddDocumentComment", buildLibraryAddDocumentComment(args), opts);
 };
 
+/** Save a personal note on an exact selected passage. Notes never enter AI revision requests. */
+export interface LibraryAddDocumentNoteArgs {
+  artifactId: string;
+  expectedVersion: number;
+  expectedRevision: string;
+  anchor: Record<string, unknown>;
+  body: string;
+  requestId: string;
+}
+
+export function buildLibraryAddDocumentNote(args: LibraryAddDocumentNoteArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("expectedVersion: " + renderMemQLValue(args.expectedVersion));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  parts.push("anchor: " + renderMemQLValue(args.anchor));
+  parts.push("body: " + renderMemQLValue(args.body));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin libraryAddDocumentNote(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryAddDocumentNote(args: LibraryAddDocumentNoteArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryAddDocumentNote = function (this: QueryClient, args: LibraryAddDocumentNoteArgs = {} as LibraryAddDocumentNoteArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryAddDocumentNote", buildLibraryAddDocumentNote(args), opts);
+};
+
+/** Read owned document history metadata, with a version cursor and branch provenance. */
+export interface LibraryDocumentHistoryArgs {
+  artifactId: string;
+  beforeVersion?: number;
+}
+
+export function buildLibraryDocumentHistory(args: LibraryDocumentHistoryArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  if (args.beforeVersion !== undefined) parts.push("beforeVersion: " + renderMemQLValue(args.beforeVersion));
+  return "builtin libraryDocumentHistory(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryDocumentHistory(args: LibraryDocumentHistoryArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryDocumentHistory = function (this: QueryClient, args: LibraryDocumentHistoryArgs = {} as LibraryDocumentHistoryArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryDocumentHistory", buildLibraryDocumentHistory(args), opts);
+};
+
+/** Read the caller's personal document notes after checking current document access. These are not AI feedback. */
+export interface LibraryDocumentNotesArgs {
+  artifactId: string;
+}
+
+export function buildLibraryDocumentNotes(args: LibraryDocumentNotesArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  return "builtin libraryDocumentNotes(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryDocumentNotes(args: LibraryDocumentNotesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryDocumentNotes = function (this: QueryClient, args: LibraryDocumentNotesArgs = {} as LibraryDocumentNotesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryDocumentNotes", buildLibraryDocumentNotes(args), opts);
+};
+
 /** Read revision-bound feedback after checking current access to the artifact. */
 export interface LibraryDocumentReviewArgs {
   artifactId: string;
@@ -1914,7 +1989,7 @@ QueryClient.prototype.libraryDocumentReview = function (this: QueryClient, args:
   return this.executeNamed("libraryDocumentReview", buildLibraryDocumentReview(args), opts);
 };
 
-/** Read the exact owned proposal, approval, run and output draft. */
+/** Read the owned analysis, proposed replacements, decision and saved result. */
 export interface LibraryDocumentRevisionStatusArgs {
   requestId: string;
 }
@@ -1933,6 +2008,87 @@ declare module "./query.js" {
 
 QueryClient.prototype.libraryDocumentRevisionStatus = function (this: QueryClient, args: LibraryDocumentRevisionStatusArgs = {} as LibraryDocumentRevisionStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("libraryDocumentRevisionStatus", buildLibraryDocumentRevisionStatus(args), opts);
+};
+
+/** Open a retained Markdown snapshot without changing its current document. */
+export interface LibraryDocumentVersionArgs {
+  artifactId: string;
+  versionNumber: number;
+}
+
+export function buildLibraryDocumentVersion(args: LibraryDocumentVersionArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("versionNumber: " + renderMemQLValue(args.versionNumber));
+  return "builtin libraryDocumentVersion(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryDocumentVersion(args: LibraryDocumentVersionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryDocumentVersion = function (this: QueryClient, args: LibraryDocumentVersionArgs = {} as LibraryDocumentVersionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryDocumentVersion", buildLibraryDocumentVersion(args), opts);
+};
+
+/** Create an independent document branch from an exact owned snapshot. Durable request identity makes retries safe across replicas; original content and history are preserved. */
+export interface LibraryForkDocumentVersionArgs {
+  artifactId: string;
+  versionNumber: number;
+  revision: string;
+  name: string;
+  requestId: string;
+}
+
+export function buildLibraryForkDocumentVersion(args: LibraryForkDocumentVersionArgs): string {
+  const parts: string[] = [];
+  parts.push("artifactId: " + renderMemQLValue(args.artifactId));
+  parts.push("versionNumber: " + renderMemQLValue(args.versionNumber));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  parts.push("name: " + renderMemQLValue(args.name));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  return "builtin libraryForkDocumentVersion(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryForkDocumentVersion(args: LibraryForkDocumentVersionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryForkDocumentVersion = function (this: QueryClient, args: LibraryForkDocumentVersionArgs = {} as LibraryForkDocumentVersionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryForkDocumentVersion", buildLibraryForkDocumentVersion(args), opts);
+};
+
+/** Revise one proposal item with AI; retain every other item unchanged. */
+export interface LibraryModifyRevisionItemArgs {
+  requestId: string;
+  approvalId: string;
+  itemId: string;
+  instruction: string;
+  newRequestId: string;
+}
+
+export function buildLibraryModifyRevisionItem(args: LibraryModifyRevisionItemArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  parts.push("itemId: " + renderMemQLValue(args.itemId));
+  parts.push("instruction: " + renderMemQLValue(args.instruction));
+  parts.push("newRequestId: " + renderMemQLValue(args.newRequestId));
+  return "builtin libraryModifyRevisionItem(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryModifyRevisionItem(args: LibraryModifyRevisionItemArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryModifyRevisionItem = function (this: QueryClient, args: LibraryModifyRevisionItemArgs = {} as LibraryModifyRevisionItemArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryModifyRevisionItem", buildLibraryModifyRevisionItem(args), opts);
 };
 
 /** Remove a label from a Library artifact index row. Idempotent -- a label already absent is left alone and nothing is written. Same owner-threaded load/write shape as libraryAddArtifactLabel. */
@@ -1958,7 +2114,7 @@ QueryClient.prototype.libraryRemoveArtifactLabel = function (this: QueryClient, 
   return this.executeNamed("libraryRemoveArtifactLabel", buildLibraryRemoveArtifactLabel(args), opts);
 };
 
-/** Capture selected current feedback and open a Nexus run waiting for approval. */
+/** Capture selected current feedback and start its analysis run. */
 export interface LibraryRequestDocumentRevisionArgs {
   artifactId: string;
   expectedVersion: number;

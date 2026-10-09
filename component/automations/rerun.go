@@ -367,7 +367,15 @@ func rerunResumePoint(j *RunJournal, automation *Automation, spec *RerunSpec, ta
 				continue
 			}
 			state, want := j.StepStates[step.ID], spec.Versions[step.ID]
-			if want <= 0 || j.MaxAttempt[step.ID] < want || !finishedFor(state, step) {
+			// A failure retry is planned from the steps recorded so far.
+			// Downstream steps first reached by this request have no floor;
+			// their completed first version still belongs to this request.
+			// Replaying them on a later approval would repeat model calls and
+			// could replace the proposal the person already reviewed.
+			if want <= 0 {
+				want = 1
+			}
+			if j.MaxAttempt[step.ID] < want || !finishedFor(state, step) {
 				return step.ID
 			}
 		}

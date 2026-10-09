@@ -34,10 +34,12 @@ package automations
 // consumer saw before.
 
 import (
+	"encoding/json"
 	"strings"
 	"sync"
 	"time"
 
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -250,6 +252,27 @@ func functionStatementValue(kind string, raw any) any {
 			}
 		}
 		v = raw
+	}
+	// A bounded integration capability returns one synthetic node through the
+	// engine's graph transport. A builtin statement binds that result's payload,
+	// not the transport's randomly keyed node dictionary. Wire responses remain
+	// unchanged; ordinary maps and multi-row results retain their own shape.
+	if strings.EqualFold(kind, "builtin") {
+		if nodes, ok := v.(map[string]memorynodes.MemoryNode); ok && len(nodes) == 1 {
+			for _, node := range nodes {
+				var payload map[string]any
+				if json.Unmarshal(node.Payload, &payload) == nil {
+					v = payload
+				}
+			}
+		}
+		if nodes, ok := v.(map[string]any); ok && len(nodes) == 1 {
+			for key, raw := range nodes {
+				if node, ok := raw.(map[string]any); ok && isNodeMap(node) && node["id"] == key && node["concept"] != nil {
+					v = node["payload"]
+				}
+			}
+		}
 	}
 	v = viewRows(v)
 	if strings.EqualFold(kind, "mutation") {

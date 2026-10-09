@@ -20,11 +20,38 @@
               "requestId": "s-requestId"
             },
             "kind": "builtin",
-            "name": "libraryExecuteDocumentRevision"
+            "name": "libraryRevisionInput"
+          },
+          {
+            "args": {
+              "data": {
+                "instruction": null
+              },
+              "templateId": "libraryRevisionResearch"
+            },
+            "kind": "builtin",
+            "name": "runAgentTurn"
+          },
+          {
+            "args": {
+              "data": {},
+              "templateId": "libraryRevisionPassages"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          },
+          {
+            "args": {
+              "requestId": "s-requestId"
+            },
+            "kind": "builtin",
+            "name": "libraryRevisionProposal"
           }
         ],
         "result": {
-          "output": null,
+          "output": {
+            "changed": false
+          },
           "status": "completed"
         }
       }
@@ -48,11 +75,38 @@
               "requestId": "s-requestId"
             },
             "kind": "builtin",
-            "name": "libraryExecuteDocumentRevision"
+            "name": "libraryRevisionInput"
+          },
+          {
+            "args": {
+              "data": {
+                "instruction": null
+              },
+              "templateId": "libraryRevisionResearch"
+            },
+            "kind": "builtin",
+            "name": "runAgentTurn"
+          },
+          {
+            "args": {
+              "data": {},
+              "templateId": "libraryRevisionPassages"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          },
+          {
+            "args": {
+              "requestId": "s-requestId"
+            },
+            "kind": "builtin",
+            "name": "libraryRevisionProposal"
           }
         ],
         "result": {
-          "output": null,
+          "output": {
+            "changed": false
+          },
           "status": "completed"
         }
       }

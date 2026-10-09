@@ -111,12 +111,57 @@ func (i *Integration) handleDocumentReview(ctx context.Context, args map[string]
 		delete(row, "ownerUserId")
 		delete(row, "requestId")
 	}
-	return reviewResult(map[string]any{"comments": rows, "hasMore": more, "version": doc.version, "revision": doc.revision})
+	request, err := i.revisionRow(memql.ContextWithFreshRead(ctx), "workDocumentRevisionRequest", map[string]any{"artifactId": doc.artifact})
+	if err != nil {
+		return nil, err
+	}
+	return reviewResult(map[string]any{"comments": rows, "hasMore": more, "version": doc.version, "revision": doc.revision,
+		"requestId": asString(request["requestId"])})
 }
 
 var reviewRequestID = regexp.MustCompile(`^[a-zA-Z0-9_-]{8,120}$`)
 
 func (i *Integration) handleAddDocumentComment(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	return i.addDocumentAnnotation(ctx, args, "feedback")
+}
+func (i *Integration) handleAddDocumentNote(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	anchor, err := validateReviewAnchor(args["anchor"])
+	if err != nil {
+		return nil, err
+	}
+	if anchor["kind"] != "markdown" {
+		return nil, fmt.Errorf("select a passage for your note")
+	}
+	return i.addDocumentAnnotation(ctx, args, "note")
+}
+func (i *Integration) handleDocumentNotes(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	access, ok := auth.AccessFromContext(ctx)
+	if !ok || access == nil || access.UserId == "" {
+		return nil, fmt.Errorf("sign in to read your notes")
+	}
+	ctx = memql.ContextWithFreshRead(ctx)
+	doc, err := i.reviewDocument(ctx, asString(args["artifactId"]))
+	if err != nil {
+		return nil, err
+	}
+	result, err := reviewstore.Notes(ctx, i.engine, doc.owner, doc.artifact, access.UserId)
+	if err != nil {
+		return nil, err
+	}
+	rows := extractRows(result)
+	more := len(rows) > 500
+	if more {
+		rows = rows[:500]
+	}
+	for _, row := range rows {
+		row["id"] = memql.BareShortId(stringField(row, "id"))
+		row["outdated"] = stringField(row, "revision") != doc.revision
+		delete(row, "ownerUserId")
+		delete(row, "requestId")
+	}
+	return reviewResult(map[string]any{"notes": rows, "hasMore": more})
+}
+func (i *Integration) addDocumentAnnotation(ctx context.Context, args map[string]any, purpose string) ([]memorynodes.MemoryNode, error) {
 	subject, ok := auth.SubjectFromContext(ctx)
 	if !ok || !auth.CapableFor(ctx, subject, auth.VerbCreate, auth.ResourceData) {
 		return nil, fmt.Errorf("you do not have permission to add feedback")
@@ -161,7 +206,7 @@ func (i *Integration) handleAddDocumentComment(ctx context.Context, args map[str
 	}
 	if rows := extractRows(raw); len(rows) > 0 {
 		oldVersion, _ := intArg(rows[0]["versionNumber"])
-		if stringField(rows[0], "body") != body || stringField(rows[0], "revision") != revision || oldVersion != expected || !reflect.DeepEqual(rows[0]["anchor"], anchor) {
+		if (stringField(rows[0], "purpose") == "note") != (purpose == "note") || stringField(rows[0], "body") != body || stringField(rows[0], "revision") != revision || oldVersion != expected || !reflect.DeepEqual(rows[0]["anchor"], anchor) {
 			return nil, fmt.Errorf("this feedback request was already used with different content")
 		}
 		return reviewResult(map[string]any{"commentId": commentID, "saved": true})
@@ -173,7 +218,7 @@ func (i *Integration) handleAddDocumentComment(ctx context.Context, args map[str
 		return nil, err
 	}
 	_, err = reviewstore.Append(ctx, i.engine, doc.owner, map[string]any{
-		"commentId": commentID, "artifactId": doc.artifact, "authorUserId": author,
+		"purpose": purpose, "commentId": commentID, "artifactId": doc.artifact, "authorUserId": author,
 		"revision": doc.revision, "versionNumber": doc.version, "anchor": anchor, "body": body, "requestId": requestID,
 	})
 	if err != nil {
@@ -190,7 +235,13 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 		return nil, fmt.Errorf("select a shorter passage")
 	}
 	var anchor map[string]any
-	if json.Unmarshal(bytes, &anchor) != nil || anchor["kind"] != "markdown" {
+	if json.Unmarshal(bytes, &anchor) == nil && anchor["kind"] == "document-end" {
+		return map[string]any{"kind": "document-end", "quote": "End of document"}, nil
+	}
+	if anchor["kind"] == "document" {
+		return map[string]any{"kind": "document", "quote": "Entire document"}, nil
+	}
+	if anchor["kind"] != "markdown" {
 		return nil, fmt.Errorf("select a Markdown passage")
 	}
 	start, startOK := intArg(anchor["startLine"])
@@ -200,6 +251,20 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 		return nil, fmt.Errorf("select a shorter passage")
 	}
 	result := map[string]any{"kind": "markdown", "startLine": float64(start), "endLine": float64(end), "quote": quote, "sourceQuote": source}
+	if intent, exists := anchor["intent"]; exists {
+		if intent != "extend" {
+			return nil, fmt.Errorf("invalid document feedback intent")
+		}
+		result["intent"] = intent
+	}
+	// Scope identifies the selected context, independently of the operation
+	// requested in the person's feedback. The DSL harness resolves that intent.
+	if scope, exists := anchor["scope"]; exists {
+		if scope != "section" {
+			return nil, fmt.Errorf("invalid document feedback scope")
+		}
+		result["scope"] = scope
+	}
 	for _, key := range []string{"startBlock", "endBlock", "startTextOffset", "endTextOffset"} {
 		if value, exists := anchor[key]; exists {
 			n, ok := intArg(value)
@@ -209,6 +274,20 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 			result[key] = float64(n)
 		}
 	}
+	for _, key := range []string{"prefix", "suffix"} {
+		if value, ok := anchor[key].(string); ok && len(value) <= 512 {
+			result[key] = value
+		}
+	}
+	if raw, ok := anchor["sectionPath"].([]any); ok && len(raw) <= 6 {
+		path := make([]string, 0, len(raw))
+		for _, item := range raw {
+			if value, ok := item.(string); ok && len(value) <= 2000 {
+				path = append(path, value)
+			}
+		}
+		result["sectionPath"] = path
+	}
 	return result, nil
 }
 
@@ -216,6 +295,9 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 // saves. A client-supplied revision alone cannot attest a passage. Blob URLs
 // come only from the authorized backing row and use the configured store.
 func (i *Integration) verifyReviewPassage(ctx context.Context, doc reviewDocument, anchor map[string]any) error {
+	if anchor["kind"] == "document-end" || anchor["kind"] == "document" {
+		return nil
+	}
 	const maxBytes = 2 * 1024 * 1024
 	var content []byte
 	if doc.kind == "file" {

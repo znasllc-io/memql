@@ -224,3 +224,15 @@ shape feedbackPolicy feedbackPolicyFull {
   reusableAfterSignatures
   row.createdAt
 }
+
+/// Request identity only; recovery must not expose captured document bytes.
+@row
+shape run workRevisionRequest {
+  input.requestId
+}
+
+/// Durable admission identity for an item modification, including a partial bootstrap.
+@row
+shape goal workRevisionAmendment {
+ input.requestId
+}

@@ -1,5 +1,7 @@
+import { registerDictation } from './dictation';
 import { requestedResource, checkTools } from './handoff.mjs';
 import { BrowserSecrets } from './secrets';
+import { appearanceSettings, appearanceTheme, readEditorAppearance } from '../../productivity/src/editorAppearance';
 import { initialize } from '@codingame/monaco-vscode-api';
 import { registerExtension, ExtensionHostKind, type IExtensionManifest } from '@codingame/monaco-vscode-api/extensions';
 import getWorkbench from '@codingame/monaco-vscode-workbench-service-override';
@@ -52,6 +54,8 @@ export async function start(isBasic: () => boolean, ready: () => void) {
     for (const file of bundle.files) extension.registerFileUrl(file, new URL(`extensions/${bundle.name}/${file}`, document.baseURI).href);
   }
   const host = registerExtension({ name: 'editor-host', publisher: 'znasllc', version: '0.1.0', engines: { vscode: '*' } }, ExtensionHostKind.LocalProcess);
+  const appearance = readEditorAppearance(new URL(location.href).searchParams.get('appearance'));
+  const themeName = appearance ? (isBasic() ? (appearance.mode === 'light' ? 'Default Light Modern' : 'Default Dark Modern') : appearanceTheme(appearance).name) : undefined;
   const editorHost = location.hostname;
   const dot = editorHost.indexOf('.');
   const isolatedOrigin = `https://${editorHost.slice(0, dot)}--assets--{{uuid}}${editorHost.slice(dot)}`;
@@ -65,11 +69,24 @@ export async function start(isBasic: () => boolean, ready: () => void) {
     workspaceProvider: { workspace: undefined, trusted: true, async open() { return false; } },
     enableWorkspaceTrust: true,
     secretStorageProvider: new BrowserSecrets(),
-    configurationDefaults: { 'workbench.startupEditor': 'none', 'telemetry.telemetryLevel': 'off', 'window.title': '${dirty}${activeEditorShort}${separator}MemQL Editor' },
+    configurationDefaults: { ...(themeName ? { 'workbench.colorTheme': themeName } : {}), 'workbench.startupEditor': 'none', 'telemetry.telemetryLevel': 'off', 'window.title': '${dirty}${activeEditorShort}${separator}MemQL Editor' },
     productConfiguration: { nameShort: 'MemQL Editor', nameLong: 'MemQL Editor', enableTelemetry: false },
   });
   const api = await host.getApi();
+  // The dedicated MemQL host matches each handoff, before revealing the editor.
+  // Keep high contrast as an explicit accessibility choice.
+  if (appearance && themeName && [api.ColorThemeKind.Light, api.ColorThemeKind.Dark].includes(api.window.activeColorTheme.kind)) {
+    try {
+      const workbench = api.workspace.getConfiguration('workbench');
+      const existing = workbench.inspect<Record<string, unknown>>('colorCustomizations')?.globalValue ?? {};
+      const next = appearanceSettings(appearance, existing);
+      const colors = isBasic() ? { ...existing, [`[${themeName}]`]: appearanceTheme(appearance).colors } : next.colors;
+      await workbench.update('colorCustomizations', colors, api.ConfigurationTarget.Global);
+      await workbench.update('colorTheme', themeName, api.ConfigurationTarget.Global);
+    } catch { void api.window.showWarningMessage('The editor theme could not be matched. You can change it in Settings.'); }
+  }
   if (isBasic()) { ready(); return; }
+  registerDictation(api);
   await checkTools((command: string) => api.commands.executeCommand(command));
   if (isBasic()) { ready(); return; }
   api.commands.registerCommand('memql.editor.showTools', () => api.commands.executeCommand('workbench.extensions.search', '@builtin memql'));

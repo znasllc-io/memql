@@ -34,7 +34,7 @@ import {
   type CredentialFailureReason,
   type CredentialSource,
 } from "./credentials.js";
-import { webSocketUrlFor } from "./endpoint.js";
+import { apiBaseUrlFor, webSocketUrlFor } from "./endpoint.js";
 
 /**
  * WHY an error state carries a reason as well as a message.
@@ -135,6 +135,9 @@ export type DialFn = (opts: ConnectOptions) => Promise<Connection>;
 const defaultDial: DialFn = (opts) => Connection.dial(opts);
 
 export class ConnectionManager {
+  private editorScope = {};
+  private editorTarget = "";
+  private editorBearer = "";
   private conn: Connection | undefined;
   // Rebuilt with `conn`, never carried across one. See `get authoring()`.
   private authoringClient: AuthoringClient | undefined;
@@ -191,6 +194,10 @@ export class ConnectionManager {
   get state(): ConnectionState {
     return this.current;
   }
+
+  // A transport retry may keep open editor leases only when it proves the
+  // same target and credential. Explicit connection/account changes never do.
+  get editorSessionScope(): object { return this.editorScope; }
 
   get query(): QueryClient | undefined {
     return this.conn?.query;
@@ -326,6 +333,7 @@ export class ConnectionManager {
   }
 
   async connect(cluster: ClusterConfig): Promise<void> {
+    this.editorScope = {};
     // A person (or activation) asked for THIS connection: any retry of an
     // earlier drop is superseded, whichever cluster it was for.
     this.cancelRetry();
@@ -412,7 +420,10 @@ export class ConnectionManager {
               // credential on its way out.
               onTokenExpired: async () => {
                 const fresh = await this.credentials.forceRefresh(cluster);
-                if (fresh !== null && this.latest.isCurrent(token)) this.currentBearer = fresh;
+                if (fresh !== null && this.latest.isCurrent(token)) {
+                  this.currentBearer = fresh;
+                  this.editorBearer = fresh;
+                }
                 return fresh;
               },
             },
@@ -470,6 +481,10 @@ export class ConnectionManager {
     }
 
     const conn = outcome.value;
+    const editorTarget = JSON.stringify([cluster.name, cluster.domain, webSocketUrlFor(cluster), apiBaseUrlFor(cluster)]);
+    if (retry && (editorTarget !== this.editorTarget || dialedBearer !== this.editorBearer)) this.editorScope = {};
+    this.editorTarget = editorTarget;
+    this.editorBearer = dialedBearer;
     this.conn = conn;
     this.lastDialed = cluster;
     this.authoringClient = undefined;
@@ -483,6 +498,8 @@ export class ConnectionManager {
   }
 
   async disconnect(): Promise<void> {
+    this.editorScope = {};
+    this.editorBearer = "";
     this.cancelRetry();
     // invalidate(), not begin(): a disconnect supersedes every outstanding
     // token but starts no operation of its own, so there is no token to mint.

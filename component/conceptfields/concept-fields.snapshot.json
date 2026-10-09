@@ -3051,6 +3051,7 @@
         "authorUserId",
         "body",
         "ownerUserId",
+        "purpose",
         "requestId",
         "revision",
         "versionNumber"
@@ -3064,7 +3065,13 @@
         "requestId",
         "revision",
         "versionNumber"
-      ]
+      ],
+      "enums": {
+        "purpose": [
+          "feedback",
+          "note"
+        ]
+      }
     },
     {
       "concept": "v1:library:documentVersion",
@@ -3073,6 +3080,11 @@
         "attachmentId",
         "authorId",
         "authorKind",
+        "branchName",
+        "branchParentArtifactId",
+        "branchParentRevision",
+        "branchParentVersion",
+        "branchRootArtifactId",
         "content",
         "documentId",
         "note",

@@ -63,6 +63,7 @@ import (
 // Replier itself and this package needs no import of the agent-tagged tree --
 // which it could not have, because it loads on nodes that do not build it.
 type AgentTurnRunner interface {
+	ResolveOwnerAgent(context.Context, string) (string, error)
 	// RunTurn executes one agent turn and returns the reply text. A caller
 	// that wants deltas uses the gRPC path; this one waits.
 	RunTurn(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg) (string, error)
@@ -101,8 +102,44 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 	}
 	agentId := strings.TrimSpace(asString(args["agentId"]))
 	prompt := strings.TrimSpace(asString(args["prompt"]))
-	if agentId == "" || prompt == "" {
-		return nil, fmt.Errorf("runAgentTurn: needs an agentId and a prompt")
+	if templateID := strings.TrimSpace(asString(args["templateId"])); templateID != "" {
+		if prompt != "" {
+			return nil, fmt.Errorf("runAgentTurn: supply either prompt or templateId")
+		}
+		if i.engine == nil {
+			return nil, fmt.Errorf("runAgentTurn: no engine to render the named prompt")
+		}
+		data, err := promptData(templateID, args["data"])
+		if err != nil {
+			return nil, err
+		}
+		prompt, err = i.engine.RenderPrompt(templateID, data)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if prompt == "" {
+		return nil, fmt.Errorf("runAgentTurn: needs a prompt")
+	}
+	runner := i.agentTurnRunner()
+	if agentId == "" {
+		run, ok := common.RunFromContext(ctx)
+		ac, _ := auth.AccessFromContext(ctx)
+		if !ok || run.RunId == "" || run.OwnerUserId == "" || ac == nil || memql.BareShortId(ac.UserId) != memql.BareShortId(run.OwnerUserId) {
+			return nil, fmt.Errorf("runAgentTurn: omitting agentId requires an owned work run")
+		}
+		if runner == nil {
+			return nil, fmt.Errorf("runAgentTurn: no agent runtime on this agent node")
+		}
+		var err error
+		agentId, err = runner.ResolveOwnerAgent(ctx, run.OwnerUserId)
+		if err != nil {
+			return nil, err
+		}
+		if agentId == "" {
+			return nil, fmt.Errorf("runAgentTurn: no reasoning agent for this owner")
+		}
 	}
 	requireFile, _ := args["requireFile"].(bool)
 	if requireFile {
@@ -113,7 +150,6 @@ func (i *Integration) handleRunAgentTurn(ctx context.Context, args map[string]an
 		}
 	}
 
-	runner := i.agentTurnRunner()
 	if runner == nil {
 		// NAMED, not empty. An empty reply is indistinguishable from an agent
 		// that had nothing to say, and this is a deployment fact rather than

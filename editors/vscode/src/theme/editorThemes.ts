@@ -50,7 +50,7 @@
 // this module is data, shared by the drift test and by
 // scripts/generate-themes.mjs, and neither runs inside an editor.
 
-import { DARK, LIGHT, type PaletteKey } from "../webview/palette.js";
+import { DARK, LIGHT, type Palette, type PaletteKey } from "../webview/palette.js";
 
 /** Which of the two themes is being built. */
 export type ThemeVariant = "dark" | "light";
@@ -286,8 +286,7 @@ const TOKENS: readonly { name: string; scope: string[]; token: PaletteKey; fontS
 ];
 
 /** Build one theme from its palette. Pure: same variant in, same bytes out. */
-export function buildEditorTheme(variant: ThemeVariant): EditorTheme {
-  const palette = variant === "dark" ? DARK : LIGHT;
+export function buildEditorTheme(variant: ThemeVariant, palette: Palette = variant === "dark" ? DARK : LIGHT): EditorTheme {
 
   const colors: Record<string, string> = {};
   for (const [id, token] of Object.entries(COLORS)) colors[id] = palette[token];

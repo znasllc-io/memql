@@ -171,7 +171,7 @@ builtin libraryAddDocumentComment {
   requestId string!
 }
 
-/// Capture selected current feedback and open a Nexus run waiting for approval.
+/// Capture selected current feedback and start its analysis run.
 @sdk
 @executor("integration.library.requestDocumentRevision")
 @args(profile="object")
@@ -184,13 +184,28 @@ builtin libraryRequestDocumentRevision {
  requestId string!
 }
 
-/// Read the exact owned proposal, approval, run and output draft.
+/// Read the owned analysis, proposed replacements, decision and saved result.
 @sdk
 @executor("integration.library.documentRevisionStatus")
 @args(profile="object")
 builtin libraryDocumentRevisionStatus {
  requestId string!
 }
+
+/// Revalidate and read the immutable source captured for the current owned run.
+@executor("integration.library.revisionInput")
+@args(profile="object")
+builtin libraryRevisionInput { requestId string! }
+
+/// Decode and validate replacements only within the selected source passages.
+@executor("integration.library.revisionProposal")
+@args(profile="object")
+builtin libraryRevisionProposal { requestId string! response any! }
+
+/// Park the current run on an exact proposal; return only after human approval.
+@executor("integration.library.reviewRevision")
+@args(profile="object")
+builtin libraryReviewRevision { requestId string! proposal object! question string! }
 
 /// Only its approved, server-owned run may execute this revision.
 @executor("integration.library.executeDocumentRevision")
@@ -305,3 +320,66 @@ builtin libraryAuditTraining {  }
 @executor("integration.library.libraryComposeRevision")
 @args(profile="object")
 builtin libraryComposeRevision { name string! format string! statement string! }
+
+/// Revise one proposal item with AI; retain every other item unchanged.
+@sdk
+@executor("integration.library.modifyRevisionItem")
+@args(profile="object")
+builtin libraryModifyRevisionItem {
+ requestId string!
+ approvalId string!
+ itemId string!
+ instruction string!
+ newRequestId string!
+}
+
+
+@sdk
+@executor("integration.library.documentHistory")
+@args(profile="object")
+@description("Read owned document history metadata, with a version cursor and branch provenance.")
+builtin libraryDocumentHistory {
+  artifactId string!
+  beforeVersion int
+}
+
+@sdk
+@executor("integration.library.documentVersion")
+@args(profile="object")
+@description("Open a retained Markdown snapshot without changing its current document.")
+builtin libraryDocumentVersion {
+  artifactId string!
+  versionNumber int!
+}
+
+@sdk
+@executor("integration.library.forkDocumentVersion")
+@args(profile="object")
+@description("Create an independent document branch from an exact owned snapshot. Durable request identity makes retries safe across replicas; original content and history are preserved.")
+builtin libraryForkDocumentVersion {
+  artifactId string!
+  versionNumber int!
+  revision string!
+  name string!
+  requestId string!
+}
+
+
+@sdk
+@executor("integration.library.documentNotes")
+@args(profile="object")
+@description("Read the caller's personal document notes after checking current document access. These are not AI feedback.")
+builtin libraryDocumentNotes { artifactId string! }
+
+@sdk
+@executor("integration.library.addDocumentNote")
+@args(profile="object")
+@description("Save a personal note on an exact selected passage. Notes never enter AI revision requests.")
+builtin libraryAddDocumentNote {
+  artifactId string!
+  expectedVersion int!
+  expectedRevision string!
+  anchor object!
+  body string!
+  requestId string!
+}

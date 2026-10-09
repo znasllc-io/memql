@@ -2391,6 +2391,104 @@ func LibraryAddDocumentCommentBuild(args LibraryAddDocumentCommentArgs) string {
 	return b.String()
 }
 
+// LibraryAddDocumentNote -- Save a personal note on an exact selected passage. Notes never enter AI revision requests.
+type LibraryAddDocumentNoteArgs struct {
+	ArtifactId       string
+	ExpectedVersion  int
+	ExpectedRevision string
+	Anchor           map[string]any
+	Body             string
+	RequestId        string
+}
+
+// LibraryAddDocumentNote calls the engine builtin libraryAddDocumentNote.
+func (qc *QueryClient) LibraryAddDocumentNote(ctx context.Context, args LibraryAddDocumentNoteArgs) (*Result, error) {
+	call := LibraryAddDocumentNoteBuild(args)
+	return qc.executeNamed(ctx, "libraryAddDocumentNote", call)
+}
+
+func LibraryAddDocumentNoteBuild(args LibraryAddDocumentNoteArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryAddDocumentNote(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedVersion: ")
+	b.WriteString(fmt.Sprintf("%v", args.ExpectedVersion))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("anchor: ")
+	b.WriteString(renderMemQLValue(args.Anchor))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("body: ")
+	b.WriteString(quoteMemQL(args.Body))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryDocumentHistory -- Read owned document history metadata, with a version cursor and branch provenance.
+type LibraryDocumentHistoryArgs struct {
+	ArtifactId    string
+	BeforeVersion int
+}
+
+// LibraryDocumentHistory calls the engine builtin libraryDocumentHistory.
+func (qc *QueryClient) LibraryDocumentHistory(ctx context.Context, args LibraryDocumentHistoryArgs) (*Result, error) {
+	call := LibraryDocumentHistoryBuild(args)
+	return qc.executeNamed(ctx, "libraryDocumentHistory", call)
+}
+
+func LibraryDocumentHistoryBuild(args LibraryDocumentHistoryArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryDocumentHistory(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if args.BeforeVersion != 0 {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("beforeVersion: ")
+		b.WriteString(fmt.Sprintf("%v", args.BeforeVersion))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryDocumentNotes -- Read the caller's personal document notes after checking current document access. These are not AI feedback.
+type LibraryDocumentNotesArgs struct {
+	ArtifactId string
+}
+
+// LibraryDocumentNotes calls the engine builtin libraryDocumentNotes.
+func (qc *QueryClient) LibraryDocumentNotes(ctx context.Context, args LibraryDocumentNotesArgs) (*Result, error) {
+	call := LibraryDocumentNotesBuild(args)
+	return qc.executeNamed(ctx, "libraryDocumentNotes", call)
+}
+
+func LibraryDocumentNotesBuild(args LibraryDocumentNotesArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryDocumentNotes(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryDocumentReview -- Read revision-bound feedback after checking current access to the artifact.
 type LibraryDocumentReviewArgs struct {
 	ArtifactId string
@@ -2411,7 +2509,7 @@ func LibraryDocumentReviewBuild(args LibraryDocumentReviewArgs) string {
 	return b.String()
 }
 
-// LibraryDocumentRevisionStatus -- Read the exact owned proposal, approval, run and output draft.
+// LibraryDocumentRevisionStatus -- Read the owned analysis, proposed replacements, decision and saved result.
 type LibraryDocumentRevisionStatusArgs struct {
 	RequestId string
 }
@@ -2427,6 +2525,120 @@ func LibraryDocumentRevisionStatusBuild(args LibraryDocumentRevisionStatusArgs) 
 	b.WriteString("builtin libraryDocumentRevisionStatus(")
 	b.WriteString("requestId: ")
 	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryDocumentVersion -- Open a retained Markdown snapshot without changing its current document.
+type LibraryDocumentVersionArgs struct {
+	ArtifactId    string
+	VersionNumber int
+}
+
+// LibraryDocumentVersion calls the engine builtin libraryDocumentVersion.
+func (qc *QueryClient) LibraryDocumentVersion(ctx context.Context, args LibraryDocumentVersionArgs) (*Result, error) {
+	call := LibraryDocumentVersionBuild(args)
+	return qc.executeNamed(ctx, "libraryDocumentVersion", call)
+}
+
+func LibraryDocumentVersionBuild(args LibraryDocumentVersionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryDocumentVersion(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("versionNumber: ")
+	b.WriteString(fmt.Sprintf("%v", args.VersionNumber))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryForkDocumentVersion -- Create an independent document branch from an exact owned snapshot. Durable request identity makes retries safe across replicas; original content and history are preserved.
+type LibraryForkDocumentVersionArgs struct {
+	ArtifactId    string
+	VersionNumber int
+	Revision      string
+	Name          string
+	RequestId     string
+}
+
+// LibraryForkDocumentVersion calls the engine builtin libraryForkDocumentVersion.
+func (qc *QueryClient) LibraryForkDocumentVersion(ctx context.Context, args LibraryForkDocumentVersionArgs) (*Result, error) {
+	call := LibraryForkDocumentVersionBuild(args)
+	return qc.executeNamed(ctx, "libraryForkDocumentVersion", call)
+}
+
+func LibraryForkDocumentVersionBuild(args LibraryForkDocumentVersionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryForkDocumentVersion(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("versionNumber: ")
+	b.WriteString(fmt.Sprintf("%v", args.VersionNumber))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(quoteMemQL(args.Revision))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if b.Len() > 35 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryModifyRevisionItem -- Revise one proposal item with AI; retain every other item unchanged.
+type LibraryModifyRevisionItemArgs struct {
+	RequestId    string
+	ApprovalId   string
+	ItemId       string
+	Instruction  string
+	NewRequestId string
+}
+
+// LibraryModifyRevisionItem calls the engine builtin libraryModifyRevisionItem.
+func (qc *QueryClient) LibraryModifyRevisionItem(ctx context.Context, args LibraryModifyRevisionItemArgs) (*Result, error) {
+	call := LibraryModifyRevisionItemBuild(args)
+	return qc.executeNamed(ctx, "libraryModifyRevisionItem", call)
+}
+
+func LibraryModifyRevisionItemBuild(args LibraryModifyRevisionItemArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin libraryModifyRevisionItem(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("itemId: ")
+	b.WriteString(quoteMemQL(args.ItemId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("instruction: ")
+	b.WriteString(quoteMemQL(args.Instruction))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("newRequestId: ")
+	b.WriteString(quoteMemQL(args.NewRequestId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -2457,7 +2669,7 @@ func LibraryRemoveArtifactLabelBuild(args LibraryRemoveArtifactLabelArgs) string
 	return b.String()
 }
 
-// LibraryRequestDocumentRevision -- Capture selected current feedback and open a Nexus run waiting for approval.
+// LibraryRequestDocumentRevision -- Capture selected current feedback and start its analysis run.
 type LibraryRequestDocumentRevisionArgs struct {
 	ArtifactId       string
 	ExpectedVersion  int

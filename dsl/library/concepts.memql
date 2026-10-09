@@ -185,11 +185,17 @@ concept generatedOutput {
 @displayCard(primary="documentId", secondary="note", tertiary="createdAt")
 @rowAuthz(owner="ownerUserId")
 concept documentVersion {
+  branchRootArtifactId string @description("Original artifact of a branch family, recorded only on the immutable initial snapshot.")
+  branchParentArtifactId string @description("Artifact whose exact version was copied to create this branch; a provenance link, not authorship.")
+  branchParentVersion int @description("Version copied from the parent artifact.")
+  branchParentRevision string @description("Exact revision copied from the parent artifact.")
+  branchName string @description("Human-readable name chosen when creating the branch.")
+
   ownerUserId      string!  @serverSet  @description("v1:identity:user.id that owns the logical document this version belongs to. Stamped from actor.userId on every append and never accepted from caller args: the edit/restore handlers resolve the backing document's owner and run the append under that owner's actor, so the stamped value is the document owner and ownership cannot be forged. @serverSet makes that a LOAD-TIME rejection rather than a convention, and the engine server-stamps the field from the @rowAuthz declaration above on the raw insert() surface that bypasses accept/stamp (memql#3059 / #3175). The load-bearing per-row authz key for every history read.")
 
   documentId       string!  @description("Logical document id this version belongs to -- the stable identity of the document ACROSS all its versions (e.g. the v1:library:generatedOutput id, or the artifact's sourceConceptRef). A PLAIN STRING foreign key, NOT an @relationship: it points across concepts to the backing document, and the only valid @relationship types (parent/contains/alias/equals) don't model a cross-concept content-history link. Every version of the same document shares this value; it is the grouping key for the history queries.")
 
-  versionNumber    int!  @description("Monotonically increasing version number within the logical document, starting at 1 for the first snapshot. Computed server-side as (latest existing versionNumber for this documentId) + 1 on every append -- MemQL has no arithmetic, so the increment is done in the Go edit/restore handlers that read the current latest before inserting. The user-visible 'v3' label and the optimistic-concurrency token (an edit naming an expectedVersion that no longer matches the latest is a conflict).")
+  versionNumber    int!  @description("Monotonically increasing version number within the logical document, starting at 0 for the initial content snapshot (older documents may begin at 1). Computed server-side as (latest existing versionNumber for this documentId) + 1 on every append -- MemQL has no arithmetic, so the increment is done in the Go edit/restore handlers that read the current latest before inserting. The user-visible 'v3' label and the optimistic-concurrency token (an edit naming an expectedVersion that no longer matches the latest is a conflict).")
 
   content          string  @description("Inline text content for this version (markdown / plain text). The immutable body snapshot. File-backed documents leave this empty and carry bytes on attachmentId instead. body and/or attachmentId -- at least one is set.")
 
@@ -677,6 +683,7 @@ concept watchedFolder {
 @displayCard(primary="body")
 @rowAuthz(owner="ownerUserId", clusterOwner)
 concept documentComment {
+  purpose enum("feedback", "note") @description("Absent means feedback. A personal note is never eligible for AI revision input.")
   ownerUserId  string! @serverSet @description("The backing document's owner; assigned only by the review store after caller authorization.")
   artifactId   string!
   authorUserId string!

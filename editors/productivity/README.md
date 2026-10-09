@@ -35,11 +35,63 @@ this directory. `npm test` exercises pure logic. The host suite uses
 after both extensions have been compiled. `npm run package` creates a VSIX
 with both entry points; it does not publish it.
 
-Markdown mode controls are available above the reading view and from the command
-palette: **Markdown Source**, **Markdown Reading View**, and **Markdown Split
-View**. The source and preview share one VS Code document, including unsaved
-changes. Save before adding shared feedback. Local files remain local; opening
+Markdown has **Source**, **Read**, and **Review** modes. Read is a clean reading
+surface with **Copy** and **Add note** for selected text. Review adds **Feedback** to that menu
+for selected text. Cut and Paste are available in Source and editable feedback
+fields, never on the rendered document. Review offers one feedback action for selections and sections, plus
+a circular plus button at the end to extend the document. The circular revision
+button above the document accepts whole-document direction: a name correction
+changes only relevant references; a requested rewrite can rework the whole
+document. Both require proposal review and approval.
+
+The header’s **Find in document** button and ⌘F/Ctrl+F search rendered document text
+in Read and Review, with highlighted matches, counts and next/previous navigation. Source uses the native
+VS Code text editor, including Find/Replace, selection, Cut/Copy/Paste and undo.
+
+**Version history** opens retained versions without replacing the current head.
+Choose a version, preview it, then **Start branch** to create a separate Markdown
+document with its own history and a durable link to the exact parent revision.
+History loads earlier pages on demand. Initial generated content is retained
+before its first edit; versions not retained by older releases cannot be recovered.
+
+**Add note** creates a personal passage annotation, available in Read and Review.
+The header’s Notes button opens a separate panel; passage markers show note
+previews on hover and open the note on click. Unchanged, unambiguous passages
+keep their markers after edits; otherwise the note remains listed as belonging
+to an earlier version. Notes reuse document annotations with an explicit purpose,
+are visible only to their author through this surface, and are rejected as AI
+revision input. They do not enter the standalone MemQLOS notes list.
+
+ **Markdown Split View** remains
+available in the editor title and command palette. These views share one VS Code
+document, including unsaved changes. Save before adding shared feedback. Local files remain local; opening
 one never silently uploads it or starts another Cockpit backup process.
+
+Review each proposal with **Accept**, **Decline**, or **Modify with AI**, then
+choose **Apply accepted**. Linked edits, such as moving a passage, share one
+decision. Modifying an item preserves the other proposed items and their
+decisions. The DSL workflow uses the harness for evidence collection when the
+feedback calls for research, then prepares exact replacements for human review.
+Unchanged text and formatting are preserved by default. **Show in document**
+keeps the target highlighted; expanded explanations survive status updates.
+
+In the MemQL browser editor, **Dictate** in feedback, extension and per-item
+modification composers uses Ask's
+microphone capture and authenticated transcription stream. Browser microphone
+permission is requested on first use. Stop to finish transcribing, edit the
+transcript, then add it to review. Nothing is submitted automatically. Closing
+the view, switching to Read or changing the connection cancels capture. Ordinary desktop VS Code
+does not expose this capture adapter, so its feedback composer remains text-only.
+The cluster must offer an eligible speech recognition model: a running Whisper
+endpoint also needs its Cockpit worker registered, connected and allowed to
+serve that model. Text-model readiness alone does not establish dictation readiness.
+
+The immutable approval records human feedback separately from proposed text,
+the measured provider/model calls behind each item, the exact accepted subset,
+and the source revision. A modified item gets its new attribution while retained
+items keep theirs. Existing document/file version history remains the source of
+earlier authorship; this does not infer missing model identities for imported
+or historical content.
 
 The reading view uses an HTML-disabled Markdown renderer and does not fetch
 remote images. Links open only after a deliberate click. Shared comments require
@@ -100,20 +152,54 @@ captures the ready template content it reviewed, so later copy edits do not
 change an in-progress campaign. Existing jobs without a captured snapshot retain
 the older live-template behavior; pause and recreate those jobs to capture a copy.
 
-For an AI-assisted Markdown revision, select up to 20 current comments, describe
-what should change, and choose **Review change request**. The cluster captures
-the exact saved source (up to 128 KiB), selected feedback and instruction before
-opening a Nexus job that waits for human approval. Inspect the captured source
-and feedback, then choose **Approve draft job** or **Decline**. Approval can also
-be handled in the existing Nexus inbox. Refresh the reading view to see progress.
+In **Review**, select a passage and choose **Feedback**, use the feedback icon
+beside a heading, or press Ctrl/Cmd+Alt+M. Describe what you want; the DSL-driven
+harness infers additions, revisions, deletion, moves and research from that
+request. Selecting a section supplies context without forcing an operation.
+**Extend document** at the end also starts a request without a selection. Unfinished notes stay attached to their selection across view
+changes; if the source changes, their text is preserved and must be reselected.
+Both composers use **Add to review**. The **Requests** list uses labeled
+**Included / Excluded** switches to choose what enters the next proposal; a
+previous completed review is collapsed. Submitted requests become read-only
+and appear beside their corresponding changes, without inclusion controls.
+**Propose changes** generates the same before/after review and
+approval controls for passage feedback and standalone extensions. Overlapping
+status reads cannot let an old completed request hide a new proposal.
+Reopening an editor restores the latest owned request from a DSL lookup in
+MemQL, even when the browser has an older saved receipt. Request ordering uses
+admission time, so later heartbeats on an older review cannot displace it.
 
-The approved job uses Materializer and MemQL's model router with a one-model-call
-ceiling. It saves a separate draft in Files. **Compare draft** opens a read-only
-diff; return to the reading view and choose **Apply compared draft** when ready.
-The original is saved as a new version only after that action. Source changes or
-revoked write access before approval/execution stop the job; an intervening save
-before applying the draft refuses the save and keeps the local edits. Request
-and decision retries recover the same work identities, including an interrupted
-bootstrap or resume. Opening a file, adding a comment, or preparing a request
-does not itself start AI work. Feedback-driven revision currently supports
-Markdown; email example generation and publishing use their separate controls.
+Choose up to 100 current notes and **Propose changes**. This starts a bounded
+AI revision against the exact saved Markdown source, up to 128 KiB. The DSL
+`reviseLibraryDocument` template orders source capture, harness evidence gathering,
+the named revision prompt, validation, human review and application. The native capabilities enforce
+ownership, source revisions, unambiguous non-overlapping replacements, exact
+approval and versioned storage. No generation-specific metadata is required:
+imported Markdown uses the same source, quote, context and position anchors.
+
+The review panel shows the original and proposed text for every affected
+location, including both ends of a move. Location links scroll to the affected
+passage without closing Review; proposal links use the actual insertion location,
+even when the request started at the document end. At narrow widths Review
+becomes a bottom panel, keeping the document reachable above it. **Compare full document** opens a
+read-only diff. **Apply accepted** resumes the same Nexus job and saves a new
+version containing only accepted items; declined items are excluded. Preservation is the default:
+people can say "Rename this to Draft Exchange" without asking to retain bold
+formatting, surrounding descriptions or other items. The DSL prompt requires
+minimal changes and a check that every difference serves the feedback. Native
+application copies unaffected bytes and matching context from the saved source.
+Explicit document-end extension requests also enforce insertion-only changes;
+addition-only feedback follows the preservation contract in the DSL prompt. Additions default to
+the selected section or passage, or append when started at the document end.
+Instructions can direct an addition elsewhere, such as question time after lunch
+in a schedule. The button's location does not constrain the insertion point.
+Requests can also delete, rearrange or extend content. The
+panel follows progress and refreshes a clean editor after application, while
+preserving unsaved local edits. Invalid or ambiguous AI output fails without a
+write; a failed or declined attempt can be submitted again.
+
+Opening a document and saving notes do not start AI work. Approval is tied to
+the exact proposal and source revision; intervening edits or revoked authority
+refuse the save. Repeated submissions and decisions recover existing receipts,
+and resumption on another replica reuses the journaled AI result. Feedback-driven
+revision currently supports Markdown; email composition uses separate controls.

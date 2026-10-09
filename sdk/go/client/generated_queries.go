@@ -3297,7 +3297,8 @@ func DocumentVersionsBuild(args DocumentVersionsArgs) string {
 //
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["documentVersionsForOwner"] in generated_concepts.go).
 type DocumentVersionsForOwnerArgs struct {
-	DocumentId string
+	DocumentId      string
+	DocumentIdAlias string
 }
 
 // DocumentVersionsForOwner calls the engine query documentVersionsForOwner.
@@ -3311,6 +3312,13 @@ func DocumentVersionsForOwnerBuild(args DocumentVersionsForOwnerArgs) string {
 	b.WriteString("query documentVersionsForOwner(")
 	b.WriteString("documentId: ")
 	b.WriteString(quoteMemQL(args.DocumentId))
+	if args.DocumentIdAlias != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("documentIdAlias: ")
+		b.WriteString(quoteMemQL(args.DocumentIdAlias))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -4390,6 +4398,62 @@ func LibraryArtifactsByLensBuild(args LibraryArtifactsByLensArgs) string {
 	return b.String()
 }
 
+// LibraryDocumentBranches -- Branch roots retain their exact parent link even after their document changes.
+//
+// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentBranches"] in generated_concepts.go).
+type LibraryDocumentBranchesArgs struct {
+	RootArtifactId string
+}
+
+// LibraryDocumentBranches calls the engine query libraryDocumentBranches.
+func (qc *QueryClient) LibraryDocumentBranches(ctx context.Context, args LibraryDocumentBranchesArgs) (*Result, error) {
+	call := LibraryDocumentBranchesBuild(args)
+	return qc.executeNamed(ctx, "libraryDocumentBranches", call)
+}
+
+func LibraryDocumentBranchesBuild(args LibraryDocumentBranchesArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryDocumentBranches(")
+	b.WriteString("rootArtifactId: ")
+	b.WriteString(quoteMemQL(args.RootArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// LibraryDocumentHistoryPage -- Cursor-based retained document history. Bodies are fetched only on selection.
+//
+// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentHistoryPage"] in generated_concepts.go).
+type LibraryDocumentHistoryPageArgs struct {
+}
+
+// LibraryDocumentHistoryPage calls the engine query libraryDocumentHistoryPage.
+func (qc *QueryClient) LibraryDocumentHistoryPage(ctx context.Context, args LibraryDocumentHistoryPageArgs) (*Result, error) {
+	call := LibraryDocumentHistoryPageBuild(args)
+	return qc.executeNamed(ctx, "libraryDocumentHistoryPage", call)
+}
+
+func LibraryDocumentHistoryPageBuild(args LibraryDocumentHistoryPageArgs) string {
+	_ = args
+	return "query libraryDocumentHistoryPage()"
+}
+
+// LibraryDocumentVersionByNumber -- One owned immutable snapshot, including the initial version zero.
+//
+// Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["libraryDocumentVersionByNumber"] in generated_concepts.go).
+type LibraryDocumentVersionByNumberArgs struct {
+}
+
+// LibraryDocumentVersionByNumber calls the engine query libraryDocumentVersionByNumber.
+func (qc *QueryClient) LibraryDocumentVersionByNumber(ctx context.Context, args LibraryDocumentVersionByNumberArgs) (*Result, error) {
+	call := LibraryDocumentVersionByNumberBuild(args)
+	return qc.executeNamed(ctx, "libraryDocumentVersionByNumber", call)
+}
+
+func LibraryDocumentVersionByNumberBuild(args LibraryDocumentVersionByNumberArgs) string {
+	_ = args
+	return "query libraryDocumentVersionByNumber()"
+}
+
 // LibraryFileById -- Fetch one Library file by id, gated to the caller: `row.ownerUserId == actor.userId`, over a concept declaring the composite tier. Backs the artifact detail view and the download / export route, which needs name, mimeType, size and blobUrl together to stream the bytes with correct headers.
 //
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileById"] in generated_concepts.go).
@@ -4489,6 +4553,23 @@ func LibraryFileChunksForFileBuild(args LibraryFileChunksForFileArgs) string {
 	b.WriteString(quoteMemQL(args.FileId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// LibraryFileHistoryPage -- Cursor-based retained file history, with content resolved through owned storage.
+//
+// Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileHistoryPage"] in generated_concepts.go).
+type LibraryFileHistoryPageArgs struct {
+}
+
+// LibraryFileHistoryPage calls the engine query libraryFileHistoryPage.
+func (qc *QueryClient) LibraryFileHistoryPage(ctx context.Context, args LibraryFileHistoryPageArgs) (*Result, error) {
+	call := LibraryFileHistoryPageBuild(args)
+	return qc.executeNamed(ctx, "libraryFileHistoryPage", call)
+}
+
+func LibraryFileHistoryPageBuild(args LibraryFileHistoryPageArgs) string {
+	_ = args
+	return "query libraryFileHistoryPage()"
 }
 
 // LibraryFileSizesForOwner -- The sizes of every file the caller holds, ARCHIVED INCLUDED -- the stored half of the storage quota (memql#4782, design C4). Archived files keep their bytes and keep counting: retention is real, and a quota that forgot archived rows would let 'archive then re-upload' mint unbounded storage. UNBOUNDED for the same fail-open reason as its session sibling; owner-scoped, two fields per row.
@@ -12630,6 +12711,28 @@ func WorkApprovalForOwnerBuild(args WorkApprovalForOwnerArgs) string {
 	return b.String()
 }
 
+// WorkApprovalsForOwnedRun -- Durable decisions for one of the caller's runs, including decided reviews.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwnedRun"] in generated_concepts.go).
+type WorkApprovalsForOwnedRunArgs struct {
+	RunId string
+}
+
+// WorkApprovalsForOwnedRun calls the engine query workApprovalsForOwnedRun.
+func (qc *QueryClient) WorkApprovalsForOwnedRun(ctx context.Context, args WorkApprovalsForOwnedRunArgs) (*Result, error) {
+	call := WorkApprovalsForOwnedRunBuild(args)
+	return qc.executeNamed(ctx, "workApprovalsForOwnedRun", call)
+}
+
+func WorkApprovalsForOwnedRunBuild(args WorkApprovalsForOwnedRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workApprovalsForOwnedRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkApprovalsForOwner -- The caller's pending approvals, newest first. Owned. `row.decision == ""` is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwner"] in generated_concepts.go).
@@ -12743,6 +12846,50 @@ func WorkDescriptionGuidanceBuild(args WorkDescriptionGuidanceArgs) string {
 	b.WriteString("query workDescriptionGuidance(")
 	b.WriteString("goalSignature: ")
 	b.WriteString(quoteMemQL(args.GoalSignature))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkDocumentRevisionAmendment -- A successor invalidates the earlier immutable proposal for application. Ordering is by admission, never a mutable heartbeat or decision timestamp.
+//
+// Bound concept: v1:work:goal (machine-readable: BoundConcepts["workDocumentRevisionAmendment"] in generated_concepts.go).
+type WorkDocumentRevisionAmendmentArgs struct {
+	RequestId string
+}
+
+// WorkDocumentRevisionAmendment calls the engine query workDocumentRevisionAmendment.
+func (qc *QueryClient) WorkDocumentRevisionAmendment(ctx context.Context, args WorkDocumentRevisionAmendmentArgs) (*Result, error) {
+	call := WorkDocumentRevisionAmendmentBuild(args)
+	return qc.executeNamed(ctx, "workDocumentRevisionAmendment", call)
+}
+
+func WorkDocumentRevisionAmendmentBuild(args WorkDocumentRevisionAmendmentArgs) string {
+	var b strings.Builder
+	b.WriteString("query workDocumentRevisionAmendment(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkDocumentRevisionRequest -- Recover this person's latest document review across editor windows and restarts. Returns only an owned request identifier; Library checks the backing document before retrieving its review. This lookup exposes no captured document bytes. startedAt orders requests by admission, not by a later approval or heartbeat.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workDocumentRevisionRequest"] in generated_concepts.go).
+type WorkDocumentRevisionRequestArgs struct {
+	ArtifactId string
+}
+
+// WorkDocumentRevisionRequest calls the engine query workDocumentRevisionRequest.
+func (qc *QueryClient) WorkDocumentRevisionRequest(ctx context.Context, args WorkDocumentRevisionRequestArgs) (*Result, error) {
+	call := WorkDocumentRevisionRequestBuild(args)
+	return qc.executeNamed(ctx, "workDocumentRevisionRequest", call)
+}
+
+func WorkDocumentRevisionRequestBuild(args WorkDocumentRevisionRequestArgs) string {
+	var b strings.Builder
+	b.WriteString("query workDocumentRevisionRequest(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
 	b.WriteString(")")
 	return b.String()
 }

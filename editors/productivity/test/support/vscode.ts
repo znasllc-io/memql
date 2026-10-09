@@ -17,7 +17,7 @@ export const window = {
   showInputBox: async (_options?: unknown): Promise<string | undefined> => undefined,
   showInformationMessage: async (_message: string): Promise<void> => {},
 };
-export const commands = { executeCommand: async (_name: string, ..._args: unknown[]): Promise<void> => {} };
+export const commands = { registerCommand: (_name:string,_handler:(...args:any[])=>any)=>({dispose(){}}), getCommands:async()=>[] as string[], executeCommand: async (_name: string, ..._args: unknown[]): Promise<void> => {} };
 export const workspace = { fs: {
   async readFile(uri: Uri) { const bytes = stored.get(uri.toString()); if (!bytes) throw new Error("not found"); return new Uint8Array(bytes); },
   async writeFile(uri: Uri, bytes: Uint8Array) { writes.push(uri.toString()); stored.set(uri.toString(), new Uint8Array(bytes)); },
@@ -25,3 +25,5 @@ export const workspace = { fs: {
 } };
 
 export const ProgressLocation = { Notification: 15 };
+export const ConfigurationTarget = {Global:1};
+export const ColorThemeKind = {Light:1,Dark:2,HighContrast:3,HighContrastLight:4};

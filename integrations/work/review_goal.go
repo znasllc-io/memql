@@ -26,10 +26,20 @@ type ReviewGoalReceipt struct {
 // No run is published as running during bootstrap; the existing Nexus decision
 // flow is the only way to release it. A partially written request is recoverable.
 func (i *Integration) OpenReviewGoal(ctx context.Context, requestKey string, g DirectGoal, subject map[string]any, question string) (ReviewGoalReceipt, error) {
+	return i.openReviewGoal(ctx, requestKey, g, subject, question, false)
+}
+
+// OpenAnalysisGoal starts a stable, owner-bound request immediately. The DSL
+// template decides where to request review; no approval is manufactured here.
+func (i *Integration) OpenAnalysisGoal(ctx context.Context, requestKey string, g DirectGoal) (ReviewGoalReceipt, error) {
+	return i.openReviewGoal(ctx, requestKey, g, nil, "", true)
+}
+
+func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g DirectGoal, subject map[string]any, question string, analyze bool) (ReviewGoalReceipt, error) {
 	var receipt ReviewGoalReceipt
 	owner := strings.TrimSpace(g.OwnerUserId)
 	requestKey, question = strings.TrimSpace(requestKey), strings.TrimSpace(question)
-	if i == nil || owner == "" || memql.BareShortId(callerUserId(ctx)) != memql.BareShortId(owner) || requestKey == "" || len(requestKey) > 200 || strings.TrimSpace(g.Statement) == "" || strings.TrimSpace(g.AutomationName) == "" || question == "" || len(subject) == 0 {
+	if i == nil || owner == "" || memql.BareShortId(callerUserId(ctx)) != memql.BareShortId(owner) || requestKey == "" || len(requestKey) > 200 || strings.TrimSpace(g.Statement) == "" || strings.TrimSpace(g.AutomationName) == "" || (!analyze && (question == "" || len(subject) == 0)) {
 		return receipt, fmt.Errorf("work: a reviewed request needs its authenticated owner, stable key, proposal and template")
 	}
 	receipt = ReviewGoalIdentity(owner, requestKey)
@@ -95,12 +105,21 @@ func (i *Integration) OpenReviewGoal(ctx context.Context, requestKey string, g D
 			}
 		}
 		now := i.clock().UTC()
+		status := runStatusWaiting
+		waiting := map[string]any{"kind": "approval", "subject": receipt.ApprovalID, "since": rfc(now)}
+		if analyze {
+			status = runStatusRunning
+			waiting = nil
+		}
 		if err = st.createRunRow(scoped, runSeed{Spine: spine, RunId: receipt.RunID, GoalId: receipt.GoalID, AutomationName: g.AutomationName,
-			Input: g.Input, Variables: g.Input, Mode: modeLive, Status: runStatusWaiting, NodeId: selfNodeId(), StartedAt: now,
+			Input: g.Input, Variables: g.Input, Mode: modeLive, Status: status, NodeId: selfNodeId(), StartedAt: now,
 			OwnerUserId: owner, TriggeredBy: g.TriggeredBy, ExecutionAuthority: authority,
-			WaitingOn: map[string]any{"kind": "approval", "subject": receipt.ApprovalID, "since": rfc(now)}}); err != nil {
+			WaitingOn: waiting}); err != nil {
 			return receipt, err
 		}
+	}
+	if analyze {
+		return receipt, nil
 	}
 	approval, err := one(st.query(scoped, "query "+call("workApprovalForOwner", map[string]any{"approvalId": receipt.ApprovalID})))
 	if err != nil {
@@ -151,9 +170,33 @@ func (i *Integration) validatePlanReview(ctx context.Context, kind string, subje
 	return validate(ctx, subject)
 }
 
+// SetPlanReviewAnswerValidator binds a typed selection to an immutable proposal.
+// The owning integration validates its contract; Work persists and replays the
+// person's exact answer under the existing cross-replica decision lock.
+func (i *Integration) SetPlanReviewAnswerValidator(kind string, validate func(context.Context, map[string]any, map[string]any) error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.reviewAnswerValidators == nil {
+		i.reviewAnswerValidators = make(map[string]func(context.Context, map[string]any, map[string]any) error)
+	}
+	i.reviewAnswerValidators[kind] = validate
+}
+func (i *Integration) validatePlanReviewAnswer(ctx context.Context, kind string, subject, answer map[string]any) error {
+	if kind != workstate.ApprovalKindPlanReview {
+		return nil
+	}
+	i.mu.RLock()
+	validate := i.reviewAnswerValidators[rowString(subject, "reviewType")]
+	i.mu.RUnlock()
+	if validate != nil {
+		return validate(ctx, subject, answer)
+	}
+	return nil
+}
+
 // recoverReviewDecision only recovers the fixed-template review bootstrap's
 // resume. It never replays training, promotion, or other approval side effects.
-func (i *Integration) recoverReviewDecision(ctx context.Context, approvalID, decision string) (map[string]any, error) {
+func (i *Integration) recoverReviewDecision(ctx context.Context, approvalID, decision string, answer map[string]any) (map[string]any, error) {
 	st := i.store()
 	approval, err := one(st.query(ctx, "query "+call("workApprovalForOwner", map[string]any{"approvalId": approvalID})))
 	if err != nil || approval == nil {
@@ -161,6 +204,9 @@ func (i *Integration) recoverReviewDecision(ctx context.Context, approvalID, dec
 	}
 	if rowString(approval, "kind") != workstate.ApprovalKindPlanReview || rowString(approval, "decision") != decision {
 		return nil, nil
+	}
+	if workstate.ArtifactHash(optMap(rowMap(approval, "answer"))) != workstate.ArtifactHash(optMap(answer)) {
+		return nil, fmt.Errorf("work: this approval already has a different recorded answer")
 	}
 	run, err := st.runForOwner(ctx, rowString(approval, "runId"))
 	if err != nil || run == nil {
@@ -186,4 +232,13 @@ func (i *Integration) recoverReviewDecision(ctx context.Context, approvalID, dec
 		return nil, err
 	}
 	return map[string]any{"approvalId": approvalID, "runId": memql.BareShortId(rowString(approval, "runId")), "decision": decision, "runResumed": resumed, "recovered": true}, nil
+}
+
+// LockPlanReview serializes replacing a proposal with deciding it. Consumers
+// take this gate before their document gate, matching the shared decision path.
+func (i *Integration) LockPlanReview(ctx context.Context, approvalID string) (func(), error) {
+	if i == nil || i.decisionGate == nil {
+		return nil, fmt.Errorf("work: approval coordination is unavailable")
+	}
+	return i.decisionGate(ctx, approvalID)
 }

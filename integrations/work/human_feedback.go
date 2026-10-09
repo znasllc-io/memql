@@ -41,6 +41,15 @@ func (i *Integration) AskComputerScope(ctx context.Context, owner, runID string,
 	return i.parkHumanDecision(ctx, owner, runID, "scopeElevation", subject, rowString(subject, "summary"), nil, i.clock().UTC().Add(time.Hour))
 }
 
+// AskPlanReview parks the current run on an exact, immutable proposal. The DSL
+// chooses the question and placement; shared native machinery owns the receipt.
+func (i *Integration) AskPlanReview(ctx context.Context, owner, runID string, subject map[string]any, question string) (string, error) {
+	if len(subject) == 0 || strings.TrimSpace(question) == "" || len(question) > 8000 {
+		return "", fmt.Errorf("review needs a proposal and question")
+	}
+	return i.parkHumanDecision(ctx, owner, runID, workstate.ApprovalKindPlanReview, subject, question, nil, time.Time{})
+}
+
 func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, approvalKind string, subject map[string]any, question string, options []map[string]any, expires time.Time) (string, error) {
 	rc, ok := common.RunFromContext(ctx)
 	if !ok || memql.BareShortId(rc.RunId) != memql.BareShortId(runID) || memql.BareShortId(rc.OwnerUserId) != memql.BareShortId(owner) {

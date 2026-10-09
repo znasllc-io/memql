@@ -56,7 +56,7 @@ func (a *App) transportAgent() {
 	// Materializer automation steps execute here, with this node's own
 	// registered integration, AI router and shared Library blob container.
 	a.wireComposeIntegration(uploader, blobContainer)
-	a.wireLibraryIntegration(uploader)
+	a.wireLibraryIntegration(uploader, blobContainer)
 	a.wireReleaseCandidates(uploader, blobContainer)
 
 	// memql#733/#801: hand the workbench integration the Azure Blob uploader so a

@@ -211,6 +211,11 @@ type replierTurnRunner struct {
 	engine  *memql.MemQLEngine
 }
 
+func (r *replierTurnRunner) ResolveOwnerAgent(ctx context.Context, owner string) (string, error) {
+	resolved, err := procedureReasoningAgents(r.engine)(ctx, owner)
+	return resolved.Id, err
+}
+
 func (r *replierTurnRunner) RunTurn(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg) (string, error) {
 	bounded, stopBudget, err := r.engine.ContextWithRunDeadline(ctx)
 	if err != nil {

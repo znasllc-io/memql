@@ -365,7 +365,8 @@ func (h *ModelCallHandle) RequestId() string {
 	return h.requestId
 }
 
-// Deltas is the stream of generated output. Closed when the call ends.
+// Deltas carries output and explicit Keepalive signals. Keepalives carry no
+// content or tools; downstream watchdogs must still see them. Closed at end.
 func (h *ModelCallHandle) Deltas() <-chan ModelCallDelta {
 	if h == nil {
 		return nil
@@ -469,15 +470,16 @@ func (h *ModelCallHandle) deliverDelta(d ModelCallDelta) {
 	if !d.Keepalive && d.Content != "" {
 		h.assembly.WriteString(d.Content)
 	}
-	h.absorbToolFragmentsLocked(d.ToolCalls)
+	if d.Keepalive {
+		d.Content = ""
+		d.ToolCalls = nil
+	} else {
+		h.absorbToolFragmentsLocked(d.ToolCalls)
+	}
 	h.mu.Unlock()
 
-	// A keepalive is a liveness signal, not output. It has already reset
-	// the idle timer above; forwarding it would put empty deltas into
-	// every consumer's loop for no reader's benefit.
-	if d.Keepalive {
-		return
-	}
+	// Preserve liveness across callers and replica hops. Dropping it here
+	// makes an outer watchdog cancel active inference before answer text.
 
 	select {
 	case h.deltas <- d:
