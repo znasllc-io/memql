@@ -29,7 +29,7 @@ func contextResearchTrace() []common.ChatMessage {
 
 func TestWorkContextChunkKeepsCompleteParallelExchanges(t *testing.T) {
 	messages := contextResearchTrace()
-	start, end := workContextChunk(messages, 15000-len(workContextTask(messages)))
+	start, end := workContextChunk(messages, workCheckpointInputBytes-len(workContextTask(messages)))
 	require.Equal(t, 2, start)
 	require.Equal(t, 5, end)
 	for _, u := range workContextUnits(messages) {
@@ -38,7 +38,7 @@ func TestWorkContextChunkKeepsCompleteParallelExchanges(t *testing.T) {
 	// A short transcript may retire an older exchange, still preserving the
 	// newest one; a pending or mismatched group must never be compacted.
 	short := append(append([]common.ChatMessage{}, messages[:5]...), messages[7:]...)
-	start, end = workContextChunk(short, 15000-len(workContextTask(short)))
+	start, end = workContextChunk(short, workCheckpointInputBytes-len(workContextTask(short)))
 	require.Equal(t, []int{2, 5}, []int{start, end})
 	for _, broken := range []string{"missing", "duplicate", "unrelated"} {
 		t.Run(broken, func(t *testing.T) {
@@ -52,7 +52,7 @@ func TestWorkContextChunkKeepsCompleteParallelExchanges(t *testing.T) {
 				bad[4].ToolCallId = "other"
 			}
 			require.False(t, workContextUnits(bad)[2].complete)
-			s, _ := workContextChunk(bad, 15000-len(workContextTask(bad)))
+			s, _ := workContextChunk(bad, workCheckpointInputBytes-len(workContextTask(bad)))
 			require.NotEqual(t, 2, s)
 		})
 	}
@@ -62,7 +62,7 @@ func TestWorkContextChunkPinsAuthorityRequestAndLatestCorrection(t *testing.T) {
 	messages := contextResearchTrace()
 	messages = append(messages, common.ChatMessage{Role: "user", Content: "Correction: use Morgan, not Taylor"}, common.ChatMessage{Role: "assistant", Content: "Working"})
 	for range 3 {
-		s, e := workContextChunk(messages, 15000-len(workContextTask(messages)))
+		s, e := workContextChunk(messages, workCheckpointInputBytes-len(workContextTask(messages)))
 		if s == e {
 			break
 		}

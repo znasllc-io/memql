@@ -25,6 +25,13 @@ type workCheckpoint struct {
 
 const workCheckpointSchema = `{"type":"object","properties":{"facts":{"type":"array","items":{"type":"string"}},"entities":{"type":"array","items":{"type":"string"}},"decisions":{"type":"array","items":{"type":"string"}},"constraints":{"type":"array","items":{"type":"string"}},"unfinished":{"type":"array","items":{"type":"string"}}},"required":["facts","entities","decisions","constraints","unfinished"],"additionalProperties":false}`
 
+// A strong checkpoint can consolidate several bounded retrievals together.
+// The smaller fast-model window forced even ordinary parallel results into
+// head/tail previews before the summarizer could read their evidence. This
+// byte cap includes the relevance context; routing still reserves output and
+// requires a provider that can serve the complete rendered request.
+const workCheckpointInputBytes = 30000
+
 func WorkContextSize(messages []common.ChatMessage, tools []common.ToolDefinition) int {
 	raw, _ := json.Marshal(struct {
 		Messages []common.ChatMessage
@@ -52,7 +59,7 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 	}
 	out := append([]common.ChatMessage(nil), messages...)
 	task := workContextTask(messages)
-	sourceLimit := 15000 - len(task)
+	sourceLimit := workCheckpointInputBytes - len(task)
 	// Offload bulky, completed tool results first. Their envelopes and receipts
 	// stay in the conversation; the exact bytes are durable before replacement.
 	for _, unit := range workContextUnits(out) {
