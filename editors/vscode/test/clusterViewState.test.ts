@@ -74,7 +74,9 @@ test("every connection state maps to what a view shows for it, as the published 
 // -----------------------------------------------------------------------------
 
 function welcomes(view: string): { contents: string; when?: string }[] {
-  return manifest.contributes.viewsWelcome.filter((entry) => entry.view === view);
+  // These connection-state cases run after owner setup.
+  return manifest.contributes.viewsWelcome.filter((entry) => entry.view === view)
+    .map(entry => ({ ...entry, when: entry.when?.replace(/ && !memql\.ownerSetupPending$/, "") }));
 }
 
 function linked(contents: string): string[] {

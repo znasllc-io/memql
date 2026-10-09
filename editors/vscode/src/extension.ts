@@ -1634,14 +1634,21 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // SecretStorage as well as the file, so a row never claims "Sign in" for a
   // cluster a stored session would connect -- plus the owner-passkey offer's
   // evidence. The tree, the cluster page and the select command read it.
-  factsForCluster = (cluster) =>
-    gatherClusterFacts(cluster, {
+  void commands.executeCommand('setContext', 'memql.ownerSetupPending', false);
+  factsForCluster = async (cluster) => {
+    const facts = await gatherClusterFacts(cluster, {
       readRefreshToken: (name) => new ClusterCredentialStore(context.secrets).readRefreshToken(name),
       readReceipt: () => readReceipt(receiptPath),
       ownerState: (cluster) => readOwnerSetupState(cluster, desktopTrust.fetch),
       signedInBefore: (c) => signedInClusters(context).includes(signedInKey(c)),
       now: () => Date.now(),
     });
+    const registry = await readClustersFileSafe(clustersPath);
+    if (registry.ok && registry.file.selectedCluster === cluster.name) {
+      void commands.executeCommand('setContext', 'memql.ownerSetupPending', facts.ownerSetup);
+    }
+    return facts;
+  };
   rememberSignIn = async (cluster) => {
     const known = signedInClusters(context);
     const key = signedInKey(cluster);
@@ -1650,7 +1657,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
 
   // Set once `presence` exists (below): the tree calls it after every read, and
   // it publishes whether a local cluster is on this machine for the welcome.
-  let onClustersRead: (clusters: readonly ClusterConfig[]) => void = () => {};
+  let onClustersRead: (clusters: readonly ClusterConfig[], selectedCluster: string) => void = () => {};
   const clustersTree = new ClustersTreeProvider(
     clustersPath,
     connections,
@@ -1658,7 +1665,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     clusterVersions,
     {
       factsFor: (cluster) => factsForCluster(cluster),
-      onRead: (clusters) => onClustersRead(clusters),
+      onRead: (clusters, selectedCluster) => onClustersRead(clusters, selectedCluster),
     }
   );
   context.subscriptions.push(
@@ -2487,7 +2494,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   context.subscriptions.push(receiptWatcher);
 
   let presencePublished: string | undefined;
-  onClustersRead = () => {
+  onClustersRead = (_clusters, selectedCluster) => {
+    if (!selectedCluster) void commands.executeCommand('setContext', 'memql.ownerSetupPending', false);
     void presence
       .get()
       .then((result) => {
@@ -4767,6 +4775,7 @@ async function runSignInToCluster(
               ...(signal !== undefined ? { signal } : {}),
             });
             flight.useCode = () => {
+              if (ownerSetup) return;
               if (race.useCode()) {
                 phase('code');
                 say('Requesting a code');
