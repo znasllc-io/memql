@@ -627,8 +627,11 @@ function pull_and_import_infra() {
 #
 # A probe that cannot run returns false, so the fallback is to import.
 function cluster_holds_db_image() {
+    # Drain the full listing: grep -q closes its input on an early match,
+    # making docker exit on SIGPIPE under pipefail when the cache is large.
+    # That falsely reports a missing image and rebuilds the database operand.
     docker exec "k3d-${CLUSTER_NAME}-server-0" ctr -n k8s.io images ls -q 2>/dev/null \
-        | grep -q "${DB_IMAGE}"
+        | grep -F "${DB_IMAGE}" >/dev/null
 }
 
 #

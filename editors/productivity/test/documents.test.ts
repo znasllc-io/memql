@@ -106,3 +106,28 @@ test("revision requests and decisions stay on the document lease and refuse anot
   await assert.rejects(files.decideRevision(doc, "same-request", "approval", "approved"), /does not belong/);
   assert.equal(calls.filter(call => call.name === "decideApproval").length, 1);
 });
+
+// Keep the real generated builder here: mocking removeAnnotation itself hid a
+// wire regression that sent an empty builtin call despite the supplied IDs.
+test("annotation deletion sends both IDs and requires a confirmed receipt", async () => {
+  const lease = { domain: "client.example", name: "client", generation: 9 };
+  let result: Record<string, unknown>[] = [{ removed: true }];
+  let calls = 0;
+  const api = { execute: async (actual: unknown, name: string, call: string) => {
+    assert.equal(actual, lease);
+    assert.equal(name, "libraryRemoveDocumentAnnotation");
+    assert.equal(call, 'builtin libraryRemoveDocumentAnnotation(artifactId: "document-id", commentId: "annotation-id")');
+    calls++;
+    return result;
+  } } as unknown as EditorConnectionAPI;
+  const doc = { resource: { domain: "client.example", kind: "artifacts" as const, id: "document-id", name: "document.md" }, lease,
+    content: new TextEncoder().encode("Source"), mime: "text/markdown", sourceId: "source", kind: "file", version: 3, revision: "file:3" };
+  const files = new Documents(api);
+  await files.removeAnnotation(doc, "annotation-id");
+  result = [];
+  await assert.rejects(files.removeAnnotation(doc, "annotation-id"), /Deletion was not confirmed/);
+  result = [{ removed: false }];
+  await assert.rejects(files.removeAnnotation(doc, "annotation-id"), /Deletion was not confirmed/);
+  assert.equal(calls, 3);
+  assert.equal(new TextDecoder().decode(doc.content), "Source");
+});

@@ -47,10 +47,13 @@ func TestDeleteDocumentAnnotationsAcrossReplicas(t *testing.T) {
 			if _, err = f.second.handleRemoveDocumentAnnotation(f.ctx, wrong, 0); err == nil {
 				t.Fatal("wrong artifact accepted")
 			}
-			for _, replica := range []*Integration{f.second, f.first} {
-				rows, err = replica.handleRemoveDocumentAnnotation(f.ctx, remove, 0)
-				if historyResult(t, rows, err)["removed"] != true {
-					t.Fatal("missing deletion receipt")
+			// Exercise public builtin dispatch on both replicas. SDK request
+			// serialization is covered in the client modules, so this module
+			// does not acquire a dependency on its consumers.
+			for _, replica := range []*memql.MemQLEngine{f.other, f.engine} {
+				receipt := f.query(replica, f.ctx, "builtin", "libraryRemoveDocumentAnnotation", remove)
+				if len(receipt) != 1 || receipt[0]["removed"] != true {
+					t.Fatalf("missing deletion receipt: %v", receipt)
 				}
 			}
 			rows, err = f.first.handleDocumentReview(f.ctx, map[string]any{"artifactId": artifact}, 0)
