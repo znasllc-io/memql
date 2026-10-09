@@ -113,6 +113,11 @@ Owned work uses the following layers:
    facts, exact references, decisions, constraints, receipts, uncertainty,
    failed approaches and unfinished work. Older checkpoints can be
    consolidated with fresh evidence; their sources remain retrievable.
+   A bounded excerpt of the original request and latest correction guides
+   relevance without becoming evidence. This context shares the summarizer's
+   existing input budget and is part of its cache identity. The DSL distinguishes
+   retrieved metadata from verified findings and tool parameters from human
+   constraints, so incidental output does not crowd out the remaining work.
    When parallel tool results together exceed the summarizer's input window,
    the engine archives the largest results first so the previous semantic
    checkpoint can still be consolidated with the new evidence.

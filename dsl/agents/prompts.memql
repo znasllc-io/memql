@@ -117,4 +117,4 @@ prompt responsibilityIntake {
 /// work journal. This is memory compression, not execution or permission.
 @level("fast")
 @templateFile("prompts/workContextCheckpoint.tmpl")
-prompt workContextCheckpoint { source string! }
+prompt workContextCheckpoint { source string! task string }

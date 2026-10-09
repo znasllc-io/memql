@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/znasllc-io/memql/core/common"
@@ -52,7 +53,7 @@ func isWorkMemory(m common.ChatMessage) bool {
 // latest exchange verbatim. Six recent messages is a preference, never a cut
 // through a parallel call group. Short transcripts can still retire an older
 // complete exchange when the preferred tail occupies the entire conversation.
-func workContextChunk(messages []common.ChatMessage) (int, int) {
+func workContextChunk(messages []common.ChatMessage, sourceLimit int) (int, int) {
 	units := workContextUnits(messages)
 	firstUser, lastUser := -1, -1
 	for i, m := range messages {
@@ -89,7 +90,8 @@ func workContextChunk(messages []common.ChatMessage) (int, int) {
 			}
 			// Include a whole first exchange even when it crosses the preferred
 			// size; the caller archives oversized units without an LLM call.
-			if fresh && WorkContextSize(messages[start:u.end], nil) > 4500 {
+			raw, _ := json.Marshal(messages[start:u.end])
+			if fresh && len(raw) > sourceLimit {
 				return start, end
 			}
 			end = u.end
