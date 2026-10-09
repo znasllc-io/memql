@@ -257,48 +257,66 @@ automation reviseLibraryDocument {
   passages: captured.passagesJSON, references: references.references,
   instruction: captured.amendment.instruction ?? captured.instruction
  })
+ // Keep the app receipt at evidence.app/report so retries across replicas
+ // reuse the same immutable request's completed subscription work.
  evidence := parallel {
   branch headless {
-   // A positively classified editorial change already has the document and
-   // authorized references. Tool research adds no evidence for this work.
-   if lower(trim(intent.reply)) == "edit" {
-    return "Editorial change: use the supplied document and reference files directly. No external research was requested or performed."
+   if lower(trim(intent.reply)) != "parallel" {
+    return ""
    }
-   if lower(trim(intent.reply)) == "research" {
-    priorEvidence := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "evidence.app/report")
-   } else {
-    priorEvidence := []
-   }
+   priorEvidence := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "evidence.app/report")
    report := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
-    priorEvidence: priorEvidence.select(receipt => receipt.result.value.reply), document: captured.content, passages: captured.passagesJSON, references: references.references,
-    instruction: captured.amendment.instruction ?? captured.instruction,
-    previous: captured.amendment.edits
-   })
-   return report.reply
+    priorEvidence: priorEvidence.select(receipt => receipt.result.value.reply), gaps: "Independent corroboration of this demanding research request.",
+    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    instruction: captured.amendment.instruction ?? captured.instruction, previous: captured.amendment.edits
+   }) on error continue
+   return report.reply ?? ""
   }
   branch app {
-   if lower(trim(intent.reply)) == "research" {
-    // Retrying a failed sibling must not spend the app quota again. The
-    // request capture is immutable; only a completed owned receipt is reusable.
-    current := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "evidence.app/report")
-    for retained in current {
-     if retained.result.value.reply != nil {
-      return retained.result.value.reply
-     }
+   if lower(trim(intent.reply)) == "edit" {
+    return {available: false, report: ""}
+   }
+   current := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "evidence.app/report")
+   for retained in current {
+    retainedReply := trim(retained.result.value.reply ?? "")
+    if retainedReply != "" {
+     return {available: true, report: retained.result.value.reply}
     }
    }
-   if lower(trim(intent.reply)) == "research" {
-    report := builtin ai(templateId: "libraryRevisionAppResearch", data: {
-     document: captured.content, passages: captured.passagesJSON, references: references.references,
-     instruction: captured.amendment.instruction ?? captured.instruction,
-     previous: captured.amendment.edits
-    }) on error continue
-    return report.reply ?? "App research was unavailable. Use the independently collected headless evidence and disclose any unsupported claims; no app findings were obtained."
-   }
-   return "No independent app research requested by the local intent assessment."
+   report := builtin ai(templateId: "libraryRevisionAppResearch", data: {
+    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    instruction: captured.amendment.instruction ?? captured.instruction, previous: captured.amendment.edits
+   }) on error continue
+   return {available: trim(report.reply ?? "") != "", report: report.reply ?? ""}
   }
  }
- combinedEvidence := "Independent headless report:\n" + evidence.headless + "\nIndependent app report:\n" + evidence.app
+ if lower(trim(intent.reply)) == "edit" {
+  combinedEvidence := "Editorial change: use the supplied document and reference files directly. No external research was requested or performed."
+ } else {
+  // A report's presence is not proof of adequate evidence. An unavailable or
+  // malformed assessment conservatively selects local research, never success.
+  if evidence.app.available || trim(evidence.headless) != "" {
+   assessment := builtin ai(templateId: "libraryRevisionEvidence", data: {
+    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    instruction: captured.amendment.instruction ?? captured.instruction,
+    appEvidence: evidence.app.report, localEvidence: evidence.headless
+   }) on error continue
+  } else {
+   assessment := {reply: "App research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources."}
+  }
+  assessed := lower(trim(assessment.reply ?? ""))
+  if assessed == "sufficient" {
+   supplement := {reply: "No additional research needed by the evidence assessment."}
+  } else {
+   supplement := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
+    priorEvidence: [evidence.app.report, evidence.headless],
+    gaps: assessment.reply ?? "The evidence assessment was unavailable. Check source support and fill the missing evidence conservatively.",
+    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    instruction: captured.amendment.instruction ?? captured.instruction, previous: captured.amendment.edits
+   })
+  }
+  combinedEvidence := "App research report:\n" + (evidence.app.available ? evidence.app.report : "App research was unavailable; no app findings were obtained.") + "\nIndependent local report:\n" + evidence.headless + "\nEvidence assessment:\n" + (assessment.reply ?? "Unavailable") + "\nTargeted local research:\n" + supplement.reply
+ }
 
  if captured.amendment != nil {
   analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, data: {

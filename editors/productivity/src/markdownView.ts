@@ -325,8 +325,10 @@ function dictate(target: string) {
 function dictationControl(button: HTMLButtonElement, target: string) {
   const active=dictationPhase!=="idle"&&dictationTarget===target;
   button.hidden=!dictationAvailable;button.disabled=!connected||!active&&(revisionBusy||target==="feedback"&&composerPurpose==="feedback"&&revisionLocked())||dictationPhase!=="idle"&&!active;
-  button.textContent=active?dictationPhase==="listening"?"Stop":"Cancel":"Dictate";
-  button.setAttribute("aria-label",active?dictationPhase==="listening"?"Stop dictation":"Cancel dictation":target==="feedback"?"Dictate feedback":"Dictate direction for this change");
+  const label=active?dictationPhase==="listening"?"Stop dictation":"Cancel dictation":target==="feedback"?"Dictate feedback":"Dictate direction for this change";
+  const shape=active?dictationPhase==="listening"?'<rect x="6" y="6" width="12" height="12" rx="2"/>':'<path d="m6 6 12 12M6 18 18 6"/>':'<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/>';
+  button.innerHTML=`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shape}</svg>`;
+  button.setAttribute("aria-label",label);button.title=label;button.setAttribute("aria-pressed",String(active));
 }
 function dictationStatus(target: string) {
   return dictationTarget!==target?"":dictationError|| (dictationPhase==="starting"?"Opening microphone…":dictationPhase==="listening"?"Listening…":dictationPhase==="transcribing"?"Transcribing…":"");
@@ -720,10 +722,10 @@ function renderRevisionContent() {
         input.maxLength=8000;input.placeholder="Describe what you’d like instead…";input.setAttribute("aria-label","Direction for this change");input.dataset.focusKey=`${item.id}:instruction`;input.value=modifications[item.id]??"";
         input.readOnly=revisionBusy||dictationPhase!=="idle";send.disabled=revisionBusy||dictationPhase!=="idle"||!input.value.trim();input.addEventListener("input",()=>{modifications[item.id]=input.value;send.disabled=revisionBusy||dictationPhase!=="idle"||!input.value.trim();saveState();});
         send.addEventListener("click",()=>{if(send.disabled)return;pendingAnchors=item.edits.map(editLocation).filter((anchor:Anchor|undefined):anchor is Anchor=>!!anchor);revisionBusy=true;controls();api.postMessage({type:"modifyRevisionItem",approvalId:status.approvalId,itemId:item.id,instruction:input.value});renderRevision();});
-        const mic=textElement("button","Dictate","secondary") as HTMLButtonElement;mic.dataset.focusKey=`${item.id}:dictate`;dictationControl(mic,item.id);mic.addEventListener("click",()=>dictate(item.id));
+        const mic=textElement("button","","icon-button composer-tool") as HTMLButtonElement;mic.dataset.focusKey=`${item.id}:dictate`;dictationControl(mic,item.id);mic.addEventListener("click",()=>dictate(item.id));
         const voiceStatus=textElement("small",dictationStatus(item.id),"dictation-status");voiceStatus.setAttribute("role","status");
         if(dictationTarget===item.id&&dictationError)renderProblem(voiceStatus,{message:dictationError,reference:dictationReference},value=>api.postMessage(value));
-        const actions=textElement("div","","composer-actions");actions.append(send,mic,voiceStatus);editor.append(input,actions);card.append(editor);
+        const actions=textElement("div","","composer-actions");actions.append(mic,send);editor.append(input,actions,voiceStatus);card.append(editor);
       }
     }
     panel.append(card);

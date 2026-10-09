@@ -110,6 +110,17 @@ choose **Apply accepted**. Linked edits, such as moving a passage, share one
 decision. Modifying an item preserves the other proposed items and their
 decisions. The DSL workflow uses the harness for evidence collection when the
 feedback calls for research, then prepares exact replacements for human review.
+Ordinary research tries an available subscription app first, with the existing
+router's app fallbacks for unavailable apps or exhausted usage. A bounded local
+evidence assessment checks coverage, source links and support for the requested
+claims. Local headless research fills identified gaps or takes over when apps
+are unavailable; it reuses the reports instead of restarting discovery. This
+assessment is a planning check, not independent source verification. Explicit
+independent corroboration, conflicting studies, systematic evidence reviews or
+consequential evaluations can select full parallel app/local research. Document
+length or elaborate Markdown formatting alone does not select that path. App
+failure stays recorded and does not by itself stop the goal; unavailable or
+unrecognized assessment output conservatively invokes local research.
 When the evidence stage retries, its DSL reuses completed app research from the
 same immutable request, including across replicas; a failed sibling does not
 spend the subscription quota again. An unchanged retry checks up to 20 recent
@@ -118,7 +129,7 @@ attempt cannot hide earlier evidence. Changed feedback starts fresh research.
 Unchanged text and formatting are preserved by default. **Show in document**
 keeps the target highlighted; expanded explanations survive status updates.
 
-In the MemQL browser editor, **Dictate** in feedback, extension and per-item
+In the MemQL browser editor, the **Dictate** microphone icon in feedback, extension and per-item
 modification composers uses Ask's
 microphone capture and authenticated transcription stream. Browser microphone
 permission is requested on first use. Stop to finish transcribing, edit the

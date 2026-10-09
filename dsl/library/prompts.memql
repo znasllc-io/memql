@@ -27,13 +27,14 @@ prompt libraryRevisionItem {
 prompt libraryRevisionResearch {
  references string
  priorEvidence []string
+ gaps string
  document string!
  passages string!
  instruction string
  previous []object
 }
 
-/// Independent evidence from an available subscription app's own tools; no MemQL tool loop.
+/// Primary evidence from an available subscription app; the router tries its configured app fallbacks.
 @level("strong")
 @templateFile("prompts/libraryRevisionAppResearch.tmpl")
 prompt libraryRevisionAppResearch {
@@ -58,4 +59,17 @@ prompt libraryRevisionIntent {
 @templateFile("prompts/libraryRevisionImages.tmpl")
 prompt libraryRevisionImages {
  images []string!
+}
+
+/// Assess source coverage before paying for another research pass. This is a
+/// conservative planning check, not independent verification or certification.
+@level("fast")
+@templateFile("prompts/libraryRevisionEvidence.tmpl")
+prompt libraryRevisionEvidence {
+ references string
+ document string!
+ passages string!
+ instruction string
+ appEvidence string
+ localEvidence string
 }

@@ -98,7 +98,8 @@ var promptLevels = map[string]string{
 	// identifies visible content and states uncertainty without controlling the UI.
 	"libraryRevisionImages": "fast",
 	// A one-word classification gates optional app usage.
-	"libraryRevisionIntent": "fast",
+	"libraryRevisionIntent":   "fast",
+	"libraryRevisionEvidence": "fast",
 	// An app gathers a bounded evidence report; a human reviews the proposal.
 	"libraryRevisionAppResearch": "strong",
 	// Semantic consolidation must keep task relevance, corrections and evidence

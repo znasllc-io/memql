@@ -235,7 +235,7 @@ test("polling preserves explanations, item decisions, focus and modification dra
  f.send({type:"revision",status:{...status,heartbeat:2}});f.send({type:"revisionIdle"});
  assert.equal(f.doc.querySelector<HTMLDetailsElement>(".change-reason")!.open,true);
  const restored=f.doc.querySelector<HTMLTextAreaElement>(".item-modify textarea")!;assert.equal(restored.value,"Research this claim first");assert.equal(f.doc.activeElement,restored);assert.equal(restored.selectionStart,5);assert.equal(restored.selectionEnd,9);
- f.doc.querySelector<HTMLButtonElement>(".item-modify button")!.click();assert.equal(f.messages.at(-1).type,"modifyRevisionItem");assert.equal(f.messages.at(-1).instruction,"Research this claim first");f.dom.window.close();
+ f.doc.querySelector<HTMLButtonElement>(".item-modify .primary")!.click();assert.equal(f.messages.at(-1).type,"modifyRevisionItem");assert.equal(f.messages.at(-1).instruction,"Research this claim first");f.dom.window.close();
 });
 
 test("Read is a quiet reading mode and restores Review without losing the draft",()=>{
