@@ -135,7 +135,7 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 	for _, edit := range answer.Edits {
 		edit.Before = strings.ReplaceAll(edit.Before, "\r\n", "\n")
 		edit.After = strings.ReplaceAll(edit.After, "\r\n", "\n")
-		if (edit.Before == "" && (normalized != "" || len(answer.Edits) != 1)) || len(edit.Before) > revisionContentLimit || len(edit.After) > revisionContentLimit || strings.TrimSpace(edit.Reason) == "" || len(edit.Reason) > 4000 || len(edit.CommentIDs) == 0 {
+		if (edit.Before == "" && (strings.TrimSpace(normalized) != "" || len(answer.Edits) != 1)) || len(edit.Before) > revisionContentLimit || len(edit.After) > revisionContentLimit || strings.TrimSpace(edit.Reason) == "" || len(edit.Reason) > 4000 || len(edit.CommentIDs) == 0 {
 			return nil, fmt.Errorf("each proposed edit needs an exact source, feedback reference and explanation")
 		}
 		if edit.Before != "" && (strings.Index(normalized, edit.Before) < 0 || strings.Index(normalized, edit.Before) != strings.LastIndex(normalized, edit.Before)) {
