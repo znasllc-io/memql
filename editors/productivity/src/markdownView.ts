@@ -194,7 +194,8 @@ function paintReviewHistory() {
     root.append(textElement("h3",`Version ${entry.version}${entry.current?" · Current":""}`),textElement("small",stamp(entry)));
     const actions=textElement("div","","history-detail-actions");
     const open=link("Open saved version",()=>{historyFromReview=true;showHistory(true);historyRequest({type:"historyVersion",version:entry.version});});open.disabled=historyBusy;actions.append(open);
-    if(entry.version>0){const compare=link("Compare with previous",()=>historyRequest({type:"historyCompare",version:entry.version}));compare.disabled=historyBusy;actions.append(compare);}
+    const hasPrevious=historyVersions.some(row=>row.version===entry.version-1)||historyData.hasMore&&entry.version===Math.min(...historyVersions.map(row=>row.version));
+    if(entry.version>0&&hasPrevious){const compare=link("Compare with previous",()=>historyRequest({type:"historyCompare",version:entry.version}));compare.disabled=historyBusy;actions.append(compare);}
     root.append(actions);
     if(completedReview?.result?.applied && completedReview.proposal?.version+1===entry.version){
       renderProposal(completedReview,root,document.createElement("div"),true);

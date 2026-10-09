@@ -606,7 +606,8 @@ test("history tabs support keyboard navigation, paging, saved comparisons and re
  f.el("review-history-status").querySelector<HTMLButtonElement>("button.passage")!.click();assert.equal(f.messages.at(-1).type,"historyCompare");f.send({type:"historyIdle"});
  f.doc.querySelector<HTMLButtonElement>(".review-history-back")!.click();assert.equal(f.doc.activeElement,row());
  [...f.el("review-history-content").querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="Load earlier versions")!.click();assert.equal(f.messages.at(-1).beforeVersion,3);
- f.send({type:"history",append:true,data:{versions:[{version:0,note:"Initial"}],hasMore:false}});f.send({type:"historyIdle"});assert.equal(f.doc.querySelectorAll(".review-history-row").length,2);
+ f.send({type:"history",append:true,data:{versions:[{version:1,note:"First retained snapshot"}],hasMore:false}});f.send({type:"historyIdle"});assert.equal(f.doc.querySelectorAll(".review-history-row").length,2);
+ f.doc.querySelector<HTMLButtonElement>('[aria-label="Review version 1"]')!.click();assert.doesNotMatch(f.el("review-history-content").textContent!,/Compare with previous/,"do not offer a comparison to an unretained version zero");
  f.el("review-tab-history").dispatchEvent(new f.dom.window.KeyboardEvent("keydown",{key:"Home",bubbles:true}));assert.equal(f.doc.activeElement?.id,"review-tab-requests");f.dom.window.close();
 });
 
