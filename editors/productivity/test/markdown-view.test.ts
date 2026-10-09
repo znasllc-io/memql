@@ -530,6 +530,9 @@ test("personal notes delete in read mode without touching feedback or other note
   f.send({type:"notes",rows:[row,{...row,id:"other",body:"Another thought"}]});
   f.el("note-markers").querySelector<HTMLButtonElement>("button")!.click();
   f.doc.querySelector<HTMLButtonElement>('[aria-label="Delete note"]')!.click();
+  const keep=f.doc.querySelector<HTMLButtonElement>('[data-focus-key="keep:note"]')!;
+  keep.focus();f.send({type:"notes",rows:[row,{...row,id:"other",body:"Another thought"}]});
+  assert.equal(f.doc.activeElement,keep,"unchanged note polling must preserve confirmation focus");
   f.doc.querySelector<HTMLButtonElement>('[data-focus-key="confirm-delete:note"]')!.click();
   assert.equal(f.messages.at(-1).purpose,"note");
   f.send({type:"annotationRemoved",id:"note",purpose:"note"});

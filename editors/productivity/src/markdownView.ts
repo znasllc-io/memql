@@ -812,7 +812,7 @@ window.addEventListener("message",event=>{
   }
   if(message.type==="selectionNote"&&contextSelection&&connected&&!historyPreview){openComposer(contextSelection.anchor,contextSelection.rect,"note");contextSelection=undefined;}
   if(message.type==="find")showFind(true);
-  if(message.type==="notes"){personalNotes=message.rows??[];byId("notes-status").textContent=message.hasMore?"Showing your 500 most recent notes. Older notes remain saved.":"";byId("notes-retry").hidden=true;renderNotes();}
+  if(message.type==="notes"){const next=message.rows??[],different=JSON.stringify(next)!==JSON.stringify(personalNotes);personalNotes=next;byId("notes-status").textContent=message.hasMore?"Showing your 500 most recent notes. Older notes remain saved.":"";byId("notes-retry").hidden=true;if(different)renderNotes();}
   if(message.type==="notesError"){renderProblem(byId("notes-status"),message,value=>api.postMessage(value));byId("notes-retry").hidden=false;}
   if(message.type==="noteSaved"){commentBusy=false;feedback.value="";draftAnchor=undefined;closeComposer();controls();showNotes(true);}
   if(message.type==="selectionFeedback" && contextSelection && connected && mode==="review") {
