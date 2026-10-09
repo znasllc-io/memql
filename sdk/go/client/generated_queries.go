@@ -4315,6 +4315,28 @@ func LibraryArtifactBySourceConceptRefBuild(args LibraryArtifactBySourceConceptR
 	return b.String()
 }
 
+// LibraryArtifactForFile -- Resolve a newly uploaded file's artifact using the bare file ID from its receipt. The polymorphic sourceConceptRef query is for canonical internal references; clients cannot infer a concept from a bare ID.
+//
+// Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactForFile"] in generated_concepts.go).
+type LibraryArtifactForFileArgs struct {
+	FileId string
+}
+
+// LibraryArtifactForFile calls the engine query libraryArtifactForFile.
+func (qc *QueryClient) LibraryArtifactForFile(ctx context.Context, args LibraryArtifactForFileArgs) (*Result, error) {
+	call := LibraryArtifactForFileBuild(args)
+	return qc.executeNamed(ctx, "libraryArtifactForFile", call)
+}
+
+func LibraryArtifactForFileBuild(args LibraryArtifactForFileArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryArtifactForFile(")
+	b.WriteString("fileId: ")
+	b.WriteString(quoteMemQL(args.FileId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryArtifacts -- List the caller's entire Library (artifacts + records). Owned: the row set is gated by `row.ownerUserId == actor.userId` server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates.
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifacts"] in generated_concepts.go).

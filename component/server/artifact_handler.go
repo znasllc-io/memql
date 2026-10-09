@@ -529,6 +529,16 @@ type ArtifactUploadResponse struct {
 	VersionNumber int    `json:"versionNumber"`
 }
 
+// Uploads use the HTTP byte-transfer exception, so they do not pass through
+// the gRPC egress normalizer. Apply the same ID contract at this wire boundary
+// for both single-request uploads and resumable upload completions.
+func (r ArtifactUploadResponse) MarshalJSON() ([]byte, error) {
+	type wireResponse ArtifactUploadResponse
+	r.ArtifactId = memql.BareShortId(r.ArtifactId)
+	r.FileId = memql.BareShortId(r.FileId)
+	return json.Marshal(wireResponse(r))
+}
+
 // ArtifactHandlerOptions configures an ArtifactHandler.
 type ArtifactHandlerOptions struct {
 	Logger     *slog.Logger

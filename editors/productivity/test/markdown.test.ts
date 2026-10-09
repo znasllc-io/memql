@@ -22,7 +22,7 @@ test("generated front matter stays in source and preserves existing passage coor
   const html = renderMarkdown(source);
   assert.ok(!html.includes("author:"));
   assert.ok(!html.includes("Draft"));
-  assert.match(html, /<h1 data-block-id="2" data-start-line="5" data-end-line="6">My document/);
+  assert.match(html, /<h1 data-block-id="2" data-start-line="5" data-end-line="6"[^>]*>My document/);
   assert.match(html, /data-block-id="3" data-start-line="7" data-end-line="8"/);
   const anchor = markdownAnchor(source, {startLine:7,endLine:8,quote:"Review this."});
   assert.equal(anchor.sourceQuote,"Review **this**.");

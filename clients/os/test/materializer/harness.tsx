@@ -115,7 +115,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
       composeResolveSources: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult(seed.resolved ? [seed.resolved] : [{ sources: [], total: 0 }]),
       ),
-      libraryArtifactBySourceConceptRef: vi.fn(async (_args: Record<string, unknown>) => rowsResult(seed.outputArtifact ? [seed.outputArtifact] : [])),
+      libraryArtifactForFile: vi.fn(async (_args: Record<string, unknown>) => rowsResult(seed.outputArtifact ? [seed.outputArtifact] : [])),
       libraryFileById: vi.fn(async (_args: Record<string, unknown>) => rowsResult(seed.outputFile ? [seed.outputFile] : [])),
       composeMaterialize: write(seed.materializeReply),
       composeRunRecipe: write(seed.materializeReply),

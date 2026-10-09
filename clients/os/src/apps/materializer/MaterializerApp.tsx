@@ -116,7 +116,7 @@ export function MaterializerApp({
       load: async () => {
         if (!connection) throw new Error("Connect to the cluster before opening this file.");
         const [artifactResult, fileResult] = await Promise.all([
-          connection.query.libraryArtifactBySourceConceptRef({ sourceConceptRef: fileId }),
+          connection.query.libraryArtifactForFile({ fileId }),
           connection.query.libraryFileById({ fileId }),
         ]);
         const artifact = artifactResult.rows()[0], file = fileResult.rows()[0];

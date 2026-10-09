@@ -7,6 +7,7 @@ import { anchorStillMatches, markdownAnchor, renderMarkdown, type MarkdownAnchor
 
 import { markdownPage } from "./markdownPage.js";
 import { refreshQueue } from "./refreshQueue.js";
+import { markdownImageURI } from "./markdownAssets.js";
 
 export class MarkdownEditor implements vscode.CustomTextEditorProvider {
   private active?: { document: vscode.TextDocument; panel: vscode.WebviewPanel };
@@ -84,7 +85,13 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     const entry = this.active;
     this.panels.add(entry);
     const root = vscode.Uri.joinPath(this.context.extensionUri, "out");
-    panel.webview.options = { enableScripts: true, localResourceRoots: [root] };
+    const imageRoot = document.uri.scheme === "memql-file"
+      ? document.uri.with({ path: "/artifacts", query: "", fragment: "" }) : vscode.Uri.joinPath(document.uri, "..");
+    panel.webview.options = { enableScripts: true, localResourceRoots: [root, imageRoot] };
+    const renderDocumentHTML = (source: string) => renderMarkdown(source, { image: src => {
+      const uri = markdownImageURI(src, document.uri.toString());
+      return uri ? panel.webview.asWebviewUri(vscode.Uri.parse(uri)).toString() : undefined;
+    } });
     const script = panel.webview.asWebviewUri(vscode.Uri.joinPath(root, "markdownView.js"));
     const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
     const draftKey = `memql.markdownReviewDraft:${document.uri.toString()}`;
@@ -147,7 +154,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
     });
     const render = async () => {
       try {
-        await panel.webview.postMessage({ type: "document", html: renderMarkdown(document.getText()), version: document.version, sourceIdentity: document.getText(),
+        await panel.webview.postMessage({ type: "document", html: renderDocumentHTML(document.getText()), version: document.version, sourceIdentity: document.getText(),
           historyAvailable: document.uri.scheme === "memql-file", connected: document.uri.scheme === "memql-file" && !document.isDirty,
           status: document.uri.scheme !== "memql-file" ? "Local document. Open its MemQL copy to share feedback."
             : document.isDirty ? "Unsaved changes. Save before adding revision-bound feedback." : "Feedback is saved to MemQL." });
@@ -189,7 +196,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
               } else if(message.type === "historyVersion") {
                 if(!Number.isInteger(message.version)||message.version<0)throw new UserInputError("Choose a saved version.");
                 const snapshot=await this.files.version(base,message.version);
-                if(ticket===historyGeneration){preview=snapshot;this.dictation.cancel(panel);await panel.webview.postMessage({type:"historyVersion",...snapshot,html:renderMarkdown(snapshot.content)});}
+                if(ticket===historyGeneration){preview=snapshot;this.dictation.cancel(panel);await panel.webview.postMessage({type:"historyVersion",...snapshot,html:renderDocumentHTML(snapshot.content)});}
               } else if(message.type === "historyFork") {
                 if(!preview || typeof message.name!=="string" || document.isDirty)throw new UserInputError("Save your local changes before starting a branch.");
                 const fingerprint=JSON.stringify([preview.version,preview.revision,message.name]);
@@ -268,6 +275,6 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
       if (this.active?.panel === panel) this.active = undefined;
       this.rendered.delete(document.uri.toString());
     });
-    panel.webview.html = markdownPage(document.fileName, String(script), nonce);
+    panel.webview.html = markdownPage(document.fileName, String(script), nonce, panel.webview.cspSource);
   }
 }

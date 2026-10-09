@@ -148,6 +148,20 @@ query artifact libraryArtifactBySourceConceptRef {
   shape   artifactFull
 }
 
+/// Resolve a newly uploaded file's artifact using the bare file ID from its
+/// receipt. The polymorphic sourceConceptRef query is for canonical internal
+/// references; clients cannot infer a concept from a bare ID.
+@unbounded("one artifact per canonical file reference, enforced by createArtifact idempotency and gated to the owner")
+@cache(0)
+@actor
+query artifact libraryArtifactForFile {
+  args {
+    fileId string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.sourceConceptRef == canonicalId(args.fileId, "file")
+  shape artifactFull
+}
+
 /// Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id,
 /// gated to the caller. Owned: `row.ownerUserId == actor.userId`. Called by the Library viewer when opening
 /// a generated_output artifact resolved from its sourceConceptRef.

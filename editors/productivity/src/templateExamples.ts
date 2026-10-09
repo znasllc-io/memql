@@ -2,7 +2,7 @@ import { UserInputError } from "./problems.js";
 import * as vscode from "vscode";
 import {
   buildClientAccountsAll, buildLibraryFilesForOwner, buildComposeMaterialize, buildCompositionById,
-  buildComposeCancel, buildLibraryArtifactBySourceConceptRef, buildCreateComposeRecipe,
+  buildComposeCancel, buildLibraryArtifactForFile, buildCreateComposeRecipe,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
@@ -100,7 +100,7 @@ export class TemplateExamples {
         if (status === "failed") throw new Error(value(row, "failureReason") || "Materializer could not finish this draft.");
         if (status === "cancelled") return;
         if (status === "ready") {
-          const artifacts = await this.api.execute(lease, "libraryArtifactBySourceConceptRef", buildLibraryArtifactBySourceConceptRef({ sourceConceptRef: value(row, "outputFileId") }));
+          const artifacts = await this.api.execute(lease, "libraryArtifactForFile", buildLibraryArtifactForFile({ fileId: value(row, "outputFileId") }));
           const artifact = artifacts[0];
           if (artifact && value(artifact, "id")) {
             const name = value(artifact, "title") || value(row, "name") || "template";
