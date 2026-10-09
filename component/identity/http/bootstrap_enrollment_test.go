@@ -79,6 +79,11 @@ func (e *bootstrapEngine) Execute(ctx context.Context, q string) (*memqlengine.E
 		}
 		e.organization = extractField(q, "name")
 		e.organizationOwner = extractField(q, "ownerUserId")
+	case strings.Contains(q, "ownerCredentialHistory("):
+		for _, credential := range e.byCredentialId {
+			return e.nodes(credential)
+		}
+		return e.nodes(e.signInRoutes...)
 	case strings.Contains(q, "clusterSettingsCurrent("):
 		if e.settings == nil {
 			return e.nodes()

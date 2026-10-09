@@ -2416,6 +2416,18 @@ query identity signInIdentitiesForUser {
   shape    identitySummary
 }
 
+/// Detect any previous sign-in credential, including revoked credentials, before
+/// allowing an installer-named owner to register their FIRST passkey. Internal
+/// callers only; a revoked credential must never reopen first-run ownership.
+@serverOnly
+query identity ownerCredentialHistory {
+  args { userId string! }
+  filter row => row.userId == args.userId
+             && (identityIsPasskey(row) || identityIsMagicLink(row) || identityIsOidc(row))
+  paginate 1
+  shape identitySummary
+}
+
 // ---- queries/v1/identity/nodeTokenIdentityByBinding.memql ----
 
 // nodeTokenIdentityByBinding

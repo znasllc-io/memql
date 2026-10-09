@@ -39,8 +39,12 @@ func (s *Server) handleBootstrapPasskey(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleBootstrapResume(w http.ResponseWriter, r *http.Request) {
-	if s.Store == nil || s.Cfg.LocalPasskeyOnly() || s.IssueMagicLink == nil {
+	if s.Store == nil {
 		s.renderError(w, r, http.StatusForbidden, "Resume this installation with your passkey.")
+		return
+	}
+	if allowed, _ := s.enrolLimiter().Allow(clientIP(r)); !allowed {
+		s.renderError(w, r, http.StatusTooManyRequests, "Too many setup attempts. Please try again later.")
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -53,12 +57,32 @@ func (s *Server) handleBootstrapResume(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
-	pending, err := s.Store.ReservedBootstrap(r.Context())
+	pending, err := s.Store.PendingOwnerSetup(r.Context(), s.Cfg)
 	if err != nil || pending == nil || pending.Complete || !strings.EqualFold(strings.TrimSpace(r.Form.Get("email")), pending.Settings.BootstrapEmail) {
-		s.renderError(w, r, http.StatusBadRequest, "Use the email address originally verified for this setup.")
+		s.renderError(w, r, http.StatusBadRequest, "Enter the owner email used during installation. If you already registered a passkey, use it to sign in.")
 		return
 	}
-	res, err := s.IssueMagicLink(r.Context(), IssueMagicLinkInput{Email: pending.Settings.BootstrapEmail, Bootstrap: true, AdminSession: true, SourceIP: clientIP(r), UserAgent: r.UserAgent()})
+	if s.Cfg.LocalPasskeyOnly() {
+		token, err := s.Store.ResumeOwnerSetupLocked(r.Context(), s.Cfg, r.Form.Get("email"), s.bootstrapOAuth(r), false)
+		if err != nil {
+			s.renderError(w, r, http.StatusConflict, "Setup cannot be resumed by email. Use your existing passkey.")
+			return
+		}
+		s.setBootstrapCookie(w, token)
+		http.Redirect(w, r, "/auth/setup/passkey", http.StatusSeeOther)
+		return
+	}
+	if s.IssueMagicLink == nil {
+		s.renderError(w, r, http.StatusServiceUnavailable, "Email verification is unavailable. Please retry.")
+		return
+	}
+	// Persist configured details before issuing a hosted verification link.
+	if err := s.Store.PersistClusterSettings(r.Context(), pending.Settings); err != nil {
+		s.renderError(w, r, http.StatusServiceUnavailable, "Setup is temporarily unavailable.")
+		return
+	}
+	oauth := s.bootstrapOAuth(r)
+	res, err := s.IssueMagicLink(r.Context(), IssueMagicLinkInput{Email: pending.Settings.BootstrapEmail, Bootstrap: true, AdminSession: oauth == nil, ClientId: oauth["client_id"], RedirectURI: oauth["redirect_uri"], State: oauth["state"], CodeChallenge: oauth["code_challenge"], CodeChallengeMethod: oauth["code_challenge_method"], SourceIP: clientIP(r), UserAgent: r.UserAgent()})
 	if err != nil {
 		s.renderError(w, r, http.StatusServiceUnavailable, "The verification link could not be sent. Please retry.")
 		return
@@ -73,4 +97,12 @@ func bootstrapSettings(in ClusterSettingsInput) identity.ClusterSettingsRow {
 		AccessRequestNotifyEmails: in.AccessRequestNotifyEmails, BootstrapEmail: in.OwnerEmail, BootstrapFirstName: in.OwnerFirstName,
 		BootstrapLastName: in.OwnerLastName, BootstrapPhone: in.OwnerPhone, BootstrapPrimaryRole: in.OwnerPrimaryRole,
 		BootstrapGender: in.OwnerGender, BootstrapBirthdate: in.OwnerBirthdate}
+}
+
+func (s *Server) bootstrapOAuth(r *http.Request) map[string]string {
+	cid, uri, state, matched := s.pickOAuthCtx(r.Context(), r.Form.Get("client_id"), r.Form.Get("redirect_uri"), r.Form.Get("return_to"), r.Form.Get("state"))
+	if !matched || r.Form.Get("code_challenge") == "" {
+		return nil
+	}
+	return map[string]string{"client_id": cid, "redirect_uri": uri, "state": state, "code_challenge": r.Form.Get("code_challenge"), "code_challenge_method": r.Form.Get("code_challenge_method")}
 }

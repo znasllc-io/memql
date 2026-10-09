@@ -883,7 +883,7 @@ export function doneScreen(input: DoneInput): RegionParts {
       state: "done",
       ...(input.now === undefined ? {} : { now: input.now }),
     }) +
-    `<div class="ac-column">${facts(rows)}${recoveryKeyBlock(input.recoveryKey)}</div>` +
+    `<div class="ac-column">${facts(rows)}${recoveryKeyBlock(input.recoveryKey)}${!input.signedIn && input.notListed !== true && input.kind !== "added" ? "<p>Sign in to finish setup. If you have not registered a passkey, use the owner email entered during installation.</p>" : ""}</div>` +
     (input.startedAt === undefined ? "" : logsDisclosure(input.logsOpen === true, input.logLines ?? []));
 
   // BACK, as a quiet text act: to the landing, which looks at this computer

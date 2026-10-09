@@ -65,6 +65,20 @@ an identity-issued JWT access token.
 
 ---
 
+## Finishing a skipped owner passkey
+
+After installation or repair, choose **Sign in**, then **Finish ownership setup**
+if setup has not completed. The setup page asks for the owner email recorded
+when the cluster was installed. On a local installation, a matching email lets
+you register your first passkey without sending email. On a hosted installation,
+open the verification link sent to that address before registering the passkey.
+
+This path also handles older installers that created the owner account before
+registering a passkey. It cannot replace an existing credential or reopen setup
+after a credential is revoked. If a passkey was created but the final setup step
+failed, resume with that passkey. Canceling the browser's passkey prompt leaves
+setup incomplete and allows another attempt.
+
 ## Magic link
 
 The default, and the one every other path is measured against.

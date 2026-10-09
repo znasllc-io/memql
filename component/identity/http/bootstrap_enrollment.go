@@ -66,7 +66,13 @@ func (s *Server) handleBootstrapRegister(w http.ResponseWriter, r *http.Request,
 		s.bootstrapError(w, err)
 		return
 	}
-	if (claimed || hasOwner) && len(row.Proof) == 0 {
+	if row.Recovery && len(row.Proof) == 0 {
+		candidate, readErr := s.Store.PendingOwnerSetup(ctx, s.Cfg)
+		if readErr != nil || candidate == nil || candidate.TokenHash != row.TokenHash || candidate.UserID != row.UserID {
+			s.bootstrapError(w, identity.ErrBootstrapEnrollment)
+			return
+		}
+	} else if (claimed || hasOwner) && len(row.Proof) == 0 {
 		s.bootstrapError(w, identity.ErrBootstrapEnrollment)
 		return
 	}

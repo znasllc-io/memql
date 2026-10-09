@@ -38,6 +38,7 @@ type BootstrapEnrollment struct {
 	OAuth         map[string]string
 	Proof         json.RawMessage `json:",omitempty"`
 	Complete      bool
+	Recovery      bool // Resumes the installer-named owner, including older unclaimed owner rows.
 }
 
 func bootstrapHash(token string) string {
