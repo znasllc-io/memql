@@ -689,6 +689,14 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 	// nothing to do with the run. Failing it would throw away a compiled
 	// template and a journal because somebody closed a laptop.
 	if status == "failed" {
+		// Integration/mesh errors may retain the message but lose their Go
+		// type. The shared Stop receipt is authoritative on every replica;
+		// do not turn it into a retry, budget request or model-classified
+		// failure just because this executor did not originate the call.
+		if asked, by := j.cancelRequested(ctx, exec.ID); asked {
+			j.cancelStop(ctx, exec, chainHead, by)
+			return
+		}
 		// A periodic cluster-maintenance attempt ends at this failure. The
 		// schedule retries current state on its next tick; parking each old
 		// attempt manufactures an ever-growing queue with no human owner.

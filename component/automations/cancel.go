@@ -101,7 +101,7 @@ func (j *workJournal) cancelRequested(ctx context.Context, runId string) (asked 
 		j.warn("workRunById", err)
 		return false, ""
 	}
-	res, err := j.exec.Execute(journalContext(ctx), "query "+call)
+	res, err := j.exec.Execute(memql.ContextWithFreshRead(journalContext(ctx)), "query "+call)
 	if err != nil {
 		j.warn("workRunById", err)
 		return false, ""

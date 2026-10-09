@@ -348,10 +348,10 @@ func TestANovelFailureCostsExactlyOneProviderCall(t *testing.T) {
 // question nobody was told about.
 func TestAnUnclassifiableFailureStillFailsTheRun(t *testing.T) {
 	calls := closeWith(t, nil, failedRun("v1:work:run:t3", "something nothing has a rule for", 1, 0))
-	if len(calls) != 1 {
-		t.Fatalf("want one close call on a node with no classifier, got %v", calls)
+	if len(calls) != 2 || !strings.HasPrefix(calls[0], "query workRunById(") {
+		t.Fatalf("want a cancellation read and one close call on a node with no classifier, got %v", calls)
 	}
-	name, args := argsOf(t, calls[0])
+	name, args := argsOf(t, calls[1])
 	if name != "updateWorkRun" || args["status"] != "failed" {
 		t.Fatalf("call = %q status = %v, want the run to fail exactly as it did before", name, args["status"])
 	}
