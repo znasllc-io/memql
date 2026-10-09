@@ -743,6 +743,7 @@ smoke("a cluster document opens read-only with no language-server diagnostics", 
   const folder = vscode.workspace.workspaceFolders?.[0];
   assert.ok(folder !== undefined, "no workspace folder, so the language server has no root to serve");
   const brokenPath = path.join(folder.uri.fsPath, "cluster-document-control.memql");
+  const runnablePath = path.join(folder.uri.fsPath, "late-language-start.memql");
   // The shape cmd/memql-lsp's own TestPublishDiagnostics_CleanAndBroken uses:
   // a logic whose block never closes, which is a parse error.
   fs.writeFileSync(brokenPath, "logic oops {\n", "utf8");
@@ -756,6 +757,17 @@ smoke("a cluster document opens read-only with no language-server diagnostics", 
       20_000
     );
     info("control: the language server is attached and diagnosing file: documents");
+
+    // Activation started the runtime before any source document was open.
+    // Late language startup must attach the Run/Train controls too; diagnostics
+    // alone would pass if registerRunSurface had permanently skipped them.
+    fs.writeFileSync(runnablePath, 'query space allSpaces {\n  filter row => true\n}\n', 'utf8');
+    const runnable = vscode.Uri.file(runnablePath);
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(runnable));
+    await waitFor("Run controls to attach after deferred language startup", async () => {
+      const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>("vscode.executeCodeLensProvider", runnable);
+      return lenses?.some(lens => lens.command?.command === "memql.run.construct") ?? false;
+    }, 20_000);
 
     const uri = vscode.Uri.parse("memql-cluster://nowhere/cognition/queries.memql?kind=query&name=x");
     const doc = await vscode.workspace.openTextDocument(uri);
@@ -773,6 +785,7 @@ smoke("a cluster document opens read-only with no language-server diagnostics", 
   } finally {
     await closeAllTabs();
     fs.rmSync(brokenPath, { force: true });
+    fs.rmSync(runnablePath, { force: true });
   }
 });
 

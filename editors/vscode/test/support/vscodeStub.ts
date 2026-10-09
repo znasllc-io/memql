@@ -492,11 +492,12 @@ export class Uri {
   }
 
   static parse(value: string): Uri {
-    return new Uri('file', value.startsWith('file://') ? value.slice('file://'.length) : value);
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(value)?.[1] ?? 'file';
+    return new Uri(scheme, value.startsWith('file://') ? value.slice('file://'.length) : value);
   }
 
   toString(): string {
-    return `file://${this.fsPath}`;
+    return this.scheme === 'file' ? `file://${this.fsPath}` : this.fsPath;
   }
 }
 
@@ -670,11 +671,26 @@ export const ConfigurationTarget = {
   WorkspaceFolder: 3,
 } as const;
 
+interface StubTextDocument {
+  uri: Uri;
+  languageId?: string;
+  getText(): string;
+  isDirty: boolean;
+}
+
+const openedDocuments = new EventEmitter<StubTextDocument>();
+
+export function openTextDocument(document: StubTextDocument): void {
+  workspace.textDocuments.push(document);
+  openedDocuments.fire(document);
+}
+
 export const workspace = {
   // Mutable: a case sets the trust state it wants before calling activate().
   isTrusted: true,
   workspaceFolders: undefined as { uri: Uri }[] | undefined,
-  textDocuments: [] as { uri: Uri; getText(): string; isDirty: boolean }[],
+  textDocuments: [] as StubTextDocument[],
+  onDidOpenTextDocument: openedDocuments.event,
 
   getConfiguration(section: string) {
     return {
@@ -722,12 +738,12 @@ export const workspace = {
     return uri.fsPath.slice(folder.uri.fsPath.length).replace(/^\//, '');
   },
 
-  createFileSystemWatcher(pattern: RelativePattern): StubDisposable & {
+  createFileSystemWatcher(pattern: RelativePattern | string): StubDisposable & {
     onDidChange(handler: () => void): StubDisposable;
     onDidCreate(handler: () => void): StubDisposable;
     onDidDelete(handler: () => void): StubDisposable;
   } {
-    recorded.watched.push(`${pattern.base.fsPath}/${pattern.pattern}`);
+    recorded.watched.push(typeof pattern === 'string' ? pattern : `${pattern.base.fsPath}/${pattern.pattern}`);
     const noop = (): StubDisposable => ({ dispose: () => undefined });
     return {
       onDidChange: noop,
