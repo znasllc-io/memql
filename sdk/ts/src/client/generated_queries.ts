@@ -12152,6 +12152,30 @@ QueryClient.prototype.workComputerScopesForOwnerRun = function (this: QueryClien
   return this.executeNamed("workComputerScopesForOwnerRun", buildWorkComputerScopesForOwnerRun(args), opts);
 };
 
+/** Read only context archives, one bounded page; execution-progress snapshots are not pulled into memory by a history search. Authority remains per owner. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workContextSourcesForOwnerRun"] in generated_concepts.ts).
+export interface WorkContextSourcesForOwnerRunArgs {
+  runId: string;
+  fingerprint: string;
+}
+
+export function buildWorkContextSourcesForOwnerRun(args: WorkContextSourcesForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("fingerprint: " + renderMemQLValue(args.fingerprint));
+  return "query workContextSourcesForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workContextSourcesForOwnerRun(args: WorkContextSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workContextSourcesForOwnerRun = function (this: QueryClient, args: WorkContextSourcesForOwnerRunArgs = {} as WorkContextSourcesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workContextSourcesForOwnerRun", buildWorkContextSourcesForOwnerRun(args), opts);
+};
+
 /** Latest durable tool exchange checkpoint for this owner's step. Separate receipts cannot overwrite concurrent run cancellation or human decisions. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workContinuationForOwnerRun"] in generated_concepts.ts).
 export interface WorkContinuationForOwnerRunArgs {

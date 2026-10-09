@@ -26,7 +26,7 @@ var toolHandlerCorpus = []struct {
 	tool, v1, rendered string
 }{
 	{"recallMemory", `query workRecallMemory(search: args.search)`, `query workRecallMemory(search: "v-search")`},
-	{"recallWorkHistory", `query workRecallHistory(search: args.search)`, `query workRecallHistory(search: "v-search")`},
+	{"recallWorkHistory", `query workRecallHistory(search: args.search, checkpoint: args.checkpoint, messageIndex: args.messageIndex, offset: args.offset, maxChars: args.maxChars, cursor: args.cursor)`, `query workRecallHistory(search: "v-search", checkpoint: "v-checkpoint", messageIndex: 7, offset: 7, maxChars: 7, cursor: "v-cursor")`},
 	{"discoverCapabilities", `query workCapabilities(search: args.search)`, `query workCapabilities(search: "v-search")`},
 	{"executeCapability", `query workExecute(name: args.name, arguments: args.arguments)`, `query workExecute(name: "v-name", arguments: {"done":true,"n":2,"title":"T arguments"})`},
 	{"navigateOS", `query workNavigate(app: args.app, section: args.section, record: args.record)`, `query workNavigate(app: "v-app", section: "v-section", record: "v-record")`},
