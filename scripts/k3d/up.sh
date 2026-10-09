@@ -639,6 +639,7 @@ function wait_for_workloads() {
     local deadline="${WORKLOAD_TIMEOUT:-${MEMQL_K3D_WORKLOAD_TIMEOUT:-300}}" names retired waited=0 tick=5
     local started last_report=-30 remaining poll pause
     deadline="${deadline%s}"
+    started=$SECONDS
     info "Waiting up to ${deadline}s for the MemQL workloads to become Available..."
 
     # SAY WHAT IS BEING LEFT OUT, before waiting rather than after. A narrowed
@@ -648,12 +649,26 @@ function wait_for_workloads() {
         info "not waiting for $(printf '%s' "$retired" | tr '\n' ' '): a node type this tree no longer builds, so these belong to the release being upgraded from rather than to the revision under test (memql#5061)."
     fi
 
-    if [[ -z "$(all_deployments)" ]]; then
-        warn "no Deployments in ${NAMESPACE} yet -- ArgoCD may not have applied them."
-        WORKLOADS_READY=false
-        WORKLOADS_REASON="ArgoCD applied no Deployments to ${NAMESPACE} at all. The Application was registered and its source compared, so this is a sync that produced nothing rather than a workload that will not start: $(argocd_app_state)"
-        return 0
-    fi
+    # A successful comparison only rendered the manifests. The controller can
+    # still be starting its first sync, so an empty namespace is not yet a
+    # failed install. Creation and readiness share the same workload budget.
+    while [[ -z "$(all_deployments)" ]]; do
+        waited=$((SECONDS - started))
+        remaining=$((deadline - waited))
+        if (( remaining <= 0 )); then
+            warn "no Deployments in ${NAMESPACE} after ${deadline}s -- ArgoCD has not applied them."
+            WORKLOADS_READY=false
+            WORKLOADS_REASON="ArgoCD applied no Deployments to ${NAMESPACE} within ${deadline}s: $(argocd_app_state)"
+            return 0
+        fi
+        if (( waited - last_report >= 30 )); then
+            info "waiting for ArgoCD to create the MemQL workloads (${waited}s/${deadline}s)."
+            last_report=$waited
+        fi
+        pause=$tick
+        if (( remaining < pause )); then pause=$remaining; fi
+        sleep "$pause"
+    done
 
     names="$(scaled_up_deployments)"
     if [[ -z "$names" ]]; then
@@ -696,7 +711,7 @@ function wait_for_workloads() {
     cap_progress "Starting services" "$ready" "$total"
     reported=$ready
 
-    started=$SECONDS
+    last_report=-30
     while :; do
         waited=$((SECONDS - started))
         remaining=$((deadline - waited))

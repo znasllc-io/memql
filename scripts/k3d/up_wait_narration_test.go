@@ -81,7 +81,7 @@ func TestWaitBudgetParamOutranksTheEnv(t *testing.T) {
 
 func TestWaitBudgetIncludesTimeInsideKubectl(t *testing.T) {
 	ready, calls, log := runWaitForWorkloadsEnv(t, "bff 1\n", "bff", []string{
-		"WORKLOAD_TIMEOUT=1", "FAKE_WAIT_DELAY=2",
+		"WORKLOAD_TIMEOUT=3", "FAKE_WAIT_DELAY=4",
 	})
 	if ready != "false" {
 		t.Fatalf("WORKLOADS_READY = %q, want false\n%s", ready, log)
@@ -98,7 +98,7 @@ func TestWaitBudgetIncludesTimeInsideKubectl(t *testing.T) {
 // "still waiting" line -- the flake this pins, made deterministic.
 func TestWaitNarratesEvenWhenOnePollSpendsTheBudget(t *testing.T) {
 	ready, _, log := runWaitForWorkloadsEnv(t, "bff 1\nidentity 1\n", "identity", []string{
-		"WORKLOAD_TIMEOUT=1", "FAKE_WAIT_DELAY=2",
+		"WORKLOAD_TIMEOUT=3", "FAKE_WAIT_DELAY=4",
 	})
 	if ready != "false" {
 		t.Fatalf("WORKLOADS_READY = %q, want false\n%s", ready, log)

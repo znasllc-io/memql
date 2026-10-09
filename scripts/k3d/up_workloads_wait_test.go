@@ -94,7 +94,7 @@ func runWaitForWorkloads(t *testing.T, deployments, unready string) (ready strin
 		"FAKE_KUBECTL_LOG="+calls,
 		"FAKE_DEPLOYMENTS="+deployments,
 		"FAKE_UNREADY="+unready,
-		"MEMQL_K3D_WORKLOAD_TIMEOUT=1s",
+		"MEMQL_K3D_WORKLOAD_TIMEOUT=3s",
 	)
 	out, err := cmd.CombinedOutput()
 	if _, ok := err.(*exec.ExitError); !ok && err != nil {
@@ -164,5 +164,60 @@ func TestWaitForWorkloadsReportsAllZeroReplicasAsNotReady(t *testing.T) {
 	ready, _, log := runWaitForWorkloads(t, "mcp 0\nedge 0\n", "")
 	if ready != "false" {
 		t.Fatalf("WORKLOADS_READY = %q, want false -- no workload is running at all\noutput:\n%s", ready, log)
+	}
+}
+
+// Source comparison can finish before the controller's first sync creates any
+// Deployments. Exercise that gap without a real cluster or wall-clock sleeps,
+// and make sure creation does not grant readiness a fresh timeout budget.
+func TestWaitForWorkloadsAllowsTheFirstArgoSync(t *testing.T) {
+	for _, tt := range []struct {
+		name, appearAt, waitReady, wantReady, wantElapsed string
+	}{
+		{"created and ready", "5", "true", "true", "5"},
+		{"created but never ready", "5", "false", "false", "9"},
+		{"never created", "100", "false", "false", "9"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			harness := `
+source "$1/scripts/k3d/up.sh"
+NAMESPACE=memql
+WORKLOAD_TIMEOUT=9
+function retired_engine_deployments() { :; }
+function all_deployments() {
+    if (( SECONDS >= APPEAR_AT )); then printf 'deployment.apps/bff\n'; fi
+}
+function scaled_up_deployments() { all_deployments; }
+function available_count() { printf '0'; }
+function what_is_not_ready() { printf 'bff is starting\n'; }
+function argocd_app_state() { printf 'Application memql-local sync=OutOfSync'; }
+function sleep() { SECONDS=$((SECONDS + $1)); }
+function kubectl() {
+    [[ "$1" == wait ]] || return 0
+    printf 'WAIT=%s\n' "$*" >&2
+    if [[ "$WAIT_READY" == true ]]; then return 0; fi
+    local arg budget
+    for arg in "$@"; do
+        case "$arg" in --timeout=*) budget="${arg#--timeout=}"; sleep "${budget%s}" ;; esac
+    done
+    return 1
+}
+SECONDS=0
+wait_for_workloads
+printf 'READY=%s ELAPSED=%s REASON=%s\n' "$WORKLOADS_READY" "$SECONDS" "${WORKLOADS_REASON:-}"
+`
+			cmd := exec.Command("bash", "-c", harness, "wait-test", repoRoot(t))
+			cmd.Env = append(os.Environ(), "APPEAR_AT="+tt.appearAt, "WAIT_READY="+tt.waitReady)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("wait: %v\n%s", err, out)
+			}
+			if !strings.Contains(string(out), "READY="+tt.wantReady+" ELAPSED="+tt.wantElapsed) {
+				t.Fatalf("wrong verdict or shared deadline:\n%s", out)
+			}
+			if tt.appearAt == "100" && !strings.Contains(string(out), "no Deployments") {
+				t.Fatalf("empty timeout lost its diagnosis:\n%s", out)
+			}
+		})
 	}
 }
