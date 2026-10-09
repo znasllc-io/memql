@@ -15625,6 +15625,8 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-machine-facts { padding-block:12px; border-bottom:1px solid var(--os-line); }
 .fleet-machine-facts > summary { cursor:pointer; font-weight:600; }
 .fleet-machine-facts > .os-facts { margin-top:16px; }
+.fleet-app-permission-body { display:grid; gap:8px; min-width:0; padding-top:8px; }
+.fleet-app-permission-body > .os-caption { margin:0; }
 .fleet-home .fleet-device-base { max-width:100%; }
 .fleet-home .fleet-equipment-area { padding-inline:0; }
 .fleet-catalog-profile > summary::after, .os-fleet-catgroup > summary::after, .fleet-workspace-summary::after { content:"⌄"; margin-left:auto; color:var(--os-muted); }
