@@ -102,3 +102,33 @@ test("a stopped review keeps checking for a replacement and refreshes its applie
     assert.equal(refreshes, 1, "the same applied receipt must not reload the document repeatedly");
   } finally { dispose(); }
 });
+
+test("annotation deletion cancels only the confirmed review and never removes after cancellation failure",async()=>{
+  const noop=()=>({dispose(){}});
+  Object.assign(vscode.Uri,{joinPath:(uri:vscode.Uri,path:string)=>vscode.Uri.parse(`${uri}/${path}`)});
+  Object.assign(vscode.workspace,{registerTextDocumentContentProvider:noop,onDidCloseTextDocument:noop,onDidChangeTextDocument:noop,onDidSaveTextDocument:noop});
+  Object.assign(vscode.window,{onDidChangeVisibleTextEditors:noop,visibleTextEditors:[]});
+  for(const scenario of ["feedback","note","cancel-failed","approved","stale","other-author"]){
+    const uri=vscode.Uri.parse("memql-file://cluster/artifacts/doc/Guide.md"),source="Existing text.";
+    const document={uri,fileName:"Guide.md",version:1,isDirty:false,getText:()=>source} as vscode.TextDocument;
+    const base={resource:{id:"doc"},content:new TextEncoder().encode(source),version:1,revision:"file:1"} as OpenDocument;
+    const saved=new Map<string,unknown>([[`memql.documentRevision:${uri}`,{fingerprint:"saved",requestId:"request"}]]);
+    const context={extensionUri:vscode.Uri.parse("file:///extension"),subscriptions:[],workspaceState:{get:(key:string)=>saved.get(key),update:async(key:string,value:unknown)=>{saved.set(key,value);}}} as unknown as vscode.ExtensionContext;
+    const events:string[]=[],messages:any[]=[];
+    const row={id:"comment",canRemove:scenario!=="other-author",anchor:{kind:"document-end"},body:"Add details",revision:"file:1"};
+    const proposal={artifactId:"doc",requestId:"request",revision:"file:1",version:1,commentIds:["comment"],instruction:"",content:source};
+    const files={review:async()=>({requestId:"request",comments:[row]}),notes:async()=>({notes:[row]}),revision:async()=>({status:"waiting",runId:"run",approvalId:"approval",decision:scenario==="approved"?"approved":undefined,proposal}),
+      cancelRevision:async()=>{events.push("cancel");if(scenario==="cancel-failed")throw new Error("offline");},
+      removeAnnotation:async()=>{events.push("remove");},
+    } as unknown as Documents;
+    let receive!:(message:unknown)=>Promise<void>,dispose!:()=>void;
+    const panel={visible:false,active:true,onDidChangeViewState:noop,onDidDispose:(fn:()=>void)=>{dispose=fn;},webview:{asWebviewUri:(value:vscode.Uri)=>value,postMessage:async(message:unknown)=>{messages.push(message);return true;},onDidReceiveMessage:(fn:typeof receive)=>{receive=fn;return noop();}}} as unknown as vscode.WebviewPanel;
+    await new MarkdownEditor(context,files,async()=>base).resolveCustomTextEditor(document,panel);
+    try {
+      await receive({type:"removeAnnotation",id:"comment",purpose:scenario==="note"?"note":"feedback",runId:scenario==="stale"?"old-run":"run"});
+      assert.deepEqual(events,scenario==="feedback"?["cancel","remove"]:scenario==="note"?["remove"]:scenario==="cancel-failed"?["cancel"]:[],scenario);
+      assert.equal(messages.some(m=>m.type==="annotationRemoved"),["feedback","note"].includes(scenario),scenario);
+      assert.equal(messages.some(m=>m.type==="annotationRemoveError"),!["feedback","note"].includes(scenario),scenario);
+    } finally{dispose();}
+  }
+});

@@ -3053,6 +3053,7 @@
         "body",
         "ownerUserId",
         "purpose",
+        "removed",
         "requestId",
         "revision",
         "versionNumber"

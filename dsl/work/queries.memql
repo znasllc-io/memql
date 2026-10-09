@@ -466,6 +466,17 @@ query run workDocumentRevisionRequest {
   paginate 1
 }
 
+/// Deletion must account for every live review, including older editor windows.
+@actor
+query run workActiveDocumentRevisionRequests {
+ args { artifactId string! }
+ filter row => row.ownerUserId == actor.userId && row.automationName == "reviseLibraryDocument"
+            && row.?input.proposal.artifactId == args.artifactId
+            && row.status in ["compiling", "running", "waiting"]
+ shape workRevisionRequest
+ paginate 101
+}
+
 /// Bounded retry candidates; Library verifies identical source and feedback.
 @actor
 query run workDocumentRevisionRequests {

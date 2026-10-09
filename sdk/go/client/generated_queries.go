@@ -12711,6 +12711,28 @@ func WarmupStateForIdentityBuild(args WarmupStateForIdentityArgs) string {
 	return b.String()
 }
 
+// WorkActiveDocumentRevisionRequests -- Deletion must account for every live review, including older editor windows.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workActiveDocumentRevisionRequests"] in generated_concepts.go).
+type WorkActiveDocumentRevisionRequestsArgs struct {
+	ArtifactId string
+}
+
+// WorkActiveDocumentRevisionRequests calls the engine query workActiveDocumentRevisionRequests.
+func (qc *QueryClient) WorkActiveDocumentRevisionRequests(ctx context.Context, args WorkActiveDocumentRevisionRequestsArgs) (*Result, error) {
+	call := WorkActiveDocumentRevisionRequestsBuild(args)
+	return qc.executeNamed(ctx, "workActiveDocumentRevisionRequests", call)
+}
+
+func WorkActiveDocumentRevisionRequestsBuild(args WorkActiveDocumentRevisionRequestsArgs) string {
+	var b strings.Builder
+	b.WriteString("query workActiveDocumentRevisionRequests(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkApprovalForOwner -- Exact caller-owned approval receipt, including decided approvals for recovery.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalForOwner"] in generated_concepts.go).

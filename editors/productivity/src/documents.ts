@@ -1,6 +1,6 @@
 import { UserInputError } from "./problems.js";
 import {
-  buildLibraryArtifactForFile,
+  buildLibraryArtifactForFile, buildLibraryRemoveDocumentAnnotation,
   buildLibraryDocumentNotes, buildLibraryAddDocumentNote, buildLibraryDocumentHistory, buildLibraryDocumentVersion, buildLibraryForkDocumentVersion, buildCancelGoal, buildLibraryModifyRevisionItem, buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
   buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment, buildLibraryRequestDocumentRevision, buildLibraryDocumentRevisionStatus, buildDecideApproval,
 } from "@znasllc-io/memql-sdk-core/client";
@@ -108,6 +108,10 @@ export class Documents {
     if (!/^[\w-]{1,160}$/.test(id)) throw new UserInputError("Invalid document link.");
     const filename=/\.(md|markdown)$/i.test(name)?name:name+".md";
     return `memql-file://${document.resource.domain}/artifacts/${id}/${encodeURIComponent(filename)}`;
+  }
+  async removeAnnotation(document: OpenDocument, commentId: string): Promise<void> {
+    const row = (await this.api.execute(document.lease, "libraryRemoveDocumentAnnotation", buildLibraryRemoveDocumentAnnotation({artifactId:document.resource.id,commentId})))[0];
+    if (!row?.removed) throw new Error("Deletion was not confirmed. Try again.");
   }
   async notes(document:OpenDocument):Promise<Record<string,unknown>> {
     const row=(await this.api.execute(document.lease,"libraryDocumentNotes",buildLibraryDocumentNotes({artifactId:document.resource.id})))[0];

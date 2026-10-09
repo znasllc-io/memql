@@ -213,7 +213,7 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 				return nil, err
 			}
 			rows := extractRows(raw)
-			if len(rows) != 1 || stringField(rows[0], "purpose") == "note" || memql.BareShortId(stringField(rows[0], "artifactId")) != doc.artifact || stringField(rows[0], "revision") != doc.revision {
+			if len(rows) != 1 || boolField(rows[0], "removed") || stringField(rows[0], "purpose") == "note" || memql.BareShortId(stringField(rows[0], "artifactId")) != doc.artifact || stringField(rows[0], "revision") != doc.revision {
 				return nil, fmt.Errorf("one selected comment is unavailable or belongs to an earlier revision")
 			}
 			row := rows[0]
@@ -398,7 +398,11 @@ func (i *Integration) handleDocumentRevisionStatus(ctx context.Context, args map
 	if len(drafts) > 0 {
 		draft = revisionMap(revisionMap(drafts[0]["data"])["execution"])
 	}
-	return reviewResult(map[string]any{"draft": draft, "cancelRequested": run["cancelRequested"], "items": items, "proposalHash": workstate.ArtifactHash(proposal), "answer": approval["answer"], "supersededBy": successor["requestId"], "prepared": run != nil, "goalId": ids.GoalID, "runId": ids.RunID, "approvalId": ids.ApprovalID,
+	removed, err := i.removedRevisionComments(memql.ContextWithFreshRead(ctx), proposal)
+	if err != nil {
+		return nil, err
+	}
+	return reviewResult(map[string]any{"removedCommentIds": removed, "draft": draft, "cancelRequested": run["cancelRequested"], "items": items, "proposalHash": workstate.ArtifactHash(proposal), "answer": approval["answer"], "supersededBy": successor["requestId"], "prepared": run != nil, "goalId": ids.GoalID, "runId": ids.RunID, "approvalId": ids.ApprovalID,
 		"proposal": proposal, "decision": approval["decision"], "status": run["status"], "errorMessage": run["errorMessage"], "waitingOn": map[string]any{"kind": revisionMap(run["waitingOn"])["kind"], "resumeAt": revisionMap(run["waitingOn"])["resumeAt"]}, "retryCount": revisionMap(run["spent"])["retries"], "result": revisionMap(run["outcome"])["returned"]})
 }
 

@@ -718,7 +718,7 @@ query watchedFolder libraryWatchedFolders {
 @actor
 query documentComment documentCommentsForArtifact {
   args { artifactId string! }
-  filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true) && row.artifactId == args.artifactId && row.purpose != "note"
+  filter row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true) && row.artifactId == args.artifactId && row.purpose != "note" && row.removed != true
   shape documentCommentFull
   sort "row.createdAt", "desc"
   paginate 501
@@ -785,8 +785,20 @@ query documentVersion libraryDocumentBranches {
 @actor
 query documentComment documentNotesForArtifact {
   args { artifactId string! authorUserId string! }
-  filter row => row.ownerUserId == actor.userId && row.artifactId == args.artifactId && row.authorUserId == args.authorUserId && row.purpose == "note"
+  filter row => row.ownerUserId == actor.userId && row.artifactId == args.artifactId && row.authorUserId == args.authorUserId && row.purpose == "note" && row.removed != true
   shape documentCommentFull
   sort "row.createdAt", "desc"
   paginate 501
+}
+
+/// Bounded to a captured proposal's ids after current artifact authorization.
+/// actor.userId scopes the borrowed document owner, not the original caller;
+/// only Library can recheck the caller's current access before this receipt read.
+@serverOnly
+@actor
+query documentComment removedDocumentComments {
+ args { artifactId string! commentIds []string! }
+ filter row => row.ownerUserId == actor.userId && row.artifactId == args.artifactId && row.removed == true && row.id in args.commentIds.select(candidate => canonicalId(candidate, documentComment))
+ shape documentCommentFull
+ paginate 100
 }

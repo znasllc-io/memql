@@ -1085,6 +1085,7 @@ var BoundConcepts = map[string]string{
 	"validationLog":                                    "v1:data:log",
 	"validationQueue":                                  "v1:forge:request",
 	"warmupStateForIdentity":                           "v1:campaigns:warmupState",
+	"workActiveDocumentRevisionRequests":               "v1:work:run",
 	"workApprovalForOwner":                             "v1:work:approval",
 	"workApprovalsForOwnedRun":                         "v1:work:approval",
 	"workApprovalsForOwner":                            "v1:work:approval",
