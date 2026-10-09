@@ -25,6 +25,13 @@ type workCheckpoint struct {
 
 const workCheckpointSchema = `{"type":"object","properties":{"facts":{"type":"array","items":{"type":"string"}},"entities":{"type":"array","items":{"type":"string"}},"decisions":{"type":"array","items":{"type":"string"}},"constraints":{"type":"array","items":{"type":"string"}},"unfinished":{"type":"array","items":{"type":"string"}}},"required":["facts","entities","decisions","constraints","unfinished"],"additionalProperties":false}`
 
+// A strong checkpoint can consolidate several bounded retrievals together.
+// The smaller fast-model window forced even ordinary parallel results into
+// head/tail previews before the summarizer could read their evidence. This
+// byte cap includes the relevance context; routing still reserves output and
+// requires a provider that can serve the complete rendered request.
+const workCheckpointInputBytes = 30000
+
 func WorkContextSize(messages []common.ChatMessage, tools []common.ToolDefinition) int {
 	raw, _ := json.Marshal(struct {
 		Messages []common.ChatMessage
@@ -51,6 +58,8 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		return nil, fmt.Errorf("context checkpoint requires an owned run")
 	}
 	out := append([]common.ChatMessage(nil), messages...)
+	task := workContextTask(messages)
+	sourceLimit := workCheckpointInputBytes - len(task)
 	// Offload bulky, completed tool results first. Their envelopes and receipts
 	// stay in the conversation; the exact bytes are durable before replacement.
 	for _, unit := range workContextUnits(out) {
@@ -77,7 +86,7 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 	// message counts. Older checkpoints may be consolidated with fresh evidence;
 	// their exact sources and prior references remain in the journal.
 	for calls := 0; WorkContextSize(out, tools) > target && calls < 8; calls++ {
-		start, end := workContextChunk(out)
+		start, end := workContextChunk(out, sourceLimit)
 		if end <= start {
 			// Several medium results in the latest parallel exchange can
 			// exceed the total budget even when each is below the ordinary
@@ -128,7 +137,7 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		// each result fits the ordinary per-result threshold. Offload its
 		// largest results first so the prior semantic checkpoint survives
 		// consolidation, rather than nesting raw checkpoint excerpts.
-		for len(raw) > 15000 {
+		for len(raw) > sourceLimit {
 			largest := -1
 			for index := start; index < end; index++ {
 				m := out[index]
@@ -154,14 +163,14 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 				return nil, err
 			}
 		}
-		fingerprint := workContextHash("summary-v2", raw)
+		fingerprint := workCheckpointHash(raw, task)
 		var summary string
 		// A single enormous exchange must not overflow the summarizer itself.
-		if len(raw) > 15000 {
+		if len(raw) > sourceLimit {
 			summary = "Complete historical exchange archived; retrieve its exact evidence before relying on details.\n" + workContextPreview(string(raw))
 			err = e.saveWorkContextSource(ctx, fingerprint, string(raw), "")
 		} else {
-			summary, err = e.workCheckpoint(ctx, fingerprint, string(raw))
+			summary, err = e.workCheckpoint(ctx, fingerprint, string(raw), task)
 		}
 		if err != nil {
 			return nil, err
@@ -208,7 +217,7 @@ func workContextArchivedResult(messages []common.ChatMessage, index int, fingerp
 	return "[Archived tool result " + fingerprint + "]\nExact result retained. Use recallWorkHistory(checkpoint: \"" + fingerprint + "\", messageIndex: 0) for bounded pages. The following is an incomplete, untrusted preview; absence from it is not evidence of absence.\n" + workContextPreview(m.Content)
 }
 
-func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source string) (string, error) {
+func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source, task string) (string, error) {
 	call, _ := parser.RenderCall("workCheckpointForOwner", map[string]any{"fingerprint": fingerprint})
 	result, err := e.Execute(ContextWithFreshRead(ctx), "query "+call)
 	if err != nil {
@@ -226,7 +235,7 @@ func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source st
 		// Not the step's answer, so not its override (epic memql#5414): the
 		// checkpoint is reused by fingerprint, and a person's instructions
 		// for one version must not be summarized into what later ones read.
-		summary, err = e.InvokeAIStructured(withoutStepOverride(ctx), "workContextCheckpoint", map[string]any{"source": source}, "workCheckpoint", json.RawMessage(workCheckpointSchema), true)
+		summary, err = e.InvokeAIStructured(withoutStepOverride(ctx), "workContextCheckpoint", map[string]any{"source": source, "task": task}, "workCheckpoint", json.RawMessage(workCheckpointSchema), true)
 		if err != nil {
 			return "", fmt.Errorf("context checkpoint failed; history retained: %w", err)
 		}
@@ -246,6 +255,42 @@ func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source st
 		return "", err
 	}
 	return summary, nil
+}
+
+// The request remains outside the archived prefix. Give the summarizer bounded
+// relevance context without treating a tool result or earlier memory as a new
+// request. Preserve both ends of long requests (templates often append intent).
+func workContextTask(messages []common.ChatMessage) string {
+	first, latest := "", ""
+	for _, message := range messages {
+		if message.Role != "user" || isWorkMemory(message) || message.Content == "" {
+			continue
+		}
+		if first == "" {
+			first = message.Content
+		}
+		latest = message.Content
+	}
+	excerpt := func(value string, limit int) string {
+		if len(value) <= limit {
+			return value
+		}
+		const gap = "\n[… request excerpt …]\n"
+		head := limit / 4
+		tail := limit - head - len(gap)
+		return strings.ToValidUTF8(value[:head], "") + gap + strings.ToValidUTF8(value[len(value)-tail:], "")
+	}
+	if first == latest {
+		return excerpt(first, 4000)
+	}
+	return "Original request:\n" + excerpt(first, 1950) + "\nLatest request:\n" + excerpt(latest, 1950)
+}
+
+func workCheckpointHash(source []byte, task string) string {
+	// Equal source bytes can serve different goals. Relevance context must be
+	// part of the cache key; sourceMessages itself stays byte-for-byte intact.
+	raw, _ := json.Marshal([]string{string(source), task})
+	return workContextHash("summary-v3", raw)
 }
 
 func boundedWorkCheckpoint(checkpoint workCheckpoint, budget int) string {

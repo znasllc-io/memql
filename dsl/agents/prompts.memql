@@ -115,6 +115,8 @@ prompt responsibilityIntake {
 
 /// A portable checkpoint of an immutable prefix; original messages stay in the
 /// work journal. This is memory compression, not execution or permission.
-@level("fast")
+/// Semantic consolidation must preserve relevance and uncertainty across many
+/// turns; a classification-tier model can perpetuate stale summaries.
+@level("strong")
 @templateFile("prompts/workContextCheckpoint.tmpl")
-prompt workContextCheckpoint { source string! }
+prompt workContextCheckpoint { source string! task string }

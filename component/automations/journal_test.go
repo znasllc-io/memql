@@ -231,7 +231,7 @@ func TestJournal_FailedStepAndFailedRun(t *testing.T) {
 	if _, present := args["result"]; present {
 		t.Error("a failed step carries no result")
 	}
-	_, args = argsOf(t, rec.calls[3])
+	_, args = argsOf(t, rec.calls[len(rec.calls)-1])
 	if args["status"] != "failed" || args["errorMessage"] != "boom" {
 		t.Errorf("failed run: %v", args)
 	}
@@ -422,15 +422,15 @@ func TestARunParksWhenNoDoorToAModelIsOpen(t *testing.T) {
 	})
 	j.closeRun(context.Background(), run, "chain-head")
 
-	if len(exec.calls) != 2 {
-		t.Fatalf("want the approval then the wait, got %d calls: %v", len(exec.calls), exec.calls)
+	if len(exec.calls) != 3 || !strings.HasPrefix(exec.calls[0], "query workRunById(") {
+		t.Fatalf("want the cancellation read, approval, then wait, got %d calls: %v", len(exec.calls), exec.calls)
 	}
 
 	// THE ORDER IS LOAD-BEARING. A run parked on an approval id that does not
 	// exist is a run waiting on nothing: no person can decide it and no sweep
 	// can resolve it, so it sits until the abandoned sweep closes it with a
 	// sentence that has nothing true in it.
-	name, args := argsOf(t, exec.calls[0])
+	name, args := argsOf(t, exec.calls[1])
 	if name != "createWorkApproval" {
 		t.Fatalf("first call = %q, want the approval to exist before the run waits on it", name)
 	}
@@ -447,7 +447,7 @@ func TestARunParksWhenNoDoorToAModelIsOpen(t *testing.T) {
 		t.Fatal("the approval needs an id")
 	}
 
-	name, args = argsOf(t, exec.calls[1])
+	name, args = argsOf(t, exec.calls[2])
 	if name != "updateWorkRun" {
 		t.Fatalf("second call = %q", name)
 	}
@@ -483,7 +483,7 @@ func TestACeilingParkIsNotReCheckedOnATimer(t *testing.T) {
 	run.Fail(&stubDoorRefusal{code: work.RefusalCeilingReached})
 	j.closeRun(context.Background(), run, "")
 
-	_, args := argsOf(t, exec.calls[1])
+	_, args := argsOf(t, exec.calls[len(exec.calls)-1])
 	waiting, _ := args["waitingOn"].(map[string]any)
 	if _, present := waiting["resumeAt"]; present {
 		t.Errorf("a ceiling park must not carry resumeAt: %v", waiting)
@@ -503,10 +503,10 @@ func TestAnOrdinaryFailureStillFailsTheRun(t *testing.T) {
 	run.Fail(errors.New("the step's postcondition did not hold"))
 	j.closeRun(context.Background(), run, "")
 
-	if len(exec.calls) != 1 {
-		t.Fatalf("want one close call, got %v", exec.calls)
+	if len(exec.calls) != 2 || !strings.HasPrefix(exec.calls[0], "query workRunById(") {
+		t.Fatalf("want a cancellation read and one close call, got %v", exec.calls)
 	}
-	name, args := argsOf(t, exec.calls[0])
+	name, args := argsOf(t, exec.calls[1])
 	if name != "updateWorkRun" || args["status"] != "failed" {
 		t.Fatalf("call = %q status = %v, want the run to fail", name, args["status"])
 	}

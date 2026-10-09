@@ -28,16 +28,20 @@ type cancelAnsweringExecutor struct {
 	// flags is consumed one entry per workRunById; the last entry repeats.
 	flags []bool
 	// failReads makes every workRunById fail, which is the fail-open case.
-	failReads bool
-	reads     int
+	failReads  bool
+	reads      int
+	freshReads int
 }
 
-func (c *cancelAnsweringExecutor) Execute(_ context.Context, query string) (*memql.ExecuteResult, error) {
+func (c *cancelAnsweringExecutor) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
 	c.calls = append(c.calls, query)
 	if !strings.HasPrefix(strings.TrimSpace(query), "query workRunById") {
 		return &memql.ExecuteResult{}, nil
 	}
 	c.reads++
+	if memql.FreshReadFromContext(ctx) {
+		c.freshReads++
+	}
 	if c.failReads {
 		return nil, errors.New("read timeout")
 	}
@@ -217,6 +221,28 @@ func TestExecutor_AnUnjournaledRunAsksNothingAboutCancellation(t *testing.T) {
 	}
 	if len(steps.ran) != 3 || exec.Status != "completed" {
 		t.Fatalf("a preview must run normally: ran %v, status %q", steps.ran, exec.Status)
+	}
+}
+
+// A remote integration can return only the error's text. The receiving
+// executor has no local cancellation error or waiter; the shared receipt is
+// what distinguishes the person's Stop from a failure needing AI triage.
+func TestRemoteCancellationClosesWithoutFailureClassification(t *testing.T) {
+	rec := &cancelAnsweringExecutor{flags: []bool{true}}
+	classifier := &countingClassifier{}
+	journal := newWorkJournal(rec, nil)
+	journal.classifier = classifier
+	execution := failedRun("run-1", `function "runAgentTurn" execution failed: cancelled: the person asked this work to stop`, 1, 0)
+	journal.closeRun(context.Background(), execution, "saved-prefix")
+	if rec.freshReads != 1 {
+		t.Fatalf("cancellation receipt must bypass the receiving replica cache: fresh reads=%d", rec.freshReads)
+	}
+	if classifier.calls != 0 || execution.Status != "cancelled" {
+		t.Fatalf("Stop became a failure: classifier calls=%d status=%s", classifier.calls, execution.Status)
+	}
+	name, fields := argsOf(t, rec.calls[len(rec.calls)-1])
+	if name != "updateWorkRun" || fields["status"] != "cancelled" || fields["cancelledBy"] != "u-alice" || fields["chainHead"] != "saved-prefix" {
+		t.Fatalf("cancellation receipt = %s %+v", name, fields)
 	}
 }
 

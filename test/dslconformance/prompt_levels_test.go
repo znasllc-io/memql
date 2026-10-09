@@ -98,10 +98,10 @@ var promptLevels = map[string]string{
 	"libraryRevisionIntent": "fast",
 	// An app gathers a bounded evidence report; a human reviews the proposal.
 	"libraryRevisionAppResearch": "strong",
-	// workContextCheckpoint summarizes a bounded immutable prefix. Originals
-	// remain available for recall; this derived memory neither executes work nor
-	// changes authority. The fast band handles this constrained extraction.
-	"workContextCheckpoint": "fast",
+	// Semantic consolidation must keep task relevance, corrections and evidence
+	// limits through repeated checkpoints. The fast band copied stale metadata
+	// in the long research trace; recallability alone did not prevent that loop.
+	"workContextCheckpoint": "strong",
 	// deriveProcedureHole: proposes how ONE argument of a learned procedure is
 	// derived from an earlier step's result (epic memql#5402, D6's single
 	// bounded call). Reasoning rather than fast, and the reason is the shape

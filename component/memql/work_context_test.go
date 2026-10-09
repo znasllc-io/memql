@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
@@ -15,13 +16,15 @@ import (
 )
 
 type checkpointModel struct {
-	calls int
-	fail  bool
-	reply string
+	calls    int
+	fail     bool
+	reply    string
+	messages []common.ChatMessage
 }
 
-func (p *checkpointModel) CallChatStructured(_ context.Context, _ []common.ChatMessage, _ common.StructuredSchema) (string, error) {
+func (p *checkpointModel) CallChatStructured(_ context.Context, messages []common.ChatMessage, _ common.StructuredSchema) (string, error) {
 	p.calls++
+	p.messages = messages
 	if p.fail {
 		return "", fmt.Errorf("summary unavailable")
 	}
@@ -51,6 +54,9 @@ func TestWorkCheckpointRetainsSourcesReusesExactMemoryAndIsolatesOwners(t *testi
 	require.Contains(t, compacted[2].Content, "owner@example.test")
 	calls := model.calls
 	require.Positive(t, calls)
+	require.Contains(t, fmt.Sprint(model.messages), "<request-context>")
+	require.Contains(t, fmt.Sprint(model.messages), "Turn 0: CNAS")
+	require.Contains(t, fmt.Sprint(model.messages), "Turn 59: CNAS")
 	again, err := e.CompactWorkContext(ctx, messages, nil, 15000)
 	require.NoError(t, err)
 	require.Equal(t, compacted, again)
@@ -64,6 +70,35 @@ func TestWorkCheckpointRetainsSourcesReusesExactMemoryAndIsolatesOwners(t *testi
 	rows, err = e.workRows(stranger, "workObservationsForOwnerRun", run.RunId)
 	require.NoError(t, err)
 	require.Empty(t, rows)
+}
+
+func TestWorkCheckpointRelevanceContextIsBoundedAndPartOfItsIdentity(t *testing.T) {
+	request := "Compare field performance " + strings.Repeat("文献", 3000) + " preserve measurement uncertainty"
+	messages := []common.ChatMessage{
+		{Role: "system", Content: "system-only"},
+		{Role: "user", Content: request},
+		{Role: "tool", Content: "tool-only"},
+		{Role: "user", Content: "[Memory checkpoint old]\nderived-only"},
+	}
+	context := workContextTask(messages)
+	require.LessOrEqual(t, len(context), 4000)
+	require.True(t, utf8.ValidString(context))
+	require.Contains(t, context, "Compare field performance")
+	require.Contains(t, context, "preserve measurement uncertainty")
+	for _, excluded := range []string{"system-only", "tool-only", "derived-only"} {
+		require.NotContains(t, context, excluded)
+	}
+	source := []byte(`[{"Role":"tool","Content":"exact evidence"}]`)
+	before := workCheckpointHash(source, context)
+	messages = append(messages, common.ChatMessage{Role: "user", Content: "Correction: compare regeneration costs"})
+	corrected := workContextTask(messages)
+	require.LessOrEqual(t, len(corrected), 4000)
+	require.True(t, utf8.ValidString(corrected))
+	require.Contains(t, corrected, "Compare field performance")
+	require.Contains(t, corrected, "Correction: compare regeneration costs")
+	require.NotEqual(t, before, workCheckpointHash(source, corrected), "a changed objective must not reuse differently focused memory")
+	require.Equal(t, before, workCheckpointHash(source, context))
+	require.Empty(t, workContextTask(nil))
 }
 func TestWorkContextSizeCountsToolSchemasAndArguments(t *testing.T) {
 	messages := []common.ChatMessage{{Role: "assistant", ToolCalls: []common.ToolCall{{Name: "execute", Arguments: strings.Repeat("x", 30000)}}}}
