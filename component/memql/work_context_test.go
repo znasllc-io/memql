@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -16,12 +17,16 @@ import (
 type checkpointModel struct {
 	calls int
 	fail  bool
+	reply string
 }
 
 func (p *checkpointModel) CallChatStructured(_ context.Context, _ []common.ChatMessage, _ common.StructuredSchema) (string, error) {
 	p.calls++
 	if p.fail {
 		return "", fmt.Errorf("summary unavailable")
+	}
+	if p.reply != "" {
+		return p.reply, nil
 	}
 	return `{"facts":["The project is CNAS [0]"],"entities":["owner@example.test [1]"],"decisions":[],"constraints":[],"unfinished":[]}`, nil
 }
@@ -63,4 +68,26 @@ func TestWorkCheckpointRetainsSourcesReusesExactMemoryAndIsolatesOwners(t *testi
 func TestWorkContextSizeCountsToolSchemasAndArguments(t *testing.T) {
 	messages := []common.ChatMessage{{Role: "assistant", ToolCalls: []common.ToolCall{{Name: "execute", Arguments: strings.Repeat("x", 30000)}}}}
 	require.Greater(t, WorkContextSize(messages, nil), 10000)
+}
+
+func TestWorkCheckpointBoundsWholeEntriesIncludingUnicode(t *testing.T) {
+	checkpoint := workCheckpoint{
+		Facts:       []string{strings.Repeat("文献", 4000), "Measured result [3]"},
+		Entities:    []string{"https://example.test/exact-source [4]"},
+		Decisions:   []string{"Keep uncertainty explicit [5]"},
+		Constraints: []string{"Do not repeat the completed upload [6]"},
+		Unfinished:  []string{"Verify field evidence [7]"},
+	}
+	got := boundedWorkCheckpoint(checkpoint, 512)
+	require.LessOrEqual(t, len(got), 512)
+	var decoded workCheckpoint
+	require.NoError(t, json.Unmarshal([]byte(got), &decoded))
+	require.Contains(t, decoded.Unfinished, checkpoint.Unfinished[0])
+	require.Contains(t, decoded.Constraints, checkpoint.Constraints[0])
+	require.Contains(t, decoded.Entities, checkpoint.Entities[0])
+	require.NotContains(t, got, "文", "do not publish truncated claims")
+	require.Contains(t, got, "incomplete")
+	checkpoint.Facts = []string{"Short evidence [3]"}
+	raw, _ := json.Marshal(checkpoint)
+	require.Equal(t, string(raw), boundedWorkCheckpoint(checkpoint, 6000))
 }

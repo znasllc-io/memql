@@ -113,6 +113,14 @@ Owned work uses the following layers:
    facts, exact references, decisions, constraints, receipts, uncertainty,
    failed approaches and unfinished work. Older checkpoints can be
    consolidated with fresh evidence; their sources remain retrievable.
+   When parallel tool results together exceed the summarizer's input window,
+   the engine archives the largest results first so the previous semantic
+   checkpoint can still be consolidated with the new evidence.
+   If the model returns an oversized checkpoint, the engine retains whole
+   entries across these categories within its byte budget and labels the
+   memory incomplete. It never truncates a claim or source URL to make it
+   fit. Exact source messages are saved before the bounded memory replaces
+   them, so verbosity alone does not stop the goal or spend another model call.
 4. **Retrieve only what is needed.** `recallWorkHistory` searches a bounded
    page of archive records. An exact checkpoint and message index retrieve
    character pages of the original serialized message, including tool-call
@@ -120,6 +128,9 @@ Owned work uses the following layers:
    search. An empty page with `hasMore` does not mean the evidence is absent.
    `matchLimitReached` means that some excerpts could not fit the response;
    narrow the search or read exact indexes from its listed source records.
+   If a recalled page itself exceeds the active budget, the engine directs
+   the next read to the same original source and offset with a smaller page.
+   It never directs the model into another archive of that recall response.
 
 The runtime bounds summarizer input and output, model calls per compaction,
 and recall excerpts. A single exchange too large for the summarizer is

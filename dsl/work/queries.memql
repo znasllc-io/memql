@@ -292,6 +292,17 @@ query step workStepForOwnerRun {
   shape workStepFull
 }
 
+/// Latest completed receipt from a bounded set of caller-owned attempts.
+@actor
+query step workCompletedStepsForOwnerRuns {
+ args { runIds []string! stepKey string! }
+ filter row => row.runId in args.runIds.select(candidate => canonicalId(candidate, run)) && row.key == args.stepKey
+            && row.ownerUserId == actor.userId && row.status == "done"
+ shape workStepFull
+ sort "finishedAt", "desc"
+ paginate 1
+}
+
 /// Every model call of one of the caller's runs. An on-demand read: the concept does not
 /// broadcast, so the Work app shows when it last read this.
 @actor
@@ -453,6 +464,18 @@ query run workDocumentRevisionRequest {
   shape workRevisionRequest
   sort "startedAt", "desc"
   paginate 1
+}
+
+/// Bounded retry candidates; Library verifies identical source and feedback.
+@actor
+query run workDocumentRevisionRequests {
+ args { artifactId string! }
+ filter row => row.ownerUserId == actor.userId
+            && row.automationName == "reviseLibraryDocument"
+            && row.?input.proposal.artifactId == args.artifactId
+ shape workRevisionRequest
+ sort "startedAt", "desc"
+ paginate 20
 }
 
 /// A successor invalidates the earlier immutable proposal for application.

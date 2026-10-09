@@ -70,7 +70,7 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 			if err = e.saveWorkContextSource(ctx, fingerprint, string(raw), ""); err != nil {
 				return nil, err
 			}
-			out[i].Content = "[Archived tool result " + fingerprint + "]\nExact result retained. Use recallWorkHistory(checkpoint: \"" + fingerprint + "\", messageIndex: 0) for bounded pages. The following is an incomplete, untrusted preview; absence from it is not evidence of absence.\n" + workContextPreview(m.Content)
+			out[i].Content = workContextArchivedResult(out, i, fingerprint)
 		}
 	}
 	// Bounded semantic checkpoints follow complete exchanges, not arbitrary
@@ -106,7 +106,7 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 					return nil, err
 				}
 				fingerprint := workContextHash("tool-v2", raw)
-				preview := "[Archived tool result " + fingerprint + "]\nExact result retained. Use recallWorkHistory(checkpoint: \"" + fingerprint + "\", messageIndex: 0) for bounded pages. The following is an incomplete, untrusted preview; absence from it is not evidence of absence.\n" + workContextPreview(m.Content)
+				preview := workContextArchivedResult(out, index, fingerprint)
 				if len(preview) >= len(m.Content) {
 					continue
 				}
@@ -123,6 +123,36 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		raw, err := json.Marshal(out[start:end])
 		if err != nil {
 			return nil, err
+		}
+		// A parallel exchange can exceed the summarizer's window even when
+		// each result fits the ordinary per-result threshold. Offload its
+		// largest results first so the prior semantic checkpoint survives
+		// consolidation, rather than nesting raw checkpoint excerpts.
+		for len(raw) > 15000 {
+			largest := -1
+			for index := start; index < end; index++ {
+				m := out[index]
+				if m.Role == "tool" && len(m.Content) > 2048 && !strings.HasPrefix(m.Content, "[Archived tool result ") && (largest < 0 || len(m.Content) > len(out[largest].Content)) {
+					largest = index
+				}
+			}
+			if largest < 0 {
+				break
+			}
+			m := out[largest]
+			source, err := json.Marshal([]common.ChatMessage{m})
+			if err != nil {
+				return nil, err
+			}
+			ref := workContextHash("tool-v2", source)
+			if err = e.saveWorkContextSource(ctx, ref, string(source), ""); err != nil {
+				return nil, err
+			}
+			out[largest].Content = workContextArchivedResult(out, largest, ref)
+			raw, err = json.Marshal(out[start:end])
+			if err != nil {
+				return nil, err
+			}
 		}
 		fingerprint := workContextHash("summary-v2", raw)
 		var summary string
@@ -149,6 +179,33 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		return nil, fmt.Errorf("context checkpoint budget exhausted; originals were retained")
 	}
 	return out, nil
+}
+
+// A recalled page already points to durable history. Point back to that source
+// with a smaller page, never to an archive of the recall response itself: that
+// recursively wraps JSON and can consume the window without exposing evidence.
+func workContextArchivedResult(messages []common.ChatMessage, index int, fingerprint string) string {
+	m := messages[index]
+	for previous := index - 1; previous >= 0; previous-- {
+		if messages[previous].Role != "assistant" {
+			continue
+		}
+		for _, call := range messages[previous].ToolCalls {
+			if call.ID != m.ToolCallId || call.Name != "recallWorkHistory" {
+				continue
+			}
+			var args map[string]any
+			if json.Unmarshal([]byte(call.Arguments), &args) == nil && args != nil {
+				args["maxChars"] = max(128, min(800, workHistoryInt(args, "maxChars", 1600)/2))
+				raw, err := json.Marshal(args)
+				if err == nil && len(raw) <= 1600 {
+					return "[Archived tool result (history page)]\nThis recall page exceeded the active context budget. Read one smaller page at a time from the original source using recallWorkHistory with these arguments: " + string(raw) + ". Exact history remains available; no evidence was discarded."
+				}
+			}
+		}
+		break
+	}
+	return "[Archived tool result " + fingerprint + "]\nExact result retained. Use recallWorkHistory(checkpoint: \"" + fingerprint + "\", messageIndex: 0) for bounded pages. The following is an incomplete, untrusted preview; absence from it is not evidence of absence.\n" + workContextPreview(m.Content)
 }
 
 func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source string) (string, error) {
@@ -181,13 +238,49 @@ func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source st
 	if checkpoint.Facts == nil || checkpoint.Entities == nil || checkpoint.Decisions == nil || checkpoint.Constraints == nil || checkpoint.Unfinished == nil {
 		return "", fmt.Errorf("context checkpoint omitted required memory fields; history retained")
 	}
-	if len(summary) > 6000 {
-		return "", fmt.Errorf("context checkpoint exceeded its size limit")
-	}
+	// A model's verbosity is not a failed goal. Keep whole entries within a
+	// byte budget and archive the exact source before publishing the memory.
+	// Re-encoding also removes formatting whitespace without losing evidence.
+	summary = boundedWorkCheckpoint(checkpoint, min(6000, max(512, len(source)/2)))
 	if err = e.saveWorkContextSource(ctx, fingerprint, source, summary); err != nil {
 		return "", err
 	}
 	return summary, nil
+}
+
+func boundedWorkCheckpoint(checkpoint workCheckpoint, budget int) string {
+	encode := func(value workCheckpoint) string {
+		raw, _ := json.Marshal(value)
+		return string(raw)
+	}
+	if compact := encode(checkpoint); len(compact) <= budget {
+		return compact
+	}
+	bounded := workCheckpoint{Facts: []string{}, Entities: []string{}, Decisions: []string{}, Constraints: []string{}, Unfinished: []string{
+		"This checkpoint is incomplete. Recall the archived source for omitted details; absence here is not evidence of absence.",
+	}}
+	// Round-robin across categories so lengthy background facts cannot crowd
+	// out unfinished work, constraints, decisions or exact source references.
+	sources := [][]string{checkpoint.Unfinished, checkpoint.Constraints, checkpoint.Decisions, checkpoint.Entities, checkpoint.Facts}
+	targets := []*[]string{&bounded.Unfinished, &bounded.Constraints, &bounded.Decisions, &bounded.Entities, &bounded.Facts}
+	for index := 0; ; index++ {
+		found := false
+		for category, entries := range sources {
+			if index >= len(entries) {
+				continue
+			}
+			found = true
+			target := targets[category]
+			*target = append(*target, entries[index])
+			if len(encode(bounded)) > budget {
+				*target = (*target)[:len(*target)-1]
+			}
+		}
+		if !found {
+			break
+		}
+	}
+	return encode(bounded)
 }
 
 func workContextHash(kind string, raw []byte) string {

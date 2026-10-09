@@ -91,6 +91,11 @@ choose **Apply accepted**. Linked edits, such as moving a passage, share one
 decision. Modifying an item preserves the other proposed items and their
 decisions. The DSL workflow uses the harness for evidence collection when the
 feedback calls for research, then prepares exact replacements for human review.
+When the evidence stage retries, its DSL reuses completed app research from the
+same immutable request, including across replicas; a failed sibling does not
+spend the subscription quota again. An unchanged retry checks up to 20 recent
+owned requests and uses the latest completed receipt, so an intervening stopped
+attempt cannot hide earlier evidence. Changed feedback starts fresh research.
 Unchanged text and formatting are preserved by default. **Show in document**
 keeps the target highlighted; expanded explanations survive status updates.
 

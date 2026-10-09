@@ -12811,6 +12811,23 @@ func WorkCheckpointForOwnerBuild(args WorkCheckpointForOwnerArgs) string {
 	return b.String()
 }
 
+// WorkCompletedStepsForOwnerRuns -- Latest completed receipt from a bounded set of caller-owned attempts.
+//
+// Bound concept: v1:work:step (machine-readable: BoundConcepts["workCompletedStepsForOwnerRuns"] in generated_concepts.go).
+type WorkCompletedStepsForOwnerRunsArgs struct {
+}
+
+// WorkCompletedStepsForOwnerRuns calls the engine query workCompletedStepsForOwnerRuns.
+func (qc *QueryClient) WorkCompletedStepsForOwnerRuns(ctx context.Context, args WorkCompletedStepsForOwnerRunsArgs) (*Result, error) {
+	call := WorkCompletedStepsForOwnerRunsBuild(args)
+	return qc.executeNamed(ctx, "workCompletedStepsForOwnerRuns", call)
+}
+
+func WorkCompletedStepsForOwnerRunsBuild(args WorkCompletedStepsForOwnerRunsArgs) string {
+	_ = args
+	return "query workCompletedStepsForOwnerRuns()"
+}
+
 // WorkComputerScopesForOwnerRun -- Read only this run's own computer-use decisions, including previous grants.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerScopesForOwnerRun"] in generated_concepts.go).
@@ -12938,6 +12955,28 @@ func (qc *QueryClient) WorkDocumentRevisionRequest(ctx context.Context, args Wor
 func WorkDocumentRevisionRequestBuild(args WorkDocumentRevisionRequestArgs) string {
 	var b strings.Builder
 	b.WriteString("query workDocumentRevisionRequest(")
+	b.WriteString("artifactId: ")
+	b.WriteString(quoteMemQL(args.ArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkDocumentRevisionRequests -- Bounded retry candidates; Library verifies identical source and feedback.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workDocumentRevisionRequests"] in generated_concepts.go).
+type WorkDocumentRevisionRequestsArgs struct {
+	ArtifactId string
+}
+
+// WorkDocumentRevisionRequests calls the engine query workDocumentRevisionRequests.
+func (qc *QueryClient) WorkDocumentRevisionRequests(ctx context.Context, args WorkDocumentRevisionRequestsArgs) (*Result, error) {
+	call := WorkDocumentRevisionRequestsBuild(args)
+	return qc.executeNamed(ctx, "workDocumentRevisionRequests", call)
+}
+
+func WorkDocumentRevisionRequestsBuild(args WorkDocumentRevisionRequestsArgs) string {
+	var b strings.Builder
+	b.WriteString("query workDocumentRevisionRequests(")
 	b.WriteString("artifactId: ")
 	b.WriteString(quoteMemQL(args.ArtifactId))
 	b.WriteString(")")
