@@ -23,7 +23,7 @@ prompt libraryRevisionItem {
 @level("strong")
 @templateFile("prompts/libraryRevisionResearch.tmpl")
 prompt libraryRevisionResearch {
- priorEvidence []object
+ priorEvidence []string
  document string!
  passages string!
  instruction string
