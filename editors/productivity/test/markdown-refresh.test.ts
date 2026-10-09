@@ -108,14 +108,14 @@ test("annotation deletion cancels only the confirmed review and never removes af
   Object.assign(vscode.Uri,{joinPath:(uri:vscode.Uri,path:string)=>vscode.Uri.parse(`${uri}/${path}`)});
   Object.assign(vscode.workspace,{registerTextDocumentContentProvider:noop,onDidCloseTextDocument:noop,onDidChangeTextDocument:noop,onDidSaveTextDocument:noop});
   Object.assign(vscode.window,{onDidChangeVisibleTextEditors:noop,visibleTextEditors:[]});
-  for(const scenario of ["feedback","note","cancel-failed","approved","stale","other-author"]){
+  for(const scenario of ["feedback","note","cancel-failed","approved","applied","stale","other-author"]){
     const uri=vscode.Uri.parse("memql-file://cluster/artifacts/doc/Guide.md"),source="Existing text.";
     const document={uri,fileName:"Guide.md",version:1,isDirty:false,getText:()=>source} as vscode.TextDocument;
     const base={resource:{id:"doc"},content:new TextEncoder().encode(source),version:1,revision:"file:1"} as OpenDocument;
     const saved=new Map<string,unknown>([[`memql.documentRevision:${uri}`,{fingerprint:"saved",requestId:"request"}]]);
     const context={extensionUri:vscode.Uri.parse("file:///extension"),subscriptions:[],workspaceState:{get:(key:string)=>saved.get(key),update:async(key:string,value:unknown)=>{saved.set(key,value);}}} as unknown as vscode.ExtensionContext;
     const events:string[]=[],messages:any[]=[];
-    const row={id:"comment",canRemove:scenario!=="other-author",anchor:{kind:"document-end"},body:"Add details",revision:"file:1"};
+    const row={id:"comment",applied:scenario==="applied",canRemove:!["other-author","applied"].includes(scenario),anchor:{kind:"document-end"},body:"Add details",revision:"file:1"};
     const proposal={artifactId:"doc",requestId:"request",revision:"file:1",version:1,commentIds:["comment"],instruction:"",content:source};
     const files={review:async()=>({requestId:"request",comments:[row]}),notes:async()=>({notes:[row]}),revision:async()=>({status:"waiting",runId:"run",approvalId:"approval",decision:scenario==="approved"?"approved":undefined,proposal}),
       cancelRevision:async()=>{events.push("cancel");if(scenario==="cancel-failed")throw new Error("offline");},

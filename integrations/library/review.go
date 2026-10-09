@@ -88,6 +88,7 @@ func (i *Integration) reviewDocument(ctx context.Context, artifactID string) (re
 }
 
 func (i *Integration) handleDocumentReview(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	ctx = memql.ContextWithFreshRead(ctx)
 	if _, ok := auth.SubjectFromContext(ctx); !ok {
 		return nil, fmt.Errorf("sign in to read document feedback")
 	}
@@ -104,12 +105,17 @@ func (i *Integration) handleDocumentReview(ctx context.Context, args map[string]
 	if more {
 		rows = rows[:500]
 	}
+	applied, err := i.appliedReviewComments(ctx, doc, rows)
+	if err != nil {
+		return nil, err
+	}
 	for _, row := range rows {
 		row["id"] = memql.BareShortId(stringField(row, "id"))
 		row["authorUserId"] = memql.BareShortId(stringField(row, "authorUserId"))
 		row["outdated"] = stringField(row, "revision") != doc.revision
 		access, _ := auth.AccessFromContext(ctx)
-		row["canRemove"] = access != nil && memql.BareShortId(access.UserId) == memql.BareShortId(stringField(row, "authorUserId"))
+		row["applied"] = applied[asString(row["id"])]
+		row["canRemove"] = !applied[asString(row["id"])] && access != nil && memql.BareShortId(access.UserId) == memql.BareShortId(stringField(row, "authorUserId"))
 		delete(row, "ownerUserId")
 		delete(row, "requestId")
 	}

@@ -28,7 +28,7 @@ document.addEventListener("contextmenu", event => {
 }, true);
 type Anchor = { kind?: "markdown"; intent?: "extend"; scope?: "section"; sectionPath?: string[]; sourceQuote?: string; startLine: number; endLine: number; quote: string; startBlock: number; endBlock: number; startTextOffset: number; endTextOffset: number; prefix?: string; suffix?: string } | { kind: "document-end"; quote: string; intent?: never; scope?: never; sectionPath?: never } | { kind: "document"; quote: string; intent?: never; scope?: never; sectionPath?: never };
 type Attachment = { artifactId:string; version:number; revision:string; name:string; mimeType:string; size:number; uri:string };
-type ReviewRow = { canRemove?:boolean; attachments?:Attachment[]; id: string; body: string; outdated?: boolean; anchor: Anchor };
+type ReviewRow = { applied?:boolean; canRemove?:boolean; attachments?:Attachment[]; id: string; body: string; outdated?: boolean; anchor: Anchor };
 const state = (api.getState() ?? {}) as { attachments?:Attachment[]; draft?: string; purpose?: "feedback"|"note"; anchor?: Anchor; draftVersion?: number; source?: string; instruction?: string; reviewOpen?: boolean; included?: string[]; seen?: string[]; decisions?: Record<string, "accepted" | "declined">; modifications?: Record<string,string>; expanded?: Record<string,boolean>; reviewSource?: string };
 let attachments: Attachment[] = state.attachments ?? [];
 const attachmentPreviews = new Map<string,string>();
@@ -547,7 +547,10 @@ function openNote(id:string) {
 let confirmingAnnotation = "", removingAnnotation = "", annotationProblem: {message:string;reference?:string}|undefined;
 function deleteAnnotationControl(row:ReviewRow,purpose:"feedback"|"note"):HTMLElement {
   const slot=textElement("div","","annotation-delete");
-  if(row.canRemove!==true)return slot;
+  // A completion can arrive before the refreshed comment permissions. Close
+  // any pending confirmation immediately, including in an older editor window.
+  const applied=purpose==="feedback"&&(row.applied===true||revision?.result?.applied===true&&(revision?.items??[]).some((item:any)=>revision?.answer?.acceptedItemIds?.includes(item.id)&&item.commentIds?.includes(row.id)));
+  if(row.canRemove!==true||applied){if(confirmingAnnotation===row.id)confirmingAnnotation="";return slot;}
   const noun=purpose==="note"?"note":isExtension(row.anchor)?"extension request":"feedback";
   const linked=purpose==="feedback"&&activeRun()&&revision?.proposal?.commentIds?.includes(row.id);
   const busy=!!removingAnnotation||revisionBusy||preparing||commentBusy||dictationPhase!=="idle";
@@ -559,7 +562,7 @@ function deleteAnnotationControl(row:ReviewRow,purpose:"feedback"|"note"):HTMLEl
     button.setAttribute("aria-label",`Delete ${noun}`);button.title=`Delete ${noun}`;button.dataset.focusKey=`delete:${row.id}`;
     button.innerHTML='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg>';
     button.disabled=busy||!connected||!!linked&&revision?.decision==="approved";
-    if(linked&&revision?.decision==="approved")button.title="Wait for the approved changes to finish";
+    if(linked&&revision?.decision==="approved")button.title="Approved changes are being applied";
     button.addEventListener("click",()=>{confirmingAnnotation=row.id;annotationProblem=undefined;redraw();focus(`keep:${row.id}`);});slot.append(button);return slot;
   }
   slot.classList.add("confirming");

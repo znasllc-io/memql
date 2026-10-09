@@ -46,6 +46,8 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 	// -- specifically to remove the unguarded coupling a duplicated hash
 	// expression created, so the entry is gone rather than kept.)
 	allow := map[string]string{
+		"library/review_applied.go":              "verifies an existing immutable storage receipt against app/library_revision_files.go's raw SHA-256 operation path; core/id uses a different composition and cannot identify already-written blobs",
+		"library/review_applied_test.go":         "independently constructs the existing immutable blob receipt protocol for operation and byte-integrity verification",
 		"library/review_attachments.go":          "pins exact reference-file bytes in persisted approval receipts using standard SHA-256; core/id is order-independent/idempotent composition, not an interoperable byte-integrity checksum",
 		"installation/artifacts_test.go":         "independently computes standard OCI manifest, config and layer SHA-256 digests for the receiving registry protocol fixture",
 		"installation/source_capture.go":         "verifies private archive bytes against their immutable storage receipt's standard SHA-256; internal capture identities use core/id",
