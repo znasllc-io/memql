@@ -1,3 +1,4 @@
+import { UserInputError } from "./problems.js";
 import * as vscode from "vscode";
 import { buildClientAccountsAll, buildCampaignSaveTemplate } from "@znasllc-io/memql-sdk-core/client";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
@@ -20,18 +21,18 @@ export class TemplatePublisher {
     return operation;
   }
   private async publishDocument(document: vscode.TextDocument): Promise<void> {
-    if (document.isDirty && !await document.save()) throw new Error("Save this email before using it in Campaigns.");
+    if (document.isDirty && !await document.save()) throw new UserInputError("Save this email before using it in Campaigns.");
     const content = readTemplate(document.getText());
     const version = document.version;
     const source = document.uri.scheme === "memql-file" ? await this.load(document.uri) : undefined;
     const lease = source?.lease ?? this.api.current();
-    if (!lease) throw new Error("Connect and sign in with MemQL first.");
+    if (!lease) throw new UserInputError("Connect and sign in with MemQL first.");
     let publication: Publication | undefined = source?.template ? { domain: lease.domain, templateId: source.sourceId,
       accountId: source.template.accountId, name: source.template.name, revision: source.revision || "" } : undefined;
     const key = `memql.campaignPublication:${document.uri.toString()}`;
     if (!publication) {
       publication = this.context.workspaceState.get<Publication>(key);
-      if (publication && publication.domain !== lease.domain) throw new Error("This document's Campaigns draft belongs to a different cluster. Reconnect to that cluster.");
+      if (publication && publication.domain !== lease.domain) throw new UserInputError("This document's Campaigns draft belongs to a different cluster. Reconnect to that cluster.");
       if (!publication) {
         const accounts = await this.api.execute(lease, "clientAccountsAll", buildClientAccountsAll({}));
         const organization = await vscode.window.showQuickPick(accounts.map(row => ({ label: text(row,"name") || text(row,"id"), id: text(row,"id") })),
@@ -48,7 +49,7 @@ export class TemplatePublisher {
     const choice = await vscode.window.showQuickPick(["Save draft in Campaigns", "Publish template for campaigns"], {
       title: publication.name, placeHolder: "Publishing makes this reviewed copy available to campaigns. It does not send mail.", ignoreFocusOut: true });
     if (!choice) return;
-    if (document.version !== version || document.isDirty) throw new Error("The email changed during review. Save and review it again.");
+    if (document.version !== version || document.isDirty) throw new UserInputError("The email changed during review. Save and review it again.");
     let revision = publication.revision;
     if (!source?.template || choice === "Save draft in Campaigns") {
       const result = (await this.api.execute(lease, "campaignSaveTemplate", buildCampaignSaveTemplate({ ...publication, content: { ...content }, expectedRevision: revision, action: "save" })))[0];
@@ -58,7 +59,7 @@ export class TemplatePublisher {
       else await this.context.workspaceState.update(key, { ...publication, revision });
     }
     if (choice === "Publish template for campaigns") {
-      if (document.version !== version || document.isDirty) throw new Error("The email changed. Its saved draft is available, but review again before publishing.");
+      if (document.version !== version || document.isDirty) throw new UserInputError("The email changed. Its saved draft is available, but review again before publishing.");
       const result = (await this.api.execute(lease, "campaignSaveTemplate", buildCampaignSaveTemplate({ ...publication, content: { ...content }, expectedRevision: revision, action: "publish" })))[0];
       if (!result?.saved || !text(result,"revision")) throw new Error("Campaigns did not confirm publication. Retry to recover its receipt.");
       revision = text(result,"revision");

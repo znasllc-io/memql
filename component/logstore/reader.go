@@ -42,7 +42,7 @@ type Query struct {
 	Session        string
 	UserId         string
 
-	// Text is a case-insensitive substring of the message.
+	// Text is a case-insensitive substring of the message, subject, or structured attributes.
 	Text string
 
 	Limit int
@@ -122,7 +122,7 @@ func applyFacets(sel *bun.SelectQuery, q Query) *bun.SelectQuery {
 		sel = sel.Where("user_id = ?", v)
 	}
 	if v := strings.TrimSpace(q.Text); v != "" {
-		sel = sel.Where(`message ILIKE ? ESCAPE '\'`, ilikePattern(v))
+		sel = sel.Where(`(message ILIKE ? ESCAPE '\' OR subject ILIKE ? ESCAPE '\' OR attributes::text ILIKE ? ESCAPE '\')`, ilikePattern(v), ilikePattern(v), ilikePattern(v))
 	}
 	return sel
 }

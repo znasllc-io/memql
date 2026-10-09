@@ -1,3 +1,4 @@
+import { UserInputError } from "./problems.js";
 import MarkdownIt from "markdown-it";
 
 export interface MarkdownAnchor {
@@ -58,7 +59,7 @@ for (const name of ["fence", "code_block"] as const) {
   };
 }
 export function renderMarkdown(source: string): string {
-  if (source.length > MAX_MARKDOWN_CHARS) throw new Error("This Markdown document exceeds the 2 MiB reading-view limit. Open its source instead.");
+  if (source.length > MAX_MARKDOWN_CHARS) throw new UserInputError("This Markdown document exceeds the 2 MiB reading-view limit. Open its source instead.");
   const tokens = markdown.parse(source, {});
   // Generated files carry YAML front matter. Keep it in Source, not as a
   // giant setext heading above the document. Assign ranges/block IDs BEFORE
@@ -76,21 +77,21 @@ export function renderMarkdown(source: string): string {
   return markdown.renderer.render(body, markdown.options, {});
 }
 export function markdownAnchor(source: string, input: unknown): MarkdownAnchor {
-  if (!input || typeof input !== "object") throw new Error("Select a passage in the document first.");
+  if (!input || typeof input !== "object") throw new UserInputError("Select a passage in the document first.");
   const row = input as Record<string, unknown>;
   const startLine = Number(row.startLine), endLine = Number(row.endLine);
   const quote = typeof row.quote === "string" ? row.quote.trim() : "";
   const lines = source.split(/\r?\n/);
   if (!Number.isSafeInteger(startLine) || !Number.isSafeInteger(endLine) || startLine < 0 || endLine <= startLine || endLine > lines.length || !quote || quote.length > 8000) {
-    throw new Error("Select a shorter passage in the rendered document.");
+    throw new UserInputError("Select a shorter passage in the rendered document.");
   }
   const sourceQuote = lines.slice(startLine, endLine).join("\n");
-  if (sourceQuote.length > 16000) throw new Error("Select a shorter passage for this comment.");
+  if (sourceQuote.length > 16000) throw new UserInputError("Select a shorter passage for this comment.");
   const position: Partial<MarkdownAnchor> = {};
   for (const key of ["startBlock", "endBlock", "startTextOffset", "endTextOffset"] as const) {
     if (row[key] === undefined) continue;
     const value = Number(row[key]);
-    if (!Number.isSafeInteger(value) || value < 0 || value > MAX_MARKDOWN_CHARS) throw new Error("Select the passage again.");
+    if (!Number.isSafeInteger(value) || value < 0 || value > MAX_MARKDOWN_CHARS) throw new UserInputError("Select the passage again.");
     position[key] = value;
   }
   const sectionPath: string[] = [];

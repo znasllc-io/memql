@@ -343,7 +343,7 @@ func (i *Integration) handleDocumentRevisionStatus(ctx context.Context, args map
 		return nil, err
 	}
 	return reviewResult(map[string]any{"cancelRequested": run["cancelRequested"], "items": items, "proposalHash": workstate.ArtifactHash(proposal), "answer": approval["answer"], "supersededBy": successor["requestId"], "prepared": run != nil, "goalId": ids.GoalID, "runId": ids.RunID, "approvalId": ids.ApprovalID,
-		"proposal": proposal, "decision": approval["decision"], "status": run["status"], "errorMessage": run["errorMessage"], "result": revisionMap(run["outcome"])["returned"]})
+		"proposal": proposal, "decision": approval["decision"], "status": run["status"], "errorMessage": run["errorMessage"], "waitingOn": map[string]any{"kind": revisionMap(run["waitingOn"])["kind"], "resumeAt": revisionMap(run["waitingOn"])["resumeAt"]}, "retryCount": revisionMap(run["spent"])["retries"], "result": revisionMap(run["outcome"])["returned"]})
 }
 
 // Only a live instance of the captured run can reach the bounded operations.

@@ -2861,7 +2861,7 @@ func LogsRecordClientBuild(args LogsRecordClientArgs) string {
 	return b.String()
 }
 
-// LogsSearch -- Lines inside [windowStart, windowEnd), newest first, narrowed by every facet given. `apps` and `subjectConcepts` together form ONE scope predicate ORed -- an app's slice is 'lines tagged with me OR about the things I own' -- and every other facet ANDs. `text` is a case-insensitive substring of the message. Keyset-paged: pass the oldest row's occurredAt and id back as beforeAt and beforeId for the next page. `limit` defaults to 200 and is capped at 500. Admin and above; the handler repeats the floor.
+// LogsSearch -- Lines inside [windowStart, windowEnd), newest first, narrowed by every facet given. `apps` and `subjectConcepts` together form ONE scope predicate ORed -- an app's slice is 'lines tagged with me OR about the things I own' -- and every other facet ANDs. `text` is a case-insensitive substring of the message, subject, or structured attributes (including troubleshooting references). Keyset-paged: pass the oldest row's occurredAt and id back as beforeAt and beforeId for the next page. `limit` defaults to 200 and is capped at 500. Admin and above; the handler repeats the floor.
 type LogsSearchArgs struct {
 	// Inclusive start of the window (RFC 3339).
 	WindowStart string
@@ -2887,7 +2887,7 @@ type LogsSearchArgs struct {
 	Session string
 	// Only OS lines written by this user.
 	UserId string
-	// Case-insensitive substring of the message.
+	// Case-insensitive substring of the message, subject, or structured attributes (including troubleshooting references).
 	Text string
 	// Rows per page: 1 to 500, default 200.
 	Limit int
@@ -3093,7 +3093,7 @@ type LogsTailArgs struct {
 	Session string
 	// Only OS lines written by this user.
 	UserId string
-	// Case-insensitive substring of the message.
+	// Case-insensitive substring of the message, subject, or structured attributes (including troubleshooting references).
 	Text string
 	// Rows per answer: 1 to 500, default 200.
 	Limit int

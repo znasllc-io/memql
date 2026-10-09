@@ -58,7 +58,7 @@ test('a dismissed old microphone prompt cannot interrupt a new dictation', {time
  const count=messages.length;captures[0].reject(new Error('Old permission prompt dismissed'));
  await new Promise(resolve=>setTimeout(resolve,0));assert.equal(messages.length,count);
  captures[1].reject(new Error('Microphone permission denied'));await second;
- assert.equal(messages.at(-1).phase,'idle');assert.equal(messages.at(-1).error,'Microphone permission denied');
+ assert.equal(messages.at(-1).phase,'idle');assert.match(messages.at(-1).error,/Microphone access is blocked.*browser settings/);
 });
 
 test('unavailable speech releases capture, gives a recovery action, and permits retry', async () => {
@@ -75,7 +75,7 @@ test('unavailable speech releases capture, gives a recovery action, and permits 
  const dictation=new DocumentDictation({subscriptions:[]} as unknown as vscode.ExtensionContext,files);
  await dictation.start(panel,{} as OpenDocument);
  assert.equal(stopped,1);
- assert.match(messages.at(-1).error,/speech recognition model.*Fleet/);
+ assert.match(messages.at(-1).error,/AI model.*Fleet/);
  assert.ok(messages.at(-1).error.length<200);
  assert.equal(messages.some(m=>m.final),false);
  await dictation.start(panel,{} as OpenDocument);

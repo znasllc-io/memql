@@ -1,3 +1,4 @@
+import { renderProblem } from "./problemView.js";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type PDFDocumentLoadingTask, type RenderTask } from "pdfjs-dist/legacy/build/pdf.mjs";
 declare function acquireVsCodeApi(): { postMessage(value: unknown): void };
 const vscode = acquireVsCodeApi();
@@ -31,6 +32,7 @@ async function render() {
   }
 }
 window.addEventListener("message", async event => {
+  if(event.data?.type === "problem") { renderProblem(error,event.data,value=>vscode.postMessage(value)); return; }
   if (event.data?.type !== "document" || !Array.isArray(event.data.bytes)) return;
   const currentDocument = ++documentRevision;
   try {
@@ -52,8 +54,8 @@ window.addEventListener("message", async event => {
     vscode.postMessage({ type: "renderError", message: e instanceof Error ? e.message : String(e) });
   }
 });
-document.getElementById("previous")!.onclick = () => { if (page > 0) { page--; void render(); } };
-document.getElementById("next")!.onclick = () => { if (pdf && page < pdf.numPages - 1) { page++; void render(); } };
+document.getElementById("previous")!.onclick = () => { if (page > 0) { page--; void render().catch(e=>vscode.postMessage({type:"renderError",message:e instanceof Error?e.message:String(e)})); } };
+document.getElementById("next")!.onclick = () => { if (pdf && page < pdf.numPages - 1) { page++; void render().catch(e=>vscode.postMessage({type:"renderError",message:e instanceof Error?e.message:String(e)})); } };
 document.getElementById("rotate")!.onclick = () => vscode.postMessage({ type: "edit", change: { kind: "rotate", page } });
 document.getElementById("add")!.onclick = () => {
   const text = (document.getElementById("text") as HTMLInputElement).value;

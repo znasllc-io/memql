@@ -1,3 +1,4 @@
+import { UserInputError } from "./problems.js";
 import {
   buildLibraryDocumentNotes, buildLibraryAddDocumentNote, buildLibraryDocumentHistory, buildLibraryDocumentVersion, buildLibraryForkDocumentVersion, buildCancelGoal, buildLibraryModifyRevisionItem, buildLibraryArtifactById, buildLibraryFileById, buildGeneratedOutputById,
   buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment, buildLibraryRequestDocumentRevision, buildLibraryDocumentRevisionStatus, buildDecideApproval,
@@ -10,9 +11,9 @@ export function resourceFrom(uri: string): Resource {
   const segments = parsed.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   if (parsed.protocol !== "memql-file:" || parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash ||
       !parsed.hostname || segments.length !== 3 || !["artifacts", "templates"].includes(segments[0]) || !/^[\w-]{1,160}$/.test(segments[1])) {
-    throw new Error("Invalid MemQL file link.");
+    throw new UserInputError("Invalid MemQL file link.");
   }
-  if (!segments[2] || /[\\/\u0000-\u001f]/.test(segments[2])) throw new Error("Invalid file name.");
+  if (!segments[2] || /[\\/\u0000-\u001f]/.test(segments[2])) throw new UserInputError("Invalid file name.");
   return { domain: parsed.hostname.toLowerCase(), kind: segments[0] as Resource["kind"], id: segments[1], name: segments[2] };
 }
 export function isZip(name: string, mime = "", bytes?: Uint8Array): boolean {
@@ -31,10 +32,10 @@ export class Documents {
   async read(uri: string, openedLease?: ConnectionLease): Promise<OpenDocument> {
     const resource = resourceFrom(uri);
     const lease = openedLease ?? await this.api.connect(resource.domain);
-    if (lease.domain !== resource.domain) throw new Error("This file belongs to another cluster.");
+    if (lease.domain !== resource.domain) throw new UserInputError("This file belongs to another cluster.");
     if (resource.kind === "templates") {
       const row = (await this.api.execute(lease, "templateById", buildTemplateById({ templateId: resource.id })))[0];
-      if (!row) throw new Error("Template not found or unavailable to your organization.");
+      if (!row) throw new UserInputError("Template not found or unavailable to your organization.");
       const revision = text(row, "createdAt");
       if (!revision) throw new Error("The cluster did not return the template revision.");
       const content = new TextEncoder().encode(JSON.stringify({ subject: text(row,"subject"), textBody: text(row,"textBody"), htmlBody: text(row,"htmlBody") }, null, 2) + "\n");
@@ -42,7 +43,7 @@ export class Documents {
         template: { name: text(row,"name"), accountId: text(row,"accountId"), status: text(row,"status") } };
     }
     const artifact = (await this.api.execute(lease, "libraryArtifactById", buildLibraryArtifactById({ artifactId: resource.id })))[0];
-    if (!artifact || artifact.archived) throw new Error("File not found or unavailable to your account.");
+    if (!artifact || artifact.archived) throw new UserInputError("File not found or unavailable to your account.");
     const sourceId = text(artifact, "sourceConceptRef");
     const kind = text(artifact, "kind");
     let mime = text(artifact, "mimeType");
@@ -51,7 +52,7 @@ export class Documents {
     let content: Uint8Array;
     if (kind === "file") {
       const file = (await this.api.execute(lease, "libraryFileById", buildLibraryFileById({ fileId: sourceId })))[0];
-      if (!file) throw new Error("File not found or unavailable to your account.");
+      if (!file) throw new UserInputError("File not found or unavailable to your account.");
       mime = text(file, "mimeType") || mime;
       resource.name = text(file, "name") || resource.name;
       version = typeof file.versionNumber === "number" && file.versionNumber > 0 ? file.versionNumber : 1;
@@ -59,7 +60,7 @@ export class Documents {
       revision = `file:${version}`;
     } else if (kind === "generated_output") {
       const output = (await this.api.execute(lease, "generatedOutputById", buildGeneratedOutputById({ outputId: sourceId })))[0];
-      if (!output) throw new Error("Document not found or unavailable to your account.");
+      if (!output) throw new UserInputError("Document not found or unavailable to your account.");
       const versions = await this.api.execute(lease, "documentVersions", buildDocumentVersions({ documentId: sourceId }));
       version = Math.max(0, ...versions.map(row => Number(row.versionNumber) || 0));
       content = new TextEncoder().encode(text(output, "body"));
@@ -86,7 +87,7 @@ export class Documents {
     return this.artifactURI(document, row.artifactId, row.name);
   }
   artifactURI(document: OpenDocument, id:string, name:string):string {
-    if (!/^[\w-]{1,160}$/.test(id)) throw new Error("Invalid document link.");
+    if (!/^[\w-]{1,160}$/.test(id)) throw new UserInputError("Invalid document link.");
     const filename=/\.(md|markdown)$/i.test(name)?name:name+".md";
     return `memql-file://${document.resource.domain}/artifacts/${id}/${encodeURIComponent(filename)}`;
   }
@@ -128,7 +129,7 @@ export class Documents {
   async revision(document: OpenDocument, requestId: string): Promise<Record<string, unknown>> {
     const result = (await this.api.execute(document.lease, "libraryDocumentRevisionStatus", buildLibraryDocumentRevisionStatus({ requestId })))[0];
     const proposal = result?.proposal as Record<string, unknown> | undefined;
-    if (!proposal || proposal.artifactId !== document.resource.id) throw new Error("This revision request does not belong to the open document.");
+    if (!proposal || proposal.artifactId !== document.resource.id) throw new UserInputError("This revision request does not belong to the open document.");
     return result;
   }
   async modifyRevision(document: OpenDocument, requestId: string, approvalId: string, itemId: string, instruction: string, newRequestId: string): Promise<void> {
@@ -137,15 +138,15 @@ export class Documents {
   }
   async decideRevision(document: OpenDocument, requestId: string, approvalId: string, decision: "approved" | "rejected", answer?: Record<string, unknown>): Promise<void> {
     const current = await this.revision(document, requestId);
-    if (current.approvalId !== approvalId) throw new Error("The approval changed. Review the request again.");
-    if (current.cancelRequested || current.status === "cancelled") throw new Error("This review was stopped. Submit a new proposal to continue.");
-    if (["succeeded", "failed"].includes(String(current.status))) throw new Error("This review has finished. Refresh to see its result.");
+    if (current.approvalId !== approvalId) throw new UserInputError("The approval changed. Review the request again.");
+    if (current.cancelRequested || current.status === "cancelled") throw new UserInputError("This review was stopped. Submit a new proposal to continue.");
+    if (["succeeded", "failed"].includes(String(current.status))) throw new UserInputError("This review has finished. Refresh to see its result.");
     const result = (await this.api.execute(document.lease, "decideApproval", buildDecideApproval({ approvalId, decision, answer })))[0];
     if (result?.decision !== decision) throw new Error("The cluster did not confirm your decision. Refresh or retry to recover it.");
-    if (result.resumeError) throw new Error("Your decision was saved, but the job could not start. Retry to recover the same job.");
+    if (result.resumeError) throw new UserInputError("Your decision was saved, but the job could not start. Retry to recover the same job.");
   }
   async save(document: OpenDocument, content: Uint8Array): Promise<void> {
-    if (isZip(document.resource.name, document.mime, document.content)) throw new Error("ZIP files are downloads; they cannot be edited or extracted here.");
+    if (isZip(document.resource.name, document.mime, document.content)) throw new UserInputError("ZIP files are downloads; they cannot be edited or extracted here.");
     if (document.kind === "campaign_template" && document.template) {
       const result = (await this.api.execute(document.lease, "campaignSaveTemplate", buildCampaignSaveTemplate({
         templateId: document.sourceId, accountId: document.template.accountId, name: document.template.name,
@@ -163,11 +164,11 @@ export class Documents {
       const result = (await this.api.execute(document.lease, "editDocument", buildEditDocument({
         documentId: document.sourceId, content: body, expectedVersion: document.version, expectedRevision: document.revision, authorKind: "user",
       })))[0];
-      if (!result || result.conflict) throw new Error("This document changed. Compare with its latest version before saving.");
+      if (!result || result.conflict) throw new UserInputError("This document changed. Compare with its latest version before saving.");
       if (Number(result.newVersion) !== document.version + 1) throw new Error("The cluster did not confirm the saved version.");
       document.version = Number(result.newVersion);
       document.revision = String(result.revision || "");
-    } else throw new Error("This kind of record cannot be edited as a file yet.");
+    } else throw new UserInputError("This kind of record cannot be edited as a file yet.");
     document.content = new Uint8Array(content);
   }
 }
