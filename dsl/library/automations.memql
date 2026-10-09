@@ -1,3 +1,4 @@
+use work.queries.{ workStepForOwnerRun }
 use agents.builtins.{ ai, runAgentTurn }
 
 // library domain -- promotion triggers.
@@ -265,6 +266,12 @@ automation reviseLibraryDocument {
    return report.reply
   }
   branch app {
+   if captured.previousRunId != nil {
+    previous := query workStepForOwnerRun(runId: captured.previousRunId, stepKey: "evidence.app/report")
+    if previous.0.status == "done" && previous.0.result.value.reply != nil {
+     return previous.0.result.value.reply
+    }
+   }
    if lower(trim(intent.reply)) == "research" {
     report := builtin ai(templateId: "libraryRevisionAppResearch", data: {
      document: captured.content, passages: captured.passagesJSON,

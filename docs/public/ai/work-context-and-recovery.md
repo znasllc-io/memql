@@ -62,6 +62,13 @@ No metered provider is in either research chain. A genuine permission gate for
 headless or desktop access remains mandatory. Explicit owner routing and step
 overrides still take precedence.
 
+A new attempt after a failed or cancelled document review can reuse the completed
+app report from its immediately preceding request. Library binds that predecessor
+only for the same owner, exact saved source and unchanged feedback; the DSL
+reads the successful receipt. Changed feedback starts fresh research. A changed
+automation definition still refuses in-place resume: this reuse does not bypass
+the definition check or apply an old proposal.
+
 Remaining subscription quota is not inferred from sign-in. A failed session
 or bounded timeout remains an error with its attempt receipt. The chain may
 continue while the parent run is active; cancellation of the parent stops it.
@@ -100,6 +107,8 @@ Owned work uses the following layers:
    tool results are stored in the owner-scoped journal before replacement
    with a short, explicitly incomplete preview and an exact reference. The
    call ID and tool name remain intact. This requires no summarization call.
+   If several medium results collectively overflow the newest exchange, the
+   engine also offloads them until the combined context fits.
 3. **Checkpoint older complete exchanges.** The DSL checkpoint prompt retains
    facts, exact references, decisions, constraints, receipts, uncertainty,
    failed approaches and unfinished work. Older checkpoints can be

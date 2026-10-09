@@ -37,7 +37,7 @@ func WorkContextSize(messages []common.ChatMessage, tools []common.ToolDefinitio
 
 // CompactWorkContext is shared by conversational and autonomous work. It
 // checkpoints complete older exchanges before the hard window limit, keeps
-// the live tail raw, and refuses to drop history if summarization/storage fails.
+// the live tail protocol intact, and refuses to drop history if summarization/storage fails.
 func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition, target int) ([]common.ChatMessage, error) {
 	if target <= 0 {
 		return nil, fmt.Errorf("context checkpoint target must be positive")

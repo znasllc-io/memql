@@ -231,6 +231,31 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 			selected = append(selected, map[string]any{"id": commentID, "authorUserId": memql.BareShortId(stringField(row, "authorUserId")), "body": stringField(row, "body"), "anchor": anchor})
 		}
 		proposal = map[string]any{"reviewType": documentReviewType, "requestId": requestID, "artifactId": doc.artifact, "sourceId": memql.BareShortId(doc.source), "documentKind": doc.kind, "revision": doc.revision, "version": doc.version, "name": name, "format": "markdown", "content": content, "blobURL": stringField(doc.backing, "blobUrl"), "commentIds": comments, "comments": selected, "instruction": instruction}
+		// Bind a retry to the same owner's immediately preceding failed request.
+		// DSL chooses which completed evidence receipts can be reused; a changed
+		// source or feedback never inherits this link.
+		prior, err := i.revisionRow(ctx, "workDocumentRevisionRequest", map[string]any{"artifactId": doc.artifact})
+		if err != nil {
+			return nil, err
+		}
+		if priorID := asString(prior["requestId"]); priorID != "" {
+			previous, previousProposal, previousRun, _, err := i.revisionRequest(ctx, priorID)
+			if err != nil {
+				return nil, err
+			}
+			if previousRun["status"] == "failed" || previousRun["status"] == "cancelled" {
+				matches := true
+				for _, key := range []string{"artifactId", "sourceId", "revision", "content", "comments", "instruction", "amendment"} {
+					if workstate.ArtifactHash(map[string]any{key: proposal[key]}) != workstate.ArtifactHash(map[string]any{key: previousProposal[key]}) {
+						matches = false
+						break
+					}
+				}
+				if matches {
+					proposal["previousRunId"] = previous.RunID
+				}
+			}
+		}
 	}
 	ac, _ := auth.AccessFromContext(ctx)
 	receipt, err := i.reviewGoals.OpenAnalysisGoal(ctx, "library-revision:"+requestID, work.DirectGoal{
@@ -398,7 +423,7 @@ func (i *Integration) handleRevisionInput(ctx context.Context, args map[string]a
 	if err != nil {
 		return nil, err
 	}
-	return reviewResult(map[string]any{"content": captured["content"], "passages": passages, "passagesJSON": string(encoded), "instruction": captured["instruction"], "amendment": captured["amendment"]})
+	return reviewResult(map[string]any{"previousRunId": captured["previousRunId"], "content": captured["content"], "passages": passages, "passagesJSON": string(encoded), "instruction": captured["instruction"], "amendment": captured["amendment"]})
 }
 
 func (i *Integration) handleRevisionProposal(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
