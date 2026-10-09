@@ -191,12 +191,6 @@ func compileBudgetScopes(req CompileRequest) []string {
 // in flight finishes and is journaled rather than being abandoned mid-effect
 // -- which for a step that has already written outside the graph is the
 // difference between a receipt and an orphan.
-//
-// KNOWN RESIDUAL: the goal ROW is not closed. dsl/work/mutations.memql has no
-// update-shaped goal writer, so status/closedAt/closeReason cannot be written
-// from here. The reply says `goalClosed:false` rather than implying otherwise;
-// the gaps note at the bottom of this file names the mutation that would fix
-// it.
 func (i *Integration) handleCancelGoal(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	ac, err := requirePrincipal(ctx)
 	if err != nil {
@@ -206,6 +200,12 @@ func (i *Integration) handleCancelGoal(ctx context.Context, args map[string]any,
 	if goalId == "" {
 		return nil, fmt.Errorf("work: cancelGoal needs a goalId")
 	}
+	release, err := i.decisionGate(ctx, "goal-lifecycle-"+memql.BareShortId(goalId))
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	ctx = memql.ContextWithFreshRead(ctx)
 	st := i.store()
 
 	// Read the goal under the CALLER's own actor. A goal they cannot read is
@@ -262,7 +262,7 @@ func (i *Integration) handleCancelGoal(ctx context.Context, args map[string]any,
 	// the intent is recorded everywhere it needs to be, not that everything
 	// has already stopped.
 	closed := true
-	if err := st.closeGoalRow(ownerActor(ctx, owner), goalId, "closed", i.clock().UTC(), reason); err != nil {
+	if err := st.closeGoalRow(ownerActor(ctx, owner), goalId, "closed", workRowVersionAfter(goal["createdAt"], i.clock().UTC()), reason); err != nil {
 		// The runs were still asked, which is the half that matters most, so
 		// this reports rather than fails: a caller who is told the goal is
 		// still open can close it again, and a caller told nothing happened

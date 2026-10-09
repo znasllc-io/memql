@@ -242,8 +242,8 @@ func digString(m map[string]any, key string) string {
 // written, and nothing errors. cancelGoal would report runs asked and a goal
 // closed while neither happened.
 func TestCancelGoal_DB_BorrowsAuthorityFromARowDerivedOwner(t *testing.T) {
-	eng := openWorkTestEngine(t)
-	i := New(eng, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	replica := openActsDB(t)
+	eng, i := replica.eng, replica.i
 	// createGoal refuses without a compile surface (memql#5268 fold). These
 	// tests prove row landing / owned-tier authz, not compile itself.
 	i.SetCompiler(&recordingCompiler{done: make(chan CompileRequest, 8)})

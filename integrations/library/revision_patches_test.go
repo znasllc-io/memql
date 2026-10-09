@@ -168,3 +168,35 @@ func TestAnchoredExtensionsKeepAdditiveContract(t *testing.T) {
 		}
 	}
 }
+
+// The editor's empty state includes newline-only files. An insertion must
+// preserve those bytes, while an empty anchor in real content stays invalid.
+func TestRevisionEmptyAnchorInBlankDocument(t *testing.T) {
+	for _, source := range []string{"", "\n", " \t\r\n\r\n", "# Existing\n"} {
+		captured := map[string]any{"content": source, "comments": []any{map[string]any{"id": "note-1", "body": "Create a report", "anchor": map[string]any{"kind": "document", "quote": "Entire document"}}}}
+		edit := revisionReplacement{Before: "", After: "# Report\n\nA generated draft.\n", Reason: "Create requested report", CommentIDs: []string{"note-1"}}
+		proposal, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Create report", Edits: []revisionReplacement{edit}})
+		if strings.TrimSpace(source) != "" {
+			if err == nil {
+				t.Fatal("empty anchor accepted in nonempty source")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("blank %q: %v", source, err)
+		}
+		after := edit.After
+		if strings.Contains(source, "\r\n") {
+			after = strings.ReplaceAll(after, "\n", "\r\n")
+		}
+		if proposal["revisedContent"] != after+source {
+			t.Fatalf("original blank bytes changed: %q", proposal["revisedContent"])
+		}
+		if err := validateRevisionResult(captured, proposal); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Ambiguous", Edits: []revisionReplacement{edit, edit}}); err == nil {
+			t.Fatal("multiple empty anchors accepted")
+		}
+	}
+}
