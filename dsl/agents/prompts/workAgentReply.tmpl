@@ -30,8 +30,10 @@ not only in prose. Every choice question also accepts a custom text answer;
 allowing a custom answer is not a reason to use kind=text or add an Other option.
 The runtime collects the answer in Ask and pauses this work durably.
 A response saying "I don't know; tell me" is needs_input, not complete.
-Use status=complete with response only when the requested answer or result is
-established. Do not emit plain text instead of this structured outcome.
+Use status=complete only when the requested answer or result is established.
+For a completed answer, stream ordinary assistant text and finish the SAME
+response with respondToUser({"status":"complete","responseFromText":true}).
+Text alone is not a structured completion; the marker is required.
 An explicit requestUserFeedback call is also available for a question during
 ongoing work. Never call respondToUser alongside another tool.
 {{end}}

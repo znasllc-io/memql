@@ -37,6 +37,9 @@ test("input validation stays actionable; arbitrary server strings never pass thr
   assert.equal(userMessage(new UserInputError("Select a passage first."),"save"),"Select a passage first.");
   assert.equal(userMessage(new Error("Select a passage first. INTERNAL password=abc"),"save"),"Couldn’t save. Try again. If this continues, use the troubleshooting reference.");
   assert.match(userMessage(new Error("expected version mismatch"),"save"),/Compare with the latest/);
+  const denied=new Error("Permission denied");denied.name="NotAllowedError";
+  assert.match(userMessage(denied,"transcribe your feedback"),/Microphone access/);
+  assert.doesNotMatch(userMessage(denied,"copy the reference"),/Microphone/);
 });
 
 test("offline and refused diagnostics preserve a local reference without retries or recursion",async()=>{

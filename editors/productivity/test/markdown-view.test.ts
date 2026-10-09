@@ -314,6 +314,7 @@ test("automatic retries have a stable details panel and never offer manual resum
  await new Promise(resolve=>setTimeout(resolve,0));
  f.send({type:"revision",status:{...status,retryCount:2}});assert.equal(f.doc.querySelector<HTMLDetailsElement>(".problem-details")!.open,true);
  f.doc.querySelector<HTMLButtonElement>(".problem-details button")!.click();assert.deepEqual(JSON.parse(JSON.stringify(f.messages.at(-1))),{type:"copyProblemReference",reference:"review-run-test"});
- f.send({type:"revision",status:{...status,status:"running",waitingOn:null}});assert.equal(f.doc.querySelector(".problem-details"),null);
+ f.send({type:"revision",status:{...status,status:"running",waitingOn:null,retryCount:1}});assert.match(f.el("revision").textContent!,/Retrying automatically/);
+ f.send({type:"revision",status:{...status,status:"running",waitingOn:null,retryCount:0}});assert.equal(f.doc.querySelector(".problem-details"),null);
  f.dom.window.close();
 });

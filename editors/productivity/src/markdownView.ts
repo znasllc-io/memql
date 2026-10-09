@@ -485,7 +485,7 @@ function renderRevisionContent() {
   const status = revision, proposal = status.proposal ?? {};
   const terminal = !!status.cancelRequested || ["succeeded", "failed", "cancelled"].includes(status.status);
   const awaiting = !terminal && !!status.approvalId && !status.decision && status.status === "waiting";
-  const retrying = !terminal && !awaiting && ["retry","replan","repair"].includes(status.waitingOn?.kind);
+  const retrying = !terminal && !awaiting && (["retry","replan","repair"].includes(status.waitingOn?.kind) || status.status === "running" && Number(status.retryCount)>0);
   const paused = !retrying && !terminal && !awaiting && !status.decision && status.prepared !== false && status.status === "waiting";
   let panel: HTMLElement = root;
   if (terminal && pending) {

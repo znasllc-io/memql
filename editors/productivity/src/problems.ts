@@ -15,7 +15,7 @@ export function userMessage(error: unknown, operation: string): string {
   const detail = error instanceof Error ? error.message : String(error);
   if (/idle ceiling|idle.timeout|stopped producing output/i.test(detail)) return "The AI stopped responding. Try again.";
   if (/every_door_shut|speech recognition|transcription is not configured/i.test(detail)) return "No suitable AI model is available for this request. Check the models in Fleet, then try again.";
-  if (/NotAllowedError|microphone.*(denied|permission)|permission.*microphone/i.test(detail)) return "Microphone access is blocked. Allow it in your browser settings, then try dictating again.";
+  if (/microphone.*(denied|permission)|permission.*microphone/i.test(detail) || /transcrib|dictat/i.test(operation) && /NotAllowedError|permission denied/i.test(error instanceof Error ? `${error.name}: ${detail}` : detail)) return "Microphone access is blocked. Allow it in your browser settings, then try dictating again.";
   if (/connection changed|another cluster|different cluster/i.test(detail)) return "The MemQL connection changed. Reconnect to the file’s cluster and compare with its latest version before saving.";
   if (/conflict|stale|revision.*changed|changed.*revision|version.*mismatch|expected.*version/i.test(detail)) return "This document changed elsewhere. Compare with the latest revision and review your edits before trying again.";
   if (/unauthenticated|sign.?in|session.*expired|\b401\b/i.test(detail)) return "Your session has ended. Sign in to MemQL, then try again.";
