@@ -805,8 +805,8 @@ export function runScreen(i: RunScreenInput): RegionParts {
       lines: i.lines ?? [],
       empty: "No output yet",
       acts: [
-        { act: "copyLog", label: "Copy" },
-        { act: "openOutput", label: "Open in Output" },
+        { act: "copyLog", label: "Copy log", icon: "copy" },
+        { act: "openOutput", label: "Open in Output", icon: "open" },
       ],
     }),
   });

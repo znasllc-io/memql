@@ -12,8 +12,8 @@
 // `vscode` stays external: it is supplied by the host at require time and has
 // no on-disk package to inline.
 //
-// Only test-host/index.ts is an entry point. test-host/runner.js runs OUTSIDE
-// the host in plain Node and is deliberately not bundled -- see its header.
+// The smoke suite and interactive installer fixture run INSIDE the host.
+// Their runner scripts run in plain Node and are deliberately not bundled.
 const esbuild = require("esbuild");
 const fs = require("fs");
 const path = require("path");
@@ -32,7 +32,7 @@ esbuild
   .build({
     inject: [path.join(__dirname, "test/support/registryHelper.ts")],
     define: { __MEMQL_REGISTRY_TEST_HELPER__: JSON.stringify(helperPath) },
-    entryPoints: ["test-host/index.ts"],
+    entryPoints: ["test-host/index.ts", "test-host/installManual.ts"],
     bundle: true,
     outdir: "dist-host",
     outbase: ".",

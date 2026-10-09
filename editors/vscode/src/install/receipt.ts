@@ -53,6 +53,18 @@ export interface ReceiptEntry {
   recordedAt: string;
 }
 
+/** Non-secret choices saved before any install step can fail or be stopped. */
+export interface InstallIntent {
+  tag: string;
+  commit: string;
+  imageTag: string;
+  imagesFromSource: boolean;
+  domain: string;
+  ownerEmail: string;
+  ownerFirstName: string;
+  ownerLastName: string;
+}
+
 export interface Receipt {
   version: number;
   /** The graph that produced it ("install"). */
@@ -60,6 +72,7 @@ export interface Receipt {
   startedAt: string;
   updatedAt: string;
   entries: ReceiptEntry[];
+  intent?: InstallIntent;
 }
 
 export type ParseResult =
@@ -178,8 +191,27 @@ export function parseReceipt(text: string): ParseResult {
       startedAt: typeof obj.startedAt === "string" ? obj.startedAt : now,
       updatedAt: typeof obj.updatedAt === "string" ? obj.updatedAt : now,
       entries,
+      ...(obj.intent === undefined ? {} : { intent: parseInstallIntent(obj.intent) }),
     },
   };
+}
+
+function parseInstallIntent(value: unknown): InstallIntent {
+  const o = plainObject(value);
+  const text = (key: string): string => typeof o[key] === "string" ? (o[key] as string).trim() : "";
+  return { tag: text("tag"), commit: text("commit"), imageTag: text("imageTag"),
+    imagesFromSource: o.imagesFromSource === true, domain: text("domain"),
+    ownerEmail: text("ownerEmail"), ownerFirstName: text("ownerFirstName"), ownerLastName: text("ownerLastName") };
+}
+
+/** Uses the same lock and atomic write as step receipts; accepts only named, non-secret fields. */
+export async function recordInstallIntent(file: string, graph: string, intent: InstallIntent): Promise<void> {
+  await serialise(file, async () => {
+    const receipt = await readReceipt(file) ?? emptyReceipt(graph);
+    receipt.intent = parseInstallIntent(intent);
+    receipt.updatedAt = new Date().toISOString();
+    await writeAtomic(file, serializeReceipt(receipt));
+  });
 }
 
 function parseEntry(value: unknown): ReceiptEntry | null {
@@ -570,7 +602,7 @@ export function recordedStackTag(receipt: Receipt | null): string {
   if (!receipt) return "";
   const entry = entryFor(receipt, "stackCheckout");
   const tag = entry?.params?.tag;
-  return typeof tag === "string" ? tag.trim() : "";
+  return typeof tag === "string" ? tag.trim() : (entry === undefined ? receipt.intent?.tag ?? "" : "");
 }
 
 /**
@@ -772,20 +804,15 @@ export function recordedImageTag(receipt: Receipt | null): string {
 /**
  * Whether the install this receipt describes BUILT its node images (memql#4430).
  *
- * READ OFF THE `buildImages` ENTRY, which is the only honest evidence: the
- * from-source lane is the lane that ran that step, and a receipt that has an
- * entry for it ran it. Deriving it from the recorded ref kind instead would be
- * wrong for every branch install cut BEFORE this lane existed -- those pulled
- * release images and recorded an image tag, and a repair must keep replaying
- * that tag rather than start looking for `:local` images nothing built.
- *
- * That is the same shape as `recordedImageTag`: the answer is what the run
- * actually did, read back, rather than the same derivation performed twice
- * against inputs that have since changed.
+ * Intent is written before the first step: bootstrap can fail before the
+ * image build is reached. Older source installs identify the same lane in
+ * their graph name or buildImages entry. A historical branch install using
+ * the release graph still replays its released images.
  */
 export function recordedImagesFromSource(receipt: Receipt | null): boolean {
   if (!receipt) return false;
-  return entryFor(receipt, "buildImages") !== undefined;
+  return receipt.intent?.imagesFromSource ??
+    (receipt.graph === "install-main" || entryFor(receipt, "buildImages") !== undefined);
 }
 
 /**
@@ -861,8 +888,12 @@ export function recordedCheckout(receipt: Receipt | null): RecordedCheckout {
   const tag = recordedStackTag(receipt);
   const commit = recordedStackCommit(receipt);
   const kind = recordedStackRefKind(receipt);
-  const imageTag = recordedImageTag(receipt);
+  const imageTag = recordedImageTag(receipt) || receipt?.intent?.imageTag || "";
   const fromSource = recordedImagesFromSource(receipt);
+  if (receipt?.intent && commit === "") {
+    return { tag: receipt.intent.tag, commit: receipt.intent.commit, imageTag, fromSource,
+      label: receipt.intent.tag || receipt.intent.commit.slice(0, 7) };
+  }
 
   if (kind === "branch" || kind === "commit") {
     return {
@@ -903,7 +934,7 @@ export function recordedDomain(receipt: Receipt | null): string {
     const domain = entry.params.domain;
     if (typeof domain === "string" && domain.trim() !== "") return domain.trim();
   }
-  return "";
+  return receipt?.intent?.domain ?? "";
 }
 
 // ---------------------------------------------------------------------------
@@ -1029,8 +1060,8 @@ export function recordedOwner(receipt: Receipt | null): RecordedOwner {
     return "";
   };
   return {
-    email: find("owner-email"),
-    firstName: find("owner-first-name"),
-    lastName: find("owner-last-name"),
+    email: receipt?.intent?.ownerEmail || find("owner-email"),
+    firstName: receipt?.intent?.ownerFirstName || find("owner-first-name"),
+    lastName: receipt?.intent?.ownerLastName || find("owner-last-name"),
   };
 }

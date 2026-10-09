@@ -122,6 +122,11 @@ export class LiveView {
     if (regions === undefined) return;
     this.shown = next;
     this.send({ type: "patch", regions });
+    // Replacing the body replaces its log pane too (for example on completion).
+    // Refill it after the patch, just as we do after a document reload.
+    if (regions.body !== undefined && (this.buffer.length > 0 || this.logWasReset)) {
+      this.send({ type: "log", lines: this.buffer.map(line => ({ ...line })), reset: true });
+    }
   }
 
   /** The live values of the page's progress region. Remembered, and re-sent on every `ready`. */

@@ -178,12 +178,12 @@ test('every file the trees read is watched, so an external edit refreshes them',
   // refresh independently, so each holds its own watcher. One shared watcher
   // fanning out to both would make either view's lifetime decide the other's.
   const memql = path.join(home, '.memql');
-  assert.deepEqual(recorded.watched, [
+  assert.deepEqual([...recorded.watched].sort(), [
     `${memql}/clusters.yaml`,
     `${memql}/clusters.yaml`,
     `${memql}/install-receipt.json`,
     `${memql}/runs/*.json`,
-  ]);
+  ].sort());
 });
 
 test('the missing-binary message names the language features, not the extension', () => {

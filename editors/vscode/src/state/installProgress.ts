@@ -211,7 +211,7 @@ export function failureGuidance(
     case 5:
       return {
         headline: "The step failed.",
-        advice: "Retrying often helps. If it fails again, the log has the details.",
+        advice: "Review the error, then retry. Completed steps will be checked and reused.",
         retryable: true,
       };
     case null:

@@ -49,6 +49,7 @@ import {
   imageTagFor,
 } from "../src/install/stackPin.js";
 import type { ExecEvent, StepPlan } from "../src/install/executor.js";
+import { readReceipt, recordedCheckout, recordedDomain, recordedOwner } from "../src/install/receipt.js";
 import { compareVersions } from "../src/version/compare.js";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -645,7 +646,7 @@ test("the STEP's own --repo-root decides, not a guess made when the session was 
   assert.deepEqual(paths, [path.join(REPO_ROOT, "scripts", "k3d", "dev.sh")]);
 });
 
-test("an install's non-build steps still come from the extension", async () => {
+test("a source install bootstraps and builds from its checkout; earlier steps stay bundled", async () => {
   // The other half, and the reason the rule is keyed on the capability rather
   // than applied to the whole session: the early steps run BEFORE any checkout
   // exists, and the graph is the extension's contract with its own wizard.
@@ -657,9 +658,10 @@ test("an install's non-build steps still come from the extension", async () => {
   );
 
   const strays = paths.filter(
-    (p) => !p.endsWith(path.join("scripts", "k3d", "dev.sh")) && !p.startsWith(staged + path.sep),
+    (p) => !["dev.sh", "up.sh"].some((name) => p.endsWith(path.join("scripts", "k3d", name))) && !p.startsWith(staged + path.sep),
   );
-  assert.deepEqual(strays, [], "a non-build step read its script from outside the extension");
+  assert.deepEqual(strays, [], "an early step read its script from outside the extension");
+  assert.ok(paths.includes(path.join(REPO_ROOT, "scripts", "k3d", "up.sh")), "source bootstrap must use the selected checkout");
 });
 
 test("a checkout that cannot answer the capability contract falls back to the extension", async () => {
@@ -1292,42 +1294,29 @@ test("the from-source lane gets a SHORT workload wait, because that one is dead 
   assert.equal(decision.params["image-tag"], undefined);
 });
 
-test("a REPAIR of a from-source cluster keeps the full budget, because its images exist", () => {
-  // THE TRAP IN THE LINE ABOVE, and the reason it is keyed on the fresh install
-  // rather than on `imagesFromSource`. A repair carries `imagesFromSource` read
-  // back off the receipt, while its VERSION is empty -- a from-source install
-  // records a commit and no tag. So `isMainBranchChoice("")` is false, the
-  // panel loads install.json rather than install-main.json, and THAT graph's
-  // clusterUp verifies `result.workloadsReady`.
-  //
-  // Keying the short wait on the lane would therefore hand this repair a 60s
-  // ceiling for a check it actually has to pass, on a cluster whose pods are
-  // restarting -- turning a working repair into a failing one. Its `:local`
-  // images already exist, so its wait is a real budget.
-  const plan = installPlan({ ...options(), tag: "", commit: "a".repeat(40), imagesFromSource: true });
-  const decision = plan({
-    id: "clusterUp",
-    script: "k3d.up",
-    label: "Working",
-    description: "",
-    elevation: "none",
-    retained: false,
-    retainedReason: "",
-    shared: false,
-    sharedReason: "",
-    verify: { kind: "scriptOk" },
-  });
-
-  assert.equal(decision.action, "run");
-  assert.equal(
-    decision.params["workload-timeout"],
-    "900",
-    "a repair of a from-source cluster verifies workloadsReady and its images already " +
-      "exist -- it needs the fresh-pull budget, not the fresh-install shortcut",
+test("continuing a source install reaches image building even when no images exist yet", async () => {
+  // A repair replays a pinned commit with no version label. Its source graph
+  // verifies ArgoCD here, then builds and starts the workloads in buildImages.
+  // Waiting fifteen minutes for the not-yet-built images would prevent useful
+  // progress on precisely the interrupted setup this flow needs to recover.
+  const staged = stagedTree();
+  const { run, paths } = pathRecordingRunner();
+  let bootstrapParams: Record<string, string> | undefined;
+  const report = await runInstall(
+    options({ root: staged, stackDir: REPO_ROOT, tag: "", commit: "a".repeat(40), imagesFromSource: true }),
+    { run: async (input) => {
+      const result = await run(input);
+      if (input.capability === "k3d.up") {
+        bootstrapParams = input.params;
+        if (result.envelope) result.envelope.result = { ...ALL_VERIFIES_SATISFIED, workloadsReady: false };
+      }
+      return result;
+    } },
   );
-  // Still the from-source lane, so still no registry: the two decisions are
-  // independent and this asserts they stayed that way.
-  assert.equal(decision.params["image-registry"], undefined);
+  assert.equal(report.ok, true, "source continuation must build before verifying workload readiness");
+  assert.equal(bootstrapParams?.["workload-timeout"], "60");
+  assert.equal(bootstrapParams?.["image-registry"], undefined);
+  assert.ok(paths.includes(path.join(REPO_ROOT, "scripts", "k3d", "dev.sh")), "the image-building step was skipped");
 });
 
 test("clusterUp is told to pull published images, not locally built ones", async () => {
@@ -1703,3 +1692,25 @@ test("the detect step's second copy still says what the install document says", 
       "it must say what scripts/install/graph/install.json says",
   );
 });
+
+
+for (const stop of [false, true]) {
+  test(`dev choices survive ${stop ? "stopping" : "failure"} before checkout and image building`, async () => {
+    const opts = options({ tag: "main", domain: "local.example.test", ownerEmail: "owner@example.test", ownerFirstName: "Ada", ownerLastName: "Lovelace" });
+    const controller = new AbortController();
+    const report = await runInstall(opts, { graph: INSTALL_GRAPH, signal: controller.signal, run: async () => {
+      // A process can fail before it has emitted any receipt envelope.
+      const written = await readReceipt(opts.receiptFile);
+      assert.equal(written?.intent?.imagesFromSource, true);
+      if (stop) controller.abort();
+      return { argv: [], exitCode: 5, signal: null, stdout: "", stderr: "connection reset", envelope: null };
+    }});
+    assert.equal(report.ok, false);
+    const receipt = await readReceipt(opts.receiptFile);
+    assert.equal(recordedCheckout(receipt).tag, "main");
+    assert.equal(recordedCheckout(receipt).fromSource, true);
+    assert.equal(recordedDomain(receipt), "local.example.test");
+    assert.deepEqual(recordedOwner(receipt), { email: "owner@example.test", firstName: "Ada", lastName: "Lovelace" });
+    assert.equal(receipt?.entries.some(e => e.stepId === "buildImages"), false);
+  });
+}

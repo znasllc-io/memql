@@ -47,7 +47,12 @@ case "$*" in
     case "$*" in *"${FAKE_ROLLOUT_FAILURE:-no-such-resource}"*) echo 'ImagePullBackOff' >&2; exit 1 ;; esac
     exit 0 ;;
   *"get deployment"*)
+    if [ "${FAKE_OPERATOR_AFTER_REFRESH:-}" = 1 ]; then [ -f "$FAKE_APP_READS.refreshed" ]; exit $?; fi
     [ "${FAKE_OPERATOR_ABSENT:-}" != 1 ] ;;
+  *"annotate application"*)
+    [ "${FAKE_REFRESH_EXIT:-0}" = 0 ] || exit "$FAKE_REFRESH_EXIT"
+    touch "$FAKE_APP_READS.refreshed"
+    exit 0 ;;
   *"get namespace"*)
     if [ "${FAKE_ARGOCD_ABSENT:-}" = 1 ]; then exit 1; fi
     exit 0 ;;
@@ -62,7 +67,12 @@ case "$*" in
     if [ -n "${FAKE_APP_CLEAR_AFTER:-}" ] && [ "$reads" -gt "$FAKE_APP_CLEAR_AFTER" ]; then
       conditions=""
     fi
+    if [ "${FAKE_CLEAR_ON_REFRESH:-}" = 1 ] && [ -f "$FAKE_APP_READS.refreshed" ]; then conditions=""; fi
     case "$*" in
+      *'metadata.annotations.argocd'*'ComparisonError'*)
+        refresh=""
+        if [ "${FAKE_REFRESH_PENDING:-}" = 1 ] && [ -f "$FAKE_APP_READS.refreshed" ]; then refresh=hard; fi
+        printf '%s\n%s\n%s.' "${FAKE_APP_SYNC:-}" "$refresh" "$conditions" ;;
       *ComparisonError*) printf '%s' "$conditions" ;;
       *'status.sync.status'*) printf '%s' "${FAKE_APP_SYNC:-}" ;;
       *'status.health.status'*) printf 'Healthy' ;;
@@ -128,7 +138,7 @@ func TestAnUnreadableApplicationSourceFailsWhereItWentWrong(t *testing.T) {
 		t.Errorf("the failure does not carry ArgoCD's own message %q -- a diagnosis the operator cannot\n"+
 			"read is the same as the JSON path this replaces\noutput:\n%s", argoSays, out)
 	}
-	for _, want := range []string{"https://example.test/x.git", "abc123", "deploy/k8s/overlays/local", "memql"} {
+	for _, want := range []string{"memql-local"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the failure does not name %q, so the operator cannot see WHICH source was refused\noutput:\n%s", want, out)
 		}

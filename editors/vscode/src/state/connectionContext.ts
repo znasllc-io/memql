@@ -61,6 +61,8 @@ export const CONNECTED_KEY = "memql.connected";
 export const CONNECTION_STATE_KEY = "memql.connectionState";
 /** Whether a MemQL local cluster exists on this machine, listed or not (published by extension.ts). */
 export const LOCAL_CLUSTER_PRESENT_KEY = "memql.localClusterPresent";
+/** The local setup verdict, shared by sidebar action labels and the installer. */
+export const LOCAL_CLUSTER_STATE_KEY = "memql.localClusterState";
 
 /**
  * The values of `memql.connectionState`:
