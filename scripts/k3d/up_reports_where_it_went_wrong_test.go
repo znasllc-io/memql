@@ -51,6 +51,7 @@ case "$*" in
     case "$*" in *"${FAKE_ROLLOUT_FAILURE:-no-such-resource}"*) echo 'ImagePullBackOff' >&2; exit 1 ;; esac
     exit 0 ;;
   *"get deployment"*)
+    case "$*" in *"get deployment ${FAKE_OPERATOR_EXISTING:-no-such-deployment} "*) exit 0 ;; esac
     if [ "${FAKE_OPERATOR_AFTER_REFRESH:-}" = 1 ]; then [ -f "$FAKE_APP_READS.refreshed" ]; exit $?; fi
     [ "${FAKE_OPERATOR_ABSENT:-}" != 1 ]; exit $? ;;
   *"annotate application"*)

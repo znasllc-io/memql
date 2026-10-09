@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.6
+
+- Allow ArgoCD to recover from a timed-out initial repository download within
+  one shared bootstrap deadline. Deployment readiness retains its own shorter
+  limit, and long source comparisons report progress.
+
 ## 0.6.5
 
 - Repair expired local certificates, certificates signed by an old CA, and

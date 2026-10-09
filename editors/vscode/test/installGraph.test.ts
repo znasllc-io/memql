@@ -21,6 +21,7 @@ import {
   GraphError,
   evaluateVerify,
   graphDocumentPath,
+  installGraphPath,
   loadGraph,
   loadGraphFile,
   resolvePreExisting,
@@ -585,25 +586,22 @@ test("magicLink verifies on the state it found, not on having found a link", asy
 // ---------------------------------------------------------------------------
 
 test("clusterUp declares a budget that contains the budgets inside it", async () => {
-  // clusterUp runs two inner waits -- ArgoCD (300s default, k3d.up) and the
-  // workloads (900s, passed by installPlan since memql#4073) -- plus cluster
-  // create, secret seeding and every image pull a fresh containerd has never
-  // seen. A step ceiling below the sum is a step that can be killed WHILE
-  // SUCCEEDING, which is exactly how the first install after #4073 died:
-  // the inner wait was willing, the outer ceiling was not, exit 124.
-  //
-  // 300 + 900 + 300 of create/seed/pull overhead. If an inner budget grows,
-  // this fails until the step's declared price grows with it -- the tie that
-  // was missing when #4073 raised one number and left the other.
-  const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
-  const up = g.steps.find((s) => s.id === "clusterUp");
-  assert.ok(up, "the install graph must still bring the cluster up");
-  assert.ok(
-    up.timeoutSeconds !== undefined && up.timeoutSeconds >= 300 + 900 + 300,
-    `clusterUp declares timeoutSeconds=${up.timeoutSeconds} but its inner waits alone ` +
-      "can legitimately take 1200s (ArgoCD 300 + workloads 900) before a single " +
-      "image pull is priced -- the executor would SIGKILL a SUCCEEDING install",
-  );
+  // The outer executor must leave room for ArgoCD's cold Git retry, both
+  // operator rollouts, the mesh comparison, and the fresh image pulls.
+  const script = await fs.readFile(path.join(REPO_ROOT, "scripts/k3d/up.sh"), "utf8");
+  const stackBudget = Number(script.match(/OPERATOR_STACK_TIMEOUT="\$\{MEMQL_K3D_OPERATOR_STACK_TIMEOUT:-(\d+)\}"/)?.[1]);
+  assert.ok(stackBudget > 0, "read the actual shared operator budget");
+  for (const name of ["install", "install-main"] as const) {
+    const g = await loadGraphFile(installGraphPath(REPO_ROOT, name === "install-main"));
+    const up = g.steps.find((s) => s.id === "clusterUp");
+    assert.ok(up, "the install graph must still bring the cluster up");
+    const workloads = name === "install-main" ? 60 : 900;
+    const minimum = 300 + stackBudget + 180 + workloads + 300;
+    assert.ok(
+      up.timeoutSeconds !== undefined && up.timeoutSeconds >= minimum,
+      `${name}: clusterUp budget ${up.timeoutSeconds} cannot contain its ${minimum}s inner waits and startup allowance`,
+    );
+  }
 });
 
 test("a step budget of zero is refused -- a step may not opt out of dying", async () => {
