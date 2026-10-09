@@ -266,6 +266,14 @@ automation reviseLibraryDocument {
    return report.reply
   }
   branch app {
+   // Retrying a failed sibling must not spend the app quota again. The
+   // request capture is immutable; only a completed owned receipt is reusable.
+   current := query workStepForOwnerRun(runId: captured.runId, stepKey: "evidence.app/report")
+   for retained in current {
+    if retained.status == "done" && retained.result.value.reply != nil {
+     return retained.result.value.reply
+    }
+   }
    if captured.previousRunId != nil {
     previous := query workStepForOwnerRun(runId: captured.previousRunId, stepKey: "evidence.app/report")
     for completed in previous {

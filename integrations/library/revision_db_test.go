@@ -213,7 +213,14 @@ func (f *revisionDB) execute(engine *memql.MemQLEngine, request string, resume b
 	executor := automations.NewExecutor(automations.ExecutorOptions{Engine: engine, Logger: engine.Logger, StepRegistry: steps.NewRegistry()})
 	defer executor.Close()
 	if resume {
-		_, err = executor.ResumeFrom(ctx, journal, auto, &automations.ResumeOptions{})
+		opts := &automations.ResumeOptions{}
+		if journal.Rerun != nil {
+			journal, opts, err = automations.PrepareRerun(journal, nil, auto)
+			if err != nil {
+				f.t.Fatal(err)
+			}
+		}
+		_, err = executor.ResumeFrom(ctx, journal, auto, opts)
 	} else {
 		_, err = executor.ExecuteAdopted(ctx, auto, automations.RunAdoption{RunId: journal.RunId, Variables: journal.Variables, Journal: journal})
 	}
@@ -659,6 +666,18 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Exercise a same-run parallel-stage retry on a different replica first.
+	// The engine re-enters both branches; DSL reuses the completed app receipt.
+	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{
+		"runId": ids.RunID, "status": "running", "waitingOn": map[string]any{},
+		"rerun": map[string]any{"requestId": "same-run-retry", "reason": "rerun", "stepKey": "evidence"},
+	})
+	if err = f.execute(f.other, request, true); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	if f.ai.appCalls.Load() != 1 || f.ai.researchCalls.Load() != 2 {
+		t.Fatalf("same-run retry repeated app research: app=%d headless=%d", f.ai.appCalls.Load(), f.ai.researchCalls.Load())
+	}
 	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": ids.RunID, "status": "failed", "errorMessage": "automation definition changed since the run started"})
 	args["requestId"] = "retry-" + fmt.Sprint(time.Now().UnixNano())
 	if _, err = f.second.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
@@ -672,7 +691,7 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	if err = f.execute(f.other, next, false); !errors.As(err, &wait) {
 		t.Fatal(err)
 	}
-	if f.ai.appCalls.Load() != 1 || f.ai.researchCalls.Load() != 2 {
+	if f.ai.appCalls.Load() != 1 || f.ai.researchCalls.Load() != 3 {
 		t.Fatalf("retry repeated subscription research or skipped fresh headless research: app=%d headless=%d", f.ai.appCalls.Load(), f.ai.researchCalls.Load())
 	}
 	// Changed direction is new work, even against the same unchanged file.

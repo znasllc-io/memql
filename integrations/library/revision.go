@@ -404,7 +404,7 @@ func (i *Integration) revisionRun(ctx context.Context, requestID string) (work.R
 }
 
 func (i *Integration) handleRevisionInput(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	_, captured, _, err := i.revisionRun(ctx, asString(args["requestId"]))
+	ids, captured, _, err := i.revisionRun(ctx, asString(args["requestId"]))
 	if err != nil {
 		return nil, err
 	}
@@ -423,7 +423,7 @@ func (i *Integration) handleRevisionInput(ctx context.Context, args map[string]a
 	if err != nil {
 		return nil, err
 	}
-	return reviewResult(map[string]any{"previousRunId": captured["previousRunId"], "content": captured["content"], "passages": passages, "passagesJSON": string(encoded), "instruction": captured["instruction"], "amendment": captured["amendment"]})
+	return reviewResult(map[string]any{"runId": ids.RunID, "previousRunId": captured["previousRunId"], "content": captured["content"], "passages": passages, "passagesJSON": string(encoded), "instruction": captured["instruction"], "amendment": captured["amendment"]})
 }
 
 func (i *Integration) handleRevisionProposal(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

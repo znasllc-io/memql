@@ -258,6 +258,8 @@ function renderEmptyDocument() {
   byId("empty-description").textContent = !reviewing ? "Switch to Review to describe a draft, or write directly in Source." : running ? awaiting ? "Review the proposed content before adding it to your document." : paused ? "Open the review to see what needs attention. Your request is saved." : "Your request is being prepared. You can review the draft before it’s added." : hasRequest ? "Your description is saved. Open the review to prepare your draft." : "Describe the topic, audience, and details you want. You’ll review the draft before it’s added.";
   const create = byId("empty-create") as HTMLButtonElement;
   create.textContent = !reviewing ? "Start in Review" : hasRequest ? "Open review" : "Describe document";
+  create.classList.toggle("primary", !reviewing || !hasRequest);
+  create.classList.toggle("passage", reviewing && hasRequest);
   create.hidden = !connected;
   create.disabled = dictationPhase !== "idle" || commentBusy;
   byId("empty-source").hidden = running;
