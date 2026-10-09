@@ -19,6 +19,7 @@ import {
   type MachineRow,
 } from "../rows";
 import { CredentialHealth } from "./CredentialHealth";
+import { AppPermissionHelp } from "./AppPermissionHelp";
 import { HardwareGroup } from "./HardwareGroup";
 import { LabelEditor } from "./LabelEditor";
 import { ModelsGroup } from "./ModelsGroup";
@@ -319,7 +320,7 @@ function AppsGroup({ machine, standalone }: { machine: MachineRow; standalone: b
       ) : (
         <RecordList as="ul" label="Apps on this machine">
           {machine.apps.map((app) => (
-            <MachineAppLine key={app.id} app={app} />
+            <MachineAppLine key={app.id} app={app} machine={machine} />
           ))}
         </RecordList>
       )}
@@ -327,12 +328,12 @@ function AppsGroup({ machine, standalone }: { machine: MachineRow; standalone: b
   );
 }
 
-function MachineAppLine({ app }: { app: MachineRow["apps"][number] }) {
+function MachineAppLine({ app, machine }: { app: MachineRow["apps"][number]; machine: MachineRow }) {
   const [open, setOpen] = useState(false);
   return <div><RecordRow name={app.label} secondary={app.version || "Version not reported"}
     state={app.runnable ? "Ready" : "Needs attention"} tone={app.runnable ? "accent" : "warn"}
     open={open} onOpen={() => setOpen(value => !value)} />
-    {open ? <Facts><Fact label="Subscription" value={app.subscription || "Unknown"} /><Fact label="Availability" value={app.runnable ? "Allowed and signed in" : app.why || "Not available to run"} /></Facts> : null}
+    {open ? <><Facts><Fact label="Subscription" value={app.subscription || "Unknown"} /><Fact label="Availability" value={app.runnable ? "Allowed and signed in" : app.why || "Not available to run"} /></Facts><AppPermissionHelp app={app} machine={machine} /></> : null}
   </div>;
 }
 
