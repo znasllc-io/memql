@@ -80,12 +80,14 @@ function renderHistory() {
   if(historyData.branchesHasMore)family.append(textElement("small","Showing the 100 most recent branches. All branches remain available in Files."));
   historyControls();
 }
+function syncChromeLayout(){document.documentElement.style.setProperty("--document-tools-offset",`${byId("document-chrome").getBoundingClientRect().height}px`);}
+if(typeof ResizeObserver!=="undefined")new ResizeObserver(()=>{syncChromeLayout();renderNoteMarkers();}).observe(byId("document-chrome"));
 const findQuery=byId("find-query") as HTMLInputElement;
 let findRanges:Range[]=[],findIndex=-1;
 function showFind(open:boolean) {
- byId("document-find").hidden=!open;
+ byId("document-find").hidden=!open;syncChromeLayout();
  if(open){closeComposer();byId("selection-tools").hidden=true;findQuery.focus();findQuery.select();updateFind(false);}
- else {highlight("memql-find",[]);highlight("memql-find-active",[]);content.focus({preventScroll:true});}
+ else {highlight("memql-find",[]);highlight("memql-find-active",[]);byId("find-marker").hidden=true;content.focus({preventScroll:true});}
  renderNoteMarkers();
 }
 function updateFind(scroll=true) {
@@ -107,10 +109,23 @@ function updateFind(scroll=true) {
  if(findRanges.length)findIndex=0;showFindMatch(scroll);
 }
 function showFindMatch(scroll:boolean) {
- highlight("memql-find",findRanges);const active=findRanges[findIndex];highlight("memql-find-active",active?[active]:[]);
+ highlight("memql-find",findRanges,2);const active=findRanges[findIndex];highlight("memql-find-active",active?[active]:[],3);
  byId("find-count").textContent=!findQuery.value?"":findRanges.length?`${findIndex+1} of ${findRanges.length}${findRanges.length===5000?"+":""}`:"No matches";
  (byId("find-previous") as HTMLButtonElement).disabled=(byId("find-next") as HTMLButtonElement).disabled=!findRanges.length;
- if(scroll&&active)mapped(active.startContainer)?.scrollIntoView?.({block:"center"});
+ if(scroll&&active){
+  mapped(active.startContainer)?.scrollIntoView?.({block:"center"});
+  const rect=active.getBoundingClientRect?.();
+  if(rect){const top=byId("document-find").getBoundingClientRect().bottom+24;const bottom=document.body.classList.contains("review-open")&&window.innerWidth<1000?window.innerHeight*.5:window.innerHeight-24;
+   if(rect.top<top||rect.bottom>bottom)window.scrollBy?.({top:rect.top-(top+bottom)/2,behavior:"instant"});}
+ }
+ positionFindMarker();
+}
+function positionFindMarker(){
+ const marker=byId("find-marker"),active=findRanges[findIndex];marker.hidden=byId("document-find").hidden||!active;
+ if(marker.hidden)return;marker.textContent=String(findIndex+1);
+ const rect=active.getClientRects?.()[0],main=content.closest("main")!.getBoundingClientRect();if(!rect)return;
+ marker.style.top=`${rect.top-main.top+(rect.height-18)/2}px`;
+ marker.style.left=`${Math.max(2,content.getBoundingClientRect().left-main.left-28)}px`;
 }
 function nextFind(direction:number){if(findRanges.length){findIndex=(findIndex+direction+findRanges.length)%findRanges.length;showFindMatch(true);}}
 byId("find").addEventListener("click",()=>showFind(true));
@@ -196,9 +211,9 @@ function position(element: HTMLElement, rect?: DOMRect, compact = false) {
   element.style.top = `${Math.max(16, Math.min(window.innerHeight - height - 16, below + height <= window.innerHeight ? below : (rect?.top ?? below) - height - 10))}px`;
   element.style.maxHeight = `${Math.max(180,window.innerHeight - 32)}px`; element.style.overflowY = "auto";
 }
-function highlight(name: string, ranges: Range[]) {
+function highlight(name: string, ranges: Range[], priority=0) {
   const css = (window as any).CSS, Constructor = (window as any).Highlight;
-  if (css?.highlights && Constructor) { if (ranges.length) css.highlights.set(name, new Constructor(...ranges)); else css.highlights.delete(name); }
+  if (css?.highlights && Constructor) { if (ranges.length) {const layer=new Constructor(...ranges);layer.priority=priority;css.highlights.set(name,layer);} else css.highlights.delete(name); }
 }
 function openComposer(anchor: Anchor, rect?: DOMRect, purpose:"feedback"|"note"="feedback") {
   if (purpose==="feedback" && mode !== "review" || historyPreview || !connected) return;
@@ -267,7 +282,7 @@ document.addEventListener("keydown",event => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !byId("composer").hidden) { event.preventDefault(); add.click(); }
   if ((event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === "m" && selection && connected) { event.preventDefault(); openComposer(selection,selectionRect); }
 });
-window.addEventListener("scroll",() => { byId("selection-tools").hidden = true; },{passive:true});
+window.addEventListener("scroll",() => { byId("selection-tools").hidden = true; positionFindMarker(); },{passive:true});
 window.addEventListener("resize",() => { byId("selection-tools").hidden = true; if (!byId("composer").hidden) position(byId("composer"));renderNoteMarkers(); });
 for (const mode of ["source","reading","review"]) byId(mode).addEventListener("click",() => api.postMessage({type:mode}));
 const views = Array.from(document.querySelectorAll<HTMLButtonElement>(".views button"));
@@ -366,7 +381,7 @@ function renderNoteMarkers() {
   for(const row of personalNotes){const anchor=currentNoteAnchor(row);if(!anchor)continue;const range=rangeFor(anchor);if(range)ranges.push(range);const block=mapped(range?.startContainer??null);if(block)groups.set(block,[...(groups.get(block)??[]),row]);}
   const top=markers.getBoundingClientRect().top;
   for(const [block,notes] of groups){const button=textElement("button",String(notes.length),"note-marker") as HTMLButtonElement;button.setAttribute("aria-label",`Open ${notes.length===1?"note":notes.length+" notes"} on: ${notes[0].anchor.quote}`);button.title=notes.map(row=>row.body).join("\n\n");button.style.top=`${Math.max(0,block.getBoundingClientRect().top-top)}px`;button.addEventListener("click",()=>openNote(notes[0].id));markers.append(button);}
-  highlight("memql-notes",ranges);
+  highlight("memql-notes",ranges);positionFindMarker();
 }
 byId("notes-toggle").addEventListener("click",()=>{showNotes(!notesOpen);if(notesOpen)api.postMessage({type:"refreshNotes"});});
 byId("notes-close").addEventListener("click",()=>{showNotes(false);byId("notes-toggle").focus();});

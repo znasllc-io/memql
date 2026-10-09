@@ -8,6 +8,7 @@ import { renderMarkdown } from "../src/markdown.js";
 function fixture(initial: any = {}) {
   const dom = new JSDOM(markdownPage("Review.md", "", "test"), {runScripts:"outside-only"});
   const messages: any[]=[];let state=initial;
+  const highlights=new Map<string,Set<Range>>();Object.assign(dom.window,{CSS:{highlights},Highlight:class extends Set<Range>{priority=0;constructor(...ranges:Range[]){super(ranges);}}});
   Object.assign(dom.window,{acquireVsCodeApi:()=>({postMessage:(message:any)=>messages.push(message),getState:()=>state,setState:(value:any)=>{state=value;}})});
   dom.window.eval(readFileSync("dist-test/markdown-view.js","utf8"));
   const doc=dom.window.document,el=(id:string)=>doc.getElementById(id)!;
@@ -16,7 +17,7 @@ function fixture(initial: any = {}) {
   const document=(source="# Title\n\nKeep **this selection** and the rest.\n",version=17,connected=true)=>send({type:"document",html:renderMarkdown(source),version,sourceIdentity:source,connected,status:"Save first"});
   const select=(selector="strong")=>{const range=doc.createRange();range.selectNodeContents(doc.querySelector(selector)!);dom.window.getSelection()!.removeAllRanges();dom.window.getSelection()!.addRange(range);doc.dispatchEvent(new dom.window.Event("selectionchange"));};
   const input=(id:string,value:string)=>{(el(id) as HTMLTextAreaElement).value=value;el(id).dispatchEvent(new dom.window.Event("input"));};
-  return {dom,doc,el,send,document,select,input,messages,state:()=>state};
+  return {dom,doc,el,send,document,select,input,messages,highlights,state:()=>state};
 }
 test("selection tools appear contextually and preserve exact rendered offsets",()=>{
   const f=fixture();f.document();assert.equal(f.doc.querySelector("#feedback-toggle"),null);assert.equal((f.el("annotate") as HTMLButtonElement).disabled,true);
@@ -271,4 +272,13 @@ test("document search matches across inline formatting, wraps, and never searche
  f.input("find-query","[.*]");assert.equal(f.el("find-count").textContent,"No matches");assert.equal((f.el("find-next") as HTMLButtonElement).disabled,true);
  f.send({type:"comments",rows:[{id:"a",body:"Only in feedback",anchor:{kind:"document"}}]});f.input("find-query","Only in feedback");assert.equal(f.el("find-count").textContent,"No matches");
  f.input("find-query","Alice");f.document("# Replacement\n\nNo occurrences.\n",18);assert.equal(f.el("find-count").textContent,"No matches");f.el("find-close").click();assert.equal(f.el("document-find").hidden,true);f.dom.window.close();
+});
+
+test("search highlights all matches and keeps an indexed active match through navigation and closing",()=>{
+ const f=fixture();f.document("# Guide\n\nAlice labels boxes.\n\nAsk Alice to close.\n");f.el("find").click();f.input("find-query","Alice");
+ assert.equal(f.highlights.get("memql-find")?.size,2);assert.equal(f.highlights.get("memql-find-active")?.size,1);
+ assert.equal([...f.highlights.get("memql-find-active")!][0].startContainer.textContent,"Alice labels boxes.");assert.equal(f.el("find-marker").textContent,"1");
+ f.el("find-next").click();assert.equal([...f.highlights.get("memql-find-active")!][0].startContainer.textContent,"Ask Alice to close.");assert.equal(f.el("find-marker").textContent,"2");
+ f.input("find-query","absent");assert.equal(f.highlights.has("memql-find-active"),false);assert.equal(f.el("find-marker").hidden,true);
+ f.input("find-query","Alice");f.el("find-close").click();assert.equal(f.highlights.has("memql-find"),false);assert.equal(f.highlights.has("memql-find-active"),false);assert.equal(f.el("find-marker").hidden,true);f.dom.window.close();
 });
