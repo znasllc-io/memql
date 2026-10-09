@@ -81,3 +81,39 @@ func TestWorkHistoryIndexBoundsMetadataAndAlwaysAdvances(t *testing.T) {
 	}
 	require.Equal(t, len(messages), seen)
 }
+
+func TestWorkHistorySearchJumpsWithinAnExactCheckpointAcrossReplicas(t *testing.T) {
+	a, _, _ := readMergeTestEngine(t)
+	b, _, _ := readMergeTestEngine(t)
+	ctx := contextTestRun(t, a)
+	messages := []common.ChatMessage{{Role: "tool", Name: "readPaper", Content: strings.Repeat("metadata 文献 ", 1000) + "ABSTRACT: a verified experimental result"}}
+	raw, err := json.Marshal(messages)
+	require.NoError(t, err)
+	hash := workContextHash("tool-v2", raw)
+	require.NoError(t, a.saveWorkContextSource(ctx, hash, string(raw), ""))
+	args := map[string]any{"checkpoint": hash, "messageIndex": 0, "search": "abstract", "maxChars": 400}
+	result, err := b.recallWorkHistoryBuiltin(ctx, args, 0)
+	require.NoError(t, err)
+	var response struct {
+		Matches []struct {
+			Source string
+			Offset int
+		}
+	}
+	require.NoError(t, json.Unmarshal(result[0].Payload, &response))
+	require.Len(t, response.Matches, 1)
+	require.Greater(t, response.Matches[0].Offset, 10000)
+	require.Contains(t, response.Matches[0].Source, "ABSTRACT: a verified experimental result")
+	// Explicit offsets remain exact, even when a search filters the message.
+	args["offset"] = 0
+	result, err = b.recallWorkHistoryBuiltin(ctx, args, 0)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(result[0].Payload, &response))
+	require.Zero(t, response.Matches[0].Offset)
+	require.NotContains(t, response.Matches[0].Source, "ABSTRACT:")
+	args["search"] = "unavailable finding"
+	result, err = b.recallWorkHistoryBuiltin(ctx, args, 0)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(result[0].Payload, &response))
+	require.Empty(t, response.Matches)
+}

@@ -7,7 +7,14 @@ Archived previews and summaries are incomplete evidence. Read their checkpoint
 and messageIndex for exact pages, continue with nextOffset, and follow a search
 cursor when hasMore is true. If matchLimitReached is true, narrow the search or
 read exact message indexes from the listed sources; the matches are incomplete.
-Retrieve the relevant part, not every old result.
+Retrieve the relevant part, not every old result. To locate a specific fact
+inside a large archived result, combine checkpoint and messageIndex with search
+and omit offset; the returned page starts near the matching phrase. Then use
+nextOffset only if more of that passage is needed. Do not sequentially read
+an entire metadata record or bibliography when a targeted search can locate
+the needed title, abstract, finding or license. Bibliographic metadata verifies
+identity, not scientific findings; retrieve the primary abstract or paper when
+the finding is missing, and disclose unavailable evidence.
 Speech may misspell
 names: compare ambiguous words with recent entities before denying context.
 The current conversation is not the limit of your memory. For a question
