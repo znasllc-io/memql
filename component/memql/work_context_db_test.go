@@ -191,3 +191,45 @@ func TestWorkContextArchivesMediumParallelResultsWhenPinnedTailExceedsBudget(t *
 	require.Contains(t, string(result[0].Payload), "evidence")
 	require.NotContains(t, messages[5].Content, "[Archived", "caller input remains unchanged")
 }
+
+func TestWorkContextVerboseCheckpointContinuesAndRetainsExactSource(t *testing.T) {
+	a, _, _ := readMergeTestEngine(t)
+	b, _, _ := readMergeTestEngine(t)
+	ctx := contextTestRun(t, a)
+	reply, _ := json.Marshal(workCheckpoint{
+		Facts:     []string{strings.Repeat("Detailed research evidence 文献 ", 400)},
+		Entities:  []string{"https://example.test/paper [1]"},
+		Decisions: []string{}, Constraints: []string{"Preserve uncertainty [0]"},
+		Unfinished: []string{"Compare field evidence [2]"},
+	})
+	model := &checkpointModel{reply: string(reply)}
+	contextTestModel(a, model)
+	messages := contextResearchTrace()
+	for i := range messages {
+		if messages[i].Role == "tool" && len(messages[i].Content) > 1500 {
+			messages[i].Content = messages[i].Content[:1500]
+		}
+	}
+	before, _ := json.Marshal(messages)
+	compacted, err := a.CompactWorkContext(ctx, messages, nil, 1300)
+	require.NoError(t, err)
+	require.LessOrEqual(t, WorkContextSize(compacted, nil), 1300)
+	require.Positive(t, model.calls)
+	require.Contains(t, fmt.Sprint(compacted), "incomplete")
+	after, _ := json.Marshal(messages)
+	require.Equal(t, before, after)
+	start, end := workContextChunk(messages)
+	source, _ := json.Marshal(messages[start:end])
+	fingerprint := workContextHash("summary-v2", source)
+	call, _ := parser.RenderCall("workCheckpointForOwner", map[string]any{"fingerprint": fingerprint})
+	result, err := b.Execute(ContextWithFreshRead(ctx), "query "+call)
+	require.NoError(t, err)
+	rows := MaterializeRows(result.OutputPayload())
+	require.NotEmpty(t, rows)
+	data := rows[0]["data"].(map[string]any)
+	require.Equal(t, string(source), data["sourceMessages"])
+	contextTestModel(b, &checkpointModel{fail: true})
+	again, err := b.CompactWorkContext(ctx, messages, nil, 1300)
+	require.NoError(t, err, "another replica reuses durable memory without another model call")
+	require.Equal(t, compacted, again)
+}

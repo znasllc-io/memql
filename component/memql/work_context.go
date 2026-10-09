@@ -181,13 +181,49 @@ func (e *MemQLEngine) workCheckpoint(ctx context.Context, fingerprint, source st
 	if checkpoint.Facts == nil || checkpoint.Entities == nil || checkpoint.Decisions == nil || checkpoint.Constraints == nil || checkpoint.Unfinished == nil {
 		return "", fmt.Errorf("context checkpoint omitted required memory fields; history retained")
 	}
-	if len(summary) > 6000 {
-		return "", fmt.Errorf("context checkpoint exceeded its size limit")
-	}
+	// A model's verbosity is not a failed goal. Keep whole entries within a
+	// byte budget and archive the exact source before publishing the memory.
+	// Re-encoding also removes formatting whitespace without losing evidence.
+	summary = boundedWorkCheckpoint(checkpoint, min(6000, max(512, len(source)/2)))
 	if err = e.saveWorkContextSource(ctx, fingerprint, source, summary); err != nil {
 		return "", err
 	}
 	return summary, nil
+}
+
+func boundedWorkCheckpoint(checkpoint workCheckpoint, budget int) string {
+	encode := func(value workCheckpoint) string {
+		raw, _ := json.Marshal(value)
+		return string(raw)
+	}
+	if compact := encode(checkpoint); len(compact) <= budget {
+		return compact
+	}
+	bounded := workCheckpoint{Facts: []string{}, Entities: []string{}, Decisions: []string{}, Constraints: []string{}, Unfinished: []string{
+		"This checkpoint is incomplete. Recall the archived source for omitted details; absence here is not evidence of absence.",
+	}}
+	// Round-robin across categories so lengthy background facts cannot crowd
+	// out unfinished work, constraints, decisions or exact source references.
+	sources := [][]string{checkpoint.Unfinished, checkpoint.Constraints, checkpoint.Decisions, checkpoint.Entities, checkpoint.Facts}
+	targets := []*[]string{&bounded.Unfinished, &bounded.Constraints, &bounded.Decisions, &bounded.Entities, &bounded.Facts}
+	for index := 0; ; index++ {
+		found := false
+		for category, entries := range sources {
+			if index >= len(entries) {
+				continue
+			}
+			found = true
+			target := targets[category]
+			*target = append(*target, entries[index])
+			if len(encode(bounded)) > budget {
+				*target = (*target)[:len(*target)-1]
+			}
+		}
+		if !found {
+			break
+		}
+	}
+	return encode(bounded)
 }
 
 func workContextHash(kind string, raw []byte) string {

@@ -113,6 +113,11 @@ Owned work uses the following layers:
    facts, exact references, decisions, constraints, receipts, uncertainty,
    failed approaches and unfinished work. Older checkpoints can be
    consolidated with fresh evidence; their sources remain retrievable.
+   If the model returns an oversized checkpoint, the engine retains whole
+   entries across these categories within its byte budget and labels the
+   memory incomplete. It never truncates a claim or source URL to make it
+   fit. Exact source messages are saved before the bounded memory replaces
+   them, so verbosity alone does not stop the goal or spend another model call.
 4. **Retrieve only what is needed.** `recallWorkHistory` searches a bounded
    page of archive records. An exact checkpoint and message index retrieve
    character pages of the original serialized message, including tool-call
