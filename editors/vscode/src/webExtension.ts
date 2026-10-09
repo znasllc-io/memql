@@ -26,6 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
   }, { delaysMs: DEFAULT_RECONNECT_DELAYS_MS, reload: name => registry.read(name) });
   const connection = new EditorConnection({
     scope: () => manager.editorSessionScope,
+    refreshBearer: async rejected => { await manager.refreshEditorBearer(rejected); },
     session: () => selected && manager.state.status === "connected" && manager.query && manager.bearer
       ? { cluster: selected, query: manager.query, bearer: manager.bearer, dispatcher: manager.dispatcher } : undefined,
     connect: async domain => {

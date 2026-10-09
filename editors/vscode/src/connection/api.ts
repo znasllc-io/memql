@@ -31,6 +31,7 @@ export interface EditorConnectionDeps {
   // Hosts without a scope invalidate leases on every lifecycle transition.
   scope?(): object;
   connect(domain: string): Promise<void>;
+  refreshBearer?(rejectedBearer: string): Promise<void>;
   fetch?: typeof fetch;
 }
 export const MAX_EDITOR_BYTES = 32 * 1024 * 1024;
@@ -91,15 +92,31 @@ export class EditorConnection implements EditorConnectionAPI {
       this.require(lease);return result.text;
     } finally {change.dispose();signal.removeEventListener("abort",cancel);}
   }
+  // Retry only an authentication refusal, before the server can accept a write.
+  // The owner refreshes the same live session; every await retains the lease fence.
+  private async fileRequest(lease: ConnectionLease, path: string, init: RequestInit): Promise<Response> {
+    for (let attempt = 0; ; attempt++) {
+      const session = this.require(lease);
+      const base = apiBaseUrlFor(session.cluster);
+      if (!base) throw new Error("This cluster has no file address.");
+      const response = await (this.deps.fetch ?? fetch)(`${base}${path}`, {
+        ...init, headers: { Authorization: `Bearer ${session.bearer}` }, credentials: "omit", redirect: "error",
+      });
+      this.require(lease);
+      if (response.status !== 401 || attempt !== 0 || !this.deps.refreshBearer) return response;
+      await response.body?.cancel();
+      this.require(lease);
+      await this.deps.refreshBearer(session.bearer);
+      this.require(lease);
+    }
+  }
   async readBytes(lease: ConnectionLease, artifactId: string, version?: number): Promise<Uint8Array> {
     const session = this.require(lease);
     const base = apiBaseUrlFor(session.cluster);
     if (!base) throw new Error("This cluster has no file address.");
     if (version !== undefined && (!Number.isSafeInteger(version) || version < 1)) throw new Error("Invalid file version.");
     const suffix = version === undefined ? "" : `?version=${version}`;
-    const response = await (this.deps.fetch ?? fetch)(`${base}/artifacts/${encodeURIComponent(artifactId)}/content${suffix}`, {
-      headers: { Authorization: `Bearer ${session.bearer}` }, credentials: "omit", redirect: "error", cache: "no-store",
-    });
+    const response = await this.fileRequest(lease, `/artifacts/${encodeURIComponent(artifactId)}/content${suffix}`, { cache: "no-store" });
     this.require(lease);
     if (!response.ok) throw new Error(`Unable to read this file (${response.status}).`);
     if (Number(response.headers.get("content-length")) > MAX_EDITOR_BYTES) throw new Error("This file is larger than the 32 MiB editor limit. Download it from Files.");
@@ -133,9 +150,7 @@ export class EditorConnection implements EditorConnectionAPI {
     body.append("name", filename);
     body.append("targetArtifactId", artifactId);
     body.append("expectedVersion", String(expectedVersion));
-    const response = await (this.deps.fetch ?? fetch)(`${base}/artifacts`, {
-      method: "POST", body, headers: { Authorization: `Bearer ${session.bearer}` }, credentials: "omit", redirect: "error",
-    });
+    const response = await this.fileRequest(lease, "/artifacts", { method: "POST", body });
     this.require(lease);
     if (response.status === 409) throw new Error("This file changed in MemQL. Compare with the latest version before saving again.");
     if (!response.ok) throw new Error(`Unable to save this file (${response.status}). Your edits are still in the editor.`);
@@ -151,8 +166,7 @@ export class EditorConnection implements EditorConnectionAPI {
     const body = new FormData();
     body.append("file", new Blob([new Uint8Array(content)], { type: mimeType }), filename);
     body.append("name", filename);
-    const response = await (this.deps.fetch ?? fetch)(`${base}/artifacts`, { method: "POST", body,
-      headers: { Authorization: `Bearer ${session.bearer}` }, credentials: "omit", redirect: "error" });
+    const response = await this.fileRequest(lease, "/artifacts", { method: "POST", body });
     this.require(lease);
     if (!response.ok) throw new Error(`Unable to upload this reference (${response.status}).`);
     const result = await response.json() as Record<string, unknown>;

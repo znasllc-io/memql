@@ -94,6 +94,9 @@ var promptLevels = map[string]string{
 	// the bounded harness. Its output informs a proposal, never a direct write;
 	// the same human review gate makes strong sufficient here.
 	"libraryRevisionResearch": "strong",
+	// Bounded image observations inform a human-reviewed proposal; fast vision
+	// identifies visible content and states uncertainty without controlling the UI.
+	"libraryRevisionImages": "fast",
 	// A one-word classification gates optional app usage.
 	"libraryRevisionIntent": "fast",
 	// An app gathers a bounded evidence report; a human reviews the proposal.

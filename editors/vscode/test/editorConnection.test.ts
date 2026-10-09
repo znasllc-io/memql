@@ -97,3 +97,31 @@ test("reference uploads use the selected cluster and do not return a receipt aft
   finish(new Response(JSON.stringify({ fileId: "one", artifactId: "two" }), { status: 201 }));
   await assert.rejects(upload, /connection changed/);
 });
+
+test("file uploads renew a refused bearer once without duplicating an accepted write", async () => {
+  let session: EditorSession = { cluster: { name: 'a', domain: 'a.example', endpoint: 'api.a.example:443' }, query: {} as EditorSession['query'], bearer: 'expired' };
+  const attempts: string[] = []; let refreshes = 0;
+  const api = new EditorConnection({ session: () => session, connect: async () => {},
+    refreshBearer: async rejected => { assert.equal(rejected, 'expired'); refreshes++; session = { ...session, bearer: 'renewed' }; },
+    fetch: async (_url, init) => {
+      attempts.push(new Headers(init?.headers).get('Authorization')!);
+      return attempts.length === 1 ? new Response('expired', { status: 401 }) : new Response(JSON.stringify({ fileId: 'saved' }), { status: 201 });
+    },
+  });
+  assert.equal((await api.uploadFile(api.current()!, 'figure.png', 'image/png', new Uint8Array([1]))).fileId, 'saved');
+  assert.deepEqual(attempts, ['Bearer expired', 'Bearer renewed']); assert.equal(refreshes, 1);
+});
+
+test("file retry is bounded and never follows a changed connection or uncertain write", async () => {
+  for (const scenario of ['refused-twice', 'changed-session', 'server-error']) {
+    let session: EditorSession | undefined = { cluster: { name: 'a', domain: 'a.example', endpoint: 'api.a.example:443' }, query: {} as EditorSession['query'], bearer: 'expired' };
+    let calls = 0, refreshes = 0;
+    const api = new EditorConnection({ session: () => session, connect: async () => {},
+      refreshBearer: async () => { refreshes++; if (scenario === 'changed-session') { session = undefined; api.changed(); } },
+      fetch: async () => { calls++; return new Response('', { status: scenario === 'server-error' ? 500 : 401 }); },
+    });
+    await assert.rejects(api.uploadFile(api.current()!, 'reference.md', 'text/markdown', new Uint8Array([1])));
+    assert.equal(calls, scenario === 'refused-twice' ? 2 : 1);
+    assert.equal(refreshes, scenario === 'server-error' ? 0 : 1);
+  }
+});

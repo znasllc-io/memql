@@ -237,6 +237,23 @@ export class ConnectionManager {
     return this.conn === undefined ? undefined : this.currentBearer;
   }
 
+  // Browser timers can be suspended while the editor is in the background.
+  // An HTTP 401 must renew this connection, never independently select an actor.
+  async refreshEditorBearer(rejected: string): Promise<void> {
+    const conn = this.conn, cluster = this.lastDialed, scope = this.editorScope;
+    const current = () => this.conn === conn && this.editorScope === scope;
+    if (!conn || !cluster || !current()) throw new Error("The MemQL connection changed. Reconnect before uploading.");
+    if (this.currentBearer !== rejected) return; // The live stream already renewed it.
+    const fresh = await this.credentials.forceRefresh(cluster);
+    if (!current()) throw new Error("The MemQL connection changed while renewing your session.");
+    if (!fresh) throw new Error("Your session expired. Sign in to MemQL, then try again.");
+    const accepted = await conn.rotateAuth(fresh);
+    if (!current()) throw new Error("The MemQL connection changed while renewing your session.");
+    if (!accepted) throw new Error("Your session expired. Sign in to MemQL, then try again.");
+    this.currentBearer = fresh;
+    this.editorBearer = fresh;
+  }
+
   get subscriptions(): SubscriptionManager | undefined {
     return this.conn?.subscriptions;
   }
