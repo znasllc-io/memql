@@ -73,6 +73,13 @@ func (i *Integration) handleRemoveDocumentAnnotation(ctx context.Context, args m
 		return reviewResult(map[string]any{"removed": true, "commentId": comment})
 	}
 	if stringField(rows[0], "purpose") != "note" {
+		applied, err := i.appliedReviewComments(ctx, doc, rows)
+		if err != nil {
+			return nil, err
+		}
+		if applied[comment] {
+			return nil, fmt.Errorf("applied feedback stays in the document’s review history and cannot be deleted")
+		}
 		current, err := i.revisionRows(ctx, "workActiveDocumentRevisionRequests", map[string]any{"artifactId": doc.artifact})
 		if err != nil {
 			return nil, err
@@ -97,7 +104,7 @@ func (i *Integration) handleRemoveDocumentAnnotation(ctx context.Context, args m
 				}
 				terminal := run["status"] == "succeeded" || run["status"] == "failed" || run["status"] == "cancelled"
 				if !terminal && (approval["decision"] == "approved" || run["cancelRequested"] != true) {
-					return nil, fmt.Errorf("stop the current review before deleting its feedback; approved changes must finish first")
+					return nil, fmt.Errorf("stop the current review before deleting its feedback; approved changes cannot be deleted while applying")
 				}
 			}
 		}

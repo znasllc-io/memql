@@ -802,3 +802,32 @@ query documentComment removedDocumentComments {
  shape documentCommentFull
  paginate 100
 }
+
+/// Exact immutable save receipts; Library has already authorized the document.
+@serverOnly
+@actor
+query documentVersion libraryDocumentRevisionReceipt {
+ args {
+  sourceId string!
+  sourceAlias string!
+  versionNumber int!
+ }
+ filter row => row.ownerUserId == actor.userId
+            && (row.documentId == args.sourceId || row.documentId == args.sourceAlias)
+            && row.versionNumber == args.versionNumber
+ shape libraryDocumentSaveReceipt
+ paginate 1
+}
+
+@serverOnly
+@actor
+query fileVersion libraryFileRevisionReceipt {
+ args {
+  sourceId string!
+  versionNumber int!
+ }
+ filter row => row.ownerUserId == actor.userId && row.fileId == args.sourceId
+            && row.versionNumber == args.versionNumber
+ shape libraryFileSaveReceipt
+ paginate 1
+}

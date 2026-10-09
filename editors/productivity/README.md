@@ -73,12 +73,14 @@ document with its own history and a durable link to the exact parent revision.
 History loads earlier pages on demand. Initial generated content is retained
 before its first edit; versions not retained by older releases cannot be recovered.
 
-Saved feedback, section or document extension requests, and personal notes each
-have a **Delete** trash icon and an inline confirmation. Deletion removes the
+Unapplied feedback, section or document extension requests, and personal notes
+have a **Delete** trash icon and an inline confirmation. Applied feedback and
+extensions remain in review history and cannot be deleted. Declined items remain
+removable, including after other items from the same review were applied. Deletion removes the
 request and its highlight without editing document content. Only its author may
 delete it. If it belongs to a running review, confirmation stops that proposal;
-other requests remain saved and can be proposed again. Approved changes must
-finish first. A deleted request cannot be restored by a delayed submission or
+other requests remain saved and can be proposed again. Deletion is unavailable
+while approved changes are being applied. A deleted request cannot be restored by a delayed submission or
 applied from an older editor or approval. The internal receipt remains for
 idempotency and authorship history; it is no longer an active annotation.
 

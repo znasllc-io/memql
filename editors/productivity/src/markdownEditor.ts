@@ -241,12 +241,13 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
               const base = await this.load(document.uri);
               const collection = message.purpose === "note" ? (await this.files.notes(base)).notes : (await this.files.review(base)).comments;
               const row = (collection as Record<string,unknown>[] | undefined)?.find(row => row.id === message.id);
+              if (row?.applied === true) throw new UserInputError("Applied feedback stays in the document’s review history and cannot be deleted.");
               if (row && row.canRemove !== true) throw new UserInputError("Only the author can delete this feedback or note.");
               if (message.purpose === "feedback" && row) {
                 const status = await this.revisions.status(document);
                 const proposal = status?.proposal as Record<string,any> | undefined;
                 if (proposal?.commentIds?.includes(message.id) && !["succeeded","failed","cancelled"].includes(String(status?.status))) {
-                  if (status?.decision === "approved") throw new UserInputError("Wait for the approved changes to finish, then delete this feedback.");
+                  if (status?.decision === "approved") throw new UserInputError("Approved changes are being applied and cannot be deleted.");
                   if (status?.runId !== message.runId) throw new UserInputError("The review changed. Open it and try deleting this request again.");
                   if (!status?.cancelRequested) await this.files.cancelRevision(base, proposal.requestId);
                 }

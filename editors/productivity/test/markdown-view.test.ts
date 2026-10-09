@@ -543,3 +543,28 @@ test("personal notes delete in read mode without touching feedback or other note
   assert.equal(f.highlights.get("memql-notes")?.size??0,0);assert.equal(f.el("note-markers").children.length,0);
   f.dom.window.close();
 });
+
+test("applied feedback and extensions lose Delete even before refreshed permissions arrive",()=>{
+  const f=fixture();f.document();
+  const feedback={id:"feedback",body:"Clarify",canRemove:true,anchor:{kind:"document",quote:"Entire document"}};
+  const extension={...feedback,id:"extension",body:"Add sources",anchor:{kind:"document-end",quote:"End of document"}};
+  const declined={...feedback,id:"declined",body:"Try another title"};
+  const items=[feedback,extension,declined].map(row=>({id:`item-${row.id}`,commentIds:[row.id],edits:[{before:"this selection",after:row.body,commentIds:[row.id]}]}));
+  const proposal={commentIds:[feedback.id,extension.id,declined.id],comments:[feedback,extension,declined],edits:items.flatMap(item=>item.edits)};
+  f.send({type:"comments",rows:[feedback,extension,declined]});
+  f.send({type:"revision",status:{runId:"run",status:"waiting",approvalId:"approval",proposal,items}});
+  f.doc.querySelector<HTMLButtonElement>('[data-focus-key="delete:feedback"]')!.click();
+  assert.ok(f.doc.querySelector('[data-focus-key="confirm-delete:feedback"]'));
+  f.send({type:"revision",status:{runId:"run",status:"succeeded",decision:"approved",result:{applied:true},answer:{acceptedItemIds:["item-feedback","item-extension"]},proposal,items}});
+  assert.equal(f.doc.querySelector('[data-focus-key="confirm-delete:feedback"]'),null,"close stale confirmation");
+  for(const id of ["feedback","extension"])assert.equal(f.doc.querySelector(`[data-focus-key="delete:${id}"]`),null,id);
+  assert.ok(f.doc.querySelector('[data-focus-key="delete:declined"]'),"declined request remains removable");
+  // A newer review and an old selection do not undo the server's applied flag.
+  f.send({type:"comments",rows:[{...feedback,applied:true,canRemove:false,outdated:true},{...extension,applied:true,canRemove:false,outdated:true},{...declined,outdated:true}]});
+  f.send({type:"revision",status:{runId:"new-run",status:"running",proposal:{commentIds:[]}}});
+  for(const id of ["feedback","extension"])assert.equal(f.doc.querySelector(`[data-focus-key="delete:${id}"]`),null,id);
+  assert.ok(f.doc.querySelector('[data-focus-key="delete:declined"]'));
+  f.send({type:"notes",rows:[{...feedback,id:"note",body:"Personal thought"}]});
+  assert.ok(f.doc.querySelector('[data-focus-key="delete:note"]'));
+  f.dom.window.close();
+});

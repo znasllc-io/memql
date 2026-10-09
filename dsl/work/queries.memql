@@ -477,6 +477,23 @@ query run workActiveDocumentRevisionRequests {
  paginate 101
 }
 
+/// Internal audit lookup after Library admits the artifact and backing document.
+/// Across authors: another collaborator may have applied the person's feedback.
+@serverOnly
+@actor
+query approval workDocumentApprovedRevisions {
+ args {
+  versions []int!
+  artifactId string!
+ }
+ filter row => actor.isClusterOwner == true && row.kind == "planReview"
+            && row.decision == "approved" && row.?subject.reviewType == "library-document"
+            && row.?subject.artifactId == args.artifactId && row.?subject.version in args.versions
+ shape workDocumentApprovalReceipt
+ sort "row.createdAt", "asc"
+ paginate 100
+}
+
 /// Bounded retry candidates; Library verifies identical source and feedback.
 @actor
 query run workDocumentRevisionRequests {

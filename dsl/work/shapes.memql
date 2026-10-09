@@ -231,6 +231,18 @@ shape run workRevisionRequest {
   input.requestId
 }
 
+/// Only the decision and edit identities needed to protect applied feedback.
+@row
+shape approval workDocumentApprovalReceipt {
+ row.id
+ runId
+ subject.sourceId
+ subject.documentKind
+ subject.version
+ subject.edits
+ answer.acceptedItemIds
+}
+
 /// Durable admission identity for an item modification, including a partial bootstrap.
 @row
 shape goal workRevisionAmendment {
