@@ -335,7 +335,7 @@ automation reviseLibraryDocument {
   imageSpecs := builtin libraryRevisionImagePlan(response: imagePlan.reply)
   for imageSpec in imageSpecs.images {
    acquired := builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: imageSpec, level: "fast", width: 512, height: 512, reportSourceFailure: true)
-   if trim(acquired.fileId ?? "") == "" {
+   if acquired.fileId == "" {
     // A remote 403, catalog page or unusable raster is not a MemQL permission
     // failure. Research one replacement; never repeat a known-bad URL blindly.
     replacementEvidence := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
