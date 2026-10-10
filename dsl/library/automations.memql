@@ -414,7 +414,7 @@ automation reviseLibraryDocument {
  candidate := builtin libraryRevisionProposal(requestId: args.requestId, response: analysis.reply, sourceRunId: preparedImages.sourceRunId, allowIncomplete: true, reportInvalid: true)
  // A changed document can still omit part of the feedback. Check actual
  // proposed content, not the editor's claimed completion or changed-byte count.
- if (candidate.invalidReason ?? "") != "" {
+ if candidate.invalidReason != nil {
   repairFeedback := "The proposed edits could not be applied safely: " + candidate.invalidReason + ". Check the original source. Check that each before is copied verbatim and occurs exactly once, that edits do not overlap, and that every edit references the requesting comment. If one edit replaces text that another edit uses as an insertion anchor, combine those changes into one non-overlapping before/after pair. Preserve all requested image references and unrelated prose."
   repairNeeded := true
  } else if !candidate.complete {
