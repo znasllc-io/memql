@@ -324,8 +324,8 @@ automation reviseLibraryDocument {
  // Reuse a completed acquisition batch only for the same immutable request.
  // The native manifest reader revalidates ownership, bytes and provenance.
  retainedImages := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "preparedImages")
- if retainedImages.count() > 0 && retainedImages.0.result.value.references != "[]" {
-  imageSourceRun := retainedImages.0.result.value.sourceRunId ?? retainedImages.0.runId
+ if retainedImages.count() > 0 && retainedImages.first().result.value.references != "[]" {
+  imageSourceRun := retainedImages.first().result.value.sourceRunId ?? retainedImages.first().runId
  } else {
   imageSourceRun := captured.runId
  }
