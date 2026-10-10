@@ -50,8 +50,11 @@ prefix and accumulated usage, and does not replenish automatic retries or
 raise resource limits. A transient failure's **Retry** instead repeats the
 failed step. Either decision is persisted for the cluster to resume safely.
 
-Replanning uses structured output for the replacement program and validates it
-before installation. A timed-out attempt records its failure with a separate,
+Replanning an existing sealed program uses structured, exact source edits so
+that repairing a small part does not require the model to repeat a large
+program. The runtime rejects ambiguous or overlapping edits and changes to
+completed calls or their arguments. It compiles the resulting program and
+validates the whole bundle before installation. A timed-out attempt records its failure with a separate,
 short write deadline so that an expired model request cannot leave the same
 attempt eligible to run again on another replica. This finalization does not
 extend model execution; it rechecks the run's current state before writing.

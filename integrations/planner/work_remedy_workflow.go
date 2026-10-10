@@ -119,11 +119,17 @@ func (s *remedyScope) generate(ctx context.Context, args map[string]any) (any, e
 	}
 	data["originalTemplate"] = source
 	data["templateName"] = rc.TemplateName
+	headline := replanHeadline(rc)
+	data["patchExisting"] = headline != ""
+	schema := replanDraftSchema
+	if headline != "" {
+		schema = replanEditsSchema
+	}
 	if strings.TrimSpace(s.reason) != "" {
 		data["remainingGoal"] = strings.TrimSpace(s.reason)
 	}
 	s.generated = true
-	out, err := s.remedy.loop.engine.InvokeAIStructured(systemActorContext(ctx), prompt, data, "workReplan", replanDraftSchema, true)
+	out, err := s.remedy.loop.engine.InvokeAIStructured(systemActorContext(ctx), prompt, data, "workReplan", schema, true)
 	if err != nil {
 		if errors.As(err, &s.ceiling) {
 			return map[string]any{"available": true, "ok": false, "message": err.Error()}, nil
@@ -135,6 +141,17 @@ func (s *remedyScope) generate(ctx context.Context, args map[string]any) (any, e
 		return map[string]any{"available": true, "ok": false, "message": err.Error()}, nil
 	}
 	draft, err := parseReplanDraft(out)
+	if err == nil && !draft.GoalAlreadyServed {
+		if headline != "" {
+			if draft.Source != "" {
+				err = fmt.Errorf("replan of a sealed program requires edits, not a replacement source")
+			} else {
+				draft.Source, err = applyReplanEdits(headline, draft.Edits)
+			}
+		} else if len(draft.Edits) != 0 {
+			err = fmt.Errorf("replan edits require the original sealed program")
+		}
+	}
 	if err != nil {
 		return map[string]any{"available": true, "ok": false, "message": err.Error()}, nil
 	}
@@ -153,6 +170,15 @@ func (s *remedyScope) validate(_ context.Context, _ map[string]any) (any, error)
 	}
 	if err != nil {
 		return fail("source", err)
+	}
+	if source := replanHeadline(s.context); source != "" {
+		original, err := automations.NewLoader(automations.LoaderOptions{Logger: s.remedy.loop.logger}).CompileSource(source, "work-replan/"+s.runID+"-original.memql")
+		if err != nil {
+			return fail("original-source", err)
+		}
+		if err := replanPreservesDefinitions(original, auto, s.context); err != nil {
+			return fail("prefix", err)
+		}
 	}
 	resumeAt, keys, err := replanKeepsPrefix(auto, s.context)
 	if err != nil {

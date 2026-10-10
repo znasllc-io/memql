@@ -135,9 +135,10 @@ func (r *WorkRemedy) ask(ctx context.Context, ownerUserId, runId, stepKey, kind,
 
 // replanDraft is what replanGap answers (dsl/work/prompts/replanGap.tmpl).
 type replanDraft struct {
-	Source              string `json:"source"`
-	GoalAlreadyServed   bool   `json:"goalAlreadyServed"`
-	AbandonedAssumption string `json:"abandonedAssumption"`
+	Source              string             `json:"source"`
+	Edits               []replanSourceEdit `json:"edits"`
+	GoalAlreadyServed   bool               `json:"goalAlreadyServed"`
+	AbandonedAssumption string             `json:"abandonedAssumption"`
 }
 
 // The model emits only the executable draft and its verdict. The runtime
@@ -177,7 +178,7 @@ func parseReplanDraft(resp any) (replanDraft, error) {
 		return replanDraft{}, fmt.Errorf("parse replanGap JSON: %w (raw=%s)", err, truncate(string(raw), 200))
 	}
 	draft.Source = strings.TrimSpace(draft.Source)
-	if draft.Source == "" && !draft.GoalAlreadyServed {
+	if draft.Source == "" && len(draft.Edits) == 0 && !draft.GoalAlreadyServed {
 		return replanDraft{}, fmt.Errorf("replanGap returned no source")
 	}
 	return draft, nil

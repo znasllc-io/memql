@@ -4,7 +4,7 @@ that should replace the remainder.
 
 THE PREFIX IS FIXED. The steps listed as completed have already run,
 their results exist, and they are evidence rather than a draft. Preserve
-their statements verbatim in the returned program, but do not schedule them
+their statements, but do not schedule them
 again or re-order them. New work begins immediately after them and may read
 their values by the names their statements bind.
 
@@ -36,7 +36,22 @@ unfinished suffix of the headline automation. Private helper constructs remain
 available unchanged; do not redefine them. Use the real agent ids and builtin
 signatures in this source instead of guessing. A time-limit repair must call
 the smaller work directly, not reuse the helper that requests the oversized
-work. Return one complete headline automation with its necessary imports.
+work.
+{{ if .patchExisting }}
+Return only the edits needed to repair the unfinished work. Do not reproduce
+the complete program, completed prefix, unchanged suffix, or private helpers.
+Each find string must match exactly one substring of the ORIGINAL headline
+source, including whitespace. All edits apply simultaneously to that original
+source and must not overlap; use enough surrounding text to make a target
+unique. A replacement may split one statement into several bounded steps.
+Preserve downstream binding names and value shapes, aggregating the smaller
+results when needed. Keep unrelated unfinished statements unchanged. Prefer
+one localized edit over restating the plan. Keep new source under about 800
+words; do not put research or biography content inside the source.
+{{ else }}
+No sealed source is available. Return one complete headline automation with
+its necessary imports and the recorded prefix retained.
+{{ end }}
 
 Reusable catalog (constructs already available to compose -- prefer these):
 {{ .catalog }}
@@ -56,7 +71,9 @@ Reusable catalog (constructs already available to compose -- prefer these):
    limit, not evidence of a network outage. Replace the oversized step
    with smaller checkpointed steps. Separate bounded evidence gathering
    from drafting; split large sets into named batches, each producing
-   about 500-800 words of new prose. Preserve full requested coverage and
+   about 500-800 words of new prose. For research, bound each step to one or
+   two subjects, a small number of source fetches, and concise evidence with
+   exact links; do not ask it to write the final narrative too. Preserve full requested coverage and
    depth across those batches. Never retry the identical request, increase
    a platform limit, or merely rename the same oversized step. Keep all
    successful prefix results and their source references. Intermediate
@@ -78,11 +95,23 @@ Reusable catalog (constructs already available to compose -- prefer these):
 
 # Output
 
+{{ if .patchExisting }}
+{
+  "abandonedAssumption": "<what the old plan believed that turned out false, or empty>",
+  "goalAlreadyServed": true|false,
+  "edits": [{"find": "<unique exact original source>", "replace": "<repaired source fragment>"}]
+}
+
+Use an empty edits array only if the goal is already served. Do not emit a
+source field. Edits are applied to the sealed original and checked by the
+compiler and the completed-prefix guard before installation.
+{{ else }}
 {
   "abandonedAssumption": "<what the old plan believed that turned out false, or empty>",
   "goalAlreadyServed": true|false,
   "source": "<the complete .memql automation source for the NEW version, prefix included as already-completed steps>"
 }
+{{ end }}
 
 Return only this object. Keep the source concise, without a duplicate prose
 plan or biography content. The runtime reads the steps from the source and

@@ -175,7 +175,6 @@ automation summariseTicketsReplanned {
 func replanAnswer(t *testing.T, source string, served bool) string {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
-		"remainingSteps":      []map[string]any{{"key": "write"}},
 		"abandonedAssumption": "a summary template existed",
 		"goalAlreadyServed":   served,
 		"source":              source,
@@ -249,12 +248,12 @@ func TestReplanInstallsTheDraftThroughTheCompilePath(t *testing.T) {
 
 func TestReplanPreservesPrivateDependenciesForTheExecutingReplica(t *testing.T) {
 	const helper = "logic savedEvidence { return 42 }"
-	source := strings.Replace(replanSource, `gather := builtin runAgentTurn(agentId: "agent-1", prompt: "gather yesterday's tickets")`, "gather := logic savedEvidence()", 1)
-	eng := &replanEngine{answer: replanAnswer(t, source, false)}
+	const original = "@template\nautomation oldHeadline { gather := logic savedEvidence()\n draft := logic savedEvidence() }"
+	eng := &replanEngine{answer: map[string]any{"edits": []replanSourceEdit{{Find: "draft := logic savedEvidence()", Replace: "write := logic savedEvidence()"}}, "goalAlreadyServed": false, "abandonedAssumption": "a summary template existed"}}
 	rc := replanFixture()
 	rc.TemplateName = "oldHeadline"
 	rc.Template = []memql.SandboxConstruct{
-		{Kind: "automation", Name: "oldHeadline", Source: "@template\nautomation oldHeadline { gather := logic savedEvidence() }"},
+		{Kind: "automation", Name: "oldHeadline", Source: original},
 		{Kind: "logic", Name: "savedEvidence", Source: helper},
 	}
 	rec := &remedyRecorder{context: rc}
@@ -264,9 +263,15 @@ func TestReplanPreservesPrivateDependenciesForTheExecutingReplica(t *testing.T) 
 	if got := eng.aiData[0]["originalTemplate"].([]map[string]any); len(got) != 2 || got[1]["source"] != helper {
 		t.Fatalf("model was not given original source: %v", got)
 	}
+	if !eng.strict || !strings.Contains(string(eng.schema), `"edits"`) || strings.Contains(string(eng.schema), `"source"`) || eng.aiData[0]["patchExisting"] != true {
+		t.Fatalf("sealed replans must request edits only: schema=%s data=%v", eng.schema, eng.aiData)
+	}
 	writes := eng.wrote("createAuthoringConstruct")
 	if len(rec.installed) != 1 || len(writes) != 2 || !strings.Contains(strings.Join(writes, "\n"), helper) {
 		t.Fatalf("private dependency missing from executing replica's bundle: %v; asked=%v", writes, rec.asked)
+	}
+	if rec.installed[0].ResumeAt != "write" || !strings.Contains(strings.Join(writes, "\n"), "gather := logic savedEvidence()") {
+		t.Fatalf("edited bundle lost prefix or resumed from the wrong step: %+v", rec.installed)
 	}
 }
 
