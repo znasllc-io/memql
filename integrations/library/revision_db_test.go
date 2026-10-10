@@ -34,6 +34,9 @@ import (
 type revisionAI struct {
 	firstAnswer           *revisionAnswer
 	completionReply       string
+	completionAfterRepair string
+	completionDocuments   []string
+	onCompletion          func(context.Context, int32) error
 	completionCalls       atomic.Int32
 	repairCalls           atomic.Int32
 	calls                 atomic.Int32
@@ -100,12 +103,27 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		}},
 		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
+			if args["templateId"] == "libraryRevisionCompletion" {
+				n := a.completionCalls.Add(1)
+				if len(a.completionDocuments) > 0 && (int(n) > len(a.completionDocuments) || data["document"] != a.completionDocuments[n-1]) {
+					return nil, fmt.Errorf("completion check did not assess the actual proposed document: %v", data["document"])
+				}
+				if a.onCompletion != nil {
+					if err := a.onCompletion(ctx, n); err != nil {
+						return nil, err
+					}
+				}
+				reply := a.completionReply
+				if a.repairCalls.Load() > 0 {
+					reply = a.completionAfterRepair
+				}
+				if reply == "" {
+					reply = "satisfied"
+				}
+				return reviewResult(map[string]any{"reply": reply})
+			}
 			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
 				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
-			}
-			if args["templateId"] == "libraryRevisionCompletion" {
-				a.completionCalls.Add(1)
-				return reviewResult(map[string]any{"reply": a.completionReply})
 			}
 			if args["templateId"] == "libraryRevisionIntent" {
 				intent := "edit"
@@ -189,7 +207,11 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 					return nil, fmt.Errorf("repair lost the independent check's concrete findings")
 				}
 			}
-			if args["templateId"] == "libraryRevisionItem" && (a.completionCalls.Load() == 0 || data["reviewNotes"] != a.completionReply) {
+			expectedReview := a.completionReply
+			if expectedReview == "" {
+				expectedReview = "satisfied"
+			}
+			if args["templateId"] == "libraryRevisionItem" && (a.completionCalls.Load() == 0 || data["reviewNotes"] != expectedReview) {
 				return nil, fmt.Errorf("amendment did not receive its independent preflight assessment")
 			}
 			body, _ := json.Marshal(answer)

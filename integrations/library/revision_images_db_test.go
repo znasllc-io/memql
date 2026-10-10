@@ -16,6 +16,7 @@ import (
 	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/integrations/work"
 )
 
 type preparedImageEngine struct {
@@ -68,6 +69,7 @@ func TestDocumentRevisionImageWorkflow(t *testing.T) {
 		{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
 		{"RevisionCompletionRepairsNoopAndReusesSavedImages", testRevisionCompletionRepairsNoopAndReusesSavedImages},
 		{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},
+		{"RevisionPartialFeedbackRepair", testRevisionPartialFeedbackRepair},
 		{"RevisionAmendmentPreservesImagePinsAcrossReplicas", testRevisionAmendmentPreservesImagePinsAcrossReplicas},
 	}
 	for _, tc := range cases {
@@ -318,8 +320,61 @@ func testRevisionNoopAssessmentAndBoundedRepair(t *testing.T, f *revisionDB) {
 			} else if !errors.As(err, &wait) || f.ai.calls.Load() != 2 || f.ai.repairCalls.Load() != 1 {
 				t.Fatalf("unfinished no-op not repaired: %v", err)
 			}
-			if f.ai.completionCalls.Load() != 1 {
+			expectedChecks := int32(2)
+			if satisfied {
+				expectedChecks = 1
+			}
+			if f.ai.completionCalls.Load() != expectedChecks {
 				t.Fatal("no-op assessment missing or repeated")
+			}
+		})
+	}
+}
+
+func testRevisionPartialFeedbackRepair(t *testing.T, shared *revisionDB) {
+	for _, unresolved := range []bool{false, true} {
+		t.Run(fmt.Sprint(unresolved), func(t *testing.T) {
+			f := shared.isolatedCase(t)
+			artifact, doc := f.document("# Guide\n\nFirst claim. Second claim.\n")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Correct both claims.")
+			request := asString(args["requestId"])
+			// Assessment runs after the first proposal codec. Journal it so the
+			// real approval gate detects stale pre-assessment attribution.
+			f.ai.onCompletion = func(ctx context.Context, n int32) error {
+				rc, _ := common.RunFromContext(ctx)
+				return work.NewModelJournal(f.other).Record(ctx, f.owner, memql.JournaledCall{RunId: rc.RunId, StepKey: rc.StepKey, RequestHash: fmt.Sprintf("assessment-%d", n), Provider: "fixture", Model: "assessment-model", PromptRef: "libraryRevisionCompletion", Served: "live"})
+			}
+			f.ai.firstAnswer = &revisionAnswer{Summary: "Both corrected", Edits: []revisionReplacement{{Before: "First claim. Second claim.", After: "First corrected. Second claim.", Reason: "Correction", CommentIDs: []string{note}}}}
+			f.ai.answer = revisionAnswer{Summary: "Both corrected", Edits: []revisionReplacement{{Before: "First claim. Second claim.", After: "First corrected. Second corrected.", Reason: "Both requested corrections", CommentIDs: []string{note}}}}
+			f.ai.completionReply = "incomplete: Second claim remains unchanged."
+			f.ai.completionDocuments = []string{"# Guide\n\nFirst corrected. Second claim.\n", "# Guide\n\nFirst corrected. Second corrected.\n"}
+			if unresolved {
+				f.ai.answer = *f.ai.firstAnswer
+				f.ai.completionAfterRepair = f.ai.completionReply
+				f.ai.completionDocuments[1] = f.ai.completionDocuments[0]
+			}
+			err := f.execute(f.other, request, false)
+			if f.ai.calls.Load() != 2 || f.ai.completionCalls.Load() != 2 || f.ai.repairCalls.Load() != 1 {
+				t.Fatalf("partial feedback was not assessed and repaired once: %v", err)
+			}
+			if unresolved {
+				_, _, _, approval, _ := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+				if err == nil || !strings.Contains(err.Error(), "document edits incomplete:") || approval != nil {
+					t.Fatalf("partial repair reached approval: %v", err)
+				}
+				return
+			}
+			var wait *workstate.HumanWait
+			if !errors.As(err, &wait) {
+				t.Fatal(err)
+			}
+			f.query(f.engine, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
+			if err = f.execute(f.engine, request, true); err != nil {
+				t.Fatal(err)
+			}
+			changed, err := f.second.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
+			if err != nil || asString(changed.backing["body"]) != f.ai.completionDocuments[1] {
+				t.Fatalf("did not save the assessed repair: %v %v", changed, err)
 			}
 		})
 	}
@@ -392,6 +447,7 @@ func testRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T, f *revi
 	}
 	f.ai.firstAnswer = &revisionAnswer{Summary: "Claimed clarification, but the proposal was copied", Edits: previousEdits}
 	f.ai.calls.Store(0)
+	f.ai.completionCalls.Store(0)
 	f.ai.completionReply = "incomplete: the paragraph still repeats the original claim without the requested clarification."
 	f.ai.imagePlan = nil
 	f.ai.needsResearch = false
@@ -437,7 +493,7 @@ func testRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T, f *revi
 	if err != nil || !strings.Contains(asString(changed.backing["body"]), images[0].Reference.URI) || !strings.Contains(asString(changed.backing["body"]), "clarified paragraph") {
 		t.Fatalf("saved amendment lost content/image: %v %v", changed, err)
 	}
-	if f.ai.completionCalls.Load() != 1 || f.ai.repairCalls.Load() != 1 || f.ai.calls.Load() != 2 {
+	if f.ai.completionCalls.Load() != 2 || f.ai.repairCalls.Load() != 1 || f.ai.calls.Load() != 2 {
 		t.Fatal("unchanged amendment did not receive exactly one bounded correction")
 	}
 	if generator.calls != 1 || store.writes != 1 {

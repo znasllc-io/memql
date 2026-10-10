@@ -92,6 +92,8 @@ prompt libraryRevisionImagePlan {
 @level("fast")
 @templateFile("prompts/libraryRevisionCompletion.tmpl")
 prompt libraryRevisionCompletion {
+ references string
+ evidence string
  document string!
  passages string!
  instruction string!
