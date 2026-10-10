@@ -43,6 +43,16 @@
           },
           {
             "args": {
+              "data": {
+                "instruction": null
+              },
+              "templateId": "libraryRevisionImageIntent"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          },
+          {
+            "args": {
               "stepKey": "evidence.app/report"
             },
             "kind": "query",
@@ -276,6 +286,16 @@
                 "instruction": null
               },
               "templateId": "libraryRevisionIntent"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          },
+          {
+            "args": {
+              "data": {
+                "instruction": null
+              },
+              "templateId": "libraryRevisionImageIntent"
             },
             "kind": "builtin",
             "name": "ai"

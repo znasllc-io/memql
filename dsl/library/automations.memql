@@ -260,6 +260,12 @@ automation reviseLibraryDocument {
   passages: captured.passagesJSON, references: references.references,
   instruction: captured.amendment.instruction ?? captured.instruction
  })
+ // Research and image acquisition are independent: factual corrections can
+ // also request new portraits. Neither decision may suppress the other.
+ imageIntent := builtin ai(templateId: "libraryRevisionImageIntent", data: {
+  passages: captured.passagesJSON, references: references.references,
+  instruction: captured.amendment.instruction ?? captured.instruction
+ })
  // Keep the app receipt at evidence.app/report so retries across replicas
  // reuse the same immutable request's completed subscription work.
  evidence := parallel {
@@ -330,7 +336,7 @@ automation reviseLibraryDocument {
   imageSourceRun := captured.runId
  }
  // Image selection is authored here; native operations only acquire and verify one asset.
- if lower(trim(intent.reply)) == "images" && imageSourceRun == captured.runId {
+ if lower(trim(imageIntent.reply)) == "acquire" && imageSourceRun == captured.runId {
   imageSchema := {
    type: "object", additionalProperties: false, required: ["images", "limitations"], properties: {
     limitations: {type: "string"}, images: {type: "array", maxItems: 64, items: {
