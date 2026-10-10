@@ -411,6 +411,33 @@ test("whole-document skeleton tracks work without replacing source and ends for 
  f.send({type:"revision",status:{status:"failed",proposal:{comments:[row]}}});assert.equal((f.el("source") as HTMLButtonElement).disabled,false);assert.equal((f.el("document-feedback") as HTMLButtonElement).disabled,false);
  f.dom.window.close();
 });
+test("end extensions reserve their own placeholder until processing ends, without masking saved text",()=>{
+ const f=fixture();f.document();const original=f.el("content").querySelector("p")!.innerHTML;
+ const row={id:"extension",body:"Add next steps",anchor:{kind:"document-end",quote:"End of document"}};
+ const proposal={comments:[row]};
+ const extension=f.el("extension-progress");
+ assert.equal(extension.hidden,true);
+ f.send({type:"comments",rows:[row]});f.el("prepare-revision").click();
+ assert.equal(extension.hidden,false,"reserve space as soon as preparation starts");
+ assert.equal(f.el("passage-progress").children.length,0,"append placeholders are not positioned over the page");
+ assert.ok(extension.compareDocumentPosition(f.el("extend")) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING);
+ assert.equal((f.el("extend") as HTMLButtonElement).disabled,true);
+ f.send({type:"revision",status:{status:"running",proposal}});f.send({type:"revisionIdle"});
+ const first=extension.firstChild;
+ f.send({type:"revision",status:{status:"running",proposal}});assert.equal(extension.firstChild,first,"polls preserve shimmer nodes");
+ f.send({type:"viewMode",mode:"reading"});assert.equal(extension.hidden,true);
+ f.send({type:"viewMode",mode:"review"});assert.equal(extension.hidden,false);
+ f.send({type:"historyVersion",version:1,html:"<p>Earlier</p>"});assert.equal(extension.hidden,true);
+ f.send({type:"historyCurrent"});assert.equal(extension.hidden,false);
+ for(const end of [{status:"waiting",approvalId:"approve"},{status:"waiting",waitingOn:{kind:"question"}},{status:"failed"},{status:"cancelled"},{status:"succeeded"}]){
+  f.send({type:"revision",status:{status:"running",proposal}});assert.equal(extension.hidden,false);
+  f.send({type:"revision",status:{...end,proposal}});assert.equal(extension.hidden,true,"release space on review, pause or completion");
+ }
+ f.send({type:"revision",status:{status:"running",proposal:{comments:[row,{id:"whole",anchor:{kind:"document"}}]}}});
+ assert.equal(extension.hidden,true,"whole-document preparation does not duplicate the extension skeleton");
+ assert.equal(f.el("content").querySelector("p")!.innerHTML,original,"the saved document is untouched");
+ f.dom.window.close();
+});
 test("passage skeleton uses exact selection rectangles and never changes adjacent text or source offsets",()=>{
  const f=fixture();f.document();f.select();f.el("selection-feedback").click();f.input("feedback","Clarify");f.el("add").click();
  const anchor=f.messages.find(m=>m.type==="comment").selection;f.send({type:"saved"});

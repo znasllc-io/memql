@@ -367,6 +367,9 @@ function renderDocumentProgress(force = false) {
   content.setAttribute("aria-busy",String(loading || processing));
   byId("progress-status").textContent = loading ? "Loading document" : processing ? whole ? "Preparing document" : "Preparing selected changes" : "";
   full.hidden = !whole; full.replaceChildren();
+  // Appended content reserves space in normal flow before the extension control.
+  // Only existing passages belong in the positioned overlay.
+  byId("extension-progress").hidden = !atEnd;
   const retiring = wasBusy && !loading && !processing && !wasWhole && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? [...passages.children] : [];
   passages.replaceChildren();
   for (const old of retiring) { const node=old as HTMLElement;passages.append(node);const animation=node.animate?.([{opacity:1},{opacity:0}],{duration:180,easing:"ease-out"});if(animation)animation.onfinish=()=>node.remove();else node.remove(); }
@@ -376,7 +379,6 @@ function renderDocumentProgress(force = false) {
   } else {
     const origin=wrap.getBoundingClientRect();
     const rectangles=ranges.flatMap(range => Array.from(range.getClientRects?.() ?? []));
-    if(atEnd){const end=content.getBoundingClientRect();for(let i=0;i<3;i++)rectangles.push({left:end.left,top:end.bottom+16+i*28,width:end.width*(i===2?.6:.95),height:14} as DOMRect);}
     const distinct=new Set<string>();
     for(const rect of rectangles){
       if(rect.width<=0||rect.height<=0)continue;

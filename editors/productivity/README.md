@@ -299,8 +299,10 @@ missing answers, questions, and completion mixed with side-effect calls retain
 the existing validation and human-review boundaries.
 
 Document loading and active whole-document requests use a theme-aware skeleton;
-passage requests mask only their exact rendered selection. The saved text stays
-unchanged until approval. Placeholders stop for human review, pauses and errors.
+passage requests mask only their exact rendered selection. End-of-document
+extensions reserve space for their skeleton before the circular plus control;
+the control stays below the pending content at every viewport width. The saved
+text stays unchanged until approval. Placeholders stop for human review, pauses and errors.
 Content uses a short reveal transition, respecting reduced-motion preferences.
 Source and feedback mutation controls are disabled during an active revision;
 Read, copy, notes, review navigation and cancellation remain available.
