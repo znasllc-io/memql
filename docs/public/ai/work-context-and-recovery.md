@@ -102,7 +102,10 @@ manifest. Approval and application revalidate those retained assets on the
 receiving replica. Supplying another request’s image identifiers or claiming
 inheritance in a model response grants no authority. An amendment that repeats
 the prior proposed text also receives the bounded completion assessment; changing
-only its explanation does not count as fulfilling the new direction.
+only its explanation does not count as fulfilling the new direction. A separate
+assessment identifies specific unmet requirements before an amendment. Those
+findings also guide the bounded repair, rather than repeating the editor’s
+possibly incorrect claim of completion.
 
 ## Browser research fallback
 

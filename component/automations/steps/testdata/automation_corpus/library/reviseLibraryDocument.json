@@ -157,7 +157,7 @@
             "args": {
               "data": {
                 "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n",
-                "recovery": "The previous response did not complete the request. It said: . Produce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
+                "recovery": "The previous response did not complete the request. Unfulfilled requirements from the independent check: Requested prepared images are missing from the proposed Markdown.\nProduce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
               },
               "progress": true,
               "responseSchema": {
@@ -386,7 +386,7 @@
             "args": {
               "data": {
                 "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n",
-                "recovery": "The previous response did not complete the request. It said: . Produce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
+                "recovery": "The previous response did not complete the request. Unfulfilled requirements from the independent check: Requested prepared images are missing from the proposed Markdown.\nProduce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
               },
               "progress": true,
               "responseSchema": {

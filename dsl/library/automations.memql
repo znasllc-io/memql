@@ -377,8 +377,14 @@ automation reviseLibraryDocument {
   }}, summary: {type: "string", maxLength: 300}}
  }
  if captured.amendment != nil {
+  previousCandidate := builtin libraryRevisionProposal(requestId: args.requestId,
+   response: {edits: captured.amendment.edits, summary: "Previous proposed changes"}, sourceRunId: preparedImages.sourceRunId, allowIncomplete: true)
+  amendmentAssessment := builtin ai(templateId: "libraryRevisionCompletion", data: {
+   document: previousCandidate.proposal.revisedContent, passages: captured.passagesJSON,
+   instruction: captured.amendment.instruction, explanation: "Assess the previous proposal against the new direction."
+  })
   analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
-   preparedImages: preparedImages.references,
+   reviewNotes: amendmentAssessment.reply, preparedImages: preparedImages.references,
    document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.amendment.instruction,
    previous: captured.amendment.edits, evidence: combinedEvidence + "\nImage acquisition limitations: " + imageLimitations
   })
@@ -392,21 +398,28 @@ automation reviseLibraryDocument {
  // A refusal or plan is not a completed edit. Missing image nodes are a
  // deterministic failure; other no-ops get a separate intent assessment.
  if !candidate.complete {
+  repairFeedback := "Requested prepared images are missing from the proposed Markdown."
   repairNeeded := true
  } else if !candidate.requestChanged {
-  completion := builtin ai(templateId: "libraryRevisionCompletion", data: {
-   document: captured.amendment != nil ? candidate.proposal.revisedContent : captured.content, passages: captured.passagesJSON,
-   instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary
-  })
+  if captured.amendment != nil {
+   completion := amendmentAssessment
+  } else {
+   completion := builtin ai(templateId: "libraryRevisionCompletion", data: {
+    document: captured.content, passages: captured.passagesJSON,
+    instruction: captured.instruction, explanation: candidate.summary
+   })
+  }
+  repairFeedback := completion.reply
   repairNeeded := lower(trim(completion.reply)) != "satisfied"
  } else {
+  repairFeedback := ""
   repairNeeded := false
  }
  if repairNeeded {
-  repairDirection := "The previous response did not complete the request. It said: " + candidate.summary + ". Produce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
+  repairDirection := "The previous response did not complete the request. Unfulfilled requirements from the independent check: " + repairFeedback + "\nProduce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
   if captured.amendment != nil {
    repaired := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
-    recovery: repairDirection, preparedImages: preparedImages.references,
+    recovery: repairDirection, reviewNotes: amendmentAssessment.reply, preparedImages: preparedImages.references,
     document: captured.content, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction, previous: captured.amendment.edits, evidence: combinedEvidence
    })

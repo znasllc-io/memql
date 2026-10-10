@@ -304,7 +304,7 @@ func testRevisionNoopAssessmentAndBoundedRepair(t *testing.T, f *revisionDB) {
 			artifact, doc := f.document("# Guide\n\nOriginal claim.\n")
 			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Correct the claim if needed.")
 			f.ai.firstAnswer = &revisionAnswer{Summary: "No changes needed", Edits: []revisionReplacement{}}
-			f.ai.completionReply = "incomplete"
+			f.ai.completionReply = "incomplete: the paragraph still repeats the original claim without the requested clarification."
 			f.ai.answer = revisionAnswer{Summary: "Corrected claim", Edits: []revisionReplacement{{Before: "Original claim.", After: "Corrected claim.", Reason: "Requested correction", CommentIDs: []string{note}}}}
 			if satisfied {
 				f.ai.completionReply = "satisfied"
@@ -392,7 +392,7 @@ func testRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T, f *revi
 	}
 	f.ai.firstAnswer = &revisionAnswer{Summary: "Claimed clarification, but the proposal was copied", Edits: previousEdits}
 	f.ai.calls.Store(0)
-	f.ai.completionReply = "incomplete"
+	f.ai.completionReply = "incomplete: the paragraph still repeats the original claim without the requested clarification."
 	f.ai.imagePlan = nil
 	f.ai.needsResearch = false
 	f.ai.answer = revisionAnswer{Summary: "Clarify the paragraph", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this clarified paragraph.\n\n![Illustration](" + images[0].Reference.URI + ")\nAI-generated illustration; actual-image-model.", Reason: "Requested clarification", CommentIDs: []string{note}}}}

@@ -185,6 +185,12 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 			}
 			if asString(data["recovery"]) != "" {
 				a.repairCalls.Add(1)
+				if a.completionCalls.Load() > 0 && !strings.Contains(asString(data["recovery"]), a.completionReply) {
+					return nil, fmt.Errorf("repair lost the independent check's concrete findings")
+				}
+			}
+			if args["templateId"] == "libraryRevisionItem" && (a.completionCalls.Load() == 0 || data["reviewNotes"] != a.completionReply) {
+				return nil, fmt.Errorf("amendment did not receive its independent preflight assessment")
 			}
 			body, _ := json.Marshal(answer)
 			return reviewResult(map[string]any{"reply": string(body)})

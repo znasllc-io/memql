@@ -23,6 +23,7 @@ prompt libraryRevisionItem {
  passages string!
  instruction string!
  previous []object!
+ reviewNotes string
 }
 
 /// Carry out the research, verification or reasoning called for by document feedback before proposing edits.
