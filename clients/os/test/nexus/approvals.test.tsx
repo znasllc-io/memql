@@ -583,6 +583,14 @@ it("opens a typed question in Ask without sending a decision from Nexus", async 
 
 
 describe("a budget approval", () => {
+  it("keeps an expired request readable without offering another decision", async () => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "expired", kind: "budget", question: "Expired time request", expiresAt: "2020-01-01T00:00:00Z", subject: { ceiling: "wallClock" } })] }));
+    fireEvent.click(await screen.findByText("Expired time request"));
+    expect(screen.queryByLabelText("New total time (minutes)")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Raise limit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reject this/ })).toBeNull();
+    expect(screen.getByText("This request has expired.")).toBeTruthy();
+  });
   it("requires an explicit total and converts minutes before resuming", async () => {
     const conn = fakeConnection({ approvals: [approvalRow({ id: "budget", kind: "budget", question: "More time needed", subject: { ceiling: "wallClock", limit: "2700000ms", actual: "2700001ms" } })] });
     mount(conn);

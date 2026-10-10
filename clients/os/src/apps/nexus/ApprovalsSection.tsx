@@ -144,6 +144,8 @@ export function ApprovalsSection({
 
   const rows = view?.snapshot.rows ?? [];
   const selected = rows.find((a) => idTail(a.id) === idTail(selectedApprovalId)) ?? null;
+  const lapsed = selected !== null && selected.expiresAt !== "" && Date.parse(selected.expiresAt) <= now.getTime();
+  const canDecide = selected !== null && selected.decision === "" && !lapsed;
   const runsById = useMemo(() => {
     const byId = new Map<string, RunRow>();
     for (const run of runs) byId.set(idTail(run.id), run);
@@ -174,7 +176,7 @@ export function ApprovalsSection({
     : true;
 
   const acts: Act[] = [];
-  if (selected !== null && selected.decision === "") {
+  if (selected !== null && canDecide) {
     if (answerInAsk) {
       acts.push({ label: "Answer in Ask", tone: "primary", onAct: () => answerInAsk(selected.runId) });
     } else if (isFeedback) {
@@ -257,6 +259,7 @@ export function ApprovalsSection({
           <div className="os-nexus-column os-nexus-aside">
             {answerInAsk ? <p className="os-nexus-approval-ask">{selected.question}</p> : <ApprovalDetail
               approval={selected}
+              canDecide={canDecide}
               run={runsById.get(idTail(selected.runId)) ?? null}
               choices={choices}
               onChoices={setChoices}
@@ -274,13 +277,13 @@ export function ApprovalsSection({
 
       {selected === null ? null : (
         <ActionBar
-          state={decisionWord(selected.decision)}
+          state={selected.decision === "" && lapsed ? "Lapsed" : decisionWord(selected.decision)}
           // A BAR WITH A STATE AND NO ACTS HAS TO SAY WHY. Send is absent
           // until an answer exists, which is right -- an act that cannot
           // succeed should not be offered -- but an empty bar with no
           // account of itself reads as something nobody built.
           detail={
-            selected.decision !== "" ? approvalDecidedNext(selected.kind, selected.decision) : budget !== null && !answerReady ? "Enter a new total limit above the recorded usage." : answerInAsk ? undefined : isFeedback && !answerReady
+            selected.decision !== "" ? approvalDecidedNext(selected.kind, selected.decision) : lapsed ? "This request has expired." : budget !== null && !answerReady ? "Enter a new total limit above the recorded usage." : answerInAsk ? undefined : isFeedback && !answerReady
               ? hasOptions
                 ? "pick an answer above to send it"
                 : "write an answer above to send it"
@@ -289,7 +292,7 @@ export function ApprovalsSection({
                   undefined
                 : approvalKindMeaning(selected.kind)
           }
-          tone={selected.decision === "" ? "paused" : "none"}
+          tone={canDecide ? "paused" : "none"}
           acts={acts}
         >
           {decide.error === "" ? null : (
@@ -394,6 +397,7 @@ function ApprovalLine({
 
 function ApprovalDetail({
   approval,
+  canDecide,
   run,
   choice,
   onChoice,
@@ -406,6 +410,7 @@ function ApprovalDetail({
   onOpenProcedure,
 }: {
   approval: ApprovalRow;
+  canDecide: boolean;
   run: RunRow | null;
   choice: string;
   choices: string[];
@@ -448,13 +453,13 @@ function ApprovalDetail({
         {/* SAID ONCE: a promotion's question already says what promoting does. */}
         {approval.kind === PROCEDURE_PROMOTION || isFeedback ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
 
-        {budget === null || approval.decision !== "" ? null : <>
+        {budget === null || !canDecide ? null : <>
           <Field label={budget.label}>
             <Input id="work-approval-budget" label={budget.label} value={freeText} onChange={onFreeText} />
           </Field>
           <Caption>Total allowance, including work already completed. Resumes from saved progress.</Caption>
         </>}
-        {isFeedback && approval.decision === "" ? (
+        {isFeedback && canDecide ? (
           approval.subject?.kind === "multi" ? (
             <div role="group" aria-label="Your answers">{approval.options.map(option => <Check key={option.value} checked={choices.includes(option.value)} onChange={checked => onChoices(checked ? [...choices, option.value] : choices.filter(value => value !== option.value))}>{option.label}</Check>)}</div>
           ) : approval.options.length > 0 ? (
