@@ -218,43 +218,28 @@ const SOURCE_SENTENCES: Record<string, string> = {
   pipeline: PIPELINE_SENTENCE,
 };
 
-export function fileStory(row: ArtifactRow, machine: MachinePresence | null): FileStory {
-  if (row.producedByWorkerId !== "") {
-    // A named machine outranks every other reading: it is the physical fact,
-    // and its presence is what the dot is about (design D5 -- producedByWorker*
-    // means "a machine is known", computer-use or upload alike).
-    const name = row.producedByWorkerName.trim() || machine?.name || "one of your machines";
-    const sentence =
-      row.source === "computer_use" ? `Made on ${name} by computer use` : `Uploaded from ${name}`;
-    const tone: ProvenanceTone =
-      machine === null ? "unknown" : machine.online ? "reachable" : "unreachable";
-    return { sentence, tone, machineNamed: true };
+export function fileStory(row: ArtifactRow, machine: MachinePresence | null, composition: CompositionRow | null = null): FileStory {
+  // A composition is direct evidence of origin, even if an older index row
+  // was classified by its upload transport. Machine attribution alone does
+  // not mean a person uploaded a file: runs can produce files on machines too.
+  if (composition !== null) {
+    return { sentence: "Made in Materializer", tone: "reachable", machineNamed: false };
   }
+  const name = row.producedByWorkerName.trim() || machine?.name || "one of your machines";
+  const tone: ProvenanceTone = machine === null ? "unknown" : machine.online ? "reachable" : "unreachable";
   if (row.source === "computer_use") {
-    // Made by computer use, machine unrecorded: honest and dot-less.
-    return { sentence: "Made by computer use", tone: "unknown", machineNamed: false };
+    return row.producedByWorkerId !== ""
+      ? { sentence: `Made on ${name} by computer use`, tone, machineNamed: true }
+      : { sentence: "Made by computer use", tone: "unknown", machineNamed: false };
   }
   if (row.source === "pipeline") {
-    // A PIPELINE'S FILE IS ALWAYS A RUN'S (epic memql#5478): a step's log and
-    // its artifacts carry the work run that made them, so the run reading
-    // below would tell every one of them as "Produced by a run". The source
-    // is the more specific fact; the run is the `Run` fact's to show.
     return { sentence: PIPELINE_SENTENCE, tone: "reachable", machineNamed: false };
   }
   if (row.producedByRunId !== "") {
-    // THE ID IS NOT IN THE SENTENCE, and that is the whole of the fix.
-    //
-    // This read `Produced by plan ${id}`, which put a 32-character opaque
-    // token in the one line the inspector leads with -- three wrapped lines of
-    // hex above the file's own summary, saying nothing a person can act on,
-    // and repeating the `Run` fact four rows below it (DESIGN.md rule 7).
-    // The fact is where an id belongs: it is monospaced, truncated, and has a
-    // button that copies the whole thing. The story is for the sentence only
-    // this platform can say.
-    //
-    // And it says a RUN: plans are retired (epic memql#5000), and a work run
-    // is what `producedByRunId` names.
     return { sentence: "Produced by a run", tone: "reachable", machineNamed: false };
+  }
+  if (row.source === "uploaded" && row.producedByWorkerId !== "") {
+    return { sentence: `Uploaded from ${name}`, tone, machineNamed: true };
   }
   const sentence = SOURCE_SENTENCES[row.source];
   if (sentence !== undefined) return { sentence, tone: "reachable", machineNamed: false };

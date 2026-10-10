@@ -5,6 +5,7 @@ import {
   artifactFingerprint,
   artifactFromRow,
   artifactName,
+  compositionFromRow,
   fileStory,
   folderFromRow,
   isContentKind,
@@ -151,6 +152,22 @@ describe("fileStory -- the provenance sentence and its dot", () => {
     // memql#5000).
     expect(story.sentence).toBe("Produced by a run");
     expect(story.tone).toBe("reachable");
+  });
+
+  it("uses a composition's recorded output instead of a stale upload classification", () => {
+    const row = artifactFromRow(artifact({id: "a-1", source: "uploaded", producedByWorkerId: "w-1"}));
+    const composition = compositionFromRow({id: "c-1", outputFileId: "f-1"} as Row);
+    expect(fileStory(row, null, composition).sentence).toBe("Made in Materializer");
+  });
+
+  it.each([
+    ["agent_generated", "", "Made by an agent"],
+    ["agent_generated", "run-1", "Produced by a run"],
+    ["pipeline", "run-1", "Made by a pipeline run"],
+    ["derived", "", "Derived from an artifact"],
+  ])("does not classify %s output on a machine as an upload", (source, run, sentence) => {
+    const row = artifactFromRow(artifact({id: "a-1", source, producedByWorkerId: "w-1", producedByRunId: run}));
+    expect(fileStory(row, {name: "Studio", online: true}).sentence).toBe(sentence);
   });
 
   it("falls back to the source's own label for the remaining cluster sources", () => {

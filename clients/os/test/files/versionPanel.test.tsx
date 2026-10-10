@@ -95,10 +95,10 @@ describe("the version history panel", () => {
     expect(within(history).getByText("current")).toBeTruthy();
 
     // EACH VERSION TELLS ITS OWN STORY. The one pushed from a machine says so;
-    // the two dropped from a browser say "Uploaded here" -- provenance is per
+    // the two dropped from a browser say "Saved in MemQL" -- provenance is per
     // version and never inherited.
     expect(within(history).getByText("Uploaded from MacBook-Pro")).toBeTruthy();
-    expect(within(history).getAllByText("Uploaded here")).toHaveLength(2);
+    expect(within(history).getAllByText("Saved in MemQL")).toHaveLength(2);
 
     // A version that arrived under a different NAME is news; the two that did
     // not are not repeated.

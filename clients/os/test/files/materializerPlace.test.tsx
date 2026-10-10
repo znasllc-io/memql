@@ -87,8 +87,13 @@ describe("the Materializer place", () => {
     await renderFiles();
 
     await click(screen.getByRole("button", { name: /^Materializer/ }));
-    expect(screen.getByRole("button", { name: /Q3 report\.pdf/ })).toBeTruthy();
+    const output = screen.getByRole("button", { name: /Q3 report\.pdf/ });
+    expect(within(output).getByText("Made in Materializer")).toBeTruthy();
     expect(screen.queryByText(/uploaded\.txt/)).toBeNull();
+    await click(output);
+    const detail = screen.getByRole("region", {name: "File details"});
+    expect(within(detail).queryByText("Uploaded here")).toBeNull();
+    expect(within(detail).getByText("Origin").nextElementSibling?.textContent).toBe("Made in Materializer");
   });
 
   it("lists the FOLDERS its outputs are filed in, not the files", async () => {

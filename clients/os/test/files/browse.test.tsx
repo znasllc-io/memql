@@ -191,7 +191,7 @@ describe("the inspector", () => {
     await renderFiles({ settings: { confirmBeforeArchive: false } });
     await click(screen.getByRole("button", { name: /brief\.pdf/ }));
     const inspector = screen.getByRole("region", { name: "File details" });
-    await click(within(inspector).getByRole("button", { name: /Move to Bin/ }));
+    await click(within(inspector).getByRole("button", { name: "Delete" }));
     expect(
       within(inspector).getByText("the cluster refused: archived rows keep counting"),
     ).toBeTruthy();
@@ -205,8 +205,8 @@ describe("the inspector", () => {
     await renderFiles();
     await click(screen.getByRole("button", { name: /brief\.pdf/ }));
     const inspector = screen.getByRole("region", { name: "File details" });
-    await click(within(inspector).getByRole("button", { name: /Move to Bin/ }));
-    expect(within(inspector).getByText(/Move "brief\.pdf" to the Bin\?/)).toBeTruthy();
+    await click(within(inspector).getByRole("button", { name: "Delete" }));
+    expect(within(inspector).getByText(/Delete "brief\.pdf"\?/)).toBeTruthy();
     await click(within(inspector).getByRole("button", { name: "Cancel" }));
     expect(connection.callsNamed("archiveArtifact")).toEqual([]);
   });

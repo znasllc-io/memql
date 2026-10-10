@@ -1060,6 +1060,14 @@ preserve the current location. A file opens a full-page detail view with labels,
 clients, compact actions and a plain version list. Neither list uses provenance
 circles or an inspector beside the list.
 
+File details share the list's full page gutters. Origin appears under Details;
+a matching Materializer composition and recorded generation sources take
+precedence over machine upload attribution. Version entries without recorded
+upload attribution say "Saved in MemQL" rather than inferring a browser upload.
+Labels follow their description and input. Open remains a text action; desktop,
+download and Delete use named icons. Delete moves the file to the Bin, where it
+can be restored until purged.
+
 Ordinary uploads are independent copies. Host-path tracking belongs only to
 explicit folder backups; see the [upload contract](../../docs/public/operate/library.md#uploads-and-folder-backups).
 Backups use a plus action, a full-page form, a schedule, and a hidden-file switch.

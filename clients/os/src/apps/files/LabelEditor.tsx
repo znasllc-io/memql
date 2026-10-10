@@ -21,9 +21,7 @@ import { useArtifactLabels } from "./actions/labels";
 // which is what makes the revert exact: the value captured before the edit is
 // still the value to go back to when the answer lands.
 //
-// THE FREE-TEXT NOTE IS SAID ONCE (DESIGN.md rule 7), under the control that
-// takes the text -- not repeated on every chip, and not in the browse's own
-// facet, which is asking a different question about the same field.
+// The short description precedes the input; saved labels follow it.
 
 /** Value-identity for a label list, so an effect can compare two arrays. */
 function labelKey(labels: readonly string[]): string {
@@ -84,26 +82,7 @@ export function LabelEditor({
 
   return (
     <div className="os-files-labeledit">
-      <Chips label="Labels">
-        {labels.length === 0 ? (
-          <span className="os-caption">None yet.</span>
-        ) : (
-          labels.map((label) => (
-            <span key={label} className="os-chip-editable" role="listitem">
-              <Chip>{label}</Chip>
-              <button
-                type="button"
-                className="os-chip-remove"
-                aria-label={`Remove label ${label}`}
-                disabled={write.busy}
-                onClick={() => void remove(label)}
-              >
-                &times;
-              </button>
-            </span>
-          ))
-        )}
-      </Chips>
+      <p className="os-caption">Use labels to find related files.</p>
 
       <div className="os-form-row">
         <label className="os-sr-only" htmlFor={inputId}>
@@ -129,9 +108,24 @@ export function LabelEditor({
         </Button>
       </div>
 
-      <p className="os-caption">
-        Use labels to find related files.
-      </p>
+      {labels.length > 0 ? (
+        <Chips label="Labels">
+          {labels.map((label) => (
+            <span key={label} className="os-chip-editable" role="listitem">
+              <Chip>{label}</Chip>
+              <button
+                type="button"
+                className="os-chip-remove"
+                aria-label={`Remove label ${label}`}
+                disabled={write.busy}
+                onClick={() => void remove(label)}
+              >
+                &times;
+              </button>
+            </span>
+          ))}
+        </Chips>
+      ) : null}
 
       {write.error === "" ? null : (
         <Notice

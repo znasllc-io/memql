@@ -66,6 +66,7 @@ export function Button({
   busyLabel,
   ariaLabel,
   ariaExpanded,
+  title,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -76,6 +77,7 @@ export function Button({
   busyLabel?: string;
   ariaLabel?: string;
   ariaExpanded?: boolean;
+  title?: string;
 }) {
   return (
     <button
@@ -90,6 +92,7 @@ export function Button({
       aria-busy={busy || undefined}
       aria-label={ariaLabel}
       aria-expanded={ariaExpanded}
+      title={title}
       onClick={onClick}
     >
       {busy && busyLabel ? busyLabel : children}
