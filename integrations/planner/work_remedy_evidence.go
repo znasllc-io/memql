@@ -2,12 +2,11 @@ package planner
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // This is a prompt projection, never the journal used for execution or prefix
@@ -31,6 +30,7 @@ func replanEvidenceView(ctx context.Context, receipts []map[string]any) ([]map[s
 
 func projectReplanEvidence(receipts []map[string]any, perStep, remaining int) ([]map[string]any, error) {
 	out := make([]map[string]any, 0, len(receipts))
+	fingerprints := id.NewUntracked()
 	for _, receipt := range receipts {
 		// Never drop a completed identity, even after the preview allowance is used.
 		entry := map[string]any{"key": receipt["key"], "call": receipt["call"]}
@@ -50,12 +50,11 @@ func projectReplanEvidence(receipts []map[string]any, perStep, remaining int) ([
 			entry["result"] = result
 			remaining -= len(text)
 		} else {
-			digest := sha256.Sum256(raw)
 			head := allowance / 2
 			tail := allowance - head
 			entry["resultPreview"] = string(text[:head]) + "\n[stored result omitted]\n" + string(text[len(text)-tail:])
 			entry["resultCharacters"] = len(text)
-			entry["resultSHA256"] = hex.EncodeToString(digest[:])
+			entry["resultFingerprint"] = string(fingerprints.FromBytes(raw))
 			entry["resultOmitted"] = true
 			remaining -= allowance
 		}

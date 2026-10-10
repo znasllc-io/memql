@@ -22,7 +22,7 @@ Now:            {{ .now }}
 Completed steps (FIXED -- their results are available to you):
 {{ .completedSteps }}
 These are bounded journal views. A resultPreview is a HEAD/TAIL excerpt, not
-complete output; resultOmitted, character count and SHA256 identify that fact.
+complete output; resultOmitted, character count and resultFingerprint identify that fact.
 Every completed binding and its full value remain available to resumed steps.
 Never regenerate completed work just because its preview omits content. Do not
 invent omitted facts: preserve the binding or add a bounded step that reads the

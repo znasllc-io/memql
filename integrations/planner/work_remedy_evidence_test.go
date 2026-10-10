@@ -25,7 +25,7 @@ func TestReplanEvidenceBoundsRepeatedBodiesWithoutLosingPrefix(t *testing.T) {
 	}
 	for j := 1; j < len(projected); j++ {
 		preview := projected[j]["resultPreview"].(string)
-		if !utf8.ValidString(preview) || projected[j]["resultOmitted"] != true || len(projected[j]["resultSHA256"].(string)) != 64 {
+		if !utf8.ValidString(preview) || projected[j]["resultOmitted"] != true || len(projected[j]["resultFingerprint"].(string)) != 64 {
 			t.Fatalf("unmarked or invalid preview: %v", projected[j])
 		}
 	}
