@@ -13111,6 +13111,50 @@ func WorkModelCallsForOwnerRunBuild(args WorkModelCallsForOwnerRunArgs) string {
 	return b.String()
 }
 
+// WorkModelCallsPageForOwnerRun -- A bounded page of model receipts for the caller's activity view.
+//
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsPageForOwnerRun"] in generated_concepts.go).
+type WorkModelCallsPageForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkModelCallsPageForOwnerRun calls the engine query workModelCallsPageForOwnerRun.
+func (qc *QueryClient) WorkModelCallsPageForOwnerRun(ctx context.Context, args WorkModelCallsPageForOwnerRunArgs) (*Result, error) {
+	call := WorkModelCallsPageForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workModelCallsPageForOwnerRun", call)
+}
+
+func WorkModelCallsPageForOwnerRunBuild(args WorkModelCallsPageForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workModelCallsPageForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkObservationSummariesForOwnerRun -- Activity summaries, without potentially megabyte-sized checkpoint/tool data. Cursor paging keeps a months-long run from becoming one transport message.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationSummariesForOwnerRun"] in generated_concepts.go).
+type WorkObservationSummariesForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkObservationSummariesForOwnerRun calls the engine query workObservationSummariesForOwnerRun.
+func (qc *QueryClient) WorkObservationSummariesForOwnerRun(ctx context.Context, args WorkObservationSummariesForOwnerRunArgs) (*Result, error) {
+	call := WorkObservationSummariesForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workObservationSummariesForOwnerRun", call)
+}
+
+func WorkObservationSummariesForOwnerRunBuild(args WorkObservationSummariesForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workObservationSummariesForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkObservationsForOwnerRun -- Every observation of one of the caller's runs. On-demand, like the model calls.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationsForOwnerRun"] in generated_concepts.go).
@@ -13319,6 +13363,28 @@ func (qc *QueryClient) WorkStepsForOwnerRun(ctx context.Context, args WorkStepsF
 func WorkStepsForOwnerRunBuild(args WorkStepsForOwnerRunArgs) string {
 	var b strings.Builder
 	b.WriteString("query workStepsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkVerdictsForOwnerRun -- Human and validator verdicts only. Other decisions and tool/checkpoint data are not verdicts and must not travel to the feedback controls.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workVerdictsForOwnerRun"] in generated_concepts.go).
+type WorkVerdictsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkVerdictsForOwnerRun calls the engine query workVerdictsForOwnerRun.
+func (qc *QueryClient) WorkVerdictsForOwnerRun(ctx context.Context, args WorkVerdictsForOwnerRunArgs) (*Result, error) {
+	call := WorkVerdictsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workVerdictsForOwnerRun", call)
+}
+
+func WorkVerdictsForOwnerRunBuild(args WorkVerdictsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workVerdictsForOwnerRun(")
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")

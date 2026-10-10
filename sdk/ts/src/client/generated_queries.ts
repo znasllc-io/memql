@@ -12457,6 +12457,50 @@ QueryClient.prototype.workModelCallsForOwnerRun = function (this: QueryClient, a
   return this.executeNamed("workModelCallsForOwnerRun", buildWorkModelCallsForOwnerRun(args), opts);
 };
 
+/** A bounded page of model receipts for the caller's activity view. */
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsPageForOwnerRun"] in generated_concepts.ts).
+export interface WorkModelCallsPageForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkModelCallsPageForOwnerRun(args: WorkModelCallsPageForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workModelCallsPageForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workModelCallsPageForOwnerRun(args: WorkModelCallsPageForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workModelCallsPageForOwnerRun = function (this: QueryClient, args: WorkModelCallsPageForOwnerRunArgs = {} as WorkModelCallsPageForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workModelCallsPageForOwnerRun", buildWorkModelCallsPageForOwnerRun(args), opts);
+};
+
+/** Activity summaries, without potentially megabyte-sized checkpoint/tool data. Cursor paging keeps a months-long run from becoming one transport message. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationSummariesForOwnerRun"] in generated_concepts.ts).
+export interface WorkObservationSummariesForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkObservationSummariesForOwnerRun(args: WorkObservationSummariesForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workObservationSummariesForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workObservationSummariesForOwnerRun(args: WorkObservationSummariesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workObservationSummariesForOwnerRun = function (this: QueryClient, args: WorkObservationSummariesForOwnerRunArgs = {} as WorkObservationSummariesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workObservationSummariesForOwnerRun", buildWorkObservationSummariesForOwnerRun(args), opts);
+};
+
 /** Every observation of one of the caller's runs. On-demand, like the model calls. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationsForOwnerRun"] in generated_concepts.ts).
 export interface WorkObservationsForOwnerRunArgs {
@@ -12674,6 +12718,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workStepsForOwnerRun = function (this: QueryClient, args: WorkStepsForOwnerRunArgs = {} as WorkStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workStepsForOwnerRun", buildWorkStepsForOwnerRun(args), opts);
+};
+
+/** Human and validator verdicts only. Other decisions and tool/checkpoint data are not verdicts and must not travel to the feedback controls. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workVerdictsForOwnerRun"] in generated_concepts.ts).
+export interface WorkVerdictsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkVerdictsForOwnerRun(args: WorkVerdictsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workVerdictsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workVerdictsForOwnerRun(args: WorkVerdictsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workVerdictsForOwnerRun = function (this: QueryClient, args: WorkVerdictsForOwnerRunArgs = {} as WorkVerdictsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workVerdictsForOwnerRun", buildWorkVerdictsForOwnerRun(args), opts);
 };
 
 /** Membership is evidence of affiliation, never evidence of employment or selection as the organization producing the current deliverable. */

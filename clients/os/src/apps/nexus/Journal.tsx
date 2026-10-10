@@ -12,6 +12,7 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
   return (
     <section className="os-nexus-journal" aria-label="The journal for this run">
       <Subhead>Activity</Subhead>
+      {journal.hasNewer ? <Caption>Earlier activity</Caption> : null}
       {journal.state === "loading" && !journal.readAt ? <RecordListSkeleton label="Loading activity" /> : null}
       {journal.error === "" ? null : (
         <Notice
@@ -41,6 +42,12 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
         </div>
       )}
 
+      {journal.hasOlder || journal.hasNewer ? (
+        <nav className="os-panel-actions" aria-label="Activity pages">
+          <Button onClick={journal.newer} disabled={!journal.hasNewer || journal.state === "loading"}>Newer activity</Button>
+          <Button onClick={journal.older} disabled={!journal.hasOlder || journal.state !== "ready"}>Older activity</Button>
+        </nav>
+      ) : null}
     </section>
   );
 }

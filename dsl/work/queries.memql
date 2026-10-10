@@ -326,6 +326,38 @@ query observation workObservationsForOwnerRun {
   shape   workObservationFull
 }
 
+/// A bounded page of model receipts for the caller's activity view.
+@actor
+query modelCall workModelCallsPageForOwnerRun {
+  args { runId string! }
+  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape workModelCallSummary
+}
+
+/// Activity summaries, without potentially megabyte-sized checkpoint/tool data.
+/// Cursor paging keeps a months-long run from becoming one transport message.
+@actor
+query observation workObservationSummariesForOwnerRun {
+  args { runId string! }
+  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape workObservationSummary
+}
+
+/// Human and validator verdicts only. Other decisions and tool/checkpoint data
+/// are not verdicts and must not travel to the feedback controls.
+@actor
+@unbounded("human and validator verdicts of one owner-scoped run")
+query observation workVerdictsForOwnerRun {
+  args { runId string! }
+  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
+             && (row.kind == "feedback" || (row.kind == "decision" && row.?data.validator != nil))
+  shape workObservationFull
+}
+
 /// Every run at a non-terminal status, whoever owns it -- the wait-and-abandon sweep's read.
 /// Server-only AND cluster-owner: the sweep must see EVERY owner's parked runs, because a person
 /// whose run is stranded on a replica that has gone cannot resume it themselves, which is the whole

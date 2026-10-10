@@ -11,7 +11,7 @@ vi.mock("../../src/live/connection", () => ({
 
 const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
-const { fakeConnection, goalRow, runRow, stepRow, withSession } = await import("./harness");
+const { fakeConnection, goalRow, runRow, stepRow, withSession, rowsResult } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -411,6 +411,54 @@ describe("what a run's bar offers", () => {
 });
 
 describe("the journal", () => {
+  it("pages both streams independently, skips exhausted streams and returns to current activity", async () => {
+    const conn = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: fiveSteps() });
+    conn.query.workModelCallsPageForOwnerRun.mockImplementation(async (_args, options) => {
+      const cursor = (options as { cursor?: string })?.cursor;
+      return rowsResult([{ id: cursor ? "m-old" : "m-new", model: cursor ? "Earlier model" : "Latest model" }]);
+    });
+    conn.query.workObservationSummariesForOwnerRun.mockImplementation(async (_args, options) => {
+      const cursor = (options as { cursor?: string })?.cursor;
+      return rowsResult([{ id: cursor || "new", content: cursor === "page-3" ? "Oldest evidence" : cursor ? "Earlier evidence" : "Latest evidence" }], cursor === "page-3" ? undefined : cursor ? "page-3" : "page-2");
+    });
+    await openRun(conn);
+    await screen.findByText("Latest evidence");
+    fireEvent.click(screen.getByRole("button", { name: "Older activity" }));
+    await screen.findByText("Earlier evidence");
+    expect(screen.queryByText("Latest evidence")).toBeNull();
+    expect(screen.queryByText("Latest model")).toBeNull();
+    expect(conn.query.workModelCallsPageForOwnerRun).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Older activity" }));
+    await screen.findByText("Oldest evidence");
+    expect((screen.getByRole("button", { name: "Older activity" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Newer activity" }));
+    await screen.findByText("Earlier evidence");
+    fireEvent.click(screen.getByRole("button", { name: "Newer activity" }));
+    await screen.findByText("Latest evidence");
+    expect(screen.getByText("Latest model")).toBeTruthy();
+    expect(conn.query.workModelCallsPageForOwnerRun).toHaveBeenCalledTimes(2);
+    expect(conn.query.workObservationsForOwnerRun).not.toHaveBeenCalled();
+    expect(conn.query.workModelCallsForOwnerRun).not.toHaveBeenCalled();
+  });
+
+  it("can retry a failed older page and still navigate back", async () => {
+    const conn = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: fiveSteps() });
+    conn.query.workObservationSummariesForOwnerRun
+      .mockResolvedValueOnce(rowsResult([{ id: "new", content: "Current evidence" }], "older"))
+      .mockRejectedValueOnce(new Error("temporarily unavailable"))
+      .mockResolvedValueOnce(rowsResult([{ id: "old", content: "Recovered earlier evidence" }]))
+      .mockResolvedValueOnce(rowsResult([{ id: "new", content: "Current evidence" }]));
+    await openRun(conn);
+    await screen.findByText("Current evidence");
+    fireEvent.click(screen.getByRole("button", { name: "Older activity" }));
+    await screen.findByText("temporarily unavailable");
+    expect(screen.queryByText("Current evidence")).toBeNull();
+    fireEvent.click(within(screen.getByLabelText("The journal for this run")).getByRole("button", { name: "Retry" }));
+    await screen.findByText("Recovered earlier evidence");
+    fireEvent.click(screen.getByRole("button", { name: "Newer activity" }));
+    await screen.findByText("Current evidence");
+  });
+
   it("reads activity when its run opens", async () => {
     const conn = fakeConnection({
       runs: [runRow({ id: "run-1" })],
@@ -418,8 +466,8 @@ describe("the journal", () => {
       modelCalls: [],
     });
     await openRun(conn);
-    await waitFor(() => expect(conn.query.workModelCallsForOwnerRun).toHaveBeenCalled());
-    expect(conn.query.workObservationsForOwnerRun).toHaveBeenCalled();
+    await waitFor(() => expect(conn.query.workModelCallsPageForOwnerRun).toHaveBeenCalled());
+    expect(conn.query.workObservationSummariesForOwnerRun).toHaveBeenCalled();
   });
 
   it("reads both halves together and displays their receipts", async () => {
@@ -453,8 +501,8 @@ describe("the journal", () => {
       ],
     });
     await openRun(conn);
-    await waitFor(() => expect(conn.query.workModelCallsForOwnerRun).toHaveBeenCalled());
-    expect(conn.query.workObservationsForOwnerRun).toHaveBeenCalled();
+    await waitFor(() => expect(conn.query.workModelCallsPageForOwnerRun).toHaveBeenCalled());
+    expect(conn.query.workObservationSummariesForOwnerRun).toHaveBeenCalled();
     expect((await screen.findByRole("heading", { name: /^Model calls/ })).querySelector(".os-subhead-meta")?.textContent).toBe("1");
     expect(screen.getByText("served from the journal")).toBeTruthy();
     expect(screen.getByRole("heading", { name: /^Observations/ }).querySelector(".os-subhead-meta")?.textContent).toBe("1");
@@ -596,12 +644,21 @@ function decisionCalls() {
 /** The decision comes from the journal, which is an on-demand read. */
 async function openRunAndReadJournal(conn: Conn) {
   const timeline = await openRun(conn);
-  await waitFor(() => expect(conn.query.workModelCallsForOwnerRun).toHaveBeenCalled());
-  await waitFor(() => expect(conn.query.workObservationsForOwnerRun).toHaveBeenCalled());
+  await waitFor(() => expect(conn.query.workModelCallsPageForOwnerRun).toHaveBeenCalled());
+  await waitFor(() => expect(conn.query.workObservationSummariesForOwnerRun).toHaveBeenCalled());
   return timeline;
 }
 
 describe("each step's decision", () => {
+  it("does not turn one page of calls into a complete step cost or provider claim", async () => {
+    const conn = fakeConnection({ runs: [runRow({ id: "run-1" })], steps: decisionSteps() });
+    conn.query.workModelCallsPageForOwnerRun.mockResolvedValue(rowsResult(decisionCalls(), "more-calls"));
+    const timeline = await openRunAndReadJournal(conn);
+    await screen.findByRole("button", { name: "Older activity" });
+    expect(timeline.querySelector(".os-nexus-step-decision")).toBeNull();
+    expect(screen.getByRole("list", { name: "Model calls" })).toBeTruthy();
+  });
+
   it("names your own fleet, and puts no money on it", async () => {
     // The claim this epic exists to make legible: a call your own hardware
     // answered was not billed, and the row must not leave a reader hunting

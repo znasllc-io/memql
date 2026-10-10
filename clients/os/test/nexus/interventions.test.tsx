@@ -131,7 +131,7 @@ async function openRun(over: Seed = {}): Promise<Conn> {
   await screen.findByLabelText("What this run did, in order");
   // The versions read and the verdicts read both land before a test acts.
   await waitFor(() => expect(conn.query.workStepVersions).toHaveBeenCalled());
-  await waitFor(() => expect(conn.query.workObservationsForOwnerRun).toHaveBeenCalled());
+  await waitFor(() => expect(conn.query.workVerdictsForOwnerRun).toHaveBeenCalled());
   return conn;
 }
 

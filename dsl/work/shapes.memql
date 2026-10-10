@@ -181,6 +181,25 @@ shape modelCall workModelCallFull {
   decision
 }
 
+/// The activity view's model receipt, without response bodies or routing data.
+@row
+shape modelCall workModelCallSummary {
+  row.id
+  row.createdAt
+  ownerUserId
+  runId
+  stepKey
+  provider
+  model
+  promptRef
+  inputTokens
+  outputTokens
+  cost
+  latencyMs
+  served
+  error
+}
+
 /// Every approval field.
 @row
 shape approval workApprovalFull {
@@ -213,6 +232,19 @@ shape observation workObservationFull {
   stepKey
   kind
   data
+  content
+}
+
+/// Activity list projection. Large tool payloads and context checkpoints remain
+/// in the full journal for replay; the timeline only displays this summary.
+@row
+shape observation workObservationSummary {
+  row.id
+  row.createdAt
+  ownerUserId
+  runId
+  stepKey
+  kind
   content
 }
 

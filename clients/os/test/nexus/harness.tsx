@@ -14,8 +14,8 @@ import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/
 // LiveCollection, the real retain/seed path, the real projections and the real
 // arrival fold -- which is where the behaviour under test actually lives.
 
-export function rowsResult(rows: Row[]): Result {
-  return new Result({ data: rows } as never);
+export function rowsResult(rows: Row[], cursor?: string): Result {
+  return new Result({ data: rows, ...(cursor ? { meta: { cursor } } : {}) } as never);
 }
 
 /**
@@ -139,7 +139,7 @@ export interface FakeSeed {
 
 export function fakeConnection(seed: FakeSeed = {}) {
   const read = (rows: Row[] | Error | undefined) =>
-    vi.fn(async (_args: Record<string, unknown>) => {
+    vi.fn(async (_args: Record<string, unknown>, _opts?: unknown) => {
       if (rows instanceof Error) throw rows;
       return rowsResult(rows ?? []);
     });
@@ -227,6 +227,9 @@ export function fakeConnection(seed: FakeSeed = {}) {
       feedbackPolicyCurrent: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult([{ id: "v1:work:feedbackPolicy:primary", validateAnswers: true, reusableAfterSignatures: 2 }]),
       ),
+      workModelCallsPageForOwnerRun: read(seed.modelCalls),
+      workObservationSummariesForOwnerRun: read(seed.observations),
+      workVerdictsForOwnerRun: read(seed.observations),
       workModelCallsForOwnerRun: read(seed.modelCalls),
       workObservationsForOwnerRun: read(seed.observations),
       // TYPED ARGS, so `.mock.calls[0][0]` is a record rather than `never` --
