@@ -128,7 +128,8 @@ export function markdownAnchor(source: string, input: unknown): MarkdownAnchor {
     if (heading) { sectionPath.length = Math.min(sectionPath.length,heading[1].length-1); sectionPath.push(heading[2]); }
   }
   return { kind: "markdown", startLine, endLine, sourceQuote, quote, ...position,
-    ...(row.intent === "extend" ? { intent: "extend" as const, ...(row.scope === "section" ? { scope: "section" as const } : {}) } : {}),
+    ...(row.intent === "extend" ? { intent: "extend" as const } : {}),
+    ...(row.scope === "section" ? { scope: "section" as const } : {}),
     prefix: typeof row.prefix === "string" ? row.prefix.slice(-80) : "", suffix: typeof row.suffix === "string" ? row.suffix.slice(0,80) : "", sectionPath };
 
 }

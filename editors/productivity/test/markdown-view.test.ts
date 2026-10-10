@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { markdownPage } from "../src/markdownPage.js";
-import { renderMarkdown } from "../src/markdown.js";
+import { renderMarkdown, markdownAnchor } from "../src/markdown.js";
 
 function fixture(initial: any = {}) {
   const dom = new JSDOM(markdownPage("Review.md", "", "test"), {runScripts:"outside-only"});
@@ -181,14 +181,18 @@ test("standalone extensions replace the previous review with the same diff and a
 
 
 test("one feedback action carries addition requests at precise section and passage locations",()=>{
-  const f=fixture();f.document("# Guide\n\n## Examples\n\nKeep **this selection** and the rest.\n\n## Examples\n\nLater content.\n");
+  const source="# Guide\n\n## Examples\n\nKeep **this selection** and the rest.\n\n## Examples\n\nLater content.\n";
+  const f=fixture();f.document(source);
   const sections=f.doc.querySelectorAll<HTMLButtonElement>('button[aria-label="Feedback on section: Examples"]');
   sections[1].click();assert.equal(f.el("composer-title").textContent,"Add feedback");f.input("feedback","Add an exercise");f.el("add").click();
   const section=f.messages.find(m=>m.type==="comment").selection;
   assert.equal(section.intent,undefined);assert.equal(section.scope,"section");assert.equal(section.startLine,6);assert.equal(section.quote,"Examples");assert.equal(section.endTextOffset,8);
+  const savedSection=markdownAnchor(source,section);
+  assert.equal(savedSection.scope,"section");assert.equal(savedSection.intent,undefined);assert.equal(savedSection.sourceQuote,"## Examples");
   f.send({type:"saved"});f.select();assert.equal(f.doc.querySelectorAll("#selection-tools button").length,3);f.el("selection-feedback").click();assert.equal(f.el("composer-title").textContent,"Add feedback");f.input("feedback","Add a concrete example");f.el("add").click();
   const passage=f.messages.filter(m=>m.type==="comment").at(-1).selection;
   assert.equal(passage.intent,undefined);assert.equal(passage.scope,undefined);assert.equal(passage.quote,"this selection");assert.equal(passage.startTextOffset,5);assert.equal(passage.endTextOffset,19);
+  assert.equal(markdownAnchor(source,passage).scope,undefined);
   f.dom.window.close();
 });
 
