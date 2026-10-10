@@ -571,14 +571,9 @@ export function approvalKindMeaning(kind: string): string {
     case "scopeElevation":
       return "A step wants more access than it standing has. Approving widens it for this run.";
     case "budget":
-      // TWO THINGS RAISE THIS KIND and the sentence has to be true of both.
-      // One is the run crossing a ceiling the goal declared, where approving
-      // raises it. The other is the money itself running out at the provider,
-      // where approving raises nothing and somebody has to top it up first --
-      // so the old sentence, "approving lets it carry on spending", promised
-      // a button that does not exist in that half of the cases. What is true
-      // of both is that the run stopped over money and is not retrying.
-      return "The run stopped because paid model calls are no longer available to it -- a ceiling it declared, or the balance behind them. It does not retry against that on its own; the reason below says which.";
+      // A local time or call limit needs no paid provider. Provider balance
+      // failures use this same approval kind, but require replenishing funds.
+      return "Work is paused at a resource limit. Review the reason and adjust the limit or provider balance before continuing.";
     case "skillMint":
       return "The run wants to keep what it learned as a skill it can reuse.";
     case "feedback":

@@ -174,7 +174,7 @@ export function ApprovalsSection({
     : true;
 
   const acts: Act[] = [];
-  if (selected !== null) {
+  if (selected !== null && selected.decision === "") {
     if (answerInAsk) {
       acts.push({ label: "Answer in Ask", tone: "primary", onAct: () => answerInAsk(selected.runId) });
     } else if (isFeedback) {
@@ -280,7 +280,7 @@ export function ApprovalsSection({
           // succeed should not be offered -- but an empty bar with no
           // account of itself reads as something nobody built.
           detail={
-            budget !== null && !answerReady ? "Enter a new total limit above the recorded usage." : answerInAsk ? undefined : isFeedback && !answerReady
+            selected.decision !== "" ? approvalDecidedNext(selected.kind, selected.decision) : budget !== null && !answerReady ? "Enter a new total limit above the recorded usage." : answerInAsk ? undefined : isFeedback && !answerReady
               ? hasOptions
                 ? "pick an answer above to send it"
                 : "write an answer above to send it"
@@ -448,13 +448,13 @@ function ApprovalDetail({
         {/* SAID ONCE: a promotion's question already says what promoting does. */}
         {approval.kind === PROCEDURE_PROMOTION || isFeedback ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
 
-        {budget === null ? null : <>
+        {budget === null || approval.decision !== "" ? null : <>
           <Field label={budget.label}>
             <Input id="work-approval-budget" label={budget.label} value={freeText} onChange={onFreeText} />
           </Field>
           <Caption>Total allowance, including work already completed. Resumes from saved progress.</Caption>
         </>}
-        {isFeedback ? (
+        {isFeedback && approval.decision === "" ? (
           approval.subject?.kind === "multi" ? (
             <div role="group" aria-label="Your answers">{approval.options.map(option => <Check key={option.value} checked={choices.includes(option.value)} onChange={checked => onChoices(checked ? [...choices, option.value] : choices.filter(value => value !== option.value))}>{option.label}</Check>)}</div>
           ) : approval.options.length > 0 ? (

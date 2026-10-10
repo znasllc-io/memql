@@ -591,6 +591,14 @@ describe("a budget approval", () => {
     fireEvent.change(screen.getByLabelText("New total time (minutes)"), { target: { value: "240" } });
     fireEvent.click(screen.getByRole("button", { name: "Raise limit" }));
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "budget", decision: "approved", answer: { newLimit: 14_400_000 } }));
+    // A live update may retain the decided row for history. It must stop
+    // offering a second decision even when it stays selected.
+    await act(async () => {
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "budget", kind: "budget", question: "More time needed", subject: { ceiling: "wallClock" }, decision: "approved" }), "NODE_UPDATED");
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Raise limit" })).toBeNull());
+    expect(screen.queryByLabelText("New total time (minutes)")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reject this/ })).toBeNull();
   });
   it("refuses malformed and fractional count limits without affecting other approvals", () => {
     const approval = approvalFromRow(approvalRow({ id: "budget", kind: "budget", subject: { ceiling: "modelCalls" } }));

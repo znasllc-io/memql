@@ -340,14 +340,11 @@ describe("run readings", () => {
     expect(waitsOnAPerson("feedback")).toBe(true);
   });
 
-  it("asks about money in words that are true of both ways money runs out", () => {
-    // Two things raise a `budget` approval: the run crossing a ceiling its
-    // goal declared, where approving raises it, and the balance behind paid
-    // calls running out, where approving raises nothing and somebody has to
-    // top it up first. The old sentence promised a button that does not exist
-    // in the second case.
+  it("explains local resource limits as well as provider balance failures", () => {
     const meaning = approvalKindMeaning("budget");
-    expect(meaning).toContain("paid model calls");
+    expect(meaning).toContain("resource limit");
+    expect(meaning).toContain("provider balance");
+    expect(meaning).not.toContain("paid model calls are no longer available");
     expect(meaning).not.toContain("Approving lets it carry on spending");
     expect(approvalKindWord("budget")).toBe("Budget");
   });
