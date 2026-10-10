@@ -54,7 +54,14 @@ Replanning an existing sealed program uses structured, exact source edits so
 that repairing a small part does not require the model to repeat a large
 program. The runtime rejects ambiguous or overlapping edits and changes to
 completed calls or their arguments. It compiles the resulting program and
-validates the whole bundle before installation. A timed-out attempt records its failure with a separate,
+validates the whole bundle before installation. An installed template without
+a private authoring bundle is recovered from the receiving replica's DSL tree
+only when its complete definition matches the run's recorded fingerprint.
+Missing or changed source stops recovery before inference; journal previews
+are never a substitute for the original program. Generated edits retain the
+normal caller trust and approval gates.
+
+A timed-out attempt records its failure with a separate,
 short write deadline so that an expired model request cannot leave the same
 attempt eligible to run again on another replica. This finalization does not
 extend model execution; it rechecks the run's current state before writing.
@@ -62,11 +69,12 @@ extend model execution; it rechecks the run's current state before writing.
 ## Browser research fallback
 
 The document DSL first assesses whether feedback needs external evidence using
-a local model. For research, it runs local headless collection and independent
-app research concurrently. The `researchApps` policy tries Codex with a balanced
-model, then Claude Code with Sonnet; each uses its own tools. The headless
-branch runs on local models. Both reports reach the proposal stage, which
-combines complementary findings and checks disagreements against primary
+a local model. It prefers an available research app, assesses the returned
+evidence, then uses local headless research for missing evidence or unavailable
+apps. Particularly demanding requests select parallel app and headless research.
+The `researchApps` policy tries Codex with a balanced model, then Claude Code
+with Sonnet; each uses its own tools. Both reports reach the proposal stage,
+which combines complementary findings and checks disagreements against primary
 sources. Ordinary wording edits do not spend app quota.
 
 App research is optional. Credit limits, missing apps, connection errors and

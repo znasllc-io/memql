@@ -3,9 +3,12 @@ package work
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // replanTemplate reads the run's owned, sealed source rather than trusting a
@@ -14,7 +17,7 @@ import (
 func (s *store) replanTemplate(ctx context.Context, run map[string]any) ([]memql.SandboxConstruct, error) {
 	constructID := rowString(run, "templateConstructId")
 	if constructID == "" {
-		return nil, nil // Installed templates have no private source bundle.
+		return installedReplanTemplate(run)
 	}
 	headline, err := one(s.query(ctx, "query "+call("authoringConstructById", map[string]any{"constructId": constructID})))
 	if err != nil {
@@ -43,4 +46,27 @@ func (s *store) replanTemplate(ctx context.Context, run map[string]any) ([]memql
 		return nil, fmt.Errorf("work: the original replan template source changed since compilation")
 	}
 	return source, nil
+}
+
+// Installed templates have no private authoring bundle. Resolve their source
+// from this replica's DSL tree, then prove it describes the exact program the
+// run admitted. A rollout must not silently substitute a newer recipe. Parsing
+// here installs nothing and grants no source trust to the model's later edits.
+func installedReplanTemplate(run map[string]any) ([]memql.SandboxConstruct, error) {
+	name, fingerprint := rowString(run, "automationName"), rowString(run, "templateFingerprint")
+	if name == "" || fingerprint == "" {
+		return nil, fmt.Errorf("work: the original installed replan template has no recorded identity")
+	}
+	source, ok := memql.DSLConstructSource(slog.Default(), "automation", name)
+	if !ok {
+		return nil, fmt.Errorf("work: the original installed replan template %q is unavailable", name)
+	}
+	auto, err := automations.NewLoader(automations.LoaderOptions{Logger: slog.Default()}).CompileSource(source, "work-replan-installed/"+name+".memql")
+	if err != nil {
+		return nil, fmt.Errorf("work: read the original installed replan template: %w", err)
+	}
+	if auto.Name != name || auto.DefinitionFingerprint(id.NewUntracked()) != fingerprint {
+		return nil, fmt.Errorf("work: the original installed replan template changed since admission")
+	}
+	return []memql.SandboxConstruct{{Kind: "automation", Name: name, Source: source}}, nil
 }
