@@ -122,7 +122,8 @@ in the planner DSL namespace. Their decisions are inspectable source:
    Sectioned files receive a focused planning pass: one named output per step,
    at most 800 estimated words, with explicit coverage and dependencies. The
    A separate coverage check compares the plan with the full request; the
-   default DSL permits one correction of an invalid or incomplete plan. Intermediate steps
+   default DSL permits one correction of an invalid or incomplete plan using
+   the stronger model tier. Intermediate steps
    return text; the final delivery saves the file once.
 5. If a draft fails **before persistence**, optionally try live sections and
    then inline sections. A write failure never authorizes this fallback.
@@ -237,7 +238,7 @@ compile, including calls made from parallel DSL branches.
 | `spineUseCandidate` | `handle` | Selects the previously read plan; terminal for this compile. Learned procedures retain their execution-time ladder check. |
 | `spineClassify` | none | Validated `{complexity, intent, sectionable, requiresFile, conversational, workload, acknowledgement}`. At most once. |
 | `spineAcknowledge` | none | One optional prose repair after classification; returns a boolean. Cannot reclassify or execute work. |
-| `spineRefineSections` | `prompt`, `maxWords` | `{ok, message}`. Refines a file's routing sketch before section preparation, preserving its delivery contract. At most two metered calls; rejects multiple outputs per step, oversized estimates and intermediate file effects. |
+| `spineRefineSections` | `prompt`, `maxWords`, `timeoutSeconds` | `{ok, message}`. Refines a file's routing sketch before section preparation, preserving its delivery contract. At most two metered calls with a timeout no greater than 600 seconds; rejects multiple outputs per step, oversized estimates and intermediate file effects. |
 | `spineReviewSections` | `prompt` | `{ok, message}`. One metered coverage assessment per refinement. Missing or invalid verdicts cannot approve a plan; deficiencies feed the next refinement. |
 | `spinePrepareSections` | `route: "trivial"` or `"sectionable"` | `{valid, reason}` after native boundary checks and owner-scoped section evidence. At most once. |
 | `spineDraft` | `mode: "default"`, `"live"` or `"inline"` | `{ok, message, hasCatalog, hasLiveSections}`. Each mode at most once. A safe pre-write failure is data; a persistence failure aborts. Success is terminal. |

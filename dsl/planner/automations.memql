@@ -194,12 +194,12 @@ automation defaultWorkSpine {
 /// A routing pass can group many drafts under one heading; require an executable decomposition before drafting.
 @template
 automation workSpineDocumentSections {
- first := builtin spineRefineSections(prompt: "workDocumentSections", maxWords: 800)
+ first := builtin spineRefineSections(prompt: "workDocumentSections", maxWords: 800, timeoutSeconds: 120)
  if first.ok {
   review := builtin spineReviewSections(prompt: "workDocumentCoverage")
   if review.ok { return true }
  }
- repaired := builtin spineRefineSections(prompt: "workDocumentSections", maxWords: 800)
+ repaired := builtin spineRefineSections(prompt: "workDocumentSectionsRepair", maxWords: 800, timeoutSeconds: 480)
  if repaired.ok {
   repairedReview := builtin spineReviewSections(prompt: "workDocumentCoverage")
   if repairedReview.ok { return true }

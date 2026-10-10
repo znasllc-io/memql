@@ -39,10 +39,22 @@ func (e *draftDBCompiler) Execute(ctx context.Context, q string) (any, error) {
 }
 func (e *draftDBCompiler) InvokeAI(_ context.Context, name string, _ map[string]any) (any, error) {
 	e.calls++
-	if name != "goalComplexityTriage" {
+	switch name {
+	case "goalComplexityTriage":
+		return e.triage, nil
+	case "workDocumentSections":
+		return map[string]any{
+			"assembly": "Join the first and second sections in order.",
+			"sections": []map[string]any{
+				{"label": "one", "instruction": "first section", "outputs": []string{"first"}, "estimatedWords": 400},
+				{"label": "two", "instruction": "second section", "outputs": []string{"second"}, "estimatedWords": 400},
+			},
+		}, nil
+	case "workDocumentCoverage":
+		return map[string]any{"ok": true, "message": "Both requested sections are present."}, nil
+	default:
 		return nil, fmt.Errorf("unexpected expensive compile call %s", name)
 	}
-	return e.triage, nil
 }
 func (*draftDBCompiler) InvokeAIChatWithFilteredTools(context.Context, string, map[string]any, []string) (string, error) {
 	return "", fmt.Errorf("unexpected authoring call")

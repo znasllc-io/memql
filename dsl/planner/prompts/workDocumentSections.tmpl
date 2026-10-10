@@ -40,11 +40,13 @@ The assembly instruction names the draft outputs to include in order, excludes
 evidence-only notes, preserves citations and saves the final document once.
 
 Return ONLY JSON in this shape, with no markdown fences or commentary:
+Keep instructions concise (at most 45 words each). Omit optional purpose,
+reuseIntent, effects and postcondition fields to spend space on complete
+coverage. This is a plan, not a set of biographies or research notes.
 {
  "assembly": "Combine the named drafts in order, preserving their full prose and citations.",
  "sections": [
   {"label":"A specific batch", "instruction":"The exact bounded work for THIS batch.",
-   "purpose":"Why this batch is needed", "inputs":[], "outputs":["batchOne"],
-   "estimatedWords":600, "reuseIntent":"goalSpecific", "effects":[], "postcondition":""}
+   "inputs":[], "outputs":["batchOne"], "estimatedWords":600}
  ]
 }

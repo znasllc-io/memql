@@ -49,6 +49,12 @@ var levels = map[string]bool{"fast": true, "strong": true, "reasoning": true, "e
 var promptLevels = map[string]string{
 	// Named in D3.
 	"goalComplexityTriage": "fast",
+	// Initial document decomposition is bounded data, checked separately before execution.
+	"workDocumentSections": "fast",
+	// A compact independent scope verdict feeds one correction; it never executes the plan.
+	"workDocumentCoverage": "fast",
+	// Escalate an observed incomplete plan to the design/judgment tier, not another cheap retry.
+	"workDocumentSectionsRepair": "strong",
 	// One bounded repair of acknowledgment wording; never reclassifies work.
 	"workAcknowledgement":  "fast",
 	"responsibilityIntake": "fast",

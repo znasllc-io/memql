@@ -208,6 +208,7 @@ builtin spineAcknowledge {
 builtin spineRefineSections {
  prompt string!
  maxWords int!
+ timeoutSeconds int!
 }
 
 /// Check document coverage before drafting. A refusal feeds the next bounded refinement.

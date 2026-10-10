@@ -74,6 +74,21 @@ prompt workDocumentSections {
  now string!
 }
 
+/// Escalate only the correction of an invalid/incomplete document plan to the stronger tier.
+@level("strong")
+@templateFile("prompts/workDocumentSections.tmpl")
+prompt workDocumentSectionsRepair {
+ goal string!
+ conversation string
+ sketch string!
+ inputKeys []string
+ requiresResearch bool!
+ maxWords int!
+ maxSections int!
+ previousError string
+ now string!
+}
+
 /// A short independent scope check before a document plan starts spending drafting calls.
 @level("fast")
 @templateFile("prompts/workDocumentCoverage.tmpl")

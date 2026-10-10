@@ -57,7 +57,7 @@ type documentSectionsEngine struct {
 
 func (e *documentSectionsEngine) InvokeAI(ctx context.Context, name string, data map[string]any) (any, error) {
 	response, err := e.countingCompileEngine.InvokeAI(ctx, name, data)
-	if name == "workDocumentSections" && len(e.answers) > 0 {
+	if (name == "workDocumentSections" || name == "workDocumentSectionsRepair") && len(e.answers) > 0 {
 		response, e.answers = e.answers[0], e.answers[1:]
 	}
 	if name == "workDocumentCoverage" {
@@ -65,6 +65,9 @@ func (e *documentSectionsEngine) InvokeAI(ctx context.Context, name string, data
 		if len(e.reviews) > 0 {
 			response, e.reviews = e.reviews[0], e.reviews[1:]
 		}
+	}
+	if failure, ok := response.(error); ok {
+		return nil, failure
 	}
 	return response, err
 }
@@ -83,6 +86,8 @@ func TestDocumentDecompositionRunsOnPinnedSpineAndMetersRepairs(t *testing.T) {
 	}{
 		{"valid", []any{plan}, nil, 0, 3, true},
 		{"repair invalid plan", []any{map[string]any{}, plan}, nil, 0, 4, true},
+		{"repair timed out planning call", []any{context.DeadlineExceeded, plan}, nil, 0, 4, true},
+		{"retry failed coverage call", []any{plan, plan}, []any{context.DeadlineExceeded}, 0, 5, true},
 		{"refuse two invalid plans", []any{map[string]any{}, map[string]any{}}, nil, 0, 3, false},
 		{"budget before refinement", []any{plan}, nil, 1, 1, false},
 		{"budget before review", []any{plan}, nil, 2, 2, false},
@@ -128,7 +133,7 @@ func TestDocumentDecompositionRunsOnPinnedSpineAndMetersRepairs(t *testing.T) {
 			}
 			refinements := 0
 			for index, name := range engine.aiCalls {
-				if name != "workDocumentSections" {
+				if name != "workDocumentSections" && name != "workDocumentSectionsRepair" {
 					continue
 				}
 				refinements++
@@ -137,5 +142,14 @@ func TestDocumentDecompositionRunsOnPinnedSpineAndMetersRepairs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDocumentPlanningFailurePreservesRunCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := (&spineScope{}).documentPlanningFailure(ctx, context.DeadlineExceeded)
+	if result != nil || err != context.Canceled {
+		t.Fatalf("canceled run must stop rather than request a repair: result=%v error=%v", result, err)
 	}
 }

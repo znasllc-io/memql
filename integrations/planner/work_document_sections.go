@@ -18,15 +18,16 @@ func (s *spineScope) refineSections(ctx context.Context, args map[string]any) (a
 		return nil, fmt.Errorf("document section refinement requires classification, precedes preparation and permits at most two attempts")
 	}
 	var config struct {
-		Prompt   string
-		MaxWords int
+		Prompt         string
+		MaxWords       int
+		TimeoutSeconds int
 	}
 	encoded, err := json.Marshal(args)
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(encoded, &config); err != nil || config.Prompt == "" || config.MaxWords < 1 || config.MaxWords > 2000 {
-		return nil, fmt.Errorf("section refinement requires a prompt and a word budget between 1 and 2000")
+	if err := json.Unmarshal(encoded, &config); err != nil || config.Prompt == "" || config.MaxWords < 1 || config.MaxWords > 2000 || config.TimeoutSeconds < 1 || config.TimeoutSeconds > 600 {
+		return nil, fmt.Errorf("section refinement requires a prompt, a word budget between 1 and 2000 and a timeout between 1 and 600 seconds")
 	}
 	if err := s.modelAllowed(); err != nil {
 		return nil, err
@@ -40,7 +41,7 @@ func (s *spineScope) refineSections(ctx context.Context, args map[string]any) (a
 	if err != nil {
 		return nil, err
 	}
-	callCtx, cancel := context.WithTimeout(airoute.WithCallPurpose(ctx, "Planning document sections", 0), 2*time.Minute)
+	callCtx, cancel := context.WithTimeout(airoute.WithCallPurpose(ctx, "Planning document sections", 0), time.Duration(config.TimeoutSeconds)*time.Second)
 	defer cancel()
 	response, err := s.loop.engine.InvokeAI(systemActorContext(callCtx), config.Prompt, map[string]any{
 		"goal": s.req.Statement, "conversation": conversation, "sketch": string(sketch), "inputKeys": s.keys,
@@ -48,7 +49,7 @@ func (s *spineScope) refineSections(ctx context.Context, args map[string]any) (a
 		"previousError": s.sectionRefinementError, "now": time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
-		return nil, err
+		return s.documentPlanningFailure(ctx, err)
 	}
 	sections, assembly, err := parseDocumentSections(response, config.MaxWords)
 	if err != nil {
@@ -136,7 +137,7 @@ func (s *spineScope) reviewSections(ctx context.Context, args map[string]any) (a
 		"now": time.Now().UTC().Format(time.RFC3339),
 	})
 	if err != nil {
-		return nil, err
+		return s.documentPlanningFailure(ctx, err)
 	}
 	var raw []byte
 	if text, ok := response.(string); ok {
@@ -159,4 +160,14 @@ func (s *spineScope) reviewSections(ctx context.Context, args map[string]any) (a
 		s.sectionRefinementError = ""
 	}
 	return map[string]any{"ok": s.sectionRefinementError == "", "message": s.sectionRefinementError}, nil
+}
+
+// A failed bounded model call is evidence for the DSL's correction policy.
+// Cancellation of the enclosing run must still stop the workflow immediately.
+func (s *spineScope) documentPlanningFailure(ctx context.Context, err error) (any, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	s.sectionRefinementError = err.Error()
+	return map[string]any{"ok": false, "message": s.sectionRefinementError}, nil
 }
