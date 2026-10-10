@@ -6,7 +6,9 @@ package planner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
@@ -137,7 +139,7 @@ func (s *draftSourceScope) facts() map[string]any {
 		}
 		items = append(items, map[string]any{"name": section.Name, "catalog": s.dec.catalogFor(section.Index) != nil,
 			"live": ls != nil && ls.Automation != "", "dependent": dependent, "effectful": footprintOf(section.Spec.Effects).IsSideEffect(),
-			"label": section.Spec.Label, "instruction": section.Spec.Instruction, "purpose": strings.TrimSpace(section.Spec.Purpose), "postcondition": strings.TrimSpace(section.Spec.Postcondition)})
+			"deliver": section.Spec.Deliver, "label": section.Spec.Label, "instruction": section.Spec.Instruction, "purpose": strings.TrimSpace(section.Spec.Purpose), "postcondition": strings.TrimSpace(section.Spec.Postcondition)})
 		for _, out := range section.Spec.Outputs {
 			producers[out] = section.Name
 		}
@@ -145,6 +147,7 @@ func (s *draftSourceScope) facts() map[string]any {
 	return map[string]any{"goal": s.req.Statement, "file": *s.dec.RequiresFile, "research": s.dec.RequiresResearch,
 		"navigation": s.dec.Navigation != nil && !s.dec.Sectionable && !*s.dec.RequiresFile && strings.TrimSpace(s.dec.Navigation.App) != "",
 		"fanout":     s.dec.Sectionable && len(s.sections) >= minSectionsForFanout, "sections": items,
+		"prose":        s.fileFormat == "markdown" || s.fileFormat == "txt" || s.fileFormat == "html" || s.fileFormat == "pdf" || s.fileFormat == "docx",
 		"intelligence": s.dec.anyIntelligence(s.headline), "assembly": s.dec.Assembly}
 }
 
@@ -245,7 +248,30 @@ func (s *draftSourceScope) append(args map[string]any) error {
 		text := s.x.join(langparser.QuoteString(instruction+heading), s.x.goalInput)
 		if kind == "file" {
 			params := fmt.Sprintf("name: %s, format: %s, statement: %s", langparser.QuoteString(s.fileName), langparser.QuoteString(s.fileFormat), text)
-			if draft != "" {
+			if selected, supplied := args["sectionKeys"]; supplied && selected != nil {
+				encoded, err := json.Marshal(selected)
+				if err != nil {
+					return err
+				}
+				var keys []string
+				if err := json.Unmarshal(encoded, &keys); err != nil || len(keys) == 0 || !s.collected {
+					return fmt.Errorf("section delivery requires completed ordered sections")
+				}
+				expected := []string{}
+				for _, section := range s.sections {
+					if section.Spec.Deliver {
+						expected = append(expected, section.Name)
+					}
+				}
+				if !slices.Equal(keys, expected) {
+					return fmt.Errorf("section delivery differs from the authored selection")
+				}
+				quoted := make([]string, len(keys))
+				for j, key := range keys {
+					quoted[j] = langparser.QuoteString(key)
+				}
+				params += ", sectionKeys: [" + strings.Join(quoted, ", ") + "]"
+			} else if draft != "" {
 				params += ", draft: " + draft
 			}
 			fmt.Fprintf(&s.body, "  %s := builtin composeMaterialize(%s)\n", id, params)

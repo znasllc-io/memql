@@ -46,8 +46,8 @@ func (e *draftDBCompiler) InvokeAI(_ context.Context, name string, _ map[string]
 		return map[string]any{
 			"assembly": "Join the first and second sections in order.",
 			"sections": []map[string]any{
-				{"label": "one", "instruction": "first section", "outputs": []string{"first"}, "estimatedWords": 400},
-				{"label": "two", "instruction": "second section", "outputs": []string{"second"}, "estimatedWords": 400},
+				{"label": "one", "instruction": "first section", "outputs": []string{"first"}, "deliver": true, "estimatedWords": 400},
+				{"label": "two", "instruction": "second section", "outputs": []string{"second"}, "deliver": true, "estimatedWords": 400},
 			},
 		}, nil
 	case "workDocumentCoverage":
@@ -434,21 +434,32 @@ func TestCompileDraftDB_SeparateReplicaReadsAndRunsValidatedDraft(t *testing.T) 
 					if sectionable {
 						stepKey, wantTurns = "assemble", 2
 					}
-					if len(probe.prompts) != wantTurns || len(composerProbe.requests) != 1 {
+					directSections := sectionable && format != purecompose.FormatCSV && format != purecompose.FormatJSON
+					wantCompositions := 1
+					if directSections {
+						wantCompositions = 0
+					}
+					if len(probe.prompts) != wantTurns || len(composerProbe.requests) != wantCompositions {
 						t.Fatalf("native delivery required redundant agent turn: turns=%d want=%d compose=%d", len(probe.prompts), wantTurns, len(composerProbe.requests))
 					}
-					composed := composerProbe.requests[0]
-					if !strings.Contains(composed.Statement, req.Statement) || !strings.Contains(composed.Statement, "runtime-input") || !strings.Contains(composed.Statement, "EMEA") || strings.Contains(composed.Statement, "draft.md") {
-						t.Fatalf("composer lost original goal or runtime input: %+v", composed)
-					}
-					if !strings.Contains(composed.Statement, "\n\nGoal input (JSON):\n") {
-						t.Fatalf("composer received escaped source instead of real line breaks: %q", composed.Statement)
-					}
-					if composed.Format != format || composerProbe.runs[0].StepKey != stepKey {
-						t.Fatalf("composer lost validated format or caller step: req=%+v run=%+v", composed, composerProbe.runs[0])
-					}
-					if sectionable && (!strings.Contains(composed.Draft, "FIRST_SECTION_CONTENT") || !strings.Contains(composed.Draft, "SECOND_SECTION_CONTENT")) {
-						t.Fatalf("native assembly lost completed section content: %+v", composed)
+					if directSections {
+						if format == purecompose.FormatMarkdown && !strings.Contains(string(uploaderProbe.data), "FIRST_SECTION_CONTENT\n\nSECOND_SECTION_CONTENT") {
+							t.Fatal("saved Markdown lost exact ordered chapter text")
+						}
+					} else {
+						composed := composerProbe.requests[0]
+						if !strings.Contains(composed.Statement, req.Statement) || !strings.Contains(composed.Statement, "runtime-input") || !strings.Contains(composed.Statement, "EMEA") || strings.Contains(composed.Statement, "draft.md") {
+							t.Fatalf("composer lost original goal or runtime input: %+v", composed)
+						}
+						if !strings.Contains(composed.Statement, "\n\nGoal input (JSON):\n") {
+							t.Fatalf("composer received escaped source instead of real line breaks: %q", composed.Statement)
+						}
+						if composed.Format != format || composerProbe.runs[0].StepKey != stepKey {
+							t.Fatalf("composer lost validated format or caller step: req=%+v run=%+v", composed, composerProbe.runs[0])
+						}
+						if sectionable && (!strings.Contains(composed.Draft, "FIRST_SECTION_CONTENT") || !strings.Contains(composed.Draft, "SECOND_SECTION_CONTENT")) {
+							t.Fatalf("native assembly lost completed section content: %+v", composed)
+						}
 					}
 					files := read("libraryFilesForOwner", map[string]any{"runId": req.RunId, "stepKey": stepKey, "status": "ready"})
 					wantFiles := 1

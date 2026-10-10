@@ -267,6 +267,13 @@ var rules = []rule{
 		},
 	},
 	{
+		id: "plan.materializerDraft", tier: "plan", symptom: SymptomPlan,
+		reason: "the model returned an incomplete document; render completed sections directly or divide the remaining generation into smaller steps",
+		match: func(s Signal) bool {
+			return strings.Contains(lower(s.ErrorMessage), "materializer: invalid draft:")
+		},
+	},
+	{
 		id: "transient.rateLimit", tier: "retryable", symptom: SymptomTransient,
 		reason: "the far side rate-limited the call",
 		match: func(s Signal) bool {

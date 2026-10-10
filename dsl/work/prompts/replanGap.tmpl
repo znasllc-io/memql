@@ -79,6 +79,16 @@ Reusable catalog (constructs already available to compose -- prefer these):
    successful prefix results and their source references. Intermediate
    drafts return text; save the final file once after assembly.
 
+   If composing already completed prose failed with "materializer: invalid
+   draft" or exhausted a model limit, replace ONLY that unfinished
+   composeMaterialize call with deterministic assembly. The existing builtin
+   accepts sectionKeys: ["completed_draft_step_key", ...], name and format; omit
+   draft. Select every final draft step in document order, excluding research
+   notes. Keys are the exact completed top-level statement binding names, not
+   output labels, expressions or a new step. This renders saved replies verbatim
+   with their model provenance and makes no additional composition model call.
+   Preserve the existing name/format and all completed prefix statements.
+
 3. Compose from the catalog by real name. Prefer deterministic steps, and
    give each one a postcondition, for the same reasons the original
    compile did.

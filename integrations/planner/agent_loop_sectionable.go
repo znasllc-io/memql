@@ -138,6 +138,8 @@ type sectionSpec struct {
 	// Instruction is the per-section production instruction the agent turn runs
 	// for this section. May be empty -- the section then inherits the goal.
 	Instruction string `json:"instruction"`
+	// Deliver marks final prose selected by the authored plan, excluding evidence notes.
+	Deliver bool `json:"deliver,omitempty"`
 
 	// The decomposition's own fields (epic memql#5414, design D24), every one
 	// optional: a section that omits one simply has none, and component/work
@@ -183,6 +185,7 @@ func (s *sectionSpec) UnmarshalJSON(b []byte) error {
 	*s = sectionSpec{
 		Label:         textField(raw["label"]),
 		Instruction:   textField(raw["instruction"]),
+		Deliver:       raw["deliver"] == true,
 		Purpose:       strings.TrimSpace(textField(raw["purpose"])),
 		Inputs:        nameList(raw["inputs"]),
 		Outputs:       nameList(raw["outputs"]),

@@ -13111,6 +13111,23 @@ func WorkModelCallsForOwnerRunBuild(args WorkModelCallsForOwnerRunArgs) string {
 	return b.String()
 }
 
+// WorkModelCallsForOwnerStep -- Contribution receipts for one completed section, without response/checkpoint bodies.
+//
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerStep"] in generated_concepts.go).
+type WorkModelCallsForOwnerStepArgs struct {
+}
+
+// WorkModelCallsForOwnerStep calls the engine query workModelCallsForOwnerStep.
+func (qc *QueryClient) WorkModelCallsForOwnerStep(ctx context.Context, args WorkModelCallsForOwnerStepArgs) (*Result, error) {
+	call := WorkModelCallsForOwnerStepBuild(args)
+	return qc.executeNamed(ctx, "workModelCallsForOwnerStep", call)
+}
+
+func WorkModelCallsForOwnerStepBuild(args WorkModelCallsForOwnerStepArgs) string {
+	_ = args
+	return "query workModelCallsForOwnerStep()"
+}
+
 // WorkModelCallsPageForOwnerRun -- A bounded page of model receipts for the caller's activity view.
 //
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsPageForOwnerRun"] in generated_concepts.go).

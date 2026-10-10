@@ -19,11 +19,12 @@ func documentSectionsSchema(maxWords int) json.RawMessage {
   "assembly":{"type":"string"},
   "sections":{"type":"array","minItems":2,"maxItems":%d,"items":{
    "type":"object","additionalProperties":false,
-   "required":["label","instruction","inputs","outputs","estimatedWords"],
+   "required":["label","instruction","inputs","outputs","estimatedWords","deliver"],
    "properties":{
     "label":{"type":"string"},"instruction":{"type":"string"},
     "inputs":{"type":"array","items":{"type":"string"}},
     "outputs":{"type":"array","minItems":1,"maxItems":1,"items":{"type":"string"}},
+    "deliver":{"type":"boolean"},
     "estimatedWords":{"type":"integer","minimum":1,"maximum":%d}
    }
   }}
@@ -114,12 +115,18 @@ func parseDocumentSections(response any, maxWords int, inputKeys ...string) ([]s
 	}
 	for _, entry := range plan.Sections {
 		var section sectionSpec
-		var size struct{ EstimatedWords int }
+		var size struct {
+			EstimatedWords int
+			Deliver        *bool
+		}
 		if err := json.Unmarshal(entry, &section); err != nil {
 			return nil, "", err
 		}
 		if err := json.Unmarshal(entry, &size); err != nil {
 			return nil, "", err
+		}
+		if size.Deliver == nil {
+			return nil, "", fmt.Errorf("section %q must declare whether it delivers final content", section.Label)
 		}
 		if section.Label == "" || strings.TrimSpace(section.Instruction) == "" || size.EstimatedWords < 1 || size.EstimatedWords > maxWords || len(section.Outputs) != 1 || len(section.Effects) != 0 {
 			return nil, "", fmt.Errorf("section %q must produce one named text output of 1-%d estimated words, with no file-writing effects; split multiple drafts into separate entries", section.Label, maxWords)
@@ -138,6 +145,13 @@ func parseDocumentSections(response any, maxWords int, inputKeys ...string) ([]s
 		// execution even when the model omitted it from its instruction prose.
 		section.Instruction += fmt.Sprintf("\nOutput limit for this step: %d words total.", size.EstimatedWords)
 		sections = append(sections, section)
+	}
+	delivers := false
+	for _, section := range sections {
+		delivers = delivers || section.Deliver
+	}
+	if !delivers {
+		return nil, "", fmt.Errorf("document plan has no sections selected for delivery")
 	}
 	return sections, plan.Assembly, nil
 }

@@ -991,6 +991,8 @@ type ComposeMaterializeArgs struct {
 	Sources []map[string]any
 	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly.
 	Draft string
+	// Ordered completed text step keys in the CURRENT work run. Renders their saved replies verbatim, separated by blank lines, without another model call. Exclude research-only notes; include every final chapter in delivery order. Preserves recorded model/source provenance. Requires a prose format and no draft, outputKind or deployableKind. Missing, unfinished, duplicate or non-text sections are refused.
+	SectionKeys []string
 	// v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through.
 	TemplateId string
 	// v1:library:folder to file the output into. Empty means the Library root.
@@ -1048,6 +1050,13 @@ func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
 		}
 		b.WriteString("draft: ")
 		b.WriteString(quoteMemQL(args.Draft))
+	}
+	if args.SectionKeys != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sectionKeys: ")
+		b.WriteString(renderMemQLValue(args.SectionKeys))
 	}
 	if args.TemplateId != "" {
 		if b.Len() > 27 {

@@ -47,6 +47,7 @@ type materializeArgs struct {
 	OutputKind     string
 	Sources        []SourceRef
 	Draft          string
+	SectionKeys    []string `json:",omitempty"`
 	TemplateId     string
 	FolderId       string
 	AccountIds     []string
@@ -82,6 +83,15 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 		RecipeId:       strings.TrimSpace(stringOf(args["recipeId"])),
 		OutputKind:     strings.TrimSpace(stringOf(args["outputKind"])),
 		AccountIds:     stringList(args["accountIds"]),
+	}
+	if raw, exists := args["sectionKeys"]; exists && raw != nil {
+		encoded, err := json.Marshal(raw)
+		if err != nil {
+			return out, err
+		}
+		if err := json.Unmarshal(encoded, &out.SectionKeys); err != nil || len(out.SectionKeys) == 0 {
+			return out, fmt.Errorf("compose: sectionKeys must be a non-empty list of step keys")
+		}
 	}
 	if out.Name == "" {
 		return out, fmt.Errorf("compose: a materialization needs a name")
@@ -121,6 +131,7 @@ type executionRequest struct {
 	Started      time.Time          `json:"started"`
 	Recipe       *pure.RenderRecipe `json:"recipe,omitempty"`
 	TemplateBody string             `json:"templateBody,omitempty"`
+	Sections     *sectionAssembly   `json:"sections,omitempty"`
 }
 
 var materializeIDEngine = id.NewUntracked()
@@ -148,6 +159,9 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	}
 	rc, nested := common.RunFromContext(ctx)
 	nested = nested && rc.RunId != "" && rc.GoalId != ""
+	if err := validateSectionAssembly(a, rc, nested, userId); err != nil {
+		return nil, err
+	}
 	compositionId := id.NewShortId()
 	if nested {
 		// The step owns a single materialization for this exact request. Including
@@ -183,6 +197,12 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 		return nil, err
 	}
 	request := executionRequest{Args: a, Resolved: resolved, Started: i.clock().UTC()}
+	if len(a.SectionKeys) > 0 {
+		request.Sections, err = i.captureSections(ctx, rc, a.SectionKeys)
+		if err != nil {
+			return nil, err
+		}
+	}
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("compose: capturing the request: %w", err)
@@ -347,10 +367,10 @@ func (i *Integration) failComposition(ctx context.Context, compositionId string,
 	} else if row != nil && stringOf(row["runId"]) != "" {
 		// The shared work loop owns retry budgets, backoff and stall detection.
 		// Preserve this step's snapshot and identity when that loop can recover
-		// from a provider/network interruption, including on another replica.
+		// from a provider/network interruption or a plan repair, including on another replica.
 		_, terminal := workstate.TerminalFailureCode(cause.Error())
 		symptom, _, classified := workstate.ClassifyByRules(workstate.Signal{ErrorMessage: cause.Error()})
-		if !terminal && classified && symptom == workstate.SymptomTransient {
+		if !terminal && classified && (symptom == workstate.SymptomTransient || symptom == workstate.SymptomPlan) {
 			status = "draft"
 		}
 	}
@@ -408,6 +428,9 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 	var templateName, templateBody string
 	draft := pure.Draft{Title: a.Name, Body: a.Draft}
 	var models []pure.ModelContribution
+	if request.Sections != nil {
+		draft.Body, models = request.Sections.Body, request.Sections.Models
+	}
 	var prov pure.Provenance
 	var recipe pure.RenderRecipe
 	var rendered pure.Result
@@ -483,7 +506,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 			return nil, nil
 		},
 		"composeWorkflowFacts": func(context.Context, map[string]any) (any, error) {
-			return map[string]any{"savedRecipe": request.Recipe != nil, "hasComposer": i.composerRef() != nil, "hasDraft": strings.TrimSpace(a.Draft) != "", "hasRows": len(draft.Rows) > 0, "format": string(a.Format), "outputKind": a.OutputKind, "needsSource": needsSource, "sourceComplete": sourceComplete, "hasRecipeId": a.RecipeId != ""}, nil
+			return map[string]any{"savedRecipe": request.Recipe != nil, "hasSections": request.Sections != nil, "hasComposer": i.composerRef() != nil, "hasDraft": strings.TrimSpace(draft.Body) != "", "hasRows": len(draft.Rows) > 0, "format": string(a.Format), "outputKind": a.OutputKind, "needsSource": needsSource, "sourceComplete": sourceComplete, "hasRecipeId": a.RecipeId != ""}, nil
 		},
 		"composeRestoreDraft": func(context.Context, map[string]any) (any, error) {
 			if request.Recipe == nil {
@@ -496,6 +519,9 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 			return nil, nil
 		},
 		"composeGenerateDraft": func(ctx context.Context, _ map[string]any) (any, error) {
+			if request.Sections != nil {
+				return nil, errors.New("compose: completed sections must be rendered without regeneration")
+			}
 			if i.composerRef() == nil {
 				return nil, errors.New("compose: no composer configured")
 			}
@@ -519,7 +545,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 			return nil, nil
 		},
 		"composeRequireDraft": func(ctx context.Context, _ map[string]any) (any, error) {
-			if strings.TrimSpace(a.Draft) == "" {
+			if strings.TrimSpace(draft.Body) == "" {
 				return fail("this node has no composer configured and no draft was supplied, so there is nothing to render", nil)
 			}
 			return nil, nil
@@ -552,6 +578,9 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 				Sources:       pureSources(resolved),
 				Models:        models,
 				CreatedAt:     started,
+			}
+			if request.Sections != nil {
+				prov.Sources = append(prov.Sources, request.Sections.Sources...)
 			}
 
 			if a.OutputKind == "email_template" && request.Recipe == nil {

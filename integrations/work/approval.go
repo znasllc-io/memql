@@ -247,6 +247,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
 		if work.IsFailureQuestion(approval["options"]) {
 			retry.symptom = work.Symptom(rowString(rowMap(approval, "subject"), "symptom"))
+			// A parked receipt can predate a classifier repair. An explicit retry
+			// must not replay a now-known oversized generation as a network blip.
+			if symptom, _, known := work.ClassifyByRules(work.Signal{ErrorMessage: rowString(rowMap(approval, "subject"), "errorMessage")}); known && symptom == work.SymptomPlan {
+				retry.symptom = symptom
+			}
 			retry.reason = rowString(rowMap(approval, "evidence"), "reason") + "\n" + rowString(rowMap(approval, "subject"), "errorMessage")
 		}
 	}

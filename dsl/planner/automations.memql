@@ -269,6 +269,9 @@ automation workSpineDraftProgram {
   }
  }
  builtin spineDraftAppend(kind: "collect")
+ if facts.file && facts.prose && facts.sections.any(section => section.deliver) {
+  return builtin spineDraftAppend(kind: "file", instruction: facts.goal, inputHeading: inputHeading, sectionKeys: facts.sections.where(section => section.deliver).select(section => section.name))
+ }
  if facts.file || facts.intelligence {
   kind := facts.sections.any(section => section.dependent) ? "sections" : "independent sections"
   return builtin spineDraftAppend(kind: facts.file ? "file" : "answer", inputHeading: inputHeading, sectionsHeading: "\n\nCompleted sections:\n", instruction: facts.goal + "\n\nAssemble the completed " + kind + " into the requested deliverable. Verify completeness. " + facts.assembly)

@@ -315,6 +315,15 @@ query modelCall workModelCallsForOwnerRun {
   shape   workModelCallFull
 }
 
+/// Contribution receipts for one completed section, without response/checkpoint bodies.
+@actor
+@unbounded("model contributions of ONE step in ONE caller-owned run")
+query modelCall workModelCallsForOwnerStep {
+  args { runId string! stepKey string! }
+  filter row => row.runId == args.runId && row.stepKey == args.stepKey && row.ownerUserId == actor.userId
+  shape workModelCallSummary
+}
+
 /// Every observation of one of the caller's runs. On-demand, like the model calls.
 @actor
 @unbounded("every observation of ONE run -- bounded by the run")

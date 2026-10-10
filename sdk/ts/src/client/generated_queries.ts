@@ -12457,6 +12457,26 @@ QueryClient.prototype.workModelCallsForOwnerRun = function (this: QueryClient, a
   return this.executeNamed("workModelCallsForOwnerRun", buildWorkModelCallsForOwnerRun(args), opts);
 };
 
+/** Contribution receipts for one completed section, without response/checkpoint bodies. */
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerStep"] in generated_concepts.ts).
+export interface WorkModelCallsForOwnerStepArgs {
+}
+
+export function buildWorkModelCallsForOwnerStep(args: WorkModelCallsForOwnerStepArgs): string {
+  void args;
+  return "query workModelCallsForOwnerStep()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workModelCallsForOwnerStep(args?: WorkModelCallsForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workModelCallsForOwnerStep = function (this: QueryClient, args: WorkModelCallsForOwnerStepArgs = {} as WorkModelCallsForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workModelCallsForOwnerStep", buildWorkModelCallsForOwnerStep(args), opts);
+};
+
 /** A bounded page of model receipts for the caller's activity view. */
 // Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsPageForOwnerRun"] in generated_concepts.ts).
 export interface WorkModelCallsPageForOwnerRunArgs {

@@ -283,6 +283,7 @@ builtin spineDraftAppend {
  instruction string
  inputHeading string
  sectionsHeading string
+ sectionKeys []string
 }
 
 /// Bounded operation inside the claimed remedy scope.

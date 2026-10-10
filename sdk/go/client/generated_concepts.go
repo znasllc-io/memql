@@ -1104,6 +1104,7 @@ var BoundConcepts = map[string]string{
 	"workGoalsForOwner":                                "v1:work:goal",
 	"workGoalsForResponsibility":                       "v1:work:goal",
 	"workModelCallsForOwnerRun":                        "v1:work:modelCall",
+	"workModelCallsForOwnerStep":                       "v1:work:modelCall",
 	"workModelCallsPageForOwnerRun":                    "v1:work:modelCall",
 	"workObservationSummariesForOwnerRun":              "v1:work:observation",
 	"workObservationsForOwnerRun":                      "v1:work:observation",

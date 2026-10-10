@@ -28,8 +28,8 @@ func TestDocumentSectionsRefuseMultipleDraftsHiddenInOneCall(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			plan := map[string]any{"assembly": "Combine draftA and draftB", "sections": []map[string]any{
-				{"label": "First batch", "instruction": "Write the first two profiles", "outputs": test.outputs, "estimatedWords": test.words, "effects": test.effects},
-				{"label": "Second batch", "instruction": "Write the next two profiles", "outputs": []string{"draftB"}, "estimatedWords": 700},
+				{"label": "First batch", "instruction": "Write the first two profiles", "outputs": test.outputs, "deliver": true, "estimatedWords": test.words, "effects": test.effects},
+				{"label": "Second batch", "instruction": "Write the next two profiles", "outputs": []string{"draftB"}, "deliver": true, "estimatedWords": 700},
 			}}
 			sections, _, err := parseDocumentSections(plan, 800)
 			if (err == nil) != test.valid {
@@ -60,8 +60,8 @@ type documentSectionsEngine struct {
 func TestDocumentSectionsPreserveEvidenceDependencies(t *testing.T) {
 	for _, input := range []string{"evidence", "topic", "misspelledEvidence", "draft"} {
 		plan := map[string]any{"assembly": "Deliver draft", "sections": []map[string]any{
-			{"label": "Research", "instruction": "Gather evidence", "outputs": []string{"evidence"}, "estimatedWords": 200},
-			{"label": "Draft", "instruction": "Use the supplied evidence", "inputs": []string{input}, "outputs": []string{"draft"}, "estimatedWords": 600},
+			{"label": "Research", "instruction": "Gather evidence", "outputs": []string{"evidence"}, "deliver": false, "estimatedWords": 200},
+			{"label": "Draft", "instruction": "Use the supplied evidence", "inputs": []string{input}, "outputs": []string{"draft"}, "deliver": true, "estimatedWords": 600},
 		}}
 		_, _, err := parseDocumentSections(plan, 800, "topic")
 		valid := input == "evidence" || input == "topic"
@@ -90,8 +90,8 @@ func (e *documentSectionsEngine) InvokeAI(ctx context.Context, name string, data
 
 func TestDocumentDecompositionRunsOnPinnedSpineAndMetersRepairs(t *testing.T) {
 	plan := map[string]any{"assembly": "Combine earlyDraft then lateDraft, preserving their text", "sections": []map[string]any{
-		{"label": "Early profiles", "instruction": "Write the first two profiles, at most 600 words", "purpose": "First two profiles", "outputs": []string{"earlyDraft"}, "estimatedWords": 600, "reuseIntent": "goalSpecific"},
-		{"label": "Later profiles", "instruction": "Write the next two profiles, at most 600 words", "purpose": "Next two profiles", "outputs": []string{"lateDraft"}, "estimatedWords": 600, "reuseIntent": "goalSpecific"},
+		{"label": "Early profiles", "instruction": "Write the first two profiles, at most 600 words", "purpose": "First two profiles", "outputs": []string{"earlyDraft"}, "deliver": true, "estimatedWords": 600, "reuseIntent": "goalSpecific"},
+		{"label": "Later profiles", "instruction": "Write the next two profiles, at most 600 words", "purpose": "Next two profiles", "outputs": []string{"lateDraft"}, "deliver": true, "estimatedWords": 600, "reuseIntent": "goalSpecific"},
 	}}
 	for _, test := range []struct {
 		name          string
@@ -133,11 +133,14 @@ func TestDocumentDecompositionRunsOnPinnedSpineAndMetersRepairs(t *testing.T) {
 				t.Fatalf("out=%+v error=%v calls=%v", out, err, engine.aiCalls)
 			}
 			if test.valid {
+				if !strings.Contains(persistedSource(t, engine.countingCompileEngine, out.AutomationName), "sectionKeys: [") {
+					t.Fatal("complete drafts were sent through a whole-document model call")
+				}
 				if out.Route != work.RouteSectionable || len(out.Sections) != 2 {
 					t.Fatalf("refinement lost: %+v", out)
 				}
 				source := persistedSource(t, engine.countingCompileEngine, out.AutomationName)
-				if strings.Contains(source, "Oversized sketch") || !strings.Contains(source, "earlyDraft") || !strings.Contains(source, "lateDraft") {
+				if strings.Contains(source, "Oversized sketch") || !strings.Contains(source, "_Early_profiles") || !strings.Contains(source, "_Later_profiles") {
 					t.Fatalf("draft persisted routing sketch instead of refined execution steps: %s", source)
 				}
 			} else {
@@ -179,4 +182,38 @@ func (e *documentSectionsEngine) InvokeAIStructured(ctx context.Context, name st
 	}
 	e.structuredCalls = append(e.structuredCalls, name)
 	return structuredTestResponse(e.InvokeAI(ctx, name, data))
+}
+
+func TestDocumentDeliveryMustBeExplicitAndCannotContainOnlyEvidence(t *testing.T) {
+	for _, selection := range []any{nil, "yes", false} {
+		plan := map[string]any{"assembly": "Deliver the draft", "sections": []map[string]any{
+			{"label": "Evidence", "instruction": "Research facts", "outputs": []string{"facts"}, "estimatedWords": 100, "deliver": false},
+			{"label": "Chapter", "instruction": "Write final text", "inputs": []string{"facts"}, "outputs": []string{"draft"}, "estimatedWords": 500, "deliver": selection},
+		}}
+		if _, _, err := parseDocumentSections(plan, 800); err == nil {
+			t.Fatalf("ambiguous or empty delivery accepted: %v", selection)
+		}
+	}
+}
+
+func TestDocumentDSLSelectsFinalChaptersWithoutResearchNotes(t *testing.T) {
+	req := compileReq()
+	var err error
+	req.Spine, err = workintegration.CaptureSpine("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := parseSectionableDecision(map[string]any{"requiresFile": true, "fileName": "report", "fileFormat": "markdown", "sectionable": true, "sections": []map[string]any{
+		{"label": "Research", "instruction": "Gather evidence", "outputs": []string{"facts"}, "deliver": false},
+		{"label": "Chapter", "instruction": "Write final prose", "inputs": []string{"facts"}, "outputs": []string{"draft"}, "deliver": true},
+	}})
+	bundle, err := synthesizeWorkReasoningBundle(req, "agent", dec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := bundle.Constructs[0].Source
+	_, delivery, ok := strings.Cut(source, "assemble :=")
+	if !ok || !strings.Contains(delivery, "sectionKeys: [") || !strings.Contains(delivery, "_Chapter") || strings.Contains(delivery, "_Research") || strings.Contains(delivery, "draft:") {
+		t.Fatalf("delivery selected research notes or another model call: %s", source)
+	}
 }

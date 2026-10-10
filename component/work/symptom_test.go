@@ -346,3 +346,16 @@ func TestSymptomIsValid(t *testing.T) {
 		t.Fatal("an unknown symptom must not validate: the concept enum is closed")
 	}
 }
+
+func TestMalformedMaterializerOutputIsNotANetworkFailure(t *testing.T) {
+	for _, msg := range []string{"materializer: invalid draft: unexpected EOF", `function "composeMaterialize" execution failed: compose: composing the draft failed: materializer: invalid draft: unexpected EOF`} {
+		symptom, evidence, known := ClassifyByRules(Signal{ErrorMessage: msg})
+		if !known || symptom != SymptomPlan || evidence.RuleId != "plan.materializerDraft" {
+			t.Fatalf("malformed model output classified as %s: %+v", symptom, evidence)
+		}
+	}
+	symptom, _, _ := ClassifyByRules(Signal{ErrorMessage: "transport: unexpected EOF"})
+	if symptom != SymptomTransient {
+		t.Fatal("actual transport EOF no longer retries")
+	}
+}

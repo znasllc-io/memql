@@ -33,6 +33,11 @@ in the final document. Verify time-sensitive coverage and facts from sources.
 The execution agent has the research tools; do not invent tool or source names.
 
 Do not include a step for assembling, rewriting or saving the whole document.
+Final assembly joins deliver=true outputs verbatim in list order, without another
+model call. Set deliver=false for evidence-only notes; deliver=true for every
+final chapter, introduction or conclusion. Each final output must be publishable
+prose, with its heading and precise citations. Do not assume assembly will fix
+facts, add citations, rewrite text or invent missing content.
 Final assembly is provided separately. These intermediate steps only return
 text; all have effects [] and postcondition "". Output names must be unique.
 Inputs reference only available goal keys or outputs of EARLIER entries.
@@ -47,6 +52,6 @@ coverage. This is a plan, not a set of biographies or research notes.
  "assembly": "Combine the named drafts in order, preserving their full prose and citations.",
  "sections": [
   {"label":"A specific batch", "instruction":"The exact bounded work for THIS batch.",
-   "inputs":[], "outputs":["batchOne"], "estimatedWords":600}
+   "inputs":[], "outputs":["batchOne"], "estimatedWords":600, "deliver":true}
  ]
 }
