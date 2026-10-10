@@ -201,7 +201,13 @@ builtin libraryRevisionInput { requestId string! }
 /// Decode and validate replacements only within the selected source passages.
 @executor("integration.library.revisionProposal")
 @args(profile="object")
-builtin libraryRevisionProposal { requestId string! response any! }
+builtin libraryRevisionProposal {
+ requestId string!
+ response any!
+ sourceRunId string
+ allowIncomplete bool
+ requireChanges bool
+}
 
 /// Park the current run on an exact proposal; return only after human approval.
 @executor("integration.library.reviewRevision")
@@ -426,4 +432,7 @@ builtin libraryPrepareRevisionImage {
 /// Read verified images actually stored by this revision, never model-claimed URLs.
 @executor("integration.library.revisionPreparedImages")
 @args(profile="object")
-builtin libraryRevisionPreparedImages { requestId string! }
+builtin libraryRevisionPreparedImages {
+ requestId string!
+ sourceRunId string
+}

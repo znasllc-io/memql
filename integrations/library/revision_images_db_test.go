@@ -213,3 +213,110 @@ func TestRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch(t *testing.T)
 		})
 	}
 }
+
+func TestRevisionCompletionRepairsNoopAndReusesSavedImages(t *testing.T) {
+	f := newRevisionDB(t)
+	artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
+	args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add an illustration.")
+	request := asString(args["requestId"])
+	f.ai.imagePlan = []revisionImageSpec{{Mode: "generate", Name: "illustration.png", Alt: "An illustration", Prompt: "An editorial illustration"}}
+	f.ai.needsResearch, f.ai.assessmentReply = true, "sufficient"
+	f.ai.answer = revisionAnswer{Summary: "A rewrite is required, beyond the scope of a patch.", Edits: []revisionReplacement{}}
+	generator := &preparedImageEngine{IntegrationEngineAccess: f.engine}
+	f.first.engine = generator
+	store := &preparedImageStore{f: f}
+	f.first.SetImageAssets(store)
+	f.first.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+	f.second.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+	err := f.execute(f.engine, request, false)
+	if err == nil || !strings.Contains(err.Error(), "document edits incomplete:") || f.ai.calls.Load() != 2 || f.ai.repairCalls.Load() != 1 || f.ai.completionCalls.Load() != 0 {
+		t.Fatalf("unfinished image edit silently succeeded or repair was unbounded: %v calls=%d repairs=%d", err, f.ai.calls.Load(), f.ai.repairCalls.Load())
+	}
+	ids, _, _, approval, _ := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+	if approval != nil || generator.calls != 1 || store.writes != 1 {
+		t.Fatal("invalid proposal reached approval or repeated images")
+	}
+	// Reproduce the legacy false-success receipt: same source and same direction.
+	// The next attempt must recover its completed asset batch, on another replica.
+	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": ids.RunID, "status": "succeeded"})
+	args["requestId"] = request + "-retry"
+	next := asString(args["requestId"])
+	if _, err = f.second.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
+		t.Fatal(err)
+	}
+	images, err := f.second.preparedRevisionImages(f.ctx, next, ids.RunID)
+	if err != nil || len(images) != 1 {
+		t.Fatalf("lost predecessor manifest: %v %v", images, err)
+	}
+	f.ai.answer = revisionAnswer{Summary: "Added illustration", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this paragraph.\n\n![Illustration](" + images[0].Reference.URI + ")\n\nAI-generated illustration; actual-image-model.", Reason: "Requested illustration", CommentIDs: []string{note}}}}
+	var wait *workstate.HumanWait
+	if err = f.execute(f.other, next, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	if generator.calls != 1 || store.writes != 1 || f.ai.imagePlanCalls.Load() != 1 || f.ai.appCalls.Load() != 1 {
+		t.Fatal("retry regenerated assets or repeated app research")
+	}
+	_, _, _, approval, err = f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.first.ValidateRevisionProposal(f.ctx, revisionMap(approval["subject"])); err != nil {
+		t.Fatal(err)
+	}
+	f.query(f.engine, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(next)})
+	if err = f.execute(f.engine, next, true); err != nil {
+		t.Fatal(err)
+	}
+	if generator.calls != 1 || store.writes != 1 {
+		t.Fatal("approval repeated image acquisition")
+	}
+	// A different request may not smuggle this sourceRunId through the private API.
+	otherArtifact, otherDoc := f.document("# Other\n")
+	different, _ := f.submit(otherArtifact, otherDoc, map[string]any{"kind": "document"}, "Add an image.")
+	if _, err = f.second.preparedRevisionImages(f.ctx, asString(different["requestId"]), ids.RunID); err == nil {
+		t.Fatal("unrelated predecessor admitted")
+	}
+}
+
+func TestRevisionNoopAssessmentAndBoundedRepair(t *testing.T) {
+	for _, satisfied := range []bool{true, false} {
+		t.Run(fmt.Sprint(satisfied), func(t *testing.T) {
+			f := newRevisionDB(t)
+			artifact, doc := f.document("# Guide\n\nOriginal claim.\n")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Correct the claim if needed.")
+			f.ai.firstAnswer = &revisionAnswer{Summary: "No changes needed", Edits: []revisionReplacement{}}
+			f.ai.completionReply = "incomplete"
+			f.ai.answer = revisionAnswer{Summary: "Corrected claim", Edits: []revisionReplacement{{Before: "Original claim.", After: "Corrected claim.", Reason: "Requested correction", CommentIDs: []string{note}}}}
+			if satisfied {
+				f.ai.completionReply = "satisfied"
+			}
+			err := f.execute(f.other, asString(args["requestId"]), false)
+			var wait *workstate.HumanWait
+			if satisfied {
+				if err != nil || f.ai.calls.Load() != 1 || f.ai.repairCalls.Load() != 0 {
+					t.Fatalf("genuine no-op changed content: %v", err)
+				}
+			} else if !errors.As(err, &wait) || f.ai.calls.Load() != 2 || f.ai.repairCalls.Load() != 1 {
+				t.Fatalf("unfinished no-op not repaired: %v", err)
+			}
+			if f.ai.completionCalls.Load() != 1 {
+				t.Fatal("no-op assessment missing or repeated")
+			}
+		})
+	}
+}
+
+func TestPreparedImageMustBeRenderedMarkdown(t *testing.T) {
+	uri := "../artifact/portrait.png"
+	images := []preparedRevisionImage{{Reference: reviewAttachment{URI: uri}}}
+	for _, content := range []string{uri, "[Portrait](" + uri + ")", "`![Portrait](" + uri + ")`", "```md\n![Portrait](" + uri + ")\n```", "<!-- ![Portrait](" + uri + ") -->"} {
+		if len(missingPreparedImages(content, images)) != 1 {
+			t.Fatalf("non-image counted as embedded: %q", content)
+		}
+	}
+	for _, content := range []string{"![Portrait](" + uri + ")", "![Portrait][photo]\n\n[photo]: " + uri} {
+		if len(missingPreparedImages(content, images)) != 0 {
+			t.Fatalf("rendered image not recognized: %q", content)
+		}
+	}
+}

@@ -10,9 +10,13 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
@@ -236,7 +240,11 @@ type preparedRevisionImage struct {
 }
 
 func (i *Integration) preparedRevisionImages(ctx context.Context, requestID, runID string) ([]preparedRevisionImage, error) {
-	rows, err := i.revisionRows(memql.ContextWithFreshRead(ctx), "libraryImagesForRevision", map[string]any{"requestId": requestID, "runId": runID})
+	sourceRequest, sourceRun, err := i.revisionImageSource(ctx, requestID, runID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := i.revisionRows(memql.ContextWithFreshRead(ctx), "libraryImagesForRevision", map[string]any{"requestId": sourceRequest, "runId": sourceRun})
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +278,11 @@ func (i *Integration) handleRevisionPreparedImages(ctx context.Context, args map
 	if err != nil {
 		return nil, err
 	}
-	images, err := i.preparedRevisionImages(ctx, requestID, ids.RunID)
+	sourceRun := asString(args["sourceRunId"])
+	if sourceRun == "" {
+		sourceRun = ids.RunID
+	}
+	images, err := i.preparedRevisionImages(ctx, requestID, sourceRun)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +293,7 @@ func (i *Integration) handleRevisionPreparedImages(ctx context.Context, args map
 	if len(raw) > 128<<10 {
 		return nil, fmt.Errorf("prepared image metadata exceeds the limit")
 	}
-	return reviewResult(map[string]any{"references": string(raw)})
+	return reviewResult(map[string]any{"references": string(raw), "sourceRunId": sourceRun})
 }
 func (i *Integration) validatePreparedRevisionImages(ctx context.Context, proposal map[string]any) error {
 	if proposal["preparedImages"] == nil {
@@ -295,10 +307,6 @@ func (i *Integration) validatePreparedRevisionImages(ctx context.Context, propos
 	if json.Unmarshal(raw, &images) != nil || len(images) > 64 {
 		return fmt.Errorf("invalid prepared image manifest")
 	}
-	ids, err := revisionIdentity(ctx, asString(proposal["requestId"]))
-	if err != nil {
-		return err
-	}
 	for _, image := range images {
 		refs, _, err := i.reviewAttachments(ctx, []reviewAttachment{image.Reference})
 		if err != nil {
@@ -311,9 +319,80 @@ func (i *Integration) validatePreparedRevisionImages(ctx context.Context, propos
 		provenance := revisionMap(doc.backing["imageProvenance"])
 		actual, _ := json.Marshal(provenance)
 		captured, _ := json.Marshal(image.Provenance)
-		if string(actual) != string(captured) || provenance["requestId"] != proposal["requestId"] || memql.BareShortId(asString(doc.backing["producedByRunId"])) != ids.RunID {
+		sourceRequest, sourceRun, err := i.revisionImageSource(ctx, asString(proposal["requestId"]), asString(doc.backing["producedByRunId"]))
+		if err != nil {
+			return err
+		}
+		if string(actual) != string(captured) || provenance["requestId"] != sourceRequest || memql.BareShortId(asString(doc.backing["producedByRunId"])) != sourceRun {
 			return fmt.Errorf("prepared image provenance changed or belongs to another request")
 		}
 	}
 	return nil
+}
+
+// A retry may reuse assets only from an owned, captured predecessor with the
+// identical document, human feedback and attachments. Run IDs are not authority.
+func sameRevisionInput(a, b map[string]any) bool {
+	for _, key := range []string{"artifactId", "sourceId", "revision", "content", "comments", "instruction", "amendment"} {
+		if workstate.ArtifactHash(map[string]any{key: a[key]}) != workstate.ArtifactHash(map[string]any{key: b[key]}) {
+			return false
+		}
+	}
+	return true
+}
+func (i *Integration) revisionImageSource(ctx context.Context, requestID, sourceRun string) (string, string, error) {
+	ids, captured, _, _, err := i.revisionRequest(ctx, requestID)
+	if err != nil {
+		return "", "", err
+	}
+	sourceRun = memql.BareShortId(sourceRun)
+	if sourceRun == "" || sourceRun == ids.RunID {
+		return requestID, ids.RunID, nil
+	}
+	raw, err := json.Marshal(captured["previousRunIds"])
+	var previous []string
+	if err != nil || json.Unmarshal(raw, &previous) != nil {
+		return "", "", fmt.Errorf("invalid revision predecessors")
+	}
+	allowed := false
+	for _, run := range previous {
+		if run == sourceRun {
+			allowed = true
+		}
+	}
+	if !allowed {
+		return "", "", fmt.Errorf("image source is not a captured predecessor")
+	}
+	run, err := i.revisionRow(ctx, "workRunForOwner", map[string]any{"runId": sourceRun})
+	if err != nil {
+		return "", "", err
+	}
+	sourceRequest := asString(revisionMap(run["input"])["requestId"])
+	sourceIDs, original, _, _, err := i.revisionRequest(ctx, sourceRequest)
+	if err != nil {
+		return "", "", err
+	}
+	if sourceIDs.RunID != sourceRun || !sameRevisionInput(captured, original) {
+		return "", "", fmt.Errorf("prepared images belong to different feedback")
+	}
+	return sourceRequest, sourceRun, nil
+}
+
+// Verify actual Markdown image nodes, not filenames in prose, code or links.
+func missingPreparedImages(content string, images []preparedRevisionImage) []string {
+	embedded := map[string]bool{}
+	root := goldmark.DefaultParser().Parse(text.NewReader([]byte(content)))
+	_ = ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if image, ok := n.(*ast.Image); entering && ok {
+			embedded[string(image.Destination)] = true
+		}
+		return ast.WalkContinue, nil
+	})
+	missing := []string{}
+	for _, image := range images {
+		if !embedded[image.Reference.URI] {
+			missing = append(missing, image.Reference.URI)
+		}
+	}
+	return missing
 }

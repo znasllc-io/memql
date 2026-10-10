@@ -81,6 +81,20 @@ plan recovery; it cannot silently disappear from the document. Successful
 assets and research receipts survive a resume on another replica. This does
 not authorize bypassing a source's access restrictions.
 
+A saved image is not a completed document edit. Revision proposals check actual
+Markdown image nodes against the prepared asset manifest; prose links and code
+examples do not count as embedded images. The DSL makes one corrective edit
+attempt when requested assets are missing. Other empty proposals receive a
+separate assessment of whether the original already satisfies the feedback;
+unfinished requests get the same bounded repair. A second incomplete result
+fails visibly instead of reporting that no changes were needed.
+
+An unchanged request can reuse a completed image batch from an earlier finished
+or stopped attempt. The native gate compares the captured source, feedback,
+attachments and direction, rechecks owner access and immutable image bytes, and
+preserves the original source/model attribution. Changed feedback does not
+inherit that authority. Research and generation are not repeated on approval.
+
 ## Browser research fallback
 
 The document DSL first assesses whether feedback needs external evidence using

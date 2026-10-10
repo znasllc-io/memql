@@ -75,6 +75,13 @@
           },
           {
             "args": {
+              "stepKey": "preparedImages"
+            },
+            "kind": "query",
+            "name": "workCompletedStepsForOwnerRuns"
+          },
+          {
+            "args": {
               "requestId": "s-requestId"
             },
             "kind": "builtin",
@@ -119,6 +126,7 @@
                       "type": "object"
                     },
                     "maxItems": 100,
+                    "minItems": 1,
                     "type": "array"
                   },
                   "summary": {
@@ -139,7 +147,75 @@
           },
           {
             "args": {
+              "allowIncomplete": true,
               "requestId": "s-requestId"
+            },
+            "kind": "builtin",
+            "name": "libraryRevisionProposal"
+          },
+          {
+            "args": {
+              "data": {
+                "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n",
+                "recovery": "The previous response did not complete the request. It said: . Produce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
+              },
+              "progress": true,
+              "responseSchema": {
+                "additionalProperties": false,
+                "properties": {
+                  "edits": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "after": {
+                          "type": "string"
+                        },
+                        "before": {
+                          "type": "string"
+                        },
+                        "commentIds": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "reason": {
+                          "maxLength": 400,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "before",
+                        "after",
+                        "reason",
+                        "commentIds"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "summary": {
+                    "maxLength": 300,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "edits",
+                  "summary"
+                ],
+                "type": "object"
+              },
+              "templateId": "libraryRevisionPassages"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          },
+          {
+            "args": {
+              "requestId": "s-requestId",
+              "requireChanges": true
             },
             "kind": "builtin",
             "name": "libraryRevisionProposal"
@@ -227,7 +303,15 @@
           },
           {
             "args": {
-              "requestId": "s-requestId"
+              "stepKey": "preparedImages"
+            },
+            "kind": "query",
+            "name": "workCompletedStepsForOwnerRuns"
+          },
+          {
+            "args": {
+              "requestId": "s-requestId",
+              "sourceRunId": null
             },
             "kind": "builtin",
             "name": "libraryRevisionPreparedImages"
@@ -271,6 +355,7 @@
                       "type": "object"
                     },
                     "maxItems": 100,
+                    "minItems": 1,
                     "type": "array"
                   },
                   "summary": {
@@ -291,7 +376,75 @@
           },
           {
             "args": {
+              "allowIncomplete": true,
               "requestId": "s-requestId"
+            },
+            "kind": "builtin",
+            "name": "libraryRevisionProposal"
+          },
+          {
+            "args": {
+              "data": {
+                "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n",
+                "recovery": "The previous response did not complete the request. It said: . Produce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
+              },
+              "progress": true,
+              "responseSchema": {
+                "additionalProperties": false,
+                "properties": {
+                  "edits": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "after": {
+                          "type": "string"
+                        },
+                        "before": {
+                          "type": "string"
+                        },
+                        "commentIds": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "reason": {
+                          "maxLength": 400,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "before",
+                        "after",
+                        "reason",
+                        "commentIds"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "summary": {
+                    "maxLength": 300,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "edits",
+                  "summary"
+                ],
+                "type": "object"
+              },
+              "templateId": "libraryRevisionPassages"
+            },
+            "kind": "builtin",
+            "name": "ai"
+          },
+          {
+            "args": {
+              "requestId": "s-requestId",
+              "requireChanges": true
             },
             "kind": "builtin",
             "name": "libraryRevisionProposal"

@@ -2,6 +2,7 @@
 @level("strong")
 @templateFile("prompts/libraryRevisionPassages.tmpl")
 prompt libraryRevisionPassages {
+ recovery string
  preparedImages string
  references string
  evidence string
@@ -14,6 +15,7 @@ prompt libraryRevisionPassages {
 @level("strong")
 @templateFile("prompts/libraryRevisionItem.tmpl")
 prompt libraryRevisionItem {
+ recovery string
  preparedImages string
  references string
  evidence string
@@ -83,4 +85,14 @@ prompt libraryRevisionImagePlan {
  passages string!
  instruction string
  evidence string!
+}
+
+/// Check whether a no-op fulfills the human request, never whether it is easy.
+@level("fast")
+@templateFile("prompts/libraryRevisionCompletion.tmpl")
+prompt libraryRevisionCompletion {
+ document string!
+ passages string!
+ instruction string!
+ explanation string!
 }

@@ -109,6 +109,8 @@ var promptLevels = map[string]string{
 	// A one-word classification gates optional app usage.
 	"libraryRevisionIntent":   "fast",
 	"libraryRevisionEvidence": "fast",
+	// No-op intent assessment; deterministic asset coverage remains native.
+	"libraryRevisionCompletion": "fast",
 	// An app gathers a bounded evidence report; a human reviews the proposal.
 	"libraryRevisionAppResearch": "strong",
 	// Semantic consolidation must keep task relevance, corrections and evidence

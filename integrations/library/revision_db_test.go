@@ -32,6 +32,10 @@ import (
 // Only the model boundary is replaced. The installed DSL, journal, authorization,
 // two independent engines, approvals and version writes run against PostgreSQL.
 type revisionAI struct {
+	firstAnswer           *revisionAnswer
+	completionReply       string
+	completionCalls       atomic.Int32
+	repairCalls           atomic.Int32
 	calls                 atomic.Int32
 	researchCalls         atomic.Int32
 	retainedEvidenceCalls atomic.Int32
@@ -98,6 +102,10 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 			data := revisionMap(args["data"])
 			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
 				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
+			}
+			if args["templateId"] == "libraryRevisionCompletion" {
+				a.completionCalls.Add(1)
+				return reviewResult(map[string]any{"reply": a.completionReply})
 			}
 			if args["templateId"] == "libraryRevisionIntent" {
 				intent := "edit"
@@ -170,8 +178,15 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 			if schema := revisionMap(args["responseSchema"]); schema["type"] != "object" || schema["additionalProperties"] != false || args["progress"] != true {
 				return nil, fmt.Errorf("revision analysis lost its strict edit protocol or public lifecycle")
 			}
-			a.calls.Add(1)
-			body, _ := json.Marshal(a.answer)
+			count := a.calls.Add(1)
+			answer := a.answer
+			if count == 1 && a.firstAnswer != nil {
+				answer = *a.firstAnswer
+			}
+			if asString(data["recovery"]) != "" {
+				a.repairCalls.Add(1)
+			}
+			body, _ := json.Marshal(answer)
 			return reviewResult(map[string]any{"reply": string(body)})
 		}}}
 }
