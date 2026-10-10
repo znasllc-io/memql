@@ -147,6 +147,9 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 			if a.needsResearch && a.appError != nil && !strings.Contains(asString(data["evidence"]), "App research was unavailable") {
 				return nil, fmt.Errorf("app failure disguised as research")
 			}
+			if schema := revisionMap(args["responseSchema"]); schema["type"] != "object" || schema["additionalProperties"] != false || args["progress"] != true {
+				return nil, fmt.Errorf("revision analysis lost its strict edit protocol or public lifecycle")
+			}
 			a.calls.Add(1)
 			body, _ := json.Marshal(a.answer)
 			return reviewResult(map[string]any{"reply": string(body)})

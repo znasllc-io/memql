@@ -79,6 +79,49 @@
                 "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n"
               },
               "progress": true,
+              "responseSchema": {
+                "additionalProperties": false,
+                "properties": {
+                  "edits": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "after": {
+                          "type": "string"
+                        },
+                        "before": {
+                          "type": "string"
+                        },
+                        "commentIds": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "before",
+                        "after",
+                        "reason",
+                        "commentIds"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "summary",
+                  "edits"
+                ],
+                "type": "object"
+              },
               "templateId": "libraryRevisionPassages"
             },
             "kind": "builtin",
@@ -178,6 +221,49 @@
                 "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n"
               },
               "progress": true,
+              "responseSchema": {
+                "additionalProperties": false,
+                "properties": {
+                  "edits": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "after": {
+                          "type": "string"
+                        },
+                        "before": {
+                          "type": "string"
+                        },
+                        "commentIds": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "reason": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "before",
+                        "after",
+                        "reason",
+                        "commentIds"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "summary": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "summary",
+                  "edits"
+                ],
+                "type": "object"
+              },
               "templateId": "libraryRevisionPassages"
             },
             "kind": "builtin",

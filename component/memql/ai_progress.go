@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -17,9 +18,23 @@ type aiProgressSink func(string) error
 // call. Only output text is recorded, never provider reasoning or metadata.
 // Snapshots use the work journal, so another replica can serve a reconnect.
 func (e *MemQLEngine) InvokeAIProgress(ctx context.Context, templateID string, data map[string]any) (any, error) {
+	return e.invokePromptProgress(ctx, templateID, func(callCtx context.Context) (any, error) {
+		return e.InvokeAI(callCtx, templateID, data)
+	})
+}
+
+// Structured providers publish lifecycle and the completed public result. They
+// never fall back to unconstrained streaming merely to provide partial output.
+func (e *MemQLEngine) InvokeAIStructuredProgress(ctx context.Context, templateID string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (any, error) {
+	return e.invokePromptProgress(ctx, templateID, func(callCtx context.Context) (any, error) {
+		return e.InvokeAIStructured(callCtx, templateID, data, schemaName, schema, strict)
+	})
+}
+
+func (e *MemQLEngine) invokePromptProgress(ctx context.Context, templateID string, invoke func(context.Context) (any, error)) (any, error) {
 	run, ok := common.RunFromContext(ctx)
 	if !ok || run.Mode == common.RunModeReplay {
-		return e.InvokeAI(ctx, templateID, data)
+		return invoke(ctx)
 	}
 	var latest string
 	var last time.Time
@@ -39,7 +54,7 @@ func (e *MemQLEngine) InvokeAIProgress(ctx context.Context, templateID string, d
 		savedBytes = len(text)
 		return record(text, "running")
 	})
-	result, err := e.InvokeAI(context.WithValue(ctx, aiProgressKey{}, sink), templateID, data)
+	result, err := invoke(context.WithValue(ctx, aiProgressKey{}, sink))
 	phase := "completed"
 	if err != nil {
 		phase = "paused"

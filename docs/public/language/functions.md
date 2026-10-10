@@ -722,7 +722,7 @@ domain that declares it (`use agents.builtins.{ ai }`). See
 
 | Builtin | Description | Called as |
 |---------|-------------|-----------|
-| `ai` | Calls one named prompt with a data object and returns `{prompt, reply}`. Synchronous; the prompt's `@level` and the routing rules choose the model, so the call never names one | `builtin ai(templateId: "docSummary", data: { content: args.content })` |
+| `ai` | Calls one named prompt with a data object and returns `{prompt, reply}`. Optional `responseSchema` constrains `reply` to JSON matching that schema through structured model routing. `progress: true` records public lifecycle and the completed result; partial text is available only for unconstrained streaming. Synchronous; the prompt's `@level` and the routing rules choose the model, so the call never names one | `builtin ai(templateId: "docSummary", data: { content: args.content })` |
 | `agent` | Opens a `v1:work:goal` naming the `invokeAgent` template and returns `{goalId, runId}`; a run dispatcher claims it on an agent node | `builtin agent(name: "assistant", prompt: args.question, partitionId: "system")` |
 | `runAgentTurn` | Runs one agent turn in line and returns its reply. Answers only on an agent node | `builtin runAgentTurn(agentId: args.agentId, prompt: args.question)` |
 

@@ -318,13 +318,21 @@ automation reviseLibraryDocument {
   combinedEvidence := "App research report:\n" + (evidence.app.available ? evidence.app.report : "App research was unavailable; no app findings were obtained.") + "\nIndependent local report:\n" + evidence.headless + "\nEvidence assessment:\n" + (assessment.reply ?? "Unavailable") + "\nTargeted local research:\n" + supplement.reply
  }
 
+ // The edit protocol is constrained JSON, not free-form model reasoning.
+ revisionSchema := {
+  type: "object", additionalProperties: false, required: ["summary", "edits"],
+  properties: {summary: {type: "string"}, edits: {type: "array", items: {
+   type: "object", additionalProperties: false, required: ["before", "after", "reason", "commentIds"],
+   properties: {before: {type: "string"}, after: {type: "string"}, reason: {type: "string"}, commentIds: {type: "array", items: {type: "string"}}}
+  }}}
+ }
  if captured.amendment != nil {
-  analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, data: {
+  analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
    document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.amendment.instruction,
    previous: captured.amendment.edits, evidence: combinedEvidence
   })
  } else {
-  analysis := builtin ai(templateId: "libraryRevisionPassages", progress: true, data: {
+  analysis := builtin ai(templateId: "libraryRevisionPassages", progress: true, responseSchema: revisionSchema, data: {
    document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.instruction, evidence: combinedEvidence
   })
  }
