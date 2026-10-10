@@ -171,21 +171,6 @@ const settings: OsAppManifest = {
   ],
   settingsSection: "appearance",
   logsSection: "logs",
-  // The shell's first STATIC unseen-change marker (memql#5390). A new place to
-  // learn what this cluster's DSL may still write and for how long is a new
-  // capability rather than a restyling, and it is not discoverable from
-  // anywhere else -- which is what the marker is for.
-  //
-  // The destination is the section itself, so the common shell acknowledges it
-  // when Language is VISIBLE and an ancestor (opening Settings on About, or the
-  // Settings tile) never can. Advance the revision only when the section itself
-  // changes meaningfully -- a new language line, say -- and never when a form
-  // is added to the table it reads: that is data moving, not the surface.
-  attentionChanges: [
-    { id: "settings:ask-conversations-and-voice", revision: "1", sectionId: "ask", label: "Conversations, dictation and live voice with MemQL" },
-    { id: "settings:connections", revision: "shared-connections-1", sectionId: "connections", label: "Shared GitHub and Shopify connections" },
-    { id: "settings:language", revision: "language-1.0", sectionId: "language", label: "MemQL 1.0 language and deprecations" },
-  ],
   component: SettingsApp,
 };
 
@@ -213,7 +198,6 @@ const files: OsAppManifest = {
   wants: FILES_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
-  attentionChanges: [{ id: "files:editor", revision: "browser-1", sectionId: "settings", label: "Choose browser VS Code or your installed editor" }],
   component: FilesApp,
 };
 
@@ -249,17 +233,6 @@ const deployables: OsAppManifest = {
   wants: DEPLOYABLES_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
-  attentionChanges: [
-    { id: "deployables:shopify-store", revision: "connect-1", sectionId: "deployables", target: "shopify-store", label: "Connect Shopify from a storefront’s Store page" },
-    // A NEW CAPABILITY ON THE SAME PAGE, so a new id on the same destination
-    // (memql#5602): the Store slot's marker and the Store page's
-    // acknowledgment already exist, and a storefront owner who must move a
-    // store's own values out of App values is told where they now go.
-    { id: "deployables:store-values", revision: "store-values-1", sectionId: "deployables", target: "shopify-store", label: "Give each store its own values on a storefront’s Store page" },
-    { id: "deployables:organization", revision: "organization-1", sectionId: "deployables", label: "Organization ownership for sources and deployables" },
-    { id: "deployables:github-accounts", revision: "account-settings-2", sectionId: "settings", label: "Manage connected GitHub accounts in Settings" },
-    { id: "deployables:saved-sources", revision: "github-sources-3", sectionId: "sources", label: "Manage each source by GitHub account, organization and repository" },
-  ],
   component: DeployablesApp,
 };
 
@@ -287,9 +260,6 @@ const fleet: OsAppManifest = {
   // who knew where those were has to be told where they went -- that is a
   // change in how they use it, not a restyling. The destination is the
   // section, which every Fleet user can open (Machines is ungated).
-  attentionChanges: [
-    { id: "fleet:routing", revision: "routing-1", sectionId: "routing", label: "Routes, rules and history, all in Routing" },
-  ],
   component: FleetApp,
 };
 
@@ -373,7 +343,7 @@ const users: OsAppManifest = {
   icon: Users,
   requires: "app:users",
   sections: USERS_SECTIONS,
-  attentionChanges: [{ id: "users:access-requests", revision: "review-1", sectionId: "requests", label: "Review requests to join this cluster" }],
+
   records: [
     { section: "people", idField: "userId", query: "identity.searchUsers", labels: ["displayName", "primaryEmail"] },
     { section: "groups", idField: "groupId", query: "identity.groupsAll", labels: ["name"] },
@@ -445,7 +415,6 @@ const accounts: OsAppManifest = {
   sections: ACCOUNTS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
-  attentionChanges: [{ id: "accounts:organization-membership", revision: "organization-1", sectionId: "accounts", label: "Organizations, membership and scoped app access" }],
   component: AccountsApp,
 };
 
@@ -510,17 +479,6 @@ const cluster: OsAppManifest = {
   sections: CLUSTER_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
-  // Mesh is a new place to learn whether every node hears the cluster (epic
-  // memql#5338), and nothing else in the shell says so: an island used to be
-  // found only by reading pod logs. The destination is the section itself, so
-  // the shell acknowledges the marker when Mesh is VISIBLE and opening the
-  // app on Readiness never can. Advance the revision only when the section
-  // changes meaningfully -- never because a node's counts moved.
-  attentionChanges: [
-    { id: "cluster:releases", revision: "release-lifecycle-2", sectionId: "releases", label: "Prepare releases from builds and review public publication" },
-    { id: "cluster:updates", revision: "signed-discovery-1", sectionId: "updates", label: "Check signed releases from configured publishers" },
-    { id: "cluster:mesh", revision: "mesh-1", sectionId: "mesh", label: "See what every node hears" },
-  ],
   component: ClusterApp,
 };
 
@@ -598,7 +556,6 @@ const campaigns: OsAppManifest = {
   wants: CAMPAIGNS_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
-  attentionChanges: [{ id: "campaigns:testing-audience", revision: "test-queue-1", sectionId: "settings", label: "Choose a testing audience for campaign test runs" }, { id: "campaigns:package-config", revision: "package-1", sectionId: "settings", label: "Import and export campaign email configuration" }, { id: "campaigns:azure-email", revision: "azure-cluster-1", sectionId: "senders", label: "Use one cluster Azure setup for client email domains" }, { id: "campaigns:newsletter", revision: "newsletter-1", sectionId: "audiences", target: "newsletter", label: "Connect storefront newsletter signups" }, { id: "campaigns:recurring", revision: "recurring-1", sectionId: "campaigns", target: "recurring", label: "Set up repeating campaigns" }, { id: "campaigns:organization", revision: "organization-1", sectionId: "campaigns", label: "Choose the organization for every campaign" }, { id: "campaigns:template-editor", revision: "editor-1", sectionId: "templates", label: "Edit and publish email templates in Productivity Tools" }],
   component: CampaignsApp,
 };
 
@@ -610,7 +567,6 @@ const email: OsAppManifest = {
   sections: [{ id: "inbox", name: "Inbox" }, { id: "logs", name: "Logs", requires: "app:email/logs" }, { id: "settings", name: "Settings" }],
   settingsSection: "settings",
   logsSection: "logs",
-  attentionChanges: [{ id: "email:test-inbox", revision: "capture-1", sectionId: "inbox", label: "Inspect captured test email" }],
   component: EmailApp,
 };
 
@@ -688,40 +644,6 @@ const nexus: OsAppManifest = {
   sections: NEXUS_SECTIONS,
   settingsSection: "settings",
   logsSection: "logs",
-  // Learned procedures (epic memql#5408) are a new kind of thing in the
-  // Automations list -- work the system watched an app do, climbing a ladder
-  // toward running without a model -- and nothing else in the shell says they
-  // exist. The destination is the SECTION, so the marker is reachable on a
-  // cluster that has learned nothing yet (the empty list says where they come
-  // from), and the shell acknowledges it when Automations is visible -- never
-  // when the app opens on Goals. Advance the revision only when the surface
-  // itself changes meaningfully, never because a procedure climbed.
-  //
-  // Stepping into a run (epic memql#5414) is a new capability nothing else in
-  // the shell says exists: run a step again with a different intelligence,
-  // branch from it, go back to an earlier version, and say what was wrong.
-  // The destination is the version area of a step on a FINISHED run -- where
-  // all of that is reachable -- so the marker sits on the rows that open it
-  // and is acknowledged only when that area is on screen, never when Runs or
-  // a run page opens. Advance the revision only when the surface itself
-  // changes meaningfully, never because a run gained a version.
-  attentionChanges: [
-    { id: "nexus:ask-work", revision: "background-1", sectionId: "runs", label: "Follow background work from Ask" },
-    { id: "nexus:questions", revision: "questions-1", sectionId: "approvals", label: "Answer questions and approve scoped computer access" },
-    { id: "nexus:procedures", revision: "procedures-1", sectionId: "automations", label: "Learned procedures" },
-    {
-      id: "nexus:interventions",
-      revision: "interventions-1",
-      sectionId: "runs",
-      target: "step-versions",
-      label: "Re-run, branch and feedback",
-    },
-    // Every automation now says what it is for, and a person can say so
-    // themselves (epic memql#5414, D24). The list carries the label on its
-    // rows and asks about it in Refine, so the section itself is where it is
-    // seen.
-    { id: "nexus:reuse", revision: "reuse-1", sectionId: "automations", label: "Reuse labels" },
-  ],
   component: NexusApp,
 };
 
@@ -812,9 +734,6 @@ const identity: OsAppManifest = {
     { id: "tokens", name: "Access tokens" },
     { id: "logs", name: "Logs", requires: "app:identity/logs" },
     { id: "settings", name: "Settings" },
-  ],
-  attentionChanges: [
-    { id: "identity:account-security", revision: "native-os-1", sectionId: "devices", label: "Manage your passkeys and sessions in OS" },
   ],
   component: IdentityApp,
 };

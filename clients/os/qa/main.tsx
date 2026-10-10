@@ -46,9 +46,7 @@ import {
 import { rowsResult as deployRowsResult } from "../test/deployables/harness";
 import { SessionProvider } from "../src/chrome/access";
 import { OsProvider } from "../src/chrome/state";
-import { AttentionProvider } from "../src/attention/Attention";
 import { OS_REGISTRY } from "../src/apps/registry";
-import { OptionalReadiness } from "../src/chrome/OptionalReadiness";
 import { PipelinesSection } from "../src/apps/settings/PipelinesSection";
 import { UNKNOWN_RUNTIME_CONFIG } from "../src/cluster/config";
 import type { Readiness } from "../src/live/readiness";
@@ -417,16 +415,11 @@ function RunsWindow({ runId }: { runId?: string }) {
   return <DeployablesWindow section="runs" fallback="Runs" intent={runId ? { runId } : undefined} />;
 }
 
-/**
- * The Deployables fake, answering the two shell-level reads a pipelines
- * surface makes as well: the machines feed (whether "your fleet" exists) and
- * the attention receipts (whether the Settings mark was answered).
- */
-function pipelinesConnection(seed: FakeSeed, extra: { machines?: unknown[]; receipts?: unknown[] } = {}) {
+/** The Deployables fake, also answering the machines feed. */
+function pipelinesConnection(seed: FakeSeed, extra: { machines?: unknown[] } = {}) {
   const fake = fakeConnection(seed);
   const base = fake.query.executeNamed.bind(fake.query);
   (fake.query as unknown as { executeNamed: unknown }).executeNamed = async (name: string, call: string, opts?: unknown) => {
-    if (call === "query myAttentionReceipts()") return deployRowsResult((extra.receipts ?? []) as never);
     if (call === "query myWorkersWithStatus()") return deployRowsResult((extra.machines ?? []) as never);
     return base(name, call, opts as never);
   };
@@ -462,8 +455,7 @@ function pipelinesVerdict(state: Verdict["state"], slots: Partial<Record<"github
 
 /**
  * Settings -> Pipelines in its window, under the providers the shell mounts
- * it in -- the readiness reading it is drawn from, and the attention service
- * whose mark its "Not now" answers.
+ * it in, including the readiness reading it is drawn from.
  */
 function SettingsPipelinesWindow({ verdict }: { verdict: Verdict | null }) {
   installSeededAccess("owner");
@@ -483,14 +475,14 @@ function SettingsPipelinesWindow({ verdict }: { verdict: Verdict | null }) {
       }}
     >
       <OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{ cols: 12, rows: 8 }}>
-        <AttentionProvider apps={OS_REGISTRY.apps}>
+
           <MachinesProvider>
-            <OptionalReadiness />
+
             <WindowBody fallback="Pipelines">
               <PipelinesSection />
             </WindowBody>
           </MachinesProvider>
-        </AttentionProvider>
+
       </OsProvider>
     </SessionProvider>
   );
@@ -861,11 +853,6 @@ const VIEWS: Record<
     connect: () => pipelinesConnection({ githubApp: APP_REGISTERED }, { machines: [ALLOWED_MACHINE] }),
     wrap: (el) => el,
     render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("configured", { githubApp: true, repository: true, runner: true })} />,
-  },
-  "settings-pipelines-dismissed": {
-    connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }, { receipts: [{ id: "rc-1", changeId: "readiness:pipelines", revision: "optional-1" }] }),
-    wrap: (el) => el,
-    render: () => <SettingsPipelinesWindow verdict={pipelinesVerdict("unconfigured", { githubApp: false, repository: false, runner: false })} />,
   },
   "settings-pipelines-unreported": {
     connect: () => pipelinesConnection({ githubApp: { configured: false, canSetup: true } }),

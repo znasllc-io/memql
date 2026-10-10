@@ -56,7 +56,7 @@ page in each state, epic memql#5479; the seeds are `qa/pipelinesSeeds.ts`, and
 lines so the log tail is judged with a real failure in it), or
 `pipeline-source`, `pipeline-source-none`, `pipeline-map` (a source's checks,
 a source with no pipeline, the Overview map's Checks nodes) and
-`settings-pipelines-unset`, `-partial`, `-done`, `-dismissed`, `-unreported`
+`settings-pipelines-unset`, `-partial`, `-done`, `-unreported`
 (Settings -> Pipelines in each reading);
 `mode` is `dark`
 or `light`. **Take at least one narrow capture** (`820,760`): two of

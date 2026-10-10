@@ -2493,8 +2493,7 @@ pages read it serially every twenty seconds and on reconnect. Failed reads prese
 context and remove state-changing actions until a fresh read succeeds. Configuration
 and artifact storage failures do not hide durable candidate/publication history.
 Navigation carries the owner-only `app:cluster/releases` resource; native owner and
-candidate ownership gates remain authoritative. The feature marker is acknowledged
-only at the visible Releases destination, including its empty state.
+candidate ownership gates remain authoritative.
 
 This surface reviews already-prepared candidates. Candidate assembly, release-tag
 creation/promotion and installed cluster update control are separate delivery work;
@@ -2537,99 +2536,13 @@ to it.
   enough to read, and a peer linked both ways sits in both columns because two
   streams exist.
 
-## Unseen changes: shared attention markers
+## Update discovery
 
-`src/attention` is the OS-wide attention service. A small blue circle means a
-meaningful change has not been viewed by this person. It is independent of the
-short-lived arrival animation, green Live health, amber setup warnings, red
-errors and Ask activity. It is not a notification feed. Users configure none
-of these markers.
-
-Icon buttons use `data-os-setup` for setup dots: the dot overlaps the upper-right
-corner without moving the icon. If an unseen-change marker is also present, it
-uses the upper-left corner; setup remains on the right.
-
-All registered apps participate through the shared desktop and phone shell:
-launcher entries, dock apps, window icons and section navigation aggregate
-unseen descendants. Section `parent` relationships aggregate automatically;
-`ancestors` can name another view of the same destination (such as a map).
-
-For authors and coding agents: decide whether the change gives a person a
-new capability or materially changes how they use an existing one. If it is
-worth directing their attention to that destination, declare it. Routine
-fixes, refactors, restyling, tests and rebuilds usually need no declaration;
-never manufacture a revision just because source files changed. Keep the
-existing ID for the same capability and advance its revision only for a new
-meaningful change. Namespace IDs by app (`fleet:policy-editor`) because
-receipt IDs are shared across the OS.
-
-For a meaningful UI/functionality change, add `attentionChanges` to the app's
-`OsAppManifest`. For example:
-
-```tsx
-attentionChanges: [{
-  id: "fleet:route-composer", revision: "route-composer-v2",
-  sectionId: "routing", label: "Route composer improved",
-}]
-```
-
-A section destination is acknowledged by the common shell only when that
-section is visible. For a deeper destination, add a stable `target` and wrap
-its actual visible content in `AttentionDestination` with the same `appId`,
-`sectionId` and `target`. Render `AttentionMarker` on the control that opens
-it. An ancestor marker never acknowledges descendants. Retained hidden panes
-must pass `visible={false}`; window visibility is inherited automatically.
-Do not use commit IDs, rebuild times or incidental source diffs as feature
-revisions. Declare only changes worth directing a person to their destination.
-
-A deeper destination uses the same explicit target in declaration, marker and
-acknowledgment wrapper:
-
-```tsx
-// Manifest entry: { id: "fleet:route-composer", revision: "route-composer-v2",
-//   sectionId: "routing", target: "route-composer", label: "Route composer improved" }
-<AttentionMarker appId="fleet" sectionId="routing" target="route-composer" />
-{routeOpen && <AttentionDestination appId="fleet" sectionId="routing" target="route-composer">
-  <RouteComposer {...props} />
-</AttentionDestination>}
-```
-
-Reviewers should check that the revision represents a meaningful change,
-that an eligible person can reach the exact destination (including empty or
-undeployed states), and that opening ancestors cannot dismiss it. Add a
-focused rendering test proving that route and acknowledgment behavior; also
-cover hidden panes, another user, and a later revision when changing the
-shared mechanism. `npm test -- test/attention` checks declared IDs, known
-sections and receipt behavior. It does not infer semantic importance or prove
-arbitrary dynamic destinations reachable. Those remain author/reviewer
-judgments; there is no mandatory PR attention decision or source-diff gate. CI adds a
-non-blocking review reminder to its job summary when app, shell, registry,
-shared-control or attention code changes. It stays quiet for documentation,
-tests, asset-only edits and unrelated backend changes; it never decides
-whether a marker is needed.
-
-Runtime sources use `usePublishAttention(sourceId, changes)` with `kind:
-"runtime"` and the actual discovered revision. Keep the producer at shell
-lifetime if the app should be marked while closed. Deployables does this via
-one shared package collection, so its map, list and closed-app marker cannot
-hold different package feeds. A source retracts an item when it no longer
-applies; viewing an item does not change its underlying availability.
-
-**A change that only an EXPLICIT answer may clear names a target nothing
-wraps.** The common shell acknowledges every unseen change aimed at a visible
-section, so a section-level runtime change is cleared by a visit. The optional
-readiness item (`chrome/OptionalReadiness.tsx`, epic memql#5479) must not be:
-looking at what Settings > Pipelines asks is not answering it. Its change
-carries `target: "readiness"`, which no `AttentionDestination` wraps, so the
-dock, launcher and section navigation still draw the dot, and the section's
-"Not now" acknowledges exactly that change. The mark also retracts by itself
-when the item stops being open (set up, or no longer reported unset).
-
-Acknowledgments are `v1:os:attentionReceipt` rows, keyed by server-derived
-(user, change ID, revision), owner-scoped and broadcast between nodes. The UI
-clears marks only after a successful write, preserves them on failure, and
-offers an in-surface retry. An old revision cannot acknowledge a newer one,
-and one person's receipts cannot dismiss another's changes.
+MemQL OS does not display unseen-update dots or guide users through navigation
+with change markers. Update and setup controls live in their normal app sections.
+The shell neither subscribes to attention receipts nor writes acknowledgments.
+Historical receipt rows and the existing DSL/SDK contracts remain available for
+stored-data and client compatibility; the OS no longer consumes them.
 
 ### GitHub Sources
 
@@ -2717,13 +2630,9 @@ stops automatic work at safe boundaries before staging/rolling/publishing.
 Work already across that boundary finishes to avoid a partially rolled
 cluster. Detection continues, and the serving version stays available.
 
-Manual pending versions publish attention under the package's revision.
-Markers lead through Overview/map, source group and deployable row to
-**Available version** in the deployable's Versions area or the source page
-(including sources that have not deployed yet). Opening the app,
-source or deployable does not acknowledge it. Expanding Available version
-does, without deploying or removing the available update. Successful
-automatic updates do not create this manual-update attention item.
+Manual pending versions can be inspected through **Available version** in the
+deployable's Versions area or the source page, including sources that have not
+deployed yet. Inspecting a version neither deploys nor removes the available update.
 
 ### Storefront connections and testing
 
@@ -2760,7 +2669,7 @@ tool completions must not move focus or erase a navigation cue. No fake cursor.
 ### Email app availability
 
 `MEMQL_EMAIL_APP_ENABLED=false` on Edge removes the operator test inbox from
-the OS registry, including the launcher, restored windows and attention markers.
+the OS registry, including the launcher and restored windows.
 It defaults to enabled and is independent of `MEMQL_EMAIL_TRANSPORT`; Campaigns
 and transactional mail continue using their configured providers. Set this value
 in the installation overlay, never by branching on its domain or environment.

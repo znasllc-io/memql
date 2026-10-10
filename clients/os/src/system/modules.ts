@@ -62,8 +62,7 @@ export const MODULE_NAMES: Record<ModuleId, string> = {
  * GitHub App, so its section is seeded on the owner alone. A developer shown a
  * Set up group for it is told the place in words rather than given a button
  * into a section they cannot open -- `moduleActFor` asks the registry, which
- * is what makes that the answer. It is also where the optional item's mark
- * points (chrome/OptionalReadiness).
+ * is what makes that the answer.
  */
 export const MODULE_SETTINGS_SECTION: Record<
   ModuleId,

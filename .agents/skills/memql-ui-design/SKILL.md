@@ -18,7 +18,7 @@ This skill is a repository-owned entry point, not another design system.
   prototypes illustrate the direction; their sample data and old controls are
   not requirements.
 - For OS implementation, read [the OS README](../../../clients/os/README.md)
-  for live collections, navigation, readiness and attention behavior.
+  for live collections, navigation, readiness and update behavior.
 - If `frontend-design` is available in the session, read its catalog-provided
   `SKILL.md`. Use its plan/build/critique process within the MemQL brief; do not
   replace the existing palette, typography or kit with a generic new aesthetic.

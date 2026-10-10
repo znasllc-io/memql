@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
-import { AttentionDestination, AttentionMarker } from "../../attention/Attention";
 import { useLiveCollection, feedIsBehind } from "../../live/useLiveCollection";
 import { Button, Caption, Chip, Field, Notice, Panel, Select, Subhead } from "../../kit";
 import { flatten } from "../../kit/rows";
@@ -38,11 +37,11 @@ export function RecurrencePanel({ campaignId }: { campaignId: string }) {
     <div className="os-campaign-detail-head">
       <Subhead>Repeat</Subhead>
       {row ? <Chip>{status}</Chip> : !editing ? <Button disabled={busy} onClick={() => setEditing(true)}>
-        Set up repeating sends<AttentionMarker appId="campaigns" sectionId="campaigns" target="recurring" />
+        Set up repeating sends
       </Button> : null}
     </div>
     {feed.snapshot.error || feedIsBehind(feed.snapshot.state) ? <Notice tone="warn" sentence="The repeating schedule could not be confirmed."><Button onClick={feed.reseed}>Try again</Button></Notice> : null}
-    {row || editing ? <AttentionDestination appId="campaigns" sectionId="campaigns" target="recurring">
+    {row || editing ? <>
       {row ? <>
         <Caption>Every {String(row.intervalWeeks)} weeks · {zone}{status === "active" ? ` · Next: ${date}` : ""}</Caption>
         {text(row, "lastError") ? <Notice tone="warn" sentence="Review this schedule before resuming." detail={text(row, "lastError")} /> : null}
@@ -65,7 +64,7 @@ export function RecurrencePanel({ campaignId }: { campaignId: string }) {
         </div>
       </div> : null}
       {row ? <Caption>Changes apply to future occurrences. Manage queued sends in their campaigns. Resume skips missed dates.</Caption> : null}
-    </AttentionDestination> : null}
+    </> : null}
     {write.error ? <Notice tone="error" sentence="The schedule was not changed." detail={write.error} /> : null}
   </Panel>;
 }

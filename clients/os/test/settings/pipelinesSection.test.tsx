@@ -11,11 +11,6 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 // never drawn as "not done". The GitHub App is set up through the cluster's
 // app manifest, offered only to somebody the cluster says may. An installation
 // whose permissions lag the app is named with GitHub's own page, and a read
-// that failed says so. "Not now" writes exactly one receipt and nothing else
-// does -- not even standing on the section, which every case here does: the
-// section is mounted inside a VISIBLE `AttentionDestination` for its own
-// section, exactly as the window frame mounts every app body.
-//
 // The connection is faked under `executeNamed` (the Deployables harness), so
 // the generated builders render the call strings asserted below.
 
@@ -27,9 +22,7 @@ vi.mock("../../src/live/connection", () => ({
   bridgePathFor: () => "/_memql/ws",
 }));
 
-import { AttentionDestination, AttentionMarker, AttentionProvider } from "../../src/attention/Attention";
 import { SessionProvider } from "../../src/chrome/access";
-import { OptionalReadiness } from "../../src/chrome/OptionalReadiness";
 import { OsProvider, useOs } from "../../src/chrome/state";
 import { OS_REGISTRY } from "../../src/apps/registry";
 import { PIPELINES_RETURN_PATH, PipelinesSection } from "../../src/apps/settings/PipelinesSection";
@@ -49,12 +42,6 @@ import type { Verdict } from "../../src/system/readinessFold";
 import type { OsAppProps } from "../../src/system/registry";
 import { fakeConnection, rowsResult, type FakeConnection, type FakeSeed } from "../deployables/harness";
 import { installSeededAccess } from "../seededAccess";
-
-const NOT_NOW_CALL = 'mutation acknowledgeAttention(changeId: "readiness:pipelines", revision: "optional-1")';
-
-/** The registry with no FEATURE declarations, so the only change a Settings
- *  mark can carry here is the runtime one under test. */
-const RUNTIME_ONLY = OS_REGISTRY.apps.map((app) => ({ ...app, attentionChanges: [] }));
 
 type Slots = Partial<Record<"githubApp" | "repository" | "runner", boolean>>;
 
@@ -101,35 +88,24 @@ function machine(id: string, over: Record<string, unknown> = {}): Row {
 
 interface Seed extends FakeSeed {
   machines?: Row[];
-  receipts?: Row[];
-  ackError?: string;
 }
 
 interface Wire {
   fake: FakeConnection;
-  /** Every acknowledgeAttention call string that reached the wire. */
-  acknowledged: string[];
 }
 
-/** The Deployables fake, with the attention and machines reads answered too. */
+/** The Deployables fake, with the machines read answered too. */
 function connect(seed: Seed = {}): Wire {
   const fake = fakeConnection(seed);
   const base = fake.query.executeNamed.bind(fake.query);
-  const acknowledged: string[] = [];
   (fake.query as unknown as { executeNamed: unknown }).executeNamed = vi.fn(
     async (name: string, call: string, opts?: { cursor?: string; signal?: AbortSignal }) => {
-      if (call === "query myAttentionReceipts()") return rowsResult(seed.receipts ?? []);
-      if (call.startsWith("mutation acknowledgeAttention(")) {
-        acknowledged.push(call);
-        if (seed.ackError !== undefined) throw new Error(seed.ackError);
-        return rowsResult([]);
-      }
       if (call === "query myWorkersWithStatus()") return rowsResult(seed.machines ?? []);
       return base(name, call, opts as never);
     },
   );
   h.connection = { query: fake.query, subscriptions: fake.subscriptions, dispatcher: fake.dispatcher };
-  return { fake, acknowledged };
+  return { fake };
 }
 
 /** What the shell holds, read off the provider the section really mounts under. */
@@ -150,20 +126,14 @@ function mount(verdict: Verdict | null, { role = "owner", intent, consumeIntent 
       }}
     >
       <OsProvider registry={OS_REGISTRY} actorRole={role} grid={{ cols: 12, rows: 8 }}>
-        <AttentionProvider apps={RUNTIME_ONLY}>
+
           <MachinesProvider>
-            <OptionalReadiness />
-            <span data-testid="settings-mark">
-              <AttentionMarker appId="settings" />
-            </span>
-            {/* As the window frame mounts every section body: a visible
-                destination for the section itself. */}
-            <AttentionDestination appId="settings" sectionId="pipelines">
+
               <PipelinesSection intent={intent} consumeIntent={consumeIntent} />
-            </AttentionDestination>
+
             <WindowsProbe />
           </MachinesProvider>
-        </AttentionProvider>
+
       </OsProvider>
     </SessionProvider>,
   );
@@ -179,10 +149,6 @@ function stopStates(): (string | null)[] {
 
 function bar(): HTMLElement {
   return screen.getByRole("group", { name: "What you can do with this" });
-}
-
-function settingsMark(): HTMLElement | null {
-  return within(screen.getByTestId("settings-mark")).queryByRole("img", { name: "Unseen change" });
 }
 
 /** Let every pending read settle -- a negative is only worth asserting after. */
@@ -314,7 +280,6 @@ describe("Settings > Pipelines", () => {
     // Not known offers nothing: no setup, no dismissal, no mark.
     expect(screen.queryByRole("button", { name: "Set up GitHub" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
-    expect(settingsMark()).toBeNull();
   });
 
   it("reads a configured verdict with no lane as every sub-step done", () => {
@@ -407,71 +372,6 @@ describe("Settings > Pipelines", () => {
     mount(pipelines("configured", { githubApp: true, repository: true, runner: true }));
     expect(await screen.findByText("GitHub could not be asked about the app's installations.")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Review on GitHub" })).toBeNull();
-  });
-
-  it("answers Not now with exactly the item's receipt, and the act goes while the section stays", async () => {
-    const wire = connect({ githubApp: { configured: false, canSetup: true } });
-    mount(pipelines("unconfigured", { githubApp: false, repository: false, runner: true }));
-
-    const notNow = await within(bar()).findByRole("button", { name: "Not now" });
-    expect(settingsMark()?.getAttribute("title")).toBe("Pipelines can be set up");
-    // STANDING ON THE SECTION IS NOT AN ANSWER: it is mounted inside a visible
-    // destination for itself, and nothing has been acknowledged.
-    await settle();
-    expect(wire.acknowledged).toEqual([]);
-    expect(settingsMark()).not.toBeNull();
-
-    fireEvent.click(notNow);
-    await waitFor(() => expect(within(bar()).queryByRole("button", { name: "Not now" })).toBeNull());
-    expect(wire.acknowledged).toEqual([NOT_NOW_CALL]);
-    expect(settingsMark()).toBeNull();
-    // The item stays, with its state.
-    expect(screen.getByRole("heading", { name: "Pipelines" })).toBeTruthy();
-    expect(within(bar()).getByText("Partly set up")).toBeTruthy();
-  });
-
-  it("keeps the mark and the act when Not now is refused, and says so", async () => {
-    const wire = connect({ githubApp: { configured: false, canSetup: true }, ackError: "the receipt could not be written" });
-    mount(pipelines("unconfigured", { githubApp: false, repository: false, runner: false }));
-    fireEvent.click(await within(bar()).findByRole("button", { name: "Not now" }));
-    expect(await screen.findByText("Your answer was not saved, so Settings stays marked.")).toBeTruthy();
-    expect(wire.acknowledged).toEqual([NOT_NOW_CALL]);
-    expect(within(bar()).getByRole("button", { name: "Not now" })).toBeTruthy();
-    expect(settingsMark()).not.toBeNull();
-  });
-
-  it("offers no Not now once the item is set up, or when it may not be dismissed", async () => {
-    connect({ githubApp: { configured: true, slug: "memql-znas" } });
-    const view = mount(pipelines("configured", { githubApp: true, repository: true, runner: true }));
-    await settle();
-    expect(within(bar()).getByText("Set up")).toBeTruthy();
-    expect(within(bar()).queryByRole("button", { name: "Not now" })).toBeNull();
-    expect(settingsMark()).toBeNull();
-    view.unmount();
-
-    connect({ githubApp: { configured: false, canSetup: true } });
-    mount(pipelines("unconfigured", { githubApp: false, repository: false, runner: false }, { dismissable: false }));
-    await settle();
-    expect(within(bar()).getByText("Not set up")).toBeTruthy();
-    expect(within(bar()).queryByRole("button", { name: "Not now" })).toBeNull();
-    expect(settingsMark()).toBeNull();
-  });
-
-  it("offers no Not now to somebody who already answered it", async () => {
-    const wire = connect({
-      githubApp: { configured: false, canSetup: true },
-      receipts: [{ id: "r-1", changeId: "readiness:pipelines", revision: "optional-1" } as unknown as Row],
-    });
-    mount(pipelines("unconfigured", { githubApp: false, repository: false, runner: true }));
-    await waitFor(() =>
-      expect((wire.fake.query.executeNamed as ReturnType<typeof vi.fn>).mock.calls.some(([name]) => name === "myAttentionReceipts")).toBe(true),
-    );
-    await settle();
-    // The item is still open -- the receipt, not the state, is why.
-    expect(within(bar()).getByText("Partly set up")).toBeTruthy();
-    expect(within(bar()).queryByRole("button", { name: "Not now" })).toBeNull();
-    expect(settingsMark()).toBeNull();
-    expect(wire.acknowledged).toEqual([]);
   });
 
   it("holds what came back from GitHub beside the app's stop, and asks again", async () => {

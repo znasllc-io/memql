@@ -53,8 +53,6 @@ describe("the manifest", () => {
   });
 
   it("announces the unified Sources destination without a second repository or account section", () => {
-    expect(deployables?.attentionChanges?.find(change => change.id === "deployables:saved-sources"))
-      .toMatchObject({ revision: "github-sources-3", sectionId: "sources" });
     expect(DEPLOYABLES_SECTION_IDS).not.toContain("repositories");
     expect(DEPLOYABLES_SECTION_IDS).not.toContain("accounts");
   });

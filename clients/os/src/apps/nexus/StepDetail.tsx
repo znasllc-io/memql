@@ -1,6 +1,4 @@
 import type { ReactNode } from "react";
-
-import { AttentionDestination } from "../../attention/Attention";
 import {
   Chip,
   Chips,
@@ -14,7 +12,6 @@ import {
   formatDuration,
   formatMoment,
 } from "../../kit";
-import { NEXUS_APP_ID } from "./concepts";
 import { formatMoney, formatTokens, type StepRow } from "./rows";
 import { answeredBy, askedFor, overrideFacts, resultLine, type StepVersion } from "./versions";
 import { kindCalledAModel, stepKindMeaning, stepKindWord, stepStatusWord, symptomMeaning, symptomWord } from "./words";
@@ -39,9 +36,6 @@ import { kindCalledAModel, stepKindMeaning, stepKindWord, stepStatusWord, sympto
 // version is named: a version somebody authored is never a recording of an
 // app, and the page must not let it look like one.
 
-/** The unseen-change destination this area is (registry: `nexus:interventions`). */
-export const STEP_VERSIONS_TARGET = "step-versions";
-
 export function StepDetail({
   step,
   versions,
@@ -53,7 +47,6 @@ export function StepDetail({
   selectedVersion,
   session,
   viewerId,
-  reachable,
   continues,
   onOpenRun,
   verdict,
@@ -71,8 +64,6 @@ export function StepDetail({
   selectedVersion: StepVersion | StepRow | null;
   session: boolean;
   viewerId: string;
-  /** The run is one a person can step into: the change marker is acknowledged only then. */
-  reachable: boolean;
   /** More steps follow, so the spine's thread runs on past this disclosure. */
   continues: boolean;
   onOpenRun: (runId: string) => void;
@@ -93,7 +84,7 @@ export function StepDetail({
         <strong>{stepKindWord(step.kind)}</strong> -- {stepKindMeaning(step.kind)}
       </p>
 
-      <AttentionDestination appId={NEXUS_APP_ID} sectionId="runs" target={STEP_VERSIONS_TARGET} visible={reachable}>
+      <>
         {pickable ? (
           <div className="os-nexus-versions" role="radiogroup" aria-label={`Versions of ${step.key}`}>
             <span className="os-nexus-versions-label" aria-hidden>
@@ -147,7 +138,7 @@ export function StepDetail({
             <VersionFacts version={shown} session={session} viewerId={viewerId} />
           )}
         </Panel>
-      </AttentionDestination>
+      </>
 
       {step.dependsOn.length === 0 ? null : (
         <Chips label="Steps this one waited for">

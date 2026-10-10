@@ -250,7 +250,7 @@ variables:
     scope: node
     default: "true"
     optional: true
-    description: "Expose the operator test inbox in MemQL OS. Set false to remove Email from the app roster, restored windows and attention markers. Independent of outbound email transport and Campaigns."
+    description: "Expose the operator test inbox in MemQL OS. Set false to remove Email from the app roster and restored windows. Independent of outbound email transport and Campaigns."
 
   - name: MEMQL_EMAIL_TRANSPORT
     component: email

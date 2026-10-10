@@ -64,7 +64,7 @@ export function RecordRow({ icon, name, secondary, children, state, tone = "mute
   stateTitle?: string;
   /** Marks that belong with the state: a "new" tick, a "Review needed". */
   stateExtra?: ReactNode;
-  /** Sits between the state and the chevron: an attention marker. */
+  /** Sits between the state and the chevron: additional row information. */
   trailing?: ReactNode;
   /** Independent controls, outside the row button and always keyboard reachable. */
   actions?: ReactNode;

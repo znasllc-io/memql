@@ -138,7 +138,6 @@ export interface FakeSeed {
 }
 
 export function fakeConnection(seed: FakeSeed = {}) {
-  const receipts: Row[] = [];
   const read = (rows: Row[] | Error | undefined) =>
     vi.fn(async (_args: Record<string, unknown>) => {
       if (rows instanceof Error) throw rows;
@@ -242,15 +241,6 @@ export function fakeConnection(seed: FakeSeed = {}) {
       forkRun: write(seed.deriveReply),
       replayRun: write(seed.deriveReply),
       decideApproval: write(),
-      // The shared attention service's two calls (src/attention), so a suite
-      // can mount the real AttentionProvider over this connection.
-      myAttentionReceipts: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
-        builtinReply("myAttentionReceipts", receipts),
-      ),
-      acknowledgeAttention: vi.fn(async (args: Record<string, unknown>) => {
-        receipts.push({ id: `${String(args["changeId"])}:${String(args["revision"])}`, ...args });
-        return builtinReply("acknowledgeAttention", []);
-      }),
       executeNamed: vi.fn(async (_name: string, filter: string) => {
         const match = /id==(\S+)/.exec(filter);
         const wanted = match?.[1] ?? "";

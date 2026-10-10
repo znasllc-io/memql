@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
-import { AttentionDestination, AttentionMarker } from "../../attention/Attention";
 import { AddButton } from "../../kit/AddButton";
 import { Button, Caption, Check, Field, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead, formatMoment } from "../../kit";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
@@ -63,14 +62,14 @@ export function NewsletterPanel({ audienceId, accountId, resources }: { audience
   };
   return <Panel label="Storefront signups">
     <div className="os-campaign-detail-head"><Subhead>Storefront signups</Subhead>
-      {!editing && !formFor ? <span><AddButton label="Connect a signup form" onClick={() => edit({})} disabled={blocked || write.busy} /><AttentionMarker appId="campaigns" sectionId="audiences" target="newsletter" /></span> : null}
+      {!editing && !formFor ? <span><AddButton label="Connect a signup form" onClick={() => edit({})} disabled={blocked || write.busy} /></span> : null}
     </div>
     {feed.snapshot.state === "seeding" && !rows.length ? <RecordListSkeleton rows={1} label="Newsletter connections" /> : null}
     {feed.snapshot.error || feedIsBehind(feed.snapshot.state) ? <Notice tone="warn" sentence="Newsletter connections could not be confirmed."><Button onClick={feed.reseed}>Try again</Button></Notice> : null}
     {unavailable.length ? <Notice tone="warn" sentence="Signup resources could not be confirmed."><Button onClick={() => unavailable.forEach(value => value.reseed())}>Try again</Button></Notice> : null}
     {!rows.length && !editing && feed.snapshot.state === "live" ? <Caption>Connect a deployable to collect subscribers and send a welcome email.</Caption> : null}
     {rows.length && !editing && !formFor ? <RecordList>{rows.map(row => <RecordRow key={text(row,"id")} name={siteName(text(row,"siteId"))} state={row.enabled ? "Accepting signups" : "Off"} onOpen={() => edit(row)} actions={<Button onClick={() => { setFormFor(text(row,"id")); setCopied(false); setCopyError(""); }}>Get form</Button>} />)}</RecordList> : null}
-    {editing ? <AttentionDestination appId="campaigns" sectionId="audiences" target="newsletter">
+    {editing ?
       <div className="os-form">
         <Field label="Deployable">{editing.id ? <Caption>{siteName(siteId)}</Caption> : <Select id={`newsletter-site-${audienceId}`} label="Newsletter deployable" value={siteId} onChange={setSiteId}>
           <option value="">Select</option>{siteRows.filter(row => row.id === siteId || !rows.some(binding => binding.siteId === row.id)).map(row => <option key={text(row,"id")} value={text(row,"id")}>{text(row,"title") || text(row,"hostname")}</option>)}
@@ -82,7 +81,7 @@ export function NewsletterPanel({ audienceId, accountId, resources }: { audience
         <Caption>Enabling also turns on this deployable’s public forms. Existing opt-outs stay blocked.</Caption>
         <div className="os-panel-actions"><Button disabled={write.busy} onClick={() => setEditing(null)}>Cancel</Button><Button busy={write.busy} disabled={blocked || !siteId || !templateId || !senderIdentityId || consentText.trim().length < 10} onClick={() => void save()}>Save</Button></div>
       </div>
-    </AttentionDestination> : null}
+     : null}
     {write.error ? <Notice tone="error" sentence="The newsletter was not changed." detail={write.error} /> : null}
     {formFor && rows.find(row => row.id === formFor) ? <div className="os-form">
       <Caption>Add this form to the deployable in VS Code. Include /newsletter/thank-you and /newsletter/problem pages. Replace the form after changing this connection.</Caption>

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, type Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -106,8 +106,7 @@ function connect({
   /** Keeps a document read open, to look at what the click started before it landed. */
   holdDocs?: Promise<unknown>;
 } = {}): Stub {
-  const receipts: Row[] = [];
-  const executeNamed = vi.fn(async (name: string, call: string): Promise<Result> => {
+  const executeNamed = vi.fn(async (name: string, _call: string): Promise<Result> => {
     if (name === "languageStatus") {
       if (hold !== undefined) await hold;
       if (statusError !== "") throw new Error(statusError);
@@ -117,12 +116,6 @@ function connect({
       if (holdDocs !== undefined) await holdDocs;
       if (docsError !== "") throw new Error(docsError);
       return builtinReply(name, [docs(name)]);
-    }
-    if (name === "myAttentionReceipts") return builtinReply("myAttentionReceipts", receipts);
-    if (name === "acknowledgeAttention") {
-      const changeId = /changeId: "([^"]+)"/.exec(call)?.[1] ?? "";
-      const revision = /revision: "([^"]+)"/.exec(call)?.[1] ?? "";
-      receipts.push({ id: changeId + revision, changeId, revision });
     }
     return builtinReply(name, []);
   });
@@ -761,7 +754,7 @@ describe("copying for a model", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The registry, and the attention marker
+// The registry
 // ---------------------------------------------------------------------------
 
 describe("the Language section in the registry", () => {
@@ -777,86 +770,34 @@ describe("the Language section in the registry", () => {
     expect(rolesOpening("app:settings/language")).toEqual(["owner", "developer", "admin"]);
   });
 
-  it("declares the change for people who can reach it", () => {
-    const settings = OS_REGISTRY.apps.find((a) => a.id === "settings")!;
-    expect(settings.attentionChanges).toContainEqual({
-      id: "settings:language",
-      revision: "language-1.0",
-      sectionId: "language",
-      label: "MemQL 1.0 language and deprecations",
-    });
-  });
 });
 
-describe("the unseen-change marker on Language", () => {
-  beforeEach(() => {
-    resetIdsForTest();
-    document.documentElement.removeAttribute("data-theme");
-  });
+describe("navigation without update guides", () => {
+  beforeEach(() => resetIdsForTest());
 
-  function languageNavButton() {
-    const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    return within(nav).getByRole("button", { name: /^Language/ });
-  }
-
-  it("marks the section, survives the window opening elsewhere, and clears where Language is read", async () => {
+  it.each(["desktop", "phone"] as const)("opens Settings on %s without markers or receipt tracking", async (layout) => {
     const stub = connect();
-    renderShell({ access: OWNER });
-    openFromLauncher("Settings");
-
-    // The destination is reachable from the window's own nav, and marked there.
-    const button = languageNavButton();
-    await waitFor(() => expect(within(button).getByRole("img", { name: "Unseen change" })).toBeTruthy());
-    // Opening Settings on another section is an ANCESTOR view: it acknowledges
-    // nothing, which is the rule an ancestor marker must never break.
-    expect(stub.executeNamed.mock.calls.some(([name]) => name === "acknowledgeAttention")).toBe(false);
-
-    fireEvent.click(button);
-    await screen.findByText("This cluster speaks");
-    await waitFor(() =>
-      expect(stub.executeNamed.mock.calls.filter(([name]) => name === "acknowledgeAttention")).toHaveLength(1),
-    );
-    const [, call] = stub.executeNamed.mock.calls.find(([name]) => name === "acknowledgeAttention")!;
-    expect(call).toContain('changeId: "settings:language"');
-    expect(call).toContain('revision: "language-1.0"');
-    await waitFor(() => expect(within(languageNavButton()).queryByRole("img", { name: "Unseen change" })).toBeNull());
+    renderShell({ access: OWNER, layout });
+    if (layout === "desktop") fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
+    // Exact names also catch a marker accidentally returning inside a tile.
+    const tiles = layout === "desktop" ? within(screen.getByRole("dialog", { name: "Launcher" })) : screen;
+    fireEvent.click(tiles.getByRole("button", { name: appTileName("Settings") }));
+    const sections = screen.getByRole("navigation", { name: "Settings sections" });
+    fireEvent.click(within(sections).getByRole("button", { name: "Language" }));
+    await landed();
+    expect(screen.queryByRole("img", { name: "Unseen change" })).toBeNull();
+    expect(document.querySelector(".os-attention-dot, .os-attention-map-dot")).toBeNull();
+    const calls = stub.executeNamed.mock.calls.map(([name]) => name);
+    expect(calls).toContain("languageStatus");
+    expect(calls).not.toContain("myAttentionReceipts");
+    expect(calls).not.toContain("acknowledgeAttention");
   });
 
-  it("is not offered to somebody the section is not open to", async () => {
+  it("keeps inaccessible Settings sections hidden", () => {
     connect();
     renderShell({ access: READER });
     openFromLauncher("Settings");
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(within(nav).queryByRole("button", { name: /^Language/ })).toBeNull();
-  });
-
-  function settingsTile() {
-    fireEvent.click(screen.getByRole("button", { name: "Launcher" }));
-    return within(screen.getByRole("dialog", { name: "Launcher" })).getByRole("button", {
-      name: appTileName("Settings"),
-    });
-  }
-
-  it.each([
-    ["a viewer", READER],
-    ["a member", { ...READER, userId: "u-5", primaryEmail: "member@example.com", role: "writer" }],
-  ])("marks %s's Settings tile for the accessible Ask update", async (_who, access) => {
-    connect();
-    renderShell({ access });
-    const tile = settingsTile();
-    // Language stays hidden, while the new Ask feature is reachable for these roles.
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(within(tile).getByRole("img", { name: "Unseen change" })).toBeTruthy();
-    expect(tile.textContent).toBe("Settings");
-  });
-
-  it("marks the Settings tile for a role the section opens for", async () => {
-    connect();
-    renderShell({ access: OWNER });
-    // The reachable positive: without it, the two cases above pass on a shell
-    // that draws no markers at all.
-    await waitFor(() => expect(within(settingsTile()).getByRole("img", { name: "Unseen change" })).toBeTruthy());
+    expect(within(nav).queryByRole("button", { name: "Language" })).toBeNull();
   });
 });

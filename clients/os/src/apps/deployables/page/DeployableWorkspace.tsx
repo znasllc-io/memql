@@ -20,7 +20,6 @@ import { storeConnection, storeLabel } from "../store/rows";
 import type { PreviewReadiness } from "../preview/rows";
 import { PreviewSection } from "../preview/PreviewSection";
 import { NO_PARTS, type PartsHeld } from "../parts";
-import { AttentionMarker } from "../../../attention/Attention";
 import { useStore } from "../store/useStore";
 import { DeployTargetChoice, type DeployChoice } from "./DeployTargetChoice";
 
@@ -151,12 +150,12 @@ function StorePiece({ storeId, testingId, siteId, onClick, readiness }: { storeI
       : connection.state === "failed"
         ? "The store could not be read"
         : connection.store !== null
-          ? <>{[storeLabel(connection.store), storeId ? "" : "Testing", connection.store.isDevelopment ? "Sandbox" : "", word].filter((part) => part !== "").join(" \u00b7 ")}{state === "unknown" ? <> <InlineSkeleton label="Loading store status" /></> : null}</>
+          ? <>{[storeLabel(connection.store), storeId ? "" : "Testing", connection.store.isDevelopment ? "Sandbox" : "", word].filter((part) => part !== "").join(" \u00b7 ")}{state === "unknown" ?  <InlineSkeleton label="Loading store status" /> : null}</>
           : connection.state === "read"
             ? "Names a store that is not on this cluster"
             : <InlineSkeleton label="Loading store" />;
   const needsSetup = (!storeId && !testingId) || connection.state === "failed" || (connection.state === "read" && state !== null && state !== "connected" && state !== "unknown");
-  return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={needsSetup ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><AttentionMarker appId="deployables" sectionId="deployables" target="shopify-store" /><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
+  return <ActivityTarget target={`deployables:${siteId}:store`}><button type="button" className="deployable-slot" onClick={onClick} data-os-setup={needsSetup ? "" : undefined}><ShoppingBag size={18} aria-hidden /><span><strong>Store</strong><small>{detail}</small></span><ChevronRight size={13} aria-hidden /></button></ActivityTarget>;
 }
 
 export function attemptWord(status: string): string {

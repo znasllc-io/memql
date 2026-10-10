@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
-
-import { useAttention } from "../../attention/Attention";
 import { useSession } from "../../chrome/access";
-import { OPTIONAL_READINESS_TARGET, optionalItemOpen, optionalReadinessId } from "../../chrome/OptionalReadiness";
 import { Caption, ContentSkeleton, Head, InlineSkeleton, Notice, Rail, useAppReach, type Stop } from "../../kit";
-import { ActionBar, type Act } from "../../kit/ActionBar";
+import { ActionBar } from "../../kit/ActionBar";
 import { useOsConnection } from "../../live/connection";
 import { useMachines } from "../../live/machines";
 import { MODULE_DESCRIPTIONS } from "../../system/modules";
-import type { Verdict } from "../../system/readinessFold";
 import type { OsAppProps } from "../../system/registry";
 import { readLaggingInstallations, type LaggingInstallation } from "../deployables/pipelines/calls";
 import { rememberConnectAttempt, returnPathFor, type ConnectReturn } from "../deployables/sources/connectReturn";
@@ -33,7 +29,7 @@ import { PipelineRunners } from "./PipelineRunners";
 // A STANDING READINESS ITEM, NOT A WIZARD
 // ===========================================================================
 // Pipelines is the cluster's first OPTIONAL readiness item: nothing needs it,
-// and an owner may answer "Not now". Its three sub-steps -- the GitHub App, a
+// and it can be set up later. Its three sub-steps -- the GitHub App, a
 // repository whose pipeline is connected, compute -- are the readiness row's
 // own facts (pipelinesReadiness.ts), drawn as the setup rail draws a set of
 // doors: a check for what holds, a held ring for what is the owner's to do
@@ -62,21 +58,8 @@ import { PipelineRunners } from "./PipelineRunners";
 // with a link to exactly that page. A read that failed is said as a failure,
 // never drawn as "none lag".
 //
-// ===========================================================================
-// "NOT NOW" IS THE ONE ACT, AND VISITING IS NOT AN ANSWER
-// ===========================================================================
-// The mark under the gear is published by chrome/OptionalReadiness at shell
-// lifetime, aimed at a destination no window acknowledges on sight. Opening
-// this section therefore leaves it lit; "Not now" writes the viewer's receipt
-// for exactly that change and nothing else, after which the act is absent and
-// the item stays here to come back to. The act is legal exactly while the mark
-// is drawn for this person -- one condition, read from one place.
-
 /** Where GitHub sends an owner back to after registering the app from here. */
 export const PIPELINES_RETURN_PATH = returnPathFor("pipelines", "settings");
-
-/** The receipt "Not now" writes is for this module's change and no other. */
-const PIPELINES_CHANGE_ID = optionalReadinessId("pipelines");
 
 export function PipelinesSection({ intent, consumeIntent }: Pick<OsAppProps, "intent" | "consumeIntent">) {
   const { readiness, access } = useSession();
@@ -88,13 +71,6 @@ export function PipelinesSection({ intent, consumeIntent }: Pick<OsAppProps, "in
   const installations = useLaggingInstallations();
   const fleet = useMachinesAllowingPipelines(access?.userId ?? "");
   const sources = useAppReach("deployables");
-  const notNow = useNotNow(verdict);
-
-  // Rule 12: the act is ABSENT when it is not legal, never disabled.
-  const acts: Act[] = notNow.legal
-    ? [{ label: "Not now", text: true, busy: notNow.busy, onAct: () => void notNow.answer() }]
-    : [];
-
   const openSources =
     sources.canOpenWindows && sources.sections.includes("sources") ? () => sources.open("sources") : null;
   // GITHUB ENDS A REGISTER-AND-INSTALL ON A NEUTRAL RETURN (`?github=installed`)
@@ -133,9 +109,6 @@ export function PipelinesSection({ intent, consumeIntent }: Pick<OsAppProps, "in
           <Caption>The cluster's setup could not be read.</Caption>
         )}
         <LaggingInstallations read={installations} />
-        {notNow.error === "" ? null : (
-          <Notice tone="error" sentence="Your answer was not saved, so Settings stays marked." detail={notNow.error} />
-        )}
       </div>
       {loaded ? (
         <ActionBar
@@ -143,7 +116,7 @@ export function PipelinesSection({ intent, consumeIntent }: Pick<OsAppProps, "in
           detail={reading.detail}
           tone={reading.state === "setUp" ? "live" : "none"}
           live
-          acts={acts}
+          acts={[]}
         />
       ) : null}
     </section>
@@ -382,32 +355,4 @@ function useConnectReturn(
     consumeIntent?.(intent.id);
   }, [intent, consumeIntent, refresh]);
   return returned;
-}
-
-function useNotNow(verdict: Verdict | null) {
-  const { unseen, acknowledge } = useAttention({
-    appId: "settings",
-    sectionId: "pipelines",
-    target: OPTIONAL_READINESS_TARGET,
-  });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  // LEGAL EXACTLY WHILE THE MARK IS DRAWN FOR THIS PERSON: the item is open
-  // and its change is published and unseen. A receipt -- written here or on
-  // another device -- takes the change out of `unseen`, and the act with it.
-  const legal = optionalItemOpen(verdict) && unseen.some((change) => change.id === PIPELINES_CHANGE_ID);
-  const answer = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      // The provider clears the mark only after the write succeeds, and keeps
-      // it on failure -- so a refusal leaves the act in place as the retry.
-      await acknowledge();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return { legal, busy, error, answer };
 }

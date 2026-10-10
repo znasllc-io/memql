@@ -162,11 +162,6 @@ export interface FakeQuery {
   /** Who the owner may lend a machine to. On demand, never live: a virtual
    *  row computed per request, read once each time the share dialog opens. */
   fleetShareDirectory: ReturnType<typeof vi.fn>;
-  // The shared attention service's two calls (src/attention), so a suite can
-  // mount the real AttentionProvider over this connection: the receipts it
-  // seeds from, and the write that records a change as seen.
-  myAttentionReceipts: ReturnType<typeof vi.fn>;
-  acknowledgeAttention: ReturnType<typeof vi.fn>;
 }
 
 // The subscription seam, faithful to the one bit of it a collection uses:
@@ -278,8 +273,6 @@ export function fakeConnection(seed: Partial<Record<keyof FakeQuery, Row[]>> = {
       fleetShareDirectory: vi.fn(async () =>
         builtinReply("fleetShareDirectory", seed.fleetShareDirectory ?? [shareDirectoryRow()]),
       ),
-      myAttentionReceipts: read("myAttentionReceipts"),
-      acknowledgeAttention: vi.fn(async () => rowsResult([])),
     },
     subscriptions: fakeSubscriptions(),
     dispatcher: { sendAndWait: vi.fn() },
