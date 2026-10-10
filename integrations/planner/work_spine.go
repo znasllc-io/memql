@@ -35,6 +35,7 @@ type spineScope struct {
 	acknowledged           bool
 	sectionRefinements     int
 	sectionRefinementError string
+	sectionReviews         int
 	designed               bool
 	emitted                bool
 	validated              bool
@@ -85,6 +86,7 @@ func (s *spineScope) operations() map[string]workflowhost.Operation {
 		"spineClassify":        s.classify,
 		"spineAcknowledge":     s.acknowledge,
 		"spineRefineSections":  s.refineSections,
+		"spineReviewSections":  s.reviewSections,
 		"spinePrepareSections": s.prepareSections,
 		"spineDraft":           s.draft,
 		"spineDesign":          s.design,

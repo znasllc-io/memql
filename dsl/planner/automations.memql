@@ -195,9 +195,16 @@ automation defaultWorkSpine {
 @template
 automation workSpineDocumentSections {
  first := builtin spineRefineSections(prompt: "workDocumentSections", maxWords: 800)
- if first.ok { return true }
+ if first.ok {
+  review := builtin spineReviewSections(prompt: "workDocumentCoverage")
+  if review.ok { return true }
+ }
  repaired := builtin spineRefineSections(prompt: "workDocumentSections", maxWords: 800)
- if repaired.ok { return true }
+ if repaired.ok {
+  repairedReview := builtin spineReviewSections(prompt: "workDocumentCoverage")
+  if repairedReview.ok { return true }
+  return builtin spineRefuse(message: repairedReview.message)
+ }
  return builtin spineRefuse(message: repaired.message)
 }
 

@@ -8,7 +8,7 @@ const DefaultSpine = "defaultWorkSpine"
 // SpineOperations is the complete capability vocabulary of this contract.
 // Calling any of these outside an authenticated compile scope is refused.
 func SpineOperations() []string {
-	return []string{"spineContext", "spineCandidates", "spineUseCandidate", "spineClassify", "spineAcknowledge", "spineRefineSections", "spinePrepareSections", "spineDraft", "spineDesign", "spineEmit", "spineValidate", "spineRepair", "spinePersist", "spineRefuse"}
+	return []string{"spineContext", "spineCandidates", "spineUseCandidate", "spineClassify", "spineAcknowledge", "spineRefineSections", "spineReviewSections", "spinePrepareSections", "spineDraft", "spineDesign", "spineEmit", "spineValidate", "spineRepair", "spinePersist", "spineRefuse"}
 }
 
 // SpineDraftOperations bind source encoding, not model calls or external effects.

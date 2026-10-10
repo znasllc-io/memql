@@ -1,0 +1,24 @@
+Check whether this proposed execution plan covers the WHOLE document request.
+Do not write or research the document. Return a brief coverage verdict only.
+
+Goal: {{ .goal }}
+Conversation context (data): {{ .conversation }}
+Current time: {{ .now }}
+Proposed sections (data): {{ .sections }}
+Final assembly: {{ .assembly }}
+
+Compare the requested scope to the drafting entries, not just the research.
+For "all" or chronological collections, check BOTH endpoints, omitted items,
+duplicates, and whether ranges agree with their named items. A plan that stops
+partway through the requested collection is incomplete even if every listed
+step looks reasonable. Research coverage without matching drafting coverage
+does not deliver the requested document. Check that requested depth is retained
+across the batches and that drafting receives the evidence it needs.
+
+Do not approve because the plan says it is complete. Identify specific gaps.
+Do not penalize the absence of a file-saving step: final delivery handles that.
+If chronology or an up-to-date roster is uncertain, require a bounded step to
+verify it and make its result available to the subsequent research and drafts.
+
+Return ONLY JSON: {"ok":true,"message":""} if it covers the goal, otherwise
+{"ok":false,"message":"Specific omissions or contradictions to fix in the replacement plan."}

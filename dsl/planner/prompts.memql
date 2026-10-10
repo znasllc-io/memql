@@ -74,6 +74,17 @@ prompt workDocumentSections {
  now string!
 }
 
+/// A short independent scope check before a document plan starts spending drafting calls.
+@level("fast")
+@templateFile("prompts/workDocumentCoverage.tmpl")
+prompt workDocumentCoverage {
+ goal string!
+ conversation string
+ sections string!
+ assembly string!
+ now string!
+}
+
 /// One bounded repair of missing acknowledgment prose, never a second classification.
 @level("fast")
 @templateFile("prompts/workAcknowledgement.tmpl")

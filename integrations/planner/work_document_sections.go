@@ -99,7 +99,64 @@ func parseDocumentSections(response any, maxWords int) ([]sectionSpec, string, e
 			return nil, "", fmt.Errorf("each document section needs a unique output name: %q", output)
 		}
 		outputs[output] = true
+		// The estimate is part of the selected output contract. Carry it to
+		// execution even when the model omitted it from its instruction prose.
+		section.Instruction += fmt.Sprintf("\nOutput limit for this step: %d words total.", size.EstimatedWords)
 		sections = append(sections, section)
 	}
 	return sections, plan.Assembly, nil
+}
+
+// reviewSections is one metered assessment; the DSL decides whether to refine
+// again or stop. Its verdict is evidence, not authority to bypass validation.
+func (s *spineScope) reviewSections(ctx context.Context, args map[string]any) (any, error) {
+	if !s.classified || s.prepared || s.sectionRefinements == 0 || s.sectionReviews >= s.sectionRefinements {
+		return nil, fmt.Errorf("document coverage review requires a new refinement before preparation")
+	}
+	prompt := strings.TrimSpace(getString(args, "prompt"))
+	if prompt == "" {
+		return nil, fmt.Errorf("document coverage review requires a prompt")
+	}
+	if err := s.modelAllowed(); err != nil {
+		return nil, err
+	}
+	s.sectionReviews++
+	sections, err := json.Marshal(s.decision.Sections)
+	if err != nil {
+		return nil, err
+	}
+	conversation, err := conversationPreview(s.conversation)
+	if err != nil {
+		return nil, err
+	}
+	callCtx, cancel := context.WithTimeout(airoute.WithCallPurpose(ctx, "Checking document coverage", 0), time.Minute)
+	defer cancel()
+	response, err := s.loop.engine.InvokeAI(systemActorContext(callCtx), prompt, map[string]any{
+		"goal": s.req.Statement, "conversation": conversation, "sections": string(sections), "assembly": s.decision.Assembly,
+		"now": time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return nil, err
+	}
+	var raw []byte
+	if text, ok := response.(string); ok {
+		raw = []byte(text)
+	} else {
+		raw, err = json.Marshal(response)
+	}
+	var verdict struct {
+		OK      *bool
+		Message string
+	}
+	if err != nil || json.Unmarshal(extractJSONObject(raw), &verdict) != nil || verdict.OK == nil {
+		s.sectionRefinementError = "Document coverage review returned no valid verdict; verify every requested item and both chronological endpoints."
+	} else if !*verdict.OK {
+		s.sectionRefinementError = strings.TrimSpace(verdict.Message)
+		if s.sectionRefinementError == "" {
+			s.sectionRefinementError = "The document plan does not cover the full request."
+		}
+	} else {
+		s.sectionRefinementError = ""
+	}
+	return map[string]any{"ok": s.sectionRefinementError == "", "message": s.sectionRefinementError}, nil
 }

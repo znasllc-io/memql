@@ -37,6 +37,9 @@ func TestDocumentSectionsRefuseMultipleDraftsHiddenInOneCall(t *testing.T) {
 			if test.valid && len(sections) != 2 {
 				t.Fatalf("lost independent steps: %+v", sections)
 			}
+			if test.valid && !strings.Contains(sections[0].Instruction, "Output limit for this step: 650 words total.") {
+				t.Fatal("the planning output limit never reaches the execution step")
+			}
 			encoded, _ := json.Marshal(plan)
 			_, _, fencedErr := parseDocumentSections("```json\n"+string(encoded)+"\n```", 800)
 			if (fencedErr == nil) != test.valid {
@@ -49,12 +52,19 @@ func TestDocumentSectionsRefuseMultipleDraftsHiddenInOneCall(t *testing.T) {
 type documentSectionsEngine struct {
 	*countingCompileEngine
 	answers []any
+	reviews []any
 }
 
 func (e *documentSectionsEngine) InvokeAI(ctx context.Context, name string, data map[string]any) (any, error) {
 	response, err := e.countingCompileEngine.InvokeAI(ctx, name, data)
 	if name == "workDocumentSections" && len(e.answers) > 0 {
 		response, e.answers = e.answers[0], e.answers[1:]
+	}
+	if name == "workDocumentCoverage" {
+		response = map[string]any{"ok": true, "message": ""}
+		if len(e.reviews) > 0 {
+			response, e.reviews = e.reviews[0], e.reviews[1:]
+		}
 	}
 	return response, err
 }
@@ -67,14 +77,19 @@ func TestDocumentDecompositionRunsOnPinnedSpineAndMetersRepairs(t *testing.T) {
 	for _, test := range []struct {
 		name          string
 		answers       []any
+		reviews       []any
 		budget, calls int
 		valid         bool
 	}{
-		{"valid", []any{plan}, 0, 2, true},
-		{"repair invalid plan", []any{map[string]any{}, plan}, 0, 3, true},
-		{"refuse two invalid plans", []any{map[string]any{}, map[string]any{}}, 0, 3, false},
-		{"budget before refinement", []any{plan}, 1, 1, false},
-		{"budget before repair", []any{map[string]any{}, plan}, 2, 2, false},
+		{"valid", []any{plan}, nil, 0, 3, true},
+		{"repair invalid plan", []any{map[string]any{}, plan}, nil, 0, 4, true},
+		{"refuse two invalid plans", []any{map[string]any{}, map[string]any{}}, nil, 0, 3, false},
+		{"budget before refinement", []any{plan}, nil, 1, 1, false},
+		{"budget before review", []any{plan}, nil, 2, 2, false},
+		{"budget before repair", []any{map[string]any{}, plan}, nil, 2, 2, false},
+		{"repair missing coverage", []any{plan, plan}, []any{map[string]any{"ok": false, "message": "The final chronological batch is missing"}}, 0, 5, true},
+		{"refuse unresolved coverage", []any{plan, plan}, []any{map[string]any{"ok": false, "message": "Incomplete"}, map[string]any{"ok": false, "message": "Still incomplete"}}, 0, 5, false},
+		{"malformed verdict is not approval", []any{plan, plan}, []any{map[string]any{}, map[string]any{}}, 0, 5, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			req := compileReq()
@@ -91,7 +106,7 @@ func TestDocumentDecompositionRunsOnPinnedSpineAndMetersRepairs(t *testing.T) {
 			engine := &documentSectionsEngine{countingCompileEngine: &countingCompileEngine{triage: map[string]any{
 				"complexity": "moderate", "requiresFile": true, "fileName": "profiles", "fileFormat": "markdown", "sectionable": true,
 				"sections": []map[string]any{{"label": "Oversized sketch", "instruction": "Write all profiles", "outputs": []string{"allDrafts"}}},
-			}}, answers: test.answers}
+			}}, answers: test.answers, reviews: test.reviews}
 			out, err := (&PlannerAgentLoop{engine: engine}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
 			if (err == nil) != test.valid || out.ModelCalls != test.calls || len(engine.aiCalls) != test.calls {
 				t.Fatalf("out=%+v error=%v calls=%v", out, err, engine.aiCalls)
@@ -111,8 +126,15 @@ func TestDocumentDecompositionRunsOnPinnedSpineAndMetersRepairs(t *testing.T) {
 					}
 				}
 			}
-			if len(engine.aiData) > 2 && engine.aiData[2]["previousError"] == "" {
-				t.Fatal("repair lost diagnostic")
+			refinements := 0
+			for index, name := range engine.aiCalls {
+				if name != "workDocumentSections" {
+					continue
+				}
+				refinements++
+				if refinements > 1 && engine.aiData[index]["previousError"] == "" {
+					t.Fatal("repair lost diagnostic")
+				}
 			}
 		})
 	}
