@@ -143,3 +143,12 @@ func (r *Replier) workCallContext(ctx context.Context) (context.Context, context
 	}
 	return ctx, func() {}, nil
 }
+
+// Inspect the attempt before its cleanup cancels it. A run budget refusal is
+// terminal for this turn; transient provider errors still use ordinary retries.
+func (r *Replier) workCallFailure(ctx context.Context) error {
+	if guard, ok := r.engine.(interface{ WorkCallFailure(context.Context) error }); ok {
+		return guard.WorkCallFailure(ctx)
+	}
+	return nil
+}

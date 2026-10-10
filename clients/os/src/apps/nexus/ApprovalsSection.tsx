@@ -9,6 +9,7 @@ import {
   CopyValue,
   Fact,
   Facts,
+  Field,
   Head,
   Input,
   LiveList,
@@ -162,9 +163,11 @@ export function ApprovalsSection({
   }, [selectedApprovalId]);
 
   const isFeedback = selected?.kind === "feedback";
+  const budget = budgetControl(selected);
+  const budgetAnswer = budgetApprovalAnswer(selected, freeText);
   const answerInAsk = isFeedback && ["text", "choice", "multi"].includes(String(selected?.subject?.kind)) && onAnswerInAsk;
   const hasOptions = (selected?.options.length ?? 0) > 0;
-  const answerReady = isFeedback
+  const answerReady = budget !== null ? budgetAnswer !== undefined : isFeedback
     ? hasOptions
       ? selected?.subject?.kind === "multi" ? choices.length > 0 : choice !== ""
       : freeText.trim() !== ""
@@ -191,15 +194,15 @@ export function ApprovalsSection({
       // feed, so its page and its row follow the answer without a re-read.
       const documentReview = selected.subject?.reviewType === "library-document"
         ? { requestId: String(selected.subject.requestId), proposalHash: selected.artifactHash } : undefined;
-      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision, undefined, documentReview);
+      const decideIt = (decision: "approved" | "rejected") => void decide.decide(selected.id, decision, decision === "approved" ? budgetAnswer : undefined, documentReview);
       acts.push({
         label: labels.reject,
         busy: decide.deciding === idTail(selected.id),
         ariaLabel: `${labels.reject === "Reject" ? "Reject this" : labels.reject}: ${approvalRejectMeaning(selected.kind)}`,
         onAct: () => decideIt("rejected"),
       });
-      acts.push({
-        label: labels.approve,
+      if (answerReady) acts.push({
+        label: budget !== null ? "Raise limit" : labels.approve,
         tone: "primary",
         busy: decide.deciding === idTail(selected.id),
         onAct: () => decideIt("approved"),
@@ -277,7 +280,7 @@ export function ApprovalsSection({
           // succeed should not be offered -- but an empty bar with no
           // account of itself reads as something nobody built.
           detail={
-            answerInAsk ? undefined : isFeedback && !answerReady
+            budget !== null && !answerReady ? "Enter a new total limit above the recorded usage." : answerInAsk ? undefined : isFeedback && !answerReady
               ? hasOptions
                 ? "pick an answer above to send it"
                 : "write an answer above to send it"
@@ -331,6 +334,25 @@ export function answerPayload(
   // blank answer to a question somebody did answer.
   if (choice !== "") return { value: choice };
   return { text: freeText.trim() };
+}
+
+const budgetControls: Record<string, { label: string; scale: number; whole: boolean }> = {
+  wallClock: { label: "New total time (minutes)", scale: 60_000, whole: true },
+  modelCalls: { label: "New total model calls", scale: 1, whole: true },
+  tokens: { label: "New total paid tokens", scale: 1, whole: true },
+  cost: { label: "New total cost (USD)", scale: 1, whole: false },
+  retries: { label: "New total retries", scale: 1, whole: true },
+  events: { label: "New total events", scale: 1, whole: true },
+};
+function budgetControl(approval: ApprovalRow | null) {
+  return approval?.kind === "budget" ? budgetControls[String(approval.subject?.ceiling)] ?? null : null;
+}
+export function budgetApprovalAnswer(approval: ApprovalRow | null, value: string): { newLimit: number } | undefined {
+  const control = budgetControl(approval);
+  if (control === null || value.trim() === "") return undefined;
+  const newLimit = Number(value) * control.scale;
+  if (!Number.isFinite(newLimit) || newLimit <= 0 || newLimit > Number.MAX_SAFE_INTEGER || (control.whole && !Number.isInteger(newLimit))) return undefined;
+  return { newLimit };
 }
 
 function ApprovalLine({
@@ -396,6 +418,7 @@ function ApprovalDetail({
   onOpenProcedure?: (constructId: string) => void;
 }) {
   const isFeedback = approval.kind === "feedback";
+  const budget = budgetControl(approval);
   const shutDoors = doorsFromSubject(approval);
   const promotion = promotionSubject(approval);
   // The procedure a promotion names, once the catalog holds it -- which is
@@ -425,6 +448,12 @@ function ApprovalDetail({
         {/* SAID ONCE: a promotion's question already says what promoting does. */}
         {approval.kind === PROCEDURE_PROMOTION || isFeedback ? null : <Caption>{approvalKindMeaning(approval.kind)}</Caption>}
 
+        {budget === null ? null : <>
+          <Field label={budget.label}>
+            <Input id="work-approval-budget" label={budget.label} value={freeText} onChange={onFreeText} />
+          </Field>
+          <Caption>Total allowance, including work already completed. Resumes from saved progress.</Caption>
+        </>}
         {isFeedback ? (
           approval.subject?.kind === "multi" ? (
             <div role="group" aria-label="Your answers">{approval.options.map(option => <Check key={option.value} checked={choices.includes(option.value)} onChange={checked => onChoices(checked ? [...choices, option.value] : choices.filter(value => value !== option.value))}>{option.label}</Check>)}</div>

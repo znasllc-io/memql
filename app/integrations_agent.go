@@ -229,6 +229,9 @@ func (r *replierTurnRunner) RunTurn(ctx context.Context, msg *memqlv1.AgentGener
 	ctx = r.engine.ObserveWorkCalls(ctx, cancel)
 	result, err := r.replier.Handle(ctx, msg, sink)
 	if cause := context.Cause(ctx); cause != nil {
+		if budgetErr := r.engine.WorkCallFailure(ctx); budgetErr != nil {
+			return "", budgetErr
+		}
 		return "", cause
 	}
 	if err != nil {

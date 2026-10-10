@@ -143,3 +143,42 @@ func TestAgentModelDeadlineCanGrowWithinTheOriginalToolLoop(t *testing.T) {
 		}
 	}
 }
+
+func TestExpiredWorkDeadlineReturnsTypedBudgetRefusalBeforeAnotherProviderAttempt(t *testing.T) {
+	guard := &deadlineGuard{at: time.Now().Add(-time.Second), fakeGuard: fakeGuard{
+		breach: &RunCeilingBreach{Ceiling: "wallClock", Limit: "2700000ms", Actual: "2700001ms"},
+	}}
+	e := &MemQLEngine{modelSeam: &modelSeam{ceilings: guard}}
+	ctx := common.ContextWithRun(context.Background(), aRun())
+	_, stop, err := e.ContextWithWorkCallDeadline(ctx)
+	defer stop()
+	var breach *RunCeilingError
+	if !errors.As(err, &breach) || breach.Breach.Ceiling != "wallClock" {
+		t.Fatalf("expired run became a provider timeout: %v", err)
+	}
+}
+
+func TestInFlightRunDeadlineResolvesCurrentSpendAndKeepsProviderTimeoutsSeparate(t *testing.T) {
+	guard := &deadlineGuard{at: time.Now().Add(20 * time.Millisecond)}
+	e := &MemQLEngine{modelSeam: &modelSeam{ceilings: guard, journal: newCountingJournal()}}
+	ctx := common.ContextWithRun(context.Background(), aRun())
+	_, err := e.modelSeam.serve(ctx, common.ModelRequest{}, "deadline", func(call context.Context) (modelCallOutcome, error) {
+		<-call.Done()
+		guard.breach = &RunCeilingBreach{Ceiling: "wallClock", Limit: "2700000ms", Actual: "2700001ms"}
+		return modelCallOutcome{}, call.Err()
+	})
+	var breach *RunCeilingError
+	if !errors.As(err, &breach) || breach.RunId != aRun().RunId || len(guard.charges) != 1 {
+		t.Fatalf("in-flight deadline did not park with its charged attempt: %v charges=%d", err, len(guard.charges))
+	}
+	provider, stop := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer stop()
+	if err := e.WorkCallFailure(provider); err != nil {
+		t.Fatalf("provider timeout was relabeled as the run's deadline: %v", err)
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := e.WorkCallFailure(cancelled); err != nil {
+		t.Fatalf("user cancellation was relabeled: %v", err)
+	}
+}

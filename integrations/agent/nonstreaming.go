@@ -392,8 +392,12 @@ BackgroundLoop:
 			}
 			callCtx, cancel := context.WithTimeout(budgetCtx, reqTimeout)
 			stepResult, stepErr = provider.CallChatWithTools(callCtx, messages, tools)
+			budgetFailure := r.workCallFailure(callCtx)
 			cancel()
 			stopBudget()
+			if budgetFailure != nil {
+				return nil, budgetFailure
+			}
 			if stepErr == nil {
 				break
 			}

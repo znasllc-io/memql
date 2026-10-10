@@ -259,6 +259,22 @@ Verdict: no loop lacks a per-turn terminal condition. The agent / engine tool
 loops have no native cross-turn cap and rely on Layer 0 (process) and Layer 4
 (per plan-lineage / work run) for cumulative bounding.
 
+### Run time limits and approved continuation
+
+A run's wall-clock deadline is a budget boundary, including when it interrupts
+an active model call. It parks the saved run on a budget approval rather than
+retrying an expired allowance as a network timeout. Ordinary provider timeouts
+retain their separate recovery behavior.
+
+Nexus budget approvals accept a new **total** limit. The decision raises only
+that ceiling and preserves spent counters and completed steps. An explicit
+approval also supersedes the smaller workload estimate for that ceiling;
+`ceilings.workloadOverrides` records these approved values. Every replica
+intersects them with the current declared limits, so an older approval cannot
+undo a later tighter limit. Waiting for human input does not consume active
+work time. Continuing a long goal uses durable checkpoints and renewed explicit
+allowances, never an unbounded model call or a reset of prior usage.
+
 ## Layer 4 — subscription spend, counted but not charged (memql#4362)
 
 A Task delegated to a local app (epic memql#4358) spends **real tokens that

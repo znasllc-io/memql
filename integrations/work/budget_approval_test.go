@@ -47,7 +47,7 @@ func TestBudgetApprovalRaisesOnlyItsNamedCeilingBeforeResuming(t *testing.T) {
 	require.Equal(t, auth.OriginInternal, write.Origin)
 	require.Equal(t, "u-alice", write.Actor)
 	args := write.Args(t)
-	require.Equal(t, map[string]any{"maxModelCalls": float64(64), "costCeiling": 0.5, "maxRetries": float64(3)}, args["ceilings"])
+	require.Equal(t, map[string]any{"maxModelCalls": float64(64), "costCeiling": 0.5, "maxRetries": float64(3), "workloadOverrides": map[string]any{"maxModelCalls": float64(64)}}, args["ceilings"])
 	version, err := time.Parse(time.RFC3339Nano, args["versionTime"].(string))
 	require.NoError(t, err)
 	require.True(t, version.After(testNow.Add(time.Hour)))

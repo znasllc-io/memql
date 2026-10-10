@@ -1905,6 +1905,12 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   voice and never paraphrased: the rule id is where somebody goes to change the
   policy.
 
+  Budget approvals require a new total allowance before **Raise limit** is
+  available. Time is entered in minutes and sent as milliseconds; count limits
+  stay whole numbers. The backend validates usage, preserves all other limits
+  and counters, and resumes the saved run. A human-approved allowance overrides
+  the workload estimate only for that named limit, across replicas.
+
   **`answer` is the one contract this window guesses at.** It is declared
   `object` on both the concept and the builtin and epic A2 owns the executor
   that reads it, so `answerPayload` sends back the option the approval itself
