@@ -8,6 +8,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 	workstate "github.com/znasllc-io/memql/component/work"
 )
 
@@ -42,6 +45,7 @@ func revisionPassages(captured map[string]any) ([]revisionPassage, error) {
 	}
 	lines := strings.Split(strings.ReplaceAll(asString(captured["content"]), "\r\n", "\n"), "\n")
 	var passages []revisionPassage
+	var sectionEnds map[int]int
 	for _, comment := range comments {
 		anchor, err := validateReviewAnchor(comment["anchor"])
 		if err != nil {
@@ -59,6 +63,16 @@ func revisionPassages(captured map[string]any) ([]revisionPassage, error) {
 		end, _ := intArg(anchor["endLine"])
 		if end > len(lines) || strings.Join(lines[start:end], "\n") != anchor["sourceQuote"] {
 			return nil, fmt.Errorf("feedback no longer matches the captured source")
+		}
+		// A section action anchors to its heading, but its evidence context is
+		// the complete section. Keep ordinary text selections narrow.
+		if anchor["scope"] == "section" {
+			if sectionEnds == nil {
+				sectionEnds = revisionSectionEnds(lines)
+			}
+			if sectionEnd, ok := sectionEnds[start]; ok {
+				end = max(end, sectionEnd)
+			}
 		}
 		kind := "feedback"
 		if anchor["intent"] == "extend" {
@@ -82,6 +96,37 @@ func revisionPassages(captured map[string]any) ([]revisionPassage, error) {
 		merged[n].Source = strings.Join(lines[merged[n].StartLine:merged[n].EndLine], "\n")
 	}
 	return merged, nil
+}
+
+// Source-line boundaries come from parsed top-level headings, so fenced code,
+// nested quotations and setext underline syntax cannot impersonate a boundary.
+func revisionSectionEnds(lines []string) map[int]int {
+	offsets := make([]int, len(lines))
+	for n := 1; n < len(lines); n++ {
+		offsets[n] = offsets[n-1] + len(lines[n-1]) + 1
+	}
+	source := []byte(strings.Join(lines, "\n"))
+	root := goldmark.DefaultParser().Parse(text.NewReader(source))
+	type heading struct{ line, level int }
+	stack := []heading{}
+	ends := map[int]int{}
+	for node := root.FirstChild(); node != nil; node = node.NextSibling() {
+		h, ok := node.(*ast.Heading)
+		if !ok || h.Lines().Len() == 0 {
+			continue
+		}
+		start := h.Lines().At(0).Start
+		line := sort.Search(len(offsets), func(n int) bool { return offsets[n] > start }) - 1
+		for len(stack) > 0 && stack[len(stack)-1].level >= h.Level {
+			ends[stack[len(stack)-1].line] = line
+			stack = stack[:len(stack)-1]
+		}
+		stack = append(stack, heading{line, h.Level})
+	}
+	for _, h := range stack {
+		ends[h.line] = len(lines)
+	}
+	return ends
 }
 
 // A selection anchors the person's intent, not the possible destinations of a

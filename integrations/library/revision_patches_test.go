@@ -200,3 +200,32 @@ func TestRevisionEmptyAnchorInBlankDocument(t *testing.T) {
 		}
 	}
 }
+
+func TestRevisionSectionResearchIncludesBodyAndNestedHeadings(t *testing.T) {
+	for _, heading := range []string{"## Selected", "Selected\n--------"} {
+		source := "# Book\n\n" + heading + "\n\nSelected claim.\n\n### Child\n\nChild evidence.\n\n```markdown\n## Not a boundary\n```\n\n> ## Quoted heading\n> Quoted evidence.\n\n## Unrelated\n\nPrivate unrelated chapter.\n"
+		captured := capturedRevision(source, "Selected", 2, 3)
+		anchor := captured["comments"].([]any)[0].(map[string]any)["anchor"].(map[string]any)
+		anchor["scope"] = "section"
+		passages, err := revisionPassages(captured)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(passages) != 1 {
+			t.Fatalf("passages=%v", passages)
+		}
+		for _, want := range []string{"Selected claim.", "Child evidence.", "## Not a boundary", "Quoted evidence."} {
+			if !strings.Contains(passages[0].Source, want) {
+				t.Fatalf("section lost %q: %v", want, passages)
+			}
+		}
+		if strings.Contains(passages[0].Source, "Unrelated") {
+			t.Fatal("section research leaked the next chapter")
+		}
+		delete(anchor, "scope")
+		narrow, err := revisionPassages(captured)
+		if err != nil || strings.Contains(narrow[0].Source, "Selected claim.") {
+			t.Fatalf("ordinary heading selection expanded: %v %v", narrow, err)
+		}
+	}
+}
