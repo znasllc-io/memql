@@ -10,6 +10,32 @@ import (
 	"github.com/znasllc-io/memql/core/airoute"
 )
 
+// These schemas constrain the wire format. The scoped host still validates
+// dependencies and budgets; the DSL chooses the planning and review policy.
+func documentSectionsSchema(maxWords int) json.RawMessage {
+	return json.RawMessage(fmt.Sprintf(`{
+ "type":"object","additionalProperties":false,"required":["assembly","sections"],
+ "properties":{
+  "assembly":{"type":"string"},
+  "sections":{"type":"array","minItems":2,"maxItems":%d,"items":{
+   "type":"object","additionalProperties":false,
+   "required":["label","instruction","inputs","outputs","estimatedWords"],
+   "properties":{
+    "label":{"type":"string"},"instruction":{"type":"string"},
+    "inputs":{"type":"array","items":{"type":"string"}},
+    "outputs":{"type":"array","minItems":1,"maxItems":1,"items":{"type":"string"}},
+    "estimatedWords":{"type":"integer","minimum":1,"maximum":%d}
+   }
+  }}
+ }
+}`, maxSectionFanout, maxWords))
+}
+
+var documentCoverageSchema = json.RawMessage(`{
+ "type":"object","additionalProperties":false,"required":["ok","message"],
+ "properties":{"ok":{"type":"boolean"},"message":{"type":"string"}}
+}`)
+
 // refineSections turns the routing sketch into independently journaled units.
 // DSL selects the policy and word budget; the scoped operation enforces bounded
 // model attempts, the declared output sizes and the unchanged file contract.
@@ -43,11 +69,11 @@ func (s *spineScope) refineSections(ctx context.Context, args map[string]any) (a
 	}
 	callCtx, cancel := context.WithTimeout(airoute.WithCallPurpose(ctx, "Planning document sections", 0), time.Duration(config.TimeoutSeconds)*time.Second)
 	defer cancel()
-	response, err := s.loop.engine.InvokeAI(systemActorContext(callCtx), config.Prompt, map[string]any{
+	response, err := s.loop.engine.InvokeAIStructured(systemActorContext(callCtx), config.Prompt, map[string]any{
 		"goal": s.req.Statement, "conversation": conversation, "sketch": string(sketch), "inputKeys": s.keys,
 		"maxWords": config.MaxWords, "maxSections": maxSectionFanout, "requiresResearch": s.decision.RequiresResearch,
 		"previousError": s.sectionRefinementError, "now": time.Now().UTC().Format(time.RFC3339),
-	})
+	}, "documentSections", documentSectionsSchema(config.MaxWords), true)
 	if err != nil {
 		return s.documentPlanningFailure(ctx, err)
 	}
@@ -147,19 +173,14 @@ func (s *spineScope) reviewSections(ctx context.Context, args map[string]any) (a
 	}
 	callCtx, cancel := context.WithTimeout(airoute.WithCallPurpose(ctx, "Checking document coverage", 0), time.Duration(config.TimeoutSeconds)*time.Second)
 	defer cancel()
-	response, err := s.loop.engine.InvokeAI(systemActorContext(callCtx), config.Prompt, map[string]any{
+	response, err := s.loop.engine.InvokeAIStructured(systemActorContext(callCtx), config.Prompt, map[string]any{
 		"goal": s.req.Statement, "conversation": conversation, "sections": string(sections), "assembly": s.decision.Assembly,
 		"now": time.Now().UTC().Format(time.RFC3339),
-	})
+	}, "documentCoverage", documentCoverageSchema, true)
 	if err != nil {
 		return s.documentPlanningFailure(ctx, err)
 	}
-	var raw []byte
-	if text, ok := response.(string); ok {
-		raw = []byte(text)
-	} else {
-		raw, err = json.Marshal(response)
-	}
+	raw := []byte(response)
 	var verdict struct {
 		OK      *bool
 		Message string

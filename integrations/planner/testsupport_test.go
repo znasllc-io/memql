@@ -11,6 +11,7 @@ package planner
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -314,3 +315,18 @@ func waitFor(t *testing.T, cond func() bool) {
 type discardWriter struct{}
 
 func (discardWriter) Write(p []byte) (int, error) { return len(p), nil }
+
+func (f *fakeEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	return structuredTestResponse(f.InvokeAI(ctx, name, data))
+}
+
+func structuredTestResponse(response any, err error) (string, error) {
+	if err != nil {
+		return "", err
+	}
+	if text, ok := response.(string); ok {
+		return text, nil
+	}
+	raw, err := json.Marshal(response)
+	return string(raw), err
+}

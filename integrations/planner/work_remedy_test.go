@@ -361,3 +361,7 @@ func TestRepairRequestsAGuidedRerunOfTheFailedStep(t *testing.T) {
 		t.Fatalf("a run that moved on was asked about (%v)", moved.asked)
 	}
 }
+
+func (e *replanEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	return structuredTestResponse(e.InvokeAI(ctx, name, data))
+}

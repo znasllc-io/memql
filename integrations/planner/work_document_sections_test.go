@@ -3,6 +3,7 @@ package planner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -51,8 +52,9 @@ func TestDocumentSectionsRefuseMultipleDraftsHiddenInOneCall(t *testing.T) {
 
 type documentSectionsEngine struct {
 	*countingCompileEngine
-	answers []any
-	reviews []any
+	answers         []any
+	reviews         []any
+	structuredCalls []string
 }
 
 func TestDocumentSectionsPreserveEvidenceDependencies(t *testing.T) {
@@ -145,6 +147,9 @@ func TestDocumentDecompositionRunsOnPinnedSpineAndMetersRepairs(t *testing.T) {
 					}
 				}
 			}
+			if len(engine.structuredCalls) != test.calls-1 {
+				t.Fatalf("planning or review bypassed structured output: calls=%v structured=%v", engine.aiCalls, engine.structuredCalls)
+			}
 			refinements := 0
 			for index, name := range engine.aiCalls {
 				if name != "workDocumentSections" && name != "workDocumentSectionsRepair" {
@@ -166,4 +171,12 @@ func TestDocumentPlanningFailurePreservesRunCancellation(t *testing.T) {
 	if result != nil || err != context.Canceled {
 		t.Fatalf("canceled run must stop rather than request a repair: result=%v error=%v", result, err)
 	}
+}
+
+func (e *documentSectionsEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	if !strict || !json.Valid(schema) || (schemaName != "documentSections" && schemaName != "documentCoverage") {
+		return "", fmt.Errorf("missing strict planning schema")
+	}
+	e.structuredCalls = append(e.structuredCalls, name)
+	return structuredTestResponse(e.InvokeAI(ctx, name, data))
 }

@@ -464,6 +464,20 @@ func (e *spineMeteredEngine) InvokeAI(ctx context.Context, name string, data map
 	}
 	return result, err
 }
+func (e *spineMeteredEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := e.scope.modelAllowed(); err != nil {
+		return "", err
+	}
+	result, err := e.Engine.InvokeAIStructured(ctx, name, data, schemaName, schema, strict)
+	if err == nil || !memql.IsProviderUnavailable(err) {
+		e.scope.out.ModelCalls++
+	}
+	return result, err
+}
+
 func (e *spineMeteredEngine) InvokeAIChatWithFilteredTools(context.Context, string, map[string]any, []string) (string, error) {
 	return "", fmt.Errorf("Spine compilation cannot open an unmetered tool loop")
 }
