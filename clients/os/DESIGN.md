@@ -23,8 +23,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    its content. Encoded by `kit` `Head` (its `meta` slot carries a quiet
    count or scope note). Counts come from the authorized filtered collection
    only after its read settles; unavailable is not zero.
-   Do not add Refresh or Refresh overview buttons unless the owner explicitly
-   requests them; live surfaces update through their subscriptions.
+   Routine refresh buttons are absent. Use graph subscriptions where supported;
+   otherwise use the shared `AutoRefresh` recovery cadence for read-only data.
+   Pause hidden/offline views, avoid overlapping requests, and cancel stale reads.
+   Explicit probes and writes stay deliberate actions; never repeat them on a timer.
    Creation actions use the shared icon-only `AddButton` (plus), with an
    accessible label and tooltip. Do not replace it with a text button such as
    "Connect GitHub account". A settings page is titled **Settings**; subjects
@@ -40,9 +42,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    default, expanded while being asked, active constraints as removable
    chips beside it. A section never shows filter chrome over no content.
 
-3. **Sort is not a button.** Ordering is quiet text on the list's scope
-   line (`kit` `SortControl`): click swaps, the accessible name says what a
-   click does. The default order stays an app-settings preference.
+3. **Sort is a quiet menu.** `kit` `SortControl` shows the current order, a
+   direction icon and a chevron. Its menu exposes both orders and marks the
+   selected one. The default order stays an app-settings preference.
 
 4. **Micro-preferences live in the app's Settings section.** Show revoked,
    show deactivated, include archived, default sort -- preferences, not

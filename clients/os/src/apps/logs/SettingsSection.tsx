@@ -2,7 +2,7 @@ import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { useCallback, useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, RecordList, RecordRow, Fact, Facts, Head, Notice, Panel, Subhead, roleAdmits, useNow, SetupGroup } from "../../kit";
+import { AutoRefresh, Button, Caption, RecordList, RecordRow, Fact, Facts, Head, Notice, Panel, Subhead, roleAdmits, useNow, SetupGroup } from "../../kit";
 import { accessAdmits } from "../../system/registry";
 import { formatBytes, formatFreshness, formatMoment } from "../../kit/format";
 import { boolOr, flatten } from "../../kit/rows";
@@ -144,6 +144,7 @@ export function LogsSettingsSection({
   const [daysError, setDaysError] = useState("");
   const [daysReadAt, setDaysReadAt] = useState<Date | null>(null);
   const [generation, setGeneration] = useState(0);
+  const [readingStatus, setReadingStatus] = useState(false);
   const [restoring, setRestoring] = useState("");
   const [restoreNote, setRestoreNote] = useState<{ day: string; tone: "info" | "error"; sentence: string; detail?: string } | null>(null);
 
@@ -155,6 +156,9 @@ export function LogsSettingsSection({
     }
     const controller = new AbortController();
     let live = true;
+    let remaining = 2;
+    setReadingStatus(true);
+    const settled = () => { if (live && --remaining === 0) setReadingStatus(false); };
     // Each read settles on its own: the archive list can refuse (no container
     // configured is a row that says so, but a refusal is still possible) while
     // the status read succeeds, and one Promise.all would let either decide
@@ -170,7 +174,7 @@ export function LogsSettingsSection({
       } catch (err) {
         if (!live || controller.signal.aborted) return;
         setStatusError(errorSentence(err));
-      }
+      } finally { settled(); }
     })();
     void (async () => {
       try {
@@ -182,7 +186,7 @@ export function LogsSettingsSection({
       } catch (err) {
         if (!live || controller.signal.aborted) return;
         setDaysError(errorSentence(err));
-      }
+      } finally { settled(); }
     })();
     return () => {
       live = false;
@@ -213,6 +217,7 @@ export function LogsSettingsSection({
   return (
     <div className="os-settings">
       <Head title="Logs settings" />
+      <AutoRefresh onRefresh={() => setGeneration((g) => g + 1)} busy={readingStatus} enabled={connection !== null} />
       {/* THE SET UP GROUP sits above the preferences on purpose: it is the
           reason a person was sent here from an unconfigured surface, and the
           first thing they need is what to configure and where. Rule 4 puts
@@ -338,7 +343,6 @@ export function LogsSettingsSection({
               <Fact label="Lines kept" value={status.rowEstimate === 0 ? "" : `about ${status.rowEstimate.toLocaleString()}`} />
             </Facts>
             <div className="os-refresh-row">
-              <Button onClick={() => setGeneration((g) => g + 1)}>Read again</Button>
               <span className="os-caption">
                 {statusReadAt === null ? "" : `Read ${formatFreshness(statusReadAt.toISOString(), now)}. The counters are the answering node's since it started.`}
               </span>

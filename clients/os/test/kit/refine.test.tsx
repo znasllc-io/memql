@@ -97,20 +97,21 @@ describe("Refine (rule 2: filters are questions, not furniture)", () => {
   });
 });
 
-describe("SortControl (rule 3: sort is not a button)", () => {
-  it("reads as quiet text whose name says what a click does, and toggles", () => {
+describe("SortControl", () => {
+  it("offers both orders, marks the selected order, and leaves it unchanged when selected again", () => {
     const onToggle = vi.fn();
     const { rerender } = render(<SortControl ascending={false} onToggle={onToggle} />);
-    const control = screen.getByRole("button", {
-      name: "Sorted newest first -- switch to oldest first",
-    });
-    expect(control.className).toBe("os-sort");
+    const control = screen.getByRole("combobox", { name: "Sort order" });
+    expect(control.textContent).toBe("Newest first");
     fireEvent.click(control);
+    expect(screen.getByRole("option", { name: "Newest first" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("option", { name: "Newest first" }));
+    expect(onToggle).not.toHaveBeenCalled();
+    fireEvent.click(control);
+    fireEvent.click(screen.getByRole("option", { name: "Oldest first" }));
     expect(onToggle).toHaveBeenCalledOnce();
     rerender(<SortControl ascending onToggle={onToggle} />);
-    expect(
-      screen.getByRole("button", { name: "Sorted oldest first -- switch to newest first" }),
-    ).toBeTruthy();
+    expect(control.textContent).toBe("Oldest first");
   });
 });
 

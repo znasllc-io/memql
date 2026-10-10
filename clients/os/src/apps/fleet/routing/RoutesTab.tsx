@@ -4,7 +4,7 @@ import { Route } from "lucide-react";
 import { AddButton } from "../../../kit/AddButton";
 import { ContentSkeleton, InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { InfoDetail } from "../../../kit/InfoDetail";
-import { Chip, EmptyState, Notice, RecordList, RecordListSkeleton, RecordRow, RefreshButton } from "../../../kit";
+import { Chip, EmptyState, Notice, RecordList, RecordListSkeleton, RecordRow, AutoRefresh } from "../../../kit";
 import type { RulesState } from "../../settings/rulesFacts";
 import type { TaskPolicy } from "../taskPolicies";
 import { NewRouteWizard } from "./NewRouteWizard";
@@ -140,7 +140,7 @@ export function RoutesTab({
             <p>A route is a list of sources, tried in order until one can serve. Rules decide which route a call takes.</p>
             <p>A change to a route applies to every rule that takes it. Shipped routes can be changed and restored.</p>
           </InfoDetail>
-          <RefreshButton label="Read the routes again" busy={catalog.loading} onClick={reload} />
+          <AutoRefresh busy={catalog.loading} onRefresh={reload} />
           {!catalog.error && (!catalog.loading || routes.length > 0) ? <AddButton label="New route" onClick={() => setPage({ kind: "new" })} /> : null}
         </>,
         count,

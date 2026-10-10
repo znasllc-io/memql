@@ -86,7 +86,7 @@ describe("Sources catalog review regressions", () => {
     await screen.findByText("Some GitHub provenance could not be refreshed.");
     await click(screen.getByRole("button", { name: "Find sources" }));
     await type(screen.getByLabelText("Search") as HTMLInputElement, "no-match");
-    await screen.findByText("Source provenance is unavailable. Refresh sources to finish this reading.");
+    await screen.findByText("Source provenance is unavailable. Retrying automatically.");
     expect(sourcesHeading().querySelector(".os-head-meta")).toBeNull();
     expect(screen.queryByText(/No matching sources|No sources yet/)).toBeNull();
   });

@@ -158,7 +158,7 @@ describe("the Head line (DESIGN.md rules 1-3)", () => {
     });
     await renderFiles();
     expect(screen.getByRole("heading", { name: "Library" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Sorted newest first/ })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Sort order" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Refine files" })).toBeTruthy();
     // The facet controls do not stand in the surface (rule 2).
     expect(screen.queryByLabelText("Source")).toBeNull();

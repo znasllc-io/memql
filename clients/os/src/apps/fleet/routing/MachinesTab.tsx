@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { InfoDetail } from "../../../kit/InfoDetail";
-import { Notice, RefreshButton, Select } from "../../../kit";
+import { Notice, AutoRefresh, Select } from "../../../kit";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { feedIsBehind } from "../../../live/useLiveCollection";
 import { MapEditor } from "../MapEditor";
@@ -86,7 +86,7 @@ export function MachinesTab({ header }: { header: (actions: ReactNode, meta?: Re
                 <p>Required labels filter which of your machines can take a call. Preferred labels and the strategy order them. A refusal may try the next matching machine only before a call starts; a started call is never replayed.</p>
                 <p>Routes choose the source. The model order ranks your local models when a route reaches your machines.</p>
               </InfoDetail>
-              {feedIsBehind(state.liveState) ? <RefreshButton label="Reconnect machine choice" onClick={state.reseed} /> : null}
+              {feedIsBehind(state.liveState) ? <AutoRefresh onRefresh={state.reseed} /> : null}
             </>,
           )}
           {loading ? (

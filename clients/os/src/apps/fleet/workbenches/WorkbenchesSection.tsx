@@ -1,6 +1,6 @@
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
-import { RefreshButton, useFleetScroll } from "../FleetControls";
+import { AutoRefresh, useFleetScroll } from "../FleetControls";
 import { InfoDetail } from "../../../kit/InfoDetail";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -95,7 +95,7 @@ export function WorkbenchesSection() {
             behind, the same control is exactly the right one, and its
             appearance is itself the signal. */}
         {feedIsBehind(state.workspaceState) ? (
-          <RefreshButton label="Reconnect workspaces" onClick={state.reseedWorkspaces} />
+          <AutoRefresh onRefresh={state.reseedWorkspaces} />
         ) : null}
       </Head>
 
@@ -177,7 +177,7 @@ function ReplicaPanel({
         <Subhead meta={listCount(source?.snapshot)}>Workbench replicas</Subhead>
         <div className="os-head-actions">
           {feedIsBehind(state.nodeState) ? (
-            <RefreshButton label="Reconnect replicas" onClick={state.reseedNodes} />
+            <AutoRefresh onRefresh={state.reseedNodes} />
           ) : null}
         </div>
       </div>

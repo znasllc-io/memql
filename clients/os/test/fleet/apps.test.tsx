@@ -318,7 +318,7 @@ describe("one run's recording", () => {
       });
       expect(connection.query.appSessionById).toHaveBeenCalledTimes(1);
       expect(screen.getByText(/Last updated/)).toBeTruthy();
-      expect(screen.getByRole("button", { name: "Refresh app session" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Refresh app session" })).toBeNull();
     } finally {
       vi.useRealTimers();
     }

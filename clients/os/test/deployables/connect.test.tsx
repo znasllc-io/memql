@@ -7,6 +7,13 @@ import { ConnectReturnDispatcher } from "../../src/apps/deployables/sources/Conn
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+let wakeTime = Date.now();
+async function wakeRead() {
+  const clock = vi.spyOn(Date, "now").mockReturnValue(wakeTime += 2_000);
+  await act(async () => { window.dispatchEvent(new Event("focus")); });
+  clock.mockRestore();
+}
+
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
 // The connection is a module-level context read and its provider dials a real
@@ -505,9 +512,9 @@ describe("the repository picker", () => {
     expect(screen.queryByRole("button", { name: /dotfiles/ })).toBeNull();
   });
 
-  it("offers to look again, because this is a reading and not a feed", async () => {
+  it("checks again on focus without a refresh button", async () => {
     const { onLookAgain } = renderPicker();
-    await click(screen.getByRole("button", { name: "Refresh repositories" }));
+    await wakeRead();
     expect(onLookAgain).toHaveBeenCalledTimes(1);
     // No walk to offer when the page said there was none.
     expect(screen.queryByRole("button", { name: "Read more" })).toBeNull();
@@ -562,29 +569,17 @@ describe("the repository picker", () => {
     expect(link.getAttribute("rel")).toBe("noreferrer noopener");
     // ON THE ROW THAT READS AGAIN, because reading again is what follows it...
     const row = link.closest(".os-refresh-row") as HTMLElement;
-    expect(within(row).getByRole("button", { name: "Refresh repositories" })).toBeTruthy();
+    expect(within(row).queryByRole("button", { name: "Refresh repositories" })).toBeNull();
     // ...and NOT a second button there: it leaves the product, and the row has
     // its one act already.
     expect(link.classList.contains("os-button")).toBe(false);
     expect(link.classList.contains("os-link")).toBe(true);
   });
 
-  it("reads the list again when the person comes back from GitHub, once, and only after following the link", async () => {
+  it("refreshes on returning to the picker and coalesces focus events", async () => {
     const { onLookAgain } = renderPicker({ installUrl: "https://github.com/apps/memql/installations/new" });
-    // Looking at the tab is not a reason to call GitHub...
-    await act(async () => { window.dispatchEvent(new Event("focus")); });
-    expect(onLookAgain).not.toHaveBeenCalled();
-
-    // ...having gone to install the app somewhere is. jsdom follows no link,
-    // so the navigation is stopped and only the click is kept.
-    const link = screen.getByRole("link", { name: "Install on another organization" });
-    link.addEventListener("click", (e) => e.preventDefault());
-    await click(link);
-    expect(onLookAgain).not.toHaveBeenCalled();
-    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    await wakeRead();
     expect(onLookAgain).toHaveBeenCalledTimes(1);
-
-    // ONCE. The next look at the tab is just somebody looking at the tab.
     await act(async () => { window.dispatchEvent(new Event("focus")); });
     expect(onLookAgain).toHaveBeenCalledTimes(1);
   });
@@ -644,7 +639,7 @@ describe("reading the picker's list", () => {
       repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/widget" })] }),
     });
     expect(screen.getByText("Not read yet.")).toBeTruthy();
-    await click(screen.getByRole("button", { name: "Refresh repositories" }));
+    await wakeRead();
     // `credentialId: ""` is a documented value -- "the grant I hold" -- and
     // not an omission, so it is sent rather than left out.
     expect(connection.callsNamed("sourceRepositories")).toEqual([
@@ -653,24 +648,34 @@ describe("reading the picker's list", () => {
     expect(await screen.findByRole("button", { name: /widget/ })).toBeTruthy();
   });
 
-  it("appends on a walk and replaces on a re-read", async () => {
-    const { connection } = mountPicker({
-      repositories: repositoriesReply({
-        repositories: [repositoryFixture({ fullName: "acme/widget" })],
-        nextPage: 2,
-      }),
+  it("refreshes every loaded page without losing the choice or repeating rows", async () => {
+    const { connection } = mountPicker({});
+    let failSecond = false;
+    vi.mocked(connection.query.executeNamed).mockImplementation(async (_name, call) => {
+      const second = call.includes("page: 2");
+      if (second && failSecond) throw new Error("temporarily_unavailable: Try later.");
+      return builtinReply("sourceRepositories", [repositoriesReply({
+        repositories: [repositoryFixture({ fullName: second ? "acme/docs" : "acme/widget" })],
+        nextPage: second ? 0 : 2,
+      })]);
     });
-    await click(screen.getByRole("button", { name: "Refresh repositories" }));
+    await wakeRead();
     await screen.findByRole("button", { name: /widget/ });
     await click(screen.getByRole("button", { name: "Read more" }));
-    expect(connection.callsNamed("sourceRepositories").at(-1)).toBe(
+    await click(await screen.findByRole("button", { name: /docs/ }));
+    await wakeRead();
+    expect(vi.mocked(connection.query.executeNamed).mock.calls.slice(-2).map(call => call[1])).toEqual([
+      'builtin sourceRepositories(credentialId: "", page: 1)',
       'builtin sourceRepositories(credentialId: "", page: 2)',
-    );
-    // The same fixture came back, so the walk shows it twice -- which is
-    // exactly what a re-read must NOT do.
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /widget/ })).toHaveLength(2));
-    await click(screen.getByRole("button", { name: "Refresh repositories" }));
-    await waitFor(() => expect(screen.getAllByRole("button", { name: /widget/ })).toHaveLength(1));
+    ]);
+    expect(screen.getAllByRole("button", { name: /widget/ })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /docs/ })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /docs/ }).getAttribute("data-current")).toBe("true");
+    failSecond = true;
+    await wakeRead();
+    expect(await screen.findByText("Try later.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /docs/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /widget/ })).toBeTruthy();
   });
 
   it("keeps the last good list when the next read is refused", async () => {
@@ -687,11 +692,11 @@ describe("reading the picker's list", () => {
     };
     h.connection = fakeConnection(seed);
     render(<PickerHost />);
-    await click(screen.getByRole("button", { name: "Refresh repositories" }));
+    await wakeRead();
     await screen.findByRole("button", { name: /widget/ });
 
     seed.repositoriesError = "reconnect_required: GitHub refused this connection.";
-    await click(screen.getByRole("button", { name: "Refresh repositories" }));
+    await wakeRead();
     expect(await screen.findByText("Your GitHub connection needs renewing")).toBeTruthy();
     expect(screen.getByText("GitHub refused this connection.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /widget/ })).toBeTruthy();
@@ -702,7 +707,7 @@ describe("reading the picker's list", () => {
     mountPicker({
       repositories: repositoriesReply({ repositories: [repositoryFixture({ fullName: "acme/widget" })] }),
     });
-    await click(screen.getByRole("button", { name: "Refresh repositories" }));
+    await wakeRead();
     const row = await screen.findByRole("button", { name: /widget/ });
     await click(row);
     expect(screen.getByRole("button", { name: /widget/ }).getAttribute("data-current")).toBe("true");

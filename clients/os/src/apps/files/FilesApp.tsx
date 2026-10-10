@@ -347,6 +347,7 @@ export function FilesApp({
     <BrowseSection
       list={list}
       artifacts={artifacts}
+      files={files.snapshot.rows}
       foldersState={folders.snapshot.state}
       tree={tree}
       content={content}

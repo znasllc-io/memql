@@ -3,7 +3,7 @@ import { History } from "lucide-react";
 import { InfoDetail } from "../../../kit/InfoDetail";
 import { useState } from "react";
 
-import { Button, Notice, EmptyState, RefreshButton, Subhead, RecordList, RecordRow } from "../../../kit";
+import { Button, Notice, EmptyState, AutoRefresh, Subhead, RecordList, RecordRow } from "../../../kit";
 import { formatDuration, formatMoment } from "../../../kit/format";
 import { OUTCOME_TONE, type InvocationRow } from "../rows";
 import { RoutingRecordView } from "./RoutingRecordView";
@@ -33,8 +33,8 @@ export function CallHistory({ workerId, machineLabel, standalone = false }: { wo
           {open ? "Hide recent calls" : "Recent calls"}
         </Button>}
         {open ? <span className="fleet-heading-actions">
-          <InfoDetail title="Call history"><p>Calls routed to this machine. App sessions are listed separately in Activity.</p><p>{readAt === null ? "The first read has not completed." : `Read at ${formatMoment(readAt.toISOString())}. Refresh to see newer calls.`}</p></InfoDetail>
-          <RefreshButton label="Refresh recent calls" busy={loading} onClick={refresh} />
+          <InfoDetail title="Call history"><p>Calls routed to this machine. App sessions are listed separately in Activity.</p><p>{readAt === null ? "The first read has not completed." : `Read at ${formatMoment(readAt.toISOString())}. Updates automatically.`}</p></InfoDetail>
+          <AutoRefresh busy={loading} onRefresh={refresh} />
         </span> : null}
       </div>
 

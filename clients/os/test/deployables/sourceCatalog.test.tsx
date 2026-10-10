@@ -35,9 +35,7 @@ describe("configured Sources catalog", () => {
     expect(screen.queryByRole("list", { name: "Connected GitHub accounts" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Add (source|GitHub account|a deployable)/ })).toBeNull();
     expect(document.querySelector(".os-head-meta")?.textContent).toBe("3");
-    const refresh = screen.getByRole("button", { name: "Refresh sources" });
-    expect(refresh.closest(".os-head")?.querySelector(".os-head-actions")?.lastElementChild).toBe(refresh);
-    expect(screen.getAllByRole("button", { name: /Refresh/ })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Refresh sources" })).toBeNull();
   });
   it("updates provenance and removal from authorized live feeds", async () => {
     const { connection } = mount();

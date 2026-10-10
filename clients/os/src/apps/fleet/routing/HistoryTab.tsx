@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 
-import { Chip, EmptyState, Measure, Notice, RecordList, RecordListSkeleton, RecordRow, RefreshButton, Refine, Select } from "../../../kit";
+import { Chip, EmptyState, Measure, Notice, RecordList, RecordListSkeleton, RecordRow, AutoRefresh, Refine, Select } from "../../../kit";
 import { InfoDetail } from "../../../kit/InfoDetail";
 import { formatDuration, formatMoment } from "../../../kit/format";
 import {
@@ -116,7 +116,7 @@ export function HistoryTab({
               </Select>
             </Refine>
           ) : null}
-          <RefreshButton label="Read the history again" busy={decisions.loading} onClick={decisions.reload} />
+          <AutoRefresh busy={decisions.loading} onRefresh={decisions.reload} />
         </>,
         !decisions.loading && !decisions.error && decisions.supported && decisions.fetchedAt !== null ? rows.length : undefined,
       )}

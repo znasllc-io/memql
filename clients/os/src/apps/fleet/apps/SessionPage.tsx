@@ -1,6 +1,6 @@
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { RecordList, RecordRow } from "../../../kit/RecordRow";
-import { RefreshButton } from "../FleetControls";
+import { AutoRefresh } from "../FleetControls";
 
 import { EmptyState, Chip, Fact, Facts, Head, Notice, Panel, Subhead, formatMoment } from "../../../kit";
 import { Measure } from "../../../kit/MeasureView";
@@ -57,12 +57,7 @@ export function SessionPage({
   return (
     <div className="os-fleet os-fleet-session" data-os-page-context={JSON.stringify({ page: "App session", sessionId, app: session?.app, status: session?.status })}>
       <Head title={session === null ? "Run" : `${appLabel(session.app)} -- ${session.kind}`} back={{ label: "Activity", onSelect: onBack }}>
-        {/* A FINISHED RUN IS NOT RE-READ ON A TIMER, so the manual re-read is
-            the honest control for one. While a run is LIVE the poll is doing
-            it, and the word beside the status says so. */}
-        {session !== null && !sessionIsLive(session.status) ? (
-          <RefreshButton label="Refresh app session" busy={loading} onClick={reread} />
-        ) : null}
+        <AutoRefresh enabled={error !== ""} busy={loading} onRefresh={reread} />
       </Head>
 
       {error === "" ? null : (

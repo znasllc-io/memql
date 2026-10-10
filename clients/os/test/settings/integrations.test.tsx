@@ -887,7 +887,7 @@ describe("the probe is an action", () => {
   it("does not probe when a Refresh is pressed", async () => {
     await renderIntegrations();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      fireEvent.focus(window);
       await Promise.resolve();
     });
     expect(h.state.calls).toEqual([{ probe: false }, { probe: false }]);

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Caption, Head, Notice, RefreshButton } from "../../../kit";
+import { Caption, Head, Notice, AutoRefresh } from "../../../kit";
 import { InfoDetail } from "../../../kit/InfoDetail";
 import { Measure } from "../../../kit/MeasureView";
 import { OverviewBreakdown, type OverviewSegment } from "../../../kit/Overview";
@@ -143,7 +143,7 @@ export function MeshSection({
             beside a live list says "this may be stale" about rows that arrive
             on their own. When the feed says it IS behind, the same control is
             exactly right, and its appearance is itself the signal. */}
-        {feedIsBehind(feed.state) ? <RefreshButton label="Reconnect" onClick={feed.reseed} /> : null}
+        {feedIsBehind(feed.state) ? <AutoRefresh onRefresh={feed.reseed} /> : null}
       </Head>
 
       <div className="os-cluster-mesh-context">

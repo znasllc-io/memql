@@ -16,10 +16,10 @@ import { useAccountOptions } from "../accounts/tie";
 import { useArtifactAccounts } from "./actions/accounts";
 import { useFileVersions } from "./actions/versions";
 import { VersionHistory } from "./VersionHistory";
-import type { VersionEntry } from "./versions";
+import { fileHeadFromRow, type VersionEntry } from "./versions";
 import { useOsConnection } from "../../live/connection";
 import type { UploadProvider } from "../../items/upload";
-import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
+import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
 import { MATERIALIZER_APP, MATERIALIZER_COMPOSER } from "./materializer";
 import {
@@ -41,6 +41,7 @@ function describe(err: unknown): string {
 
 export function Inspector({
   row,
+  files,
   composition,
   folderNameOf,
   archivedFolderIds,
@@ -52,6 +53,7 @@ export function Inspector({
   breadcrumbs,
 }: {
   row: ArtifactRow;
+  files: readonly Row[];
   /**
    * The composition that produced this file, if one did (epic memql#4981,
    * #4983). ONE SENTENCE AND ONE ACT is the whole of what Files says about
@@ -115,7 +117,10 @@ export function Inspector({
     () => (row.kind === "file" ? (row.sourceConceptRef.split(":").pop() ?? "") : ""),
     [row.kind, row.sourceConceptRef],
   );
-  const versions = useFileVersions(fileId);
+  const liveHead = files.find(file => rowString(file, "id") === fileId);
+  const liveVersion = liveHead ? fileHeadFromRow(liveHead) : null;
+  const headRevision = liveVersion ? `${liveVersion.versionNumber}:${liveVersion.sha256}:${liveVersion.versionUploadedAt}` : "";
+  const versions = useFileVersions(fileId, headRevision);
   const refreshVersions = versions.refresh;
   const picker = useRef<HTMLInputElement | null>(null);
   const [newVersionError, setNewVersionError] = useState("");
@@ -210,10 +215,8 @@ export function Inspector({
             : `Version ${result.versionNumber} landed.`,
         );
         pending.current = null;
-        // Read the history again: these rows carry no broadcast rule, so this
-        // is what makes the stack below show what just happened. The LIST
-        // updates on its own -- the artifact index is re-stamped server-side
-        // and arrives on the feed the browse already reads.
+        // Confirm our own upload immediately; remote changes arrive through
+        // the retained file feed and invalidate the same history reading.
         refreshVersions();
       } catch (err: unknown) {
         setNewVersionError(describe(err));

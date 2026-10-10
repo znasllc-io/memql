@@ -35,6 +35,16 @@ async function openInspector(title: string): Promise<HTMLElement> {
 }
 
 describe("the label facet", () => {
+  it("keeps labels in details, without putting chips on file rows", async () => {
+    h.connection = fakeConnection({ artifacts: [BRIEF, VIDEO, PLAIN] });
+    await renderFiles();
+    const item = screen.getByRole("button", { name: /brief\.pdf/ });
+    expect(within(item).queryByText("client-acme")).toBeNull();
+    expect(within(item).queryByText("urgent")).toBeNull();
+    const details = await openInspector("brief\\.pdf");
+    expect(within(details).getByRole("button", { name: "Remove label client-acme" })).toBeTruthy();
+  });
+
   it("shows NO standing label control while Refine is collapsed", async () => {
     h.connection = fakeConnection({ artifacts: [BRIEF, VIDEO, PLAIN] });
     await renderFiles();

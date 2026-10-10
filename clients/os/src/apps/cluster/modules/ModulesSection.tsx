@@ -2,7 +2,7 @@ import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useCallback, useMemo, useState } from "react";
 import { ModulesClient, type ModulesInventory } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Chip, Head, Notice, Panel, RecordList, RecordRow, Subhead, setAsideLabel, stateWords, verdictDetail } from "../../../kit";
+import { AutoRefresh, Caption, Chip, Head, Notice, Panel, RecordList, RecordRow, Subhead, setAsideLabel, stateWords, verdictDetail } from "../../../kit";
 import { useSession } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
@@ -111,19 +111,13 @@ export function ModulesSection() {
 
   return (
     <div className="os-cluster">
-      {/* The one control on the Head, and it is quiet rather than primary:
-          this reading is not live, so "look again" is the honest companion to
-          printing when we last looked. It also re-asks after a reconnect,
-          which the reading's key deliberately does not do on its own. */}
+
       <Head title="Modules" meta={inventory.state === "read" && !inventory.error ? inventory.value?.modules.length : undefined}>
-        <Button
-          tone="quiet"
+        <AutoRefresh
           busy={inventory.state === "reading"}
 
-          onClick={() => inventory.reread()}
-        >
-          Read again
-        </Button>
+          onRefresh={() => inventory.reread()}
+         />
       </Head>
 
       {inventory.state === "failed" ? (

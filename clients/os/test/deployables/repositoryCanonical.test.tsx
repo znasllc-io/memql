@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RepositoryPicker } from "../../src/apps/deployables/sources/RepositoryPicker";
 import type { RepositoryPage, RepositoryRow } from "../../src/apps/deployables/sources/repositories";
@@ -52,23 +52,19 @@ describe("canonical repository choices", () => {
     expect(screen.getByText(/No repository here matches/)).toBeTruthy();
   });
 
-  it("uses the shared refresh icon and preserves pagination and installation return refresh", () => {
+  it("refreshes automatically while preserving pagination and installation links", async () => {
     const p = props(); const view = render(<RepositoryPicker {...p} />);
-    const refresh = screen.getByRole("button", { name: "Refresh repositories" });
-    expect(refresh.classList.contains("os-refresh")).toBe(true);
-    expect(refresh.textContent).toBe("");
-    fireEvent.click(refresh); expect(p.onLookAgain).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Refresh repositories" })).toBeNull();
+    await act(async () => { fireEvent.focus(window); });
+    expect(p.onLookAgain).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Read more" }));
     expect(p.onReadMore).toHaveBeenCalledTimes(1);
     const install = screen.getByRole("link", { name: "Install on another organization" });
     expect(install.getAttribute("target")).toBe("_blank");
     expect(install.getAttribute("rel")).toContain("noopener");
-    fireEvent.click(install); fireEvent.focus(window); fireEvent.focus(window);
-    expect(p.onLookAgain).toHaveBeenCalledTimes(2);
     view.rerender(<RepositoryPicker {...p} busy />);
-    expect(refresh.hasAttribute("disabled")).toBe(true);
-    expect(refresh.getAttribute("aria-busy")).toBe("true");
-    fireEvent.click(refresh); expect(p.onLookAgain).toHaveBeenCalledTimes(2);
+    await act(async () => { fireEvent.focus(window); });
+    expect(p.onLookAgain).toHaveBeenCalledTimes(1);
   });
 
   it("keeps prior rows on refusal without claiming a settled count", () => {

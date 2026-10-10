@@ -2041,31 +2041,26 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   flex-wrap: wrap;
 }
 
-/* Rule 3: sort is not a button -- quiet text on the scope line. */
+/* A quiet sort menu with a readable current order and a clear disclosure. */
 .os-sort {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: var(--os-control-h);
-  padding: 0 6px;
-  border: 0;
-  background: none;
   color: var(--os-muted);
-  font: inherit;
-  font-size: var(--os-text-sm);
-  cursor: pointer;
 }
-.os-sort:hover {
+.os-sort .os-select {
+  min-width: 116px;
+  border-color: transparent;
+  background: transparent;
+  padding-left: 6px;
+  color: var(--os-muted);
+}
+.os-sort .os-select:hover,
+.os-sort .os-select-wrap[data-open] .os-select {
+  background: var(--os-hover);
   color: var(--os-ink);
 }
-.os-sort:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-  border-radius: var(--os-radius-xs);
-}
-.os-sort svg {
-  opacity: 0.55;
-}
+.os-sort > svg { flex-shrink: 0; }
 
 /* Rule 2: the Refine affordance -- search and facets behind one control,
  * active constraints as removable chips beside it while collapsed. */
@@ -15411,11 +15406,6 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-page .os-panel, .fleet-page fieldset { min-width:0; }
 
 /* Fleet's shared controls and restrained, expandable records. */
-.os-refresh { width:36px; height:36px; flex:0 0 36px; }
-.os-refresh:disabled { cursor:wait; opacity:.55; }
-.os-refresh[aria-busy="true"] svg { animation:os-refresh-turn 1s linear infinite; }
-@keyframes os-refresh-turn { to { transform:rotate(360deg); } }
-@media (prefers-reduced-motion:reduce) { .os-refresh[aria-busy="true"] svg { animation:none; } }
 .os-switch { display:inline-flex; position:relative; align-items:center; gap:10px; min-height:36px; cursor:pointer; font-size:var(--os-text-sm); color:var(--os-ink); }
 .os-switch input { position:absolute; width:1px; height:1px; opacity:0; }
 .os-switch-track { display:inline-flex; align-items:center; flex:0 0 32px; width:32px; height:20px; padding:3px; border-radius:12px; background:var(--os-muted); }

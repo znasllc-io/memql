@@ -1,7 +1,7 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { Download, RotateCw } from "lucide-react";
+import { Download } from "lucide-react";
 
-import { Button, Chip, Notice, Subhead, formatBytes, formatFreshness, formatMoment, useNow } from "../../kit";
+import { AutoRefresh, Button, Chip, Notice, Subhead, formatBytes, formatFreshness, formatMoment, useNow } from "../../kit";
 import type { MachinePresence } from "../../items/provenance";
 import { shortDigest, versionStory, type VersionEntry, type VersionHistory as History } from "./versions";
 
@@ -43,16 +43,7 @@ export function VersionHistory({
     <section className="os-files-versions" aria-label="Version history">
       <div className="os-files-versions-head">
         <Subhead meta={!loading && !error && readAt !== null ? history.total : undefined}>Versions</Subhead>
-        <span className="os-caption">
-          {/* WHEN THIS WAS READ, said plainly. These rows carry no broadcast
-              routing rule, so this panel is a read rather than a feed -- and a
-              surface that looked live while sitting still would be the lie
-              worth avoiding here. */}
-          {readAt === null ? null : `Read ${formatFreshness(readAt.toISOString(), now)}`}
-        </span>
-        <Button onClick={onRefresh} ariaLabel="Read the version history again">
-          <RotateCw size={12} aria-hidden />
-        </Button>
+        <AutoRefresh onRefresh={onRefresh} busy={loading} />
       </div>
 
       {error !== "" ? (

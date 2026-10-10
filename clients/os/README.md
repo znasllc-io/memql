@@ -1064,7 +1064,8 @@ File details share the list's full page gutters. Origin appears under Details;
 a matching Materializer composition and recorded generation sources take
 precedence over machine upload attribution. Version entries without recorded
 upload attribution say "Saved in MemQL" rather than inferring a browser upload.
-Labels follow their description and input. Open remains a text action; desktop,
+Labels follow their description and input in details; file list rows do not show
+label chips. Label filters still work. Open remains a text action; desktop,
 download and Delete use named icons. Delete moves the file to the Bin, where it
 can be restored until purged.
 
@@ -1123,10 +1124,13 @@ Backups use a plus action, a full-page form, a schedule, and a hidden-file switc
   deliberately does not go through `useUploadTasks`: those create a
   placeholder ROW in the list, and a new version must not add a second row
   to the list it is proving it does not disturb. The history lives in the
-  inspector below the action that grows it, and is a READ rather than a
-  feed: `v1:library:fileVersion` carries no broadcast routing rule, so the
-  panel says when it looked and offers to look again instead of implying a
-  liveness it does not have.
+  detail page below the action that grows it. The app's existing retained
+  `v1:library:file` subscription invalidates the history when its head version
+  changes, including writes on other replicas. No second subscription is
+  opened. `AutoRefresh` checks every 15 seconds while visible and on return
+  online/focus, recovering missed events and failed reads. It never refreshes
+  hidden panes or overlaps a busy read. In-flight reads abort on file changes
+  and unmount; the last successful history stays visible during recovery.
 
 ## Accounts, the sixth app (memql#4800)
 

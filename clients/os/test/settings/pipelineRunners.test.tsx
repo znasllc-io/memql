@@ -22,11 +22,11 @@ describe("runner readiness surface", () => {
     render(<PipelineRunners />);
     expect(await screen.findByText("Ready")).toBeTruthy();
     expect(read.mock.calls[0]?.[0]).toEqual({});
-    fireEvent.click(screen.getByRole("button", { name: "Refresh readiness" }));
+    fireEvent.focus(window);
     expect(await screen.findByText("Runner readiness could not be read.")).toBeTruthy();
     expect(screen.getByText("workbench-a")).toBeTruthy();
     expect(screen.queryByText("Ready")).toBeNull();
-    expect(screen.getByRole("button", { name: "Refresh readiness" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Refresh readiness" })).toBeNull();
   });
 
   it("drops a late response from a previous connection", async () => {

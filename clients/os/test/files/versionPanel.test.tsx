@@ -11,7 +11,7 @@ vi.mock("../../src/live/connection", () => ({
   useOsConnection: () => h.connection,
 }));
 
-import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
+import { ARTIFACT_CONCEPT, FILE_CONCEPT } from "../../src/apps/files/concepts";
 import { artifactRow, click, emit, fakeConnection, fileRow, renderFiles, versionRow } from "./harness";
 import type { UploadHandle, UploadOptions, UploadProvider, UploadResult } from "../../src/items/upload";
 
@@ -123,25 +123,46 @@ describe("the version history panel", () => {
     expect(within(history).getByText(/Previous versions stay available/)).toBeTruthy();
   });
 
-  // THE PANEL SAYS WHEN IT LOOKED. These rows carry no broadcast routing rule,
-  // so this is a read rather than a feed -- and a surface that implied one
-  // would be the lie worth avoiding.
-  it("captions when it read, and offers to read again", async () => {
-    const connection = fakeConnection({
+  it("updates history when another session changes the file head, without a second subscription", async () => {
+    const seed = {
       artifacts: [artifactRow({ id: "a-1", title: "q3.pdf", sourceConceptRef: "v1:library:file:f-1" })],
-      files: [fileRow({ id: "f-1", versionNumber: 2 })],
-      versions: [versionRow({ id: "f-1-v1", fileId: "f-1", versionNumber: 1 })],
-    });
+      files: [fileRow({ id: "f-1", versionNumber: 1 })],
+      versions: [] as ReturnType<typeof versionRow>[],
+    };
+    const connection = fakeConnection(seed);
     h.connection = connection;
     await renderFiles();
     const inspector = await openInspector("q3\\.pdf");
     const history = within(inspector).getByRole("region", { name: "Version history" });
-    expect(within(history).getByText(/^Read /)).toBeTruthy();
-
+    expect(within(history).getByText("v1")).toBeTruthy();
+    expect(within(history).queryByRole("button", { name: /Read.*again/ })).toBeNull();
     const before = connection.callsNamed("libraryFileVersionsForFile").length;
-    expect(before).toBeGreaterThan(0);
-    await click(within(history).getByRole("button", { name: "Read the version history again" }));
+    seed.files = [fileRow({ id: "f-1", versionNumber: 2 })];
+    seed.versions = [versionRow({ id: "f-1-v1", fileId: "f-1", versionNumber: 1 })];
+    await emit(connection, FILE_CONCEPT, { id: "f-1", payload: seed.files[0]! });
+    expect(within(history).getAllByText(/^v\d+$/).map(el => el.textContent)).toEqual(["v2", "v1"]);
     expect(connection.callsNamed("libraryFileVersionsForFile").length).toBe(before + 1);
+    expect(connection.subscriptions.activeCount(FILE_CONCEPT)).toBe(1);
+    // An analysis re-stamp does not invalidate unchanged bytes.
+    await emit(connection, FILE_CONCEPT, { ...seed.files[0]!, summary: "Analysis updated" });
+    expect(connection.callsNamed("libraryFileVersionsForFile").length).toBe(before + 1);
+  });
+
+  it("recovers a missed version event on focus and retains the last history if a read fails", async () => {
+    const seed = {
+      artifacts: [artifactRow({ id: "a-1", title: "q3.pdf", sourceConceptRef: "v1:library:file:f-1" })],
+      files: [fileRow({ id: "f-1", versionNumber: 1 })],
+      refuse: {} as Record<string, string>,
+    };
+    const connection = fakeConnection(seed);
+    h.connection = connection;
+    await renderFiles();
+    const inspector = await openInspector("q3\\.pdf");
+    const history = within(inspector).getByRole("region", { name: "Version history" });
+    seed.refuse.libraryFileVersionsForFile = "Temporarily offline";
+    await act(async () => { fireEvent.focus(window); });
+    expect(within(history).getByText("v1")).toBeTruthy();
+    expect(within(history).getByText("The version history could not be read.")).toBeTruthy();
   });
 
   it("reads through the real generated builder", async () => {

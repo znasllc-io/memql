@@ -10,7 +10,7 @@ import { Rocket } from "lucide-react";
 import { useSession } from "../../../chrome/access";
 import { bare } from "../people";
 
-import { Button, Caption, Field, Notice, RefreshButton, useLiveView, type Stop } from "../../../kit";
+import { Button, Caption, Field, Notice, AutoRefresh, useLiveView, type Stop } from "../../../kit";
 import type { Act } from "../../../kit/ActionBar";
 import { ActivityTarget } from "../../../kit/SemanticActivity";
 import { Wizard } from "../../../kit/Wizard";
@@ -779,8 +779,8 @@ export function ComposePage(props: ComposePageProps) {
           {restoredSourceId ? <div className="os-stop-body"><Caption>Source restored. Existing deployables are unchanged.</Caption>
             {props.onOpenDeployable ? (props.placedSources ?? []).filter(site => site.packageId === restoredSourceId && site.siteId).map(site => <Button key={site.siteId} onClick={() => props.onOpenDeployable?.(site.siteId!)}>Open {site.name}</Button>) : null}
           </div> : null}
-          {selectedSource && !placementsKnown ? props.siteFeed?.error ? <Caption>Existing deployables could not be read. Refresh Deployables before continuing.</Caption> : <RecordListSkeleton label="Loading existing deployables" /> : null}
-          {selectedSource && props.siteFeed?.error && props.packageFeed?.retry ? <RefreshButton label="Refresh deployables" onClick={props.packageFeed.retry} /> : null}
+          {selectedSource && !placementsKnown ? props.siteFeed?.error ? <Caption>Existing deployables could not be read. Retrying automatically.</Caption> : <RecordListSkeleton label="Loading existing deployables" /> : null}
+          {selectedSource && props.siteFeed?.error && props.packageFeed?.retry ? <AutoRefresh onRefresh={props.packageFeed.retry} /> : null}
           {selectedSource && placementsKnown && selectedSource.declares.length > 0 && selectedSource.declares.every(app => placed.includes(app.name)) ? <Caption>All apps from this repository already have deployables. Open them from Deployables.</Caption> : null}
           </div>
           </>

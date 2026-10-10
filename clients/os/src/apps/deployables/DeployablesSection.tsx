@@ -15,7 +15,7 @@ import { deploymentStateWord, siteStateWord, statusFacetLabel } from "./words";
 import {
   Button,
   EmptyState,
-  RefreshButton,
+  AutoRefresh,
   Caption,
   Head,
   LiveList,
@@ -652,10 +652,10 @@ export function DeployablesSection({
           {root === "deployables" && canOpenCompose ? (
             <AddButton label="Add a deployable" className="deployable-new" onClick={() => setView({ kind: "compose" })} />
           ) : null}
-          {root === "sources" ? <RefreshButton label="Refresh sources" busy={sourcesList?.snapshot.state === "seeding"} onClick={refreshSources} /> : null}
+          {root === "sources" ? <AutoRefresh busy={sourcesList?.snapshot.state === "seeding"} onRefresh={refreshSources} /> : null}
         </Head>
         {root === "sources" ? <Caption>Manage sources here. Add new ones through Add deployable.</Caption> : null}
-        {root === "sources" && (connections.error || credentialFeed?.error) ? <Notice tone="warn" sentence="Some GitHub provenance could not be refreshed." detail={connections.error || credentialFeed?.error} next="Refresh sources to try again. Configured repositories remain available." /> : null}
+        {root === "sources" && (connections.error || credentialFeed?.error) ? <Notice tone="warn" sentence="Some GitHub provenance could not be refreshed." detail={connections.error || credentialFeed?.error} next="Retrying automatically. Configured repositories remain available." /> : null}
 
         {/* WHAT HAPPENED TO THE THING THAT IS NO LONGER HERE. The name is free
             the instant the row is stamped; the certificate and route come down
@@ -689,11 +689,11 @@ export function DeployablesSection({
             detail={feedError}
             next="Check your connection and try again."
           >
-            {root === "sources" ? null : <RefreshButton label="Reload deployables" onClick={onReseed} />}
+            {root === "sources" ? null : <AutoRefresh onRefresh={onReseed} />}
           </Notice>
         ) : null}
 
-        {root === "sources" && listedCount === 0 && !sourceMetadataReady ? connections.error || credentialFeed?.error ? <Caption>Source provenance is unavailable. Refresh sources to finish this reading.</Caption> : connections.state === "disconnected" || credentialFeed?.state === "disconnected" ? <Caption>Sources are unavailable while disconnected. Reconnect to the cluster and refresh.</Caption> : <RecordListSkeleton label="Loading sources and GitHub access" /> : listedCount === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
+        {root === "sources" && listedCount === 0 && !sourceMetadataReady ? connections.error || credentialFeed?.error ? <Caption>Source provenance is unavailable. Retrying automatically.</Caption> : connections.state === "disconnected" || credentialFeed?.state === "disconnected" ? <Caption>Sources are unavailable while disconnected. They update when the connection returns.</Caption> : <RecordListSkeleton label="Loading sources and GitHub access" /> : listedCount === 0 && (feedError || list?.snapshot.state !== "live") ? (feedError ? null : <div data-os-livelist data-state={list?.snapshot.state ?? "disconnected"}>
           <EmptyState icon={root === "sources" ? GitBranch : Globe} title={list?.snapshot.state === "seeding" ? "Loading from the cluster" : "Not connected to the cluster"}>
             {list?.snapshot.state === "seeding" ? "Your apps and repositories will appear here." : "Your apps will appear when the connection returns."}
           </EmptyState>

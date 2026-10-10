@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
-export { RefreshButton } from "../../kit/RefreshButton";
+export { AutoRefresh } from "../../kit/AutoRefresh";
 
 /** One scroll position per real view, restored after a drilldown or local tab. */
 export function useFleetScroll(key: string) {

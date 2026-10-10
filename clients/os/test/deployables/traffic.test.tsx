@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -473,7 +473,7 @@ describe("a deployable's readings, rendered", () => {
       expect(within(page).getByText(/a traffic read covers at most 200 deployables/)).toBeTruthy();
     });
     const before = connection.callsNamed("siteTrafficInWindow");
-    await click(within(page).getByRole("button", { name: "Refresh traffic" }));
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
     await waitFor(() => expect(connection.callsNamed("siteTrafficInWindow").length).toBe(before.length + 1));
     expect(connection.callsNamed("siteTrafficInWindow").at(-1)).toBe(before.at(-1));
   });

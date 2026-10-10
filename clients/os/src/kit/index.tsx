@@ -20,7 +20,7 @@ import {
 export { Caption } from "./Caption";
 export { EmptyState } from "./EmptyState";
 export { RecordListSkeleton } from "./RecordListSkeleton";
-export { RefreshButton } from "./RefreshButton";
+export { AutoRefresh } from "./AutoRefresh";
 export { Switch } from "./Switch";
 export { findRegion, revealRegion } from "./reveal";
 export {

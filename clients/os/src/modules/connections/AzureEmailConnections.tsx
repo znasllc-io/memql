@@ -4,7 +4,7 @@ import { useSession } from "../../chrome/access";
 import { AccountPicker } from "../../apps/accounts/AccountPicker";
 import { useAccountOptions } from "../../apps/accounts/tie";
 import { useDefaultOrganization } from "../../apps/accounts/organization";
-import { Button, EmptyState, Fact, Facts, Field, Head, Input, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, Subhead, useAppReach, useNow } from "../../kit";
+import { AutoRefresh, Button, EmptyState, Fact, Facts, Field, Head, Input, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, Subhead, useAppReach, useNow } from "../../kit";
 import { AddButton } from "../../kit/AddButton";
 import { Wizard } from "../../kit/Wizard";
 import { ActionBar, type Act } from "../../kit/ActionBar";
@@ -127,7 +127,7 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
     <Head title={state?.plan?.domain || "Sending domain"} back={{ label: backLabel, onSelect: () => setView("list") }}/>
     <div className="os-action-body os-app-stack"><Panel label="Sending domain"><Facts><Fact label="Organization" value={name}/><Fact label="Sender" value={state?.sender || "Not configured"}/><Fact label="Replies to" value={state?.replyTo || "No reply mailbox configured"}/></Facts></Panel>
       {!connected ? <Notice sentence="Cluster Azure setup needs attention."/> : null}
-      <section className="os-app-stack" aria-label="Azure send processing"><div className="os-head"><Subhead>Send processing</Subhead><Button busy={busy} onClick={() => { void call("operations").then(result => { if (result) setOperations(result.operations || []); }); }}>{operations ? "Refresh" : "Check sends"}</Button></div>
+      <section className="os-app-stack" aria-label="Azure send processing"><div className="os-head"><Subhead>Send processing</Subhead>{operations === undefined ? <Button busy={busy} onClick={() => { void call("operations").then(result => { if (result) setOperations(result.operations || []); }); }}>Check sends</Button> : <AutoRefresh busy={busy} enabled={!disconnect} onRefresh={async () => { const result = await call("operations"); if (result) setOperations(result.operations || []); }} />}</div>
         <p className="os-caption">Azure processing status does not confirm inbox delivery. Delivery and bounce feedback is not connected yet.</p>
         {operations?.length === 0 ? <p className="os-caption">No Azure sends recorded for this organization.</p> : null}
         {operations?.map(operation => <Panel key={operation.operationId} label="Azure send"><Facts><Fact label="Requested" value={new Date(operation.submittedAt).toLocaleString()}/><Fact label="Processing" value={sendOperationLabel(operation.status)}/></Facts>{operation.detail ? <p className="os-caption">{operation.detail}</p> : null}</Panel>)}

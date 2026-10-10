@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -463,7 +463,7 @@ describe("the list", () => {
     expect(screen.queryByRole("region", { name: "No deployables yet" })).toBeNull();
     expect(document.querySelector(".os-head-meta")).toBeNull();
     seed.sitesError = undefined;
-    await click(screen.getByRole("button", { name: "Reload deployables" }));
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
     expect(await screen.findByText("Storefront")).toBeTruthy();
     expect(screen.queryByText("Deployables could not be loaded.")).toBeNull();
     expect(connection.callsNamed("sitesAll")).toHaveLength(2);

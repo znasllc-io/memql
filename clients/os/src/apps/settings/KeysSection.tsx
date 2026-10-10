@@ -1,5 +1,5 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { Button, Caption, Chip, CopyValue, Fact, Facts, Head, Notice, Panel, RecordList, RecordRow, Subhead } from "../../kit";
+import { AutoRefresh, Caption, Chip, CopyValue, Fact, Facts, Head, Notice, Panel, RecordList, RecordRow, Subhead } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { agreementOf, PROBE_READS, useKeyFacts } from "./keyFacts";
 
@@ -162,13 +162,11 @@ export function KeysSection() {
       </Panel>
 
       <div className="os-refresh-row">
-        <Button onClick={facts.reload} busy={facts.loading}>
-          Read again
-        </Button>
+        <AutoRefresh intervalMs={60_000} onRefresh={facts.reload} busy={facts.loading} />
         <Caption>
           {facts.fetchedAt === null
-            ? `Not read yet. Each press makes ${PROBE_READS} independent reads.`
-            : `Read at ${new Date(facts.fetchedAt).toISOString()}. Each press makes ${PROBE_READS} independent reads, so pressing again samples the replicas again.`}
+            ? `Not read yet. Each check makes ${PROBE_READS} independent reads.`
+            : `Read at ${new Date(facts.fetchedAt).toISOString()}. Each check makes ${PROBE_READS} independent reads, and updates automatically.`}
         </Caption>
       </div>
     </div>

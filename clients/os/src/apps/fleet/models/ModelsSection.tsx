@@ -1,7 +1,7 @@
 import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useMemo, useState } from "react";
-import { RefreshButton, useFleetScroll } from "../FleetControls";
+import { AutoRefresh, useFleetScroll } from "../FleetControls";
 import { InfoDetail } from "../../../kit/InfoDetail";
 
 import {
@@ -163,11 +163,8 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
         title="Model library"
         meta={view === "available" && catalog.state === "read" && !catalog.error ? shown.length : undefined}
       >
-        {/* A REFRESH CONTROL BELONGS HERE, unlike on the live sections: both
-            readings are on-demand projections that are never broadcast, so
-            offering to look again is the honest affordance rather than a
-            contradiction of a feed that arrives on its own. */}
-        <RefreshButton label="Refresh model library" busy={reading} onClick={() => { catalog.reread(); doors.reread(); profiles.reread(); }} />
+
+        <AutoRefresh busy={reading} onRefresh={() => { catalog.reread(); doors.reread(); profiles.reread(); }} />
       </Head>
 
       <LocalTabs label="Model library views" value={view} onChange={setView} options={[["available", "Available models"], ["catalog", "Catalog"], ["sources", "Inference sources"]]} />
@@ -179,7 +176,7 @@ export function ModelsSection({ onHome }: { onHome?: () => void } = {}) {
         <Notice
           tone="info"
           sentence="We could not read your fleet's catalog."
-          next="Refresh to try again. If it still fails, check Fleet logs."
+          next="Retrying automatically. If this continues, check Fleet logs."
           detail={catalog.error}
         />
       ) : null}
@@ -339,7 +336,7 @@ function DoorsPanel({
         <Notice
           tone="info"
           sentence="Inference sources could not be read."
-          next="Refresh to check source availability again."
+          next="Source availability is checked automatically."
           detail={error}
         />
       ) : null}

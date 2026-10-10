@@ -2,7 +2,7 @@ import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { LocalTabs } from "../../../kit/LocalTabs";
 import { useEffect, useState } from "react";
-import { RefreshButton, useFleetScroll } from "../FleetControls";
+import { AutoRefresh, useFleetScroll } from "../FleetControls";
 import { InfoDetail } from "../../../kit/InfoDetail";
 
 import { Button, Check, Switch, EmptyState, Chip, Field, Head, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead } from "../../../kit";
@@ -54,13 +54,8 @@ export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { i
     <div className="fleet-pane-overview" hidden={openSessionId !== ""}>
       <div className="fleet-section-header">
       <Head title="Activity" meta={view === "sessions" && sessions.readAt && !sessions.loading && !sessions.error ? sessions.sessions.length : undefined}>
-        {/* NOT A STANDING REFRESH. Neither read on this screen is live --
-            v1:worker:delegationPolicy and v1:worker:appSession carry no
-            broadcast rule -- so unlike the Routing and Workbenches sections,
-            where the control appears only when the FEED is behind, here it is
-            the honest permanent affordance: this surface says when it looked
-            and offers to look again. */}
-        <RefreshButton label="Refresh app activity" busy={sessions.loading || policy.loading} onClick={() => { policy.reread(); sessions.reread(); }} />
+
+        <AutoRefresh busy={sessions.loading || policy.loading} onRefresh={() => { policy.reread(); sessions.reread(); }} />
       </Head>
 
       <LocalTabs label="Activity views" value={view} onChange={setView} options={[["sessions", "App sessions"], ["delegation", "Delegation"]]} />
@@ -72,7 +67,7 @@ export function AppsSection({ sessionTarget, navigation }: { sessionTarget?: { i
       <p className="os-caption">
         {sessions.readAt === null
           ? "Not read yet."
-          : `Read ${formatFreshness(sessions.readAt.toISOString(), now)}. Refresh for newer sessions.`}
+          : `Read ${formatFreshness(sessions.readAt.toISOString(), now)}. Updates automatically.`}
       </p>
 
       {sessions.error === "" ? null : (
