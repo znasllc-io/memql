@@ -13,40 +13,11 @@ vi.mock("../../src/live/connection", () => ({
 
 import { ARTIFACT_CONCEPT, FILE_CONCEPT } from "../../src/apps/files/concepts";
 import { artifactRow, click, emit, fakeConnection, fileRow, renderFiles, versionRow } from "./harness";
-import type { UploadHandle, UploadOptions, UploadProvider, UploadResult } from "../../src/items/upload";
-
-// The version history panel and the upload-new-version action (epic
-// memql#4806, #4808).
+// Version history remains available; Files no longer replaces a file by upload.
 
 beforeEach(() => {
   h.connection = null;
 });
-
-/** A provider that records what it was asked to do and answers on demand. */
-function recordingProvider(): UploadProvider & {
-  calls: Array<{ name: string; opts: UploadOptions | undefined }>;
-  settle: (result: UploadResult) => void;
-  fail: (message: string) => void;
-} {
-  const calls: Array<{ name: string; opts: UploadOptions | undefined }> = [];
-  let resolveDone: ((r: UploadResult) => void) | null = null;
-  let rejectDone: ((e: Error) => void) | null = null;
-  return {
-    calls,
-    upload(file: File, opts?: UploadOptions): UploadHandle {
-      calls.push({ name: file.name, opts });
-      return {
-        done: new Promise<UploadResult>((resolve, reject) => {
-          resolveDone = resolve;
-          rejectDone = reject;
-        }),
-        abort: () => {},
-      };
-    },
-    settle: (result) => resolveDone?.(result),
-    fail: (message) => rejectDone?.(new Error(message)),
-  };
-}
 
 async function openInspector(title: string) {
   await click(screen.getByRole("button", { name: new RegExp(title) }));
@@ -199,76 +170,29 @@ describe("the version history panel", () => {
   });
 });
 
-describe("the upload-new-version action", () => {
-  it("sends the target through the ONE provider and says which version landed", async () => {
-    const provider = recordingProvider();
-    const connection = fakeConnection({
-      artifacts: [artifactRow({ id: "a-1", title: "q3.pdf", sourceConceptRef: "v1:library:file:f-1" })],
-      files: [fileRow({ id: "f-1", versionNumber: 1 })],
-      versions: [],
-    });
-    h.connection = connection;
-    await renderFiles({ uploads: provider });
-    const inspector = await openInspector("q3\\.pdf");
-
-    const picker = within(inspector).getByLabelText("Choose a file to upload as the new version");
-    const file = new File(["new bytes"], "q3-final.pdf", { type: "application/pdf" });
-    await act(async () => {
-      fireEvent.change(picker, { target: { files: [file] } });
-    });
-
-    // THE PROVIDER IS THE ONLY ROUTE SPEAKER (test/files/onePath.test.ts), so
-    // the target is an OPTION on it rather than a second upload path -- which
-    // is what gives a new version chunking, resume, retry and verbatim
-    // refusals with nothing here knowing about any of them.
-    expect(provider.calls).toEqual([
-      { name: "q3-final.pdf", opts: { targetArtifactId: "a-1" } },
-    ]);
-
-    const readsBefore = connection.callsNamed("libraryFileVersionsForFile").length;
-    await act(async () => {
-      provider.settle({ artifactId: "a-1", title: "q3-final.pdf", fileKind: "file", source: "uploaded", versionNumber: 2 });
-    });
-    expect(within(inspector).getByText("Version 2 landed.")).toBeTruthy();
-    // The history is read again, because these rows do not arrive on a feed.
-    expect(connection.callsNamed("libraryFileVersionsForFile").length).toBe(readsBefore + 1);
-  });
-
-  it("renders the cluster's refusal verbatim, in surface, and offers the same bytes again", async () => {
-    const provider = recordingProvider();
+describe("file footer actions", () => {
+  it("keeps actions together without a replacement upload while retaining history", async () => {
     h.connection = fakeConnection({
       artifacts: [artifactRow({ id: "a-1", title: "q3.pdf", sourceConceptRef: "v1:library:file:f-1" })],
-      files: [fileRow({ id: "f-1", versionNumber: 1 })],
+      files: [fileRow({ id: "f-1", versionNumber: 2, size: 1024 })],
+      versions: [versionRow({ id: "f-1-v1", fileId: "f-1", versionNumber: 1 })],
     });
-    await renderFiles({ uploads: provider });
+    await renderFiles();
     const inspector = await openInspector("q3\\.pdf");
-
-    const picker = within(inspector).getByLabelText("Choose a file to upload as the new version");
-    const file = new File(["x"], "q3-final.pdf", { type: "application/pdf" });
-    await act(async () => {
-      fireEvent.change(picker, { target: { files: [file] } });
-    });
-    const refusal =
-      "storage quota exceeded: this upload would take your Library to 101 bytes, over the quota of 100 bytes";
-    await act(async () => {
-      provider.fail(refusal);
-    });
-
-    expect(within(inspector).getByText(refusal)).toBeTruthy();
-    // The surface says what is TRUE NOW, not only what failed.
-    expect(within(inspector).getByText("This file still holds the version it had.")).toBeTruthy();
-
-    // A refusal that made the person re-pick the file they just picked would
-    // cost them the thing they were doing.
-    await click(within(inspector).getByRole("button", { name: "Try again" }));
-    expect(provider.calls).toHaveLength(2);
-    expect(provider.calls[1]).toEqual({ name: "q3-final.pdf", opts: { targetArtifactId: "a-1" } });
+    const footer = within(inspector).getByRole("group", { name: "What you can do with this" });
+    expect(within(footer).getAllByRole("button").map(button => button.getAttribute("aria-label") || button.textContent)).toEqual([
+      "Delete", "Send to desktop", "Download", "Open",
+    ]);
+    expect(within(footer).getByText("In Library")).toBeTruthy();
+    expect(within(footer).getByText(/Version 2/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Upload new version/ })).toBeNull();
+    expect(screen.queryByLabelText("Choose a file to upload as the new version")).toBeNull();
+    expect(within(inspector).getByRole("region", { name: "Version history" })).toBeTruthy();
+    await click(within(footer).getByRole("button", { name: "Send to desktop" }));
+    expect(within(footer).getByText("On the desk.")).toBeTruthy();
   });
 
-  // An archived file's action set is deliberately smaller: the artifact is
-  // thrown away, and offering to grow it would be offering to un-throw it
-  // sideways.
-  it("is absent on an archived file", async () => {
+  it("offers Restore in the Bin and keeps previous versions available", async () => {
     h.connection = fakeConnection({
       artifacts: [
         artifactRow({
@@ -285,6 +209,10 @@ describe("the upload-new-version action", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Bin/ }));
     const inspector = await openInspector("gone\\.pdf");
     expect(within(inspector).queryByRole("button", { name: /Upload new version/ })).toBeNull();
+    const footer = within(inspector).getByRole("group", { name: "What you can do with this" });
+    expect(within(footer).getByText("In Bin")).toBeTruthy();
+    expect(within(footer).getByRole("button", { name: "Restore" })).toBeTruthy();
+    expect(within(footer).queryByRole("button", { name: "Delete" })).toBeNull();
     // The HISTORY is still there: an archived file keeps its bytes and its
     // provenance, and the panel is where a person goes to get an earlier copy.
     expect(within(inspector).getByRole("region", { name: "Version history" })).toBeTruthy();

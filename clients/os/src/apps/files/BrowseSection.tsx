@@ -63,7 +63,6 @@ import { accountIsArchived, accountName } from "../accounts/rows";
 import { useAccountOptions } from "../accounts/tie";
 import { ACCOUNT_ANY, ACCOUNT_NONE, applyFilters, labelsOf, LABEL_ANY } from "./filters";
 import { Inspector } from "./Inspector";
-import type { UploadProvider } from "../../items/upload";
 import type { UploadTask, UploadTasksApi } from "./useUploadTasks";
 
 // The browse (design D1, reshaped by epic memql#4842): rail, list, inspector
@@ -112,12 +111,10 @@ export function BrowseSection({
   selectedId,
   onSelect,
   confirmBeforeArchive,
-  askContext,
   askAbout,
   tasks,
   uploadFiles,
   uploadTree,
-  uploads,
 }: {
   list: LiveView<ArtifactRow> | null;
   artifacts: LiveCollectionHandle<Row>;
@@ -147,16 +144,10 @@ export function BrowseSection({
   selectedId: string;
   onSelect: (id: string) => void;
   confirmBeforeArchive: boolean;
-  askContext: (tag: string) => void;
   askAbout?: (tag: string) => void;
   tasks: UploadTask[];
   uploadFiles: UploadTasksApi["uploadFiles"];
   uploadTree: UploadTasksApi["uploadTree"];
-  /** The provider itself, for the inspector's new-version action (memql#4806).
-   *  Deliberately not routed through `uploadFiles`: that creates a placeholder
-   *  ROW in this list, and a new version of an existing artifact must not add
-   *  a second row to the list it is proving it does not disturb. */
-  uploads: UploadProvider;
 }) {
   const { presence } = useMachines();
   const { actions, registry } = useOs();
@@ -187,8 +178,8 @@ export function BrowseSection({
   // row, and it had no menu at all.
   const [rowMenu, setRowMenu] = useState<{ x: number; y: number; row: ArtifactRow } | null>(null);
   const [rowArchive, setRowArchive] = useState<ArtifactRow | null>(null);
-  // The row actions' one refusal slot, carrying the SENTENCE with it. Four
-  // verbs report here (archive, move, download, new version) and a single
+  // The row actions' one refusal slot, carrying the SENTENCE with it. Three
+  // verbs report here (archive, move, download) and a single
   // shared wording would tell the reader neither which one failed nor what
   // state their file is now in.
   const [rowNote, setRowNote] = useState<{ sentence: string; next: string; detail: string } | null>(
@@ -199,14 +190,11 @@ export function BrowseSection({
   // The row menu's own flows. Each renders beside the list, in surface, the
   // way every other refusal in this app does.
   const [rowMove, setRowMove] = useState<ArtifactRow | null>(null);
-  const [rowVersionFor, setRowVersionFor] = useState<ArtifactRow | null>(null);
   const [vsNoAnswer, setVsNoAnswer] = useState(false);
-  const versionPick = useRef<HTMLInputElement | null>(null);
 
   // Every heavy verb the row menu offers is the inspector's verb, reached by
   // the SAME function -- the download decision is shared in actions/download,
-  // the desk hand-off is one shell action, the new version is the one upload
-  // provider. A right-click is a third entry point onto one set of actions,
+  // the desk hand-off is one shell action. A right-click is a third entry point onto one set of actions,
   // never a second implementation of them.
   const downloadRow = async (row: ArtifactRow) => {
     setRowNote(null);
@@ -260,15 +248,6 @@ export function BrowseSection({
       await query.moveArtifactToFolder({ artifactId: row.id, folderId });
     } catch (err: unknown) {
       refuse("The move was refused.", "The file is where it was.", err);
-    }
-  };
-
-  const sendNewVersion = async (row: ArtifactRow, file: File) => {
-    setRowNote(null);
-    try {
-      await uploads.upload(file, { targetArtifactId: row.id }).done;
-    } catch (err: unknown) {
-      refuse("The new version was not accepted.", "This file still holds the version it had.", err);
     }
   };
 
@@ -500,18 +479,6 @@ export function BrowseSection({
       ...(!isZipArtifact(row) ? [{ id: "open", label: "Open in editor", onSelect: () => openVsCodeFor(row) }] : []),
       { id: "desk", label: "Send to desktop", onSelect: () => sendRowToDesk(row) },
       download,
-      ...(row.kind === "file"
-        ? [
-            {
-              id: "version",
-              label: "Upload new version",
-              onSelect: () => {
-                setRowVersionFor(row);
-                versionPick.current?.click();
-              },
-            },
-          ]
-        : []),
       {
         id: "move",
         label: "Move to folder",
@@ -685,7 +652,8 @@ export function BrowseSection({
   const scrollPositions = useRef(new Map<string, number>());
   const pageKey = `${filter.place}:${filter.folderId ?? ""}:${selectedId}`;
   useLayoutEffect(() => {
-    const scroller = pageRoot.current?.closest<HTMLElement>(".os-window-content");
+    const scroller = pageRoot.current?.querySelector<HTMLElement>(".os-file-detail-body")
+      ?? pageRoot.current?.closest<HTMLElement>(".os-window-content");
     if (scroller) scroller.scrollTop = scrollPositions.current.get(pageKey) ?? 0;
     return () => { if (scroller) scrollPositions.current.set(pageKey, scroller.scrollTop); };
   }, [pageKey]);
@@ -704,6 +672,7 @@ export function BrowseSection({
     <div
       ref={pageRoot}
       className="os-files"
+      data-detail={selected !== null || undefined}
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
         event.preventDefault();
@@ -961,8 +930,6 @@ export function BrowseSection({
             archivedFolderIds={archivedFolderIdSet}
             presence={presence}
             confirmBeforeArchive={confirmBeforeArchive}
-            uploads={uploads}
-            onAsk={askContext}
             backLabel={headTitle}
             breadcrumbs={[...(headTrail ?? [{label: headTitle}]).map((crumb, i, all) => i === all.length - 1 ? {...crumb, onSelect: () => onSelect("")} : {...crumb, onSelect: () => { onSelect(""); crumb.onSelect?.(); }}), {label: artifactName(selected)}]}
             onClose={() => onSelect("")}
@@ -973,8 +940,7 @@ export function BrowseSection({
           It used to hold one entry -- Move to Bin -- which made a right-click
           look like it had failed to load rather than like the surface it is.
           Every verb here reaches the same function the inspector's button
-          does; the two heavy ones (download, new version) run the shared
-          implementations rather than second copies. */}
+          does; downloads run the shared implementation. */}
       {rowMenu !== null ? (
         <ContextMenu
           x={rowMenu.x}
@@ -1051,23 +1017,6 @@ export function BrowseSection({
           </div>
         </Notice>
       ) : null}
-      {/* The picker is never seen: a bare file input cannot be styled into
-          this shell's button language, and every surface here uses the same
-          one. Cleared on change so picking the SAME file twice fires again --
-          a change event that never comes reads as a dead menu item. */}
-      <input
-        ref={versionPick}
-        type="file"
-        className="os-visually-hidden"
-        aria-label="Choose a file to upload as the new version"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = "";
-          const row = rowVersionFor;
-          setRowVersionFor(null);
-          if (file && row) void sendNewVersion(row, file);
-        }}
-      />
       {folderMenu !== null ? (
         <ContextMenu
           x={folderMenu.x}

@@ -206,8 +206,11 @@ describe("the inspector", () => {
     await click(screen.getByRole("button", { name: /brief\.pdf/ }));
     const inspector = screen.getByRole("region", { name: "File details" });
     await click(within(inspector).getByRole("button", { name: "Delete" }));
-    expect(within(inspector).getByText(/Delete "brief\.pdf"\?/)).toBeTruthy();
-    await click(within(inspector).getByRole("button", { name: "Cancel" }));
+    const footer = within(inspector).getByRole("group", { name: "What you can do with this" });
+    expect(within(footer).getByText(/Delete "brief\.pdf"\?/)).toBeTruthy();
+    expect(within(footer).queryByRole("button", { name: "Open" })).toBeNull();
+    await click(within(footer).getByRole("button", { name: "Cancel" }));
+    expect(within(footer).getByRole("button", { name: "Open" })).toBeTruthy();
     expect(connection.callsNamed("archiveArtifact")).toEqual([]);
   });
 });

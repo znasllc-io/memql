@@ -74,13 +74,14 @@ describe("the row's right-click menu", () => {
       "Open in editor",
       "Send to desktop",
       "Download",
-      "Upload new version",
       "Move to folder",
       "Ask about this file",
       "Move to Bin",
     ]) {
       expect(within(menu).getByRole("menuitem", { name })).toBeTruthy();
     }
+    expect(within(menu).queryByRole("menuitem", { name: "Upload new version" })).toBeNull();
+    expect(screen.queryByLabelText("Choose a file to upload as the new version")).toBeNull();
   });
 
   // Asking about a file is the person's explicit request, so it goes through

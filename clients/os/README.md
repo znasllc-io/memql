@@ -1116,15 +1116,15 @@ Backups use a plus action, a full-page form, a schedule, and a hidden-file switc
   key separator was the second one to be found this way and is now written
   the same, as the escape for U+0000.
 
-- **A NEW VERSION IS ONE ROW, NOT TWO** (epic memql#4806). "Upload new
-  version" in the inspector sends `targetArtifactId` through the SAME
-  provider every other upload rides -- so chunking, resume, retry, progress
-  and verbatim refusals all apply to it and nothing new learned any of them
-  -- and the artifact keeps its id, its folder and its labels. It
-  deliberately does not go through `useUploadTasks`: those create a
-  placeholder ROW in the list, and a new version must not add a second row
-  to the list it is proving it does not disturb. The history lives in the
-  detail page below the action that grows it. The app's existing retained
+- **FILE ACTIONS STAY IN THE FOOTER.** File details and version history scroll
+  above the shared `ActionBar`. The current state sits left; Delete (or Restore
+  in the Bin), Send to desktop, Download and Open sit right, with Open primary
+  and last. ZIP files offer Download instead of Open. Confirmation and action
+  failures stay at the footer too. New files are uploaded from the Library;
+  Files has no manual Upload new version action, including in row menus.
+
+- **VERSION HISTORY UPDATES AUTOMATICALLY.** Editor and generated revisions
+  remain available in the file's history. The app's existing retained
   `v1:library:file` subscription invalidates the history when its head version
   changes, including writes on other replicas. No second subscription is
   opened. `AutoRefresh` checks every 15 seconds while visible and on return

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Trash2, CornerUpRight, Download, FilePlus2, RotateCcw } from "lucide-react";
+import { Trash2, CornerUpRight, Download, RotateCcw } from "lucide-react";
 
 import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
@@ -9,7 +9,8 @@ import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import { editorFilename, isZipArtifact } from "../../items/editorPreference";
 import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
-import { Button, Chip, CopyValue, Fact, Facts, Notice, Head, Subhead, formatBytes, formatMoment } from "../../kit";
+import { Button, CopyValue, Fact, Facts, Notice, Head, Subhead, formatBytes, formatMoment } from "../../kit";
+import { ActionBar } from "../../kit/ActionBar";
 import { LabelEditor } from "./LabelEditor";
 import { AccountLabelPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
@@ -18,7 +19,6 @@ import { useFileVersions } from "./actions/versions";
 import { VersionHistory } from "./VersionHistory";
 import { fileHeadFromRow, type VersionEntry } from "./versions";
 import { useOsConnection } from "../../live/connection";
-import type { UploadProvider } from "../../items/upload";
 import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
 import { MATERIALIZER_APP, MATERIALIZER_COMPOSER } from "./materializer";
@@ -32,8 +32,7 @@ import { downloadWorkerRegistration, runWorkerDownload } from "./actions/downloa
 import { artifactName, fileStory, type ArtifactRow, type CompositionRow } from "./rows";
 
 // File details occupy the page. Origin belongs with the other facts;
-// editing labels and clients, file actions, and version history follow.
-// Each action keeps its own pending/error state next to its controls.
+// labels, clients and version history scroll above the pinned action footer.
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -47,7 +46,6 @@ export function Inspector({
   archivedFolderIds,
   presence,
   confirmBeforeArchive,
-  uploads,
   onClose,
   backLabel = "Files",
   breadcrumbs,
@@ -68,19 +66,6 @@ export function Inspector({
   archivedFolderIds: ReadonlySet<string>;
   presence: (workerId: string) => { name?: string; online: boolean } | null;
   confirmBeforeArchive: boolean;
-  /**
-   * The ONE upload provider (epic memql#4806). A new version rides it exactly
-   * as every other upload does, which is what gives it chunking, resume,
-   * per-chunk retry and verbatim refusals for free -- and what keeps
-   * test/files/onePath.test.ts's claim true: the provider is still the only
-   * thing in this tree that speaks the artifact upload wire.
-   *
-   * It does NOT ride `useUploadTasks`: those create a placeholder ROW in the
-   * list, and a new version of an existing artifact must not add a second row
-   * to the very list it is proving it does not disturb.
-   */
-  uploads: UploadProvider;
-  onAsk: (tag: string) => void;
   onClose: () => void;
   backLabel?: string;
   breadcrumbs?: readonly Breadcrumb[];
@@ -121,12 +106,6 @@ export function Inspector({
   const liveVersion = liveHead ? fileHeadFromRow(liveHead) : null;
   const headRevision = liveVersion ? `${liveVersion.versionNumber}:${liveVersion.sha256}:${liveVersion.versionUploadedAt}` : "";
   const versions = useFileVersions(fileId, headRevision);
-  const refreshVersions = versions.refresh;
-  const picker = useRef<HTMLInputElement | null>(null);
-  const [newVersionError, setNewVersionError] = useState("");
-  const [newVersionNote, setNewVersionNote] = useState("");
-  const [newVersionBusy, setNewVersionBusy] = useState(false);
-  const [newVersionSent, setNewVersionSent] = useState(0);
   const [downloadingVersion, setDownloadingVersion] = useState(0);
 
   useEffect(() => () => cancelHandoff.current?.(), []);
@@ -189,48 +168,6 @@ export function Inspector({
       setDownloadBusy(false);
     }
   }, [row, name, connection, authSource]);
-
-  // UPLOAD A NEW VERSION. One file, one provider call, one target.
-  //
-  // The file is HELD so "Try again" can retry the same bytes: a refusal that
-  // makes the person re-pick the file they just picked is a refusal that costs
-  // them the thing they were doing.
-  const pending = useRef<File | null>(null);
-  const sendNewVersion = useCallback(
-    async (file: File) => {
-      pending.current = file;
-      setNewVersionBusy(true);
-      setNewVersionError("");
-      setNewVersionNote("");
-      setNewVersionSent(0);
-      const handle = uploads.upload(file, { targetArtifactId: row.id });
-      const stop = handle.onProgress?.((progress) => setNewVersionSent(progress.sentBytes));
-      try {
-        const result = await handle.done;
-        // The action keeps its own name through the whole flow: the button
-        // says "Upload new version", and this says which version landed.
-        setNewVersionNote(
-          result.versionNumber === undefined
-            ? "The new version landed."
-            : `Version ${result.versionNumber} landed.`,
-        );
-        pending.current = null;
-        // Confirm our own upload immediately; remote changes arrive through
-        // the retained file feed and invalidate the same history reading.
-        refreshVersions();
-      } catch (err: unknown) {
-        setNewVersionError(describe(err));
-      } finally {
-        stop?.();
-        setNewVersionBusy(false);
-      }
-    },
-    // `refreshVersions`, not the whole `versions` object: the hook returns a
-    // fresh object every render, so depending on it would make this
-    // useCallback a no-op that re-allocates on every keystroke elsewhere in
-    // the panel. The refresh function itself is stable.
-    [uploads, row.id, refreshVersions],
-  );
 
   const downloadVersion = useCallback(
     async (entry: VersionEntry) => {
@@ -339,10 +276,10 @@ export function Inspector({
   const filedIn = folderNameOf(row.folderId);
 
   return (
-    <section className="os-file-detail" aria-label="File details" data-os-page-context={JSON.stringify({ page: "File details", fileId: row.id, name, kind: row.kind })}>
+    <section className="os-action-pane os-file-detail" aria-label="File details" data-os-page-context={JSON.stringify({ page: "File details", fileId: row.id, name, kind: row.kind })}>
+      <div className="os-action-body os-file-detail-body">
       <Head title={name} breadcrumbs={breadcrumbs} back={{label: backLabel, onSelect: onClose}} />
 
-      {row.archived ? <Chip tone="muted">archived</Chip> : null}
       {/* A summary describes the contents; origin is a fact below. */}
       {row.summary.trim() !== "" ? <p className="os-files-summary">{row.summary}</p> : null}
 
@@ -449,122 +386,6 @@ export function Inspector({
         )}
       </div>
 
-      <div className="os-files-group">
-        <Subhead>Actions</Subhead>
-        {/* Compact actions share the control height. Icons retain their names
-            for hover, keyboard and assistive technology. */}
-        <div className="os-files-actions">
-          <Button tone="primary" onClick={isZipArtifact(row) ? () => void download() : openVsCode} busy={isZipArtifact(row) && downloadBusy}
-            ariaLabel={isZipArtifact(row) ? "Download ZIP" : undefined} title={isZipArtifact(row) ? "Download ZIP" : undefined}>
-            {isZipArtifact(row) ? <Download size={16} aria-hidden /> : "Open"}
-          </Button>
-          <div className="os-files-actions-more">
-            <Button onClick={sendToDesk} ariaLabel="Send to desktop" title="Send to desktop">
-              <CornerUpRight size={16} aria-hidden />
-            </Button>
-            {!isZipArtifact(row) && <Button onClick={() => void download()} busy={downloadBusy} ariaLabel={downloadBusy ? "Downloading" : "Download"} title="Download">
-              <Download size={16} aria-hidden />
-            </Button>}
-            {/* NEW VERSION, beside Download and only for files. The person
-                NAMES the file this replaces by acting from its own inspector,
-                which is the whole identity story: a browser upload carries no
-                honest machine or path identity, and matching by filename would
-                silently merge two different files. */}
-            {row.kind === "file" && !row.archived ? (
-              <Button
-                onClick={() => picker.current?.click()}
-                busy={newVersionBusy}
-                busyLabel="Uploading"
-              >
-                <FilePlus2 size={13} aria-hidden /> Upload new version
-              </Button>
-            ) : null}
-            {!row.archived ? (
-              <Button
-                tone="danger"
-                busy={archiveBusy}
-                ariaLabel={archiveBusy ? "Deleting" : "Delete"}
-                title="Delete"
-                onClick={() => (confirmBeforeArchive ? setConfirmingArchive(true) : void archive())}
-              >
-                <Trash2 size={16} aria-hidden />
-              </Button>
-            ) : (
-              <Button busy={archiveBusy} busyLabel="Restoring" onClick={() => void restore()}>
-                <RotateCcw size={13} aria-hidden /> Restore
-              </Button>
-            )}
-          </div>
-        </div>
-        {/* The picker itself is never seen: a bare file input cannot be styled
-            into this shell's button language, and every surface here uses the
-            same one. */}
-        <input
-          ref={picker}
-          type="file"
-          className="os-visually-hidden"
-          aria-label="Choose a file to upload as the new version"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            // The input is cleared so picking the SAME file twice fires again
-            // -- a change event that never comes reads as a dead button.
-            event.target.value = "";
-            if (file) void sendNewVersion(file);
-          }}
-        />
-        {/* EVERY SLOT BELOW BELONGS TO THE ACTION ABOVE IT, in the order it
-            has always been in. One error slot per action is a recorded
-            decision: consolidating them would put a download refusal under
-            the archive button. */}
-        {newVersionBusy && newVersionSent > 0 ? (
-          <p className="os-caption os-files-version-progress">{formatBytes(newVersionSent)} sent</p>
-        ) : null}
-        {newVersionNote !== "" ? <p className="os-caption">{newVersionNote}</p> : null}
-        {newVersionError !== "" ? (
-          <Notice
-            tone="error"
-            sentence="The new version was not accepted."
-            next="This file still holds the version it had."
-            detail={newVersionError}
-          >
-            {pending.current === null ? null : (
-              <Button
-                onClick={() => {
-                  const file = pending.current;
-                  if (file) void sendNewVersion(file);
-                }}
-              >
-                Try again
-              </Button>
-            )}
-          </Notice>
-        ) : null}
-        {vsNoAnswer ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
-        {deskNote !== "" ? <p className="os-caption">{deskNote}</p> : null}
-        {downloadError !== "" ? (
-          <Notice tone="error" sentence="The download did not land." detail={downloadError}>
-            <Button onClick={() => void download()}>Try again</Button>
-          </Notice>
-        ) : null}
-        {confirmingArchive ? (
-          <Notice
-            tone="warn"
-            sentence={`Delete "${name}"?`}
-            next="You can restore it from the Bin until it is purged."
-          >
-            <div className="os-files-confirm">
-              <Button tone="danger" onClick={() => void archive()}>
-                Delete
-              </Button>
-              <Button onClick={() => setConfirmingArchive(false)}>Cancel</Button>
-            </div>
-          </Notice>
-        ) : null}
-        {archiveError !== "" ? (
-          <Notice tone="error" sentence="The archive was refused." detail={archiveError} />
-        ) : null}
-      </div>
-
       {row.kind === "file" ? (
         <VersionHistory
           history={versions.history}
@@ -578,6 +399,60 @@ export function Inspector({
           downloadingVersion={downloadingVersion}
         />
       ) : null}
+      </div>
+      <footer className="os-file-detail-footer" data-confirming={confirmingArchive || undefined}>
+        {vsNoAnswer || downloadError || archiveError ? (
+          <div className="os-file-detail-notices">
+            {vsNoAnswer ? <Notice tone="warn" sentence={VSCODE_NO_ANSWER_MESSAGE} /> : null}
+            {downloadError ? (
+              <Notice tone="error" sentence="The download did not land." detail={downloadError}>
+                <Button onClick={() => void download()} busy={downloadBusy}>Try again</Button>
+              </Notice>
+            ) : null}
+            {archiveError ? (
+              <Notice tone="error" sentence={row.archived ? "The file was not restored." : "The file was not deleted."} detail={archiveError} />
+            ) : null}
+          </div>
+        ) : null}
+        <ActionBar
+          state={archiveBusy ? (row.archived ? "Restoring" : "Deleting")
+            : confirmingArchive ? `Delete "${name}"?`
+            : downloadBusy || downloadingVersion > 0 ? "Downloading"
+            : row.archived ? "In Bin" : "In Library"}
+          detail={confirmingArchive ? "You can restore it from the Bin until it is purged."
+            : deskNote || (versions.head ? `Version ${versions.head.versionNumber} · ${formatBytes(versions.head.size)}` : undefined)}
+          live
+        >
+          {confirmingArchive ? (
+            <>
+              <button type="button" className="os-actbar-text" onClick={() => setConfirmingArchive(false)}>Cancel</button>
+              <Button tone="danger" onClick={() => void archive()}>Delete</Button>
+            </>
+          ) : (
+            <>
+              {row.archived ? (
+                <Button busy={archiveBusy} busyLabel="Restoring" onClick={() => void restore()}>
+                  <RotateCcw size={16} aria-hidden /> Restore
+                </Button>
+              ) : (
+                <Button tone="danger" busy={archiveBusy} ariaLabel={archiveBusy ? "Deleting" : "Delete"} title="Delete"
+                  onClick={() => (confirmBeforeArchive ? setConfirmingArchive(true) : void archive())}>
+                  <Trash2 size={16} aria-hidden />
+                </Button>
+              )}
+              <Button onClick={sendToDesk} disabled={archiveBusy} ariaLabel="Send to desktop" title="Send to desktop">
+                <CornerUpRight size={16} aria-hidden />
+              </Button>
+              <Button onClick={() => void download()} busy={downloadBusy} disabled={archiveBusy}
+                tone={isZipArtifact(row) ? "primary" : "quiet"}
+                ariaLabel={downloadBusy ? "Downloading" : isZipArtifact(row) ? "Download ZIP" : "Download"} title={isZipArtifact(row) ? "Download ZIP" : "Download"}>
+                <Download size={16} aria-hidden />
+              </Button>
+              {!isZipArtifact(row) ? <Button tone="primary" onClick={openVsCode} disabled={archiveBusy}>Open</Button> : null}
+            </>
+          )}
+        </ActionBar>
+      </footer>
     </section>
   );
 }
