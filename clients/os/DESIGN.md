@@ -278,8 +278,11 @@ below that page's heading and above its content. Fleet's Model Library
 (Available models / Catalog / Inference sources) and machine details are the
 reference. Keep the app's top-level section tabs in `AppFrame`; do not add a
 second app-level tab bar or disguise page navigation as radio preferences.
-Local tabs keep one active view, preserve attention destinations, and scroll
-horizontally in a narrow window. Filters stay in `Refine`, saved choices stay
+Local tabs keep one active view and scroll horizontally in a narrow window.
+The active view uses the theme's soft accent fill and a solid accent underline;
+selection must remain clear in every theme's light and dark mode, without
+depending on a near-identical surface color. Keep keyboard focus distinct.
+Filters stay in `Refine`, saved choices stay
 form controls, and ordered workflows keep their rail.
 
 Deployables used to draw both nouns in one list: a source was a row with its

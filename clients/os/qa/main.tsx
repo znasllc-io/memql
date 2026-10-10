@@ -12,6 +12,7 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import "../src/styles/index.css";
+import { applyPackStyles, resolveThemePack } from "../src/themes/registry";
 import { Panel } from "../src/kit";
 import { setRoleLadder } from "../src/system/roles";
 import { SEEDED_LADDER } from "../test/seededLadder";
@@ -1676,7 +1677,8 @@ clicks.forEach((label, i) => {
 
 const mode = new URLSearchParams(window.location.search).get("mode") ?? "dark";
 document.documentElement.setAttribute("data-theme", mode);
-document.documentElement.setAttribute("data-os-theme", "graphite");
+applyPackStyles([]);
+document.documentElement.setAttribute("data-os-theme", resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id);
 document.documentElement.style.colorScheme = mode;
 
 createRoot(document.getElementById("root")!).render(<App />);

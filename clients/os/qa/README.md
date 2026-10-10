@@ -17,6 +17,11 @@ cd clients/os
 npx vite --config qa/vite.config.ts --port 5199 --strictPort
 ```
 
+Add `theme=graphite`, `theme=vellum`, or `theme=cobalt` to inspect each built-in
+palette with `mode=light` or `mode=dark`. The harness uses the production theme
+registry; Graphite is the default. `view=routing-routes` includes the shared
+local tabs used by Fleet machine views and other app pages.
+
 Then capture. A one-shot headless screenshot is enough for any view that needs
 no click, and every view here is reachable by URL for that reason:
 
