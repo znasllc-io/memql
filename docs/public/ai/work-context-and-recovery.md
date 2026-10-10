@@ -90,6 +90,9 @@ including proposals that changed only part of it. Unfinished requests get the
 same bounded repair, followed by another assessment. A second incomplete result
 stops before approval rather than presenting partial work as complete. These
 model assessments guide recovery; they do not replace human factual review.
+The assessment uses the prose judgment level and treats the proposed document
+as the source of truth for its contents. Original selections and quoted feedback
+are context, not proof that rejected wording remains in the candidate.
 
 An unchanged request can reuse a completed image batch from an earlier finished
 or stopped attempt. The native gate compares the captured source, feedback,

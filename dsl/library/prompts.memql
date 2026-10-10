@@ -88,8 +88,8 @@ prompt libraryRevisionImagePlan {
  evidence string!
 }
 
-/// Check whether a no-op fulfills the human request, never whether it is easy.
-@level("fast")
+/// Judge actual proposed prose against all feedback, including partial edits.
+@level("strong")
 @templateFile("prompts/libraryRevisionCompletion.tmpl")
 prompt libraryRevisionCompletion {
  references string
