@@ -119,6 +119,10 @@ in the planner DSL namespace. Their decisions are inspectable source:
    conversational context. Optionally repair missing acknowledgment prose once.
 4. Use pure logic to choose a direct answer, a sectioned draft or source
    authoring. Validate decomposition boundaries before constructing a draft.
+   Sectioned files receive a focused planning pass: one named output per step,
+   at most 800 estimated words, with explicit coverage and dependencies. The
+   default DSL permits one correction of an invalid plan. Intermediate steps
+   return text; the final delivery saves the file once.
 5. If a draft fails **before persistence**, optionally try live sections and
    then inline sections. A write failure never authorizes this fallback.
 6. For source authoring, design once, emit once, validate, and optionally repair
@@ -230,8 +234,9 @@ compile, including calls made from parallel DSL branches.
 | `spineContext` | none | Goal statement, input, conversational flag, bounded repair-attempt list. No credentials. |
 | `spineCandidates` | `kind: "exact"`, `"procedure"` or `"near"` | `{ok, candidates, message}`. Each candidate has `handle`, `name`, `similarity`, `missingArgs`. Owner-scoped evidence, not permission to act on an arbitrary ID. |
 | `spineUseCandidate` | `handle` | Selects the previously read plan; terminal for this compile. Learned procedures retain their execution-time ladder check. |
-| `spineClassify` | none | Validated `{complexity, intent, sectionable, conversational, workload, acknowledgement}`. At most once. |
+| `spineClassify` | none | Validated `{complexity, intent, sectionable, requiresFile, conversational, workload, acknowledgement}`. At most once. |
 | `spineAcknowledge` | none | One optional prose repair after classification; returns a boolean. Cannot reclassify or execute work. |
+| `spineRefineSections` | `prompt`, `maxWords` | `{ok, message}`. Refines a file's routing sketch before section preparation, preserving its delivery contract. At most two metered calls; rejects multiple outputs per step, oversized estimates and intermediate file effects. |
 | `spinePrepareSections` | `route: "trivial"` or `"sectionable"` | `{valid, reason}` after native boundary checks and owner-scoped section evidence. At most once. |
 | `spineDraft` | `mode: "default"`, `"live"` or `"inline"` | `{ok, message, hasCatalog, hasLiveSections}`. Each mode at most once. A safe pre-write failure is data; a persistence failure aborts. Success is terminal. |
 | `spineDesign` | none | One bounded model design operation, after classification. Conversational source authoring requires automation intent. |
@@ -247,6 +252,14 @@ ceilings can stop it sooner. Returning from a workflow without selecting or
 persisting a valid plan fails compilation.
 
 ## Versioning and recovery limits
+
+A worker's explicit whole-model-call time ceiling is a planning failure.
+The default recovery asks for smaller checkpointed work instead of treating
+that ceiling as a network outage and repeating the same call. Ordinary
+transport and idle timeouts retain their separate classifications. Replanning
+reads the original owner-scoped source exactly as sealed, keeps the completed
+prefix and private dependencies, and validates the replacement before execution.
+A changed source closure is refused rather than silently reinterpreted.
 
 The source fingerprint pins the templates, pure logic, actions and phase mapping. It is **not**
 a promise of byte-identical model output or a snapshot of the entire
