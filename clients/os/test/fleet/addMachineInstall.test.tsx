@@ -6,6 +6,7 @@ import { MachineStop } from "../../src/apps/fleet/addMachine/stops/Machine";
 import { machineFromRow } from "../../src/apps/fleet/rows";
 import { machineRow } from "./harness";
 import type { ModelPull } from "../../src/apps/fleet/machines/models";
+import { allowAppsCommand } from "../../src/apps/fleet/addMachine/install";
 
 afterEach(cleanup);
 
@@ -32,6 +33,25 @@ describe("Linux installation choices", () => {
 });
 
 describe("concise install instructions", () => {
+  it.each([false, true])("keeps a copyable app grant beside the install command (user local: %s)", async (userLocal) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    render(<InstallStop draft={{ ...EMPTY_DRAFT, platform: "linux", userLocal }} token="test-worker-token" domain="example.com" />);
+    expect(screen.getByText(/installer detects Claude Code and Codex/)).toBeTruthy();
+    const details = screen.getByLabelText("the app permissions command").closest("details")!;
+    expect(details.open).toBe(false);
+    fireEvent.click(screen.getByText("App permissions"));
+    fireEvent.click(screen.getByRole("button", { name: "Copy the app permissions command" }));
+    expect(writeText).toHaveBeenCalledWith(`${userLocal ? '"$HOME/.memql/bin/memql"' : "/usr/local/bin/memql"} worker apps --allow claude-code --allow codex --home 'https://api.example.com'`);
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy();
+    expect(writeText.mock.calls[0]![0]).not.toContain("test-worker-token");
+  });
+
+  it("never creates an app grant for an unknown cluster or app", () => {
+    expect(allowAppsCommand("")).toBe("");
+    expect(allowAppsCommand("https://api.example.com", ["codex; bad"])).toBe("");
+    expect(allowAppsCommand("https://api.example.com", [])).toBe("");
+  });
   it.each([false, true])("shows only the commands needed for local models=%s and reveals the separate token on demand", (inference) => {
     render(<InstallStop draft={{ ...EMPTY_DRAFT, inference }} token="test-worker-token" domain="example.com" />);
     expect(screen.getByRole("button", { name: "Copy the install command" })).toBeTruthy();
@@ -48,6 +68,7 @@ describe("concise install instructions", () => {
     render(<InstallStop draft={EMPTY_DRAFT} token="test-worker-token" domain="" />);
     expect(screen.getByText("Set the cluster address before running this command.")).toBeTruthy();
     expect(screen.getByText(/including https:\/\//)).toBeTruthy();
+    expect(screen.queryByLabelText("the app permissions command")).toBeNull();
   });
 });
 

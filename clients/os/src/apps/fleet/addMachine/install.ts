@@ -186,3 +186,11 @@ export function setupCommand(userLocal = false, inference = false): string {
   const binary = userLocal ? '"$HOME/.memql/bin/memql"' : "/usr/local/bin/memql";
   return `${binary} worker setup${inference ? " --inference" : ""}`;
 }
+
+/** Explicit recovery for the installer’s automatic, cluster-scoped app grant. */
+export function allowAppsCommand(clusterUrl: string, apps: readonly string[] = ["claude-code", "codex"], userLocal?: boolean): string {
+  if (!clusterUrl || apps.length === 0 || apps.some(id => id !== "claude-code" && id !== "codex")) return "";
+  const binary = userLocal === undefined ? "memql" : userLocal ? '"$HOME/.memql/bin/memql"' : "/usr/local/bin/memql";
+  const home = `'${clusterUrl.replace(/'/g, "'\\''")}'`;
+  return `${binary} worker apps ${[...new Set(apps)].map(id => `--allow ${id}`).join(" ")} --home ${home}`;
+}

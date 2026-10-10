@@ -3,6 +3,7 @@ import { Caption, CopyField, Notice, Subhead } from "../../../../kit";
 import type { Draft } from "../flow";
 import {
   CLUSTER_URL_PLACEHOLDER,
+  allowAppsCommand,
   setupCommand,
   installCommand,
   workerClusterUrl,
@@ -46,6 +47,7 @@ export function InstallStop({
           {localTest ? `Local test build ${localTest.version}. Use this Mac. ` : ""}
           Wait until Cockpit is installed before closing the terminal.
         </Caption>
+        <Caption>The installer detects Claude Code and Codex and allows the installed apps for this cluster. They can edit files and run commands within Cockpit’s allowed workspace. Add <code>--no-apps</code> to keep app permissions unchanged.</Caption>
       </div>
 
       {clusterUrl === "" ? (
@@ -62,6 +64,14 @@ export function InstallStop({
           </Caption>
         </div>
       ) : null}
+
+      {clusterUrl ? <details className="os-fleet-install-token">
+        <summary>App permissions</summary>
+        <div className="fleet-app-permission-body">
+          <Caption>If an app still says “Not allowed by Cockpit,” run this on the machine after installing Cockpit 0.17.0 or later. It allows Claude Code and Codex for this cluster; each app still needs its own sign-in.</Caption>
+          <CopyField value={allowAppsCommand(clusterUrl, undefined, draft.userLocal)} label="the app permissions command" id="fleet-add-apps" />
+        </div>
+      </details> : null}
 
       <Caption>Keep this page open until the machine connects. The install command contains a private token shown only during this setup.</Caption>
       <details className="os-fleet-install-token">
