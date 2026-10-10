@@ -18,6 +18,8 @@ path, or use this detailed reference index. Layout + rules:
 ### Overview (`overview/`)
 
 - [Documentation home](docs/public/overview/index.md) — paths by task.
+- [Commercial use and licensing](docs/public/overview/commercial-use.md) — paid applications, independent hosting, redistribution notices, optional attribution, and partnerships.
+- [MemQL trademark policy](docs/public/overview/trademark-policy.md) — descriptive references, independent branding, logos, and permission requests.
 - [Status and direction](docs/public/overview/roadmap.md) — implemented capabilities and pending designs.
 - [What Is MemQL](docs/public/overview/what-is-memql.md) — the platform: modules it runs, clients you build on it, the memory graph underneath.
 - [The Harness](docs/public/overview/why-memql-harness.md) — the proof-driven tour of the work spine: the journal, resume, budgets, memory consolidation. Each claim names the test that backs it, and the ones not yet proven are listed as such.

@@ -128,5 +128,17 @@ For security reports, follow [SECURITY.md](SECURITY.md).
 
 ## License
 
-MemQL is licensed under [Apache 2.0](LICENSE). Bundled infrastructure has its
-own licensing; see [the database platform guide](docs/public/operate/database-platform.md).
+MemQL is licensed under the unmodified [Apache License 2.0](LICENSE).
+You can use it commercially, build and sell your own products, and offer
+independently branded hosted services without asking permission or paying
+MemQL royalties, subject to the license terms.
+
+The MemQL name and logo are covered separately by the
+[trademark policy](docs/public/overview/trademark-policy.md). Use your own
+brand and do not imply official affiliation or endorsement. See the
+[commercial-use FAQ](docs/public/overview/commercial-use.md) for examples,
+redistribution notices, optional attribution, and partnership inquiries.
+
+The [NOTICE](NOTICE) provides project attribution. Bundled infrastructure and
+third-party components retain their own licensing; see
+[the database platform guide](docs/public/operate/database-platform.md).
