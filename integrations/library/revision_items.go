@@ -156,6 +156,28 @@ func buildAmendedRevisionProposal(captured map[string]any, response any) (map[st
 	return buildRevisionProposal(captured, revisionAnswer{Summary: asString(changed["summary"]), Edits: append(retained, edits...)})
 }
 
+// Changing a reason or summary is not a different proposed document. Compare
+// amendments with the prior proposal, not only with the still-unmodified file.
+func revisionRequestChanged(captured, proposal map[string]any) (bool, error) {
+	amendment := revisionMap(captured["amendment"])
+	if len(amendment) == 0 {
+		return proposal["revisedContent"] != captured["content"], nil
+	}
+	previous, err := revisionEdits(amendment["edits"])
+	if err != nil {
+		return false, err
+	}
+	retained, err := revisionEdits(captured["retainedEdits"])
+	if err != nil {
+		return false, err
+	}
+	baseline, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Previous proposed document", Edits: append(retained, previous...)})
+	if err != nil {
+		return false, err
+	}
+	return proposal["revisedContent"] != baseline["revisedContent"], nil
+}
+
 func (i *Integration) validateCurrentRevision(ctx context.Context, proposal map[string]any) error {
 	removed, err := i.removedRevisionComments(ctx, proposal)
 	if err != nil {

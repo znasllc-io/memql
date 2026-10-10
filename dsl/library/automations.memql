@@ -393,9 +393,9 @@ automation reviseLibraryDocument {
  // deterministic failure; other no-ops get a separate intent assessment.
  if !candidate.complete {
   repairNeeded := true
- } else if !candidate.changed {
+ } else if !candidate.requestChanged {
   completion := builtin ai(templateId: "libraryRevisionCompletion", data: {
-   document: captured.content, passages: captured.passagesJSON,
+   document: captured.amendment != nil ? candidate.proposal.revisedContent : captured.content, passages: captured.passagesJSON,
    instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary
   })
   repairNeeded := lower(trim(completion.reply)) != "satisfied"

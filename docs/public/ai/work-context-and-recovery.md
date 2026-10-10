@@ -100,7 +100,9 @@ proposal’s verified image receipts. Images retained in the revised Markdown
 keep their exact bytes and provenance; removed images need not remain in the
 manifest. Approval and application revalidate those retained assets on the
 receiving replica. Supplying another request’s image identifiers or claiming
-inheritance in a model response grants no authority.
+inheritance in a model response grants no authority. An amendment that repeats
+the prior proposed text also receives the bounded completion assessment; changing
+only its explanation does not count as fulfilling the new direction.
 
 ## Browser research fallback
 

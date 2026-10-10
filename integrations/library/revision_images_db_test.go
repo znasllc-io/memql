@@ -369,6 +369,13 @@ func TestRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	previousEdits, err := revisionEdits(parent["edits"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.ai.firstAnswer = &revisionAnswer{Summary: "Claimed clarification, but the proposal was copied", Edits: previousEdits}
+	f.ai.calls.Store(0)
+	f.ai.completionReply = "incomplete"
 	f.ai.imagePlan = nil
 	f.ai.needsResearch = false
 	f.ai.answer = revisionAnswer{Summary: "Clarify the paragraph", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this clarified paragraph.\n\n![Illustration](" + images[0].Reference.URI + ")\nAI-generated illustration; actual-image-model.", Reason: "Requested clarification", CommentIDs: []string{note}}}}
@@ -412,6 +419,9 @@ func TestRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T) {
 	changed, err := f.first.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
 	if err != nil || !strings.Contains(asString(changed.backing["body"]), images[0].Reference.URI) || !strings.Contains(asString(changed.backing["body"]), "clarified paragraph") {
 		t.Fatalf("saved amendment lost content/image: %v %v", changed, err)
+	}
+	if f.ai.completionCalls.Load() != 1 || f.ai.repairCalls.Load() != 1 || f.ai.calls.Load() != 2 {
+		t.Fatal("unchanged amendment did not receive exactly one bounded correction")
 	}
 	if generator.calls != 1 || store.writes != 1 {
 		t.Fatalf("amendment repeated image generation/storage: %d/%d", generator.calls, store.writes)
