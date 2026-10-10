@@ -17,13 +17,21 @@ afterEach(() => { h.connection = null; });
 
 describe("runner readiness surface", () => {
   it("reads without probing, keeps rows on refresh, and withdraws readiness when the read fails", async () => {
-    const read = vi.fn().mockResolvedValueOnce(answer()).mockRejectedValueOnce(new Error("node disconnected"));
+    let finish!: (value: ReturnType<typeof answer>) => void;
+    const read = vi.fn()
+      .mockImplementationOnce(() => new Promise<ReturnType<typeof answer>>((resolve) => { finish = resolve; }))
+      .mockRejectedValueOnce(new Error("node disconnected"));
     h.connection = { query: { pipelinesStatus: read } };
     render(<PipelineRunners />);
-    expect(await screen.findByText("Ready")).toBeTruthy();
+    // Finish the initial read, including its finally/effects, before focus.
+    // Seeing the report alone can precede clearing busy; a focus during that
+    // read correctly waits for the normal recovery interval instead.
+    await act(async () => { finish(answer()); });
+    expect(screen.getByText("Ready")).toBeTruthy();
     expect(read.mock.calls[0]?.[0]).toEqual({});
     fireEvent.focus(window);
     expect(await screen.findByText("Runner readiness could not be read.")).toBeTruthy();
+    expect(read).toHaveBeenCalledTimes(2);
     expect(screen.getByText("workbench-a")).toBeTruthy();
     expect(screen.queryByText("Ready")).toBeNull();
     expect(screen.queryByRole("button", { name: "Refresh readiness" })).toBeNull();
