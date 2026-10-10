@@ -122,9 +122,16 @@ func (s *spineScope) reviewSections(ctx context.Context, args map[string]any) (a
 	if !s.classified || s.prepared || s.sectionRefinements == 0 || s.sectionReviews >= s.sectionRefinements {
 		return nil, fmt.Errorf("document coverage review requires a new refinement before preparation")
 	}
-	prompt := strings.TrimSpace(getString(args, "prompt"))
-	if prompt == "" {
-		return nil, fmt.Errorf("document coverage review requires a prompt")
+	var config struct {
+		Prompt         string
+		TimeoutSeconds int
+	}
+	encoded, err := json.Marshal(args)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(encoded, &config); err != nil || strings.TrimSpace(config.Prompt) == "" || config.TimeoutSeconds < 1 || config.TimeoutSeconds > 600 {
+		return nil, fmt.Errorf("document coverage review requires a prompt and a timeout between 1 and 600 seconds")
 	}
 	if err := s.modelAllowed(); err != nil {
 		return nil, err
@@ -138,9 +145,9 @@ func (s *spineScope) reviewSections(ctx context.Context, args map[string]any) (a
 	if err != nil {
 		return nil, err
 	}
-	callCtx, cancel := context.WithTimeout(airoute.WithCallPurpose(ctx, "Checking document coverage", 0), time.Minute)
+	callCtx, cancel := context.WithTimeout(airoute.WithCallPurpose(ctx, "Checking document coverage", 0), time.Duration(config.TimeoutSeconds)*time.Second)
 	defer cancel()
-	response, err := s.loop.engine.InvokeAI(systemActorContext(callCtx), prompt, map[string]any{
+	response, err := s.loop.engine.InvokeAI(systemActorContext(callCtx), config.Prompt, map[string]any{
 		"goal": s.req.Statement, "conversation": conversation, "sections": string(sections), "assembly": s.decision.Assembly,
 		"now": time.Now().UTC().Format(time.RFC3339),
 	})

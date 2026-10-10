@@ -196,12 +196,12 @@ automation defaultWorkSpine {
 automation workSpineDocumentSections {
  first := builtin spineRefineSections(prompt: "workDocumentSections", maxWords: 800, timeoutSeconds: 120)
  if first.ok {
-  review := builtin spineReviewSections(prompt: "workDocumentCoverage")
+  review := builtin spineReviewSections(prompt: "workDocumentCoverage", timeoutSeconds: 180)
   if review.ok { return true }
  }
  repaired := builtin spineRefineSections(prompt: "workDocumentSectionsRepair", maxWords: 800, timeoutSeconds: 480)
  if repaired.ok {
-  repairedReview := builtin spineReviewSections(prompt: "workDocumentCoverage")
+  repairedReview := builtin spineReviewSections(prompt: "workDocumentCoverage", timeoutSeconds: 180)
   if repairedReview.ok { return true }
   return builtin spineRefuse(message: repairedReview.message)
  }

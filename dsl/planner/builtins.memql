@@ -214,7 +214,10 @@ builtin spineRefineSections {
 /// Check document coverage before drafting. A refusal feeds the next bounded refinement.
 @executor("integration.planner.spineReviewSections")
 @args(profile="object")
-builtin spineReviewSections { prompt string! }
+builtin spineReviewSections {
+ prompt string!
+ timeoutSeconds int!
+}
 
 /// A bounded operation inside an authorized work.spine/1 planning scope.
 @executor("integration.planner.spinePrepareSections")

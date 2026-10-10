@@ -51,8 +51,8 @@ var promptLevels = map[string]string{
 	"goalComplexityTriage": "fast",
 	// Initial document decomposition is bounded data, checked separately before execution.
 	"workDocumentSections": "fast",
-	// A compact independent scope verdict feeds one correction; it never executes the plan.
-	"workDocumentCoverage": "fast",
+	// Scope judgment must distinguish real omissions from valid repeated chronological terms.
+	"workDocumentCoverage": "strong",
 	// Escalate an observed incomplete plan to the design/judgment tier, not another cheap retry.
 	"workDocumentSectionsRepair": "strong",
 	// One bounded repair of acknowledgment wording; never reclassifies work.

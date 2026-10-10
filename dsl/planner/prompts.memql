@@ -90,7 +90,7 @@ prompt workDocumentSectionsRepair {
 }
 
 /// A short independent scope check before a document plan starts spending drafting calls.
-@level("fast")
+@level("strong")
 @templateFile("prompts/workDocumentCoverage.tmpl")
 prompt workDocumentCoverage {
  goal string!
