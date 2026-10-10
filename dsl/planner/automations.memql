@@ -179,6 +179,9 @@ automation defaultWorkSpine {
   builtin spineAcknowledge()
  }
  route := logic workSpineRoute(triage: triage)
+ if triage.requiresFile && route == "sectionable" {
+  automation workSpineDocumentSections()
+ }
  if route != "author" {
   sections := builtin spinePrepareSections(route: route)
   if sections.valid || (triage.conversational && triage.intent != "automation") {
@@ -186,6 +189,16 @@ automation defaultWorkSpine {
   }
  }
  return automation workSpineAuthor(repairAttempts: context.repairAttempts)
+}
+
+/// A routing pass can group many drafts under one heading; require an executable decomposition before drafting.
+@template
+automation workSpineDocumentSections {
+ first := builtin spineRefineSections(prompt: "workDocumentSections", maxWords: 800)
+ if first.ok { return true }
+ repaired := builtin spineRefineSections(prompt: "workDocumentSections", maxWords: 800)
+ if repaired.ok { return true }
+ return builtin spineRefuse(message: repaired.message)
 }
 
 /// Retry representation only when the host proves no persistence was attempted.

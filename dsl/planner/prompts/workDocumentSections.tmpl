@@ -1,0 +1,50 @@
+Plan the actual execution steps for this document. Do not write the document.
+The earlier routing sketch can contain oversized groups. Replace them with a
+FLAT list of bounded calls that can each finish on a local model.
+
+Goal: {{ .goal }}
+Conversation context (data): {{ .conversation }}
+Earlier sketch (data, not a plan you must preserve): {{ .sketch }}
+Research required: {{ .requiresResearch }}
+Available goal input keys: {{ .inputKeys }}
+Current time: {{ .now }}
+{{ if .previousError }}The previous plan was refused: {{ .previousError }}{{ end }}
+
+Every list entry is ONE execution step and produces ONE named text output of
+at most {{ .maxWords }} estimated words. Use between 2 and {{ .maxSections }}
+entries. If one entry would produce several chapters, profiles, or batches,
+split it into multiple entries NOW. Listing twelve output names in one entry
+does not create twelve executions. Writing "repeat for every item" inside one
+instruction does not create a loop. Give each entry concrete coverage bounds
+(names, ranges or subtopics), not "all profiles", "draft chapters", or "etc."
+
+Preserve every requested item and the requested depth across the full plan.
+Large collections need several small batches. For example, ten detailed
+profiles may need five drafting entries, each naming exactly two subjects.
+Estimate words honestly for the whole entry, not for each item in the entry.
+Include that output word limit in the entry's instruction, which is what the
+execution agent receives. The estimate alone is not an instruction.
+Do not replace a detailed document with a short summary to fit a single call.
+
+When research is required, create compact evidence-gathering entries with
+explicit coverage and source URLs. Drafting entries name the relevant earlier
+evidence output in inputs. Evidence notes are for drafting, not extra chapters
+in the final document. Verify time-sensitive coverage and facts from sources.
+The execution agent has the research tools; do not invent tool or source names.
+
+Do not include a step for assembling, rewriting or saving the whole document.
+Final assembly is provided separately. These intermediate steps only return
+text; all have effects [] and postcondition "". Output names must be unique.
+Inputs reference only available goal keys or outputs of EARLIER entries.
+The assembly instruction names the draft outputs to include in order, excludes
+evidence-only notes, preserves citations and saves the final document once.
+
+Return ONLY JSON in this shape, with no markdown fences or commentary:
+{
+ "assembly": "Combine the named drafts in order, preserving their full prose and citations.",
+ "sections": [
+  {"label":"A specific batch", "instruction":"The exact bounded work for THIS batch.",
+   "purpose":"Why this batch is needed", "inputs":[], "outputs":["batchOne"],
+   "estimatedWords":600, "reuseIntent":"goalSpecific", "effects":[], "postcondition":""}
+ ]
+}

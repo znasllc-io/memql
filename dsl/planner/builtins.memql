@@ -202,6 +202,14 @@ builtin spineAcknowledge {
 
 }
 
+/// Refine document sections before execution. Native bounds validate each output and preserve the delivery contract.
+@executor("integration.planner.spineRefineSections")
+@args(profile="object")
+builtin spineRefineSections {
+ prompt string!
+ maxWords int!
+}
+
 /// A bounded operation inside an authorized work.spine/1 planning scope.
 @executor("integration.planner.spinePrepareSections")
 @args(profile="object")

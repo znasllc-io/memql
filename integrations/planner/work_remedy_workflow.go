@@ -147,7 +147,7 @@ func (s *remedyScope) persist(ctx context.Context, _ map[string]any) (any, error
 	// prefix. Carry the sealed dependencies to the new bundle so the executing
 	// replica has them too. Only the headline may be replaced by the model.
 	for _, construct := range s.context.Template {
-		if construct.Kind == "automation" && (construct.Name == s.context.TemplateName || construct.Name == s.auto.Name) {
+		if construct.Kind == "automation" && construct.Name == s.context.TemplateName {
 			continue
 		}
 		constructs = append(constructs, construct)
