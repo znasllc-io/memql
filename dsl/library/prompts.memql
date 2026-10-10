@@ -2,6 +2,8 @@
 @level("strong")
 @templateFile("prompts/libraryRevisionPassages.tmpl")
 prompt libraryRevisionPassages {
+ recovery string
+ preparedImages string
  references string
  evidence string
  document string!
@@ -13,12 +15,15 @@ prompt libraryRevisionPassages {
 @level("strong")
 @templateFile("prompts/libraryRevisionItem.tmpl")
 prompt libraryRevisionItem {
+ recovery string
+ preparedImages string
  references string
  evidence string
  document string!
  passages string!
  instruction string!
  previous []object!
+ reviewNotes string
 }
 
 /// Carry out the research, verification or reasoning called for by document feedback before proposing edits.
@@ -72,4 +77,25 @@ prompt libraryRevisionEvidence {
  instruction string
  appEvidence string
  localEvidence string
+}
+
+/// Select bounded image operations from human feedback and retrieved evidence.
+@level("strong")
+@templateFile("prompts/libraryRevisionImagePlan.tmpl")
+prompt libraryRevisionImagePlan {
+ passages string!
+ instruction string
+ evidence string!
+}
+
+/// Judge actual proposed prose against all feedback, including partial edits.
+@level("strong")
+@templateFile("prompts/libraryRevisionCompletion.tmpl")
+prompt libraryRevisionCompletion {
+ references string
+ evidence string
+ document string!
+ passages string!
+ instruction string!
+ explanation string!
 }

@@ -255,17 +255,10 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 			if err != nil {
 				return nil, err
 			}
-			if previousRun["status"] != "failed" && previousRun["status"] != "cancelled" && previousRun["cancelRequested"] != true {
+			if previousRun["status"] != "failed" && previousRun["status"] != "cancelled" && previousRun["status"] != "succeeded" && previousRun["cancelRequested"] != true {
 				continue
 			}
-			matches := true
-			for _, key := range []string{"artifactId", "sourceId", "revision", "content", "comments", "instruction", "amendment"} {
-				if workstate.ArtifactHash(map[string]any{key: proposal[key]}) != workstate.ArtifactHash(map[string]any{key: previousProposal[key]}) {
-					i.log().Info("document revision evidence differs", "requestId", requestID, "previousRunId", previous.RunID, "changedField", key)
-					matches = false
-					break
-				}
-			}
+			matches := sameRevisionInput(proposal, previousProposal)
 			if matches {
 				previousRuns = append(previousRuns, previous.RunID)
 			}
@@ -313,6 +306,9 @@ func (i *Integration) ValidateRevisionProposal(ctx context.Context, proposal map
 		return err
 	}
 	if _, _, err = i.reviewAttachments(ctx, refs); err != nil {
+		return err
+	}
+	if err = i.validatePreparedRevisionImages(ctx, proposal); err != nil {
 		return err
 	}
 	if content != proposal["content"] {
@@ -476,7 +472,27 @@ func (i *Integration) handleRevisionProposal(ctx context.Context, args map[strin
 		return nil, err
 	}
 	proposal["attribution"] = attribution
-	return reviewResult(map[string]any{"proposal": proposal, "changed": proposal["revisedContent"] != captured["content"], "summary": proposal["summary"]})
+	images, err := i.preparedRevisionImages(ctx, asString(args["requestId"]), asString(args["sourceRunId"]))
+	if err != nil {
+		return nil, err
+	}
+	pinned, err := amendedPreparedImages(captured, asString(proposal["revisedContent"]), images)
+	if err != nil {
+		return nil, err
+	}
+	if len(pinned) > 0 {
+		proposal["preparedImages"] = pinned
+	}
+	missing := missingPreparedImages(asString(proposal["revisedContent"]), images)
+	changed := proposal["revisedContent"] != captured["content"]
+	requestChanged, err := revisionRequestChanged(captured, proposal)
+	if err != nil {
+		return nil, err
+	}
+	if !boolField(args, "allowIncomplete") && (len(missing) > 0 || (boolField(args, "requireChanges") && (!changed || !requestChanged))) {
+		return nil, fmt.Errorf("document edits incomplete: the requested outcome still needs concrete edits; missing images: %v", missing)
+	}
+	return reviewResult(map[string]any{"proposal": proposal, "changed": changed, "requestChanged": requestChanged, "complete": len(missing) == 0, "missingImages": missing, "summary": proposal["summary"]})
 }
 
 func (i *Integration) handleReviewRevision(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

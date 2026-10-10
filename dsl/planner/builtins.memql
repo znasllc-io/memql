@@ -202,6 +202,23 @@ builtin spineAcknowledge {
 
 }
 
+/// Refine document sections before execution. Native bounds validate each output and preserve the delivery contract.
+@executor("integration.planner.spineRefineSections")
+@args(profile="object")
+builtin spineRefineSections {
+ prompt string!
+ maxWords int!
+ timeoutSeconds int!
+}
+
+/// Check document coverage before drafting. A refusal feeds the next bounded refinement.
+@executor("integration.planner.spineReviewSections")
+@args(profile="object")
+builtin spineReviewSections {
+ prompt string!
+ timeoutSeconds int!
+}
+
 /// A bounded operation inside an authorized work.spine/1 planning scope.
 @executor("integration.planner.spinePrepareSections")
 @args(profile="object")
@@ -266,6 +283,7 @@ builtin spineDraftAppend {
  instruction string
  inputHeading string
  sectionsHeading string
+ sectionKeys []string
 }
 
 /// Bounded operation inside the claimed remedy scope.
@@ -279,7 +297,10 @@ builtin spineRemedyGenerate { prompt string! }
 
 /// Bounded operation inside the claimed remedy scope.
 @executor("integration.planner.spineRemedyValidate")
-builtin spineRemedyValidate {  }
+@args(profile="object")
+builtin spineRemedyValidate {
+ preserveInvocation []object
+}
 
 /// Bounded operation inside the claimed remedy scope.
 @executor("integration.planner.spineRemedyPersist")

@@ -299,7 +299,7 @@ func TestLoadReplanContextCarriesWhatResumeBinds(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			i, eng := newTestIntegration(t)
-			run := remedyWaitRow(waitKindReplan)
+			run := installedReplanRun(t)
 			run["variables"] = map[string]any{"week": "2026-39", "region": "emea"}
 			tc.edit(run)
 			eng.reply("workRunForOwner", run)

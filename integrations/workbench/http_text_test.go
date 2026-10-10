@@ -54,3 +54,28 @@ func TestHTTPFetchTextBoundsPreserveUnicodeAndSignalOmittedContent(t *testing.T)
 		t.Fatal("unsupported extraction values must not silently return raw HTML")
 	}
 }
+
+func TestHTTPFetchIdentifiesClientAndPreservesSourceRefusals(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/restricted" || !strings.Contains(r.UserAgent(), "https://github.com/znasllc-io/memql") {
+			http.Error(w, "Source refuses access", http.StatusForbidden)
+			return
+		}
+		_, _ = w.Write([]byte(r.UserAgent()))
+	}))
+	defer server.Close()
+	integration := &Integration{}
+	result := integration.handleHTTPFetch(context.Background(), nil, map[string]any{"url": server.URL})
+	if !result.OK || !strings.HasPrefix(result.Payload.(map[string]any)["body"].(string), "MemQL/") {
+		t.Fatalf("research fetch did not identify MemQL: %#v", result)
+	}
+	custom := "OperatorResearch/2.0 (https://github.com/znasllc-io/memql)"
+	result = integration.handleHTTPFetch(context.Background(), nil, map[string]any{"url": server.URL, "headers": map[string]any{"User-Agent": custom}})
+	if !result.OK || result.Payload.(map[string]any)["body"] != custom {
+		t.Fatalf("explicit client identity was overwritten: %#v", result)
+	}
+	result = integration.handleHTTPFetch(context.Background(), nil, map[string]any{"url": server.URL + "/restricted"})
+	if result.OK || result.Payload.(map[string]any)["status"] != http.StatusForbidden {
+		t.Fatalf("source refusal must remain a refusal: %#v", result)
+	}
+}

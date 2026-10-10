@@ -42,5 +42,5 @@ func TestBudgetApprovalAcrossReplicasPreservesConcurrentGoalCeilings(t *testing.
 	}
 	rows := b.query(t, a.owner, "query "+call("workGoalForOwner", map[string]any{"goalId": goalID}))
 	require.Len(t, rows, 1)
-	require.Equal(t, map[string]any{"maxModelCalls": float64(64), "maxRetries": float64(8), "costCeiling": 0.5}, rows[0]["ceilings"])
+	require.Equal(t, map[string]any{"maxModelCalls": float64(64), "maxRetries": float64(8), "costCeiling": 0.5, "workloadOverrides": map[string]any{"maxModelCalls": float64(64), "maxRetries": float64(8)}}, rows[0]["ceilings"])
 }

@@ -1138,3 +1138,37 @@ mutation documentComment removeDocumentAnnotation {
   args { commentId string! }
   update { id: args.commentId, removed: true }
 }
+
+/// Only the image storage adapter can attest durable image bytes and provenance.
+/// An actor.userId filter scopes ownership but cannot prevent an owner forging
+/// storage digests, source evidence or the model that generated an image.
+@serverOnly
+@actor
+@createOnly("ownerUserId", "name", "mimeType", "size", "sha256", "blobUrl", "imageProvenance", "producedByRunId", "producedByStepKey")
+mutation file recordPreparedLibraryImage {
+ args {
+ fileId string!
+ name string!
+ mimeType string!
+ size int!
+ sha256 string!
+ blobUrl string!
+ imageProvenance object!
+ producedByRunId string!
+ producedByStepKey string!
+ source enum("agent_generated", "derived")!
+ }
+ insert {
+  accept { name, mimeType, size, sha256, blobUrl, imageProvenance, producedByRunId, producedByStepKey, source }
+  stamp {
+ id: args.fileId
+ ownerUserId: actor.userId
+ format: "image"
+ status: "stored"
+ embeddingStatus: "none"
+ archived: false
+ versionNumber: 1
+ versionUploadedAt: now
+ }
+ }
+}

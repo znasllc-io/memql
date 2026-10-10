@@ -1325,6 +1325,8 @@ jobs:
             db      packages  component/packages  300s     -         1
             # Keep the 180s work integration budget off the shared-database shards.
             db      work      integrations/work  180s     serial    1
+            # Revision workflows exercise two engines and must not compete with other DB suites.
+            db      library   integrations/library 180s   serial    1
             db      default   -                   180s     -         2
         run: >-
           go run ./scripts/ci/affected plan

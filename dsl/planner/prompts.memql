@@ -59,6 +59,47 @@ prompt goalComplexityTriage {
   inputKeys []string          @description("The names of the inputs the goal supplies (epic memql#5414, design D24). A section that reads a goal input names it EXACTLY as here, because a section's catalog signature is its purpose plus its input names: a section that respells one would miss the automation that already does its work.")
 }
 
+/// Turn a document routing sketch into bounded, independently checkpointed execution steps.
+@level("fast")
+@templateFile("prompts/workDocumentSections.tmpl")
+prompt workDocumentSections {
+ goal string!
+ conversation string
+ sketch string!
+ inputKeys []string
+ requiresResearch bool!
+ maxWords int!
+ maxSections int!
+ previousError string
+ now string!
+}
+
+/// Escalate only the correction of an invalid/incomplete document plan to the stronger tier.
+@level("strong")
+@templateFile("prompts/workDocumentSections.tmpl")
+prompt workDocumentSectionsRepair {
+ goal string!
+ conversation string
+ sketch string!
+ inputKeys []string
+ requiresResearch bool!
+ maxWords int!
+ maxSections int!
+ previousError string
+ now string!
+}
+
+/// A short independent scope check before a document plan starts spending drafting calls.
+@level("strong")
+@templateFile("prompts/workDocumentCoverage.tmpl")
+prompt workDocumentCoverage {
+ goal string!
+ conversation string
+ sections string!
+ assembly string!
+ now string!
+}
+
 /// One bounded repair of missing acknowledgment prose, never a second classification.
 @level("fast")
 @templateFile("prompts/workAcknowledgement.tmpl")

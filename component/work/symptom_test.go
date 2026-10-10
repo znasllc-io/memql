@@ -96,6 +96,32 @@ func TestIdleModelRecoveryStillHonorsStallAndRetryLimits(t *testing.T) {
 	}
 }
 
+func TestModelCallCeilingReplansInsteadOfRetryingUnchanged(t *testing.T) {
+	for _, message := range []string{
+		"worker: model call exceeded its 10m0s ceiling",
+		`automation "profiles" execution failed: function "runAgentTurn" execution failed: runAgentTurn: stream: Ask local voice: model_call_failed worker: model call exceeded its 10m0s ceiling`,
+		"remote worker: model call exceeded its 1m30s ceiling (timeout)",
+	} {
+		signal := Signal{ErrorMessage: message, ErrorCode: "timeout"}
+		sym, evidence, ok := ClassifyByRules(signal)
+		if !ok || sym != SymptomPlan || evidence.RuleId != "plan.modelCallCeiling" || evidence.Source != EvidenceSourceRules {
+			t.Fatalf("whole-call limit misclassified: %q: %s %+v", message, sym, evidence)
+		}
+		if ActFor(sym, 0, 2) != ActReplan || ActFor(sym, 2, 2) != ActAsk {
+			t.Fatal("time-limit recovery must change the plan within the existing retry budget")
+		}
+		signal.RepeatedAction = true
+		if symptom, _, _ := ClassifyByRules(signal); symptom != SymptomHuman {
+			t.Fatal("time limit bypassed the repeated-action guard")
+		}
+	}
+	for _, message := range []string{"worker: model call exceeded its 0s ceiling", "worker: model call exceeded its unknown ceiling"} {
+		if _, _, ok := ClassifyByRules(Signal{ErrorMessage: message}); ok {
+			t.Fatalf("invalid limit claimed by a deterministic rule: %s", message)
+		}
+	}
+}
+
 // AN EXHAUSTED QUOTA ARRIVES AS A 429, which is the reason this rule has to
 // sit above transient.rateLimit rather than anywhere convenient. OpenAI
 // reports a spent balance with the same status it uses for ordinary rate
@@ -318,5 +344,27 @@ func TestSymptomIsValid(t *testing.T) {
 	}
 	if Symptom("invented").Valid() {
 		t.Fatal("an unknown symptom must not validate: the concept enum is closed")
+	}
+}
+
+func TestMalformedMaterializerOutputIsNotANetworkFailure(t *testing.T) {
+	for _, msg := range []string{"materializer: invalid draft: unexpected EOF", `function "composeMaterialize" execution failed: compose: composing the draft failed: materializer: invalid draft: unexpected EOF`} {
+		symptom, evidence, known := ClassifyByRules(Signal{ErrorMessage: msg})
+		if !known || symptom != SymptomPlan || evidence.RuleId != "plan.materializerDraft" {
+			t.Fatalf("malformed model output classified as %s: %+v", symptom, evidence)
+		}
+	}
+	symptom, _, _ := ClassifyByRules(Signal{ErrorMessage: "transport: unexpected EOF"})
+	if symptom != SymptomTransient {
+		t.Fatal("actual transport EOF no longer retries")
+	}
+}
+
+func TestRemoteImageRefusalIsAPlanProblem(t *testing.T) {
+	for _, detail := range []string{"remote server returned HTTP 403", "remote server returned HTTP 404", "source returned a page instead of a raster image"} {
+		symptom, evidence, known := ClassifyByRules(Signal{ErrorMessage: "function libraryPrepareRevisionImage execution failed: image source unusable: " + detail})
+		if !known || symptom != SymptomPlan || evidence.RuleId != "plan.imageSource" {
+			t.Fatalf("remote source misclassified: %v %v %v", symptom, evidence, known)
+		}
 	}
 }

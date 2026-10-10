@@ -105,6 +105,64 @@ func TestWorkContextSizeCountsToolSchemasAndArguments(t *testing.T) {
 	require.Greater(t, WorkContextSize(messages, nil), 10000)
 }
 
+func TestWorkContextTargetCountsOnlyPinnedInputs(t *testing.T) {
+	const preferred = 20000
+	messages := []common.ChatMessage{
+		{Role: "system", Content: strings.Repeat("authority ", 1000)},
+		{Role: "user", Content: strings.Repeat("original document ", 4000)},
+		{Role: "developer", Content: "Keep the original exact"},
+		{Role: "user", Content: "Only correct the selected section"},
+	}
+	tools := []common.ToolDefinition{{Name: "research", InputSchema: map[string]any{"description": strings.Repeat("tool contract ", 1000)}}}
+	target := WorkContextTarget(messages, tools, preferred)
+	require.Equal(t, WorkContextSize(messages, tools)+4000, target)
+	require.Greater(t, target, preferred)
+	require.Greater(t, target, WorkContextTarget(messages, nil, preferred))
+	history := []common.ChatMessage{
+		{Role: "user", Content: strings.Repeat("old correction ", 9000)},
+		{Role: "user", Content: "[Memory checkpoint old]\n" + strings.Repeat("old memory ", 9000)},
+		{Role: "assistant", Content: strings.Repeat("reasoning ", 9000)},
+		{Role: "tool", Content: strings.Repeat("retrieved evidence ", 9000)},
+	}
+	expanded := append(append(append([]common.ChatMessage{}, messages[:3]...), history...), messages[3])
+	require.Equal(t, target, WorkContextTarget(expanded, tools, preferred), "accumulating history must not expand its own allowance")
+	require.Equal(t, preferred, WorkContextTarget([]common.ChatMessage{{Role: "user", Content: "small request"}}, nil, preferred))
+	require.Zero(t, WorkContextTarget(messages, tools, 0), "invalid targets stay invalid")
+}
+
+func TestLargePinnedRequestCompactsHistoryWithoutChangingHardRecovery(t *testing.T) {
+	e, _, _ := readMergeTestEngine(t)
+	owner := "v1:identity:user:" + id.NewShortId()
+	ctx := auth.ContextWithUserActor(context.Background(), owner)
+	ctx = common.ContextWithRun(ctx, common.RunContext{RunId: id.NewShortId(), GoalId: "goal", OwnerUserId: owner, StepKey: "research"})
+	model := &checkpointModel{}
+	e.SetAIResolver(testAIResolver{fn: func(context.Context, airoute.ResolveRequest) (ResolvedProvider, error) {
+		return ResolvedProvider{Client: model, Resolution: airoute.Resolution{ProviderName: "fleet:test", Model: "test"}}, nil
+	}})
+	messages := []common.ChatMessage{{Role: "system", Content: "Research carefully"}, {Role: "user", Content: strings.Repeat("original document ", 4000)}}
+	tools := []common.ToolDefinition{{Name: "read", InputSchema: map[string]any{"description": strings.Repeat("contract ", 2000)}}}
+	target := WorkContextTarget(messages, tools, 20000)
+	got, err := e.CompactWorkContext(ctx, messages, tools, target)
+	require.NoError(t, err)
+	require.Equal(t, messages, got, "the initial request must reach the router intact")
+	_, err = e.CompactWorkContext(ctx, messages, tools, 20000)
+	require.ErrorContains(t, err, "cannot fit", "actual overflow recovery must still obey its strict target")
+	for n := range 30 {
+		messages = append(messages, common.ChatMessage{Role: "assistant", Content: fmt.Sprintf("Finding %d %s", n, strings.Repeat("evidence ", 150))})
+	}
+	require.Equal(t, target, WorkContextTarget(messages, tools, 20000))
+	got, err = e.CompactWorkContext(ctx, messages, tools, target)
+	require.NoError(t, err)
+	require.Positive(t, model.calls)
+	require.LessOrEqual(t, WorkContextSize(got, tools), target)
+	require.Equal(t, messages[:2], got[:2])
+	require.Equal(t, messages[len(messages)-1], got[len(got)-1])
+	run, _ := common.RunFromContext(ctx)
+	rows, err := e.workRows(ctx, "workObservationsForOwnerRun", run.RunId)
+	require.NoError(t, err)
+	require.Contains(t, fmt.Sprint(rows), "Finding 0", "exact evidence must remain durable")
+}
+
 func TestWorkCheckpointBoundsWholeEntriesIncludingUnicode(t *testing.T) {
 	checkpoint := workCheckpoint{
 		Facts:       []string{strings.Repeat("文献", 4000), "Measured result [3]"},

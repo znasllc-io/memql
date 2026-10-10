@@ -1,0 +1,91 @@
+{
+  "automation": "planner/automations.memql workSpineDocumentSections",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.workSpineDocumentSections"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "maxWords": 800,
+              "prompt": "workDocumentSections",
+              "timeoutSeconds": 120
+            },
+            "kind": "builtin",
+            "name": "spineRefineSections"
+          },
+          {
+            "args": {
+              "maxWords": 800,
+              "prompt": "workDocumentSectionsRepair",
+              "timeoutSeconds": 480
+            },
+            "kind": "builtin",
+            "name": "spineRefineSections"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineRefuse"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "spineRefuse"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.workSpineDocumentSections"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "maxWords": 800,
+              "prompt": "workDocumentSections",
+              "timeoutSeconds": 120
+            },
+            "kind": "builtin",
+            "name": "spineRefineSections"
+          },
+          {
+            "args": {
+              "maxWords": 800,
+              "prompt": "workDocumentSectionsRepair",
+              "timeoutSeconds": 480
+            },
+            "kind": "builtin",
+            "name": "spineRefineSections"
+          },
+          {
+            "kind": "builtin",
+            "name": "spineRefuse"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "spineRefuse"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

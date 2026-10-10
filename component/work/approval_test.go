@@ -124,6 +124,16 @@ func TestFailureApprovalIsAboutTheFailure(t *testing.T) {
 	}
 }
 
+func TestPlanFailureOffersARevisionWithoutChangingTheDecisionContract(t *testing.T) {
+	a := FailureApproval(ApprovalKindFeedback, "run-1", "draft", SymptomPlan, "model call exceeded its ceiling", "q", Evidence{}, t0, time.Hour)
+	if a.Options[0]["label"] != "Revise plan" || a.Options[0]["value"] != FailureAnswerRetry || !IsFailureQuestion(a.Options) {
+		t.Fatalf("plan recovery options = %+v", a.Options)
+	}
+	if !AnswerAbandons(a.Options, map[string]any{"value": FailureAnswerAbandon}) {
+		t.Fatal("a plan revision request must still offer a way to stop")
+	}
+}
+
 // Answering a failure question with Abandon is a stop; answering it with
 // Retry, or answering some other question with the same word, is not.
 func TestAnswerAbandonsReadsTheOfferedOptionOnly(t *testing.T) {

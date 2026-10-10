@@ -47,6 +47,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
@@ -509,7 +510,12 @@ func (i *Integration) serveRemedy(remedy Remedy, kind, runId, owner, since strin
 	if rc.Mode == "" {
 		rc.Mode = common.RunModeLive
 	}
-	ctx = common.ContextWithRun(ownerActor(ctx, owner), rc)
+	ctx, err = auth.ContextWithPersistedOwner(ownerActor(memql.ContextWithFreshRead(ctx), owner), owner, rowMap(run, "executionAuthority"), i.ownerIdentityResolver())
+	if err != nil {
+		i.log().Warn("work remedy: could not restore the owner's forwarded authority", "run", runId, "error", err)
+		return
+	}
+	ctx = common.ContextWithRun(ctx, rc)
 	ctx = memql.ContextWithBudgetScope(ctx, memql.BudgetScopeId("run", runId), memql.BudgetScopeId("goal", rc.GoalId))
 
 	took := false
@@ -777,6 +783,10 @@ type ReplanContext struct {
 	Statement      string
 	CompletedSteps []map[string]any
 	FailedStep     map[string]any
+	// The sealed source is evidence for the repair, including real argument
+	// names, agent ids and private dependencies on another replica.
+	TemplateName string
+	Template     []memql.SandboxConstruct
 	// Recorded is every top-level step the run holds a row for, by key, with
 	// its status. It is what a re-planned template is checked against before
 	// it is installed: resume serves a step from its row only BEFORE the
@@ -808,6 +818,11 @@ func (i *Integration) LoadReplanContext(ctx context.Context, ownerUserId, runId,
 		return ReplanContext{}, err
 	}
 	out := ReplanContext{Variables: rowMap(run, "variables")}
+	out.TemplateName = rowString(run, "automationName")
+	out.Template, err = st.replanTemplate(actorCtx, run)
+	if err != nil {
+		return ReplanContext{}, err
+	}
 	if out.Variables == nil {
 		out.Variables = rowMap(rowMap(run, "triggerEvent"), "payload")
 	}

@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/memql"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -55,6 +56,7 @@ type remedyWriter interface {
 	InstallReplan(ctx context.Context, ownerUserId, runId string, t workintegration.ReplanTemplate) error
 	RequestRepair(ctx context.Context, ownerUserId, runId, stepKey, violation string) error
 	AskAboutFailedRemedy(ctx context.Context, ownerUserId, runId, stepKey, kind, reason string) error
+	PauseReplanForBudget(ctx context.Context, ownerUserId, runId, stepKey string, ceiling *memql.RunCeilingError) error
 }
 
 // WorkRemedy satisfies workintegration.Remedy.
@@ -133,10 +135,24 @@ func (r *WorkRemedy) ask(ctx context.Context, ownerUserId, runId, stepKey, kind,
 
 // replanDraft is what replanGap answers (dsl/work/prompts/replanGap.tmpl).
 type replanDraft struct {
-	Source              string `json:"source"`
-	GoalAlreadyServed   bool   `json:"goalAlreadyServed"`
-	AbandonedAssumption string `json:"abandonedAssumption"`
+	Source              string             `json:"source"`
+	Edits               []replanSourceEdit `json:"edits"`
+	GoalAlreadyServed   bool               `json:"goalAlreadyServed"`
+	AbandonedAssumption string             `json:"abandonedAssumption"`
 }
+
+// The model emits only the executable draft and its verdict. The runtime
+// derives step identities and dependencies from the validated source rather
+// than asking for a second, potentially inconsistent plan description.
+var replanDraftSchema = json.RawMessage(`{
+ "type":"object","additionalProperties":false,
+ "required":["source","goalAlreadyServed","abandonedAssumption"],
+ "properties":{
+  "source":{"type":"string"},
+  "goalAlreadyServed":{"type":"boolean"},
+  "abandonedAssumption":{"type":"string"}
+ }
+}`)
 
 // parseReplanDraft reads replanGap's answer, tolerating a string (raw model
 // text, fenced or wrapped in prose) and a map (schema-enforced), the way the
@@ -162,7 +178,7 @@ func parseReplanDraft(resp any) (replanDraft, error) {
 		return replanDraft{}, fmt.Errorf("parse replanGap JSON: %w (raw=%s)", err, truncate(string(raw), 200))
 	}
 	draft.Source = strings.TrimSpace(draft.Source)
-	if draft.Source == "" && !draft.GoalAlreadyServed {
+	if draft.Source == "" && len(draft.Edits) == 0 && !draft.GoalAlreadyServed {
 		return replanDraft{}, fmt.Errorf("replanGap returned no source")
 	}
 	return draft, nil

@@ -32,16 +32,29 @@ import (
 // Only the model boundary is replaced. The installed DSL, journal, authorization,
 // two independent engines, approvals and version writes run against PostgreSQL.
 type revisionAI struct {
+	firstAnswer           *revisionAnswer
+	completionReply       string
+	completionAfterRepair string
+	completionDocuments   []string
+	onCompletion          func(context.Context, int32) error
+	completionCalls       atomic.Int32
+	repairCalls           atomic.Int32
 	calls                 atomic.Int32
 	researchCalls         atomic.Int32
 	retainedEvidenceCalls atomic.Int32
 	appCalls              atomic.Int32
 	needsResearch         bool
+	imagePlan             []revisionImageSpec
+	replacementImagePlan  []revisionImageSpec
+	imagePlanCalls        atomic.Int32
 	parallelResearch      bool
 	assessmentReply       string
 	assessmentError       error
 	assessmentCalls       atomic.Int32
 	headlessScope         string
+	researchDocument      string
+	researchPassages      string
+	editDocument          string
 	appStarted            chan struct{}
 	headlessStarted       chan struct{}
 	expectedReference     string
@@ -68,6 +81,8 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return nil, fmt.Errorf("local research started before the app attempt")
 			}
 			a.headlessScope = asString(data["gaps"])
+			a.researchDocument = asString(data["document"])
+			a.researchPassages = asString(data["passages"])
 			if a.headlessStarted != nil {
 				close(a.headlessStarted)
 				select {
@@ -88,11 +103,33 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		}},
 		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
+			if args["templateId"] == "libraryRevisionCompletion" {
+				n := a.completionCalls.Add(1)
+				if len(a.completionDocuments) > 0 && (int(n) > len(a.completionDocuments) || data["document"] != a.completionDocuments[n-1]) {
+					return nil, fmt.Errorf("completion check did not assess the actual proposed document: %v", data["document"])
+				}
+				if a.onCompletion != nil {
+					if err := a.onCompletion(ctx, n); err != nil {
+						return nil, err
+					}
+				}
+				reply := a.completionReply
+				if a.repairCalls.Load() > 0 {
+					reply = a.completionAfterRepair
+				}
+				if reply == "" {
+					reply = "satisfied"
+				}
+				return reviewResult(map[string]any{"reply": reply})
+			}
 			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
 				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
 			}
 			if args["templateId"] == "libraryRevisionIntent" {
 				intent := "edit"
+				if len(a.imagePlan) > 0 {
+					return reviewResult(map[string]any{"reply": "images"})
+				}
 				if a.needsResearch {
 					intent = "research"
 				}
@@ -100,6 +137,14 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 					intent = "parallel"
 				}
 				return reviewResult(map[string]any{"reply": intent})
+			}
+			if args["templateId"] == "libraryRevisionImagePlan" {
+				plan := a.imagePlan
+				if a.imagePlanCalls.Add(1) > 1 && a.replacementImagePlan != nil {
+					plan = a.replacementImagePlan
+				}
+				raw, _ := json.Marshal(map[string]any{"images": plan, "limitations": ""})
+				return reviewResult(map[string]any{"reply": string(raw)})
 			}
 			if args["templateId"] == "libraryRevisionAppResearch" {
 				a.appCalls.Add(1)
@@ -130,6 +175,7 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				}
 				return reviewResult(map[string]any{"reply": reply})
 			}
+			a.editDocument = asString(data["document"])
 			passages, valid := data["passages"].(string)
 			expectedEvidence := "Editorial change:"
 			if a.needsResearch {
@@ -147,8 +193,28 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 			if a.needsResearch && a.appError != nil && !strings.Contains(asString(data["evidence"]), "App research was unavailable") {
 				return nil, fmt.Errorf("app failure disguised as research")
 			}
-			a.calls.Add(1)
-			body, _ := json.Marshal(a.answer)
+			if schema := revisionMap(args["responseSchema"]); schema["type"] != "object" || schema["additionalProperties"] != false || args["progress"] != true {
+				return nil, fmt.Errorf("revision analysis lost its strict edit protocol or public lifecycle")
+			}
+			count := a.calls.Add(1)
+			answer := a.answer
+			if count == 1 && a.firstAnswer != nil {
+				answer = *a.firstAnswer
+			}
+			if asString(data["recovery"]) != "" {
+				a.repairCalls.Add(1)
+				if a.completionCalls.Load() > 0 && !strings.Contains(asString(data["recovery"]), a.completionReply) {
+					return nil, fmt.Errorf("repair lost the independent check's concrete findings")
+				}
+			}
+			expectedReview := a.completionReply
+			if expectedReview == "" {
+				expectedReview = "satisfied"
+			}
+			if args["templateId"] == "libraryRevisionItem" && (a.completionCalls.Load() == 0 || data["reviewNotes"] != expectedReview) {
+				return nil, fmt.Errorf("amendment did not receive its independent preflight assessment")
+			}
+			body, _ := json.Marshal(answer)
 			return reviewResult(map[string]any{"reply": string(body)})
 		}}}
 }
@@ -160,6 +226,7 @@ type revisionDB struct {
 	engine, other *memql.MemQLEngine
 	ctx           context.Context
 	owner         string
+	resetCase     func()
 }
 
 func newRevisionDB(t *testing.T) *revisionDB {
@@ -200,8 +267,27 @@ func newRevisionDB(t *testing.T) *revisionDB {
 	}
 	f.first, f.engine = open()
 	f.second, f.other = open()
+	first, second := *f.first, *f.second
+	f.resetCase = func() {
+		*f.ai = revisionAI{}
+		*f.first, *f.second = first, second
+	}
 	return f
 }
+
+// Reuse only immutable engine/DSL setup within one sequential test group.
+// Each case gets new ownership, rows and model/adapter state. Registered
+// handlers still point at these restored integration instances.
+func (f *revisionDB) isolatedCase(t *testing.T) *revisionDB {
+	t.Helper()
+	f.resetCase()
+	fresh := *f
+	fresh.t = t
+	fresh.owner = fmt.Sprintf("revision-%d", time.Now().UnixNano())
+	fresh.ctx = revisionActor(fresh.owner, auth.RoleWriter)
+	return &fresh
+}
+
 func revisionActor(user string, role auth.Role) context.Context {
 	return auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: role})
 }
@@ -294,7 +380,8 @@ func (f *revisionDB) execute(engine *memql.MemQLEngine, request string, resume b
 	return err
 }
 
-// These cases mount the same immutable DSL on two independent replicas.
+// Revision, image, history, attachment and lookup cases mount the same immutable
+// DSL on two independent replicas.
 // Bootstrap them once under this parent; each case owns fresh document/run IDs
 // and model state. Do not use a package-global fixture or parallel subtests.
 func TestDocumentRevisionWorkflow(t *testing.T) {
@@ -303,12 +390,25 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 		name string
 		run  func(*testing.T, *revisionDB)
 	}{
+		{"HistoryBranchesAcrossReplicas", testHistoryBranchesAcrossReplicas},
+		{"HistoryForkReadsOwnedFileBytes", testHistoryForkReadsOwnedFileBytes},
+		{"PersonalDocumentNotesNeverEnterAIRevision", testPersonalDocumentNotesNeverEnterAIRevision},
+		{"ArtifactForFileResolvesBareReceiptAcrossEngines", testArtifactForFileResolvesBareReceiptAcrossEngines},
+		{"ReviewAttachmentsAcrossReplicas", testReviewAttachmentsAcrossReplicas},
+		{"PreparedRevisionImagesRecoverAndPinAcrossReplicas", testPreparedRevisionImagesRecoverAndPinAcrossReplicas},
+		{"RevisionDSLPlansAcquiresAndProposesAnImage", testRevisionDSLPlansAcquiresAndProposesAnImage},
+		{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
+		{"RevisionCompletionRepairsNoopAndReusesSavedImages", testRevisionCompletionRepairsNoopAndReusesSavedImages},
+		{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},
+		{"RevisionPartialFeedbackRepair", testRevisionPartialFeedbackRepair},
+		{"RevisionAmendmentPreservesImagePinsAcrossReplicas", testRevisionAmendmentPreservesImagePinsAcrossReplicas},
 		{"AppliedFeedbackCannotBeDeletedAcrossReplicas", testAppliedFeedbackCannotBeDeletedAcrossReplicas},
 		{"DeleteDocumentAnnotationsAcrossReplicas", testDeleteDocumentAnnotationsAcrossReplicas},
 		{"DeleteProposedFeedbackInvalidatesStaleReview", testDeleteProposedFeedbackInvalidatesStaleReview},
 		{"DocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
 		{"DocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure", testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure},
 		{"DocumentResearchRouting", testDocumentResearchRouting},
+		{"DocumentResearchScopesContext", testDocumentResearchScopesContext},
 		{"DocumentRetryReusesCompletedAppEvidence", testDocumentRetryReusesCompletedAppEvidence},
 		{"DocumentRevisionRecoveryOrdersByRequestAndRechecksAccess", testDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess},
 		{"DocumentRevisionRefusesStaleApprovalAndAllowsDecline", testDocumentRevisionRefusesStaleApprovalAndAllowsDecline},
@@ -318,23 +418,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := *shared
-			f.t = t
-			f.owner = fmt.Sprintf("revision-%d", time.Now().UnixNano())
-			f.ctx = revisionActor(f.owner, auth.RoleWriter)
-			f.ai.calls.Store(0)
-			f.ai.appCalls.Store(0)
-			f.ai.researchCalls.Store(0)
-			f.ai.retainedEvidenceCalls.Store(0)
-			f.ai.needsResearch = false
-			f.ai.parallelResearch = false
-			f.ai.assessmentReply, f.ai.headlessScope = "", ""
-			f.ai.assessmentError = nil
-			f.ai.assessmentCalls.Store(0)
-			f.ai.appStarted, f.ai.headlessStarted = nil, nil
-			f.ai.appError = nil
-			f.ai.answer = revisionAnswer{}
-			tc.run(t, &f)
+			tc.run(t, shared.isolatedCase(t))
 		})
 	}
 }
@@ -849,5 +933,55 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	_, different, _, _, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), asString(args["requestId"]))
 	if err != nil || len(fmt.Sprint(different["previousRunIds"])) > 2 {
 		t.Fatalf("new feedback inherited old evidence: %v %v", different, err)
+	}
+}
+
+func testDocumentResearchScopesContext(t *testing.T, f *revisionDB) {
+	for _, scope := range []string{"selection", "document", "end"} {
+		t.Run(scope, func(t *testing.T) {
+			source := "# Research\n\nSelected claim.\n\n# Unrelated\n\n" + strings.Repeat("Unrelated material. ", 1500) + "\nEnd context."
+			anchor := map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "sourceQuote": "Selected claim.", "quote": "Selected claim."}
+			if scope == "document" {
+				anchor = map[string]any{"kind": "document"}
+			}
+			if scope == "end" {
+				anchor = map[string]any{"kind": "document-end", "prefix": "Unrelated material. "}
+			}
+			f.ai.needsResearch = true
+			f.ai.appCalls.Store(0)
+			f.ai.researchCalls.Store(0)
+			artifact, doc := f.document(source)
+			args, note := f.submit(artifact, doc, anchor, "Verify the selected claim using sources.")
+			f.ai.answer = revisionAnswer{Summary: "Verified", Edits: []revisionReplacement{{Before: "Selected claim.", After: "Verified claim.", Reason: "Source", CommentIDs: []string{note}}}}
+			if scope == "end" {
+				f.ai.answer.Edits[0].Before = "End context."
+				f.ai.answer.Edits[0].After = "End context.\n\nAdditional verified claim.\n"
+			}
+			var wait *workstate.HumanWait
+			if err := f.execute(f.engine, asString(args["requestId"]), false); !errors.As(err, &wait) {
+				t.Fatal(err)
+			}
+			if f.ai.researchCalls.Load() != 1 || f.ai.editDocument != source {
+				t.Fatal("research tools or complete editing source lost")
+			}
+			if scope == "end" {
+				if f.ai.researchDocument != source {
+					t.Fatal("end-of-document feedback lost its context")
+				}
+			} else {
+				if f.ai.researchDocument != "" {
+					t.Fatal("research duplicated the full document")
+				}
+				if scope == "selection" && strings.Contains(f.ai.researchPassages, "Unrelated material.") {
+					t.Fatal("unrelated prose entered selected research")
+				}
+				if scope == "document" && !strings.Contains(f.ai.researchPassages, "Unrelated material.") {
+					t.Fatal("whole-document feedback lost content")
+				}
+			}
+			if !strings.Contains(f.ai.researchPassages, "Verify the selected claim using sources.") {
+				t.Fatal("human feedback was truncated")
+			}
+		})
 	}
 }

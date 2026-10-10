@@ -44,15 +44,89 @@ existing plan-review approval. There is no promise that every failure can be
 recovered automatically or that a language model can identify every platform
 bug correctly.
 
+If a plan failure exhausts automatic recovery, **Revise plan** authorizes one
+further replanning attempt for the unfinished work. It preserves the completed
+prefix and accumulated usage, and does not replenish automatic retries or
+raise resource limits. A transient failure's **Retry** instead repeats the
+failed step. Either decision is persisted for the cluster to resume safely.
+
+Replanning an existing sealed program uses structured, exact source edits so
+that repairing a small part does not require the model to repeat a large
+program. The runtime rejects ambiguous or overlapping edits and changes to
+completed calls or their arguments. It compiles the resulting program and
+validates the whole bundle before installation. An installed template without
+a private authoring bundle is recovered from the receiving replica's DSL tree
+only when its complete definition matches the run's recorded fingerprint.
+Missing or changed source stops recovery before inference; journal previews
+are never a substitute for the original program. Generated edits retain the
+normal caller trust and approval gates.
+
+The Spine also declares invocation substitutions that recovery must refuse.
+For example, replacing `runAgentTurn` with `ai` for the same research prompt
+would remove tool execution. The validator compares compiled calls, including
+nested branches and loops, before persisting the replacement. This check does
+not certify the factual quality of an evidence report.
+
+A timed-out attempt records its failure with a separate,
+short write deadline so that an expired model request cannot leave the same
+attempt eligible to run again on another replica. This finalization does not
+extend model execution; it rechecks the run's current state before writing.
+
+A document image acquisition distinguishes an unusable remote resource from a
+MemQL permission or storage failure. The DSL may receive a bounded refusal
+receipt for a remote HTTP denial, catalog page, oversized or invalid raster.
+It researches one alternative source and retries only that requested image,
+with its acquisition mode unchanged. A second refusal enters the run's bounded
+plan recovery; it cannot silently disappear from the document. Successful
+assets and research receipts survive a resume on another replica. This does
+not authorize bypassing a source's access restrictions.
+
+A saved image is not a completed document edit. Revision proposals check actual
+Markdown image nodes against the prepared asset manifest; prose links and code
+examples do not count as embedded images. The DSL makes one corrective edit
+attempt when requested assets are missing. Proposals also receive a separate
+assessment of whether their actual text satisfies all the requested feedback,
+including proposals that changed only part of it. Unfinished requests get the
+same bounded repair, followed by another assessment. A second incomplete result
+stops before approval rather than presenting partial work as complete. These
+model assessments guide recovery; they do not replace human factual review.
+The assessment uses the prose judgment level and treats the proposed document
+as the source of truth for its contents. Original selections and quoted feedback
+are context, not proof that rejected wording remains in the candidate.
+
+An unchanged request can reuse a completed image batch from an earlier finished
+or stopped attempt. The native gate compares the captured source, feedback,
+attachments and direction, rechecks owner access and immutable image bytes, and
+preserves the original source/model attribution. Changed feedback does not
+inherit that authority. Research and generation are not repeated on approval.
+
+When a person modifies one proposed item, the new request captures the prior
+proposal’s verified image receipts. Images retained in the revised Markdown
+keep their exact bytes and provenance; removed images need not remain in the
+manifest. Approval and application revalidate those retained assets on the
+receiving replica. Supplying another request’s image identifiers or claiming
+inheritance in a model response grants no authority. An amendment that repeats
+the prior proposed text also receives the bounded completion assessment; changing
+only its explanation does not count as fulfilling the new direction. A separate
+assessment identifies specific unmet requirements before an amendment. Those
+findings also guide the bounded repair, rather than repeating the editor’s
+possibly incorrect claim of completion.
+
 ## Browser research fallback
 
 The document DSL first assesses whether feedback needs external evidence using
-a local model. For research, it runs local headless collection and independent
-app research concurrently. The `researchApps` policy tries Codex with a balanced
-model, then Claude Code with Sonnet; each uses its own tools. The headless
-branch runs on local models. Both reports reach the proposal stage, which
-combines complementary findings and checks disagreements against primary
+a local model. It prefers an available research app, assesses the returned
+evidence, then uses local headless research for missing evidence or unavailable
+apps. Particularly demanding requests select parallel app and headless research.
+The `researchApps` policy tries Codex with a balanced model, then Claude Code
+with Sonnet; each uses its own tools. Both reports reach the proposal stage,
+which combines complementary findings and checks disagreements against primary
 sources. Ordinary wording edits do not spend app quota.
+
+Selected source and human feedback travel together to the evidence stages.
+Those stages do not receive a second copy of the entire document; a request
+anchored at the end retains document context when it has no selected source.
+The exact-edit stage still receives the complete original document.
 
 App research is optional. Credit limits, missing apps, connection errors and
 bounded timeouts are journaled under the failed branch call. They never cancel
@@ -161,9 +235,15 @@ storage, an invalid summary, or a checkpoint that saves no space returns a
 failure without mutating the caller's original conversation.
 
 The proactive working-set threshold is an estimate that includes message
-envelopes, tool schemas and arguments. The inference router also sizes each
-actual call with completion headroom; provider context-overflow recovery can
-request a smaller checkpoint. An active request and tool contracts can
+envelopes, tool schemas and arguments. Its preference is 20,000 tokens. When
+pinned authority, the original request, the latest human correction and tool
+contracts would leave less than 4,000 tokens of working room, the target
+becomes their estimated size plus that working room. Accumulated tool results, model replies and
+derived memories do not enlarge that allowance. This lets a large document
+reach an eligible model without deleting or summarizing its original request.
+The inference router also sizes each actual call with completion headroom;
+provider context-overflow recovery can request a strictly smaller checkpoint
+without this proactive floor. An active request and tool contracts can
 themselves exceed a provider's capacity. Compaction cannot guarantee that any
 arbitrary input fits any model.
 

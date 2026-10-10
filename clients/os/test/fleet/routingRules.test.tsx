@@ -106,6 +106,8 @@ describe("the rules, as sentences", () => {
   it("reads each rule as When -> Route, in the order the engine tries them, the floor last", async () => {
     await openRules();
     expect(sentences()).toEqual([
+      "Library revision image plan prompt -> Local only",
+      "Library revision image generation prompt -> Local only",
       "Library revision evidence prompt -> Local only",
       "Library revision intent prompt -> Local only",
       "Library revision app research prompt -> Research apps",

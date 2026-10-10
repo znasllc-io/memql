@@ -168,6 +168,7 @@ builtin runAgentTurn {
 builtin ai {
   templateId  string!
   data        object!
+  responseSchema object @description("Optional JSON Schema object for a strict structured response. Routing, metering and the work journal are preserved; reply contains the JSON text.")
   progress    bool @description("Persist public output snapshots for an owned work run as the model generates them. No private reasoning is recorded.")
 }
 

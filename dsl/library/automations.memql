@@ -252,6 +252,9 @@ automation archiveFileOnArtifactArchive {
 automation reviseLibraryDocument {
  args { requestId string! proposal object! }
  captured := builtin libraryRevisionInput(requestId: args.requestId)
+ // Selected source already travels in passagesJSON. Avoid sending the whole
+ // document a second time; end-of-document requests still need its context.
+ researchDocument := captured.passages.where(p => trim(p.source) != "").count() > 0 ? "" : captured.content
  references := builtin libraryRevisionReferences(requestId: args.requestId, templateId: "libraryRevisionImages", level: "fast")
  intent := builtin ai(templateId: "libraryRevisionIntent", data: {
   passages: captured.passagesJSON, references: references.references,
@@ -267,7 +270,7 @@ automation reviseLibraryDocument {
    priorEvidence := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "evidence.app/report")
    report := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
     priorEvidence: priorEvidence.select(receipt => receipt.result.value.reply), gaps: "Independent corroboration of this demanding research request.",
-    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    document: researchDocument, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction ?? captured.instruction, previous: captured.amendment.edits
    }) on error continue
    return report.reply ?? ""
@@ -284,7 +287,7 @@ automation reviseLibraryDocument {
     }
    }
    report := builtin ai(templateId: "libraryRevisionAppResearch", data: {
-    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    document: researchDocument, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction ?? captured.instruction, previous: captured.amendment.edits
    }) on error continue
    return {available: trim(report.reply ?? "") != "", report: report.reply ?? ""}
@@ -297,7 +300,7 @@ automation reviseLibraryDocument {
   // malformed assessment conservatively selects local research, never success.
   if evidence.app.available || trim(evidence.headless) != "" {
    assessment := builtin ai(templateId: "libraryRevisionEvidence", data: {
-    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    document: researchDocument, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction ?? captured.instruction,
     appEvidence: evidence.app.report, localEvidence: evidence.headless
    }) on error continue
@@ -311,24 +314,138 @@ automation reviseLibraryDocument {
    supplement := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
     priorEvidence: [evidence.app.report, evidence.headless],
     gaps: assessment.reply ?? "The evidence assessment was unavailable. Check source support and fill the missing evidence conservatively.",
-    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    document: researchDocument, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction ?? captured.instruction, previous: captured.amendment.edits
    })
   }
   combinedEvidence := "App research report:\n" + (evidence.app.available ? evidence.app.report : "App research was unavailable; no app findings were obtained.") + "\nIndependent local report:\n" + evidence.headless + "\nEvidence assessment:\n" + (assessment.reply ?? "Unavailable") + "\nTargeted local research:\n" + supplement.reply
  }
 
+ // Reuse a completed acquisition batch only for the same immutable request.
+ // The native manifest reader revalidates ownership, bytes and provenance.
+ retainedImages := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "preparedImages")
+ if retainedImages.count() > 0 && retainedImages.first().result.value.references != "[]" {
+  imageSourceRun := retainedImages.first().result.value.sourceRunId ?? retainedImages.first().runId
+ } else {
+  imageSourceRun := captured.runId
+ }
+ // Image selection is authored here; native operations only acquire and verify one asset.
+ if lower(trim(intent.reply)) == "images" && imageSourceRun == captured.runId {
+  imageSchema := {
+   type: "object", additionalProperties: false, required: ["images", "limitations"], properties: {
+    limitations: {type: "string"}, images: {type: "array", maxItems: 64, items: {
+     type: "object", additionalProperties: false, required: ["mode", "name", "alt", "url", "sourceURL", "attribution", "license", "prompt"],
+     properties: {mode: {type: "string", enum: ["import", "generate"]}, name: {type: "string"}, alt: {type: "string"}, url: {type: "string"}, sourceURL: {type: "string"}, attribution: {type: "string"}, license: {type: "string"}, prompt: {type: "string"}}
+    }}
+   }
+  }
+  imagePlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: imageSchema, data: {passages: captured.passagesJSON, instruction: captured.amendment.instruction ?? captured.instruction, evidence: combinedEvidence})
+  imageSpecs := builtin libraryRevisionImagePlan(response: imagePlan.reply)
+  for imageSpec in imageSpecs.images {
+   acquired := builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: imageSpec, level: "fast", width: 512, height: 512, reportSourceFailure: true)
+   if acquired.fileId == "" {
+    // A remote 403, catalog page or unusable raster is not a MemQL permission
+    // failure. Research one replacement; never repeat a known-bad URL blindly.
+    replacementEvidence := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
+     document: "", passages: "[]", references: "", priorEvidence: [combinedEvidence],
+     instruction: "Find a usable openly licensed or public-domain raster source for ONLY this requested image: " + (imageSpec.alt + "; filename: " + imageSpec.name + "; failed URL: " + imageSpec.url + "; previous source page: " + imageSpec.sourceURL),
+     gaps: "The attempted acquisition failed: " + acquired.problem + ". Retrieve an accessible source page and its exact direct raster URL, attribution and reuse terms. A catalog page is not an image URL. Follow actual links; do not guess paths. Do not generate an illustration or repeat the failed URL. Return only the source evidence for this one image."
+    })
+    replacementPlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: imageSchema, data: {
+     passages: "[]", instruction: "Return exactly one import replacing this failed source for the same subject, using only the newly retrieved evidence: " + (imageSpec.alt + "; filename: " + imageSpec.name + "; failed URL: " + imageSpec.url + "; previous source page: " + imageSpec.sourceURL), evidence: replacementEvidence.reply
+    })
+    replacementSpecs := builtin libraryRevisionImagePlan(response: replacementPlan.reply, minImages: 1, maxImages: 1, mode: "import")
+    for replacementSpec in replacementSpecs.images {
+     // A second refusal goes through the run's bounded recovery; it cannot be
+     // silently omitted from the proposed document or repeat this repair loop.
+     builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: replacementSpec, level: "fast", width: 512, height: 512)
+    }
+   }
+  }
+  imageLimitations := imageSpecs.limitations
+ } else {
+  imageLimitations := ""
+ }
+ preparedImages := builtin libraryRevisionPreparedImages(requestId: args.requestId, sourceRunId: imageSourceRun)
+
+ // The edit protocol is constrained JSON, not free-form model reasoning.
+ revisionSchema := {
+  type: "object", additionalProperties: false, required: ["edits", "summary"],
+  properties: {edits: {type: "array", minItems: preparedImages.references == "[]" ? 0 : 1, maxItems: 100, items: {
+   type: "object", additionalProperties: false, required: ["before", "after", "reason", "commentIds"],
+   properties: {before: {type: "string"}, after: {type: "string"}, reason: {type: "string", maxLength: 400}, commentIds: {type: "array", items: {type: "string"}}}
+  }}, summary: {type: "string", maxLength: 300}}
+ }
  if captured.amendment != nil {
-  analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, data: {
+  previousCandidate := builtin libraryRevisionProposal(requestId: args.requestId,
+   response: {edits: captured.amendment.edits, summary: "Previous proposed changes"}, sourceRunId: preparedImages.sourceRunId, allowIncomplete: true)
+  amendmentAssessment := builtin ai(templateId: "libraryRevisionCompletion", data: {
+   references: references.references, evidence: combinedEvidence,
+   document: previousCandidate.proposal.revisedContent, passages: captured.passagesJSON,
+   instruction: captured.amendment.instruction, explanation: "Assess the previous proposal against the new direction."
+  })
+  analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
+   reviewNotes: amendmentAssessment.reply, preparedImages: preparedImages.references,
    document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.amendment.instruction,
-   previous: captured.amendment.edits, evidence: combinedEvidence
+   previous: captured.amendment.edits, evidence: combinedEvidence + "\nImage acquisition limitations: " + imageLimitations
   })
  } else {
-  analysis := builtin ai(templateId: "libraryRevisionPassages", progress: true, data: {
-   document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.instruction, evidence: combinedEvidence
+  analysis := builtin ai(templateId: "libraryRevisionPassages", progress: true, responseSchema: revisionSchema, data: {
+   preparedImages: preparedImages.references,
+   document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.instruction, evidence: combinedEvidence + "\nImage acquisition limitations: " + imageLimitations
   })
  }
- proposed := builtin libraryRevisionProposal(requestId: args.requestId, response: analysis.reply)
+ candidate := builtin libraryRevisionProposal(requestId: args.requestId, response: analysis.reply, sourceRunId: preparedImages.sourceRunId, allowIncomplete: true)
+ // A changed document can still omit part of the feedback. Check actual
+ // proposed content, not the editor's claimed completion or changed-byte count.
+ if !candidate.complete {
+  repairFeedback := "Requested prepared images are missing from the proposed Markdown."
+  repairNeeded := true
+ } else {
+  if captured.amendment != nil && !candidate.requestChanged {
+   completion := amendmentAssessment
+  } else {
+   completion := builtin ai(templateId: "libraryRevisionCompletion", data: {
+    references: references.references, evidence: combinedEvidence,
+    document: candidate.proposal.revisedContent, passages: captured.passagesJSON,
+    instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary
+   })
+  }
+  repairFeedback := completion.reply
+  repairNeeded := lower(trim(completion.reply)) != "satisfied"
+ }
+ if repairNeeded {
+  repairDirection := "The previous response did not complete the request. Unfulfilled requirements from the independent check: " + repairFeedback + "\nProduce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
+  if captured.amendment != nil {
+   repaired := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
+    recovery: repairDirection + "\nCorrect this latest incomplete response while preserving its valid corrections:\n" + analysis.reply, reviewNotes: amendmentAssessment.reply, preparedImages: preparedImages.references,
+    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    instruction: captured.amendment.instruction, previous: captured.amendment.edits, evidence: combinedEvidence
+   })
+  } else {
+   repaired := builtin ai(templateId: "libraryRevisionPassages", progress: true, responseSchema: revisionSchema, data: {
+    recovery: repairDirection + "\nCorrect this latest incomplete response while preserving its valid corrections:\n" + analysis.reply, preparedImages: preparedImages.references,
+    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    instruction: captured.instruction, evidence: combinedEvidence
+   })
+  }
+  // One repair, then the existing bounded run recovery; never silently succeed.
+  repairedCandidate := builtin libraryRevisionProposal(requestId: args.requestId, response: repaired.reply, sourceRunId: preparedImages.sourceRunId, requireChanges: true)
+  finalAssessment := builtin ai(templateId: "libraryRevisionCompletion", data: {
+   references: references.references, evidence: combinedEvidence,
+   document: repairedCandidate.proposal.revisedContent, passages: captured.passagesJSON,
+   instruction: captured.amendment.instruction ?? captured.instruction, explanation: repairedCandidate.summary
+  })
+  if lower(trim(finalAssessment.reply)) != "satisfied" {
+   return error("document edits incomplete: " + finalAssessment.reply)
+  }
+  finalResponse := repaired.reply
+ } else {
+  finalResponse := analysis.reply
+ }
+ // Stamp the final proposal after all model calls, including assessments,
+ // so the approval gate sees the complete, current attribution journal.
+ proposed := builtin libraryRevisionProposal(requestId: args.requestId, response: finalResponse, sourceRunId: preparedImages.sourceRunId)
  if proposed.changed {
   review := builtin libraryReviewRevision(requestId: args.requestId, proposal: proposed.proposal,
    question: "Apply these proposed changes to the document?")

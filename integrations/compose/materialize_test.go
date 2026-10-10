@@ -239,7 +239,7 @@ func TestMaterializeRetryOnAnotherReplicaReturnsCompletedFile(t *testing.T) {
 }
 
 func TestMaterializeTransientFailureResumesOnAnotherReplica(t *testing.T) {
-	for _, message := range []string{"context deadline exceeded", "the local runtime stopped producing output past the idle ceiling", "connection reset by peer"} {
+	for _, message := range []string{"context deadline exceeded", "the local runtime stopped producing output past the idle ceiling", "connection reset by peer", "materializer: invalid draft: unexpected EOF"} {
 		t.Run(message, func(t *testing.T) {
 			i, e, u := materializeFixture(t)
 			i.SetComposer(materializeComposerFunc(func(context.Context, ComposeRequest) (ComposeReply, error) {

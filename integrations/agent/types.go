@@ -112,6 +112,7 @@ type RetrievedChunk struct {
 // must implement it even though lightweight replier fixtures need only the
 // methods exercised by their test. The app asserts this at compile time.
 type WorkRuntime interface {
+	WorkCallFailure(context.Context) error
 	PrepareWorkTool(context.Context) error
 	ContextWithWorkCallDeadline(context.Context) (context.Context, context.CancelFunc, error)
 	SaveWorkContinuation(context.Context, []common.ChatMessage) error

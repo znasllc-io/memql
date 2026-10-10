@@ -18,6 +18,7 @@ package planner_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -419,4 +420,8 @@ func TestDecompositionSpendsIntelligenceOnceDB(t *testing.T) {
 	if outC.ModelCalls != 1 || bridgeC.calls != 1 {
 		t.Fatalf("goal C's compile spent %d model calls, want only its triage", outC.ModelCalls)
 	}
+}
+
+func (*sectionCatalogBridge) InvokeAIStructured(context.Context, string, map[string]any, string, json.RawMessage, bool) (string, error) {
+	return "", fmt.Errorf("unexpected structured planning call")
 }

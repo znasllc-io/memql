@@ -137,8 +137,8 @@ func (e *MemQLEngine) resolveAI(ctx context.Context, req airoute.ResolveRequest)
 	// decision record exactly like a floor that was measured and cleared, so a
 	// caller that forgot to estimate gets the conservative default rather than
 	// a silently unbounded request.
-	if req.Modality == airoute.ModalitySpeech || req.Modality == airoute.ModalityTranscribe {
-		// Audio runtimes advertise media limits, not a chat context window.
+	if req.Modality == airoute.ModalitySpeech || req.Modality == airoute.ModalityTranscribe || req.Modality == airoute.ModalityImage {
+		// Media runtimes advertise media limits, not a chat context window.
 		req.Needs.MinContextTokens = 0
 	} else if req.Needs.MinContextTokens <= 0 {
 		req.Needs.MinContextTokens = airoute.EstimateMinContextTokens("", 0)

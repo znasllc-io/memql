@@ -449,7 +449,7 @@ StreamLoop:
 			textChunks++
 		}
 
-		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, 20000)
+		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
 			return nil, compactErr
 		}
@@ -479,7 +479,12 @@ StreamLoop:
 			cancelAttempt := func() { stopAttempt(); stopBudget() }
 			chunks, err = provider.CallChatStreamWithTools(attemptCtx, messages, tools)
 			if err != nil {
+				budgetFailure := r.workCallFailure(attemptCtx)
 				cancelAttempt()
+				if budgetFailure != nil {
+					terminalErr = budgetFailure
+					break StreamLoop
+				}
 				if next, ok := r.handOffContext(ctx, err, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next
 					continue
@@ -508,7 +513,12 @@ StreamLoop:
 			}
 
 			turnText, turnCalls, streamErr = r.consumeStreamingTurn(attemptCtx, chunks, sink, &textChunks, &fullText, turnStart, iter, requestId, &ttftLogged, turnCtx.StreamIdleBudget)
+			budgetFailure := r.workCallFailure(attemptCtx)
 			cancelAttempt()
+			if budgetFailure != nil {
+				terminalErr = budgetFailure
+				break StreamLoop
+			}
 			if streamErr != nil {
 				if ctx.Err() != nil {
 					terminalErr = ctx.Err()

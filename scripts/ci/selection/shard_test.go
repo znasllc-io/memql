@@ -16,6 +16,7 @@ go      default   -                   600s     -         3
 db      memql     component/memql     600s     serial    2
 db      packages  component/packages  300s     -         1
 db      work      integrations/work  180s     serial    1
+db      library   integrations/library 180s   serial    1
 db      default   -                   180s     -         2
 `
 
@@ -36,6 +37,7 @@ func TestParseClassesReadsTheTable(t *testing.T) {
 		{Lane: "db", Name: "memql", Trees: []string{"component/memql"}, Timeout: "600s", Serial: true, Shards: 2},
 		{Lane: "db", Name: "packages", Trees: []string{"component/packages"}, Timeout: "300s", Shards: 1},
 		{Lane: "db", Name: "work", Trees: []string{"integrations/work"}, Timeout: "180s", Serial: true, Shards: 1},
+		{Lane: "db", Name: "library", Trees: []string{"integrations/library"}, Timeout: "180s", Serial: true, Shards: 1},
 		{Lane: "db", Name: "default", Timeout: "180s", Shards: 2},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -102,7 +104,7 @@ func shardByName(shards []Shard, name string) (Shard, bool) {
 func TestPartitionKeepsBudgetsApart(t *testing.T) {
 	classes := mustClasses(t, ciClasses)
 	dbDirs := []string{"component/memql", "component/memql/offline", "component/memql/sense", "component/packages",
-		"component/automations", "component/automations/steps", "integrations/work", "component/grpc", "app"}
+		"component/automations", "component/automations/steps", "integrations/work", "integrations/library", "integrations/library/versionstore", "component/grpc", "app"}
 	shards, err := Partition("db", dbDirs, classes, measured, 4)
 	if err != nil {
 		t.Fatal(err)
@@ -125,6 +127,13 @@ func TestPartitionKeepsBudgetsApart(t *testing.T) {
 	}
 	if work.Parallel != 1 || work.Timeout != "180s" {
 		t.Errorf("integrations/work must keep its 180s budget and run without shard contention, got -p=%d -timeout=%s", work.Parallel, work.Timeout)
+	}
+	library, ok := shardByName(shards, "library")
+	if !ok || !reflect.DeepEqual(library.Dirs, []string{"integrations/library", "integrations/library/versionstore"}) {
+		t.Errorf("library workflows must run in their own database shard, got %+v", library)
+	}
+	if library.Parallel != 1 || library.Timeout != "180s" {
+		t.Errorf("library must keep its 180s budget without shard contention, got -p=%d -timeout=%s", library.Parallel, library.Timeout)
 	}
 	for _, s := range shards {
 		if s.Class == "default" && (s.Timeout != "180s" || s.Parallel != 4) {

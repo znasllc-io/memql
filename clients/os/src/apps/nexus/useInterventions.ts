@@ -129,7 +129,7 @@ export function useRunVerdicts(runId: string, refresh: string): VerdictsRead {
     const controller = new AbortController();
     void (async () => {
       try {
-        const result = await query.workObservationsForOwnerRun({ runId }, { signal: controller.signal });
+        const result = await query.workVerdictsForOwnerRun({ runId }, { signal: controller.signal });
         if (controller.signal.aborted) return;
         const observations = result.rows().map(observationFromRow);
         const read = observations.map(feedbackFromObservation).filter((f): f is FeedbackEntry => f !== null);

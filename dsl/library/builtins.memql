@@ -201,7 +201,13 @@ builtin libraryRevisionInput { requestId string! }
 /// Decode and validate replacements only within the selected source passages.
 @executor("integration.library.revisionProposal")
 @args(profile="object")
-builtin libraryRevisionProposal { requestId string! response any! }
+builtin libraryRevisionProposal {
+ requestId string!
+ response any!
+ sourceRunId string
+ allowIncomplete bool
+ requireChanges bool
+}
 
 /// Park the current run on an exact proposal; return only after human approval.
 @executor("integration.library.reviewRevision")
@@ -400,3 +406,33 @@ builtin libraryRevisionReferences {
 @executor("integration.library.removeDocumentAnnotation")
 @args(profile="object")
 builtin libraryRemoveDocumentAnnotation { artifactId string! commentId string! }
+
+/// Decode and validate an image acquisition plan before any effects.
+@executor("integration.library.revisionImagePlan")
+@args(profile="object")
+builtin libraryRevisionImagePlan {
+ response string!
+ minImages int
+ maxImages int
+ mode string
+}
+
+/// Acquire one requested image, with durable storage and source/model provenance.
+@executor("integration.library.prepareRevisionImage")
+@args(profile="object")
+builtin libraryPrepareRevisionImage {
+ requestId string!
+ specification object!
+ level string!
+ width int!
+ height int!
+ reportSourceFailure bool
+}
+
+/// Read verified images actually stored by this revision, never model-claimed URLs.
+@executor("integration.library.revisionPreparedImages")
+@args(profile="object")
+builtin libraryRevisionPreparedImages {
+ requestId string!
+ sourceRunId string
+}

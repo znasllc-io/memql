@@ -4760,6 +4760,34 @@ func LibraryFoldersBuild(args LibraryFoldersArgs) string {
 	return "query libraryFolders()"
 }
 
+// LibraryImagesForRevision -- Bounded, owned durable image receipts for one document revision.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryImagesForRevision"] in generated_concepts.go).
+type LibraryImagesForRevisionArgs struct {
+	RequestId string
+	RunId     string
+}
+
+// LibraryImagesForRevision calls the engine query libraryImagesForRevision.
+func (qc *QueryClient) LibraryImagesForRevision(ctx context.Context, args LibraryImagesForRevisionArgs) (*Result, error) {
+	call := LibraryImagesForRevisionBuild(args)
+	return qc.executeNamed(ctx, "libraryImagesForRevision", call)
+}
+
+func LibraryImagesForRevisionBuild(args LibraryImagesForRevisionArgs) string {
+	var b strings.Builder
+	b.WriteString("query libraryImagesForRevision(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LibraryItemsForAccount -- The Library items labelled with one account.
 // `accountIds` is a LIST (D5 -- "one or two accounts" is the owner's own framing), so the tie term is membership rather than equality.
 // ARCHIVED ROWS ARE EXCLUDED, matching `libraryArtifacts` rather than this file's own `clientAccountsAll`: the account filter above is a view over the registry a person is administering, while this is a count of what is currently filed for a client. `row.archived != true` rather than `row.archived == false`, because a row promoted before the field existed carries no key at all and `row.archived == false` would silently exclude it.
@@ -13111,6 +13139,67 @@ func WorkModelCallsForOwnerRunBuild(args WorkModelCallsForOwnerRunArgs) string {
 	return b.String()
 }
 
+// WorkModelCallsForOwnerStep -- Contribution receipts for one completed section, without response/checkpoint bodies.
+//
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerStep"] in generated_concepts.go).
+type WorkModelCallsForOwnerStepArgs struct {
+}
+
+// WorkModelCallsForOwnerStep calls the engine query workModelCallsForOwnerStep.
+func (qc *QueryClient) WorkModelCallsForOwnerStep(ctx context.Context, args WorkModelCallsForOwnerStepArgs) (*Result, error) {
+	call := WorkModelCallsForOwnerStepBuild(args)
+	return qc.executeNamed(ctx, "workModelCallsForOwnerStep", call)
+}
+
+func WorkModelCallsForOwnerStepBuild(args WorkModelCallsForOwnerStepArgs) string {
+	_ = args
+	return "query workModelCallsForOwnerStep()"
+}
+
+// WorkModelCallsPageForOwnerRun -- A bounded page of model receipts for the caller's activity view.
+//
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsPageForOwnerRun"] in generated_concepts.go).
+type WorkModelCallsPageForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkModelCallsPageForOwnerRun calls the engine query workModelCallsPageForOwnerRun.
+func (qc *QueryClient) WorkModelCallsPageForOwnerRun(ctx context.Context, args WorkModelCallsPageForOwnerRunArgs) (*Result, error) {
+	call := WorkModelCallsPageForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workModelCallsPageForOwnerRun", call)
+}
+
+func WorkModelCallsPageForOwnerRunBuild(args WorkModelCallsPageForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workModelCallsPageForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkObservationSummariesForOwnerRun -- Activity summaries, without potentially megabyte-sized checkpoint/tool data. Cursor paging keeps a months-long run from becoming one transport message.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationSummariesForOwnerRun"] in generated_concepts.go).
+type WorkObservationSummariesForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkObservationSummariesForOwnerRun calls the engine query workObservationSummariesForOwnerRun.
+func (qc *QueryClient) WorkObservationSummariesForOwnerRun(ctx context.Context, args WorkObservationSummariesForOwnerRunArgs) (*Result, error) {
+	call := WorkObservationSummariesForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workObservationSummariesForOwnerRun", call)
+}
+
+func WorkObservationSummariesForOwnerRunBuild(args WorkObservationSummariesForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workObservationSummariesForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkObservationsForOwnerRun -- Every observation of one of the caller's runs. On-demand, like the model calls.
 //
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationsForOwnerRun"] in generated_concepts.go).
@@ -13319,6 +13408,28 @@ func (qc *QueryClient) WorkStepsForOwnerRun(ctx context.Context, args WorkStepsF
 func WorkStepsForOwnerRunBuild(args WorkStepsForOwnerRunArgs) string {
 	var b strings.Builder
 	b.WriteString("query workStepsForOwnerRun(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkVerdictsForOwnerRun -- Human and validator verdicts only. Other decisions and tool/checkpoint data are not verdicts and must not travel to the feedback controls.
+//
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workVerdictsForOwnerRun"] in generated_concepts.go).
+type WorkVerdictsForOwnerRunArgs struct {
+	RunId string
+}
+
+// WorkVerdictsForOwnerRun calls the engine query workVerdictsForOwnerRun.
+func (qc *QueryClient) WorkVerdictsForOwnerRun(ctx context.Context, args WorkVerdictsForOwnerRunArgs) (*Result, error) {
+	call := WorkVerdictsForOwnerRunBuild(args)
+	return qc.executeNamed(ctx, "workVerdictsForOwnerRun", call)
+}
+
+func WorkVerdictsForOwnerRunBuild(args WorkVerdictsForOwnerRunArgs) string {
+	var b strings.Builder
+	b.WriteString("query workVerdictsForOwnerRun(")
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")

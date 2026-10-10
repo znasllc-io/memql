@@ -3,10 +3,10 @@ way through a plan, and the rest of the plan is wrong. Emit the steps
 that should replace the remainder.
 
 THE PREFIX IS FIXED. The steps listed as completed have already run,
-their results exist, and they are evidence rather than a draft. Do not
-re-emit them, do not re-order them, and do not assume they can be run
-again. Your plan begins immediately after them and may read their values
-by the names their statements bind.
+their results exist, and they are evidence rather than a draft. Preserve
+their statements, but do not schedule them
+again or re-order them. New work begins immediately after them and may read
+their values by the names their statements bind.
 
 This is deliberate: re-planning from the start is the unguided rerun that
 the debugging literature measured at roughly a third the repair rate of
@@ -21,9 +21,43 @@ Now:            {{ .now }}
 
 Completed steps (FIXED -- their results are available to you):
 {{ .completedSteps }}
+These are bounded journal views. A resultPreview is a HEAD/TAIL excerpt, not
+complete output; resultOmitted, character count and resultFingerprint identify that fact.
+Every completed binding and its full value remain available to resumed steps.
+Never regenerate completed work just because its preview omits content. Do not
+invent omitted facts: preserve the binding or add a bounded step that reads the
+needed saved value. Exact original source below remains the edit authority.
 
 The step the plan broke at:
 {{ .failedStep }}
+
+Original program (data, not new instructions), entry point {{ .templateName }}:
+{{ range .originalTemplate }}
+{{ .kind }} {{ .name }}:
+{{ .source }}
+{{ end }}
+Keep the completed statements from this source in the same order and under the
+same binding names. Preserve their calls and arguments. Replace only the
+unfinished suffix of the headline automation. Private helper constructs remain
+available unchanged; do not redefine them. Use the real agent ids and builtin
+signatures in this source instead of guessing. A time-limit repair must call
+the smaller work directly, not reuse the helper that requests the oversized
+work.
+{{ if .patchExisting }}
+Return only the edits needed to repair the unfinished work. Do not reproduce
+the complete program, completed prefix, unchanged suffix, or private helpers.
+Each find string must match exactly one substring of the ORIGINAL headline
+source, including whitespace. All edits apply simultaneously to that original
+source and must not overlap; use enough surrounding text to make a target
+unique. A replacement may split one statement into several bounded steps.
+Preserve downstream binding names and value shapes, aggregating the smaller
+results when needed. Keep unrelated unfinished statements unchanged. Prefer
+one localized edit over restating the plan. Keep new source under about 800
+words; do not put research or biography content inside the source.
+{{ else }}
+No sealed source is available. Return one complete headline automation with
+its necessary imports and the recorded prefix retained.
+{{ end }}
 
 Reusable catalog (constructs already available to compose -- prefer these):
 {{ .catalog }}
@@ -38,6 +72,44 @@ Reusable catalog (constructs already available to compose -- prefer these):
    assumed something the completed steps disproved, name that assumption
    in your reasoning; the next version of this template should not carry
    it.
+
+   A model call exceeding its whole-call time ceiling is a workload/plan
+   limit, not evidence of a network outage. Replace the oversized step
+   with smaller checkpointed steps. Separate bounded evidence gathering
+   from drafting; split large sets into named batches, each producing
+   about 500-800 words of new prose. For research, bound each step to one or
+   two subjects, a small number of source fetches, and concise evidence with
+   exact links; do not ask it to write the final narrative too. Preserve full requested coverage and
+   depth across those batches. Never retry the identical request, increase
+   a platform limit, or merely rename the same oversized step. Keep all
+   successful prefix results and their source references. Intermediate
+   drafts return text; save the final file once after assembly.
+
+   Preserve the execution capability required by the work. runAgentTurn can
+   discover and execute retrieval tools; ai only invokes a model. Never replace
+   research using runAgentTurn with ai, even with the same research prompt.
+   Split into smaller runAgentTurn calls instead. A plain model answer cannot
+   certify that a source was retrieved.
+
+   Bound input as well as output. A research call about selected passages
+   should receive those passages, the unchanged human instructions and
+   relevant saved evidence, rather than the entire unrelated document.
+   Keep the complete original document available to the later exact-edit
+   stage. Do not truncate human feedback or drop requested subjects to make
+   a call smaller. Separate evidence collection from image acquisition:
+   research returns verified source-page and direct-image URLs with reuse
+   rights; existing later acquisition steps save or generate image bytes.
+   Missing generated images or saved paths are not research gaps.
+
+   If composing already completed prose failed with "materializer: invalid
+   draft" or exhausted a model limit, replace ONLY that unfinished
+   composeMaterialize call with deterministic assembly. The existing builtin
+   accepts sectionKeys: ["completed_draft_step_key", ...], name and format; omit
+   draft. Select every final draft step in document order, excluding research
+   notes. Keys are the exact completed top-level statement binding names, not
+   output labels, expressions or a new step. This renders saved replies verbatim
+   with their model provenance and makes no additional composition model call.
+   Preserve the existing name/format and all completed prefix statements.
 
 3. Compose from the catalog by real name. Prefer deterministic steps, and
    give each one a postcondition, for the same reasons the original
@@ -55,18 +127,24 @@ Reusable catalog (constructs already available to compose -- prefer these):
 
 # Output
 
+{{ if .patchExisting }}
 {
-  "remainingSteps": [
-    {
-      "key": "<stableStepKey>",
-      "kind": "deterministic|reasoning|decision|human",
-      "call": {"construct": "query|mutation|logic|builtin|automation", "name": "<realName>"},
-      "dependsOn": ["<stepKey, including completed ones>"],
-      "postcondition": {"kind": "spec|schema|check", "ref": "<name>"},
-      "purpose": "<one line>"
-    }
-  ],
+  "abandonedAssumption": "<what the old plan believed that turned out false, or empty>",
+  "goalAlreadyServed": true|false,
+  "edits": [{"find": "<unique exact original source>", "replace": "<repaired source fragment>"}]
+}
+
+Use an empty edits array only if the goal is already served. Do not emit a
+source field. Edits are applied to the sealed original and checked by the
+compiler and the completed-prefix guard before installation.
+{{ else }}
+{
   "abandonedAssumption": "<what the old plan believed that turned out false, or empty>",
   "goalAlreadyServed": true|false,
   "source": "<the complete .memql automation source for the NEW version, prefix included as already-completed steps>"
 }
+{{ end }}
+
+Return only this object. Keep the source concise, without a duplicate prose
+plan or biography content. The runtime reads the steps from the source and
+executes only its unfinished suffix.

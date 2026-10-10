@@ -81,8 +81,17 @@ func omitted(n *html.Node) bool {
 		return true
 	}
 	switch attribute(n, "role") {
-	case "navigation", "banner", "contentinfo":
+	case "navigation", "banner", "contentinfo", "menu", "menubar", "toolbar":
 		return true
+	}
+	// MediaWiki places its language and page-action menus inside the article's
+	// main/header, without navigation roles. Recognize its exact menu class so
+	// those links cannot consume the excerpt before any article prose arrives.
+	// Do not discard the surrounding header: it also holds the article title.
+	for _, class := range strings.Fields(attribute(n, "class")) {
+		if class == "mw-portlet" {
+			return true
+		}
 	}
 	// An article's header/footer can contain its title, byline and references.
 	if n.Data == "header" || n.Data == "footer" {

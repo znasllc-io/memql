@@ -190,7 +190,27 @@ func (i *Integration) handleInvokePrompt(ctx context.Context, args map[string]an
 	// core/airoute, cache, journal -- happens inside this one call, and none
 	// of it is re-implemented here.
 	var reply any
-	if args["progress"] == true {
+	if raw := args["responseSchema"]; raw != nil {
+		schema, valid := raw.(map[string]any)
+		if !valid || schema["type"] != "object" {
+			return nil, fmt.Errorf("ai: responseSchema must be a JSON Schema object with type object")
+		}
+		encoded, encodeErr := json.Marshal(schema)
+		if encodeErr != nil || len(encoded) > 32768 {
+			return nil, fmt.Errorf("ai: responseSchema exceeds the 32 KiB limit or cannot be encoded")
+		}
+		if args["progress"] == true {
+			engine, ok := i.engine.(interface {
+				InvokeAIStructuredProgress(context.Context, string, map[string]any, string, json.RawMessage, bool) (any, error)
+			})
+			if !ok {
+				return nil, fmt.Errorf("ai: structured output progress is unavailable on this engine")
+			}
+			reply, err = engine.InvokeAIStructuredProgress(ctx, templateId, data, "prompt_output", encoded, true)
+		} else {
+			reply, err = i.engine.InvokeAIStructured(ctx, templateId, data, "prompt_output", encoded, true)
+		}
+	} else if args["progress"] == true {
 		engine, ok := i.engine.(interface {
 			InvokeAIProgress(context.Context, string, map[string]any) (any, error)
 		})

@@ -368,7 +368,7 @@ BackgroundLoop:
 			}, fmt.Errorf("agent: %s after %s", turnWallclockSentinel, elapsed.Round(time.Second))
 		}
 
-		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, 20000)
+		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
 			return nil, compactErr
 		}
@@ -392,8 +392,12 @@ BackgroundLoop:
 			}
 			callCtx, cancel := context.WithTimeout(budgetCtx, reqTimeout)
 			stepResult, stepErr = provider.CallChatWithTools(callCtx, messages, tools)
+			budgetFailure := r.workCallFailure(callCtx)
 			cancel()
 			stopBudget()
+			if budgetFailure != nil {
+				return nil, budgetFailure
+			}
 			if stepErr == nil {
 				break
 			}

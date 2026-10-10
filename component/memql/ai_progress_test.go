@@ -89,3 +89,11 @@ func TestPromptProgressUsesRoutedStreamingAndTheExistingInvocation(t *testing.T)
 		t.Fatalf("result=%v err=%v latest=%s", result, err, latest)
 	}
 }
+
+func TestStructuredPromptProgressPreservesSchemaRouting(t *testing.T) {
+	e, model, seen := overrideSeamEngine(t, aiCacheConfig{})
+	got, err := e.InvokeAIStructuredProgress(context.Background(), "draftReport", map[string]any{"week": "38"}, "draft", draftSchema, true)
+	if err != nil || got != `{"draft":"the draft"}` || model.calls != 1 || len(*seen) != 1 || (*seen)[0].Modality != airoute.ModalityStructured {
+		t.Fatalf("result=%v calls=%d resolutions=%v error=%v", got, model.calls, *seen, err)
+	}
+}

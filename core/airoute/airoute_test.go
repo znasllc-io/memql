@@ -67,8 +67,8 @@ func TestLevelsAndNames_AgreeAndCoverTheSet(t *testing.T) {
 }
 
 func TestModality_ClosedSet(t *testing.T) {
-	if got := len(Modalities()); got != 9 {
-		t.Fatalf("Modalities() has %d entries; want the nine the seam serves", got)
+	if got := len(Modalities()); got != 10 {
+		t.Fatalf("Modalities() has %d entries; want the ten the seam serves", got)
 	}
 	for _, m := range Modalities() {
 		if !m.Valid() {

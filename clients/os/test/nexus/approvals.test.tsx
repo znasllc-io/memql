@@ -12,7 +12,7 @@ vi.mock("../../src/live/connection", () => ({
 const { AskProvider } = await import("../../src/ask/AskProvider");
 const { NexusApp } = await import("../../src/apps/nexus/NexusApp");
 const { LocalNexusSettingsStore } = await import("../../src/apps/nexus/settings");
-const { answerPayload } = await import("../../src/apps/nexus/ApprovalsSection");
+const { answerPayload, budgetApprovalAnswer } = await import("../../src/apps/nexus/ApprovalsSection");
 const { approvalFromRow } = await import("../../src/apps/nexus/rows");
 const { approvalRow, fakeConnection, procedureRow, runRow, withSession } = await import("./harness");
 
@@ -579,4 +579,53 @@ it("opens a typed question in Ask without sending a decision from Nexus", async 
  await waitFor(()=>expect(openWork).toHaveBeenCalledWith("original-run"));
  expect(conn.query.decideApproval).not.toHaveBeenCalled();
  expect(transport.ask).not.toHaveBeenCalled();
+});
+
+
+describe("a budget approval", () => {
+  it("shows the allowance without exposing internal recovery metadata", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "budget-replan", kind: "budget", question: "More calls needed", subject: {
+      ceiling: "modelCalls", limit: "48 calls", actual: "48 made", resumeKind: "replan", resumeReason: "internal recovery diagnostic",
+    } })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("More calls needed"));
+    expect(screen.getByText("48 calls")).toBeTruthy();
+    expect(screen.getByText("48 made")).toBeTruthy();
+    expect(screen.queryByText("resumeKind")).toBeNull();
+    expect(screen.queryByText("internal recovery diagnostic")).toBeNull();
+    fireEvent.change(screen.getByLabelText("New total model calls"), { target: { value: "96" } });
+    fireEvent.click(screen.getByRole("button", { name: "Raise limit" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "budget-replan", decision: "approved", answer: { newLimit: 96 } }));
+  });
+  it("keeps an expired request readable without offering another decision", async () => {
+    mount(fakeConnection({ approvals: [approvalRow({ id: "expired", kind: "budget", question: "Expired time request", expiresAt: "2020-01-01T00:00:00Z", subject: { ceiling: "wallClock" } })] }));
+    fireEvent.click(await screen.findByText("Expired time request"));
+    expect(screen.queryByLabelText("New total time (minutes)")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Raise limit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reject this/ })).toBeNull();
+    expect(screen.getByText("This request has expired.")).toBeTruthy();
+  });
+  it("requires an explicit total and converts minutes before resuming", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "budget", kind: "budget", question: "More time needed", subject: { ceiling: "wallClock", limit: "2700000ms", actual: "2700001ms" } })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("More time needed"));
+    expect(screen.queryByRole("button", { name: "Raise limit" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("New total time (minutes)"), { target: { value: "240" } });
+    fireEvent.click(screen.getByRole("button", { name: "Raise limit" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "budget", decision: "approved", answer: { newLimit: 14_400_000 } }));
+    // A live update may retain the decided row for history. It must stop
+    // offering a second decision even when it stays selected.
+    await act(async () => {
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "budget", kind: "budget", question: "More time needed", subject: { ceiling: "wallClock" }, decision: "approved" }), "NODE_UPDATED");
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Raise limit" })).toBeNull());
+    expect(screen.queryByLabelText("New total time (minutes)")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reject this/ })).toBeNull();
+  });
+  it("refuses malformed and fractional count limits without affecting other approvals", () => {
+    const approval = approvalFromRow(approvalRow({ id: "budget", kind: "budget", subject: { ceiling: "modelCalls" } }));
+    for (const value of ["", " ", "0", "-1", "2.5", "NaN", "Infinity", "1e100"]) expect(budgetApprovalAnswer(approval, value)).toBeUndefined();
+    expect(budgetApprovalAnswer(approval, "128")).toEqual({ newLimit: 128 });
+    expect(budgetApprovalAnswer(approvalFromRow(approvalRow({ id: "question", kind: "feedback" })), "128")).toBeUndefined();
+  });
 });

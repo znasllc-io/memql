@@ -18,6 +18,8 @@ automation composeMaterializeWorkflow {
   input := builtin composeWorkflowFacts()
   if input.savedRecipe {
     builtin composeRestoreDraft()
+  } else if input.hasSections {
+    builtin composeRequireDraft()
   } else if input.hasComposer {
     builtin composeGenerateDraft()
   } else {

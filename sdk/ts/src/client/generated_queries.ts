@@ -4741,6 +4741,30 @@ QueryClient.prototype.libraryFolders = function (this: QueryClient, args: Librar
   return this.executeNamed("libraryFolders", buildLibraryFolders(args), opts);
 };
 
+/** Bounded, owned durable image receipts for one document revision. */
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryImagesForRevision"] in generated_concepts.ts).
+export interface LibraryImagesForRevisionArgs {
+  requestId: string;
+  runId: string;
+}
+
+export function buildLibraryImagesForRevision(args: LibraryImagesForRevisionArgs): string {
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query libraryImagesForRevision(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryImagesForRevision(args: LibraryImagesForRevisionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryImagesForRevision = function (this: QueryClient, args: LibraryImagesForRevisionArgs = {} as LibraryImagesForRevisionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryImagesForRevision", buildLibraryImagesForRevision(args), opts);
+};
+
 /** The Library items labelled with one account.
 `accountIds` is a LIST (D5 -- "one or two accounts" is the owner's own framing), so the tie term is membership rather than equality.
 ARCHIVED ROWS ARE EXCLUDED, matching `libraryArtifacts` rather than this file's own `clientAccountsAll`: the account filter above is a view over the registry a person is administering, while this is a count of what is currently filed for a client. `row.archived != true` rather than `row.archived == false`, because a row promoted before the field existed carries no key at all and `row.archived == false` would silently exclude it. */
@@ -12457,6 +12481,70 @@ QueryClient.prototype.workModelCallsForOwnerRun = function (this: QueryClient, a
   return this.executeNamed("workModelCallsForOwnerRun", buildWorkModelCallsForOwnerRun(args), opts);
 };
 
+/** Contribution receipts for one completed section, without response/checkpoint bodies. */
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsForOwnerStep"] in generated_concepts.ts).
+export interface WorkModelCallsForOwnerStepArgs {
+}
+
+export function buildWorkModelCallsForOwnerStep(args: WorkModelCallsForOwnerStepArgs): string {
+  void args;
+  return "query workModelCallsForOwnerStep()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workModelCallsForOwnerStep(args?: WorkModelCallsForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workModelCallsForOwnerStep = function (this: QueryClient, args: WorkModelCallsForOwnerStepArgs = {} as WorkModelCallsForOwnerStepArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workModelCallsForOwnerStep", buildWorkModelCallsForOwnerStep(args), opts);
+};
+
+/** A bounded page of model receipts for the caller's activity view. */
+// Bound concept: v1:work:modelCall (machine-readable: BoundConcepts["workModelCallsPageForOwnerRun"] in generated_concepts.ts).
+export interface WorkModelCallsPageForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkModelCallsPageForOwnerRun(args: WorkModelCallsPageForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workModelCallsPageForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workModelCallsPageForOwnerRun(args: WorkModelCallsPageForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workModelCallsPageForOwnerRun = function (this: QueryClient, args: WorkModelCallsPageForOwnerRunArgs = {} as WorkModelCallsPageForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workModelCallsPageForOwnerRun", buildWorkModelCallsPageForOwnerRun(args), opts);
+};
+
+/** Activity summaries, without potentially megabyte-sized checkpoint/tool data. Cursor paging keeps a months-long run from becoming one transport message. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationSummariesForOwnerRun"] in generated_concepts.ts).
+export interface WorkObservationSummariesForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkObservationSummariesForOwnerRun(args: WorkObservationSummariesForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workObservationSummariesForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workObservationSummariesForOwnerRun(args: WorkObservationSummariesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workObservationSummariesForOwnerRun = function (this: QueryClient, args: WorkObservationSummariesForOwnerRunArgs = {} as WorkObservationSummariesForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workObservationSummariesForOwnerRun", buildWorkObservationSummariesForOwnerRun(args), opts);
+};
+
 /** Every observation of one of the caller's runs. On-demand, like the model calls. */
 // Bound concept: v1:work:observation (machine-readable: BoundConcepts["workObservationsForOwnerRun"] in generated_concepts.ts).
 export interface WorkObservationsForOwnerRunArgs {
@@ -12674,6 +12762,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.workStepsForOwnerRun = function (this: QueryClient, args: WorkStepsForOwnerRunArgs = {} as WorkStepsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workStepsForOwnerRun", buildWorkStepsForOwnerRun(args), opts);
+};
+
+/** Human and validator verdicts only. Other decisions and tool/checkpoint data are not verdicts and must not travel to the feedback controls. */
+// Bound concept: v1:work:observation (machine-readable: BoundConcepts["workVerdictsForOwnerRun"] in generated_concepts.ts).
+export interface WorkVerdictsForOwnerRunArgs {
+  runId: string;
+}
+
+export function buildWorkVerdictsForOwnerRun(args: WorkVerdictsForOwnerRunArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workVerdictsForOwnerRun(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workVerdictsForOwnerRun(args: WorkVerdictsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workVerdictsForOwnerRun = function (this: QueryClient, args: WorkVerdictsForOwnerRunArgs = {} as WorkVerdictsForOwnerRunArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workVerdictsForOwnerRun", buildWorkVerdictsForOwnerRun(args), opts);
 };
 
 /** Membership is evidence of affiliation, never evidence of employment or selection as the organization producing the current deliverable. */

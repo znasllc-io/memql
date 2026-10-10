@@ -802,3 +802,15 @@ query documentComment removedDocumentComments {
  shape documentCommentFull
  paginate 100
 }
+
+/// Bounded, owned durable image receipts for one document revision.
+@actor
+query file libraryImagesForRevision {
+ args {
+  requestId string!
+  runId string!
+ }
+ filter row => row.ownerUserId == actor.userId && row.producedByRunId == args.runId && row.?imageProvenance.requestId == args.requestId
+ shape libraryFileFull
+ paginate 65
+}

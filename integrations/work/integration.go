@@ -659,7 +659,7 @@ func (i *Integration) RunBudget(ctx context.Context, ownerUserId, runId string) 
 	if err != nil {
 		return out, fmt.Errorf("work: goal %s ceilings: %w", goalId, err)
 	}
-	return work.EffectiveWorkloadCeilings(out, rowString(rowMap(run, "classification"), "workload")), nil
+	return approvedWorkloadCeilings(goal, out, rowString(rowMap(run, "classification"), "workload"))
 }
 
 // LimitReplyBudget is the compiler's narrow write seam. The run's ownership

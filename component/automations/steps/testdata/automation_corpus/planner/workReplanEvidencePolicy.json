@@ -1,0 +1,45 @@
+{
+  "automation": "planner/automations.memql workReplanEvidencePolicy",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.workReplanEvidencePolicy"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "perStepCharacters": 600,
+            "totalCharacters": 16000
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.workReplanEvidencePolicy"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "output": {
+            "perStepCharacters": 600,
+            "totalCharacters": 16000
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

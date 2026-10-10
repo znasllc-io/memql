@@ -239,8 +239,21 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		runDecision = decisionAbandoned
 	}
 	var retry *failureRetry
+	if kind == work.ApprovalKindBudget && rowString(rowMap(approval, "subject"), "resumeKind") == waitKindReplan {
+		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), symptom: work.SymptomPlan,
+			reason: rowString(rowMap(approval, "subject"), "resumeReason")}
+	}
 	if work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation") || (kind == "feedback" && rowString(rowMap(approval, "subject"), "question") != "") {
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
+		if work.IsFailureQuestion(approval["options"]) {
+			retry.symptom = work.Symptom(rowString(rowMap(approval, "subject"), "symptom"))
+			// A parked receipt can predate a classifier repair. An explicit retry
+			// must not replay a now-known oversized generation as a network blip.
+			if symptom, _, known := work.ClassifyByRules(work.Signal{ErrorMessage: rowString(rowMap(approval, "subject"), "errorMessage")}); known && symptom == work.SymptomPlan {
+				retry.symptom = symptom
+			}
+			retry.reason = rowString(rowMap(approval, "evidence"), "reason") + "\n" + rowString(rowMap(approval, "subject"), "errorMessage")
+		}
 	}
 	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, retry, now)
 	if err != nil {
@@ -398,7 +411,16 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 		fields["status"] = runStatusRunning
 		fields["heartbeatAt"] = rfc(now)
 		if retry != nil {
-			if request, stale, ok := i.failureRetryRequest(ctx, run, runId, *retry, now); ok {
+			// A person authorizes one recovery attempt, not a replay of a plan
+			// already known to fail. Persist the ordinary replan wait: the DSL
+			// remedy runs under its existing cross-replica claim and keeps the
+			// completed prefix. Automatic retry limits and spend stay intact.
+			act := actRun{row: run, id: runId, owner: rowString(run, "ownerUserId"), order: topLevelOrder(rowStringSlice(run, "stepOrder"))}
+			key := topLevelStepKey(retry.stepKey)
+			if retry.symptom == work.SymptomPlan && act.requireExecutable() == nil && act.requireTopLevel(key) == nil {
+				fields["status"] = runStatusWaiting
+				fields["waitingOn"] = map[string]any{"kind": waitKindReplan, "subject": key, "reason": strings.TrimSpace(retry.reason), "since": rfc(now)}
+			} else if request, stale, ok := i.failureRetryRequest(ctx, run, runId, *retry, now); ok {
 				fields["rerun"] = request
 				fields["staleSteps"] = stale
 			}
@@ -415,6 +437,8 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 type failureRetry struct {
 	stepKey   string
 	decidedBy string
+	symptom   work.Symptom
+	reason    string
 }
 
 // failureRetryRequest is the re-run request a failure question's Retry

@@ -185,13 +185,12 @@ func TestTheAiBuiltinRefusesByNameRatherThanAnsweringEmpty(t *testing.T) {
 	})
 }
 
-// The capability is declared with the two arguments the builtin's body
-// declares, and with NO provider argument. Pinned because the absent third
-// argument is a decision -- a level plus the routing rules choose the model,
+// Prompt inputs and output contracts are declared, with no provider override.
+// A level plus the routing rules choose the model,
 // and a call site naming one is a routing decision no rule can see.
-func TestTheAiCapabilityDeclaresTwoArgumentsAndNoProviderOverride(t *testing.T) {
+func TestTheAiCapabilityDeclaresPromptContractsAndNoProviderOverride(t *testing.T) {
 	cap := aiHandler(t, &promptRecordingEngine{})
-	for _, key := range []string{"templateId", "data"} {
+	for _, key := range []string{"templateId", "data", "responseSchema", "progress"} {
 		if _, ok := cap.ArgsSchema[key]; !ok {
 			t.Errorf("the ai capability must declare %q", key)
 		}
@@ -204,8 +203,8 @@ func TestTheAiCapabilityDeclaresTwoArgumentsAndNoProviderOverride(t *testing.T) 
 				"provider this repo ships. The surviving pin is @defaultProvider on the PROMPT.", banned)
 		}
 	}
-	if len(cap.ArgsSchema) != 2 {
-		t.Errorf("the ai capability declares %d arguments, want exactly 2: %#v", len(cap.ArgsSchema), cap.ArgsSchema)
+	if len(cap.ArgsSchema) != 4 {
+		t.Errorf("the ai capability declares %d arguments, want exactly 4: %#v", len(cap.ArgsSchema), cap.ArgsSchema)
 	}
 }
 
@@ -216,5 +215,48 @@ func requireRefusal(t *testing.T, err error, want string) {
 	}
 	if !strings.Contains(err.Error(), want) {
 		t.Errorf("the refusal must name %q: %v", want, err)
+	}
+}
+
+type structuredPromptEngine struct {
+	promptRecordingEngine
+	schema   json.RawMessage
+	strict   bool
+	progress bool
+}
+
+func (e *structuredPromptEngine) InvokeAIStructured(_ context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	e.calls++
+	e.gotTemplate, e.gotData, e.schema, e.strict = name, data, schema, strict
+	if schemaName != "prompt_output" {
+		return "", fmt.Errorf("unexpected schema name")
+	}
+	return `{"edits":[]}`, e.err
+}
+func (e *structuredPromptEngine) InvokeAIStructuredProgress(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (any, error) {
+	e.progress = true
+	return e.InvokeAIStructured(ctx, name, data, schemaName, schema, strict)
+}
+func TestTheAiBuiltinUsesStructuredContractWithoutUnconstrainedFallback(t *testing.T) {
+	for _, progress := range []bool{false, true} {
+		engine := &structuredPromptEngine{}
+		schema := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"edits": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "required": []any{"edits"}}
+		args := map[string]any{"templateId": "review", "data": map[string]any{"content": "source"}, "progress": progress, "responseSchema": schema}
+		out, err := callAi(t, engine, args)
+		if err != nil || out["reply"] != `{"edits":[]}` || engine.calls != 1 || !engine.strict || engine.progress != progress || engine.gotData["content"] != "source" {
+			t.Fatalf("out=%v engine=%+v error=%v", out, engine, err)
+		}
+		engine.err = errors.New("structured provider unavailable")
+		_, err = callAi(t, engine, args)
+		if err == nil || engine.calls != 2 {
+			t.Fatalf("failed structured call fell through: calls=%d error=%v", engine.calls, err)
+		}
+	}
+	for _, raw := range []any{"not a schema", map[string]any{"type": "array"}, map[string]any{"type": "object", "description": strings.Repeat("x", 32768)}} {
+		engine := &structuredPromptEngine{}
+		_, err := callAi(t, engine, map[string]any{"templateId": "review", "data": map[string]any{}, "responseSchema": raw})
+		if err == nil || engine.calls != 0 {
+			t.Fatalf("invalid schema reached model: %v", err)
+		}
 	}
 }

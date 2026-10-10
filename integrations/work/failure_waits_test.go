@@ -9,6 +9,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -42,6 +43,8 @@ type remedyCall struct {
 	kind, runId, owner, stepKey, reason string
 	run                                 common.RunContext
 	actor                               string
+	authority                           auth.ForwardedAuthority
+	hasAuthority                        bool
 }
 
 // signallingRemedy records every remedy it is handed. The hand-off is
@@ -54,6 +57,7 @@ type signallingRemedy struct {
 func (r *signallingRemedy) record(ctx context.Context, kind, runId, owner, stepKey, reason string) bool {
 	call := remedyCall{kind: kind, runId: runId, owner: owner, stepKey: stepKey, reason: reason}
 	call.run, _ = common.RunFromContext(ctx)
+	call.authority, call.hasAuthority = auth.ForwardedAuthorityFromContext(ctx)
 	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
 		call.actor = ac.UserId
 	}
@@ -152,7 +156,59 @@ func plannerReplica(t *testing.T, remedy Remedy, claims RunClaimer, row map[stri
 	i.SetRemedy(remedy)
 	i.SetRunClaimer(claims)
 	eng.reply("workRunForOwner", row)
+	eng.reply("userByIdSystem", map[string]any{"role": "writer"})
 	return i, eng
+}
+
+func TestRemedyRestoresForwardableAuthorityOnAnotherReplica(t *testing.T) {
+	for _, kind := range []string{waitKindReplan, waitKindRepair} {
+		for _, tc := range []struct{ name, current, ceiling, want string }{
+			{"captured reader ceiling", "owner", "reader", "reader"},
+			{"current role was lowered", "reader", "owner", "reader"},
+		} {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				row := remedyWaitRow(kind)
+				row["ownerUserId"] = "v1:identity:user:u-alice"
+				row["executionAuthority"] = map[string]any{"roleCeiling": tc.ceiling, "credentialClass": auth.ForwardedClassUser}
+				claims, remedy := &pkClaims{}, &signallingRemedy{}
+				a, ae := plannerReplica(t, remedy, claims, row)
+				b, be := plannerReplica(t, remedy, claims, row)
+				ae.reply("userByIdSystem", map[string]any{"role": tc.current})
+				be.reply("userByIdSystem", map[string]any{"role": tc.current})
+				a.HandleRunEvent(remedyEvent(row))
+				b.HandleRunEvent(remedyEvent(row))
+				calls := remedy.settled(t, 1)
+				if len(calls) != 1 || !calls[0].hasAuthority {
+					t.Fatalf("remedy cannot reach a remote worker: %+v", calls)
+				}
+				// Exercise the receiving node's actual assertion codec and verifier.
+				authority := node.ForwardedAuthorityFromProto(node.ForwardedAuthorityToProto(calls[0].authority, "planner", "planner"))
+				access, err := auth.VerifyForwardedAuthority(authority, time.Now())
+				if err != nil || string(access.Role) != tc.want || access.UserId != row["ownerUserId"] || access.Synthetic || access.Unranked {
+					t.Fatalf("received authority: %+v, %v", access, err)
+				}
+				if calls[0].run.GoalId != "v1:work:goal:g1" {
+					t.Fatal("restoring authority lost budget attribution")
+				}
+			})
+		}
+	}
+}
+
+func TestRemedyRefusesInvalidPersistedAuthorityBeforeInference(t *testing.T) {
+	for _, grant := range []map[string]any{
+		{"roleCeiling": "owner", "credentialClass": "invented"},
+		{"roleCeiling": "reader", "credentialClass": auth.ForwardedClassBadge, "expiresAt": rfc(time.Now().Add(-time.Minute))},
+	} {
+		row := remedyWaitRow(waitKindReplan)
+		row["executionAuthority"] = grant
+		remedy := &signallingRemedy{}
+		i, eng := plannerReplica(t, remedy, &pkClaims{}, row)
+		i.serveRemedy(remedy, waitKindReplan, remedyRunId, "u-alice", rowString(rowMap(row, "waitingOn"), "since"))
+		if len(remedy.calls) != 0 || len(mutationsIn(eng)) != 0 {
+			t.Fatal("invalid grant reached the remedy or changed the run")
+		}
+	}
 }
 
 // A REMEDY WAIT IS SERVED FROM THE RUN'S OWN EVENT, BY EXACTLY ONE REPLICA

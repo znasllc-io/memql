@@ -199,13 +199,9 @@ export function RunPage({
 
   const breakdown = useMemo(() => kindBreakdown(steps), [steps]);
   const spend = useMemo(() => runSpend(run), [run]);
-  // WHICH DOOR ANSWERED, PER STEP -- from the journal this page already holds,
-  // so the timeline costs no extra read. The journal is read on demand
-  // (`useJournal` does not read on open, and a test pins that), so these lines
-  // appear when somebody asks for it and the map is empty until then. That is
-  // the honest state: before the read, this window does not know which door
-  // answered, and a row cannot say what it has not been told.
-  const decisions = useMemo(() => decisionsByStep(journal.modelCalls), [journal.modelCalls]);
+  // A journal page is not the entire run. Never present partial model-call
+  // totals as a step's complete receipt; its durable step totals remain above.
+  const decisions = useMemo(() => decisionsByStep(journal.modelCallsComplete ? journal.modelCalls : []), [journal.modelCalls, journal.modelCallsComplete]);
 
   // THE VERSIONS, read on open and again when a new one appears or the head
   // moves -- never on a status flip, which the steps feed already carries.

@@ -315,6 +315,15 @@ query modelCall workModelCallsForOwnerRun {
   shape   workModelCallFull
 }
 
+/// Contribution receipts for one completed section, without response/checkpoint bodies.
+@actor
+@unbounded("model contributions of ONE step in ONE caller-owned run")
+query modelCall workModelCallsForOwnerStep {
+  args { runId string! stepKey string! }
+  filter row => row.runId == args.runId && row.stepKey == args.stepKey && row.ownerUserId == actor.userId
+  shape workModelCallSummary
+}
+
 /// Every observation of one of the caller's runs. On-demand, like the model calls.
 @actor
 @unbounded("every observation of ONE run -- bounded by the run")
@@ -324,6 +333,38 @@ query observation workObservationsForOwnerRun {
   }
   filter  row => row.runId == args.runId && row.ownerUserId == actor.userId
   shape   workObservationFull
+}
+
+/// A bounded page of model receipts for the caller's activity view.
+@actor
+query modelCall workModelCallsPageForOwnerRun {
+  args { runId string! }
+  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape workModelCallSummary
+}
+
+/// Activity summaries, without potentially megabyte-sized checkpoint/tool data.
+/// Cursor paging keeps a months-long run from becoming one transport message.
+@actor
+query observation workObservationSummariesForOwnerRun {
+  args { runId string! }
+  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape workObservationSummary
+}
+
+/// Human and validator verdicts only. Other decisions and tool/checkpoint data
+/// are not verdicts and must not travel to the feedback controls.
+@actor
+@unbounded("human and validator verdicts of one owner-scoped run")
+query observation workVerdictsForOwnerRun {
+  args { runId string! }
+  filter row => row.runId == args.runId && row.ownerUserId == actor.userId
+             && (row.kind == "feedback" || (row.kind == "decision" && row.?data.validator != nil))
+  shape workObservationFull
 }
 
 /// Every run at a non-terminal status, whoever owns it -- the wait-and-abandon sweep's read.

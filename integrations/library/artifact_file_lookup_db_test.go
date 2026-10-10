@@ -6,8 +6,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 )
 
-func TestArtifactForFileResolvesBareReceiptAcrossEngines(t *testing.T) {
-	f := newRevisionDB(t)
+func testArtifactForFileResolvesBareReceiptAcrossEngines(t *testing.T, f *revisionDB) {
 	fileID := f.owner + "-upload"
 	for _, kind := range []string{"file", "generated_output"} {
 		concept := "file"

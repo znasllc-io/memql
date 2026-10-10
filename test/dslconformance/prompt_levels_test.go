@@ -49,6 +49,12 @@ var levels = map[string]bool{"fast": true, "strong": true, "reasoning": true, "e
 var promptLevels = map[string]string{
 	// Named in D3.
 	"goalComplexityTriage": "fast",
+	// Initial document decomposition is bounded data, checked separately before execution.
+	"workDocumentSections": "fast",
+	// Scope judgment must distinguish real omissions from valid repeated chronological terms.
+	"workDocumentCoverage": "strong",
+	// Escalate an observed incomplete plan to the design/judgment tier, not another cheap retry.
+	"workDocumentSectionsRepair": "strong",
 	// One bounded repair of acknowledgment wording; never reclassifies work.
 	"workAcknowledgement":  "fast",
 	"responsibilityIntake": "fast",
@@ -97,9 +103,15 @@ var promptLevels = map[string]string{
 	// Bounded image observations inform a human-reviewed proposal; fast vision
 	// identifies visible content and states uncertainty without controlling the UI.
 	"libraryRevisionImages": "fast",
+	// A bounded acquisition plan selects references from retrieved evidence;
+	// native validation enforces source, storage and local-generation boundaries.
+	"libraryRevisionImagePlan": "strong",
 	// A one-word classification gates optional app usage.
 	"libraryRevisionIntent":   "fast",
 	"libraryRevisionEvidence": "fast",
+	// Semantic review must distinguish rejected source wording from the actual
+	// candidate. The fast band falsely rejected a corrected long document.
+	"libraryRevisionCompletion": "strong",
 	// An app gathers a bounded evidence report; a human reviews the proposal.
 	"libraryRevisionAppResearch": "strong",
 	// Semantic consolidation must keep task relevance, corrections and evidence

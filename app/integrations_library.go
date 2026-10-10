@@ -19,12 +19,14 @@ func (a *App) wireLibraryIntegration(uploader server.FileUploader, bucket string
 	if work := a.lookupWorkIntegration(); work != nil {
 		integ.SetReviewGoals(work)
 	}
-	integ.SetRevisionFiles(&libraryRevisionFiles{uploader: uploader, bucket: bucket, store: server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: a.engine}, func() *sql.DB {
+	imageStore := server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: a.engine}, func() *sql.DB {
 		if db := a.BunDB(); db != nil {
 			return db.DB
 		}
 		return nil
-	})})
+	})
+	integ.SetRevisionFiles(&libraryRevisionFiles{uploader: uploader, bucket: bucket, store: imageStore})
+	integ.SetImageAssets(&libraryImageAssets{engine: &AttachmentEngineAdapter{Engine: a.engine}, store: imageStore, uploader: uploader, bucket: bucket})
 	if reader, ok := uploader.(library.BlobFetcher); ok {
 		integ.SetBlobFetcher(reader)
 	}

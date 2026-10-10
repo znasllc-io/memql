@@ -179,6 +179,9 @@ automation defaultWorkSpine {
   builtin spineAcknowledge()
  }
  route := logic workSpineRoute(triage: triage)
+ if triage.requiresFile && route == "sectionable" {
+  automation workSpineDocumentSections()
+ }
  if route != "author" {
   sections := builtin spinePrepareSections(route: route)
   if sections.valid || (triage.conversational && triage.intent != "automation") {
@@ -186,6 +189,23 @@ automation defaultWorkSpine {
   }
  }
  return automation workSpineAuthor(repairAttempts: context.repairAttempts)
+}
+
+/// A routing pass can group many drafts under one heading; require an executable decomposition before drafting.
+@template
+automation workSpineDocumentSections {
+ first := builtin spineRefineSections(prompt: "workDocumentSections", maxWords: 800, timeoutSeconds: 120)
+ if first.ok {
+  review := builtin spineReviewSections(prompt: "workDocumentCoverage", timeoutSeconds: 180)
+  if review.ok { return true }
+ }
+ repaired := builtin spineRefineSections(prompt: "workDocumentSectionsRepair", maxWords: 800, timeoutSeconds: 480)
+ if repaired.ok {
+  repairedReview := builtin spineReviewSections(prompt: "workDocumentCoverage", timeoutSeconds: 180)
+  if repairedReview.ok { return true }
+  return builtin spineRefuse(message: repairedReview.message)
+ }
+ return builtin spineRefuse(message: repaired.message)
 }
 
 /// Retry representation only when the host proves no persistence was attempted.
@@ -249,6 +269,9 @@ automation workSpineDraftProgram {
   }
  }
  builtin spineDraftAppend(kind: "collect")
+ if facts.file && facts.prose && facts.sections.any(section => section.deliver) {
+  return builtin spineDraftAppend(kind: "file", instruction: facts.goal, inputHeading: inputHeading, sectionKeys: facts.sections.where(section => section.deliver).select(section => section.name))
+ }
  if facts.file || facts.intelligence {
   kind := facts.sections.any(section => section.dependent) ? "sections" : "independent sections"
   return builtin spineDraftAppend(kind: facts.file ? "file" : "answer", inputHeading: inputHeading, sectionsHeading: "\n\nCompleted sections:\n", instruction: facts.goal + "\n\nAssemble the completed " + kind + " into the requested deliverable. Verify completeness. " + facts.assembly)
@@ -267,7 +290,7 @@ automation workSpineReplan {
  if !draft.available { return false }
  if !draft.ok { return builtin spineRemedyAsk(reason: "The re-plan for this run's failed step could not be made: " + draft.message) }
  if draft.goalAlreadyServed { return builtin spineRemedyAsk(reason: "The re-plan found nothing left to do: it judged the completed steps already serve the goal. Retry the failed step, or abandon the run.") }
- validation := builtin spineRemedyValidate()
+ validation := builtin spineRemedyValidate(preserveInvocation: [{from: "runAgentTurn", to: "ai", argument: "templateId"}])
  if !validation.ok {
   reason := logic workSpineReplanRefusal(stage: validation.stage, message: validation.message)
   return builtin spineRemedyAsk(reason: reason)
@@ -284,4 +307,11 @@ automation workSpineRepair {
  if repair.ok { return true }
  if repair.moved { return false }
  return builtin spineRemedyAsk(reason: "The failed step could not be run again with the violation as guidance: " + repair.message)
+}
+
+/// Replanning reads a bounded evidence view. Full receipts remain in the journal
+/// and completed step identities/source are never removed by this policy.
+@template
+automation workReplanEvidencePolicy {
+ return {perStepCharacters: 600, totalCharacters: 16000}
 }

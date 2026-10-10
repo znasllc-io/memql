@@ -424,3 +424,46 @@ func TestHumanWaitCreditSurvivesAReplicaChangeWithoutResettingModelSpend(t *test
 		t.Fatalf("active time became unbounded: %+v", b)
 	}
 }
+
+func TestApprovedResearchDeadlineSurvivesResumeOnAnotherReplica(t *testing.T) {
+	first, eng := newTestCeilings(t)
+	answerRows(eng, map[string]any{"wallClockMs": 7200000, "maxModelCalls": 96})
+	eng.reply("workRunForOwner", map[string]any{
+		"id": ceilingRunId, "ownerUserId": ceilingOwner, "goalId": ceilingGoalId,
+		"status": runStatusRunning, "startedAt": testNow.Format(time.RFC3339Nano),
+		"classification": map[string]any{"workload": "research"},
+	})
+	rc := aGoalBackedRun()
+	if deadline, err := first.Deadline(context.Background(), rc); err != nil || !deadline.Equal(testNow.Add(45*time.Minute)) {
+		t.Fatalf("research estimate: %v %v", deadline, err)
+	}
+	eng.reply("workGoalForOwner", map[string]any{"id": ceilingGoalId, "ownerUserId": ceilingOwner,
+		"ceilings": map[string]any{"wallClockMs": 14400000, "maxModelCalls": 96,
+			"workloadOverrides": map[string]any{"wallClockMs": 14400000}},
+	})
+	second := NewRunCeilings(eng, testLogger())
+	for _, replica := range []*RunCeilings{first, second} {
+		replica.now = func() time.Time { return testNow.Add(time.Hour) }
+		deadline, err := replica.Deadline(context.Background(), rc)
+		if err != nil || !deadline.Equal(testNow.Add(4*time.Hour)) {
+			t.Fatalf("approved time was clamped or reset on resume: %v %v", deadline, err)
+		}
+		if breach := replica.Admit(context.Background(), rc, 0); breach != nil {
+			t.Fatalf("approved run refused on replica: %+v", breach)
+		}
+		if spent := replica.Spent(context.Background(), rc); spent.WallClockMs != 3600000 {
+			t.Fatalf("resumption erased elapsed work: %+v", spent)
+		}
+		for n := 0; n < 48; n++ {
+			replica.Charge(context.Background(), rc, memqlengine.ModelSpend{Served: memqlengine.ServedLocal})
+		}
+		if breach := replica.Admit(context.Background(), rc, 0); breach == nil || breach.Ceiling != work.CeilingModelCalls {
+			t.Fatalf("time approval also relaxed unapproved model-call estimate: %+v", breach)
+		}
+	}
+	goal := map[string]any{"ceilings": map[string]any{"workloadOverrides": map[string]any{"wallClockMs": 14400000}}}
+	limits, err := approvedWorkloadCeilings(goal, work.Ceilings{WallClockMs: 60000}, "research")
+	if err != nil || limits.WallClockMs != 60000 {
+		t.Fatalf("older approval overrode tighter hard limit: %+v %v", limits, err)
+	}
+}

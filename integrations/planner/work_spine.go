@@ -19,35 +19,38 @@ import (
 // into this scope's evidence, never a construct ID or an authority token.
 // workflowhost serializes native operations even in a parallel DSL branch.
 type spineScope struct {
-	loop            *PlannerAgentLoop
-	req             CompileRequest
-	near            authoringNearMatcher
-	sandbox         authoringSandbox
-	out             CompileOutcome
-	keys            []string
-	conversation    any
-	conversational  bool
-	candidates      map[string]work.CatalogCandidate
-	candidateRoutes map[string]work.Route
-	reads           map[string][]any
-	classified      bool
-	prepared        bool
-	acknowledged    bool
-	designed        bool
-	emitted         bool
-	validated       bool
-	done            bool
-	diagnosticKey   string
-	sameDiagnostics int
-	failed          error
-	decision        sectionableDecision
-	guidance        []map[string]any
-	plan            designPlan
-	bundle          authoringBundle
-	report          memql.SandboxReport
-	repairs         int
-	seen            map[string]bool
-	draftModes      map[string]bool
+	loop                   *PlannerAgentLoop
+	req                    CompileRequest
+	near                   authoringNearMatcher
+	sandbox                authoringSandbox
+	out                    CompileOutcome
+	keys                   []string
+	conversation           any
+	conversational         bool
+	candidates             map[string]work.CatalogCandidate
+	candidateRoutes        map[string]work.Route
+	reads                  map[string][]any
+	classified             bool
+	prepared               bool
+	acknowledged           bool
+	sectionRefinements     int
+	sectionRefinementError string
+	sectionReviews         int
+	designed               bool
+	emitted                bool
+	validated              bool
+	done                   bool
+	diagnosticKey          string
+	sameDiagnostics        int
+	failed                 error
+	decision               sectionableDecision
+	guidance               []map[string]any
+	plan                   designPlan
+	bundle                 authoringBundle
+	report                 memql.SandboxReport
+	repairs                int
+	seen                   map[string]bool
+	draftModes             map[string]bool
 }
 
 func (l *PlannerAgentLoop) newSpineScope(req CompileRequest, near authoringNearMatcher, sandbox authoringSandbox) (*spineScope, error) {
@@ -82,6 +85,8 @@ func (s *spineScope) operations() map[string]workflowhost.Operation {
 		"spineUseCandidate":    s.useCandidate,
 		"spineClassify":        s.classify,
 		"spineAcknowledge":     s.acknowledge,
+		"spineRefineSections":  s.refineSections,
+		"spineReviewSections":  s.reviewSections,
 		"spinePrepareSections": s.prepareSections,
 		"spineDraft":           s.draft,
 		"spineDesign":          s.design,
@@ -253,7 +258,7 @@ func (s *spineScope) classify(ctx context.Context, _ map[string]any) (any, error
 		out.Reply = out.Workload == "quick"
 	}
 	s.guidance, s.decision = guidance, sectionable
-	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
+	return map[string]any{"complexity": string(complexity), "intent": sectionable.Intent, "sectionable": sectionable.Sectionable, "requiresFile": sectionable.RequiresFile != nil && *sectionable.RequiresFile, "conversational": conversational, "workload": out.Workload, "acknowledgement": out.Acknowledgement}, nil
 }
 
 func (s *spineScope) acknowledge(ctx context.Context, _ map[string]any) (any, error) {
@@ -459,6 +464,20 @@ func (e *spineMeteredEngine) InvokeAI(ctx context.Context, name string, data map
 	}
 	return result, err
 }
+func (e *spineMeteredEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if err := e.scope.modelAllowed(); err != nil {
+		return "", err
+	}
+	result, err := e.Engine.InvokeAIStructured(ctx, name, data, schemaName, schema, strict)
+	if err == nil || !memql.IsProviderUnavailable(err) {
+		e.scope.out.ModelCalls++
+	}
+	return result, err
+}
+
 func (e *spineMeteredEngine) InvokeAIChatWithFilteredTools(context.Context, string, map[string]any, []string) (string, error) {
 	return "", fmt.Errorf("Spine compilation cannot open an unmetered tool loop")
 }

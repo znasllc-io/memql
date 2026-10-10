@@ -12,6 +12,7 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
   return (
     <section className="os-nexus-journal" aria-label="The journal for this run">
       <Subhead>Activity</Subhead>
+      {journal.hasNewer ? <Caption>Earlier activity</Caption> : null}
       {journal.state === "loading" && !journal.readAt ? <RecordListSkeleton label="Loading activity" /> : null}
       {journal.error === "" ? null : (
         <Notice
@@ -37,10 +38,16 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
       {journal.observations.length === 0 ? null : (
         <div className="os-nexus-journal-group">
           <Subhead meta={journal.state === "ready" && !journal.error ? journal.observations.length : undefined}>Observations</Subhead>
-          <RecordList as="ul" label="Observations">{journal.observations.map(observation => <RecordRow key={observation.id} name={observationKindWord(observation.kind)} secondary={observation.content} state={observation.stepKey} />)}</RecordList>
+          <RecordList as="ul" label="Observations">{journal.observations.map(observation => <RecordRow key={observation.id} name={observationKindWord(observation.kind)} secondary={observation.content}><span>{observation.stepKey}</span></RecordRow>)}</RecordList>
         </div>
       )}
 
+      {journal.hasOlder || journal.hasNewer ? (
+        <nav className="os-panel-actions" aria-label="Activity pages">
+          <Button onClick={journal.newer} disabled={!journal.hasNewer || journal.state === "loading"}>Newer activity</Button>
+          <Button onClick={journal.older} disabled={!journal.hasOlder || journal.state !== "ready"}>Older activity</Button>
+        </nav>
+      ) : null}
     </section>
   );
 }

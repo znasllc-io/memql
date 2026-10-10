@@ -24,7 +24,9 @@ type remedyScope struct {
 	resumeAt                                  string
 	stepKeys                                  []string
 	persisted                                 CompileOutcome
+	ceiling                                   *memql.RunCeilingError
 	generated, validated, saved, closed, took bool
+	installAttempted                          bool
 }
 
 func (s *remedyScope) run(ctx context.Context, entry string) bool {
@@ -37,7 +39,11 @@ func (s *remedyScope) run(ctx context.Context, entry string) bool {
 		// Once a model was spent, leaving the remedy wait live would spend it on
 		// every lease. The native envelope closes that loophole even if the recipe
 		// catches a failure or simply returns early.
-		return s.remedy.ask(ctx, s.owner, s.runID, s.step, s.kind, "The remedy recipe stopped before it could install a validated result.")
+		reason := "The remedy recipe stopped before it could install a validated result."
+		if err != nil {
+			reason += " " + err.Error()
+		}
+		return s.ask(ctx, reason)
 	}
 	return s.took
 }
@@ -61,11 +67,31 @@ func (s *remedyScope) operations() map[string]workflowhost.Operation {
 			if reason == "" {
 				return nil, fmt.Errorf("remedy approval requires a reason")
 			}
-			s.closed = true
-			s.took = s.remedy.ask(ctx, s.owner, s.runID, s.step, s.kind, reason)
+			s.took = s.ask(ctx, reason)
 			return s.took, nil
 		},
 	}
+}
+
+// A budget refusal keeps its typed figures across the DSL's failure branch.
+// Even a recipe that returns early cannot turn this into a generic Retry:
+// that would leave the allowance unchanged and replay a known failed plan.
+func (s *remedyScope) ask(ctx context.Context, reason string) bool {
+	s.closed = true
+	// A timed-out attempt must still leave a durable decision request, or the
+	// next lease holder repeats the same model call. Only this terminal write
+	// detaches cancellation; no inference or installation does. The writer
+	// rechecks the current run, including cancellation, before changing it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if s.ceiling != nil {
+		if err := s.remedy.writer.PauseReplanForBudget(ctx, s.owner, s.runID, s.step, s.ceiling); err != nil {
+			s.remedy.warn("work remedy: could not park the replan on its budget", s.runID, err)
+			return false
+		}
+		return true
+	}
+	return s.remedy.ask(ctx, s.owner, s.runID, s.step, s.kind, reason)
 }
 
 func (s *remedyScope) sandbox() (authoringSandbox, bool) {
@@ -86,13 +112,32 @@ func (s *remedyScope) generate(ctx context.Context, args map[string]any) (any, e
 		return nil, fmt.Errorf("replan requires a named prompt")
 	}
 	rc := s.context
-	data := map[string]any{"statement": rc.Statement, "completedSteps": rc.CompletedSteps, "failedStep": rc.FailedStep, "inputKeys": inputKeys(rc.Variables), "now": s.remedy.clock().UTC().Format(time.RFC3339)}
+	evidence, err := replanEvidenceView(ctx, rc.CompletedSteps)
+	if err != nil {
+		return nil, err
+	}
+	data := map[string]any{"statement": rc.Statement, "completedSteps": evidence, "failedStep": rc.FailedStep, "inputKeys": inputKeys(rc.Variables), "now": s.remedy.clock().UTC().Format(time.RFC3339)}
+	source := make([]map[string]any, 0, len(rc.Template))
+	for _, construct := range rc.Template {
+		source = append(source, map[string]any{"kind": construct.Kind, "name": construct.Name, "source": construct.Source})
+	}
+	data["originalTemplate"] = source
+	data["templateName"] = rc.TemplateName
+	headline := replanHeadline(rc)
+	data["patchExisting"] = headline != ""
+	schema := replanDraftSchema
+	if headline != "" {
+		schema = replanEditsSchema
+	}
 	if strings.TrimSpace(s.reason) != "" {
 		data["remainingGoal"] = strings.TrimSpace(s.reason)
 	}
 	s.generated = true
-	out, err := s.remedy.loop.engine.InvokeAI(systemActorContext(ctx), prompt, data)
+	out, err := s.remedy.loop.engine.InvokeAIStructured(systemActorContext(ctx), prompt, data, "workReplan", schema, true)
 	if err != nil {
+		if errors.As(err, &s.ceiling) {
+			return map[string]any{"available": true, "ok": false, "message": err.Error()}, nil
+		}
 		if memql.IsProviderUnavailable(err) {
 			s.closed = true
 			return map[string]any{"available": false, "ok": false, "message": err.Error()}, nil
@@ -100,6 +145,17 @@ func (s *remedyScope) generate(ctx context.Context, args map[string]any) (any, e
 		return map[string]any{"available": true, "ok": false, "message": err.Error()}, nil
 	}
 	draft, err := parseReplanDraft(out)
+	if err == nil && !draft.GoalAlreadyServed {
+		if headline != "" {
+			if draft.Source != "" {
+				err = fmt.Errorf("replan of a sealed program requires edits, not a replacement source")
+			} else {
+				draft.Source, err = applyReplanEdits(headline, draft.Edits)
+			}
+		} else if len(draft.Edits) != 0 {
+			err = fmt.Errorf("replan edits require the original sealed program")
+		}
+	}
 	if err != nil {
 		return map[string]any{"available": true, "ok": false, "message": err.Error()}, nil
 	}
@@ -107,7 +163,7 @@ func (s *remedyScope) generate(ctx context.Context, args map[string]any) (any, e
 	return map[string]any{"available": true, "ok": true, "goalAlreadyServed": draft.GoalAlreadyServed}, nil
 }
 
-func (s *remedyScope) validate(_ context.Context, _ map[string]any) (any, error) {
+func (s *remedyScope) validate(_ context.Context, args map[string]any) (any, error) {
 	if !s.generated || s.validated || s.closed || s.draft.Source == "" || s.draft.GoalAlreadyServed {
 		return nil, fmt.Errorf("replan validation requires one generated unfinished plan")
 	}
@@ -118,6 +174,18 @@ func (s *remedyScope) validate(_ context.Context, _ map[string]any) (any, error)
 	}
 	if err != nil {
 		return fail("source", err)
+	}
+	if source := replanHeadline(s.context); source != "" {
+		original, err := automations.NewLoader(automations.LoaderOptions{Logger: s.remedy.loop.logger}).CompileSource(source, "work-replan/"+s.runID+"-original.memql")
+		if err != nil {
+			return fail("original-source", err)
+		}
+		if err := replanPreservesDefinitions(original, auto, s.context); err != nil {
+			return fail("prefix", err)
+		}
+		if err := replanPreservesInvocation(original, auto, args["preserveInvocation"]); err != nil {
+			return fail("invocation", err)
+		}
 	}
 	resumeAt, keys, err := replanKeepsPrefix(auto, s.context)
 	if err != nil {
@@ -136,7 +204,17 @@ func (s *remedyScope) persist(ctx context.Context, _ map[string]any) (any, error
 		return nil, fmt.Errorf("replan persistence requires a validated prefix and may run once")
 	}
 	s.saved = true
-	out, err := s.remedy.loop.persistWorkDraft(ctx, CompileRequest{RunId: s.runID, OwnerUserId: s.owner, Statement: s.context.Statement}, CompileOutcome{}, authoringBundle{AutomationName: s.auto.Name, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: s.auto.Name, Source: s.draft.Source}}}, sandbox)
+	constructs := []memql.SandboxConstruct{{Kind: "automation", Name: s.auto.Name, Source: s.draft.Source}}
+	// The replacement may still call private helpers, especially in the fixed
+	// prefix. Carry the sealed dependencies to the new bundle so the executing
+	// replica has them too. Only the headline may be replaced by the model.
+	for _, construct := range s.context.Template {
+		if construct.Kind == "automation" && construct.Name == s.context.TemplateName {
+			continue
+		}
+		constructs = append(constructs, construct)
+	}
+	out, err := s.remedy.loop.persistWorkDraft(ctx, CompileRequest{RunId: s.runID, OwnerUserId: s.owner, Statement: s.context.Statement}, CompileOutcome{}, authoringBundle{AutomationName: s.auto.Name, Constructs: constructs}, sandbox)
 	if err != nil {
 		return map[string]any{"ok": false, "message": err.Error()}, nil
 	}
@@ -145,18 +223,19 @@ func (s *remedyScope) persist(ctx context.Context, _ map[string]any) (any, error
 }
 
 func (s *remedyScope) install(ctx context.Context, _ map[string]any) (any, error) {
-	if s.closed || s.persisted.ConstructId == "" {
+	if s.closed || s.installAttempted || s.persisted.ConstructId == "" {
 		return nil, fmt.Errorf("replan installation requires a persisted validated template")
 	}
-	s.closed = true
+	s.installAttempted = true
 	out := s.persisted
 	err := s.remedy.writer.InstallReplan(ctx, s.owner, s.runID, workintegration.ReplanTemplate{AutomationName: out.AutomationName, TemplateConstructId: out.ConstructId, TemplateFingerprint: out.TemplateFingerprint, TemplateVersion: out.TemplateVersion, StepKeys: s.stepKeys, ResumeAt: s.resumeAt,
 		Outcome: map[string]any{"replannedFrom": s.step, "replannedAt": s.remedy.clock().UTC().Format(time.RFC3339), "prefixKept": len(s.context.CompletedSteps), "abandonedAssumption": s.draft.AbandonedAssumption}})
 	if err != nil {
+		s.closed = errors.Is(err, workintegration.ErrRemedyNotWaiting)
 		s.remedy.warn("work remedy: could not install the re-planned template on the run", s.runID, err)
 		return false, nil
 	}
-	s.took = true
+	s.closed, s.took = true, true
 	return true, nil
 }
 

@@ -68,8 +68,11 @@ const dsnResolverDir = "component/database/dbtest"
 // fifteenth copy costs a deliberate edit with a written justification rather
 // than a line nobody reviews.
 //
-// Both entries were CHECKED, not assumed (memql#3149 asks for exactly that):
+// Entries describe fixture literals, not connections opened by these tests.
 var dsnLiteralExemptions = map[string]string{
+	"scripts/k3d/seed_secrets_database_test.go": "opaque secret values passed to fake kubectl and asserted byte-for-byte; " +
+		"never dialed, and dbtest.DSN would replace the recovery/pooler destinations and installer-default contract under test",
+
 	// Measured 2026-08-07: adding the import and routing this through
 	// dbtest.DSN() compiles, creates no import cycle, and leaves
 	// `go test ./scripts/cidb/...` GREEN -- harness_test.go declares no Test

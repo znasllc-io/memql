@@ -198,21 +198,46 @@ export interface Journal {
   /** When this window last looked. The whole point of an on-demand read. */
   readAt: string;
   read: () => void;
+  /** Only a complete first page may be used for per-step totals. */
+  modelCallsComplete: boolean;
+  hasOlder: boolean;
+  hasNewer: boolean;
+  older: () => void;
+  newer: () => void;
 }
 
-const IDLE: Omit<Journal, "read"> = {
+type JournalCursor = { calls: string | null; observations: string | null };
+const FIRST_PAGE: JournalCursor = { calls: "", observations: "" };
+type JournalSnapshot = Omit<Journal, "read" | "modelCallsComplete" | "hasOlder" | "hasNewer" | "older" | "newer"> & {
+  next: JournalCursor;
+  pageKey: string;
+};
+const IDLE: JournalSnapshot = {
   modelCalls: [],
   observations: [],
   state: "idle",
   error: "",
   readAt: "",
+  next: { calls: null, observations: null },
+  pageKey: "",
 };
 
 /** Owner-scoped snapshots while this run page is visible. Journal rows do not
  * broadcast; bounded polling keeps the story current without a cluster-wide feed. */
 export function useJournal(runId: string, active = true): Journal {
   const connection = useOsConnection();
-  const [state, setState] = useState<Omit<Journal, "read">>(IDLE);
+  const [state, setState] = useState<JournalSnapshot>(IDLE);
+  const [pages, setPages] = useState<{ runId: string; trail: JournalCursor[] }>({ runId, trail: [] });
+  const trail = pages.runId === runId ? pages.trail : [];
+  const cursor = trail.at(-1) ?? FIRST_PAGE;
+  const pageKey = JSON.stringify([runId, cursor.calls, cursor.observations]);
+  const hasNewer = trail.length > 0;
+  const hasOlder = state.pageKey === pageKey && (state.next.calls !== null || state.next.observations !== null);
+  const older = () => {
+    if (state.state !== "ready" || !hasOlder) return;
+    setPages({ runId, trail: [...trail, state.next] });
+  };
+  const newer = () => setPages({ runId, trail: trail.slice(0, -1) });
   const [nonce, setNonce] = useState(0);
 
   const read = useCallback(() => setNonce((n) => n + 1), []);
@@ -222,6 +247,7 @@ export function useJournal(runId: string, active = true): Journal {
   // attributing one run's model calls to another.
   useEffect(() => {
     setState(IDLE);
+    setPages({ runId, trail: [] });
   }, [runId]);
 
   useEffect(() => {
@@ -233,18 +259,22 @@ export function useJournal(runId: string, active = true): Journal {
     const controller = new AbortController();
     const signal = controller.signal;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    setState((prev) => ({ ...prev, state: prev.readAt ? prev.state : "loading", error: "" }));
+    setState((prev) => prev.pageKey === pageKey
+      ? { ...prev, state: prev.readAt ? prev.state : "loading", error: "" }
+      : { ...IDLE, state: "loading", pageKey });
 
     void (async () => {
       try {
         const [calls, observations] = await Promise.all([
-          query.workModelCallsForOwnerRun({ runId }, { signal }),
-          query.workObservationsForOwnerRun({ runId }, { signal }),
+          cursor.calls === null ? null : query.workModelCallsPageForOwnerRun({ runId }, { signal, ...(cursor.calls ? { cursor: cursor.calls } : {}) }),
+          cursor.observations === null ? null : query.workObservationSummariesForOwnerRun({ runId }, { signal, ...(cursor.observations ? { cursor: cursor.observations } : {}) }),
         ]);
         if (signal.aborted) return;
         setState({
-          modelCalls: calls.rows().map(modelCallFromRow),
-          observations: observations.rows().map(observationFromRow),
+          modelCalls: calls?.rows().map(modelCallFromRow) ?? [],
+          observations: observations?.rows().map(observationFromRow) ?? [],
+          next: { calls: calls?.meta()?.cursor || null, observations: observations?.meta()?.cursor || null },
+          pageKey,
           state: "ready",
           error: "",
           readAt: new Date().toISOString(),
@@ -260,12 +290,13 @@ export function useJournal(runId: string, active = true): Journal {
           readAt: prev.readAt,
         }));
       } finally {
-        if (!signal.aborted && active) timer = setTimeout(read, 4000);
+        if (!signal.aborted && active && !hasNewer) timer = setTimeout(read, 4000);
       }
     })();
 
     return () => { controller.abort(); if (timer) clearTimeout(timer); };
-  }, [connection, runId, nonce, active, read]);
+  }, [connection, runId, nonce, active, read, pageKey, cursor.calls, cursor.observations, hasNewer]);
 
-  return { ...state, read };
+  const modelCallsComplete = state.pageKey === pageKey && state.state === "ready" && !hasNewer && state.next.calls === null;
+  return { ...state, read, modelCallsComplete, hasOlder, hasNewer, older, newer };
 }

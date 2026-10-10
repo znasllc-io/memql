@@ -28,7 +28,23 @@ through produceArtifact.
 The existing complexity triage explicitly identifies goals requiring a saved
 file and supplies its name and supported format. Deterministic file plans call
 Materializer directly with the goal and runtime inputs; sectionable file plans
-also supply their actual section results as a draft. Creating a known file
+select their completed final prose with `sectionKeys`. The section planner
+explicitly marks final content (`deliver: true`) and evidence-only notes
+(`deliver: false`); the DSL selects and orders those keys. The integration
+reads owner-scoped completed text receipts from that run, snapshots their
+exact text and recorded model/source provenance, and renders without another
+whole-document model call. Retries on another replica reuse the immutable
+snapshot. Missing, unfinished, non-text, duplicate or foreign sections fail
+before effects. CSV/JSON and generation from a new request retain composition.
+Malformed Materializer model output is a plan failure, not a transport EOF;
+recovery can replace just assembly while preserving completed chapters.
+Replanning projects receipts into a DSL-budgeted evidence view: small semantic
+values are retained, large values become explicitly marked head/tail previews
+with character counts and hashes. Duplicate result envelopes and fan-in bodies
+cannot consume the whole planning context. Every completed key/call and the
+exact sealed source remain available; execution and installation still use the
+full journal. Preview omission is never interpreted as missing work or permission
+to invent content. Creating a known file
 does not need an agent turn to rediscover the file capability through tool
 calling. A successful composition requires its Library file to be marked ready.
 Known agent-turn file templates verify an owned, ready Library file produced

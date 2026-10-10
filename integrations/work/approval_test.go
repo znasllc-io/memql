@@ -442,6 +442,60 @@ func TestApprovingAFailureQuestionResumesUnderARequestOfItsOwn(t *testing.T) {
 	}
 }
 
+// A plan failure is an instruction to revise the remaining work, even when
+// automatic remedies were exhausted. The decision travels through the graph
+// to a planner that never handled the approval; it cannot replay the same
+// failed model call or silently replenish the automatic retry allowance.
+func TestApprovingAPlanFailureHandsOffOneReplanAcrossReplicas(t *testing.T) {
+	i, eng, _ := newActsIntegration(t)
+	req := work.FailureApproval(work.ApprovalKindFeedback, actRunId, "draft/nested", work.SymptomPlan,
+		"model call exceeded its ceiling", "q", work.Evidence{Reason: "divide unfinished work"}, testNow, time.Hour)
+	eng.reply("workApprovalsForOwner", map[string]any{
+		"id": "v1:work:approval:a1", "runId": actRunId, "ownerUserId": actOwner, "stepKey": req.StepKey,
+		"kind": req.Kind, "subject": req.Subject, "artifactHash": req.ArtifactHash, "options": req.Options,
+		"evidence": map[string]any{"reason": req.Evidence.Reason},
+	})
+	run := actRunRow(runStatusWaiting, "fetch", "draft", "publish")
+	run["spent"] = map[string]any{"retries": 2, "modelCalls": 40, "tokens": 10000}
+	run["waitingOn"] = map[string]any{"kind": "approval", "subject": "v1:work:approval:a1", "since": rfc(testNow.Add(-time.Minute))}
+	eng.reply("workRunForOwner", run)
+	if _, err := i.handleDecideApproval(callerContext(actOwner), map[string]any{
+		"approvalId": "v1:work:approval:a1", "decision": "answered", "answer": map[string]any{"value": work.FailureAnswerRetry},
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	update := argsOf(t, eng, "updateWorkRun")
+	wait := rowMap(update, "waitingOn")
+	if update["status"] != runStatusWaiting || wait["kind"] != waitKindReplan || wait["subject"] != "draft" || wait["since"] == "" {
+		t.Fatalf("plan failure was replayed instead of handed to the remedy: %v", update)
+	}
+	if wait["reason"] != "divide unfinished work\nmodel call exceeded its ceiling" {
+		t.Fatalf("the remedy lost the classified cause: %v", wait)
+	}
+	for _, key := range []string{"spent", "rerun", "staleSteps", "head", "stepOrder"} {
+		if _, changed := update[key]; changed {
+			t.Errorf("approval changed %s before replanning: %v", key, update[key])
+		}
+	}
+	if len(eng.callsTo("updateWorkGoal")) != 0 || len(eng.callsTo("updateWorkStep")) != 0 {
+		t.Fatal("recovery changed the goal's budget or a completed step")
+	}
+	for k, v := range update {
+		if k != "runId" {
+			run[k] = v
+		}
+	}
+	claims, remedy := &pkClaims{}, &signallingRemedy{}
+	a, _ := plannerReplica(t, remedy, claims, run)
+	b, _ := plannerReplica(t, remedy, claims, run)
+	a.HandleRunEvent(remedyEvent(run))
+	b.HandleRunEvent(remedyEvent(run))
+	calls := remedy.settled(t, 1)
+	if len(calls) != 1 || calls[0].kind != waitKindReplan || calls[0].stepKey != "draft" || calls[0].run.GoalId != actGoalId {
+		t.Fatalf("approved recovery across replicas = %+v", calls)
+	}
+}
+
 // Only a failure question's Retry is a re-run. A budget approval the model
 // seam raised parks a step mid-flight on a person's word, and approving it
 // resumes that step; writing a request would run it again as a new version.
@@ -640,5 +694,55 @@ func TestAJobCannotApproveItsOwnWork(t *testing.T) {
 		if len(engine.calls) != 0 {
 			t.Fatal("refused approval reached storage")
 		}
+	}
+}
+
+func TestPreviouslyMisclassifiedDraftFailureHandsOffOneReplanAcrossReplicas(t *testing.T) {
+	i, eng, _ := newActsIntegration(t)
+	req := work.FailureApproval(work.ApprovalKindFeedback, actRunId, "draft/nested", work.SymptomTransient,
+		"materializer: invalid draft: unexpected EOF", "q", work.Evidence{Reason: "divide unfinished work"}, testNow, time.Hour)
+	eng.reply("workApprovalsForOwner", map[string]any{
+		"id": "v1:work:approval:a1", "runId": actRunId, "ownerUserId": actOwner, "stepKey": req.StepKey,
+		"kind": req.Kind, "subject": req.Subject, "artifactHash": req.ArtifactHash, "options": req.Options,
+		"evidence": map[string]any{"reason": req.Evidence.Reason},
+	})
+	run := actRunRow(runStatusWaiting, "fetch", "draft", "publish")
+	run["spent"] = map[string]any{"retries": 2, "modelCalls": 40, "tokens": 10000}
+	run["waitingOn"] = map[string]any{"kind": "approval", "subject": "v1:work:approval:a1", "since": rfc(testNow.Add(-time.Minute))}
+	eng.reply("workRunForOwner", run)
+	if _, err := i.handleDecideApproval(callerContext(actOwner), map[string]any{
+		"approvalId": "v1:work:approval:a1", "decision": "answered", "answer": map[string]any{"value": work.FailureAnswerRetry},
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	update := argsOf(t, eng, "updateWorkRun")
+	wait := rowMap(update, "waitingOn")
+	if update["status"] != runStatusWaiting || wait["kind"] != waitKindReplan || wait["subject"] != "draft" || wait["since"] == "" {
+		t.Fatalf("plan failure was replayed instead of handed to the remedy: %v", update)
+	}
+	if wait["reason"] != "divide unfinished work\nmaterializer: invalid draft: unexpected EOF" {
+		t.Fatalf("the remedy lost the classified cause: %v", wait)
+	}
+	for _, key := range []string{"spent", "rerun", "staleSteps", "head", "stepOrder"} {
+		if _, changed := update[key]; changed {
+			t.Errorf("approval changed %s before replanning: %v", key, update[key])
+		}
+	}
+	if len(eng.callsTo("updateWorkGoal")) != 0 || len(eng.callsTo("updateWorkStep")) != 0 {
+		t.Fatal("recovery changed the goal's budget or a completed step")
+	}
+	for k, v := range update {
+		if k != "runId" {
+			run[k] = v
+		}
+	}
+	claims, remedy := &pkClaims{}, &signallingRemedy{}
+	a, _ := plannerReplica(t, remedy, claims, run)
+	b, _ := plannerReplica(t, remedy, claims, run)
+	a.HandleRunEvent(remedyEvent(run))
+	b.HandleRunEvent(remedyEvent(run))
+	calls := remedy.settled(t, 1)
+	if len(calls) != 1 || calls[0].kind != waitKindReplan || calls[0].stepKey != "draft" || calls[0].run.GoalId != actGoalId {
+		t.Fatalf("approved recovery across replicas = %+v", calls)
 	}
 }

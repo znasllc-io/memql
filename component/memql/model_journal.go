@@ -385,6 +385,9 @@ func (s *modelSeam) serve(
 		// read to answer.
 		call.Error = err.Error()
 		record(call)
+		if budgetErr := s.deadlineFailure(ctx); budgetErr != nil {
+			return nil, budgetErr
+		}
 		return nil, err
 	}
 	call.Response = responseOf(out.Value)

@@ -378,6 +378,9 @@ func (a *CognitionEngineAdapter) CompactWorkContext(ctx context.Context, message
 func (a *CognitionEngineAdapter) PrepareWorkTool(ctx context.Context) error {
 	return a.Engine.PrepareWorkTool(ctx)
 }
+func (a *CognitionEngineAdapter) WorkCallFailure(ctx context.Context) error {
+	return a.Engine.WorkCallFailure(ctx)
+}
 func (a *CognitionEngineAdapter) ContextWithWorkCallDeadline(ctx context.Context) (context.Context, context.CancelFunc, error) {
 	return a.Engine.ContextWithWorkCallDeadline(ctx)
 }

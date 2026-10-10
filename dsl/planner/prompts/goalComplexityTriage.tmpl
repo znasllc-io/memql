@@ -158,7 +158,26 @@ complexity = "complex" when the goal is a multi-phase program, needs multiple sp
 
 ## SECTIONABLE (a deliverable cut into ordered sections)
 
-Set `sectionable: true` ONLY when the deliverable decomposes into a small number of clear SECTIONS, produced one after another in the order you list them and then assembled into the final result. When you do, list one `sections` entry per section, in order, and give a one-line `assembly`.
+Set `sectionable: true` when the deliverable decomposes into clear, bounded SECTIONS, produced one after another in the order you list them and then assembled into the final result. List one `sections` entry per section, in order, and give a one-line `assembly`. Research-backed documents can use this path too: evidence gathering and drafting are separate, bounded sections with explicit dependencies.
+
+SIZE EACH STEP, NOT JUST THE WHOLE DOCUMENT. An execution step has a limited
+model-call window. A heading such as "All profiles", "Research everything" or
+"Write the entire report" is not a decomposition of a large task. Split a
+large set into named, non-overlapping batches with explicit coverage boundaries.
+Aim for about 500-800 words of new prose per drafting section, with at most
+24 sections in this plan. Preserve the requested depth and ALL requested items
+across the batches; do not shorten the whole deliverable to fit one call. If
+24 bounded sections cannot cover it, use the normal multi-phase planner.
+Research sections return compact evidence with source URLs, supported facts and
+gaps; they do not also write the complete report. Drafting sections consume
+only their relevant evidence. An assembly combines finished sections and must
+not rewrite the entire document in another giant writing pass.
+
+For a document covering dozens of people, products or historical events, use
+several small, named batches in the requested order, with bounded evidence
+gathering feeding each batch. Do not put every biography in a single step and
+then ask a second step to write them all again. Verify the requested coverage
+from research instead of guessing a total or silently omitting later items.
 
 Two shapes qualify:
 - INDEPENDENT sections -- the "N complete things, each written out in full" pattern. Each section is producible on its own, WITHOUT the output of any other section, so their order does not matter; their `inputs` name only the goal's own inputs.
@@ -176,15 +195,16 @@ Every section entry carries:
 - `outputs`: the names of what this section produces, as single words ("invoiceSummary", "chapter3").
 - `reuseIntent`: "reusable" when the section is a general capability other goals would want too, "goalSpecific" when it only makes sense for this goal, "accountSpecific" when it depends on one client's or account's specifics.
 - `effects`: what the section CHANGES besides producing text -- "files" (writes or edits files), "machine" (acts on the person's computer), "external" (sends, posts or calls anything outside, such as an email, a webhook or an API), "spend" (costs money), or "concept:<v1 concept id>" (writes records of that kind, for example "concept:v1:todos:todo"). `[]` for a section that only reads and writes text.
+- Intermediate research notes and document drafts have `effects: []`: the final file is saved by the separate assembly step. The fact that the overall goal requests a file does not turn each draft into a file write. Do not add a section that saves the same final file a second time.
 - `postcondition`: how the END of the section is checked -- "the report file exists in the Library", "a v1:todos:todo with that title exists". REQUIRED whenever `effects` is not empty; `""` for a section with no effects, whose outputs are its end.
 
 THE BOUNDARY RULE: every section must end at a point that can be checked. A section that changes something says how its end is checked (a `postcondition`), and a section that changes nothing names what it produces (at least one `output`). A decomposition with a section that would stop in the middle of a change -- `effects` without a `postcondition` -- is refused, and the goal is then planned as a whole instead, which costs more.
 
 Set `sectionable: false` (the default) when:
-- the deliverable is a single continuous piece that can't be cut into parts ("a 30-page handbook with a flowing narrative"),
+- the work cannot be divided into independently checkable outputs, even with explicit dependencies,
 - a section could only end in the middle of a change (the boundary rule above),
 - it's `trivial` (fits in one pass -- no sections needed), or
-- it's `complex` (needs research, multiple specialists, or a multi-phase program -- the planner handles those itself).
+- it needs a multi-phase program or multiple specialists that cannot be represented by these bounded sections. Complexity alone does not prohibit sectioning a research document.
 
 When in doubt, prefer `sectionable: false` -- a non-sectionable goal simply routes through the normal planner; a wrongly-sectioned one splits work that was not actually separable.
 

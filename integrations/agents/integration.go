@@ -117,8 +117,10 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Call a named prompt with a data object and return {prompt, reply}. Wraps MemQLEngine.InvokeAI, which resolves the prompt, validates the data against the prompt's own body, renders it, routes by its @level through core/airoute, caches and journals the call. SYNCHRONOUS. Refuses by name -- unreachable runtime, unknown prompt, data that does not fit the schema -- and never answers with an empty reply.",
 			Handler:     i.handleInvokePrompt,
 			ArgsSchema: map[string]string{
-				"templateId": "string (required) -- the prompt to call, by name",
-				"data":       "object (required) -- the fields the prompt's body declares; `{}` when it declares none",
+				"templateId":     "string (required) -- the prompt to call, by name",
+				"data":           "object (required) -- the fields the prompt's body declares; `{}` when it declares none",
+				"responseSchema": "object -- optional strict JSON Schema for the response",
+				"progress":       "bool -- persist public work progress",
 			},
 		},
 		{

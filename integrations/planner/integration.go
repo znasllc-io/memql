@@ -28,6 +28,7 @@ package planner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -58,6 +59,8 @@ type Engine interface {
 	// returns the assistant response. Used by the Phase 4 Planner
 	// Agent loop to drive structured-output decisions.
 	InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error)
+	// InvokeAIStructured constrains planning decisions through the normal routed, metered model path.
+	InvokeAIStructured(ctx context.Context, templateId string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error)
 	// InvokeAIChatWithFilteredTools renders a prompt and runs a bounded
 	// tool-calling loop restricted to the named tool set, returning the
 	// model's final assistant text. Used by the trainSpecialist

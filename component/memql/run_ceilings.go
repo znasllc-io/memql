@@ -45,6 +45,7 @@ package memql
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -224,6 +225,8 @@ func estimateRequestTokens(req common.ModelRequest) int {
 	return airoute.EstimateMinContextTokensFor(0, parts...)
 }
 
+var errRunDeadline = fmt.Errorf("run wall-clock deadline reached: %w", context.DeadlineExceeded)
+
 // runDeadlineGuard is optional for test guards, but the installed work guard
 // always implements it. Deadline uses stored run time, never time of admission.
 type runDeadlineGuard interface {
@@ -237,11 +240,38 @@ func (s *modelSeam) deadlineContext(ctx context.Context, rc common.RunContext) (
 			return ctx, func() {}, err
 		}
 		if !deadline.IsZero() {
-			bounded, cancel := context.WithDeadline(ctx, deadline)
+			if !time.Now().Before(deadline) {
+				if err := s.admit(ctx, 0); err != nil {
+					return ctx, func() {}, err
+				}
+			}
+			bounded, cancel := context.WithDeadlineCause(ctx, deadline, errRunDeadline)
 			return bounded, cancel, nil
 		}
 	}
 	return ctx, func() {}, nil
+}
+
+// WorkCallFailure resolves only a deadline installed by the run guard. Provider
+// timeouts and caller cancellation retain their original meaning. Re-read the
+// guard after the attempt so the refusal carries current usage, not a snapshot
+// taken before the model ran. Receipt work is bounded and survives cancellation.
+func (e *MemQLEngine) WorkCallFailure(ctx context.Context) error {
+	if e == nil || e.modelSeam == nil {
+		return nil
+	}
+	return e.modelSeam.deadlineFailure(ctx)
+}
+
+func (s *modelSeam) deadlineFailure(ctx context.Context) error {
+	if !errors.Is(context.Cause(ctx), errRunDeadline) {
+		return nil
+	}
+	readCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer stop()
+	// An approval may have raised the ceiling while this attempt was running.
+	// In that case the original provider error remains eligible for recovery.
+	return s.admit(readCtx, 0)
 }
 
 // ContextWithWorkCallDeadline refreshes the current workload estimate before
@@ -269,7 +299,7 @@ func (e *MemQLEngine) ContextWithRunDeadline(ctx context.Context) (context.Conte
 			return ctx, func() {}, err
 		}
 		if !deadline.IsZero() {
-			bounded, cancel := context.WithDeadline(ctx, deadline)
+			bounded, cancel := context.WithDeadlineCause(ctx, deadline, errRunDeadline)
 			return bounded, cancel, nil
 		}
 		return ctx, func() {}, nil

@@ -35,6 +35,32 @@ func TestStructureWhitespaceAndMalformedHTML(t *testing.T) {
 	}
 }
 
+func TestArticleHeaderMenusDoNotConsumeResearchExcerpt(t *testing.T) {
+	// The live MediaWiki layout nests its language selector in main > header;
+	// dropping only nav or the site's outer header leaves hundreds of links.
+	body := `<main><header><h1>Article title</h1><div class="vector-dropdown mw-portlet mw-portlet-lang"><ul>` +
+		strings.Repeat(`<li><a href="https://example.org/translated">Language menu</a></li>`, 1000) +
+		`</ul></div><p>Author byline</p></header><div class="vector-menu mw-portlet mw-portlet-views">Edit page</div>` +
+		`<div role="toolbar">Page tools</div><div role="menu">Account menu</div><div role="menubar">Site menu</div>` +
+		`<div class="mw-body-content"><p>Article evidence <a href="https://example.org/study">primary source</a>.</p>` +
+		`<ul class="references"><li>Reference <a hreflang="fr" href="https://example.org/french-study">French study</a></li></ul>` +
+		`<p class="about-mw-portlet">A discussion of menu design.</p></div></main>`
+	got := Extract(body, "text/html")
+	for _, want := range []string{"Article title", "Author byline", "Article evidence primary source (https://example.org/study)", "French study (https://example.org/french-study)", "A discussion of menu design."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+	for _, unwanted := range []string{"Language menu", "Edit page", "Page tools", "Account menu", "Site menu"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("unexpected %q in research excerpt", unwanted)
+		}
+	}
+	if len(got) > 300 {
+		t.Fatalf("menus consumed the excerpt: %d bytes", len(got))
+	}
+}
+
 func TestAllSearchResultsAndUnmarkedPagesRemainReadable(t *testing.T) {
 	for _, body := range []string{
 		`<article>One <a href="/one">source</a></article><article>Two <a href="/two">source</a></article>`,
