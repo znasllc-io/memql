@@ -369,6 +369,10 @@ func (i *Integration) handleHTTPFetch(ctx context.Context, _ *workspace, args ma
 	if err != nil {
 		return errResult("http_fetch", "invalid_request", err.Error())
 	}
+	// Identify the client honestly, including a project contact. Public
+	// research sources may refuse the generic Go client; callers can still
+	// supply their own identifier through the existing headers contract.
+	req.Header.Set("User-Agent", "MemQL/1.0 (https://github.com/znasllc-io/memql; workbench)")
 	for k, v := range stringMap(args["headers"]).asMap() {
 		req.Header.Set(k, v)
 	}
