@@ -422,11 +422,13 @@ describe("the rules a route change reaches", () => {
     });
     await renderRouting();
     await openRoute("Local only");
-    // The shipped compiler and local research rules take it too.
-    fireEvent.click(screen.getByRole("button", { name: "Taken by 6 rules" }));
+    // The shipped compiler, local research and image rules take it too.
+    fireEvent.click(screen.getByRole("button", { name: "Taken by 8 rules" }));
     await settle();
     const list = screen.getByRole("list", { name: "Rules, in the order they are tried" });
     expect(within(list).getAllByRole("listitem").map((li) => li.querySelector(".fleet-rule-when")?.textContent)).toEqual([
+      "Library revision image plan prompt",
+      "Library revision image generation prompt",
       "Library revision evidence prompt",
       "Library revision intent prompt",
       "Library revision research prompt",
