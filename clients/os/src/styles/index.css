@@ -16286,7 +16286,7 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-file-detail-body { display: flex; flex-direction: column; gap: 16px; }
 .os-file-detail-footer { flex: 0 0 auto; min-width: 0; }
 .os-file-detail-footer[data-confirming] .os-actbar-state { flex-direction: column; align-items: flex-start; gap: 4px; }
-.os-file-detail-footer[data-confirming] .os-actbar-detail { white-space: normal; }
+.os-file-detail-footer .os-actbar-detail { white-space: normal; }
 .os-file-detail-footer .os-button[aria-label] { min-width: var(--os-control-h); }
 .os-file-detail-notices { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; max-height: 28vh; overflow: auto; border-top: 1px solid var(--os-line); }
 .os-file-detail .os-files-labeledit { max-width: 34rem; }
