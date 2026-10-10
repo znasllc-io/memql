@@ -149,7 +149,7 @@ func actRunRow(status string, order ...string) map[string]any {
 		"input":               map[string]any{"week": "2026-39"},
 		"inputFingerprint":    "in-39",
 		"variables":           map[string]any{"week": "2026-39", "region": "emea"},
-		"executionAuthority":  map[string]any{"expiresAt": "2026-10-01T00:00:00Z"},
+		"executionAuthority":  map[string]any{"roleCeiling": "writer", "credentialClass": "user"},
 		"mode":                modeLive,
 		"status":              status,
 		"stepOrder":           steps,

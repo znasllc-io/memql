@@ -443,7 +443,8 @@ function ApprovalDetail({
     promotion !== null || isFeedback || approval.kind === "scopeElevation"
       ? []
       : Object.entries(approval.subject ?? {}).filter(
-          ([key]) => shutDoors === null || (key !== "doors" && key !== "code"),
+          ([key]) => (shutDoors === null || (key !== "doors" && key !== "code"))
+            && (approval.kind !== "budget" || (key !== "resumeKind" && key !== "resumeReason")),
         );
 
   return (

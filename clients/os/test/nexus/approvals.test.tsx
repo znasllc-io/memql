@@ -583,6 +583,20 @@ it("opens a typed question in Ask without sending a decision from Nexus", async 
 
 
 describe("a budget approval", () => {
+  it("shows the allowance without exposing internal recovery metadata", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "budget-replan", kind: "budget", question: "More calls needed", subject: {
+      ceiling: "modelCalls", limit: "48 calls", actual: "48 made", resumeKind: "replan", resumeReason: "internal recovery diagnostic",
+    } })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("More calls needed"));
+    expect(screen.getByText("48 calls")).toBeTruthy();
+    expect(screen.getByText("48 made")).toBeTruthy();
+    expect(screen.queryByText("resumeKind")).toBeNull();
+    expect(screen.queryByText("internal recovery diagnostic")).toBeNull();
+    fireEvent.change(screen.getByLabelText("New total model calls"), { target: { value: "96" } });
+    fireEvent.click(screen.getByRole("button", { name: "Raise limit" }));
+    await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "budget-replan", decision: "approved", answer: { newLimit: 96 } }));
+  });
   it("keeps an expired request readable without offering another decision", async () => {
     mount(fakeConnection({ approvals: [approvalRow({ id: "expired", kind: "budget", question: "Expired time request", expiresAt: "2020-01-01T00:00:00Z", subject: { ceiling: "wallClock" } })] }));
     fireEvent.click(await screen.findByText("Expired time request"));

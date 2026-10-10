@@ -74,13 +74,7 @@ func (i *Integration) dispatchCompile(ctx context.Context, hint CompileRequest) 
 	if err != nil || !ok {
 		return false
 	}
-	base, err = auth.ContextWithPersistedOwner(base, req.OwnerUserId, req.ExecutionAuthority, auth.NewIdentityResolver(auth.QueryRunnerFunc(func(ctx context.Context, q string) (any, error) {
-		result, err := i.engine.Execute(ctx, q)
-		if err != nil || result == nil {
-			return nil, err
-		}
-		return result.OutputPayload(), nil
-	}), i.logger))
+	base, err = auth.ContextWithPersistedOwner(memql.ContextWithFreshRead(base), req.OwnerUserId, req.ExecutionAuthority, i.ownerIdentityResolver())
 	if err != nil {
 		i.log().Warn("work compile: could not restore the owner's forwarded authority", "run", req.RunId, "error", err)
 		return false

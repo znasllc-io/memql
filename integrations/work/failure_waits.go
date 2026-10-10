@@ -47,6 +47,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
@@ -509,7 +510,12 @@ func (i *Integration) serveRemedy(remedy Remedy, kind, runId, owner, since strin
 	if rc.Mode == "" {
 		rc.Mode = common.RunModeLive
 	}
-	ctx = common.ContextWithRun(ownerActor(ctx, owner), rc)
+	ctx, err = auth.ContextWithPersistedOwner(ownerActor(memql.ContextWithFreshRead(ctx), owner), owner, rowMap(run, "executionAuthority"), i.ownerIdentityResolver())
+	if err != nil {
+		i.log().Warn("work remedy: could not restore the owner's forwarded authority", "run", runId, "error", err)
+		return
+	}
+	ctx = common.ContextWithRun(ctx, rc)
 	ctx = memql.ContextWithBudgetScope(ctx, memql.BudgetScopeId("run", runId), memql.BudgetScopeId("goal", rc.GoalId))
 
 	took := false
