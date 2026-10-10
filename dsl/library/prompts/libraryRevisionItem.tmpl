@@ -59,3 +59,5 @@ Final amendment check: apply the NEW direction below to the previous item. Do no
 Independent review of the previous proposed text against this direction:
 {{ .reviewNotes }}
 Resolve these concrete mismatches in the replacement text. The previous item’s reasons and summary can be wrong; copying them does not correct the document.
+
+Before returning, check that all before ranges are disjoint in the original document. If replacing an image and inserting another image beside it, combine both operations into one replacement for that source region. Do not also emit the image-only replacement as a second edit; an insertion anchor must not overlap another edit.

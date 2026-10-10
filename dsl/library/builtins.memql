@@ -207,6 +207,7 @@ builtin libraryRevisionProposal {
  sourceRunId string
  allowIncomplete bool
  requireChanges bool
+ reportInvalid bool
 }
 
 /// Park the current run on an exact proposal; return only after human approval.

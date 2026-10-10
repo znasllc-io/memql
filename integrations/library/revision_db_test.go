@@ -228,6 +228,7 @@ type revisionDB struct {
 	ai            *revisionAI
 	first, second *Integration
 	engine, other *memql.MemQLEngine
+	templates     map[*memql.MemQLEngine]*automations.Automation
 	ctx           context.Context
 	owner         string
 	resetCase     func()
@@ -271,6 +272,18 @@ func newRevisionDB(t *testing.T) *revisionDB {
 	}
 	f.first, f.engine = open()
 	f.second, f.other = open()
+	// Each replica compiles its own immutable definition once, as an installed
+	// service does. Recompiling the entire DSL tree for every execute/resume
+	// wastes this suite's CI budget; journals and executors remain per call.
+	f.templates = make(map[*memql.MemQLEngine]*automations.Automation)
+	for _, engine := range []*memql.MemQLEngine{f.engine, f.other} {
+		loader := automations.NewLoader(automations.LoaderOptions{Logger: engine.Logger})
+		auto, err := loader.LoadByName(documentRevisionTemplate)
+		if err != nil || auto == nil {
+			t.Fatalf("template: %v", err)
+		}
+		f.templates[engine] = auto
+	}
 	first, second := *f.first, *f.second
 	f.resetCase = func() {
 		*f.ai = revisionAI{}
@@ -355,10 +368,9 @@ func (f *revisionDB) execute(engine *memql.MemQLEngine, request string, resume b
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	loader := automations.NewLoader(automations.LoaderOptions{Logger: engine.Logger})
-	auto, err := loader.LoadByName(documentRevisionTemplate)
-	if err != nil || auto == nil {
-		f.t.Fatalf("template: %v", err)
+	auto := f.templates[engine]
+	if auto == nil {
+		f.t.Fatal("replica has no compiled revision template")
 	}
 	// No originating process's local state crosses this hop. Authority is restored
 	// from the persisted run exactly as the receiving agent does.
@@ -402,6 +414,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 		{"PreparedRevisionImagesRecoverAndPinAcrossReplicas", testPreparedRevisionImagesRecoverAndPinAcrossReplicas},
 		{"RevisionDSLPlansAcquiresAndProposesAnImage", testRevisionDSLPlansAcquiresAndProposesAnImage},
 		{"RevisionDSLRepairsImagePlanBeforeEffects", testRevisionDSLRepairsImagePlanBeforeEffects},
+		{"RevisionDSLRepairsOverlappingImageEdits", testRevisionDSLRepairsOverlappingImageEdits},
 		{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
 		{"RevisionCompletionRepairsNoopAndReusesSavedImages", testRevisionCompletionRepairsNoopAndReusesSavedImages},
 		{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},

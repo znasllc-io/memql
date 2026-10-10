@@ -411,10 +411,13 @@ automation reviseLibraryDocument {
    document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.instruction, evidence: combinedEvidence + "\nImage acquisition limitations: " + imageLimitations
   })
  }
- candidate := builtin libraryRevisionProposal(requestId: args.requestId, response: analysis.reply, sourceRunId: preparedImages.sourceRunId, allowIncomplete: true)
+ candidate := builtin libraryRevisionProposal(requestId: args.requestId, response: analysis.reply, sourceRunId: preparedImages.sourceRunId, allowIncomplete: true, reportInvalid: true)
  // A changed document can still omit part of the feedback. Check actual
  // proposed content, not the editor's claimed completion or changed-byte count.
- if !candidate.complete {
+ if (candidate.invalidReason ?? "") != "" {
+  repairFeedback := "The proposed edits could not be applied safely: " + candidate.invalidReason + ". Check the original source. Check that each before is copied verbatim and occurs exactly once, that edits do not overlap, and that every edit references the requesting comment. If one edit replaces text that another edit uses as an insertion anchor, combine those changes into one non-overlapping before/after pair. Preserve all requested image references and unrelated prose."
+  repairNeeded := true
+ } else if !candidate.complete {
   repairFeedback := "Requested prepared images are missing from the proposed Markdown."
   repairNeeded := true
  } else {
@@ -431,7 +434,7 @@ automation reviseLibraryDocument {
   repairNeeded := lower(trim(completion.reply)) != "satisfied"
  }
  if repairNeeded {
-  repairDirection := "The previous response did not complete the request. Unfulfilled requirements from the independent check: " + repairFeedback + "\nProduce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
+  repairDirection := "The previous response did not complete the request. Required corrections: " + repairFeedback + "\nProduce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
   if captured.amendment != nil {
    repaired := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
     recovery: repairDirection + "\nCorrect this latest incomplete response while preserving its valid corrections:\n" + analysis.reply, reviewNotes: amendmentAssessment.reply, preparedImages: preparedImages.references,

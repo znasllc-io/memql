@@ -465,6 +465,12 @@ func (i *Integration) handleRevisionProposal(ctx context.Context, args map[strin
 	}
 	proposal, err := buildAmendedRevisionProposal(captured, args["response"])
 	if err != nil {
+		// Only invalid proposed replacements are repairable model output. The
+		// run/owner gate above and attribution/storage gates below still fail
+		// normally; a workflow cannot turn those failures into an edit retry.
+		if boolField(args, "reportInvalid") {
+			return reviewResult(map[string]any{"invalidReason": err.Error()})
+		}
 		return nil, err
 	}
 	attribution, err := i.revisionAttribution(ctx, captured, proposal)

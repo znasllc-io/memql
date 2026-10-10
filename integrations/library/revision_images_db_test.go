@@ -225,6 +225,56 @@ func testRevisionDSLRepairsImagePlanBeforeEffects(t *testing.T, f *revisionDB) {
 	}
 }
 
+func testRevisionDSLRepairsOverlappingImageEdits(t *testing.T, f *revisionDB) {
+	for _, invalidAgain := range []bool{false, true} {
+		t.Run(fmt.Sprint(invalidAgain), func(t *testing.T) {
+			f := f.isolatedCase(t)
+			artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
+			request := asString(args["requestId"])
+			f.ai.imagePlan = []revisionImageSpec{{Mode: "generate", Name: "desk.png", Alt: "Writing desk", Prompt: "A writing desk"}}
+			f.ai.assessmentReply, f.ai.needsResearch = "sufficient", true
+			overlapping := revisionAnswer{Summary: "Illustration", Edits: []revisionReplacement{
+				{Before: "Keep this paragraph.", After: "Keep this paragraph. Insert here.", Reason: "Insert illustration", CommentIDs: []string{note}},
+				{Before: "this paragraph.", After: "this paragraph. Insert here too.", Reason: "Insert illustration", CommentIDs: []string{note}},
+			}}
+			invalidResponse, _ := json.Marshal(overlapping)
+			if _, err := f.second.handleRevisionProposal(revisionActor("another-owner", auth.RoleWriter), map[string]any{"requestId": request, "response": string(invalidResponse), "reportInvalid": true}, 0); err == nil {
+				t.Fatal("validation reporting hid an ownership failure")
+			}
+			f.ai.firstAnswer = &overlapping
+			f.ai.answer = revisionAnswer{Summary: "Insert the illustration", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this paragraph.", Reason: "Requested illustration", CommentIDs: []string{note}}}}
+			if invalidAgain {
+				f.ai.answer = overlapping
+			}
+			generator := &preparedImageEngine{IntegrationEngineAccess: f.other}
+			f.second.engine = generator
+			store := &preparedImageStore{f: f, appendProposal: true}
+			f.second.SetImageAssets(store)
+			f.second.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			err := f.execute(f.other, request, false)
+			if f.ai.calls.Load() != 2 || f.ai.repairCalls.Load() != 1 || generator.calls != 1 || store.writes != 1 {
+				t.Fatalf("missing/unbounded edit repair or duplicate image effects: %v calls=%d repairs=%d generation=%d writes=%d", err, f.ai.calls.Load(), f.ai.repairCalls.Load(), generator.calls, store.writes)
+			}
+			if invalidAgain {
+				if err == nil || !strings.Contains(err.Error(), "proposed changes overlap") || f.ai.completionCalls.Load() != 0 {
+					t.Fatalf("invalid repair escaped validation: %v", err)
+				}
+				return
+			}
+			var wait *workstate.HumanWait
+			if !errors.As(err, &wait) || f.ai.completionCalls.Load() != 1 {
+				t.Fatalf("repair not independently reviewed: %v", err)
+			}
+			f.first.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			f.query(f.engine, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
+			if err = f.execute(f.engine, request, true); err != nil || f.ai.calls.Load() != 2 || generator.calls != 1 || store.writes != 1 {
+				t.Fatalf("cross-replica apply repeated completed work: %v", err)
+			}
+		})
+	}
+}
+
 func testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch(t *testing.T, f *revisionDB) {
 	for _, secondFailure := range []bool{false, true} {
 		t.Run(fmt.Sprint(secondFailure), func(t *testing.T) {
