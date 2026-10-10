@@ -26,11 +26,7 @@ func historyResult(t *testing.T, rows []memorynodes.MemoryNode, err error) map[s
 	}
 	return result
 }
-func TestHistoryBranchesAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
-	if f == nil {
-		return
-	}
+func testHistoryBranchesAcrossReplicas(t *testing.T, f *revisionDB) {
 	original := "# Original\n\nAlice keeps **this**.\n"
 	artifact, doc := f.document(original)
 	for n := 1; n <= 53; n++ {
@@ -131,11 +127,7 @@ func TestHistoryBranchesAcrossReplicas(t *testing.T) {
 	}
 }
 
-func TestHistoryForkReadsOwnedFileBytes(t *testing.T) {
-	f := newRevisionDB(t)
-	if f == nil {
-		return
-	}
+func testHistoryForkReadsOwnedFileBytes(t *testing.T, f *revisionDB) {
 	fileID := f.owner + "-imported"
 	f.query(f.engine, f.ctx, "mutation", "createLibraryFile", map[string]any{"fileId": fileID, "name": "Imported.md", "mimeType": "text/markdown", "size": 19, "blobUrl": "https://store.example/imported.md", "source": "uploaded", "format": "markdown"})
 	artifact := f.query(f.engine, f.ctx, "mutation", "createArtifact", map[string]any{"sourceConceptRef": fileID, "ownerUserId": f.owner, "lens": "artifact", "kind": "file", "source": "uploaded", "title": "Imported.md", "format": "markdown"})[0]
@@ -159,11 +151,7 @@ func TestHistoryForkReadsOwnedFileBytes(t *testing.T) {
 	}
 }
 
-func TestPersonalDocumentNotesNeverEnterAIRevision(t *testing.T) {
-	f := newRevisionDB(t)
-	if f == nil {
-		return
-	}
+func testPersonalDocumentNotesNeverEnterAIRevision(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Guide\n\nA selected paragraph.\n")
 	args := map[string]any{"artifactId": artifact, "expectedVersion": doc.version, "expectedRevision": doc.revision, "anchor": map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "sourceQuote": "A selected paragraph.", "quote": "selected"}, "body": "Remember to discuss this privately.", "requestId": "personal-note-request"}
 	rows, err := f.first.handleAddDocumentNote(f.ctx, args, 0)

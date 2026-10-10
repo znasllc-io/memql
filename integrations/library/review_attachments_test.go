@@ -68,8 +68,7 @@ func (e *attachmentVisionEngine) CallAIVision(_ context.Context, req airoute.Res
 	return memql.VisionAIResult{Text: "A one-pixel red test image; no scientific conclusion is supported."}, nil
 }
 
-func TestReviewAttachmentsAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
+func testReviewAttachmentsAcrossReplicas(t *testing.T, f *revisionDB) {
 	referenceID, reference := f.document("# Reference\n\nReference content sentinel.")
 	fileID := fmt.Sprintf("attachment-%d", time.Now().UnixNano())
 	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "createLibraryFile", map[string]any{"fileId": fileID, "name": "Figure.png", "mimeType": "image/png", "size": len(attachmentPNG()), "blobUrl": "https://storage.invalid/verified.png", "source": "uploaded", "format": "image"})

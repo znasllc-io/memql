@@ -380,7 +380,8 @@ func (f *revisionDB) execute(engine *memql.MemQLEngine, request string, resume b
 	return err
 }
 
-// These cases mount the same immutable DSL on two independent replicas.
+// Revision, image, history, attachment and lookup cases mount the same immutable
+// DSL on two independent replicas.
 // Bootstrap them once under this parent; each case owns fresh document/run IDs
 // and model state. Do not use a package-global fixture or parallel subtests.
 func TestDocumentRevisionWorkflow(t *testing.T) {
@@ -389,6 +390,18 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 		name string
 		run  func(*testing.T, *revisionDB)
 	}{
+		{"HistoryBranchesAcrossReplicas", testHistoryBranchesAcrossReplicas},
+		{"HistoryForkReadsOwnedFileBytes", testHistoryForkReadsOwnedFileBytes},
+		{"PersonalDocumentNotesNeverEnterAIRevision", testPersonalDocumentNotesNeverEnterAIRevision},
+		{"ArtifactForFileResolvesBareReceiptAcrossEngines", testArtifactForFileResolvesBareReceiptAcrossEngines},
+		{"ReviewAttachmentsAcrossReplicas", testReviewAttachmentsAcrossReplicas},
+		{"PreparedRevisionImagesRecoverAndPinAcrossReplicas", testPreparedRevisionImagesRecoverAndPinAcrossReplicas},
+		{"RevisionDSLPlansAcquiresAndProposesAnImage", testRevisionDSLPlansAcquiresAndProposesAnImage},
+		{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
+		{"RevisionCompletionRepairsNoopAndReusesSavedImages", testRevisionCompletionRepairsNoopAndReusesSavedImages},
+		{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},
+		{"RevisionPartialFeedbackRepair", testRevisionPartialFeedbackRepair},
+		{"RevisionAmendmentPreservesImagePinsAcrossReplicas", testRevisionAmendmentPreservesImagePinsAcrossReplicas},
 		{"AppliedFeedbackCannotBeDeletedAcrossReplicas", testAppliedFeedbackCannotBeDeletedAcrossReplicas},
 		{"DeleteDocumentAnnotationsAcrossReplicas", testDeleteDocumentAnnotationsAcrossReplicas},
 		{"DeleteProposedFeedbackInvalidatesStaleReview", testDeleteProposedFeedbackInvalidatesStaleReview},

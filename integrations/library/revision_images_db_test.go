@@ -56,27 +56,6 @@ func (s *preparedImageStore) SaveImage(ctx context.Context, w ImageAssetWrite) e
 	return nil
 }
 
-// Image workflows share one two-replica bootstrap, never model or document state.
-// Avoid repeated DSL compilation without changing the CI time limit.
-func TestDocumentRevisionImageWorkflow(t *testing.T) {
-	shared := newRevisionDB(t)
-	cases := []struct {
-		name string
-		run  func(*testing.T, *revisionDB)
-	}{
-		{"PreparedRevisionImagesRecoverAndPinAcrossReplicas", testPreparedRevisionImagesRecoverAndPinAcrossReplicas},
-		{"RevisionDSLPlansAcquiresAndProposesAnImage", testRevisionDSLPlansAcquiresAndProposesAnImage},
-		{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
-		{"RevisionCompletionRepairsNoopAndReusesSavedImages", testRevisionCompletionRepairsNoopAndReusesSavedImages},
-		{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},
-		{"RevisionPartialFeedbackRepair", testRevisionPartialFeedbackRepair},
-		{"RevisionAmendmentPreservesImagePinsAcrossReplicas", testRevisionAmendmentPreservesImagePinsAcrossReplicas},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) { tc.run(t, shared.isolatedCase(t)) })
-	}
-}
-
 func testPreparedRevisionImagesRecoverAndPinAcrossReplicas(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
 	args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
