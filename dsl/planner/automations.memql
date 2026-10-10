@@ -308,3 +308,10 @@ automation workSpineRepair {
  if repair.moved { return false }
  return builtin spineRemedyAsk(reason: "The failed step could not be run again with the violation as guidance: " + repair.message)
 }
+
+/// Replanning reads a bounded evidence view. Full receipts remain in the journal
+/// and completed step identities/source are never removed by this policy.
+@template
+automation workReplanEvidencePolicy {
+ return {perStepCharacters: 600, totalCharacters: 16000}
+}

@@ -37,7 +37,14 @@ whole-document model call. Retries on another replica reuse the immutable
 snapshot. Missing, unfinished, non-text, duplicate or foreign sections fail
 before effects. CSV/JSON and generation from a new request retain composition.
 Malformed Materializer model output is a plan failure, not a transport EOF;
-recovery can replace just assembly while preserving completed chapters. Creating a known file
+recovery can replace just assembly while preserving completed chapters.
+Replanning projects receipts into a DSL-budgeted evidence view: small semantic
+values are retained, large values become explicitly marked head/tail previews
+with character counts and hashes. Duplicate result envelopes and fan-in bodies
+cannot consume the whole planning context. Every completed key/call and the
+exact sealed source remain available; execution and installation still use the
+full journal. Preview omission is never interpreted as missing work or permission
+to invent content. Creating a known file
 does not need an agent turn to rediscover the file capability through tool
 calling. A successful composition requires its Library file to be marked ready.
 Known agent-turn file templates verify an owned, ready Library file produced

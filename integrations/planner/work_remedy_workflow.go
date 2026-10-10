@@ -112,7 +112,11 @@ func (s *remedyScope) generate(ctx context.Context, args map[string]any) (any, e
 		return nil, fmt.Errorf("replan requires a named prompt")
 	}
 	rc := s.context
-	data := map[string]any{"statement": rc.Statement, "completedSteps": rc.CompletedSteps, "failedStep": rc.FailedStep, "inputKeys": inputKeys(rc.Variables), "now": s.remedy.clock().UTC().Format(time.RFC3339)}
+	evidence, err := replanEvidenceView(ctx, rc.CompletedSteps)
+	if err != nil {
+		return nil, err
+	}
+	data := map[string]any{"statement": rc.Statement, "completedSteps": evidence, "failedStep": rc.FailedStep, "inputKeys": inputKeys(rc.Variables), "now": s.remedy.clock().UTC().Format(time.RFC3339)}
 	source := make([]map[string]any, 0, len(rc.Template))
 	for _, construct := range rc.Template {
 		source = append(source, map[string]any{"kind": construct.Kind, "name": construct.Name, "source": construct.Source})
