@@ -38,7 +38,11 @@ func (s *remedyScope) run(ctx context.Context, entry string) bool {
 		// Once a model was spent, leaving the remedy wait live would spend it on
 		// every lease. The native envelope closes that loophole even if the recipe
 		// catches a failure or simply returns early.
-		return s.ask(ctx, "The remedy recipe stopped before it could install a validated result.")
+		reason := "The remedy recipe stopped before it could install a validated result."
+		if err != nil {
+			reason += " " + err.Error()
+		}
+		return s.ask(ctx, reason)
 	}
 	return s.took
 }
@@ -73,6 +77,12 @@ func (s *remedyScope) operations() map[string]workflowhost.Operation {
 // that would leave the allowance unchanged and replay a known failed plan.
 func (s *remedyScope) ask(ctx context.Context, reason string) bool {
 	s.closed = true
+	// A timed-out attempt must still leave a durable decision request, or the
+	// next lease holder repeats the same model call. Only this terminal write
+	// detaches cancellation; no inference or installation does. The writer
+	// rechecks the current run, including cancellation, before changing it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	if s.ceiling != nil {
 		if err := s.remedy.writer.PauseReplanForBudget(ctx, s.owner, s.runID, s.step, s.ceiling); err != nil {
 			s.remedy.warn("work remedy: could not park the replan on its budget", s.runID, err)
@@ -112,7 +122,7 @@ func (s *remedyScope) generate(ctx context.Context, args map[string]any) (any, e
 		data["remainingGoal"] = strings.TrimSpace(s.reason)
 	}
 	s.generated = true
-	out, err := s.remedy.loop.engine.InvokeAI(systemActorContext(ctx), prompt, data)
+	out, err := s.remedy.loop.engine.InvokeAIStructured(systemActorContext(ctx), prompt, data, "workReplan", replanDraftSchema, true)
 	if err != nil {
 		if errors.As(err, &s.ceiling) {
 			return map[string]any{"available": true, "ok": false, "message": err.Error()}, nil
@@ -182,15 +192,15 @@ func (s *remedyScope) install(ctx context.Context, _ map[string]any) (any, error
 	if s.closed || s.persisted.ConstructId == "" {
 		return nil, fmt.Errorf("replan installation requires a persisted validated template")
 	}
-	s.closed = true
 	out := s.persisted
 	err := s.remedy.writer.InstallReplan(ctx, s.owner, s.runID, workintegration.ReplanTemplate{AutomationName: out.AutomationName, TemplateConstructId: out.ConstructId, TemplateFingerprint: out.TemplateFingerprint, TemplateVersion: out.TemplateVersion, StepKeys: s.stepKeys, ResumeAt: s.resumeAt,
 		Outcome: map[string]any{"replannedFrom": s.step, "replannedAt": s.remedy.clock().UTC().Format(time.RFC3339), "prefixKept": len(s.context.CompletedSteps), "abandonedAssumption": s.draft.AbandonedAssumption}})
 	if err != nil {
+		s.closed = errors.Is(err, workintegration.ErrRemedyNotWaiting)
 		s.remedy.warn("work remedy: could not install the re-planned template on the run", s.runID, err)
 		return false, nil
 	}
-	s.took = true
+	s.closed, s.took = true, true
 	return true, nil
 }
 

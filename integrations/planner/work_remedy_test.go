@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
@@ -21,12 +22,17 @@ import (
 // the draft it holds, every write is recorded, and Gate 1 is the real sandbox.
 type replanEngine struct {
 	realSandbox
-	mu      sync.Mutex
-	queries []string
-	aiCalls []string
-	aiData  []map[string]any
-	answer  any
-	err     error
+	mu              sync.Mutex
+	queries         []string
+	aiCalls         []string
+	aiData          []map[string]any
+	answer          any
+	err             error
+	onAI            func(context.Context)
+	structuredCalls int
+	schemaName      string
+	schema          json.RawMessage
+	strict          bool
 }
 
 func (e *replanEngine) Execute(_ context.Context, q string) (any, error) {
@@ -36,11 +42,14 @@ func (e *replanEngine) Execute(_ context.Context, q string) (any, error) {
 	return nil, nil
 }
 
-func (e *replanEngine) InvokeAI(_ context.Context, templateId string, data map[string]any) (any, error) {
+func (e *replanEngine) InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.aiCalls = append(e.aiCalls, templateId)
 	e.aiData = append(e.aiData, data)
+	if e.onAI != nil {
+		e.onAI(ctx)
+	}
 	return e.answer, e.err
 }
 
@@ -65,16 +74,18 @@ func (e *replanEngine) wrote(construct string) []string {
 // write the remedy made before it installed anything, so a remedy that only
 // records an outcome is visible as exactly that.
 type remedyRecorder struct {
-	mu        sync.Mutex
-	context   workintegration.ReplanContext
-	readErr   error
-	installed []workintegration.ReplanTemplate
-	repairs   []string
-	asked     []string
-	outcomes  []map[string]any
-	repairErr error
-	budgets   []*memql.RunCeilingError
-	budgetErr error
+	mu         sync.Mutex
+	context    workintegration.ReplanContext
+	readErr    error
+	installed  []workintegration.ReplanTemplate
+	repairs    []string
+	asked      []string
+	outcomes   []map[string]any
+	repairErr  error
+	budgets    []*memql.RunCeilingError
+	budgetErr  error
+	onAsk      func(context.Context) error
+	installErr error
 }
 
 func (r *remedyRecorder) LoadReplanContext(context.Context, string, string, string) (workintegration.ReplanContext, error) {
@@ -84,6 +95,9 @@ func (r *remedyRecorder) LoadReplanContext(context.Context, string, string, stri
 func (r *remedyRecorder) InstallReplan(_ context.Context, _, _ string, t workintegration.ReplanTemplate) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.installErr != nil {
+		return r.installErr
+	}
 	r.installed = append(r.installed, t)
 	return nil
 }
@@ -95,10 +109,13 @@ func (r *remedyRecorder) RequestRepair(_ context.Context, _, _, stepKey, violati
 	return r.repairErr
 }
 
-func (r *remedyRecorder) AskAboutFailedRemedy(_ context.Context, _, _, _, kind, reason string) error {
+func (r *remedyRecorder) AskAboutFailedRemedy(ctx context.Context, _, _, _, kind, reason string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.asked = append(r.asked, kind+": "+reason)
+	if r.onAsk != nil {
+		return r.onAsk(ctx)
+	}
 	return nil
 }
 
@@ -188,6 +205,17 @@ func TestReplanInstallsTheDraftThroughTheCompilePath(t *testing.T) {
 	}
 	if len(eng.aiCalls) != 1 || eng.aiCalls[0] != "replanGap" {
 		t.Fatalf("model calls = %v, want exactly one replanGap", eng.aiCalls)
+	}
+	if eng.structuredCalls != 1 || eng.schemaName != "workReplan" || !eng.strict {
+		t.Fatal("replanning bypassed the structured model contract")
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(eng.schema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	properties := schema["properties"].(map[string]any)
+	if len(properties) != 3 || properties["source"] == nil || properties["goalAlreadyServed"] == nil || properties["abandonedAssumption"] == nil || schema["additionalProperties"] != false {
+		t.Fatalf("replan wire contract = %v", schema)
 	}
 	if got := eng.aiData[0]["completedSteps"]; got == nil {
 		t.Fatal("replanGap was not shown the completed prefix; it would re-emit every step that already ran")
@@ -386,5 +414,45 @@ func TestRepairRequestsAGuidedRerunOfTheFailedStep(t *testing.T) {
 }
 
 func (e *replanEngine) InvokeAIStructured(ctx context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	e.structuredCalls++
+	e.schemaName, e.schema, e.strict = schemaName, append(json.RawMessage(nil), schema...), strict
 	return structuredTestResponse(e.InvokeAI(ctx, name, data))
+}
+
+func TestReplanExpiredAttemptStillRecordsBoundedFailure(t *testing.T) {
+	type evidenceKey struct{}
+	ctx, cancel := context.WithCancelCause(context.WithValue(context.Background(), evidenceKey{}, "same-run"))
+	defer cancel(nil)
+	eng := &replanEngine{err: context.DeadlineExceeded, onAI: func(context.Context) { cancel(context.DeadlineExceeded) }}
+	rec := &remedyRecorder{context: replanFixture(), onAsk: func(writeCtx context.Context) error {
+		if err := writeCtx.Err(); err != nil {
+			t.Fatalf("expired model context reached the terminal write: %v", err)
+		}
+		deadline, ok := writeCtx.Deadline()
+		if !ok || time.Until(deadline) <= 0 || time.Until(deadline) > 5*time.Second {
+			t.Fatalf("failure recording has no short independent deadline: %v", deadline)
+		}
+		if writeCtx.Value(evidenceKey{}) != "same-run" {
+			t.Fatal("failure recording lost the original run context")
+		}
+		return nil
+	}}
+	if !newRemedy(eng, rec).Replan(ctx, "v1:work:run:r1", "u1", "draft", "split the oversized work") {
+		t.Fatal("timed-out attempt remained eligible for another automatic model call")
+	}
+	if len(rec.asked) != 1 || len(eng.aiCalls) != 1 || len(rec.installed) != 0 || len(eng.queries) != 0 {
+		t.Fatalf("timeout repeated inference or wrote a draft: calls=%v asks=%v installs=%v", eng.aiCalls, rec.asked, rec.installed)
+	}
+}
+
+func TestReplanInstallRefusalClosesTheSpentAttempt(t *testing.T) {
+	for _, installErr := range []error{context.DeadlineExceeded, workintegration.ErrRemedyNotWaiting} {
+		eng := &replanEngine{answer: replanAnswer(t, replanSource, false)}
+		rec := &remedyRecorder{context: replanFixture(), installErr: installErr}
+		took := newRemedy(eng, rec).Replan(context.Background(), "v1:work:run:r1", "u1", "draft", "repair")
+		moved := errors.Is(installErr, workintegration.ErrRemedyNotWaiting)
+		if took == moved || len(rec.asked) != map[bool]int{true: 0, false: 1}[moved] || len(eng.aiCalls) != 1 {
+			t.Fatalf("install refusal: moved=%v took=%v asked=%v calls=%v", moved, took, rec.asked, eng.aiCalls)
+		}
+	}
 }

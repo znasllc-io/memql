@@ -140,6 +140,19 @@ type replanDraft struct {
 	AbandonedAssumption string `json:"abandonedAssumption"`
 }
 
+// The model emits only the executable draft and its verdict. The runtime
+// derives step identities and dependencies from the validated source rather
+// than asking for a second, potentially inconsistent plan description.
+var replanDraftSchema = json.RawMessage(`{
+ "type":"object","additionalProperties":false,
+ "required":["source","goalAlreadyServed","abandonedAssumption"],
+ "properties":{
+  "source":{"type":"string"},
+  "goalAlreadyServed":{"type":"boolean"},
+  "abandonedAssumption":{"type":"string"}
+ }
+}`)
+
 // parseReplanDraft reads replanGap's answer, tolerating a string (raw model
 // text, fenced or wrapped in prose) and a map (schema-enforced), the way the
 // authoring parsers do. A draft with no source and no "already served" verdict

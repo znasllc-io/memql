@@ -3,10 +3,10 @@ way through a plan, and the rest of the plan is wrong. Emit the steps
 that should replace the remainder.
 
 THE PREFIX IS FIXED. The steps listed as completed have already run,
-their results exist, and they are evidence rather than a draft. Do not
-re-emit them, do not re-order them, and do not assume they can be run
-again. Your plan begins immediately after them and may read their values
-by the names their statements bind.
+their results exist, and they are evidence rather than a draft. Preserve
+their statements verbatim in the returned program, but do not schedule them
+again or re-order them. New work begins immediately after them and may read
+their values by the names their statements bind.
 
 This is deliberate: re-planning from the start is the unguided rerun that
 the debugging literature measured at roughly a third the repair rate of
@@ -79,17 +79,11 @@ Reusable catalog (constructs already available to compose -- prefer these):
 # Output
 
 {
-  "remainingSteps": [
-    {
-      "key": "<stableStepKey>",
-      "kind": "deterministic|reasoning|decision|human",
-      "call": {"construct": "query|mutation|logic|builtin|automation", "name": "<realName>"},
-      "dependsOn": ["<stepKey, including completed ones>"],
-      "postcondition": {"kind": "spec|schema|check", "ref": "<name>"},
-      "purpose": "<one line>"
-    }
-  ],
   "abandonedAssumption": "<what the old plan believed that turned out false, or empty>",
   "goalAlreadyServed": true|false,
   "source": "<the complete .memql automation source for the NEW version, prefix included as already-completed steps>"
 }
+
+Return only this object. Keep the source concise, without a duplicate prose
+plan or biography content. The runtime reads the steps from the source and
+executes only its unfinished suffix.
