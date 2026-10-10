@@ -1561,8 +1561,10 @@ func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *Fun
 		}
 	}
 
-	// Validate args using the function's args-block schema.
-	validator := newFunctionValidator(fns.LookupIndex(), nil)
+	// Argument validation reads only this function's schema. Copying the whole
+	// registry here adds work proportional to every unrelated loaded function
+	// to each mutation, including every workflow journal write.
+	validator := &functionValidator{}
 	if err := validator.validateFunctionArgs(fn, args); err != nil {
 		return nil, err
 	}
