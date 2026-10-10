@@ -2,6 +2,7 @@
 @level("strong")
 @templateFile("prompts/libraryRevisionPassages.tmpl")
 prompt libraryRevisionPassages {
+ preparedImages string
  references string
  evidence string
  document string!
@@ -13,6 +14,7 @@ prompt libraryRevisionPassages {
 @level("strong")
 @templateFile("prompts/libraryRevisionItem.tmpl")
 prompt libraryRevisionItem {
+ preparedImages string
  references string
  evidence string
  document string!
@@ -72,4 +74,13 @@ prompt libraryRevisionEvidence {
  instruction string
  appEvidence string
  localEvidence string
+}
+
+/// Select bounded image operations from human feedback and retrieved evidence.
+@level("strong")
+@templateFile("prompts/libraryRevisionImagePlan.tmpl")
+prompt libraryRevisionImagePlan {
+ passages string!
+ instruction string
+ evidence string!
 }

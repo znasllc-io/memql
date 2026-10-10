@@ -315,6 +315,9 @@ func (i *Integration) ValidateRevisionProposal(ctx context.Context, proposal map
 	if _, _, err = i.reviewAttachments(ctx, refs); err != nil {
 		return err
 	}
+	if err = i.validatePreparedRevisionImages(ctx, proposal); err != nil {
+		return err
+	}
 	if content != proposal["content"] {
 		return fmt.Errorf("the saved document bytes changed; prepare a new revision request")
 	}
@@ -463,7 +466,7 @@ func (i *Integration) handleRevisionInput(ctx context.Context, args map[string]a
 }
 
 func (i *Integration) handleRevisionProposal(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	_, captured, _, err := i.revisionRun(ctx, asString(args["requestId"]))
+	ids, captured, _, err := i.revisionRun(ctx, asString(args["requestId"]))
 	if err != nil {
 		return nil, err
 	}
@@ -476,6 +479,13 @@ func (i *Integration) handleRevisionProposal(ctx context.Context, args map[strin
 		return nil, err
 	}
 	proposal["attribution"] = attribution
+	images, err := i.preparedRevisionImages(ctx, asString(args["requestId"]), ids.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if len(images) > 0 {
+		proposal["preparedImages"] = images
+	}
 	return reviewResult(map[string]any{"proposal": proposal, "changed": proposal["revisedContent"] != captured["content"], "summary": proposal["summary"]})
 }
 

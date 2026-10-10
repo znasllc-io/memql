@@ -318,22 +318,44 @@ automation reviseLibraryDocument {
   combinedEvidence := "App research report:\n" + (evidence.app.available ? evidence.app.report : "App research was unavailable; no app findings were obtained.") + "\nIndependent local report:\n" + evidence.headless + "\nEvidence assessment:\n" + (assessment.reply ?? "Unavailable") + "\nTargeted local research:\n" + supplement.reply
  }
 
+ // Image selection is authored here; native operations only acquire and verify one asset.
+ if lower(trim(intent.reply)) == "images" {
+  imagePlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: {
+   type: "object", additionalProperties: false, required: ["images", "limitations"], properties: {
+    limitations: {type: "string"}, images: {type: "array", maxItems: 64, items: {
+     type: "object", additionalProperties: false, required: ["mode", "name", "alt", "url", "sourceURL", "attribution", "license", "prompt"],
+     properties: {mode: {type: "string", enum: ["import", "generate"]}, name: {type: "string"}, alt: {type: "string"}, url: {type: "string"}, sourceURL: {type: "string"}, attribution: {type: "string"}, license: {type: "string"}, prompt: {type: "string"}}
+    }}
+   }
+  }, data: {passages: captured.passagesJSON, instruction: captured.amendment.instruction ?? captured.instruction, evidence: combinedEvidence})
+  imageSpecs := builtin libraryRevisionImagePlan(response: imagePlan.reply)
+  for imageSpec in imageSpecs.images {
+   builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: imageSpec, level: "fast")
+  }
+  imageLimitations := imageSpecs.limitations
+ } else {
+  imageLimitations := ""
+ }
+ preparedImages := builtin libraryRevisionPreparedImages(requestId: args.requestId)
+
  // The edit protocol is constrained JSON, not free-form model reasoning.
  revisionSchema := {
-  type: "object", additionalProperties: false, required: ["summary", "edits"],
-  properties: {summary: {type: "string"}, edits: {type: "array", items: {
+  type: "object", additionalProperties: false, required: ["edits", "summary"],
+  properties: {edits: {type: "array", maxItems: 100, items: {
    type: "object", additionalProperties: false, required: ["before", "after", "reason", "commentIds"],
-   properties: {before: {type: "string"}, after: {type: "string"}, reason: {type: "string"}, commentIds: {type: "array", items: {type: "string"}}}
-  }}}
+   properties: {before: {type: "string"}, after: {type: "string"}, reason: {type: "string", maxLength: 400}, commentIds: {type: "array", items: {type: "string"}}}
+  }}, summary: {type: "string", maxLength: 300}}
  }
  if captured.amendment != nil {
   analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
+   preparedImages: preparedImages.references,
    document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.amendment.instruction,
-   previous: captured.amendment.edits, evidence: combinedEvidence
+   previous: captured.amendment.edits, evidence: combinedEvidence + "\nImage acquisition limitations: " + imageLimitations
   })
  } else {
   analysis := builtin ai(templateId: "libraryRevisionPassages", progress: true, responseSchema: revisionSchema, data: {
-   document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.instruction, evidence: combinedEvidence
+   preparedImages: preparedImages.references,
+   document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.instruction, evidence: combinedEvidence + "\nImage acquisition limitations: " + imageLimitations
   })
  }
  proposed := builtin libraryRevisionProposal(requestId: args.requestId, response: analysis.reply)

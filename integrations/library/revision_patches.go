@@ -250,6 +250,9 @@ func validateRevisionResult(captured, proposal map[string]any) error {
 	if err != nil {
 		return err
 	}
+	if proposal["preparedImages"] != nil {
+		rebuilt["preparedImages"] = proposal["preparedImages"]
+	}
 	rebuilt["attribution"] = proposal["attribution"]
 	if proposal["attribution"] == nil {
 		delete(rebuilt, "attribution")

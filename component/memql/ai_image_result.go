@@ -27,6 +27,7 @@ type StoredImageAIResult struct {
 // A journal hit returns the receipt without regenerating or uploading an image.
 func (e *MemQLEngine) CallAIImage(ctx context.Context, req airoute.ResolveRequest, input FleetImageRequest, storageKey string, store func(context.Context, FleetImage, airoute.Resolution) (string, error)) (StoredImageAIResult, error) {
 	var out StoredImageAIResult
+	input.Prompt = withStepOverrideText(ctx, input.Prompt)
 	if strings.TrimSpace(input.Prompt) == "" || len(input.Prompt) > 12000 || storageKey == "" || store == nil {
 		return out, fmt.Errorf("image: a bounded prompt and durable destination are required")
 	}

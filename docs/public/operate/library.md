@@ -527,3 +527,27 @@ never appears in the Library.
 - Sub-project J (commerce memory: orders, line items and inventory mirroring by
   webhook with Admin-API reconciliation) has its own record. Nothing about
   orders or inventory is stored by the Library or by a storefront deployable.
+
+## Images requested through document feedback
+
+Markdown review can research new images, generate illustrations with a local
+image model, or mix both when requested. Vision models describe images; they do
+not necessarily generate them. Image generation requires a fleet runtime that
+advertises `image_gen`; the document workflow uses the local-only routing policy
+and does not fall back to a paid image service.
+
+The DSL selects sources and generation prompts, acquires each image separately,
+and proposes ordinary Markdown image links to the saved Library artifacts.
+Imported images retain their source page, direct URL, attribution and stated
+reuse license. Generated illustrations retain their prompt, actual served model
+and run/step provenance, and their proposed captions identify them as generated.
+Source evidence is assessed by the research workflow; a saved license statement
+is not an independent legal determination.
+
+Images are limited to PNG, JPEG, GIF and WebP, eight MiB and 24 million pixels
+per asset, with at most 64 prepared assets per revision. Acquired images are
+saved before proposing document edits. The proposal pins their versions and
+byte hashes and rechecks them at approval and application. A source that cannot
+be retrieved or a model that is unavailable remains an explicit incomplete
+operation, not a successful image. Saving an image does not approve its insertion
+into the document. Human-supplied attachments keep their existing separate limits.

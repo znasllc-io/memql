@@ -311,7 +311,8 @@ type LibraryFileRow struct {
 	// filters it out, so a re-push never lands in the Bin; libraryFileById
 	// does NOT, because a caller asking about a specific id deserves the
 	// honest answer and this field is how they get it.
-	Archived bool
+	Archived        bool
+	ImageProvenance map[string]any `json:"imageProvenance"`
 }
 
 // LibraryFileVersionRow is one superseded version, as the history read and
@@ -2051,21 +2052,23 @@ func (s *EngineLibraryStore) FileByUploadedFrom(ctx context.Context, workerId, p
 // version-target resolve and the (machine, path) resolve differ in how they
 // FIND the row and not at all in what it is.
 func libraryFileRowFrom(r map[string]any) *LibraryFileRow {
+	provenance, _ := r["imageProvenance"].(map[string]any)
 	createdAt, _ := time.Parse(time.RFC3339Nano, rowString(r, "createdAt"))
 	if t, ok := r["createdAt"].(time.Time); ok {
 		createdAt = t
 	}
 	return &LibraryFileRow{
-		CreatedAt: createdAt,
-		ID:        rowString(r, "id"),
-		Name:      rowString(r, "name"),
-		MimeType:  rowString(r, "mimeType"),
-		Size:      rowInt(r, "size"),
-		BlobUrl:   rowString(r, "blobUrl"),
-		Status:    rowString(r, "status"),
-		Sha256:    rowString(r, "sha256"),
-		Format:    rowString(r, "format"),
-		Summary:   rowString(r, "summary"),
+		ImageProvenance: provenance,
+		CreatedAt:       createdAt,
+		ID:              rowString(r, "id"),
+		Name:            rowString(r, "name"),
+		MimeType:        rowString(r, "mimeType"),
+		Size:            rowInt(r, "size"),
+		BlobUrl:         rowString(r, "blobUrl"),
+		Status:          rowString(r, "status"),
+		Sha256:          rowString(r, "sha256"),
+		Format:          rowString(r, "format"),
+		Summary:         rowString(r, "summary"),
 		// ABSENT IS 1 (epic memql#4806): every file uploaded before the
 		// field existed has no member at all, and a supersede that read
 		// that as 0 would freeze the outgoing head as "version 0" and

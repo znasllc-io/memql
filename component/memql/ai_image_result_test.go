@@ -23,6 +23,7 @@ func (f *imageResultFleet) Call(_ context.Context, req FleetCallRequest) (FleetC
 }
 
 func TestStoredImageReplayAcrossEnginesKeepsBytesOutOfJournal(t *testing.T) {
+	offTheSharedRateCeiling(t)
 	model := onlineModel("illustrator", false)
 	model.ImageGen, model.ContextWindow = true, 0
 	fleet := &imageResultFleet{stubFleet: stubFleet{models: []FleetModel{model}}}
@@ -68,6 +69,7 @@ func TestStoredImageReplayAcrossEnginesKeepsBytesOutOfJournal(t *testing.T) {
 }
 
 func TestStoredImageFailureIsNotASuccessReceipt(t *testing.T) {
+	offTheSharedRateCeiling(t)
 	model := onlineModel("illustrator", false)
 	model.ImageGen = true
 	fleet := &imageResultFleet{stubFleet: stubFleet{models: []FleetModel{model}}}
@@ -83,5 +85,21 @@ func TestStoredImageFailureIsNotASuccessReceipt(t *testing.T) {
 	}
 	if rows := journal.rows["failed-image"]; len(rows) != 1 || rows[0].Error == "" {
 		t.Fatalf("failure not recorded: %+v", rows)
+	}
+}
+
+func TestStoredImageHonorsOwnerStepInstructions(t *testing.T) {
+	offTheSharedRateCeiling(t)
+	model := onlineModel("illustrator", false)
+	model.ImageGen = true
+	fleet := &imageResultFleet{stubFleet: stubFleet{models: []FleetModel{model}}}
+	e := engineWithFleetDefaultPrompt(t, fleet, "")
+	ctx := common.ContextWithRun(userCtx("alice"), common.RunContext{RunId: "image-override", OwnerUserId: "alice", StepKey: "portrait", Override: &common.StepOverride{Prompt: "Use a charcoal drawing style"}})
+	_, err := e.CallAIImage(ctx, airoute.ResolveRequest{Level: airoute.LevelFast, ExplicitProvider: "fleet:illustrator"}, FleetImageRequest{Prompt: "An illustrated portrait", Width: 512, Height: 768, Count: 1, Format: "png"}, "image-override", func(context.Context, FleetImage, airoute.Resolution) (string, error) { return "stored-image", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fleet.lastReq.Image.Prompt, "Use a charcoal drawing style") {
+		t.Fatal("owner instructions did not reach image model")
 	}
 }

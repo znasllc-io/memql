@@ -120,6 +120,7 @@ shape documentVersion documentVersionFull {
 /// name, mimeType, size and blobUrl together to stream the bytes with correct headers.
 @row
 shape file libraryFileFull {
+  imageProvenance
   row.id
   ownerUserId
   name

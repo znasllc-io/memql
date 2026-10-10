@@ -75,8 +75,15 @@
           },
           {
             "args": {
+              "requestId": "s-requestId"
+            },
+            "kind": "builtin",
+            "name": "libraryRevisionPreparedImages"
+          },
+          {
+            "args": {
               "data": {
-                "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n"
+                "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n\nImage acquisition limitations: "
               },
               "progress": true,
               "responseSchema": {
@@ -99,6 +106,7 @@
                           "type": "array"
                         },
                         "reason": {
+                          "maxLength": 400,
                           "type": "string"
                         }
                       },
@@ -110,15 +118,17 @@
                       ],
                       "type": "object"
                     },
+                    "maxItems": 100,
                     "type": "array"
                   },
                   "summary": {
+                    "maxLength": 300,
                     "type": "string"
                   }
                 },
                 "required": [
-                  "summary",
-                  "edits"
+                  "edits",
+                  "summary"
                 ],
                 "type": "object"
               },
@@ -217,8 +227,15 @@
           },
           {
             "args": {
+              "requestId": "s-requestId"
+            },
+            "kind": "builtin",
+            "name": "libraryRevisionPreparedImages"
+          },
+          {
+            "args": {
               "data": {
-                "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n"
+                "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n\nImage acquisition limitations: "
               },
               "progress": true,
               "responseSchema": {
@@ -241,6 +258,7 @@
                           "type": "array"
                         },
                         "reason": {
+                          "maxLength": 400,
                           "type": "string"
                         }
                       },
@@ -252,15 +270,17 @@
                       ],
                       "type": "object"
                     },
+                    "maxItems": 100,
                     "type": "array"
                   },
                   "summary": {
+                    "maxLength": 300,
                     "type": "string"
                   }
                 },
                 "required": [
-                  "summary",
-                  "edits"
+                  "edits",
+                  "summary"
                 ],
                 "type": "object"
               },
