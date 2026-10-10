@@ -198,6 +198,7 @@ type revisionDB struct {
 	engine, other *memql.MemQLEngine
 	ctx           context.Context
 	owner         string
+	resetCase     func()
 }
 
 func newRevisionDB(t *testing.T) *revisionDB {
@@ -238,8 +239,27 @@ func newRevisionDB(t *testing.T) *revisionDB {
 	}
 	f.first, f.engine = open()
 	f.second, f.other = open()
+	first, second := *f.first, *f.second
+	f.resetCase = func() {
+		*f.ai = revisionAI{}
+		*f.first, *f.second = first, second
+	}
 	return f
 }
+
+// Reuse only immutable engine/DSL setup within one sequential test group.
+// Each case gets new ownership, rows and model/adapter state. Registered
+// handlers still point at these restored integration instances.
+func (f *revisionDB) isolatedCase(t *testing.T) *revisionDB {
+	t.Helper()
+	f.resetCase()
+	fresh := *f
+	fresh.t = t
+	fresh.owner = fmt.Sprintf("revision-%d", time.Now().UnixNano())
+	fresh.ctx = revisionActor(fresh.owner, auth.RoleWriter)
+	return &fresh
+}
+
 func revisionActor(user string, role auth.Role) context.Context {
 	return auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: user}), &auth.AccessContext{UserId: user, Role: role})
 }
@@ -357,23 +377,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			f := *shared
-			f.t = t
-			f.owner = fmt.Sprintf("revision-%d", time.Now().UnixNano())
-			f.ctx = revisionActor(f.owner, auth.RoleWriter)
-			f.ai.calls.Store(0)
-			f.ai.appCalls.Store(0)
-			f.ai.researchCalls.Store(0)
-			f.ai.retainedEvidenceCalls.Store(0)
-			f.ai.needsResearch = false
-			f.ai.parallelResearch = false
-			f.ai.assessmentReply, f.ai.headlessScope = "", ""
-			f.ai.assessmentError = nil
-			f.ai.assessmentCalls.Store(0)
-			f.ai.appStarted, f.ai.headlessStarted = nil, nil
-			f.ai.appError = nil
-			f.ai.answer = revisionAnswer{}
-			tc.run(t, &f)
+			tc.run(t, shared.isolatedCase(t))
 		})
 	}
 }

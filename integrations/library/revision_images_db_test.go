@@ -54,8 +54,28 @@ func (s *preparedImageStore) SaveImage(ctx context.Context, w ImageAssetWrite) e
 	}
 	return nil
 }
-func TestPreparedRevisionImagesRecoverAndPinAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
+
+// Image workflows share one two-replica bootstrap, never model or document state.
+// Avoid repeated DSL compilation without changing the CI time limit.
+func TestDocumentRevisionImageWorkflow(t *testing.T) {
+	shared := newRevisionDB(t)
+	cases := []struct {
+		name string
+		run  func(*testing.T, *revisionDB)
+	}{
+		{"PreparedRevisionImagesRecoverAndPinAcrossReplicas", testPreparedRevisionImagesRecoverAndPinAcrossReplicas},
+		{"RevisionDSLPlansAcquiresAndProposesAnImage", testRevisionDSLPlansAcquiresAndProposesAnImage},
+		{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
+		{"RevisionCompletionRepairsNoopAndReusesSavedImages", testRevisionCompletionRepairsNoopAndReusesSavedImages},
+		{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},
+		{"RevisionAmendmentPreservesImagePinsAcrossReplicas", testRevisionAmendmentPreservesImagePinsAcrossReplicas},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { tc.run(t, shared.isolatedCase(t)) })
+	}
+}
+
+func testPreparedRevisionImagesRecoverAndPinAcrossReplicas(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
 	args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
 	request := asString(args["requestId"])
@@ -128,8 +148,7 @@ func TestPreparedRevisionImagesRecoverAndPinAcrossReplicas(t *testing.T) {
 	}
 }
 
-func TestRevisionDSLPlansAcquiresAndProposesAnImage(t *testing.T) {
-	f := newRevisionDB(t)
+func testRevisionDSLPlansAcquiresAndProposesAnImage(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
 	args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
 	request := asString(args["requestId"])
@@ -159,10 +178,10 @@ func TestRevisionDSLPlansAcquiresAndProposesAnImage(t *testing.T) {
 	}
 }
 
-func TestRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch(t *testing.T) {
+func testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch(t *testing.T, f *revisionDB) {
 	for _, secondFailure := range []bool{false, true} {
 		t.Run(fmt.Sprint(secondFailure), func(t *testing.T) {
-			f := newRevisionDB(t)
+			f := f.isolatedCase(t)
 			artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
 			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a researched portrait and a generated illustration.")
 			request := asString(args["requestId"])
@@ -215,8 +234,7 @@ func TestRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch(t *testing.T)
 	}
 }
 
-func TestRevisionCompletionRepairsNoopAndReusesSavedImages(t *testing.T) {
-	f := newRevisionDB(t)
+func testRevisionCompletionRepairsNoopAndReusesSavedImages(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
 	args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add an illustration.")
 	request := asString(args["requestId"])
@@ -279,10 +297,10 @@ func TestRevisionCompletionRepairsNoopAndReusesSavedImages(t *testing.T) {
 	}
 }
 
-func TestRevisionNoopAssessmentAndBoundedRepair(t *testing.T) {
+func testRevisionNoopAssessmentAndBoundedRepair(t *testing.T, f *revisionDB) {
 	for _, satisfied := range []bool{true, false} {
 		t.Run(fmt.Sprint(satisfied), func(t *testing.T) {
-			f := newRevisionDB(t)
+			f := f.isolatedCase(t)
 			artifact, doc := f.document("# Guide\n\nOriginal claim.\n")
 			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Correct the claim if needed.")
 			f.ai.firstAnswer = &revisionAnswer{Summary: "No changes needed", Edits: []revisionReplacement{}}
@@ -324,8 +342,7 @@ func TestPreparedImageMustBeRenderedMarkdown(t *testing.T) {
 
 // An item revision must carry the original image receipt across a replica hop,
 // even though its new request has different feedback and no image-generation step.
-func TestRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T) {
-	f := newRevisionDB(t)
+func testRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T, f *revisionDB) {
 	artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
 	args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
 	request := asString(args["requestId"])
