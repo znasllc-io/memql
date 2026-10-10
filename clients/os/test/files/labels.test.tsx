@@ -31,7 +31,7 @@ async function openRefine() {
 
 async function openInspector(title: string): Promise<HTMLElement> {
   await click(screen.getByRole("button", { name: new RegExp(title) }));
-  return screen.getByRole("complementary", { name: "File details" });
+  return screen.getByRole("region", { name: "File details" });
 }
 
 describe("the label facet", () => {
@@ -49,7 +49,7 @@ describe("the label facet", () => {
     // ...and no label rail beside the folder tree. The rail is REACHED first,
     // so a rename of its own label cannot turn this into an assertion about a
     // node that is not there (the positive control for the negative below).
-    const rail = screen.getByRole("navigation", { name: "Places and folders" });
+    const rail = screen.getByRole("navigation", { name: "File locations" });
     expect(within(rail).getByText("Library")).toBeTruthy();
     expect(within(rail).queryByText("client-acme")).toBeNull();
     expect(within(rail).queryByText("urgent")).toBeNull();
@@ -262,7 +262,7 @@ describe("the label editor in the inspector", () => {
     await renderFiles();
     const inspector = await openInspector("brief\\.pdf");
 
-    expect(within(inspector).getAllByText(/Labels are free text/)).toHaveLength(1);
+    expect(within(inspector).getAllByText(/Use labels to find related files/)).toHaveLength(1);
   });
 
   it("says None yet rather than hiding the control on a file with no labels", async () => {

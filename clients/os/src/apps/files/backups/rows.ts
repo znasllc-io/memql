@@ -39,6 +39,7 @@ export interface BackupRow {
   status: "active" | "paused";
   excludeGlobs: string[];
   includeHidden: boolean;
+  intervalMinutes?: number;
   archived: boolean;
   /** "" when no cockpit has reported yet -- NOT "ok". */
   originState: OriginState | "";
@@ -65,6 +66,7 @@ export function backupFromRow(raw: Row): BackupRow {
     status: status === "paused" ? "paused" : "active",
     excludeGlobs: stringsOf(row, "excludeGlobs"),
     includeHidden: boolOr(row, "includeHidden", false),
+    intervalMinutes: Math.max(5, rowNumber(row, "intervalMinutes") ?? 5),
     archived: boolOr(row, "archived", false),
     // An unrecognised origin state reads as "" -- not reported -- for the
     // reason linkStateOf does the same: a value this build cannot name is one
@@ -88,6 +90,7 @@ export interface NewBackup {
   folderId: string;
   excludeGlobs: string[];
   includeHidden: boolean;
+  intervalMinutes?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -252,10 +255,17 @@ export function worstFileState(states: readonly (LinkState | "")[]): LinkState |
 export function backupFingerprint(backup: BackupRow): string {
   return [
     backup.status,
+    String(backup.intervalMinutes ?? 5),
     backup.originState,
     backup.localPath,
     backup.folderId,
     backup.archived ? "archived" : "",
     backup.lastSweepError,
   ].join(" ");
+}
+
+/** A readable schedule, shared by the list and detail. */
+export function backupSchedule(minutes = 5): string {
+  const [count, unit] = minutes % 1440 === 0 ? [minutes / 1440, "day"] : minutes % 60 === 0 ? [minutes / 60, "hour"] : [minutes, "minute"];
+  return `Every ${count === 1 ? "" : `${count} `}${unit}${count === 1 ? "" : "s"}`;
 }

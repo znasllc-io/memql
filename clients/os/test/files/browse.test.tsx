@@ -125,12 +125,11 @@ describe("the folder rail", () => {
       ],
     });
     await renderFiles();
-    expect(screen.queryByText(/filed\.mp4/)).toBeNull();
+    expect(screen.getByRole("button", {name: /filed\.mp4/})).toBeTruthy();
     // The places start shut, so a folder is something you go and open. The
     // disclosure is a separate control from the destination on purpose --
     // see Rail.tsx.
-    await click(screen.getByRole("button", { name: "Expand Library" }));
-    await click(screen.getByRole("button", { name: /Client videos/ }));
+    await click(screen.getByRole("button", { name: /Open folder Client videos/ }));
     expect(screen.getByRole("button", { name: /filed\.mp4/ })).toBeTruthy();
     expect(screen.queryByText(/root\.txt/)).toBeNull();
   });
@@ -145,8 +144,7 @@ describe("the folder rail", () => {
     });
     h.connection = connection;
     await renderFiles();
-    await click(screen.getByRole("button", { name: "Expand Library" }));
-    fireEvent.contextMenu(screen.getByRole("button", { name: /Client videos/ }));
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
     await click(screen.getByRole("menuitem", { name: "Archive" }));
     expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
     // The rail's place is named Bin now, but the ROW menu's own verb is
@@ -180,7 +178,7 @@ describe("the inspector", () => {
     h.connection = connection;
     await renderFiles();
     await click(screen.getByRole("button", { name: /brief\.pdf/ }));
-    const inspector = screen.getByRole("complementary", { name: "File details" });
+    const inspector = screen.getByRole("region", { name: "File details" });
     expect(within(inspector).getByText("Uploaded here")).toBeTruthy();
   });
 
@@ -192,8 +190,8 @@ describe("the inspector", () => {
     h.connection = connection;
     await renderFiles({ settings: { confirmBeforeArchive: false } });
     await click(screen.getByRole("button", { name: /brief\.pdf/ }));
-    const inspector = screen.getByRole("complementary", { name: "File details" });
-    await click(within(inspector).getByRole("button", { name: /Archive/ }));
+    const inspector = screen.getByRole("region", { name: "File details" });
+    await click(within(inspector).getByRole("button", { name: /Move to Bin/ }));
     expect(
       within(inspector).getByText("the cluster refused: archived rows keep counting"),
     ).toBeTruthy();
@@ -206,9 +204,9 @@ describe("the inspector", () => {
     h.connection = connection;
     await renderFiles();
     await click(screen.getByRole("button", { name: /brief\.pdf/ }));
-    const inspector = screen.getByRole("complementary", { name: "File details" });
-    await click(within(inspector).getByRole("button", { name: /Archive/ }));
-    expect(within(inspector).getByText(/Archive "brief\.pdf"\?/)).toBeTruthy();
+    const inspector = screen.getByRole("region", { name: "File details" });
+    await click(within(inspector).getByRole("button", { name: /Move to Bin/ }));
+    expect(within(inspector).getByText(/Move "brief\.pdf" to the Bin\?/)).toBeTruthy();
     await click(within(inspector).getByRole("button", { name: "Cancel" }));
     expect(connection.callsNamed("archiveArtifact")).toEqual([]);
   });

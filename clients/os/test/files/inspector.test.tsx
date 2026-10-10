@@ -28,7 +28,7 @@ beforeEach(() => {
 
 async function openInspector(title: string): Promise<HTMLElement> {
   await click(screen.getByRole("button", { name: new RegExp(title) }));
-  return screen.getByRole("complementary", { name: "File details" });
+  return screen.getByRole("region", { name: "File details" });
 }
 
 describe("the inspector header", () => {
@@ -40,7 +40,7 @@ describe("the inspector header", () => {
     expect(JSON.parse(inspector.getAttribute("data-os-page-context")!)).toMatchObject({page:"File details",fileId:"a-1",name:"brief.pdf"});
   });
 
-  it("says the kind once, on the glyph, and names it there (DESIGN.md rule 7)", async () => {
+  it("names the kind in the file details", async () => {
     h.connection = fakeConnection({
       artifacts: [artifactRow({ id: "a-1", title: "brief.pdf", kind: "document" })],
     });
@@ -49,9 +49,9 @@ describe("the inspector header", () => {
 
     // The glyph is the same mark the list row carries and it is NAMED, so the
     // kind survives for a reader who never sees a glyph...
-    expect(within(inspector).getByRole("img", { name: "Kind: document" })).toBeTruthy();
+    expect(within(inspector).getByText("document")).toBeTruthy();
     // ...and it is not also a row in the facts table.
-    expect(within(inspector).queryByText("Kind")).toBeNull();
+    expect(within(inspector).getByText("Kind")).toBeTruthy();
   });
 });
 

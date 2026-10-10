@@ -134,6 +134,7 @@ export function useBackupWrites(): BackupWrites {
           ...(spec.folderId !== "" ? { folderId: spec.folderId } : {}),
           ...(spec.excludeGlobs.length > 0 ? { excludeGlobs: spec.excludeGlobs } : {}),
           includeHidden: spec.includeHidden,
+          intervalMinutes: spec.intervalMinutes ?? 1440,
         }),
       );
     },
@@ -159,6 +160,7 @@ export function useBackupWrites(): BackupWrites {
           folderId: patch.folderId,
           excludeGlobs: patch.excludeGlobs,
           includeHidden: patch.includeHidden,
+          intervalMinutes: patch.intervalMinutes ?? 5,
         }),
       ),
     [run],

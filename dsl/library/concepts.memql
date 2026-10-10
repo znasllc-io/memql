@@ -562,6 +562,7 @@ concept folder {
 /// matching every other Library concept.
 @rowAuthz(owner="ownerUserId", clusterOwner)
 concept uploadSession {
+  backupWatchId string @description("The explicitly authorized directory backup for this upload; absent means an independent upload.")
   ownerUserId  string!  @serverSet  @description("v1:identity:user.id that opened this session. Stamped from actor.userId on every write and never accepted as a mutation arg (@serverSet, memql#3175). The per-row authz key, and therefore the WHOLE per-chunk authorization: chunk PUTs resolve the session under the caller's actor, and a session that is not theirs does not resolve.")
 
   name         string!  @description("Original filename as the owner will see it, sanitised at session init exactly as the one-shot route sanitises it -- it becomes the last segment of blobPath and, at complete, the file row's name.")
@@ -647,6 +648,7 @@ concept uploadSession {
 @displayCard(primary="localPath", secondary="workerId", tertiary="lastSweepAt", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner)
 concept watchedFolder {
+  intervalMinutes int @minimum(5) @maximum(525600) @description("Minutes between directory backups. Absent preserves the existing five-minute schedule. Missed runs are combined into one run when the machine is available.")
   ownerUserId   string!  @serverSet  @description("v1:identity:user.id that set this watch up. Stamped from actor.userId on every write and never accepted as a mutation arg (@serverSet makes that a load-time rejection, memql#3175). The load-bearing per-row authz key, and also the routing key: a cockpit signed in as this user is the only one that will ever read this row.")
 
   workerId      string!  @description("v1:worker:registration.id of the machine that does the watching. Deliberately NOT verified against the caller's fleet at write time -- the row is a preference and the gate that matters is at the upload, where verifyProvenance resolves the claimed machine in the caller's own fleet and refuses anything else (see the header). A watch naming a machine the owner does not have is read by no cockpit and pushes nothing.")

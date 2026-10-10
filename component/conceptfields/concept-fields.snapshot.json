@@ -3342,6 +3342,7 @@
       "concept": "v1:library:uploadSession",
       "file": "library/concepts.memql",
       "fields": [
+        "backupWatchId",
         "blobPath",
         "chunkSize",
         "expectedVersion",
@@ -3385,6 +3386,7 @@
         "filesSeen",
         "folderId",
         "includeHidden",
+        "intervalMinutes",
         "lastSweepAt",
         "lastSweepError",
         "localPath",

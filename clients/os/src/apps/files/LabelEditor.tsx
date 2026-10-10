@@ -130,8 +130,7 @@ export function LabelEditor({
       </div>
 
       <p className="os-caption">
-        Labels are free text -- your own, or added by an agent you talked to. They are how you
-        find a file again from the Refine control at the top of the list.
+        Use labels to find related files.
       </p>
 
       {write.error === "" ? null : (

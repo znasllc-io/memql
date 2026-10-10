@@ -70,8 +70,8 @@ func TestArtifactUploadStampsFolderAndVerifiedProvenance(t *testing.T) {
 		t.Errorf("UploadedFromWorkerName = %q, want the REGISTRATION's own name (MacBook-Pro), not the form's -- "+
 			"the label is resolved from the verified row, never taken on faith", p.UploadedFromWorkerName)
 	}
-	if p.UploadedFromPath != "/Users/a/Reports/q3.pdf" {
-		t.Errorf("UploadedFromPath = %q, want the reported path", p.UploadedFromPath)
+	if p.UploadedFromPath != "" {
+		t.Errorf("UploadedFromPath = %q, ordinary uploads must discard the host path", p.UploadedFromPath)
 	}
 }
 
@@ -103,7 +103,7 @@ func TestArtifactUploadRefusesAForeignWorkerClaim(t *testing.T) {
 	}
 }
 
-func TestArtifactUploadWithAPathButNoMachineIsRefused(t *testing.T) {
+func TestArtifactUploadDiscardsUnrequestedHostPath(t *testing.T) {
 	store := newFakeLibraryStore()
 	blob := newFakeBlob()
 	h := NewArtifactHandler(ArtifactHandlerOptions{
@@ -114,12 +114,12 @@ func TestArtifactUploadWithAPathButNoMachineIsRefused(t *testing.T) {
 	rec := postUpload(t, h, "user-a", "q3.pdf", "application/pdf", []byte("%PDF-1.7 x"), map[string]string{
 		"uploadedFromPath": "/Users/a/Reports/q3.pdf",
 	})
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400 -- a path with no machine is half a provenance claim, and nothing can verify it; body: %s",
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 for an ordinary upload; body: %s",
 			rec.Code, rec.Body.String())
 	}
-	if n := len(store.snapshotCreated()); n != 0 {
-		t.Errorf("createLibraryFile called %d times, want 0", n)
+	if n := len(store.snapshotCreated()); n != 1 {
+		t.Errorf("createLibraryFile called %d times, want 1", n)
 	}
 }
 

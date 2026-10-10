@@ -57,6 +57,7 @@ func TestARePushFromTheSameMachineAndPathVersionsTheSameFile(t *testing.T) {
 	rec := postUpload(t, newWatchedHandler(store, blob), "user-a", "cut-03.mov", "video/quicktime",
 		[]byte("take two, longer"), map[string]string{
 			"uploadedFromWorkerId": "wrk-1",
+			"backupWatchId":        "test-backup",
 			"uploadedFromPath":     watchedPath,
 		})
 	if rec.Code != http.StatusCreated {
@@ -102,6 +103,7 @@ func TestARePushStampsTheLinkBackToSynced(t *testing.T) {
 	rec := postUpload(t, newWatchedHandler(store, blob), "user-a", "cut-03.mov", "video/quicktime",
 		[]byte("take two"), map[string]string{
 			"uploadedFromWorkerId": "wrk-1",
+			"backupWatchId":        "test-backup",
 			"uploadedFromPath":     watchedPath,
 		})
 	if rec.Code != http.StatusCreated {
@@ -138,6 +140,7 @@ func TestADifferentPathOnTheSameMachineIsADifferentFile(t *testing.T) {
 	rec := postUpload(t, newWatchedHandler(store, blob), "user-a", "cut-04.mov", "video/quicktime",
 		[]byte("a different clip"), map[string]string{
 			"uploadedFromWorkerId": "wrk-1",
+			"backupWatchId":        "test-backup",
 			"uploadedFromPath":     "/Users/a/Clients/acme/cut-04.mov",
 		})
 	if rec.Code != http.StatusCreated {
@@ -187,6 +190,7 @@ func TestARePushAfterArchivingStartsAFreshFile(t *testing.T) {
 	rec := postUpload(t, newWatchedHandler(store, blob), "user-a", "cut-03.mov", "video/quicktime",
 		[]byte("take two"), map[string]string{
 			"uploadedFromWorkerId": "wrk-1",
+			"backupWatchId":        "test-backup",
 			"uploadedFromPath":     watchedPath,
 		})
 	if rec.Code != http.StatusCreated {
@@ -216,6 +220,7 @@ func TestANamedTargetOutranksTheProvenanceKey(t *testing.T) {
 		[]byte("take two"), map[string]string{
 			"targetArtifactId":     "art-other",
 			"uploadedFromWorkerId": "wrk-1",
+			"backupWatchId":        "test-backup",
 			"uploadedFromPath":     watchedPath,
 		})
 	if rec.Code != http.StatusCreated {
@@ -242,6 +247,7 @@ func TestAFailedKeyResolveRefusesRatherThanDuplicating(t *testing.T) {
 	rec := postUpload(t, newWatchedHandler(store, blob), "user-a", "cut-03.mov", "video/quicktime",
 		[]byte("take two"), map[string]string{
 			"uploadedFromWorkerId": "wrk-1",
+			"backupWatchId":        "test-backup",
 			"uploadedFromPath":     watchedPath,
 		})
 	if rec.Code != http.StatusInternalServerError {
@@ -285,6 +291,7 @@ func TestAChunkedRePushFromTheSameMachineAndPathVersionsTheSameFile(t *testing.T
 		"name":                 "cut-03.mov",
 		"size":                 8,
 		"uploadedFromWorkerId": "wrk-1",
+		"backupWatchId":        "test-backup",
 		"uploadedFromPath":     watchedPath,
 	})
 	for n, part := range [][]byte{[]byte("take"), []byte("-two")} {

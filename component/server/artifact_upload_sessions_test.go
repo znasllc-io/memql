@@ -64,7 +64,7 @@ func (f *fakeSessionStore) Create(ctx context.Context, p uploadsession.CreatePar
 		ID: p.UploadId, OwnerUserId: actorUserId(ctx), Name: p.Name, Size: p.Size,
 		MimeType: p.MimeType, FolderId: p.FolderId, Labels: append([]string(nil), p.Labels...),
 		UploadedFromWorkerId: p.UploadedFromWorkerId, UploadedFromWorkerName: p.UploadedFromWorkerName,
-		UploadedFromPath: p.UploadedFromPath, BlobPath: p.BlobPath, FileId: p.FileId,
+		BackupWatchId: p.BackupWatchId, UploadedFromPath: p.UploadedFromPath, BlobPath: p.BlobPath, FileId: p.FileId,
 		ChunkSize: p.ChunkSize, TargetArtifactId: p.TargetArtifactId, ExpectedVersion: p.ExpectedVersion, Status: "open",
 	}
 	return nil
@@ -466,7 +466,7 @@ func TestUploadCompleteVerifiesCommitsAndCreatesTheRow(t *testing.T) {
 		t.Errorf("Sha256 = %q, want ABSENT -- the analysis pass stamps it by streaming the blob (D10)", p.Sha256)
 	}
 	if p.Size != 10 || p.FolderId != "fold-1" || p.UploadedFromWorkerId != "wrk-1" ||
-		p.UploadedFromWorkerName != "MacBook-Pro" || p.UploadedFromPath != "/Users/a/b.bin" {
+		p.UploadedFromWorkerName != "MacBook-Pro" || p.UploadedFromPath != "" {
 		t.Errorf("file row params lost session facts: %+v", p)
 	}
 	if p.BlobUrl == "" || !strings.Contains(p.BlobUrl, p.FileId) {

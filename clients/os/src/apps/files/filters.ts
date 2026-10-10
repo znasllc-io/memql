@@ -43,7 +43,7 @@ export const ACCOUNT_NONE = "none";
 export type KindFilter = "all" | (typeof CONTENT_KINDS)[number];
 export type SourceFilter = "all" | (typeof SOURCE_VALUES)[number];
 
-export const FILES_PLACES = ["library", "desktop", "bin", "materializer"] as const;
+export const FILES_PLACES = ["library", "desktop", "materializer", "bin"] as const;
 export type FilesPlace = (typeof FILES_PLACES)[number];
 
 export function isFilesPlace(value: unknown): value is FilesPlace {
@@ -202,7 +202,7 @@ export function applyFilters(
       }
     } else {
       if (row.archived) return false;
-      if (!searching && filter.folderId !== null && row.folderId !== filter.folderId) return false;
+      if (!searching && filter.folderId && row.folderId !== filter.folderId) return false;
     }
 
     if (filter.kind !== "all" && row.kind !== filter.kind) return false;

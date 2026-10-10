@@ -50,7 +50,7 @@ function recordingProvider(): UploadProvider & {
 
 async function openInspector(title: string) {
   await click(screen.getByRole("button", { name: new RegExp(title) }));
-  return screen.getByRole("complementary", { name: "File details" });
+  return screen.getByRole("region", { name: "File details" });
 }
 
 function arrivalOf(name: string): string | null {
@@ -120,8 +120,7 @@ describe("the version history panel", () => {
     await renderFiles();
     const inspector = await openInspector("only\\.txt");
     const history = within(inspector).getByRole("region", { name: "Version history" });
-    expect(within(history).getByText(/One version so far/)).toBeTruthy();
-    expect(within(history).getByText(/same row, same folder, same labels/)).toBeTruthy();
+    expect(within(history).getByText(/Previous versions stay available/)).toBeTruthy();
   });
 
   // THE PANEL SAYS WHEN IT LOOKED. These rows carry no broadcast routing rule,

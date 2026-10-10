@@ -47,10 +47,9 @@ describe("the Desktop place", () => {
     // button" only meant the desk one while every place rendered its children
     // at once; it silently becomes the wrong element -- or none -- the moment
     // a place is shut.
-    const rail = screen.getByRole("navigation", { name: "Places and folders" });
-    const desktop = rail.querySelector("#os-files-place-desktop") as HTMLElement;
+    const desktop = screen.getByRole("list", { name: "Folders" });
     expect(desktop).toBeTruthy();
-    await click(within(desktop).getByRole("button", { name: /Reports/ }));
+    await click(within(desktop).getByRole("button", { name: /Open folder Reports/ }));
     expect(screen.getByRole("button", { name: /filed\.pdf/ })).toBeTruthy();
     expect(screen.queryByText(/loose\.bin/)).toBeNull();
   });
@@ -70,9 +69,9 @@ describe("the open intent", () => {
       intent: { id: "open-output", payload: { fileId: "output-file" } },
       consumeIntent: (id) => consumed.push(id),
     });
-    expect(screen.getByRole("heading", { name: "Reports" })).toBeTruthy();
-    const details = screen.getByRole("complementary", { name: "File details" });
-    expect(within(details).getByText("Inventory.csv")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Inventory.csv" })).toBeTruthy();
+    const details = screen.getByRole("region", { name: "File details" });
+    expect(within(details).getByRole("heading", {name: "Inventory.csv"})).toBeTruthy();
     expect(within(details).queryByText("Unrelated.csv")).toBeNull();
     expect(consumed).toEqual(["open-output"]);
   });
@@ -92,15 +91,15 @@ describe("the open intent", () => {
         id: "output-index", sourceConceptRef: "output-file", title: "Inventory.csv",
       }), "NODE_CREATED");
     });
-    expect(within(screen.getByRole("complementary", { name: "File details" })).getByText("Inventory.csv")).toBeTruthy();
+    expect(within(screen.getByRole("region", { name: "File details" })).getByRole("heading", {name: "Inventory.csv"})).toBeTruthy();
     expect(consumed).toEqual(["pending-output"]);
 
     // A later event must not re-open a file the person has just closed.
-    await click(screen.getByRole("button", { name: /Inventory\.csv/, expanded: true }));
+    await click(screen.getByRole("button", { name: "Back to Library" }));
     await act(async () => {
       conn.subscriptions.emit("v1:library:artifact", artifactRow({ id: "another-index", title: "Other.csv" }), "NODE_CREATED");
     });
-    expect(screen.queryByRole("complementary", { name: "File details" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "File details" })).toBeNull();
     expect(consumed).toEqual(["pending-output"]);
   });
 

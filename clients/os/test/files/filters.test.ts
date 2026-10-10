@@ -71,8 +71,8 @@ describe("applyFilters", () => {
     expect(ids({ folderId: null })).not.toContain("a-note");
   });
 
-  it("scopes to the root by default: filed rows wait behind their folder", () => {
-    expect(ids({})).toEqual(["a-report", "a-doc", "a-made"]);
+  it("includes every live file in Library and scopes by an explicit folder", () => {
+    expect(ids({})).toEqual(["a-report", "a-video", "a-doc", "a-made"]);
     expect(ids({ folderId: "f-vid" })).toEqual(["a-video"]);
     expect(ids({ folderId: null })).toContain("a-video");
   });

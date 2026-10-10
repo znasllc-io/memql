@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // The connection seam, mocked at the MODULE so the real LiveCollection
@@ -113,8 +113,8 @@ describe("what the link says", () => {
         fileRow({
           id: "f-a",
           folderId: "f-1",
-          uploadedFromWorkerId: "wkr-1",
-          uploadedFromPath: "/Users/ana/Clients/q3.pdf",
+          backupWorkerId: "wkr-1",
+          backupPath: "/Users/ana/Clients/q3.pdf",
           linkState: "synced",
         }),
         // A NEIGHBOUR: same Library folder, different machine path entirely.
@@ -122,8 +122,8 @@ describe("what the link says", () => {
         fileRow({
           id: "f-b",
           folderId: "f-1",
-          uploadedFromWorkerId: "wkr-2",
-          uploadedFromPath: "/elsewhere/old.pdf",
+          backupWorkerId: "wkr-2",
+          backupPath: "/elsewhere/old.pdf",
           linkState: "origin_gone",
         }),
       ],
@@ -194,8 +194,8 @@ describe("the empty state", () => {
   it("invites the person to act rather than reporting an absence", async () => {
     h.connection = fakeConnection({ backups: [] });
     await renderFiles({ section: "backups" });
-    expect(screen.getByText(/Nothing is being backed up yet/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Back up a folder" })).toBeTruthy();
+    expect(screen.getByText(/No folder backups yet/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add folder backup" })).toBeTruthy();
   });
 });
 
@@ -237,6 +237,7 @@ describe("editing", () => {
     await renderFiles({ section: "backups" });
 
     await click(screen.getByRole("button", { name: "Edit the backup of /a" }));
+    await click(screen.getByRole("button", { name: "Cancel" }));
     await click(screen.getByRole("button", { name: "Edit the backup of /b" }));
 
     // The form is now the SECOND backup's, so it shows that row's empty
@@ -268,4 +269,21 @@ describe("editing", () => {
     // What this test is about is what the person sees when Edit opens.
     expect(selectedLabel(screen.getByLabelText("Where it lands"))).toContain("Clients");
   });
+});
+
+
+describe("folder backup schedule",()=>{
+ it("creates a scheduled directory backup and refuses an invalid interval",async()=>{
+  const connection=fakeConnection({machines:[{id:"wkr-1",name:"laptop",capabilities:["HEADLESS"]} as never]}); h.connection=connection;
+  await renderFiles({section:"backups"});
+  await click(screen.getByRole("button",{name:"Add folder backup"}));
+  fireEvent.change(screen.getByLabelText("Folder on that machine"),{target:{value:"/Users/ana/Reports"}});
+  fireEvent.change(screen.getByLabelText("Back up every"),{target:{value:"0"}});
+  expect((screen.getByRole("button",{name:"Start backing up"}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText("Back up every"),{target:{value:"3"}});
+  await click(screen.getByRole("button",{name:"Start backing up"}));
+  expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('intervalMinutes: 4320');
+  expect(connection.callsNamed("createLibraryWatchedFolder")[0]).toContain('localPath: "/Users/ana/Reports"');
+  expect(screen.getByRole("button",{name:"Add folder backup"})).toBeTruthy();
+ });
 });

@@ -42,6 +42,7 @@ type Executor interface {
 // CreateParams is everything init records on the session row. There is
 // deliberately no OwnerUserId and no Status: the mutation stamps both.
 type CreateParams struct {
+	BackupWatchId          string
 	UploadId               string
 	Name                   string
 	Size                   int64
@@ -64,6 +65,7 @@ type CreateParams struct {
 
 // Row is the projection the chunk / inventory / complete handlers decide on.
 type Row struct {
+	BackupWatchId          string
 	ID                     string
 	OwnerUserId            string
 	Name                   string
@@ -122,6 +124,7 @@ func (s *Store) Create(ctx context.Context, p CreateParams) error {
 	}
 	if v := strings.TrimSpace(p.UploadedFromPath); v != "" {
 		args["uploadedFromPath"] = v
+		args["backupWatchId"] = p.BackupWatchId
 	}
 	if v := strings.TrimSpace(p.TargetArtifactId); v != "" {
 		args["targetArtifactId"] = v
@@ -171,6 +174,7 @@ func (s *Store) ByID(ctx context.Context, uploadId string) (*Row, error) {
 		UploadedFromWorkerId:   fieldString(r, "uploadedFromWorkerId"),
 		UploadedFromWorkerName: fieldString(r, "uploadedFromWorkerName"),
 		UploadedFromPath:       fieldString(r, "uploadedFromPath"),
+		BackupWatchId:          fieldString(r, "backupWatchId"),
 		BlobPath:               fieldString(r, "blobPath"),
 		FileId:                 fieldString(r, "fileId"),
 		ChunkSize:              fieldInt64(r, "chunkSize"),

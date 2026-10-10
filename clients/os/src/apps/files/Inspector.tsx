@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, CornerUpRight, Download, FilePlus2, RotateCcw, X } from "lucide-react";
+import { Archive, CornerUpRight, Download, FilePlus2, RotateCcw } from "lucide-react";
 
 import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
@@ -9,7 +9,7 @@ import { openInVsCode, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import { editorFilename, isZipArtifact } from "../../items/editorPreference";
 import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
-import { Button, Chip, CopyValue, Fact, Facts, Notice, ProvenanceDot, Subhead, formatBytes, formatMoment } from "../../kit";
+import { Button, Chip, CopyValue, Fact, Facts, Notice, Head, Subhead, formatBytes, formatMoment } from "../../kit";
 import { LabelEditor } from "./LabelEditor";
 import { AccountLabelPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
@@ -20,7 +20,7 @@ import type { VersionEntry } from "./versions";
 import { useOsConnection } from "../../live/connection";
 import type { UploadProvider } from "../../items/upload";
 import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
-import { kindGlyph } from "./glyphs";
+import type { Breadcrumb } from "../../kit/Breadcrumbs";
 import { MATERIALIZER_APP, MATERIALIZER_COMPOSER } from "./materializer";
 import {
   downloadArtifact,
@@ -95,6 +95,8 @@ export function Inspector({
   confirmBeforeArchive,
   uploads,
   onClose,
+  backLabel = "Files",
+  breadcrumbs,
 }: {
   row: ArtifactRow;
   /**
@@ -125,6 +127,8 @@ export function Inspector({
   uploads: UploadProvider;
   onAsk: (tag: string) => void;
   onClose: () => void;
+  backLabel?: string;
+  breadcrumbs?: readonly Breadcrumb[];
 }) {
   const { config } = useSession();
   const { actions, registry } = useOs();
@@ -379,30 +383,13 @@ export function Inspector({
   const filedIn = folderNameOf(row.folderId);
 
   return (
-    <aside className="os-files-inspector" aria-label="File details" data-os-page-context={JSON.stringify({ page: "File details", fileId: row.id, name, kind: row.kind })}>
-      <header className="os-files-inspector-head">
-        {/* THE KIND IS SAID HERE AND NOWHERE ELSE (DESIGN.md rule 7). The
-            glyph is the mark the list row already carries, so the panel that
-            opens is visibly the thing that was clicked -- and it is NAMED,
-            because a purely decorative glyph would drop the kind out of the
-            reading of anybody who never sees one. */}
-        <span className="os-files-inspector-glyph" role="img" aria-label={`Kind: ${row.kind}`}>
-          {kindGlyph(row.kind, 18)}
-        </span>
-        <h3 className="os-files-inspector-name" title={name}>
-          {name}
-        </h3>
-
-        <Button onClick={onClose} ariaLabel="Close details">
-          <X size={14} aria-hidden />
-        </Button>
-      </header>
+    <section className="os-file-detail" aria-label="File details" data-os-page-context={JSON.stringify({ page: "File details", fileId: row.id, name, kind: row.kind })}>
+      <Head title={name} breadcrumbs={breadcrumbs} back={{label: backLabel, onSelect: onClose}} />
 
       {/* The provenance story -- the one sentence this platform can say that
           a folder of bytes cannot. The dot is the machine's presence where a
           machine is named, and absent where nothing is known. */}
       <p className="os-files-story">
-        <ProvenanceDot tone={story.tone} />
         <span>{story.sentence}</span>
       </p>
       {row.archived ? <Chip tone="muted">archived</Chip> : null}
@@ -413,6 +400,7 @@ export function Inspector({
       <div className="os-files-group">
         <Subhead>Details</Subhead>
         <Facts>
+          <Fact label="Kind" value={row.kind.replaceAll("_", " ")} />
           <Fact label="Filed in" value={filedIn} />
           <Fact label="Format" value={row.format || row.mimeType} mono />
           {row.kind === "document" ? (
@@ -550,7 +538,7 @@ export function Inspector({
                 busyLabel="Archiving"
                 onClick={() => (confirmBeforeArchive ? setConfirmingArchive(true) : void archive())}
               >
-                <Archive size={13} aria-hidden /> Archive
+                <Archive size={13} aria-hidden /> Move to Bin
               </Button>
             ) : (
               <Button busy={archiveBusy} busyLabel="Restoring" onClick={() => void restore()}>
@@ -612,12 +600,12 @@ export function Inspector({
         {confirmingArchive ? (
           <Notice
             tone="warn"
-            sentence={`Archive "${name}"?`}
-            next="Archiving hides it from the default list; the bytes stay, and the archived filter brings it back."
+            sentence={`Move "${name}" to the Bin?`}
+            next="You can restore it from the Bin until it is purged."
           >
             <div className="os-files-confirm">
               <Button tone="danger" onClick={() => void archive()}>
-                Archive
+                Move to Bin
               </Button>
               <Button onClick={() => setConfirmingArchive(false)}>Cancel</Button>
             </div>
@@ -641,6 +629,6 @@ export function Inspector({
           downloadingVersion={downloadingVersion}
         />
       ) : null}
-    </aside>
+    </section>
   );
 }
