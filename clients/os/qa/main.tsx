@@ -1708,5 +1708,5 @@ function filesPreview(section: string, empty = false) {
 function FilesQa({section}: {section: string}) {
  const {actions} = useOs();
  useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
- return <div className="os-window-content"><FilesApp sectionId={section} navigate={()=>{}} askContext={()=>{}} store={new LocalFilesSettingsStore(null)} /></div>;
+ return <div className="os-window-content" style={{ height: "100dvh" }}><FilesApp sectionId={section} navigate={()=>{}} askContext={()=>{}} store={new LocalFilesSettingsStore(null)} /></div>;
 }

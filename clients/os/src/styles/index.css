@@ -16280,10 +16280,15 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-files-body { display: block; }
 .os-files-list { display: block; overflow: visible; }
 .os-file-folders { margin: 0; padding: 0; list-style: none; border-bottom: 1px solid var(--os-line); }
-.os-file-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; width: 100%; }
-.os-file-detail .os-files-actions, .os-file-detail .os-files-actions-more { display: flex; flex-wrap: wrap; flex-direction: row; gap: 8px; }
-.os-file-detail .os-files-actions .os-button { width: auto; flex: none; }
-.os-file-detail .os-files-actions .os-button[aria-label] { min-width: var(--os-control-h); }
+/* The body owns scrolling; the shared footer stays inside the app window. */
+.os-files[data-detail] { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.os-file-detail { flex: 1 1 auto; width: 100%; }
+.os-file-detail-body { display: flex; flex-direction: column; gap: 16px; }
+.os-file-detail-footer { flex: 0 0 auto; min-width: 0; }
+.os-file-detail-footer[data-confirming] .os-actbar-state { flex-direction: column; align-items: flex-start; gap: 4px; }
+.os-file-detail-footer .os-actbar-detail { white-space: normal; }
+.os-file-detail-footer .os-button[aria-label] { min-width: var(--os-control-h); }
+.os-file-detail-notices { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px; max-height: 28vh; overflow: auto; border-top: 1px solid var(--os-line); }
 .os-file-detail .os-files-labeledit { max-width: 34rem; }
 .os-file-version-list { list-style: none; padding: 0; margin: 0; }
 .os-file-version-list .os-files-version { display: block; padding: 12px 0; border-bottom: 1px solid var(--os-line); }

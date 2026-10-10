@@ -66,7 +66,6 @@ const FILES_LOG_CONCEPTS = [
 
 export function FilesApp({
   sectionId,
-  askContext,
   askAbout,
   intent,
   consumeIntent,
@@ -363,12 +362,10 @@ export function FilesApp({
       selectedId={selectedId}
       onSelect={setSelectedId}
       confirmBeforeArchive={settings.confirmBeforeArchive}
-      askContext={askContext}
       askAbout={askAbout}
       tasks={tasks}
       uploadFiles={uploadFiles}
       uploadTree={uploadTree}
-      uploads={provider}
     />
   );
 }
