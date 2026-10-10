@@ -958,10 +958,13 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 }
 
 func testDocumentResearchScopesContext(t *testing.T, f *revisionDB) {
-	for _, scope := range []string{"selection", "document", "end"} {
+	for _, scope := range []string{"selection", "section", "document", "end"} {
 		t.Run(scope, func(t *testing.T) {
 			source := "# Research\n\nSelected claim.\n\n# Unrelated\n\n" + strings.Repeat("Unrelated material. ", 1500) + "\nEnd context."
 			anchor := map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "sourceQuote": "Selected claim.", "quote": "Selected claim."}
+			if scope == "section" {
+				anchor = map[string]any{"kind": "markdown", "scope": "section", "startLine": 0, "endLine": 1, "sourceQuote": "# Research", "quote": "Research"}
+			}
 			if scope == "document" {
 				anchor = map[string]any{"kind": "document"}
 			}
@@ -993,12 +996,15 @@ func testDocumentResearchScopesContext(t *testing.T, f *revisionDB) {
 				if f.ai.researchDocument != "" {
 					t.Fatal("research duplicated the full document")
 				}
-				if scope == "selection" && strings.Contains(f.ai.researchPassages, "Unrelated material.") {
+				if (scope == "selection" || scope == "section") && strings.Contains(f.ai.researchPassages, "Unrelated material.") {
 					t.Fatal("unrelated prose entered selected research")
 				}
 				if scope == "document" && !strings.Contains(f.ai.researchPassages, "Unrelated material.") {
 					t.Fatal("whole-document feedback lost content")
 				}
+			}
+			if scope == "section" && !strings.Contains(f.ai.researchPassages, "Selected claim.") {
+				t.Fatal("section research received only its heading")
 			}
 			if !strings.Contains(f.ai.researchPassages, "Verify the selected claim using sources.") {
 				t.Fatal("human feedback was truncated")
