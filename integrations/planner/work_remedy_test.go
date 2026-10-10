@@ -445,6 +445,17 @@ func TestReplanExpiredAttemptStillRecordsBoundedFailure(t *testing.T) {
 	}
 }
 
+func TestReplanFailedInstallCannotBeRepeatedWithinTheRecipe(t *testing.T) {
+	rec := &remedyRecorder{installErr: context.DeadlineExceeded}
+	s := &remedyScope{remedy: newRemedy(&replanEngine{}, rec), persisted: CompileOutcome{ConstructId: "validated"}}
+	if _, err := s.install(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.install(context.Background(), nil); err == nil {
+		t.Fatal("a recipe could repeat an installation with an uncertain write outcome")
+	}
+}
+
 func TestReplanInstallRefusalClosesTheSpentAttempt(t *testing.T) {
 	for _, installErr := range []error{context.DeadlineExceeded, workintegration.ErrRemedyNotWaiting} {
 		eng := &replanEngine{answer: replanAnswer(t, replanSource, false)}

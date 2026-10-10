@@ -26,6 +26,7 @@ type remedyScope struct {
 	persisted                                 CompileOutcome
 	ceiling                                   *memql.RunCeilingError
 	generated, validated, saved, closed, took bool
+	installAttempted                          bool
 }
 
 func (s *remedyScope) run(ctx context.Context, entry string) bool {
@@ -189,9 +190,10 @@ func (s *remedyScope) persist(ctx context.Context, _ map[string]any) (any, error
 }
 
 func (s *remedyScope) install(ctx context.Context, _ map[string]any) (any, error) {
-	if s.closed || s.persisted.ConstructId == "" {
+	if s.closed || s.installAttempted || s.persisted.ConstructId == "" {
 		return nil, fmt.Errorf("replan installation requires a persisted validated template")
 	}
+	s.installAttempted = true
 	out := s.persisted
 	err := s.remedy.writer.InstallReplan(ctx, s.owner, s.runID, workintegration.ReplanTemplate{AutomationName: out.AutomationName, TemplateConstructId: out.ConstructId, TemplateFingerprint: out.TemplateFingerprint, TemplateVersion: out.TemplateVersion, StepKeys: s.stepKeys, ResumeAt: s.resumeAt,
 		Outcome: map[string]any{"replannedFrom": s.step, "replannedAt": s.remedy.clock().UTC().Format(time.RFC3339), "prefixKept": len(s.context.CompletedSteps), "abandonedAssumption": s.draft.AbandonedAssumption}})
