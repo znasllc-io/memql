@@ -299,35 +299,90 @@ func (i *Integration) validatePreparedRevisionImages(ctx context.Context, propos
 	if proposal["preparedImages"] == nil {
 		return nil
 	}
-	raw, err := json.Marshal(proposal["preparedImages"])
-	if err != nil || len(raw) > 128<<10 {
-		return fmt.Errorf("prepared image manifest is too large")
+	images, err := decodePreparedRevisionImages(proposal["preparedImages"])
+	if err != nil {
+		return err
 	}
-	var images []preparedRevisionImage
-	if json.Unmarshal(raw, &images) != nil || len(images) > 64 {
-		return fmt.Errorf("invalid prepared image manifest")
+	// Read inheritance from the owned durable request, never from a manifest
+	// supplied by the model or a caller asking to approve a proposal.
+	_, captured, _, _, err := i.revisionRequest(ctx, asString(proposal["requestId"]))
+	if err != nil {
+		return err
+	}
+	inherited, err := decodePreparedRevisionImages(captured["inheritedPreparedImages"])
+	if err != nil {
+		return err
 	}
 	for _, image := range images {
 		refs, _, err := i.reviewAttachments(ctx, []reviewAttachment{image.Reference})
 		if err != nil {
 			return err
 		}
+		if refs[0] != image.Reference {
+			return fmt.Errorf("prepared image reference changed")
+		}
 		doc, err := i.reviewDocument(ctx, refs[0].ArtifactID)
 		if err != nil {
 			return err
 		}
 		provenance := revisionMap(doc.backing["imageProvenance"])
-		actual, _ := json.Marshal(provenance)
-		captured, _ := json.Marshal(image.Provenance)
+		if workstate.ArtifactHash(provenance) != workstate.ArtifactHash(image.Provenance) {
+			return fmt.Errorf("prepared image provenance changed")
+		}
+		if len(revisionMap(captured["amendment"])) > 0 && containsPreparedImage(inherited, image) {
+			source, err := revisionIdentity(ctx, asString(provenance["requestId"]))
+			if err != nil || memql.BareShortId(asString(doc.backing["producedByRunId"])) != source.RunID {
+				return fmt.Errorf("inherited image no longer belongs to its recorded run")
+			}
+			continue
+		}
 		sourceRequest, sourceRun, err := i.revisionImageSource(ctx, asString(proposal["requestId"]), asString(doc.backing["producedByRunId"]))
 		if err != nil {
 			return err
 		}
-		if string(actual) != string(captured) || provenance["requestId"] != sourceRequest || memql.BareShortId(asString(doc.backing["producedByRunId"])) != sourceRun {
+		if provenance["requestId"] != sourceRequest || memql.BareShortId(asString(doc.backing["producedByRunId"])) != sourceRun {
 			return fmt.Errorf("prepared image provenance changed or belongs to another request")
 		}
 	}
 	return nil
+}
+
+func decodePreparedRevisionImages(value any) ([]preparedRevisionImage, error) {
+	raw, err := json.Marshal(value)
+	if err != nil || len(raw) > 128<<10 {
+		return nil, fmt.Errorf("prepared image manifest is too large")
+	}
+	var images []preparedRevisionImage
+	if json.Unmarshal(raw, &images) != nil || len(images) > 64 {
+		return nil, fmt.Errorf("invalid prepared image manifest")
+	}
+	return images, nil
+}
+
+func containsPreparedImage(images []preparedRevisionImage, candidate preparedRevisionImage) bool {
+	key := workstate.ArtifactHash(map[string]any{"image": candidate})
+	for _, image := range images {
+		if key == workstate.ArtifactHash(map[string]any{"image": image}) {
+			return true
+		}
+	}
+	return false
+}
+
+// An amendment may remove or replace an earlier image. Pin the inherited
+// assets it actually retains; freshly prepared assets remain required by DSL.
+func amendedPreparedImages(captured map[string]any, content string, fresh []preparedRevisionImage) ([]preparedRevisionImage, error) {
+	inherited, err := decodePreparedRevisionImages(captured["inheritedPreparedImages"])
+	if err != nil {
+		return nil, err
+	}
+	result := append([]preparedRevisionImage(nil), fresh...)
+	for _, image := range inherited {
+		if len(missingPreparedImages(content, []preparedRevisionImage{image})) == 0 && !containsPreparedImage(result, image) {
+			result = append(result, image)
+		}
+	}
+	return decodePreparedRevisionImages(result)
 }
 
 // A retry may reuse assets only from an owned, captured predecessor with the

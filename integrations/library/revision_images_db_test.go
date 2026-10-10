@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/airoute"
@@ -318,5 +319,116 @@ func TestPreparedImageMustBeRenderedMarkdown(t *testing.T) {
 		if len(missingPreparedImages(content, images)) != 0 {
 			t.Fatalf("rendered image not recognized: %q", content)
 		}
+	}
+}
+
+// An item revision must carry the original image receipt across a replica hop,
+// even though its new request has different feedback and no image-generation step.
+func TestRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T) {
+	f := newRevisionDB(t)
+	artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
+	args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
+	request := asString(args["requestId"])
+	f.ai.imagePlan = []revisionImageSpec{{Mode: "generate", Name: "illustration.png", Alt: "Illustrated portrait", Prompt: "An editorial illustration"}}
+	f.ai.assessmentReply = "sufficient"
+	f.ai.needsResearch = true
+	f.ai.answer = revisionAnswer{Summary: "Insert the illustration", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this paragraph.", Reason: "Requested illustration", CommentIDs: []string{note}}}}
+	generator := &preparedImageEngine{IntegrationEngineAccess: f.other}
+	f.second.engine = generator
+	store := &preparedImageStore{f: f, appendProposal: true}
+	f.second.SetImageAssets(store)
+	bytes := &attachmentStore{data: attachmentPNG()}
+	f.first.SetBlobFetcher(bytes)
+	f.second.SetBlobFetcher(bytes)
+	var wait *workstate.HumanWait
+	if err := f.execute(f.other, request, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	_, _, _, approval, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := revisionMap(approval["subject"])
+	images, err := decodePreparedRevisionImages(parent["preparedImages"])
+	if err != nil || len(images) != 1 {
+		t.Fatalf("parent images: %v %v", images, err)
+	}
+	items, err := revisionItems(parent)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("parent items: %v %v", items, err)
+	}
+	newer := "amended-" + request
+	modify := map[string]any{"requestId": request, "approvalId": wait.ApprovalID, "itemId": items[0].ID, "instruction": "Clarify the paragraph, keeping the same image.", "newRequestId": newer}
+	bytes.data = append(append([]byte{}, attachmentPNG()...), 0)
+	if _, err = f.first.handleModifyRevisionItem(f.ctx, modify, 0); err == nil {
+		t.Fatal("modified a proposal with changed image bytes")
+	}
+	bytes.data = attachmentPNG()
+	for _, lib := range []*Integration{f.first, f.second} {
+		if _, err = lib.handleModifyRevisionItem(f.ctx, modify, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.ai.imagePlan = nil
+	f.ai.needsResearch = false
+	f.ai.answer = revisionAnswer{Summary: "Clarify the paragraph", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this clarified paragraph.\n\n![Illustration](" + images[0].Reference.URI + ")\nAI-generated illustration; actual-image-model.", Reason: "Requested clarification", CommentIDs: []string{note}}}}
+	if err = f.execute(f.engine, newer, false); !errors.As(err, &wait) {
+		t.Fatal(err)
+	}
+	_, _, _, approval, err = f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), newer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := revisionMap(approval["subject"])
+	pinned, err := decodePreparedRevisionImages(proposal["preparedImages"])
+	if err != nil || len(pinned) != 1 || !containsPreparedImage(pinned, images[0]) {
+		t.Fatalf("amendment lost image pin: %v %v", pinned, err)
+	}
+	if err = f.second.ValidateRevisionProposal(f.ctx, proposal); err != nil {
+		t.Fatal(err)
+	}
+	// Supplying inheritance on a different request cannot authorize that image.
+	other, _ := f.submit(artifact, doc, map[string]any{"kind": "document"}, "An unrelated change.")
+	forged := map[string]any{"requestId": other["requestId"], "preparedImages": pinned, "inheritedPreparedImages": pinned, "amendment": modify}
+	if err = f.second.validatePreparedRevisionImages(f.ctx, forged); err == nil {
+		t.Fatal("caller-supplied inheritance authorized a foreign image")
+	}
+	amendedItems, err := revisionItems(proposal)
+	if err != nil || len(amendedItems) != 1 {
+		t.Fatalf("amended items: %v %v", amendedItems, err)
+	}
+	decision := map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": map[string]any{"acceptedItemIds": []string{amendedItems[0].ID}, "proposalHash": workstate.ArtifactHash(proposal)}}
+	// The approval gate validates the bytes again, without the preparing replica.
+	bytes.data = append(append([]byte{}, attachmentPNG()...), 0)
+	call, _ := langparser.RenderCall("decideApproval", decision)
+	if _, err = f.other.Execute(f.ctx, "query "+call); err == nil {
+		t.Fatal("approved modified image bytes")
+	}
+	bytes.data = attachmentPNG()
+	f.query(f.other, f.ctx, "query", "decideApproval", decision)
+	if err = f.execute(f.other, newer, true); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := f.first.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
+	if err != nil || !strings.Contains(asString(changed.backing["body"]), images[0].Reference.URI) || !strings.Contains(asString(changed.backing["body"]), "clarified paragraph") {
+		t.Fatalf("saved amendment lost content/image: %v %v", changed, err)
+	}
+	if generator.calls != 1 || store.writes != 1 {
+		t.Fatalf("amendment repeated image generation/storage: %d/%d", generator.calls, store.writes)
+	}
+}
+
+func TestAmendedPreparedImagesRetainsOnlyEmbeddedAssets(t *testing.T) {
+	image := preparedRevisionImage{Reference: reviewAttachment{URI: "../asset/image.png"}}
+	captured := map[string]any{"inheritedPreparedImages": []preparedRevisionImage{image}}
+	for _, body := range []string{"Removed image.", "[link](../asset/image.png)"} {
+		images, err := amendedPreparedImages(captured, body, nil)
+		if err != nil || len(images) != 0 {
+			t.Fatalf("removed image retained: %v %v", images, err)
+		}
+	}
+	images, err := amendedPreparedImages(captured, "![image](../asset/image.png)", []preparedRevisionImage{image})
+	if err != nil || len(images) != 1 {
+		t.Fatalf("image duplicated: %v %v", images, err)
 	}
 }

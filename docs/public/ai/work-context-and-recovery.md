@@ -95,6 +95,13 @@ attachments and direction, rechecks owner access and immutable image bytes, and
 preserves the original source/model attribution. Changed feedback does not
 inherit that authority. Research and generation are not repeated on approval.
 
+When a person modifies one proposed item, the new request captures the prior
+proposal’s verified image receipts. Images retained in the revised Markdown
+keep their exact bytes and provenance; removed images need not remain in the
+manifest. Approval and application revalidate those retained assets on the
+receiving replica. Supplying another request’s image identifiers or claiming
+inheritance in a model response grants no authority.
+
 ## Browser research fallback
 
 The document DSL first assesses whether feedback needs external evidence using

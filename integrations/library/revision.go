@@ -476,8 +476,12 @@ func (i *Integration) handleRevisionProposal(ctx context.Context, args map[strin
 	if err != nil {
 		return nil, err
 	}
-	if len(images) > 0 {
-		proposal["preparedImages"] = images
+	pinned, err := amendedPreparedImages(captured, asString(proposal["revisedContent"]), images)
+	if err != nil {
+		return nil, err
+	}
+	if len(pinned) > 0 {
+		proposal["preparedImages"] = pinned
 	}
 	missing := missingPreparedImages(asString(proposal["revisedContent"]), images)
 	changed := proposal["revisedContent"] != captured["content"]

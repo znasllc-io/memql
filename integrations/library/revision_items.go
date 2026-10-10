@@ -263,11 +263,18 @@ func (i *Integration) handleModifyRevisionItem(ctx context.Context, args map[str
 		if target == nil {
 			return nil, fmt.Errorf("the selected change is not part of this proposal")
 		}
+		parent := revisionMap(approval["subject"])
+		if err = i.validatePreparedRevisionImages(ctx, parent); err != nil {
+			return nil, err
+		}
 		next = map[string]any{}
 		for k, v := range captured {
 			next[k] = v
 		}
 		next["requestId"] = newID
+		// Carry immutable image receipts from the reviewed proposal. A prose
+		// amendment is not permission to regenerate or silently unpin its images.
+		next["inheritedPreparedImages"] = parent["preparedImages"]
 		next["retainedEdits"] = retained
 		next["amendment"] = map[string]any{"requestId": args["requestId"], "approvalId": args["approvalId"], "itemId": args["itemId"], "instruction": instruction, "edits": target.Edits}
 	}
