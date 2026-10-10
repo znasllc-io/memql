@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -72,6 +73,8 @@ type remedyRecorder struct {
 	asked     []string
 	outcomes  []map[string]any
 	repairErr error
+	budgets   []*memql.RunCeilingError
+	budgetErr error
 }
 
 func (r *remedyRecorder) LoadReplanContext(context.Context, string, string, string) (workintegration.ReplanContext, error) {
@@ -97,6 +100,26 @@ func (r *remedyRecorder) AskAboutFailedRemedy(_ context.Context, _, _, _, kind, 
 	defer r.mu.Unlock()
 	r.asked = append(r.asked, kind+": "+reason)
 	return nil
+}
+
+func (r *remedyRecorder) PauseReplanForBudget(_ context.Context, _, _, _ string, ceiling *memql.RunCeilingError) error {
+	r.budgets = append(r.budgets, ceiling)
+	return r.budgetErr
+}
+
+func TestReplanBudgetRefusalKeepsItsTypedApproval(t *testing.T) {
+	for _, writeErr := range []error{nil, errors.New("approval storage unavailable")} {
+		ceiling := &memql.RunCeilingError{RunId: "v1:work:run:r1", Breach: memql.RunCeilingBreach{Ceiling: "modelCalls", Limit: "48 calls", Actual: "48 made"}, Spent: memql.RunSpend{ModelCalls: 48}}
+		eng := &replanEngine{err: fmt.Errorf("model seam: %w", ceiling)}
+		rec := &remedyRecorder{context: replanFixture(), budgetErr: writeErr}
+		took := newRemedy(eng, rec).Replan(context.Background(), ceiling.RunId, "u1", "draft", "divide unfinished work")
+		if took != (writeErr == nil) || len(rec.budgets) != 1 || rec.budgets[0] != ceiling {
+			t.Fatalf("budget handoff: took=%v budgets=%v writeErr=%v", took, rec.budgets, writeErr)
+		}
+		if len(rec.asked) != 0 || len(rec.installed) != 0 || len(eng.aiCalls) != 1 || len(eng.queries) != 0 {
+			t.Fatalf("a budget refusal became a generic retry, retried inference or installed a draft: %+v", rec)
+		}
+	}
 }
 
 // RecordCompileOutcome is the write the remedy used to make: the run back to

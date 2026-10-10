@@ -24,6 +24,7 @@ type remedyScope struct {
 	resumeAt                                  string
 	stepKeys                                  []string
 	persisted                                 CompileOutcome
+	ceiling                                   *memql.RunCeilingError
 	generated, validated, saved, closed, took bool
 }
 
@@ -37,7 +38,7 @@ func (s *remedyScope) run(ctx context.Context, entry string) bool {
 		// Once a model was spent, leaving the remedy wait live would spend it on
 		// every lease. The native envelope closes that loophole even if the recipe
 		// catches a failure or simply returns early.
-		return s.remedy.ask(ctx, s.owner, s.runID, s.step, s.kind, "The remedy recipe stopped before it could install a validated result.")
+		return s.ask(ctx, "The remedy recipe stopped before it could install a validated result.")
 	}
 	return s.took
 }
@@ -61,11 +62,25 @@ func (s *remedyScope) operations() map[string]workflowhost.Operation {
 			if reason == "" {
 				return nil, fmt.Errorf("remedy approval requires a reason")
 			}
-			s.closed = true
-			s.took = s.remedy.ask(ctx, s.owner, s.runID, s.step, s.kind, reason)
+			s.took = s.ask(ctx, reason)
 			return s.took, nil
 		},
 	}
+}
+
+// A budget refusal keeps its typed figures across the DSL's failure branch.
+// Even a recipe that returns early cannot turn this into a generic Retry:
+// that would leave the allowance unchanged and replay a known failed plan.
+func (s *remedyScope) ask(ctx context.Context, reason string) bool {
+	s.closed = true
+	if s.ceiling != nil {
+		if err := s.remedy.writer.PauseReplanForBudget(ctx, s.owner, s.runID, s.step, s.ceiling); err != nil {
+			s.remedy.warn("work remedy: could not park the replan on its budget", s.runID, err)
+			return false
+		}
+		return true
+	}
+	return s.remedy.ask(ctx, s.owner, s.runID, s.step, s.kind, reason)
 }
 
 func (s *remedyScope) sandbox() (authoringSandbox, bool) {
@@ -99,6 +114,9 @@ func (s *remedyScope) generate(ctx context.Context, args map[string]any) (any, e
 	s.generated = true
 	out, err := s.remedy.loop.engine.InvokeAI(systemActorContext(ctx), prompt, data)
 	if err != nil {
+		if errors.As(err, &s.ceiling) {
+			return map[string]any{"available": true, "ok": false, "message": err.Error()}, nil
+		}
 		if memql.IsProviderUnavailable(err) {
 			s.closed = true
 			return map[string]any{"available": false, "ok": false, "message": err.Error()}, nil

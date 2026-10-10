@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/memql"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -55,6 +56,7 @@ type remedyWriter interface {
 	InstallReplan(ctx context.Context, ownerUserId, runId string, t workintegration.ReplanTemplate) error
 	RequestRepair(ctx context.Context, ownerUserId, runId, stepKey, violation string) error
 	AskAboutFailedRemedy(ctx context.Context, ownerUserId, runId, stepKey, kind, reason string) error
+	PauseReplanForBudget(ctx context.Context, ownerUserId, runId, stepKey string, ceiling *memql.RunCeilingError) error
 }
 
 // WorkRemedy satisfies workintegration.Remedy.
