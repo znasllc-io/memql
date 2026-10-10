@@ -157,7 +157,7 @@ describe("send to desktop", () => {
     h.connection = connection;
     await renderFiles();
     await click(screen.getByRole("button", { name: /brief\.pdf/ }));
-    const inspector = screen.getByRole("complementary", { name: "File details" });
+    const inspector = screen.getByRole("region", { name: "File details" });
     await click(within(inspector).getByRole("button", { name: "Send to desktop" }));
     expect(within(inspector).getByText("On the desk.")).toBeTruthy();
     await click(within(inspector).getByRole("button", { name: "Send to desktop" }));

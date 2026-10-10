@@ -4446,227 +4446,9 @@ a.os-button {
   align-items: stretch;
 }
 
-.os-files-rail {
-  flex: 0 1 184px;
-  min-width: 148px;
-  overflow-y: auto;
-  padding-right: 8px;
-  border-right: 1px solid var(--os-line);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  align-content: start;
-}
-.os-files-node {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  padding: 5px 10px;
-  border: 0;
-  border-radius: var(--os-radius-xs);
-  background: none;
-  color: var(--os-muted);
-  font-size: var(--os-text-sm);
-  text-align: left;
-  cursor: pointer;
-}
-.os-files-node:hover {
-  background: var(--os-raised);
-}
-.os-files-node[data-current] {
-  background: var(--os-accent-soft);
-  color: var(--os-ink);
-}
-.os-files-node:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-.os-files-node-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.os-files-node-count {
-  font-size: var(--os-text-xs);
-  font-variant-numeric: tabular-nums;
-  color: var(--os-muted);
-}
-/* A displaced folder's marker must not eat its name: the chip compacts and
- * the name keeps a readable floor. */
-.os-files-node .os-chip {
-  flex-shrink: 0;
-  padding: 0 6px;
-  font-size: 10px;
-}
-.os-files-node .os-files-node-name {
-  min-width: 42px;
-}
-.os-files-node:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
+.os-files-rename { display: flex; gap: 8px; padding: 12px 4px; }
+.os-files-rename input { flex: 1; min-width: 0; }
 
-.os-files-rename {
-  flex: 1;
-  min-width: 0;
-  padding: 2px 6px;
-  font-size: var(--os-text-sm);
-}
-
-/* ---- the rail's disclosures, and the one Add control (memql#4860 wave) ----
- *
- * The rail used to render every place's folders at once. Three destinations
- * were being pushed off the bottom by the contents of whichever place
- * happened to be biggest, so the places collapse and start shut; Rail.tsx
- * carries the behavioural reasoning.
- *
- * THE DISCLOSURE AND THE DESTINATION ARE TWO BUTTONS ON ONE LINE, because a
- * button inside a button is invalid and because the chevron needs its own
- * accessible name and its own aria-expanded. The row is the flex container
- * they share; the place node keeps every one of its own rules by still being
- * an .os-files-node. */
-.os-files-place-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-/* The place node is inside a flex row now, so it has to be told to take the
- * rest of it -- width: 100% on a flex item resolves against the row, not the
- * rail, and the counts would drift right of the folders below. */
-.os-files-place-row .os-files-node {
-  flex: 1;
-  min-width: 0;
-}
-/* A PLACE node opens its own block in the rail: a breath of space above,
- * nothing louder. The margin moves to the ROW, or the chevron sits on the
- * old line while the name sits on the new one. */
-.os-files-place-row:not(:first-child) {
-  margin-top: 8px;
-}
-
-.os-files-disclose {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--os-radius-xs);
-  background: none;
-  color: var(--os-muted);
-  cursor: pointer;
-  transition: transform var(--os-duration-fast) var(--os-ease);
-}
-.os-files-disclose:hover {
-  color: var(--os-ink);
-  background: var(--os-raised);
-}
-.os-files-disclose:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-/* The chevron IS the state -- it points right when shut and down when open,
- * which is the one convention every file explorer has taught. Rotating the
- * button rather than swapping the glyph keeps a single element to animate
- * and a single element to hit. */
-.os-files-disclose[aria-expanded="true"] {
-  transform: rotate(90deg);
-}
-@media (prefers-reduced-motion: reduce) {
-  .os-files-disclose {
-    transition: none;
-  }
-}
-
-/* `hidden` on the group does the hiding, and the `:not([hidden])` is what
- * lets it. An AUTHOR `display: flex` beats the UA sheet's `[hidden] {
- * display: none }` at equal specificity, so the bare selector would have
- * made the attribute inert and the rail would never collapse -- while
- * looking, in the diff, exactly like collapsing code. Guard the layout
- * instead of adding an `!important` to the UA's rule. */
-/* NAMED FOR THE PLACE, not just "group". `.os-files-group` is already the
- * INSPECTOR's rule-8 grouping (a hairline, a Subhead, display:flex), and an
- * author `display` beats the UA's `[hidden] { display: none }` at equal
- * specificity -- so sharing the name left every shut place rendering its
- * contents with a stray hairline over them, while the markup said `hidden`
- * and the tests, which query the accessibility tree, passed. Found by
- * looking at it. */
-.os-files-place-group:not([hidden]) {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.os-files-place-empty {
-  margin: 2px 0 2px 28px;
-  font-size: var(--os-text-xs);
-  color: var(--os-muted);
-}
-
-/* ---- the Bin's second level (epic memql#4981) ----
- *
- * THE SAME TWO-BUTTON GRAMMAR AS A PLACE, ONE LEVEL IN: chevron, then
- * destination. It reuses `.os-files-disclose` rather than respelling it, so
- * the rotation, the focus ring and the reduced-motion rule stay defined once.
- * It is NOT `.os-files-place-row`, and the difference is one property: a
- * place opens its own block with 8px above it, and eight pixels between every
- * archived folder would make the Bin's contents read as more places. */
-.os-files-bin-row {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.os-files-bin-row .os-files-node {
-  flex: 1;
-  min-width: 0;
-}
-/* THE BIN'S GROUP INDENTS AND THE LIBRARY'S DOES NOT, and the difference is
- * the chevron. A Library folder carries no disclosure of its own, so it can
- * never be mistaken for a place; a Bin folder carries one, which put a
- * chevron, a glyph and a name at the SAME x as Library, Desktop and Bin --
- * four rows that read as four more places. Twelve pixels is the whole fix,
- * and only a rendered screenshot showed it was needed. */
-.os-files-bin-group {
-  padding-inline-start: 12px;
-}
-/* A folder holding nothing in the Bin has no chevron, so the gutter stands in
- * for one -- otherwise its name would sit 20px left of its siblings' and the
- * group would read as two indent levels that mean nothing. */
-.os-files-rail-gutter {
-  flex: 0 0 18px;
-}
-/* "Not in a folder" is a SET, not a destination: no hover lift, no pointer,
- * no current state. It is a `span` rather than a `button`, so this only has
- * to undo the reach the shared node class gives it. */
-.os-files-node-static {
-  cursor: default;
-}
-.os-files-node-static:hover {
-  background: none;
-}
-/* A file inside a Bin group aligns under the NAMES above it (the 18px gutter
- * + the 2px gap + the node's own 10px), then one indent step in -- the same
- * 14px the Library tree steps by, so the two rails read as one language. */
-.os-files-bin-file {
-  padding-inline-start: 44px;
-}
-
-/* ---- Add: one control, two ways to put something in this folder ----
- *
- * Replaces the Upload primary AND the rail's "New folder" action. The menu
- * is anchored to the button (the .os-widget-menu-anchor pattern), not
- * portalled: it belongs to a control that is already on screen, so it has no
- * containing-block problem to solve and closing it on scroll would be wrong.
- */
-/* The row menu's move picker takes a READABLE MEASURE (DESIGN.md rule 9:
- * lists take the window, forms do not). Inside `.os-files-confirm` the
- * select is a flex item and would otherwise stretch the full width of the
- * window -- a folder name is a few words, and a control eighteen hundred
- * pixels wide to hold one is the dead space that rule is about. */
 .os-files-move-pick {
   flex: 0 1 320px;
   min-width: 0;
@@ -16501,3 +16283,21 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-question-input { display: flex; align-items: flex-end; gap: 8px; }
 .os-ask-question-input textarea { min-width: 0; flex: 1; resize: vertical; padding: 8px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-surface); color: var(--os-ink); font: inherit; }
 .os-ask-question-options button:focus-visible, .os-ask-question-input textarea:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+
+/* Files uses one content column, with folders and records in the same workspace. */
+.os-files > div:not([hidden]) { min-width: 0; }
+.os-files { height: auto; }
+.os-files-body { display: block; }
+.os-files-list { display: block; overflow: visible; }
+.os-file-folders { margin: 0; padding: 0; list-style: none; border-bottom: 1px solid var(--os-line); }
+.os-file-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 960px; width: 100%; }
+.os-file-detail .os-files-actions, .os-file-detail .os-files-actions-more { display: flex; flex-wrap: wrap; flex-direction: row; gap: 8px; }
+.os-file-detail .os-files-actions .os-button { width: auto; flex: none; }
+.os-file-version-list { list-style: none; padding: 0; margin: 0; }
+.os-file-version-list .os-files-version { display: block; padding: 12px 0; border-bottom: 1px solid var(--os-line); }
+.os-file-version-list .os-files-version::before { content: none; }
+.os-file-version-list .os-files-version:last-child { border-bottom: 0; }
+.os-file-version-list .os-files-version-body { padding: 0; }
+.os-backup-editor { max-width: 720px; display: flex; flex-direction: column; gap: 16px; }
+.os-backup-schedule { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.os-backup-schedule .os-field { flex: 1; min-width: 120px; }

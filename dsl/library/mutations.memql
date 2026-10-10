@@ -267,6 +267,8 @@ mutation generatedOutput updateGeneratedOutputContent {
 @actor
 mutation file createLibraryFile {
   args {
+    backupWorkerId string
+    backupPath string
     producedByRunId string
     producedByStepKey string
     fileId    string!
@@ -290,7 +292,7 @@ mutation file createLibraryFile {
     producedBy              object
   }
   insert {
-    accept { producedByRunId, producedByStepKey, name, mimeType, size, sha256, blobUrl, source, summary, folderId, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, producedBy }
+    accept { backupWorkerId, backupPath, producedByRunId, producedByStepKey, name, mimeType, size, sha256, blobUrl, source, summary, folderId, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, producedBy }
     stamp {
       id: args.fileId
       ownerUserId: actor.userId
@@ -714,6 +716,7 @@ mutation artifact setArtifactAccounts {
 @serverOnly
 mutation uploadSession createUploadSession {
   args {
+    backupWatchId string
     uploadId  string!
     name      string!
     size      int!
@@ -730,7 +733,7 @@ mutation uploadSession createUploadSession {
     expectedVersion int
   }
   insert {
-    accept { name, size, mimeType, folderId, labels, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, blobPath, fileId, chunkSize, targetArtifactId, expectedVersion }
+    accept { backupWatchId, name, size, mimeType, folderId, labels, uploadedFromWorkerId, uploadedFromWorkerName, uploadedFromPath, blobPath, fileId, chunkSize, targetArtifactId, expectedVersion }
     stamp {
       id: args.uploadId
       ownerUserId: actor.userId
@@ -923,6 +926,7 @@ mutation file supersedeLibraryFileHead {
 @actor
 mutation watchedFolder createLibraryWatchedFolder {
   args {
+    intervalMinutes int @minimum(5) @maximum(525600)
     watchId        string!
     workerId       string!
     localPath      string!
@@ -936,6 +940,7 @@ mutation watchedFolder createLibraryWatchedFolder {
       id: args.watchId
       ownerUserId: actor.userId
       includeHidden: args.includeHidden ?? false
+      intervalMinutes: args.intervalMinutes ?? 1440
       status: "active"
       archived: false
     }
@@ -961,6 +966,7 @@ mutation watchedFolder createLibraryWatchedFolder {
 /// moment of the change, because a person re-pointing a backup reasonably expects otherwise.
 mutation watchedFolder updateLibraryWatchedFolder {
   args {
+    intervalMinutes int @minimum(5) @maximum(525600)
     watchId        string!
     folderId       string
     excludeGlobs   []string
@@ -968,6 +974,7 @@ mutation watchedFolder updateLibraryWatchedFolder {
   }
   update {
     id: args.watchId
+    intervalMinutes: args.intervalMinutes
     folderId: args.folderId ?? ""
     excludeGlobs: args.excludeGlobs ?? []
     includeHidden: args.includeHidden ?? false

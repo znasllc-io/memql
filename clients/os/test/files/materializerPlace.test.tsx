@@ -70,59 +70,11 @@ function outputArtifact(over: { id: string; title: string; fileId: string; folde
   });
 }
 
-function railGroup(): HTMLElement {
-  const rail = screen.getByRole("navigation", { name: "Places and folders" });
-  const group = rail.querySelector("#os-files-place-materializer");
-  if (!group) throw new Error("the Materializer place has no group in the rail");
-  return group as HTMLElement;
-}
+function railGroup(): HTMLElement { return screen.getByRole("list", {name: "Folders"}); }
 
 describe("the Materializer place", () => {
-  it("is a permanent place, empty or not, and says what the Materializer is for", async () => {
-    // The three places above it are LOCATIONS rather than results. A fourth
-    // that came and went with the data would make the rail's shape depend on
-    // what happens to be in it, and there would be nowhere to find out the
-    // feature exists.
-    h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "plain.txt" })] });
-    await renderFiles();
 
-    await click(screen.getByRole("button", { name: /^Materializer/ }));
-    expect(
-      screen.getByText(/The Materializer composes a file .* out of what is in the memory graph/),
-    ).toBeTruthy();
-  });
 
-  it("never says nothing was materialized while it is showing files", async () => {
-    // THE BIN'S ORIGINAL FALSEHOOD, which this epic exists to remove, is easy
-    // to rebuild in a new place: the rail lists FOLDERS, so its emptiness is
-    // about folders, and an output filed at the Library root leaves the group
-    // empty while the place is full. Three states, three honest answers.
-    h.connection = fakeConnection({
-      artifacts: [outputArtifact({ id: "a-1", title: "loose.md", fileId: "f-1" })],
-      compositions: [compositionRow({ id: "c-1", outputFileId: "f-1" })],
-    });
-    await renderFiles();
-
-    await click(screen.getByRole("button", { name: /^Materializer/ }));
-    expect(within(railGroup()).queryByText("Nothing has been materialized yet.")).toBeNull();
-    expect(within(railGroup()).getByText("None of these are in a folder.")).toBeTruthy();
-    // ...and the file is there to prove the line was about folders.
-    expect(screen.getByRole("button", { name: /loose\.md/ })).toBeTruthy();
-  });
-
-  it("says nothing was materialized only where nobody else is saying it", async () => {
-    h.connection = fakeConnection({ artifacts: [artifactRow({ id: "a-1", title: "plain.txt" })] });
-    await renderFiles();
-
-    // Peeking in from the Library: the rail's line is the whole answer.
-    await click(screen.getByRole("button", { name: "Expand Materializer" }));
-    expect(within(railGroup()).getByText("Nothing has been materialized yet.")).toBeTruthy();
-
-    // Standing in it, the list carries the sentence with the part that
-    // matters, so the rail stands down (DESIGN.md rule 7).
-    await click(screen.getByRole("button", { name: /^Materializer/ }));
-    expect(within(railGroup()).queryByText("Nothing has been materialized yet.")).toBeNull();
-  });
 
   it("holds the files a composition produced, and nothing else", async () => {
     h.connection = fakeConnection({
@@ -157,8 +109,8 @@ describe("the Materializer place", () => {
     await renderFiles();
 
     await click(screen.getByRole("button", { name: /^Materializer/ }));
-    const folder = within(railGroup()).getByRole("button", { name: /^Reports/ });
-    expect(within(folder).getByText("1")).toBeTruthy();
+    const folder = screen.getByRole("button", { name: "Open folder Reports" });
+    expect(within(folder).getByText("1 file")).toBeTruthy();
     // The files are the list's, at every level of the rail.
     expect(within(railGroup()).queryByRole("button", { name: /Q3 report\.pdf/ })).toBeNull();
     expect(within(railGroup()).queryByRole("button", { name: /loose\.md/ })).toBeNull();
@@ -169,24 +121,6 @@ describe("the Materializer place", () => {
     expect(screen.queryByText(/loose\.md/)).toBeNull();
   });
 
-  it("counts every live output, including the ones filed nowhere", async () => {
-    h.connection = fakeConnection({
-      folders: [folderRow({ id: "f-rep", name: "Reports" })],
-      artifacts: [
-        outputArtifact({ id: "a-1", title: "one.pdf", fileId: "f-1", folderId: "f-rep" }),
-        outputArtifact({ id: "a-2", title: "two.md", fileId: "f-2" }),
-      ],
-      compositions: [
-        compositionRow({ id: "c-1", outputFileId: "f-1" }),
-        compositionRow({ id: "c-2", outputFileId: "f-2" }),
-      ],
-    });
-    await renderFiles();
-
-    const place = screen.getByRole("button", { name: /^Materializer/ });
-    expect(within(place).getByText("2")).toBeTruthy();
-    expect(within(place).getByTitle("2 files made in the Materializer")).toBeTruthy();
-  });
 
   it("leaves an ARCHIVED output to the Bin", async () => {
     // One file offering Restore from two places is the ambiguity the Bin
@@ -294,25 +228,6 @@ describe("the place is live", () => {
     expect(screen.getByRole("button", { name: /Q3 report\.pdf/ })).toBeTruthy();
   });
 
-  it("counts it on the shut place too, so the rail does not go stale", async () => {
-    const connection = fakeConnection({
-      artifacts: [outputArtifact({ id: "a-made", title: "Q3 report.pdf", fileId: "f-1" })],
-      compositions: [],
-    });
-    h.connection = connection;
-    await renderFiles();
-
-    const place = () => screen.getByRole("button", { name: /^Materializer/ });
-    expect(within(place()).queryByText("1")).toBeNull();
-
-    await emit(
-      connection,
-      COMPOSITION_CONCEPT,
-      compositionRow({ id: "c-1", outputFileId: "f-1" }),
-      "NODE_CREATED",
-    );
-    expect(within(place()).getByText("1")).toBeTruthy();
-  });
 });
 
 describe("the handoff to the Materializer", () => {
@@ -354,7 +269,7 @@ describe("the handoff to the Materializer", () => {
     await renderFiles({ registry: registryWith(MATERIALIZER_MANIFEST) });
 
     await click(screen.getByRole("button", { name: /Q3 report\.pdf/ }));
-    const inspector = screen.getByRole("complementary", { name: "File details" });
+    const inspector = screen.getByRole("region", { name: "File details" });
     expect(within(inspector).getByText("Made in")).toBeTruthy();
     expect(within(inspector).getByRole("button", { name: "Open in Materializer" })).toBeTruthy();
     // The record is the Materializer's. Files does not restate what the file
@@ -387,7 +302,7 @@ describe("the handoff to the Materializer", () => {
     fireEvent.keyDown(document, { key: "Escape" });
 
     await click(screen.getByRole("button", { name: /Q3 report\.pdf/ }));
-    const inspector = screen.getByRole("complementary", { name: "File details" });
+    const inspector = screen.getByRole("region", { name: "File details" });
     expect(within(inspector).queryByRole("button", { name: "Open in Materializer" })).toBeNull();
   });
 

@@ -14,7 +14,6 @@ import { BackupsSection } from "./backups/BackupsSection";
 import { backupFromRow, type BackupRow } from "./backups/rows";
 import { useBackupsFeed } from "./backups/useBackups";
 import { BrowseSection, type DeskFolderShortcut } from "./BrowseSection";
-import { ALL_COLLAPSED, type ExpandedPlaces } from "./Rail";
 import {
   applyFilters,
   DEFAULT_FILTER,
@@ -23,10 +22,7 @@ import {
   type FilesFilter,
 } from "./filters";
 import { foldFolderTree, foldMaterializedRail, materializedByArtifactId } from "./fold";
-import { rowString } from "@znasllc-io/memql-sdk-core/client";
 
-import { flatten } from "../../kit/rows";
-import { foldFolderLinkStates, linkStateOf, type LinkState } from "./links";
 import {
   artifactFromRow,
   compositionFromRow,
@@ -123,20 +119,6 @@ export function FilesApp({
     sortAscending: settings.defaultSort === "oldest",
   }));
   const [selectedId, setSelectedId] = useState("");
-  // Which rail places are open. HELD HERE rather than in the browse, for the
-  // same reason the filter is: the section switch below returns early, so a
-  // trip to Settings and back would otherwise shut everything the person had
-  // just opened. Starts all-shut -- Rail.tsx says why.
-  const [expanded, setExpanded] = useState<ExpandedPlaces>(ALL_COLLAPSED);
-  // The Bin's own disclosures, one level in (epic memql#4981): its archived
-  // folders and its loose group. Held HERE for exactly the reason above --
-  // the section switch below returns early, so a trip to Settings and back
-  // would shut what the person had just opened. Starts empty: the Bin opens
-  // onto its shape, and its contents are asked for.
-  const [openBinFolders, setOpenBinFolders] = useState<ReadonlySet<string>>(
-    () => new Set<string>(),
-  );
-
   // ===========================================================================
   // THE DESK, FOLDED FOR THE DESKTOP PLACE (epic memql#4842, #4846)
   // ===========================================================================
@@ -207,7 +189,6 @@ export function FilesApp({
         place,
         folderId: artifact.folderId,
       }));
-      setExpanded((e) => ({ ...e, [place]: true }));
       setSelectedId(artifact.id);
       handledIntent.current = intent.id;
       consumeIntent?.(intent.id);
@@ -225,7 +206,6 @@ export function FilesApp({
       // Arriving by intent OPENS the place. Being sent here from a desk icon
       // is the same request as clicking the place in the rail, and answering
       // it with a shut disclosure would hide the folder the sender named.
-      setExpanded((e) => ({ ...e, [place]: true }));
       setSelectedId("");
     }
     handledIntent.current = intent.id;
@@ -283,20 +263,6 @@ export function FilesApp({
   );
 
 
-  // The origin link states (epic memql#4783), keyed by the file id the index
-  // row points at. Folded from the file feed rather than read per row: one
-  // pass over a snapshot the app already holds, and the rollup below needs
-  // every file anyway.
-  const linkByFileId = useMemo(() => {
-    const byId = new Map<string, LinkState | "">();
-    for (const raw of files.snapshot.rows) {
-      const row = flatten(raw);
-      const id = rowString(row, "id").split(":").pop() ?? "";
-      if (id !== "") byId.set(id, linkStateOf(raw));
-    }
-    return byId;
-  }, [files.snapshot]);
-
   // The tree, from the folders feed. Archived folders are dropped HERE, not
   // by the read: the seed now includes them for the Bin place, and an
   // archive flip arrives as an UPDATE the fold has to keep answering for.
@@ -339,25 +305,6 @@ export function FilesApp({
         .filter((f) => f.id !== "" && f.archived && !f.deleted)
         .sort((a, b) => a.name.localeCompare(b.name)),
     [folders.snapshot],
-  );
-
-  // The folder badges: the WORST state anywhere beneath each folder. Computed
-  // over the artifact index rather than the file rows, because filing lives on
-  // the INDEX -- a file row's own folderId is the initial filing only and a
-  // later move deliberately never comes back to it.
-  const folderLinks = useMemo(
-    () =>
-      foldFolderLinkStates(
-        content.map((row) => ({
-          folderId: row.folderId,
-          state:
-            row.kind === "file"
-              ? (linkByFileId.get(row.sourceConceptRef.split(":").pop() ?? "") ?? "")
-              : "",
-        })),
-        (folderId) => tree.byId.get(folderId)?.folder.parentFolderId ?? "",
-      ),
-    [content, linkByFileId, tree],
   );
 
   function update(patch: Partial<FilesSettings>) {
@@ -412,14 +359,8 @@ export function FilesApp({
       desksWithItems={desk.desksWithItems}
       filter={filter}
       setFilter={setFilter}
-      expanded={expanded}
-      setExpanded={setExpanded}
-      openBinFolders={openBinFolders}
-      setOpenBinFolders={setOpenBinFolders}
       selectedId={selectedId}
       onSelect={setSelectedId}
-      linkByFileId={linkByFileId}
-      folderLinks={folderLinks}
       confirmBeforeArchive={settings.confirmBeforeArchive}
       askContext={askContext}
       askAbout={askAbout}

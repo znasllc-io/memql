@@ -1,3 +1,6 @@
+import { FilesApp } from "../src/apps/files/FilesApp";
+import { LocalFilesSettingsStore } from "../src/apps/files/settings";
+import { fakeConnection as filesConnection, artifactRow as filesArtifact, folderRow as filesFolder, fileRow as filesFile, versionRow as filesVersion, watchedFolderRow, withSession as filesSession } from "../test/files/harness";
 import { CampaignsSettingsSection } from "../src/apps/campaigns/CampaignsSettingsSection";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
 import { DEFAULT_CAMPAIGNS_SETTINGS } from "../src/apps/campaigns/settings";
@@ -46,7 +49,7 @@ import {
 } from "./pipelinesSeeds";
 import { rowsResult as deployRowsResult } from "../test/deployables/harness";
 import { SessionProvider } from "../src/chrome/access";
-import { OsProvider } from "../src/chrome/state";
+import { OsProvider, useOs } from "../src/chrome/state";
 import { OS_REGISTRY } from "../src/apps/registry";
 import { PipelinesSection } from "../src/apps/settings/PipelinesSection";
 import { UNKNOWN_RUNTIME_CONFIG } from "../src/cluster/config";
@@ -704,6 +707,10 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  "files": filesPreview("browse"),
+  "files-empty": filesPreview("browse", true),
+  "files-backups": filesPreview("backups"),
+  "files-backups-empty": filesPreview("backups", true),
   "azure-email-dns": azureEmailView("dns"),
   "azure-email-provisioning": azureEmailView("provisioning"),
   "azure-email-empty": azureEmailView("unconfigured"),
@@ -1682,3 +1689,24 @@ document.documentElement.setAttribute("data-os-theme", resolveThemePack(new URLS
 document.documentElement.style.colorScheme = mode;
 
 createRoot(document.getElementById("root")!).render(<App />);
+
+function filesPreview(section: string, empty = false) {
+ return {
+  connect: () => filesConnection(empty ? {} : {
+   folders: [filesFolder({id:"research",name:"Research"}), filesFolder({id:"reports",name:"Reports"})],
+   artifacts: [filesArtifact({id:"nano",title:"Nanotechnology for Water Purification.md",folderId:"research",sourceConceptRef:"v1:library:file:nano-file",mimeType:"text/markdown",format:"md",summary:"Evidence, trade-offs, and translation in water treatment.",labels:["research","water"]}),filesArtifact({id:"quarterly",title:"Quarterly report.pdf",folderId:"reports",mimeType:"application/pdf"}),filesArtifact({id:"notes",title:"Workshop notes.md",mimeType:"text/markdown"})],
+   files: [filesFile({id:"nano-file",name:"Nanotechnology for Water Purification.md",versionNumber:3,size:24920})],
+   versions: [filesVersion({id:"nano-v2",fileId:"nano-file",versionNumber:2,size:22100,name:"Nanotechnology for Water Purification.md"}),filesVersion({id:"nano-v1",fileId:"nano-file",versionNumber:1,size:12400,name:"Nanotechnology for Water Purification.md"})],
+   machines:[fleetMachineRow({id:"studio",name:"Studio mini",capabilities:["HEADLESS"]})],
+   backups:[watchedFolderRow({id:"research-backup",workerId:"studio",localPath:"/Users/ana/Research",folderId:"research",intervalMinutes:1440,originState:"ok",filesSeen:18,bytesSeen:3400000,lastSweepAt:new Date().toISOString()}),watchedFolderRow({id:"reports-backup",workerId:"studio",localPath:"/Users/ana/Reports",folderId:"reports",status:"paused",intervalMinutes:10080})],
+  }),
+  wrap: (el: JSX.Element) => filesSession(<OsProvider registry={OS_REGISTRY} actorRole="owner" grid={{cols:8,rows:5}}><MachinesProvider>{el}</MachinesProvider></OsProvider>),
+  render: () => <FilesQa section={section} />,
+ };
+}
+
+function FilesQa({section}: {section: string}) {
+ const {actions} = useOs();
+ useEffect(() => { actions.setThemePack(resolveThemePack(new URLSearchParams(window.location.search).get("theme") ?? "graphite").id); }, [actions]);
+ return <div className="os-window-content"><FilesApp sectionId={section} navigate={()=>{}} askContext={()=>{}} store={new LocalFilesSettingsStore(null)} /></div>;
+}

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, FolderPlus, Plus, Upload } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FolderPlus, Upload } from "lucide-react";
 import {
   newShortId,
   rowNumber,
@@ -19,10 +19,12 @@ import { editorFilename, isZipArtifact } from "../../items/editorPreference";
 import { useOsConnection } from "../../live/connection";
 import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
 import { planArchive, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
-import { foldBinRail } from "./fold";
+
 import { MATERIALIZER_APP, MATERIALIZER_COMPOSER } from "./materializer";
 import { kindGlyph } from "./glyphs";
-import { Rail, type ExpandedPlaces } from "./Rail";
+import { LocalTabs } from "../../kit/LocalTabs";
+import { AddButton } from "../../kit/AddButton";
+import { FileFolders } from "./FileFolders";
 import {
   Button,
   Caption,
@@ -31,7 +33,6 @@ import {
   Head,
   LiveList,
   Notice,
-  ProvenanceDot,
   Refine,
   RecordRow,
   listCount,
@@ -48,7 +49,6 @@ import { SOURCE_VALUES } from "./concepts";
 import type { FilesFilter, FilesPlace, KindFilter } from "./filters";
 import type { FolderRow } from "./rows";
 import type { FolderTree, MaterializedRail, TreeNode } from "./fold";
-import { LINK_LABEL, LINK_SENTENCE, type LinkState } from "./links";
 import type { BinDropPayload } from "../bin/concepts";
 import { binItemFromArtifact } from "../bin/rows";
 import { planRestore, runRestore } from "../bin/restore";
@@ -108,14 +108,8 @@ export function BrowseSection({
   desksWithItems,
   filter,
   setFilter,
-  expanded,
-  setExpanded,
-  openBinFolders,
-  setOpenBinFolders,
   selectedId,
   onSelect,
-  linkByFileId,
-  folderLinks,
   confirmBeforeArchive,
   askContext,
   askAbout,
@@ -148,23 +142,8 @@ export function BrowseSection({
   desksWithItems: number;
   filter: FilesFilter;
   setFilter: (next: FilesFilter) => void;
-  /** Which rail places are open. Held by the app root so switching to
-   *  Settings and back does not shut everything the person just opened. The
-   *  setter is functional-only; Rail.tsx records what a value-taking one
-   *  costs inside a React batch. */
-  expanded: ExpandedPlaces;
-  setExpanded: (update: (prev: ExpandedPlaces) => ExpandedPlaces) => void;
-  /** Which of the Bin's own disclosures are open. Held at the app root for
-   *  the reason `expanded` is; the setter is functional-only, and Rail.tsx
-   *  records what a value-taking one costs inside a React batch. */
-  openBinFolders: ReadonlySet<string>;
-  setOpenBinFolders: (update: (prev: ReadonlySet<string>) => ReadonlySet<string>) => void;
   selectedId: string;
   onSelect: (id: string) => void;
-  /** Origin link state by backing file id (epic memql#4783). */
-  linkByFileId: Map<string, LinkState | "">;
-  /** The worst link state anywhere beneath each folder -- the rail's badge. */
-  folderLinks: Map<string, LinkState>;
   confirmBeforeArchive: boolean;
   askContext: (tag: string) => void;
   askAbout?: (tag: string) => void;
@@ -571,37 +550,10 @@ export function BrowseSection({
   const counts = new Map<string, number>();
   const archivedFiles: ArtifactRow[] = [];
   for (const row of content) {
-    if (row.archived) {
-      archivedFiles.push(row);
-      continue;
-    }
+    if (row.archived) archivedFiles.push(row);
+    if (row.archived !== (filter.place === "bin")) continue;
     counts.set(row.folderId, (counts.get(row.folderId) ?? 0) + 1);
   }
-  // The Bin's picture, from the same two populations the Bin app reads: the
-  // archived index rows, and the archived folders. ONE FOLD, so the rail's
-  // per-folder numbers and the Bin app's list cannot drift apart -- they used
-  // to be two counting loops that happened to agree.
-  const bin = foldBinRail(archivedFiles, archivedFolders);
-  // Clicking a file in the Bin's rail means "show me that", which is two
-  // things at once: scope the list so the row is IN it, then select it so the
-  // inspector opens on it. The rail hands back the scope it found the file
-  // under -- "" for a loose file, which in the Bin already means everything
-  // archived rather than a root folder nothing is filed in.
-  const showBinFile = (row: ArtifactRow, folderId: string) => {
-    patch({ place: "bin", folderId, search: "" });
-    setExpanded((prev) => ({ ...prev, bin: true }));
-    onSelect(row.id);
-  };
-
-  const deskFileCount = content.filter(
-    (r) => !r.archived && deskFileArtifactIds.has(r.id),
-  ).length;
-  // The COLLAPSED Library's number is the whole place, not its root folder.
-  // A shut summary reading "3" over two hundred files is a smaller number
-  // standing in front of a bigger one it does not mention; the per-folder
-  // counts above stay direct, which is the recorded answer for a location.
-  const libraryTotal = content.length - archivedFiles.length;
-
   const folderNameOf = (folderId: string): string => {
     if (folderId === "") return "Library";
     return (
@@ -721,6 +673,21 @@ export function BrowseSection({
   );
 
   /** Back to the place, with every facet and the search dropped. */
+  const visibleFolders = searching ? [] : filter.folderId
+    ? (tree.byId.get(filter.folderId)?.children.map(node => node.folder) ?? [])
+    : filter.place === "library" ? tree.roots.map(node => node.folder)
+    : filter.place === "desktop" ? deskFolders.flatMap(shortcut => { const node = tree.byId.get(shortcut.folderId); return node ? [node.folder] : []; })
+    : filter.place === "bin" ? archivedFolders
+    : materializedRail.folders.map(entry => entry.folder);
+  const pageRoot = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef(new Map<string, number>());
+  const pageKey = `${filter.place}:${filter.folderId ?? ""}:${selectedId}`;
+  useLayoutEffect(() => {
+    const scroller = pageRoot.current?.closest<HTMLElement>(".os-window-content");
+    if (scroller) scroller.scrollTop = scrollPositions.current.get(pageKey) ?? 0;
+    return () => { if (scroller) scrollPositions.current.set(pageKey, scroller.scrollTop); };
+  }, [pageKey]);
+
   const clearFilters = () =>
     patch({
       kind: "all",
@@ -733,6 +700,7 @@ export function BrowseSection({
 
   return (
     <div
+      ref={pageRoot}
       className="os-files"
       onDragOver={(event) => {
         if (!event.dataTransfer.types.includes("Files")) return;
@@ -745,7 +713,8 @@ export function BrowseSection({
           and count, the quiet sort, one Refine affordance, the Upload
           primary. The nine-control strip this replaces is the reason rule 2
           exists. */}
-      <Head title={headTitle} breadcrumbs={headTrail} meta={listCount(list?.snapshot, listedCount)}>
+      <div hidden={selected !== null}>
+      <Head title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(list?.snapshot, listedCount)}>
         <SortControl
           ascending={filter.sortAscending}
           onToggle={() => patch({ sortAscending: !filter.sortAscending })}
@@ -856,41 +825,14 @@ export function BrowseSection({
         }}
       />
 
+      <LocalTabs label="File locations" value={filter.place} onChange={place => { onSelect(""); patch({place, folderId:"", search:""}); }}
+        options={[["library","Library"],["desktop","Desktop"],["materializer","Materializer"],["bin","Bin"]]} />
+      {railNote ? <Caption>{railNote}</Caption> : null}
       <div className="os-files-body">
-        {/* THE RAIL (epic memql#4842, #4846; collapsed by default here).
-            Library is what you have, Desktop is what sits on your desks, the
-            Bin is what you archived. Each place is a disclosure over its own
-            contents -- see Rail.tsx for why they start shut, why selecting
-            one also opens it, and why the Bin is the one place whose rail
-            reaches files as well as folders. */}
-        <Rail
-          filter={filter}
-          patch={patch}
-          tree={tree}
-          counts={counts}
-          folderLinks={folderLinks}
-          bin={bin}
-          materializedRail={materializedRail}
-          openBinFolders={openBinFolders}
-          setOpenBinFolders={setOpenBinFolders}
-          deskFolders={deskFolders}
-          folderNameOf={folderNameOf}
-          libraryTotal={libraryTotal}
-          deskFileCount={deskFileCount}
-          expanded={expanded}
-          setExpanded={setExpanded}
-          renamingFolderId={renamingFolderId}
-          onRename={(folderId, name) => void renameFolder(folderId, name)}
-          onCancelRename={() => setRenamingFolderId("")}
-          onFolderMenu={(x, y, node) => setFolderMenu({ x, y, node })}
-          onArchivedFolderMenu={(x, y, folder) =>
-            setArchivedFolderMenu({ x, y, folder })
-          }
-          onSelectBinFile={showBinFile}
-          selectedFileId={selectedId}
-          railNote={railNote}
-          foldersState={foldersState}
-        />
+        <FileFolders folders={visibleFolders} counts={counts} loading={foldersState === "seeding"}
+          renamingId={renamingFolderId} onOpen={folderId => patch({ folderId, search: "" })}
+          onRename={(folderId, name) => void renameFolder(folderId, name)} onCancelRename={() => setRenamingFolderId("")}
+          onMenu={(x, y, folder) => folder.archived ? setArchivedFolderMenu({x,y,folder}) : setFolderMenu({x,y,node:tree.byId.get(folder.id)!})} />
 
         <div className="os-files-list">
           {artifacts.snapshot.error ? (
@@ -975,18 +917,13 @@ export function BrowseSection({
               <FileLine
                 row={row}
                 tick={tick}
-                searching={searching}
+                searching={searching || !filter.folderId}
                 folderNameOf={folderNameOf}
                 presence={presence}
                 deskIndex={
                   filter.place === "desktop" && desksWithItems > 1
                     ? (deskIndexByArtifactId.get(row.id) ?? null)
                     : null
-                }
-                linkState={
-                  row.kind === "file"
-                    ? (linkByFileId.get(row.sourceConceptRef.split(":").pop() ?? "") ?? "")
-                    : ""
                 }
                 open={selectedId === row.id}
                 onToggle={() => onSelect(selectedId === row.id ? "" : row.id)}
@@ -1007,6 +944,10 @@ export function BrowseSection({
           ) : null}
         </div>
 
+
+      </div>
+
+      </div>
         {selected === null ? null : (
           <Inspector
             key={selected.id}
@@ -1018,10 +959,11 @@ export function BrowseSection({
             confirmBeforeArchive={confirmBeforeArchive}
             uploads={uploads}
             onAsk={askContext}
+            backLabel={headTitle}
+            breadcrumbs={[...(headTrail ?? [{label: headTitle}]).map((crumb, i, all) => i === all.length - 1 ? {...crumb, onSelect: () => onSelect("")} : {...crumb, onSelect: () => { onSelect(""); crumb.onSelect?.(); }}), {label: artifactName(selected)}]}
             onClose={() => onSelect("")}
           />
         )}
-      </div>
 
       {/* THE ROW'S MENU IS THE INSPECTOR'S ACTION SET (memql#4860 wave).
           It used to hold one entry -- Move to Bin -- which made a right-click
@@ -1231,9 +1173,7 @@ function AddMenu({
 
   return (
     <div className="os-files-add" ref={wrap}>
-      <Button tone="primary" ariaExpanded={open} onClick={() => setOpen(!open)}>
-        <Plus size={13} aria-hidden /> Add <ChevronDown size={12} aria-hidden />
-      </Button>
+      <AddButton label="Add files or folder" aria-expanded={open} onClick={() => setOpen(!open)} />
       {open ? (
         <div
           className="os-menu os-files-add-menu"
@@ -1345,7 +1285,6 @@ function FileLine({
   folderNameOf,
   presence,
   deskIndex,
-  linkState,
   open,
   onToggle,
   onMenu,
@@ -1360,7 +1299,6 @@ function FileLine({
   deskIndex: number | null;
   /** The origin link state (epic memql#4783), or "" for a file with no origin
    *  to link to -- which is most of them, and renders nothing. */
-  linkState: LinkState | "";
   open: boolean;
   onToggle: () => void;
   onMenu: (x: number, y: number) => void;
@@ -1408,12 +1346,7 @@ function FileLine({
       open={open}
       onOpen={onToggle}
       secondary={story.sentence}
-      stateExtra={
-        <>
-          <ProvenanceDot tone={story.tone} label={story.sentence || undefined} />
-          {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-        </>
-      }
+      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     >
       {searching && row.folderId !== "" ? (
         <Chip tone="muted">in {folderNameOf(row.folderId)}</Chip>
@@ -1430,14 +1363,7 @@ function FileLine({
           {row.validationStatus}
         </Chip>
       ) : null}
-      {linkState === "" ? null : (
-        <Chip
-          tone={linkState === "synced" ? "neutral" : "accent"}
-          title={LINK_SENTENCE[linkState]}
-        >
-          {LINK_LABEL[linkState]}
-        </Chip>
-      )}
+
     </RecordRow>
     </div>
   );

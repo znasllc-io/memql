@@ -323,6 +323,7 @@ func (h *ArtifactHandler) ownedOpenSession(w http.ResponseWriter, r *http.Reques
 // ---------------------------------------------------------------------------
 
 type uploadInitRequest struct {
+	BackupWatchId          string   `json:"backupWatchId"`
 	Name                   string   `json:"name"`
 	Size                   int64    `json:"size"`
 	MimeType               string   `json:"mimeType"`
@@ -384,6 +385,12 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 		http.Error(w, msg, status)
 		return
 	}
+	backupPath, backupStatus, backupMsg := h.backupUploadPath(ctx, strings.TrimSpace(req.BackupWatchId), strings.TrimSpace(req.UploadedFromWorkerId), strings.TrimSpace(req.UploadedFromPath))
+	if backupStatus != 0 {
+		http.Error(w, backupMsg, backupStatus)
+		return
+	}
+	req.UploadedFromPath = backupPath
 	workerName, status, msg := h.verifyProvenance(ctx,
 		strings.TrimSpace(req.UploadedFromWorkerId),
 		strings.TrimSpace(req.UploadedFromWorkerName),
@@ -457,6 +464,7 @@ func (h *ArtifactHandler) handleUploadInit(w http.ResponseWriter, r *http.Reques
 		UploadedFromWorkerId:   strings.TrimSpace(req.UploadedFromWorkerId),
 		UploadedFromWorkerName: workerName,
 		UploadedFromPath:       strings.TrimSpace(req.UploadedFromPath),
+		BackupWatchId:          strings.TrimSpace(req.BackupWatchId),
 		BlobPath:               blobPath, FileId: fileId, ChunkSize: h.chunkSizeBytes,
 		TargetArtifactId: targetArtifactId, ExpectedVersion: expectedVersion,
 	}); err != nil {
@@ -621,6 +629,13 @@ func (h *ArtifactHandler) handleUploadComplete(w http.ResponseWriter, r *http.Re
 		})
 		return
 	}
+
+	backupPath, backupStatus, backupMsg := h.backupUploadPath(r.Context(), session.BackupWatchId, session.UploadedFromWorkerId, session.UploadedFromPath)
+	if backupStatus != 0 {
+		http.Error(w, backupMsg, backupStatus)
+		return
+	}
+	session.UploadedFromPath = backupPath
 
 	if session.TargetArtifactId != "" {
 		_, head, status, msg := h.resolveVersionTarget(ctx, session.TargetArtifactId)

@@ -1,7 +1,7 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { Download, RotateCw } from "lucide-react";
 
-import { Button, Chip, Notice, ProvenanceDot, Subhead, formatBytes, formatFreshness, formatMoment, useNow } from "../../kit";
+import { Button, Chip, Notice, Subhead, formatBytes, formatFreshness, formatMoment, useNow } from "../../kit";
 import type { MachinePresence } from "../../items/provenance";
 import { shortDigest, versionStory, type VersionEntry, type VersionHistory as History } from "./versions";
 
@@ -93,20 +93,18 @@ export function VersionHistory({
         // panel's job there is to teach what the action does rather than to
         // render a list of one.
         <p className="os-files-versions-only">
-          One version so far. Upload a new one and this file keeps its place: same row, same
-          folder, same labels, with this version kept and downloadable.
+          Previous versions stay available when you upload a replacement.
         </p>
       ) : null}
 
       {history.entries.length > 0 ? (
-        <ol className="os-files-spine">
+        <ol className="os-file-version-list">
           {history.entries.map((entry) => {
             const machine =
               entry.uploadedFromWorkerId === "" ? null : presence(entry.uploadedFromWorkerId);
             const story = versionStory(entry, machine);
             return (
               <li key={entry.key} className="os-files-version" data-current={entry.current || undefined}>
-                <span className="os-files-version-node" aria-hidden />
                 <div className="os-files-version-body">
                   <p className="os-files-version-line">
                     <span className="os-files-version-n">v{entry.versionNumber}</span>
@@ -121,7 +119,6 @@ export function VersionHistory({
                     </span>
                   </p>
                   <p className="os-files-version-story">
-                    <ProvenanceDot tone={story.tone} />
                     <span>{story.sentence}</span>
                   </p>
                   {/* A version that arrived under a different name is news;

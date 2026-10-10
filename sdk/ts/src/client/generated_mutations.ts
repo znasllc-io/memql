@@ -2345,6 +2345,8 @@ QueryClient.prototype.createIdentityProvider = function (this: QueryClient, args
 /** Create a Library file row for bytes already written to blob storage. Owner-acted: ownerUserId is stamped from actor.userId, so a file can only ever be created for the person the call runs as. format is the caller's MIME-derived classification, defaulting to 'other' (the metadata-only card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus. That status is STAMPED rather than accepted is load-bearing beyond this mutation: indexFileOnCreate filters on `row.status == "stored"` so it promotes exactly once, because graph.node.created fires on every write and a second promotion would wipe the artifact's labels -- a caller-supplied status would let a later write re-enter that state. indexFileOnCreate folds the new row into the Library index automatically. */
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["createLibraryFile"] in generated_concepts.ts).
 export interface CreateLibraryFileArgs {
+  backupWorkerId?: string;
+  backupPath?: string;
   producedByRunId?: string;
   producedByStepKey?: string;
   fileId: string;
@@ -2368,6 +2370,8 @@ export interface CreateLibraryFileArgs {
 
 export function buildCreateLibraryFile(args: CreateLibraryFileArgs): string {
   const parts: string[] = [];
+  if (args.backupWorkerId !== undefined) parts.push("backupWorkerId: " + renderMemQLValue(args.backupWorkerId));
+  if (args.backupPath !== undefined) parts.push("backupPath: " + renderMemQLValue(args.backupPath));
   if (args.producedByRunId !== undefined) parts.push("producedByRunId: " + renderMemQLValue(args.producedByRunId));
   if (args.producedByStepKey !== undefined) parts.push("producedByStepKey: " + renderMemQLValue(args.producedByStepKey));
   parts.push("fileId: " + renderMemQLValue(args.fileId));
@@ -2459,6 +2463,7 @@ QueryClient.prototype.createLibraryFolder = function (this: QueryClient, args: C
 The machine is NOT verified here. That is the header's decision, not an omission: the row is a preference, a watch naming a machine the caller does not own is read by no cockpit, and the push it would attempt is refused at the upload by a check that CAN see the caller's fleet. */
 // Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["createLibraryWatchedFolder"] in generated_concepts.ts).
 export interface CreateLibraryWatchedFolderArgs {
+  intervalMinutes?: number;
   watchId: string;
   workerId: string;
   localPath: string;
@@ -2469,6 +2474,7 @@ export interface CreateLibraryWatchedFolderArgs {
 
 export function buildCreateLibraryWatchedFolder(args: CreateLibraryWatchedFolderArgs): string {
   const parts: string[] = [];
+  if (args.intervalMinutes !== undefined) parts.push("intervalMinutes: " + renderMemQLValue(args.intervalMinutes));
   parts.push("watchId: " + renderMemQLValue(args.watchId));
   parts.push("workerId: " + renderMemQLValue(args.workerId));
   parts.push("localPath: " + renderMemQLValue(args.localPath));
@@ -8027,6 +8033,7 @@ THE THREE IT DOES TAKE ARE A FULL REPLACE, and each writes its explicit empty ra
 Re-pointing folderId moves NOTHING that already arrived. Files carry their own folderId and the engine has no cascade; this decides where the next push lands. The app says exactly that at the moment of the change, because a person re-pointing a backup reasonably expects otherwise. */
 // Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["updateLibraryWatchedFolder"] in generated_concepts.ts).
 export interface UpdateLibraryWatchedFolderArgs {
+  intervalMinutes?: number;
   watchId: string;
   folderId?: string;
   excludeGlobs?: string[];
@@ -8035,6 +8042,7 @@ export interface UpdateLibraryWatchedFolderArgs {
 
 export function buildUpdateLibraryWatchedFolder(args: UpdateLibraryWatchedFolderArgs): string {
   const parts: string[] = [];
+  if (args.intervalMinutes !== undefined) parts.push("intervalMinutes: " + renderMemQLValue(args.intervalMinutes));
   parts.push("watchId: " + renderMemQLValue(args.watchId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.excludeGlobs !== undefined) parts.push("excludeGlobs: " + renderMemQLValue(args.excludeGlobs));

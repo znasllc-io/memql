@@ -54,17 +54,40 @@ func TestFileVersionConflictAcrossReplicas(t *testing.T) {
 	marker := fmt.Sprintf("file-edit-%d", time.Now().UnixNano())
 	owner := marker + "-owner"
 	ctx := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: owner}), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
+	watchID := marker + "-watch"
+	if _, err = a.exec(ctx, "createLibraryWatchedFolder", map[string]any{"watchId": watchID, "workerId": "machine-1", "localPath": "/reports", "intervalMinutes": 1440}); err != nil {
+		t.Fatal(err)
+	}
+	if root, readErr := b.BackupDirectory(ctx, watchID, "machine-1"); readErr != nil || root != "/reports" {
+		t.Fatalf("backup scope lost across replicas: %q %v", root, readErr)
+	}
+	if root, readErr := b.BackupDirectory(ctx, watchID, "another-machine"); readErr != nil || root != "" {
+		t.Fatalf("backup accepted wrong machine: %q %v", root, readErr)
+	}
+	foreign := auth.ContextWithAccess(auth.ContextWithToken(context.Background(), &auth.TokenInfo{Subject: owner + "-other"}), &auth.AccessContext{UserId: owner + "-other", Role: auth.RoleWriter})
+	if root, readErr := b.BackupDirectory(foreign, watchID, "machine-1"); readErr != nil || root != "" {
+		t.Fatalf("backup accepted wrong owner: %q %v", root, readErr)
+	}
+	if _, err = a.exec(ctx, "setLibraryWatchedFolderStatus", map[string]any{"watchId": watchID, "status": "paused"}); err != nil {
+		t.Fatal(err)
+	}
+	if root, readErr := b.BackupDirectory(ctx, watchID, "machine-1"); readErr != nil || root != "" {
+		t.Fatalf("paused backup remained active on replica: %q %v", root, readErr)
+	}
+	if _, err = a.exec(ctx, "updateLibraryWatchedFolder", map[string]any{"watchId": watchID, "intervalMinutes": 1}); err == nil {
+		t.Fatal("DSL accepted a backup interval below its minimum")
+	}
 	if err = a.CreateFile(ctx, LibraryFileCreateParams{FileId: marker, Name: "draft.txt", MimeType: "text/plain", Size: 4, BlobUrl: "library/" + owner + "/" + marker + "/initial", Format: "text", Source: "uploaded", UploadedFromWorkerId: "machine-1", UploadedFromPath: "/reports/draft.txt"}); err != nil {
 		t.Fatal(err)
 	}
 	// The base travels through the real DSL store, not a replica's memory or a
 	// test fake. A missing field in the session shape breaks this assertion.
 	sessionA, sessionB := uploadsession.NewStore(a.engine), uploadsession.NewStore(b.engine)
-	if err = sessionA.Create(ctx, uploadsession.CreateParams{UploadId: marker + "-upload", Name: "draft.txt", Size: 4, FileId: marker, BlobPath: "library/" + owner + "/" + marker + "/upload", ChunkSize: 4, TargetArtifactId: marker + "-artifact", ExpectedVersion: 1}); err != nil {
+	if err = sessionA.Create(ctx, uploadsession.CreateParams{UploadId: marker + "-upload", Name: "draft.txt", Size: 4, FileId: marker, BlobPath: "library/" + owner + "/" + marker + "/upload", ChunkSize: 4, TargetArtifactId: marker + "-artifact", ExpectedVersion: 1, BackupWatchId: watchID, UploadedFromPath: "/reports/draft.txt"}); err != nil {
 		t.Fatal(err)
 	}
 	persisted, err := sessionB.ByID(memql.ContextWithFreshRead(ctx), marker+"-upload")
-	if err != nil || persisted == nil || persisted.ExpectedVersion != 1 {
+	if err != nil || persisted == nil || persisted.ExpectedVersion != 1 || persisted.BackupWatchId != watchID {
 		t.Fatalf("session lost its base across replicas: %v %#v", err, persisted)
 	}
 	head, err := a.File(ctx, LibraryFileConceptRef(marker))

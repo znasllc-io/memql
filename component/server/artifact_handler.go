@@ -798,7 +798,11 @@ func (h *ArtifactHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	folderId := strings.TrimSpace(r.FormValue(libraryFormFolderKey))
 	workerId := strings.TrimSpace(r.FormValue(libraryFormWorkerIdKey))
 	workerName := strings.TrimSpace(r.FormValue(libraryFormWorkerNameKey))
-	fromPath := strings.TrimSpace(r.FormValue(libraryFormPathKey))
+	fromPath, backupStatus, backupMsg := h.backupUploadPath(ctx, strings.TrimSpace(r.FormValue("backupWatchId")), workerId, strings.TrimSpace(r.FormValue(libraryFormPathKey)))
+	if backupStatus != 0 {
+		http.Error(w, backupMsg, backupStatus)
+		return
+	}
 	resolvedName, provStatus, provMsg := h.verifyProvenance(ctx, workerId, workerName, fromPath)
 	if provStatus != 0 {
 		http.Error(w, provMsg, provStatus)
@@ -1800,6 +1804,8 @@ func (s *EngineLibraryStore) CreateFile(ctx context.Context, p LibraryFileCreate
 	}
 	if v := strings.TrimSpace(p.UploadedFromPath); v != "" {
 		args["uploadedFromPath"] = v
+		args["backupWorkerId"] = p.UploadedFromWorkerId
+		args["backupPath"] = v
 	}
 	_, err := s.exec(ctx, "createLibraryFile", args)
 	return err
@@ -2174,9 +2180,6 @@ func (s *EngineLibraryStore) SupersedeFile(ctx context.Context, snap LibraryVers
 	// A version has its own provenance, but remote editing cannot detach the
 	// logical watched file. Only verified upload facts can establish this key.
 	stamped.BackupWorkerId, stamped.BackupPath = current.BackupWorkerId, current.BackupPath
-	if stamped.BackupWorkerId == "" || stamped.BackupPath == "" {
-		stamped.BackupWorkerId, stamped.BackupPath = current.UploadedFromWorkerId, current.UploadedFromPath
-	}
 	if stamped.BackupWorkerId == "" || stamped.BackupPath == "" {
 		stamped.BackupWorkerId, stamped.BackupPath = head.UploadedFromWorkerId, head.UploadedFromPath
 	}

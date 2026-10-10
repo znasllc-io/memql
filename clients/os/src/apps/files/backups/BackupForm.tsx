@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from "react";
 
-import { Button, Caption, Check, Field, Input, Notice, Panel, Select, Subhead } from "../../../kit";
+import { Button, Caption, Switch, Field, Input, Notice, Select } from "../../../kit";
 import { isWorkerOnline } from "../../fleet/online";
 import { machineName, type MachineRow } from "../../fleet/rows";
 import { foldFolderTree, type TreeNode } from "../fold";
@@ -110,7 +110,12 @@ export function BackupForm({
   const choices = useMemo(() => folderChoices(folders), [folders]);
   const chosen = useMemo(() => machines.find((machine) => machine.id === workerId), [machines, workerId]);
 
-  const ready = workerId !== "" && localPath.trim() !== "";
+  const initialMinutes = editing?.intervalMinutes ?? (editing ? 5 : 1440);
+  const [unit, setUnit] = useState(initialMinutes % 1440 === 0 ? 1440 : initialMinutes % 60 === 0 ? 60 : 1);
+  const [interval, setInterval] = useState(String(initialMinutes / (initialMinutes % 1440 === 0 ? 1440 : initialMinutes % 60 === 0 ? 60 : 1)));
+  const minutes = Number(interval) * unit;
+  const scheduleValid = Number.isInteger(Number(interval)) && minutes >= 5 && minutes <= 525600;
+  const ready = scheduleValid && workerId !== "" && localPath.trim() !== "";
   const repointing = editing !== null && folderId !== editing.folderId;
 
   const submit = () => {
@@ -121,12 +126,12 @@ export function BackupForm({
       folderId,
       excludeGlobs: parseGlobs(globs),
       includeHidden,
+      intervalMinutes: minutes,
     });
   };
 
   return (
-    <Panel label={editing === null ? "Back up a folder" : "Edit this backup"}>
-      <Subhead>{editing === null ? "Back up a folder" : "Edit this backup"}</Subhead>
+    <div className="os-backup-editor">
 
       {machines.length === 0 && editing === null ? (
         <Notice
@@ -160,15 +165,12 @@ export function BackupForm({
           </Field>
 
           <Caption>
-            Type the full path. That machine checks it on its next sweep and reports back, and it can
-            refuse a folder its own policy does not list -- so this is a request the machine still
-            gets to turn down.
+            Enter a full folder path allowed by this machine’s backup policy.
           </Caption>
         </>
       ) : (
         <Caption>
-          {`Backing up ${editing.localPath}. The machine and the path are what every re-push is matched
-            on, so they stay fixed: stop this backup and start another to move them.`}
+          {`Backing up ${editing.localPath}. To change the machine or folder, create a new backup.`}
         </Caption>
       )}
 
@@ -201,13 +203,19 @@ export function BackupForm({
         />
       </Field>
       <Caption>
-        Comma-separated, matched against each path inside the folder. The machine already skips the
-        usual build and dependency directories, so this is for anything else.
+        Separate patterns with commas. Common build and dependency folders are already skipped.
       </Caption>
 
-      <Check checked={includeHidden} onChange={setIncludeHidden}>
+      <div className="os-backup-schedule">
+        <Field label="Back up every"><Input id={`${ids}-interval`} label="Back up every" value={interval} onChange={setInterval} /></Field>
+        <Field label="Period"><Select id={`${ids}-unit`} label="Period" value={String(unit)} onChange={value => setUnit(Number(value))}>
+          <option value="1">Minutes</option><option value="60">Hours</option><option value="1440">Days</option>
+        </Select></Field>
+      </div>
+      <Caption>{scheduleValid ? "Runs when the machine is online. Missed backups run at its next check-in." : "Choose an interval between 5 minutes and 365 days."}</Caption>
+      <Switch checked={includeHidden} onChange={setIncludeHidden}>
         Include hidden files
-      </Check>
+      </Switch>
 
       {error !== "" ? <Notice tone="error" sentence="That was refused." detail={error} /> : null}
 
@@ -217,6 +225,6 @@ export function BackupForm({
         </Button>
         <Button onClick={onCancel}>Cancel</Button>
       </div>
-    </Panel>
+    </div>
   );
 }

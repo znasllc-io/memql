@@ -1,3 +1,4 @@
+import { AddButton } from "../../../kit/AddButton";
 import { useMemo, useState } from "react";
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -11,6 +12,7 @@ import { folderFromRow, type FolderRow } from "../rows";
 import { BackupForm } from "./BackupForm";
 import {
   backupFingerprint,
+  backupSchedule,
   fileBelongsToBackup,
   linkToneOf,
   isOriginFault,
@@ -74,8 +76,8 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
       files.map((raw) => {
         const row = flatten(raw);
         return {
-          uploadedFromWorkerId: rowString(row, "backupWorkerId") || rowString(row, "uploadedFromWorkerId"),
-          uploadedFromPath: rowString(row, "backupPath") || rowString(row, "uploadedFromPath"),
+          uploadedFromWorkerId: rowString(row, "backupWorkerId"),
+          uploadedFromPath: rowString(row, "backupPath"),
           state: linkStateOf(raw),
         };
       }),
@@ -92,20 +94,17 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
   return (
     <section className="os-backups" aria-label="Backups">
       <Head
-        title="Backups"
-        meta={listCount(source?.snapshot)}
+        title={adding ? "New folder backup" : editing ? "Edit backup" : "Backups"}
+        back={adding || editing ? {label: "Backups", onSelect: () => { setAdding(false); setEditingId(""); write.clearError(); }} : undefined}
+        meta={!adding && !editing ? listCount(source?.snapshot) : undefined}
       >
-        <Button
-          tone={adding ? "quiet" : "primary"}
+        {!adding && !editing ? <AddButton label="Add folder backup"
           onClick={() => {
             setAdding((open) => !open);
             setEditingId("");
             write.clearError();
           }}
-          ariaExpanded={adding}
-        >
-          {adding ? "Close" : "Back up a folder"}
-        </Button>
+        /> : null}
       </Head>
 
       {adding ? (
@@ -147,6 +146,7 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
               folderId: spec.folderId,
               excludeGlobs: spec.excludeGlobs,
               includeHidden: spec.includeHidden,
+              intervalMinutes: spec.intervalMinutes,
             });
             if (ok) setEditingId("");
           }}
@@ -157,12 +157,12 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
         />
       ) : null}
 
-      <LiveList<BackupRow>
+      {!adding && !editing ? <LiveList<BackupRow>
         source={source}
         rowId={(backup) => backup.id}
         fingerprint={backupFingerprint}
         label="Backups"
-        emptyText="Nothing is being backed up yet. Choose a folder on one of your machines and everything inside it keeps arriving here."
+        emptyText="No folder backups yet. Add a folder and choose a schedule."
         renderRow={(backup) => (
           <BackupLine
             backup={backup}
@@ -182,7 +182,7 @@ export function BackupsSection({ folders, files, source, writes }: BackupsSectio
             onDismiss={() => setConfirmingId("")}
           />
         )}
-      />
+      /> : null}
     </section>
   );
 }
@@ -228,7 +228,7 @@ function BackupLine({
     <article className="os-backup" data-tone={tone}>
       <RecordRow
         name={backup.localPath}
-        secondary={`${name} to ${destination}`}
+        secondary={`${name} · ${destination} · ${backupSchedule(backup.intervalMinutes)}`}
         state={TONE_LABEL[tone]}
         tone={tone === "settled" ? "accent" : tone === "paused" ? "muted" : "warn"}
         current={online}

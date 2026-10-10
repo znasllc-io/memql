@@ -4197,6 +4197,8 @@ func CreateIdentityProviderBuild(args CreateIdentityProviderArgs) string {
 //
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["createLibraryFile"] in generated_concepts.go).
 type CreateLibraryFileArgs struct {
+	BackupWorkerId    string
+	BackupPath        string
 	ProducedByRunId   string
 	ProducedByStepKey string
 	FileId            string
@@ -4227,7 +4229,21 @@ func (qc *QueryClient) CreateLibraryFile(ctx context.Context, args CreateLibrary
 func CreateLibraryFileBuild(args CreateLibraryFileArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createLibraryFile(")
+	if args.BackupWorkerId != "" {
+		b.WriteString("backupWorkerId: ")
+		b.WriteString(quoteMemQL(args.BackupWorkerId))
+	}
+	if args.BackupPath != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupPath: ")
+		b.WriteString(quoteMemQL(args.BackupPath))
+	}
 	if args.ProducedByRunId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
 		b.WriteString("producedByRunId: ")
 		b.WriteString(quoteMemQL(args.ProducedByRunId))
 	}
@@ -4423,6 +4439,7 @@ func CreateLibraryFolderBuild(args CreateLibraryFolderArgs) string {
 //
 // Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["createLibraryWatchedFolder"] in generated_concepts.go).
 type CreateLibraryWatchedFolderArgs struct {
+	IntervalMinutes  int
 	WatchId          string
 	WorkerId         string
 	LocalPath        string
@@ -4441,6 +4458,13 @@ func (qc *QueryClient) CreateLibraryWatchedFolder(ctx context.Context, args Crea
 func CreateLibraryWatchedFolderBuild(args CreateLibraryWatchedFolderArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createLibraryWatchedFolder(")
+	if args.IntervalMinutes != 0 {
+		b.WriteString("intervalMinutes: ")
+		b.WriteString(fmt.Sprintf("%v", args.IntervalMinutes))
+	}
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
 	b.WriteString("watchId: ")
 	b.WriteString(quoteMemQL(args.WatchId))
 	if b.Len() > 36 {
@@ -13869,6 +13893,7 @@ func UpdateIdentityBuild(args UpdateIdentityArgs) string {
 //
 // Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["updateLibraryWatchedFolder"] in generated_concepts.go).
 type UpdateLibraryWatchedFolderArgs struct {
+	IntervalMinutes  int
 	WatchId          string
 	FolderId         string
 	ExcludeGlobs     []string
@@ -13885,6 +13910,13 @@ func (qc *QueryClient) UpdateLibraryWatchedFolder(ctx context.Context, args Upda
 func UpdateLibraryWatchedFolderBuild(args UpdateLibraryWatchedFolderArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateLibraryWatchedFolder(")
+	if args.IntervalMinutes != 0 {
+		b.WriteString("intervalMinutes: ")
+		b.WriteString(fmt.Sprintf("%v", args.IntervalMinutes))
+	}
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
 	b.WriteString("watchId: ")
 	b.WriteString(quoteMemQL(args.WatchId))
 	if args.FolderId != "" {

@@ -139,32 +139,27 @@ to export", so the response cannot be used to probe for rows.
 There are **no redirects and no signed storage URLs.** Bytes come through the
 bff. This design adds none.
 
-### Upload provenance
+### Uploads and folder backups
 
-Where a file came FROM is recorded only where it is honestly known
-(memql#4781, design D5). The axis is called **provenance**; "origin" stays
-reserved for the data-origins system (memql#4378).
+An ordinary upload creates an independent copy in the Library. Its host path is
+not retained, and subsequent changes or moves on that machine do not update it.
+Use **Upload new version** to replace an explicitly selected file while keeping
+its history. Verified machine attribution can still identify who produced it.
 
-- A **cockpit push** names the machine: `uploadedFromWorkerId` (the worker
-  registration), `uploadedFromWorkerName` and `uploadedFromPath` ride the
-  upload as form fields.
-- A **browser upload** carries none of the three. A browser physically cannot
-  name a machine or the dropped file's path, and nothing here guesses one
-  from a user agent.
+Folder backups are a separate, explicit arrangement in **Files → Backups**.
+Use **+** to choose a paired machine, an allowed directory, a Library destination,
+and an interval in minutes, hours or days. New backups default to daily; existing
+backups keep their five-minute interval until edited. Paused backups do not run.
+When a machine comes back online, missed runs become one catch-up run. Files
+already copied remain available when a backup is stopped.
 
-**Claims are verified, and a failed claim refuses the whole upload.** The
-named registration must be one of the CALLER's own machines -- checked under
-the caller's own actor, before any byte reaches storage -- and the stored
-`uploadedFromWorkerName` is resolved from the registration row itself
-(`displayName`, else the reported hostname), so the label the Files app
-renders can never disagree with the fleet page. A silently-dropped claim
-would render as "uploaded here", which is a lie; hence `403`, naming the
-refused registration id.
-
-Promotion forwards the machine id and name into the index's
-`producedByWorkerId` / `producedByWorkerName`, whose meaning generalizes from
-"computer_use only" to "when a machine is known". The **path stays on the
-file row**: the index does not need it, and the sync epic reads the file row.
+Cockpit includes `backupWatchId` on backup uploads, alongside the machine and
+source path. The server verifies that it names an active, caller-owned backup
+on that machine and that the file is inside its directory before storing bytes.
+Only these uploads retain paths and use machine/path matching for automatic
+versions. Chunked sessions retain this authorization reference across cluster
+nodes and recheck it before completion. The machine’s local backup policy still
+controls filesystem access. No upload or backup operation writes to its source.
 
 ### Versions
 
