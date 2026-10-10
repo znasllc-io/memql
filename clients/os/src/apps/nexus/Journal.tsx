@@ -38,7 +38,7 @@ export function JournalPanel({ journal }: { journal: JournalState }) {
       {journal.observations.length === 0 ? null : (
         <div className="os-nexus-journal-group">
           <Subhead meta={journal.state === "ready" && !journal.error ? journal.observations.length : undefined}>Observations</Subhead>
-          <RecordList as="ul" label="Observations">{journal.observations.map(observation => <RecordRow key={observation.id} name={observationKindWord(observation.kind)} secondary={observation.content} state={observation.stepKey} />)}</RecordList>
+          <RecordList as="ul" label="Observations">{journal.observations.map(observation => <RecordRow key={observation.id} name={observationKindWord(observation.kind)} secondary={observation.content}><span>{observation.stepKey}</span></RecordRow>)}</RecordList>
         </div>
       )}
 
