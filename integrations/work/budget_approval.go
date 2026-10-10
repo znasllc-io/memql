@@ -59,10 +59,32 @@ func (i *Integration) raiseApprovedBudget(ctx context.Context, approval, answer 
 	for key, value := range rowMap(goal, "ceilings") {
 		ceilings[key] = value
 	}
-	if current, ok := budgetNumber(ceilings[field]); ok && limit < current {
+	declared, err := ceilingsOf(goal)
+	if err != nil {
+		return err
+	}
+	effective, err := approvedWorkloadCeilings(goal, declared, rowString(rowMap(run, "classification"), "workload"))
+	if err != nil {
+		return err
+	}
+	current, known := budgetNumber(ceilings[field])
+	minimum := current
+	switch field {
+	case "wallClockMs":
+		minimum = float64(effective.WallClockMs)
+	case "maxModelCalls":
+		minimum = float64(effective.MaxModelCalls)
+	case "maxRetries":
+		minimum = float64(effective.MaxRetries)
+	}
+	if limit < minimum {
 		return fmt.Errorf("work: newLimit would lower a ceiling that has already been raised")
 	}
-	ceilings[field] = limit
+	// Raising a 45-minute estimate to 60 minutes need not lower an existing
+	// two-hour hard ceiling. A newer explicit approval still wins above.
+	if !known || limit > current {
+		ceilings[field] = limit
+	}
 	// An explicit approval supersedes the workload estimate for this ceiling
 	// only. Persist it with the declared budget so every replica agrees and
 	// resumption cannot immediately park on the unchanged estimate again.

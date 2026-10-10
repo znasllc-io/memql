@@ -103,3 +103,17 @@ func TestBudgetApprovalCannotLowerANewerCeiling(t *testing.T) {
 	require.Empty(t, eng.callsTo("updateWorkGoal"))
 	require.Empty(t, eng.callsTo("decideWorkApproval"))
 }
+
+func TestBudgetApprovalCanRaiseAnEstimateWithinTheDeclaredLimit(t *testing.T) {
+	i, eng, _ := budgetApprovalFixture(t)
+	subject := map[string]any{"ceiling": "wallClock", "limit": "2700000ms", "actual": "2700001ms"}
+	eng.reply("workApprovalsForOwner", map[string]any{"id": "a1", "runId": "r1", "ownerUserId": "u-alice", "kind": "budget", "subject": subject, "artifactHash": artifactHashOf(subject)})
+	eng.reply("workRunForOwner", map[string]any{"id": "r1", "goalId": "g1", "ownerUserId": "u-alice", "status": runStatusWaiting,
+		"waitingOn": map[string]any{"kind": "approval", "subject": "a1"}, "classification": map[string]any{"workload": "research"},
+		"spent": map[string]any{"wallClockMs": 2700001},
+	})
+	eng.reply("workGoalForOwner", map[string]any{"id": "g1", "ownerUserId": "u-alice", "ceilings": map[string]any{"wallClockMs": 7200000}})
+	_, err := i.handleDecideApproval(callerContext("u-alice"), map[string]any{"approvalId": "a1", "decision": "approved", "answer": map[string]any{"newLimit": 3600000}}, 0)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"wallClockMs": float64(7200000), "workloadOverrides": map[string]any{"wallClockMs": float64(3600000)}}, eng.callTo(t, "updateWorkGoal").Args(t)["ceilings"])
+}
