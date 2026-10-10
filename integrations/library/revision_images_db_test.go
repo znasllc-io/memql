@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/santhosh-tekuri/jsonschema/v5"
+
 	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -156,6 +158,120 @@ func testRevisionDSLPlansAcquiresAndProposesAnImage(t *testing.T, f *revisionDB)
 	proposal := revisionMap(approval["subject"])
 	if proposal["preparedImages"] == nil || !strings.Contains(asString(proposal["revisedContent"]), store.artifact) {
 		t.Fatal("saved image did not reach proposal")
+	}
+}
+
+// Replay the live failure: a generated image carries a caption in attribution.
+// The recipe must repair it before any effect, without relaxing native provenance.
+func testRevisionDSLRepairsImagePlanBeforeEffects(t *testing.T, f *revisionDB) {
+	for _, invalidAgain := range []bool{false, true} {
+		t.Run(fmt.Sprint(invalidAgain), func(t *testing.T) {
+			f := f.isolatedCase(t)
+			artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
+			request := asString(args["requestId"])
+			invalid := revisionImageSpec{Mode: "generate", Name: "desk.png", Alt: "Early-republic writing desk", Prompt: "A writing desk, quill and inkwell; no people", Attribution: "AI-generated conceptual illustration"}
+			corrected := invalid
+			corrected.Attribution = ""
+			f.ai.imagePlan = []revisionImageSpec{invalid}
+			f.ai.replacementImagePlan = []revisionImageSpec{corrected}
+			if invalidAgain {
+				f.ai.replacementImagePlan = []revisionImageSpec{invalid}
+			}
+			f.ai.assessmentReply, f.ai.needsResearch = "sufficient", true
+			f.ai.answer = revisionAnswer{Summary: "Insert the illustration", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this paragraph.", Reason: "Requested illustration", CommentIDs: []string{note}}}}
+			generator := &preparedImageEngine{IntegrationEngineAccess: f.other}
+			f.second.engine = generator
+			store := &preparedImageStore{f: f, appendProposal: true}
+			f.second.SetImageAssets(store)
+			f.second.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			err := f.execute(f.other, request, false)
+			if f.ai.imagePlanCalls.Load() != 2 || !strings.Contains(f.ai.imagePlanPrevious, invalid.Attribution) {
+				t.Fatalf("missing prior output or unbounded plan repair: calls=%d previous=%q err=%v", f.ai.imagePlanCalls.Load(), f.ai.imagePlanPrevious, err)
+			}
+			// The actual schema supplied by the installed DSL encodes the same mode
+			// boundary, even when a provider does not enforce constrained output.
+			schemaJSON, _ := json.Marshal(f.ai.imagePlanSchema)
+			schema, compileErr := jsonschema.CompileString("image-plan.json", string(schemaJSON))
+			if compileErr != nil {
+				t.Fatal(compileErr)
+			}
+			for _, spec := range []revisionImageSpec{invalid, corrected} {
+				raw, _ := json.Marshal(map[string]any{"images": []revisionImageSpec{spec}, "limitations": ""})
+				var value any
+				if e := json.Unmarshal(raw, &value); e != nil {
+					t.Fatal(e)
+				}
+				if valid := schema.Validate(value) == nil; valid != (spec.Attribution == "") {
+					t.Fatalf("schema admitted wrong mode fields: %s", raw)
+				}
+			}
+			if invalidAgain {
+				if err == nil || !strings.Contains(err.Error(), "a generated PNG requires a prompt") || generator.calls != 0 || store.writes != 0 {
+					t.Fatalf("invalid second plan caused effects or hid failure: %v generation=%d writes=%d", err, generator.calls, store.writes)
+				}
+				return
+			}
+			var wait *workstate.HumanWait
+			if !errors.As(err, &wait) || generator.calls != 1 || store.writes != 1 {
+				t.Fatalf("repair failed: %v generation=%d writes=%d", err, generator.calls, store.writes)
+			}
+			f.first.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			f.query(f.engine, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
+			if err = f.execute(f.engine, request, true); err != nil || f.ai.imagePlanCalls.Load() != 2 || generator.calls != 1 || store.writes != 1 {
+				t.Fatalf("other replica repeated repair or effects: %v", err)
+			}
+		})
+	}
+}
+
+func testRevisionDSLRepairsOverlappingImageEdits(t *testing.T, f *revisionDB) {
+	for _, invalidAgain := range []bool{false, true} {
+		t.Run(fmt.Sprint(invalidAgain), func(t *testing.T) {
+			f := f.isolatedCase(t)
+			artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
+			request := asString(args["requestId"])
+			f.ai.imagePlan = []revisionImageSpec{{Mode: "generate", Name: "desk.png", Alt: "Writing desk", Prompt: "A writing desk"}}
+			f.ai.assessmentReply, f.ai.needsResearch = "sufficient", true
+			overlapping := revisionAnswer{Summary: "Illustration", Edits: []revisionReplacement{
+				{Before: "Keep this paragraph.", After: "Keep this paragraph. Insert here.", Reason: "Insert illustration", CommentIDs: []string{note}},
+				{Before: "this paragraph.", After: "this paragraph. Insert here too.", Reason: "Insert illustration", CommentIDs: []string{note}},
+			}}
+			invalidResponse, _ := json.Marshal(overlapping)
+			if _, err := f.second.handleRevisionProposal(revisionActor("another-owner", auth.RoleWriter), map[string]any{"requestId": request, "response": string(invalidResponse), "reportInvalid": true}, 0); err == nil {
+				t.Fatal("validation reporting hid an ownership failure")
+			}
+			f.ai.firstAnswer = &overlapping
+			f.ai.answer = revisionAnswer{Summary: "Insert the illustration", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this paragraph.", Reason: "Requested illustration", CommentIDs: []string{note}}}}
+			if invalidAgain {
+				f.ai.answer = overlapping
+			}
+			generator := &preparedImageEngine{IntegrationEngineAccess: f.other}
+			f.second.engine = generator
+			store := &preparedImageStore{f: f, appendProposal: true}
+			f.second.SetImageAssets(store)
+			f.second.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			err := f.execute(f.other, request, false)
+			if f.ai.calls.Load() != 2 || f.ai.repairCalls.Load() != 1 || generator.calls != 1 || store.writes != 1 {
+				t.Fatalf("missing/unbounded edit repair or duplicate image effects: %v calls=%d repairs=%d generation=%d writes=%d", err, f.ai.calls.Load(), f.ai.repairCalls.Load(), generator.calls, store.writes)
+			}
+			if invalidAgain {
+				if err == nil || !strings.Contains(err.Error(), "proposed changes overlap") || f.ai.completionCalls.Load() != 0 {
+					t.Fatalf("invalid repair escaped validation: %v", err)
+				}
+				return
+			}
+			var wait *workstate.HumanWait
+			if !errors.As(err, &wait) || f.ai.completionCalls.Load() != 1 {
+				t.Fatalf("repair not independently reviewed: %v", err)
+			}
+			f.first.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			f.query(f.engine, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
+			if err = f.execute(f.engine, request, true); err != nil || f.ai.calls.Load() != 2 || generator.calls != 1 || store.writes != 1 {
+				t.Fatalf("cross-replica apply repeated completed work: %v", err)
+			}
+		})
 	}
 }
 

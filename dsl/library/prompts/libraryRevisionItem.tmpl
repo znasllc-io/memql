@@ -1,7 +1,7 @@
 {{ if .recovery }}Repair required:
 {{ .recovery }}
 
-{{ end }}Return the actual edits first, then a short user-facing summary (at most 300 characters). Never put planning, internal deliberation, or promises of future edits in the summary. A request to correct facts or rewrite a section requires concrete replacements; a section can be replaced as one exact block while the rest of the document stays unchanged. An empty edits array is valid only if the requested outcome already holds, not because edits require care.
+{{ end }}Return the actual edits first, then a short user-facing summary in one complete sentence (aim for 100–160 characters, at most 300). Finish the sentence well before the character limit; do not end mid-sentence. Never put planning, internal deliberation, or promises of future edits in the summary. A request to correct facts or rewrite a section requires concrete replacements; a section can be replaced as one exact block while the rest of the document stays unchanged. An empty edits array is valid only if the requested outcome already holds, not because edits require care.
 
 Revise ONLY the previously proposed item below in response to the person's new direction. The original document has NOT been changed. Return complete replacement edits for this item against that ORIGINAL source, not against the previous proposal. Other items will be carried forward unchanged by the system; do not produce edits for them. Keep the exact saved image references and attribution from the previous item unless the new direction asks to remove or replace them. Revising prose does not require generating those images again. Preserve the original intent unless the new direction changes it. Use only the feedback IDs provided for this item. If the person asks for no change, return an empty edits array.
 
@@ -59,3 +59,5 @@ Final amendment check: apply the NEW direction below to the previous item. Do no
 Independent review of the previous proposed text against this direction:
 {{ .reviewNotes }}
 Resolve these concrete mismatches in the replacement text. The previous item’s reasons and summary can be wrong; copying them does not correct the document.
+
+Before returning, check that all before ranges are disjoint in the original document. If replacing an image and inserting another image beside it, combine both operations into one replacement for that source region. Do not also emit the image-only replacement as a second edit; an insertion anchor must not overlap another edit.

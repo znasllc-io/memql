@@ -97,3 +97,20 @@ test("history compares retained versions, not unsaved text or an unaccepted prop
  assert.equal(provider.provideTextDocumentContent(calls[0][1]),"Previous saved");assert.equal(provider.provideTextDocumentContent(calls[0][2]),"Applied subset");
  await assert.rejects(review.compareVersion({} as vscode.TextDocument,0),/previous snapshot/);
 });
+
+
+test("a deliberate proposal after abandonment gets a new request identity",async()=>{
+ const noop=()=>({dispose(){}});
+ Object.assign(vscode.workspace,{registerTextDocumentContentProvider:noop,onDidCloseTextDocument:noop});
+ const uri=vscode.Uri.parse("memql-file://cluster/artifacts/doc/Guide.md");
+ const document={uri,isDirty:false,getText:()=>"Original"} as vscode.TextDocument;
+ const base={resource:{id:"doc"},revision:"file:1",version:1,content:new TextEncoder().encode("Original")} as OpenDocument;
+ const key=`memql.documentRevision:${uri}`;
+ const saved=new Map<string,unknown>([[key,{requestId:"abandoned",fingerprint:JSON.stringify(["file:1",1,["note"],""])}]]);
+ const submitted:string[]=[];
+ const context={subscriptions:[],workspaceState:{get:(k:string)=>saved.get(k),update:async(k:string,v:unknown)=>{saved.set(k,v);}}} as unknown as vscode.ExtensionContext;
+ const files={review:async()=>({requestId:"abandoned"}),revision:async(_base:unknown,id:string)=>({status:id==="abandoned"?"abandoned":"running"}),requestRevision:async(_base:unknown,_ids:unknown,_text:unknown,id:string)=>{submitted.push(id);}} as unknown as Documents;
+ await new RevisionReview(context,files,async()=>base).prepare(document,["note"],"");
+ assert.equal(submitted.length,1);assert.notEqual(submitted[0],"abandoned");
+ assert.equal((saved.get(key) as {requestId:string}).requestId,submitted[0]);
+});

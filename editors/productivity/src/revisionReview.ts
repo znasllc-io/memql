@@ -59,7 +59,7 @@ export class RevisionReview {
     // A deliberate new submission may retry a terminal attempt. An uncertain
     // submission retains its identity until its durable status is known.
     const previous = pending?.fingerprint === fingerprint ? await this.files.revision(base, pending.requestId).catch(() => undefined) : undefined;
-    if (pending?.fingerprint !== fingerprint || (previous && (previous.cancelRequested || ["failed", "cancelled", "succeeded"].includes(String(previous.status))))) {
+    if (pending?.fingerprint !== fingerprint || (previous && (previous.cancelRequested || ["failed", "cancelled", "succeeded", "abandoned"].includes(String(previous.status))))) {
       pending = { fingerprint, requestId: globalThis.crypto.randomUUID() };
       // Persist before submitting so a lost response or editor restart retries
       // the same request, including after only the first server write landed.
@@ -120,7 +120,7 @@ export class RevisionReview {
     if(!saved)throw new UserInputError("Open the failed revision first.");
     const base=await this.load(document.uri),status=await this.files.revision(base,saved.requestId);
     const proposal=status.proposal as Record<string,any>,amendment=proposal.amendment;
-    if(!amendment || !(status.cancelRequested || ["failed","cancelled"].includes(String(status.status))))throw new UserInputError("This modification is still running.");
+    if(!amendment || !(status.cancelRequested || ["failed","cancelled","abandoned"].includes(String(status.status))))throw new UserInputError("This modification is still running.");
     assertRevisionBase(base,document.getText(),proposal);
     const retryKey=`${key}:retry`,fingerprint=saved.requestId;
     let pending=this.context.workspaceState.get<SavedRequest>(retryKey);

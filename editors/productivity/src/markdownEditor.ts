@@ -135,7 +135,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
         const status = await this.revisions.status(document);
         if (disposed || !current()) return;
         const awaiting = status?.status === "waiting" && status.approvalId && !status.decision;
-        const problem = status?.errorMessage && !awaiting && ["waiting","failed","cancelled"].includes(String(status.status))
+        const problem = status?.errorMessage && !awaiting && ["waiting","failed","cancelled","abandoned"].includes(String(status.status))
           ? reportProblem(new Error(String(status.errorMessage)), status.decision === "approved" ? "apply the approved changes" : "prepare changes", (await this.load(document.uri)).lease, String(status.runId)) : undefined;
         const draft = status?.draft as Record<string,unknown> | undefined;
         const draftParts = revisionDraftParts(draft?.text).map(part => ({...part, html:renderDocumentHTML(part.after)}));

@@ -271,6 +271,18 @@ test("resume applies the recorded approval once and disappears for stopped or co
  f.dom.window.close();
 });
 
+test("an abandoned approved run stops loading and exposes its saved requests",()=>{
+ const f=fixture();f.document();
+ f.send({type:"revision",status:{prepared:true,status:"abandoned",approvalId:"approval",decision:"approved",answer:{acceptedItemIds:["kept"]},problem:{message:"Couldn’t apply the approved changes.",reference:"run-interrupted"},proposal:{}}});
+ assert.equal(f.doc.querySelector("#revision h3")!.textContent,"Couldn’t apply changes");
+ assert.equal(f.doc.querySelector("#revision .busy"),null);
+ assert.match(f.el("revision").textContent!,/run-interrupted/);
+ const requests=[...f.doc.querySelectorAll<HTMLButtonElement>("#revision button")].find(b=>b.textContent==="Review saved requests");
+ assert.ok(requests);requests.click();assert.equal(f.el("review-requests").hidden,false);
+ assert.ok(!f.el("review-actions").textContent!.includes("Resume approved changes"));
+ f.dom.window.close();
+});
+
 test("reopening a decided proposal restores the recorded subset rather than local guesses",()=>{
  const f=fixture({decisions:{kept:"declined",omitted:"accepted"}});f.document();
  f.send({type:"revision",status:{status:"succeeded",decision:"approved",answer:{acceptedItemIds:["kept"]},items:[{id:"kept",edits:[{before:"Keep",after:"Retain"}]},{id:"omitted",edits:[{before:"rest",after:"other"}]}],proposal:{artifactId:"doc",revision:"v1",version:1,edits:[]},result:{applied:true}}});

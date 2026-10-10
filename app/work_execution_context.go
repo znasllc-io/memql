@@ -66,6 +66,7 @@ const (
 const workResumeArgsRefused = "resume_args_refused"
 const workResumeEffectUncertain = "resume_effect_uncertain"
 const workResumeResultMissing = "resume_result_missing"
+const workResumeDefinitionChanged = "resume_definition_changed"
 
 // workResumeRefusal is the code a refused resume fails its run with, or "" for
 // one the dispatcher reports and leaves. A resume refused on its args contract
@@ -75,6 +76,12 @@ const workResumeResultMissing = "resume_result_missing"
 // later with a sentence about a node going away. A refusal that came with an
 // execution was the executor's to close, and any other is reported as before.
 func workResumeRefusal(exec *automations.AutomationExecution, err error) string {
+	if exec == nil && errors.Is(err, automations.ErrAutomationChanged) {
+		// A deployment changed the workflow, not the node's availability.
+		// Preserve that refusal instead of leaving the run for the abandoned
+		// sweep to misreport as a lost worker. No steps or effects may replay.
+		return workResumeDefinitionChanged
+	}
 	if exec == nil && errors.Is(err, automations.ErrResumeResultMissing) {
 		return workResumeResultMissing
 	}

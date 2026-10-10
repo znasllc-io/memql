@@ -250,6 +250,19 @@ func TestAnUncertainEffectHasItsOwnRecoveryFailure(t *testing.T) {
 	}
 }
 
+func TestAChangedDefinitionFailsResumeWithoutClaimingNodeLoss(t *testing.T) {
+	err := fmt.Errorf("resume after deployment: %w", automations.ErrAutomationChanged)
+	if code := workResumeRefusal(nil, err); code != workResumeDefinitionChanged {
+		t.Fatalf("definition refusal reported as %q; must preserve the deployment mismatch", code)
+	}
+	if code := workResumeRefusal(&automations.AutomationExecution{}, err); code != "" {
+		t.Fatalf("overwrote an execution's own outcome with %q", code)
+	}
+	if code := workResumeRefusal(nil, errors.New("temporary database connection failure")); code != "" {
+		t.Fatalf("transient failure became a permanent refusal: %q", code)
+	}
+}
+
 func TestARerunWithAnUnknownReasonIsRefusedAtDispatch(t *testing.T) {
 	auto := rerunDispatchTemplate(t)
 	j := finishedDispatchJournal(&automations.RerunSpec{RequestId: "req-1", Reason: "rewind", StepKey: "b"})
