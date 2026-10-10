@@ -3,6 +3,7 @@ package work
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -29,10 +30,13 @@ func (s *store) replanTemplate(ctx context.Context, run map[string]any) ([]memql
 	var source []memql.SandboxConstruct
 	hasHeadline := false
 	for _, row := range rows {
-		if rowString(row, "source") == "" || rowString(row, "status") == "retired" {
+		// Source is sealed byte-for-byte, including its trailing newline.
+		// rowString trims display/identity fields and must not read source.
+		text, _ := row["source"].(string)
+		if strings.TrimSpace(text) == "" || rowString(row, "status") == "retired" {
 			return nil, fmt.Errorf("work: the original replan template has missing or retired source")
 		}
-		source = append(source, memql.SandboxConstruct{Kind: rowString(row, "kind"), Name: rowString(row, "name"), Source: rowString(row, "source")})
+		source = append(source, memql.SandboxConstruct{Kind: rowString(row, "kind"), Name: rowString(row, "name"), Source: text})
 		hasHeadline = hasHeadline || (rowString(row, "kind") == "automation" && rowString(row, "name") == rowString(run, "automationName"))
 	}
 	if !hasHeadline || (rowString(run, "templateVersion") != "" && memql.WorkBundleVersion(source) != rowString(run, "templateVersion")) {

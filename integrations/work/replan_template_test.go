@@ -15,8 +15,8 @@ func TestReplanReadsTheSealedSourceAcrossReplicas(t *testing.T) {
 		run["automationName"] = "original"
 		run["templateConstructId"] = "original-id"
 		source := []memql.SandboxConstruct{
-			{Kind: "automation", Name: "original", Source: "@template\nautomation original { draft := logic privateDraft() }"},
-			{Kind: "logic", Name: "privateDraft", Source: "logic privateDraft { return 42 }"},
+			{Kind: "automation", Name: "original", Source: "@template\nautomation original { draft := logic privateDraft() }\n"},
+			{Kind: "logic", Name: "privateDraft", Source: "\nlogic privateDraft { return 42 }\n"},
 		}
 		run["templateVersion"] = memql.WorkBundleVersion(source)
 		if mismatch {
