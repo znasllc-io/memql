@@ -330,7 +330,7 @@ automation reviseLibraryDocument {
   }, data: {passages: captured.passagesJSON, instruction: captured.amendment.instruction ?? captured.instruction, evidence: combinedEvidence})
   imageSpecs := builtin libraryRevisionImagePlan(response: imagePlan.reply)
   for imageSpec in imageSpecs.images {
-   builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: imageSpec, level: "fast")
+   builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: imageSpec, level: "fast", width: 512, height: 512)
   }
   imageLimitations := imageSpecs.limitations
  } else {

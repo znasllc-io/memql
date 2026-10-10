@@ -134,7 +134,11 @@ func (i *Integration) handlePrepareRevisionImage(ctx context.Context, args map[s
 	}
 	ac, _ := auth.AccessFromContext(ctx)
 	rc, _ := common.RunFromContext(ctx)
-	identity, _ := json.Marshal([]any{memql.BareShortId(ac.UserId), requestID, spec, rc.Override})
+	width, height := intField(args, "width"), intField(args, "height")
+	if spec.Mode == "generate" && (width < 256 || width > 1536 || height < 256 || height > 1536) {
+		return nil, fmt.Errorf("image dimensions must be between 256 and 1536 pixels")
+	}
+	identity, _ := json.Marshal([]any{memql.BareShortId(ac.UserId), requestID, spec, width, height, rc.Override})
 	fileID := "review-image-" + string(id.NewUntracked().FromBytes(identity))
 	release, err := i.fileVersionGate(ctx, fileID)
 	if err != nil {
@@ -186,7 +190,7 @@ func (i *Integration) handlePrepareRevisionImage(ctx context.Context, args map[s
 			return nil, fmt.Errorf("image generation is unavailable on this node")
 		}
 		level := airoute.Level(asString(args["level"]))
-		_, err = generator.CallAIImage(ctx, airoute.ResolveRequest{Level: level, PromptName: "libraryRevisionImageGeneration"}, memql.FleetImageRequest{Prompt: spec.Prompt, Width: 512, Height: 768, Count: 1, Format: "png"}, fileID, func(ctx context.Context, image memql.FleetImage, resolution airoute.Resolution) (string, error) {
+		_, err = generator.CallAIImage(ctx, airoute.ResolveRequest{Level: level, PromptName: "libraryRevisionImageGeneration"}, memql.FleetImageRequest{Prompt: spec.Prompt, Width: width, Height: height, Count: 1, Format: "png"}, fileID, func(ctx context.Context, image memql.FleetImage, resolution airoute.Resolution) (string, error) {
 			provenance["provider"], provenance["model"] = resolution.ProviderName, resolution.Model
 			provenance["attribution"] = "AI-generated illustration; model " + resolution.Model
 			if err := save(ctx, image.Data); err != nil {

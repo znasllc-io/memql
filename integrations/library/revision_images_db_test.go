@@ -24,7 +24,7 @@ type preparedImageEngine struct {
 
 func (e *preparedImageEngine) CallAIImage(ctx context.Context, req airoute.ResolveRequest, input memql.FleetImageRequest, key string, store func(context.Context, memql.FleetImage, airoute.Resolution) (string, error)) (memql.StoredImageAIResult, error) {
 	e.calls++
-	if req.Level != airoute.LevelFast || req.PromptName != "libraryRevisionImageGeneration" || input.Count != 1 || key == "" {
+	if req.Level != airoute.LevelFast || req.PromptName != "libraryRevisionImageGeneration" || input.Count != 1 || input.Width != 512 || input.Height != 512 || key == "" {
 		return memql.StoredImageAIResult{}, fmt.Errorf("image routing or effect identity omitted")
 	}
 	receipt, err := store(ctx, memql.FleetImage{Data: attachmentPNG(), MediaType: "image/png"}, airoute.Resolution{ProviderName: "served-local-fixture", Model: "actual-image-model"})
@@ -77,7 +77,7 @@ func TestPreparedRevisionImagesRecoverAndPinAcrossReplicas(t *testing.T) {
 	raw, _ := json.Marshal(spec)
 	var object map[string]any
 	json.Unmarshal(raw, &object)
-	call := map[string]any{"requestId": request, "specification": object, "level": "fast"}
+	call := map[string]any{"requestId": request, "specification": object, "level": "fast", "width": 512, "height": 512}
 	if _, err = f.first.handlePrepareRevisionImage(ctx, call, 0); err == nil {
 		t.Fatal("lost storage response hidden")
 	}

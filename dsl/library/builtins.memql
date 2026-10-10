@@ -409,7 +409,7 @@ builtin libraryRevisionImagePlan { response string! }
 /// Acquire one requested image, with durable storage and source/model provenance.
 @executor("integration.library.prepareRevisionImage")
 @args(profile="object")
-builtin libraryPrepareRevisionImage { requestId string! specification object! level string! }
+builtin libraryPrepareRevisionImage { requestId string! specification object! level string! width int! height int! }
 
 /// Read verified images actually stored by this revision, never model-claimed URLs.
 @executor("integration.library.revisionPreparedImages")
