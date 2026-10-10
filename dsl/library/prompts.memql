@@ -86,6 +86,7 @@ prompt libraryRevisionImagePlan {
  passages string!
  instruction string
  evidence string!
+ previous string
 }
 
 /// Judge actual proposed prose against all feedback, including partial edits.

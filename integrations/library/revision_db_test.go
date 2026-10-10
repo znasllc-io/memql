@@ -47,6 +47,8 @@ type revisionAI struct {
 	imagePlan             []revisionImageSpec
 	replacementImagePlan  []revisionImageSpec
 	imagePlanCalls        atomic.Int32
+	imagePlanPrevious     string
+	imagePlanSchema       any
 	parallelResearch      bool
 	assessmentReply       string
 	assessmentError       error
@@ -139,6 +141,8 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return reviewResult(map[string]any{"reply": intent})
 			}
 			if args["templateId"] == "libraryRevisionImagePlan" {
+				a.imagePlanPrevious = asString(data["previous"])
+				a.imagePlanSchema = args["responseSchema"]
 				plan := a.imagePlan
 				if a.imagePlanCalls.Add(1) > 1 && a.replacementImagePlan != nil {
 					plan = a.replacementImagePlan
@@ -397,6 +401,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 		{"ReviewAttachmentsAcrossReplicas", testReviewAttachmentsAcrossReplicas},
 		{"PreparedRevisionImagesRecoverAndPinAcrossReplicas", testPreparedRevisionImagesRecoverAndPinAcrossReplicas},
 		{"RevisionDSLPlansAcquiresAndProposesAnImage", testRevisionDSLPlansAcquiresAndProposesAnImage},
+		{"RevisionDSLRepairsImagePlanBeforeEffects", testRevisionDSLRepairsImagePlanBeforeEffects},
 		{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
 		{"RevisionCompletionRepairsNoopAndReusesSavedImages", testRevisionCompletionRepairsNoopAndReusesSavedImages},
 		{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},

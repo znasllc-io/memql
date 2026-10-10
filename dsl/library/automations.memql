@@ -334,13 +334,29 @@ automation reviseLibraryDocument {
   imageSchema := {
    type: "object", additionalProperties: false, required: ["images", "limitations"], properties: {
     limitations: {type: "string"}, images: {type: "array", maxItems: 64, items: {
-     type: "object", additionalProperties: false, required: ["mode", "name", "alt", "url", "sourceURL", "attribution", "license", "prompt"],
-     properties: {mode: {type: "string", enum: ["import", "generate"]}, name: {type: "string"}, alt: {type: "string"}, url: {type: "string"}, sourceURL: {type: "string"}, attribution: {type: "string"}, license: {type: "string"}, prompt: {type: "string"}}
+     anyOf: [{
+      type: "object", additionalProperties: false, required: ["mode", "name", "alt", "url", "sourceURL", "attribution", "license", "prompt"],
+      properties: {mode: {type: "string", enum: ["import"]}, name: {type: "string"}, alt: {type: "string"}, url: {type: "string", minLength: 1}, sourceURL: {type: "string", minLength: 1}, attribution: {type: "string", minLength: 1}, license: {type: "string", minLength: 1}, prompt: {type: "string", enum: [""]}}
+     }, {
+      type: "object", additionalProperties: false, required: ["mode", "name", "alt", "url", "sourceURL", "attribution", "license", "prompt"],
+      properties: {mode: {type: "string", enum: ["generate"]}, name: {type: "string"}, alt: {type: "string"}, url: {type: "string", enum: [""]}, sourceURL: {type: "string", enum: [""]}, attribution: {type: "string", enum: [""]}, license: {type: "string", enum: [""]}, prompt: {type: "string", minLength: 1}}
+     }]
     }}
    }
   }
   imagePlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: imageSchema, data: {passages: captured.passagesJSON, instruction: captured.amendment.instruction ?? captured.instruction, evidence: combinedEvidence})
-  imageSpecs := builtin libraryRevisionImagePlan(response: imagePlan.reply)
+  validatedImageSpecs := builtin libraryRevisionImagePlan(response: imagePlan.reply) on error continue
+  if validatedImageSpecs == nil {
+   // Malformed model output is recoverable goal work. Correct the plan once,
+   // before any image effect; the same native gates still validate the repair.
+   repairedImagePlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: imageSchema, data: {
+    passages: captured.passagesJSON, instruction: captured.amendment.instruction ?? captured.instruction,
+    evidence: combinedEvidence, previous: imagePlan.reply
+   })
+   imageSpecs := builtin libraryRevisionImagePlan(response: repairedImagePlan.reply)
+  } else {
+   imageSpecs := validatedImageSpecs
+  }
   for imageSpec in imageSpecs.images {
    acquired := builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: imageSpec, level: "fast", width: 512, height: 512, reportSourceFailure: true)
    if acquired.fileId == "" {
