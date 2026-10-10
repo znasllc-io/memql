@@ -131,6 +131,16 @@ Then:
    start: `kubectl rollout restart deploy/identity -n <ns>` then the rest.
 4. **Confirm** `/readyz` is green across the mesh.
 
+On an installation whose secrets are seeded directly, update both
+`MEMQL_DATABASE_DSN` and `MEMORY_NODES_DATABASE_DIRECT_DSN` in `memql-secrets`,
+preserving the credentials and connection options. The direct connection must
+point at the recovered primary even when the application connection uses a
+pooler. Routine `make secrets` preserves the stored pair; it refuses a partial
+or unreadable pair before making changes. Only a new installation, or an
+existing Secret with neither field, receives the default database destination.
+Keep the damaged Cluster until its later data has been assessed, and verify a
+new base backup plus continuous archiving under the recovered server's name.
+
 ### Point-in-time recovery
 
 `recoveryTarget.targetTime` restores to any moment inside the retention window

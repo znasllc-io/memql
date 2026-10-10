@@ -225,6 +225,8 @@ CLUSTER_SIGNING_KEY_B64=""
 CLUSTER_SIGNING_KEY_CREATED_AT=""
 CLUSTER_NODE_BOOTSTRAP_TOKEN=""
 CLUSTER_CAMPAIGNS_UNSUBSCRIBE_SECRET=""
+CLUSTER_DATABASE_DSN=""
+CLUSTER_DATABASE_DIRECT_DSN=""
 
 function load_cluster_secret_snapshot() {
     local state
@@ -245,6 +247,8 @@ function load_cluster_secret_snapshot() {
     # values acquire the newer version's write authority.
     argocd_preservation_load "$NAMESPACE" memql-secrets \
         || cap_fail $? "cannot safely preserve memql-secrets GitOps metadata; resolve its conflicting options or cluster access before seeding"
+
+    load_cluster_database_connections
 
     local raw
     raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
@@ -310,6 +314,35 @@ function load_cluster_secret_snapshot() {
         CLUSTER_NODE_BOOTSTRAP_TOKEN="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
         [ -n "$CLUSTER_NODE_BOOTSTRAP_TOKEN" ] \
             || cap_fail 5 "memql-secrets holds a MEMQL_NODE_BOOTSTRAP_TOKEN that could not be base64-decoded; refusing to overwrite it blind."
+    fi
+}
+
+# Preserve recovery and pooler destinations across routine setup. Both reads use
+# the resource-version guard captured before credentials were read; a partial
+# pair is refused rather than connecting listeners and application writes to
+# different databases. Recovery changes these fields deliberately in the Secret.
+function load_cluster_database_connections() {
+    local key target raw decoded
+    for key in MEMQL_DATABASE_DSN MEMORY_NODES_DATABASE_DIRECT_DSN; do
+        raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
+                  -o "jsonpath={.data.$key}" 2>/dev/null)" \
+            || cap_fail 5 "cannot read the existing database connection; refusing to replace it."
+        decoded=""
+        if [ -n "$raw" ]; then
+            decoded="$(printf '%s' "$raw" | b64_decode 2>/dev/null)" \
+                || cap_fail 5 "the stored database connection could not be decoded; refusing to replace it."
+            [ -n "$(trim_space "$decoded")" ] \
+                || cap_fail 5 "the stored database connection is empty; repair the secret before seeding."
+        fi
+        case "$key" in
+            MEMQL_DATABASE_DSN) target=CLUSTER_DATABASE_DSN ;;
+            MEMORY_NODES_DATABASE_DIRECT_DSN) target=CLUSTER_DATABASE_DIRECT_DSN ;;
+        esac
+        printf -v "$target" '%s' "$decoded"
+    done
+    if { [ -n "$CLUSTER_DATABASE_DSN" ] && [ -z "$CLUSTER_DATABASE_DIRECT_DSN" ]; } \
+        || { [ -z "$CLUSTER_DATABASE_DSN" ] && [ -n "$CLUSTER_DATABASE_DIRECT_DSN" ]; }; then
+        cap_fail 3 "the stored database connection pair is incomplete; restore both database connections before seeding."
     fi
 }
 
@@ -1098,9 +1131,10 @@ function seed_memql_secrets() {
     #
     # sslmode=disable: intra-cluster traffic to a database that terminates no
     # TLS of its own. Unchanged from the Deployment this replaced.
-    db_dsn="postgres://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@memql-db-rw:5432/${LOCAL_DB_NAME}?sslmode=disable"
-    # For local, the direct DSN is the same as the pooler DSN (no PgBouncer).
-    db_direct_dsn="$db_dsn"
+    db_dsn="${CLUSTER_DATABASE_DSN:-postgres://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@memql-db-rw:5432/${LOCAL_DB_NAME}?sslmode=disable}"
+    # A new installation has no pooler; an existing installation keeps its
+    # distinct direct connection and recovered primary, if configured.
+    db_direct_dsn="${CLUSTER_DATABASE_DIRECT_DSN:-$db_dsn}"
 
     # Resolved in main BEFORE any mutation, with every other value this
     # function writes -- see the note there. All six or none (epic memql#4912):

@@ -99,6 +99,12 @@ esac
 
 # Value reads.
 case "$args" in
+  *"get secret memql-secrets"*jsonpath*MEMQL_DATABASE_DSN*)
+    [ "$FAKE_DATABASE_READ_FAILS" = MEMQL_DATABASE_DSN ] && exit 1
+    printf '%s' "$FAKE_DATABASE_DSN_B64"; exit 0 ;;
+  *"get secret memql-secrets"*jsonpath*MEMORY_NODES_DATABASE_DIRECT_DSN*)
+    [ "$FAKE_DATABASE_READ_FAILS" = MEMORY_NODES_DATABASE_DIRECT_DSN ] && exit 1
+    printf '%s' "$FAKE_DATABASE_DIRECT_DSN_B64"; exit 0 ;;
   *"get secret memql-secrets"*jsonpath*metadata.resourceVersion*)
     rv=7
     if [[ "${FAKE_ROTATE_DURING_READ:-}" == 1 && ! -f "$FAKE_KUBECTL_LOG.rotation" ]]; then rv=6; fi
@@ -164,6 +170,10 @@ type seedResult struct {
 
 // scenario configures one run of the script against the fake cluster.
 type scenario struct {
+	clusterDatabaseDSN       string
+	clusterDatabaseDirectDSN string
+	databaseReadFails        string
+	databaseInvalidEncoding  bool
 	// Set only for tests that need the actual client-generated Secret payload
 	// at the fake API apply boundary, rather than an argv inventory.
 	protectedSecret    *[]byte
@@ -294,6 +304,10 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 	if sc.campaignReadFails {
 		campaignReadFails = "1"
 	}
+	databaseEncoded := enc(sc.clusterDatabaseDSN)
+	if sc.databaseInvalidEncoding {
+		databaseEncoded = "!invalid-base64!"
+	}
 	cmd := exec.Command("bash", script, "--mkcert="+stubMkcert)
 	cmd.Dir = root
 	env := []string{
@@ -303,6 +317,9 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		"FAKE_SECRET_STATE=" + state,
 		"FAKE_SYNC_OPTIONS=" + sc.syncOptions,
 		"FAKE_COMPARE_OPTIONS=" + sc.compareOptions,
+		"FAKE_DATABASE_DSN_B64=" + databaseEncoded,
+		"FAKE_DATABASE_DIRECT_DSN_B64=" + enc(sc.clusterDatabaseDirectDSN),
+		"FAKE_DATABASE_READ_FAILS=" + sc.databaseReadFails,
 		"FAKE_CAMPAIGN_KEY_B64=" + enc(sc.clusterCampaignKey),
 		"FAKE_CAMPAIGN_READ_FAILS=" + campaignReadFails,
 		"FAKE_MASTER_KEY_B64=" + enc(sc.clusterKey),
