@@ -2,8 +2,6 @@ import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useSourceConnections } from "../../modules/connections/connections";
 import { sourceRecord } from "./sources/sourceRecord";
 import { AccountChip } from "../accounts/AccountPicker";
-import { AttentionMarker } from "../../attention/Attention";
-import { updateTarget } from "./attention";
 import type { ConnectReturn } from "./sources/connectReturn";
 import { healthExplanation } from "./health";
 import { AddButton } from "../../kit/AddButton";
@@ -805,7 +803,6 @@ function SourceLine({ group, tick, onOpen, accounts, provenance, hasPipeline = f
     state={state.word}
     tone={state.tone}
     stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-    trailing={<AttentionMarker appId="deployables" target={updateTarget(pkg.id)} />}
     current={state.tone === "accent"}
     dim={pkg.status === "archived"}
     label={`Open ${name}, ${provenance}, ${state.word.toLowerCase()}`}
@@ -868,7 +865,6 @@ function DeployableLine({
       {waiting && row.parked?.status === "awaiting_confirm" && state !== "Review needed" ? <span className="os-deploy-waiting">Review needed</span> : null}
       {tick === "added" ? <span className="os-livelist-tick">new</span> : null}
     </>}
-    trailing={row.pkg ? <AttentionMarker appId="deployables" target={updateTarget(row.pkg.id)} /> : null}
     current={state === "Live"}
     dim={site?.status === "disabled" || archived || row.disabled}
     open={open}

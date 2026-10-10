@@ -151,15 +151,9 @@ read before editing that tree. A directory without one is normal.
 | `sdk/go/` | Go SDK -- the public client surface | [→](sdk/go/CLAUDE.md) |
 | `docs/` | Documentation | [→](docs/CLAUDE.md) |
 
-**OS attention:** when adding or meaningfully changing a user-facing capability,
-consider whether people need to discover it. Declare a stable
-`attentionChanges` ID and revision on that app's manifest when they do, and
-wire and test a reachable acknowledgment destination. Refactors, fixes,
-styling and rebuilds do not warrant a marker. Read
-[Unseen changes](clients/os/README.md#unseen-changes-shared-attention-markers)
-first. Ancestor navigation must never acknowledge an unseen child;
-user/revision receipts are shared infrastructure, not a per-app local-storage
-flag.
+**OS update indicators:** Do not add unseen-update dots or navigation trails.
+The owner removed this OS-wide feature; update and setup controls remain in their
+normal app destinations without acknowledgment tracking.
 
 ---
 

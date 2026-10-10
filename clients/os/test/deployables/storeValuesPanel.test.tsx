@@ -10,9 +10,6 @@ vi.mock("../../src/chrome/state", async (importOriginal) => ({
 }));
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-
-import { AttentionProvider } from "../../src/attention/Attention";
-import { OS_REGISTRY } from "../../src/apps/registry";
 import { RuntimeSettingsPanel } from "../../src/apps/deployables/page/stops/RuntimeSettings";
 import { ALL_PARTS, partsWithout, type PartsHeld } from "../../src/apps/deployables/parts";
 import { siteFromRow } from "../../src/apps/deployables/rows";
@@ -298,40 +295,5 @@ describe("App values says where a store's values went", () => {
     connect();
     render(withSession(<RuntimeSettingsPanel site={siteFromRow(siteRow({ id: "site-web", kind: "spa" }))} canEdit />));
     expect(screen.queryByText(/Values that belong to one store/)).toBeNull();
-  });
-});
-
-describe("telling a storefront owner where their values go", () => {
-  it("is acknowledged when the Store page is visible, and not while it is hidden", async () => {
-    connect();
-    const deployables = OS_REGISTRY.apps.find((app) => app.id === "deployables")!;
-    const feature = deployables.attentionChanges!.find((change) => change.id === "deployables:store-values")!;
-    expect(feature.target).toBe("shopify-store");
-    const acknowledged: string[] = [];
-    const connection = h.connection as ReturnType<typeof fakeConnection>;
-    const original = vi.mocked(connection.query.executeNamed).getMockImplementation()!;
-    vi.mocked(connection.query.executeNamed).mockImplementation(async (name, call, options) => {
-      if (name === "myAttentionReceipts") return rowsResult([]);
-      if (name === "acknowledgeAttention") {
-        acknowledged.push(call);
-        return rowsResult([]);
-      }
-      return original(name, call, options);
-    });
-    const apps = [{ ...deployables, attentionChanges: [feature] }];
-    function Page({ visible }: { visible: boolean }) {
-      return (
-        <AttentionProvider apps={apps}>
-          {visible ? (
-            <ShopifyStorePanel site={siteFromRow(SITE_ROW)} canBind can={ALL_PARTS} trail={[]} back={{ label: "Storefront", onSelect: vi.fn() }} onWritten={vi.fn()} />
-          ) : null}
-        </AttentionProvider>
-      );
-    }
-    const view = render(withSession(<Page visible={false} />));
-    await act(async () => {});
-    expect(acknowledged).toHaveLength(0);
-    view.rerender(withSession(<Page visible />));
-    await waitFor(() => expect(acknowledged.some((c) => c.includes('changeId: "deployables:store-values"'))).toBe(true));
   });
 });

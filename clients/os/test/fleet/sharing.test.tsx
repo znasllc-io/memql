@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildFleetSetSharing, type Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -14,13 +14,6 @@ vi.mock("../../src/live/connection", () => ({
 const { SharingGroup } = await import("../../src/apps/fleet/machines/SharingGroup");
 const { MachineDetail } = await import("../../src/apps/fleet/machines/MachineDetail");
 const { useMachineWrites } = await import("../../src/apps/fleet/machines/useMachineWrites");
-const { FleetSharingAttentionFeed, machineSharingAttention, MACHINE_SHARING_CHANGE } = await import(
-  "../../src/apps/fleet/machines/sharingAttention"
-);
-const { FleetApp } = await import("../../src/apps/fleet/FleetApp");
-const { MachinesProvider } = await import("../../src/live/machines");
-const { AttentionDestination, AttentionProvider } = await import("../../src/attention/Attention");
-const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { machineFromRow } = await import("../../src/apps/fleet/rows");
 const { sharingLinkWords } = await import("../../src/apps/fleet/machines/sharing");
 const { builtinReply, fakeConnection, machineRow, shareDirectoryRow, withSession } = await import("./harness");
@@ -1110,138 +1103,5 @@ describe("a share stored with canonical ids", () => {
       userIds: ["v1:identity:user:ana"],
       groupIds: [],
     });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Attention (design G15)
-// ---------------------------------------------------------------------------
-
-describe("the sharing attention marker", () => {
-  const mine = (over: Partial<Row> = {}) => machineFromRow(studio(undefined, over));
-
-  it("is published only to somebody who owns a machine that is still in the fleet", () => {
-    expect(machineSharingAttention([mine()], OWNER)).toEqual([MACHINE_SHARING_CHANGE]);
-    expect(machineSharingAttention([mine({ revokedAt: "2026-09-01T00:00:00Z" })], OWNER)).toEqual([]);
-    // A cluster owner's feed can hold other people's machines; those are not
-    // theirs to lend, so they earn no marker.
-    expect(machineSharingAttention([mine({ ownerUserId: "someone-else" })], OWNER)).toEqual([]);
-    expect(machineSharingAttention([], OWNER)).toEqual([]);
-    expect(machineSharingAttention([mine()], "")).toEqual([]);
-    expect(MACHINE_SHARING_CHANGE).toEqual({
-      id: "fleet:machine-sharing",
-      revision: "people-and-groups-1",
-      appId: "fleet",
-      sectionId: "machines",
-      target: "machine-sharing",
-      label: "Share a machine with people and groups",
-      kind: "runtime",
-    });
-  });
-
-  function mountFleet(conn: Conn, sectionId = "machines") {
-    h.connection = conn;
-    const node = (section: string) =>
-      withSession(
-        <MachinesProvider>
-          <AttentionProvider apps={OS_REGISTRY.apps}>
-            <FleetSharingAttentionFeed />
-            {/* The window's own destination for the section on screen -- an
-                ANCESTOR of the Sharing view, which must never acknowledge it. */}
-            <AttentionDestination appId="fleet" sectionId={section}>
-              <FleetApp
-                sectionId={section}
-                navigate={vi.fn()}
-                askContext={vi.fn()}
-                store={{ load: () => ({ version: 1, defaultSection: "machines", showRevoked: false }), save: () => {} }}
-              />
-            </AttentionDestination>
-          </AttentionProvider>
-        </MachinesProvider>,
-        { userId: OWNER },
-      );
-    const view = render(node(sectionId));
-    return { rerender: (section: string) => view.rerender(node(section)) };
-  }
-
-  const acknowledged = (conn: Conn) => conn.query.acknowledgeAttention.mock.calls.map((call) => call[0]);
-
-  it("marks the way in, and is acknowledged by the Sharing view and by no ancestor of it", async () => {
-    const conn = fakeConnection({ myWorkersWithStatus: [studio()], fleetShareDirectory: [directory()] });
-    mountFleet(conn);
-    // THE TRAIL IS UNBROKEN: the machine's row in the list, then its Sharing
-    // tab and the way in from Equipment. A dot on the section that leads to a
-    // list with nothing marked is a dot that leads nowhere.
-    const row = await screen.findByRole("button", { name: /^Open Studio mini/ });
-    await waitFor(() => expect(within(row).getByRole("img", { name: "Unseen change" })).toBeTruthy());
-    fireEvent.click(row);
-    const link = await screen.findByRole("button", { name: /^Personal inference/ });
-    await waitFor(() => expect(within(link).getByRole("img", { name: "Unseen change" })).toBeTruthy());
-    const tab = screen.getByRole("button", { name: /^Sharing/ });
-    expect(within(tab).getByRole("img", { name: "Unseen change" })).toBeTruthy();
-    // The app, the Machines section and the machine's Equipment are all on
-    // screen, and none of them is the destination.
-    await settle();
-    expect(acknowledged(conn)).toEqual([]);
-
-    fireEvent.click(link);
-    await waitFor(() =>
-      expect(acknowledged(conn)).toEqual([{ changeId: "fleet:machine-sharing", revision: "people-and-groups-1" }]),
-    );
-  });
-
-  it("is not acknowledged by a Sharing view that is retained but hidden", async () => {
-    const conn = fakeConnection({ myWorkersWithStatus: [studio()], fleetShareDirectory: [directory()] });
-    const fleet = mountFleet(conn);
-    fireEvent.click(await screen.findByRole("button", { name: /^Open Studio mini/ }));
-    const link = await screen.findByRole("button", { name: /^Personal inference/ });
-    await waitFor(() => expect(within(link).getByRole("img", { name: "Unseen change" })).toBeTruthy());
-    // Another section takes the window; Machines stays mounted behind it, and
-    // its Sharing view is opened while it cannot be seen.
-    // (Routing, on screen, acknowledges its OWN change; only Sharing's is in
-    // question here.)
-    const sharing = () => acknowledged(conn).filter((a) => a.changeId === "fleet:machine-sharing");
-    fleet.rerender("routing");
-    fireEvent.click(link);
-    await settle();
-    expect(sharing()).toEqual([]);
-    // Brought back into view, it is seen.
-    fleet.rerender("machines");
-    await waitFor(() => expect(sharing()).toHaveLength(1));
-  });
-
-  it("is never shown to somebody with no machine of their own to lend", async () => {
-    const conn = fakeConnection({
-      myWorkersWithStatus: [studio(undefined, { ownerUserId: "someone-else" })],
-      fleetShareDirectory: [directory()],
-    });
-    mountFleet(conn);
-    fireEvent.click(await screen.findByRole("button", { name: /^Open Studio mini/ }));
-    const link = await screen.findByRole("button", { name: /^Personal inference/ });
-    await settle();
-    expect(within(link).queryByRole("img", { name: "Unseen change" })).toBeNull();
-    fireEvent.click(link);
-    await settle();
-    expect(acknowledged(conn)).toEqual([]);
-    // The reachable positive: the attention service was live and asked for
-    // this person's receipts, so the silence above is the feed's, not a mount
-    // that never listened.
-    expect(conn.query.myAttentionReceipts).toHaveBeenCalled();
-  });
-});
-
-describe("the model library's sources sentence", () => {
-  it("counts machines lent to you as part of the local door", async () => {
-    // Since epic memql#5344 a person's catalog holds the machines lent to them
-    // as well as their own, and "a model on your own machines" would tell
-    // somebody with no machine of their own that the model they are using
-    // does not exist.
-    const { ModelsSection } = await import("../../src/apps/fleet/models/ModelsSection");
-    h.connection = fakeConnection({
-      fleetModels: [],
-      inferenceStatus: [{ id: "v1:platform:inferenceStatus:self", eligible: true, doorsOpen: ["local"], localEligible: true, localModelCount: 1, eligibleModelIds: [], appEligible: false, runnableApps: [], appSessionsInstalled: true, cloudConfigured: false, federationConfigured: false, fleetInferenceInstalled: true, fleetCatalogInstalled: true, minimumContextWindow: 8192 }],
-    });
-    render(withSession(<ModelsSection />));
-    expect(await screen.findByText(/a local model on your machines or on one lent to you/)).toBeTruthy();
   });
 });

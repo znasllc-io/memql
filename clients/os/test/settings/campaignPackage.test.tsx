@@ -50,19 +50,3 @@ it("retains campaign bindings when Deployables exports address choices", () => {
  expect(configured.campaigns).toEqual(manifest.campaigns);
  expect(configured.deployables[0]?.deployment).toEqual({slug:"other-site",domains:["new.example.com"]});
 });
-
-it("acknowledges the new capability only in Campaigns settings", async () => {
- const { AttentionDestination, AttentionProvider } = await import("../../src/attention/Attention");
- const { OS_REGISTRY } = await import("../../src/apps/registry");
- const { fakeConnection, withSession } = await import("../campaigns/harness");
- const conn=fakeConnection();
- const query=Object.assign(conn.query,{myAttentionReceipts:vi.fn(async()=>rowsResult([])),acknowledgeAttention:vi.fn(async()=>rowsResult([]))});
- h.connection={...conn,query:{...conn.query,packageCampaigns:vi.fn(async()=>rowsResult([{status:"installed",manifest}]))}};
- const app=OS_REGISTRY.apps.find(app=>app.id==="campaigns")!;
- const apps=[{...app,attentionChanges:app.attentionChanges!.filter(change=>change.id==="campaigns:package-config")}];
- const view=render(withSession(<AttentionProvider apps={apps}><AttentionDestination appId="campaigns" sectionId="overview"><span>Overview</span></AttentionDestination></AttentionProvider>));
- expect(query.acknowledgeAttention).not.toHaveBeenCalled();
- view.rerender(withSession(<AttentionProvider apps={apps}><AttentionDestination appId="campaigns" sectionId="settings"><CampaignPackageConfig accountId="client" organizationName="Client" onImported={()=>{}}/></AttentionDestination></AttentionProvider>));
- await screen.findByText("client-package · memql-package.yaml");
- await waitFor(()=>expect(query.acknowledgeAttention).toHaveBeenCalledWith({changeId:"campaigns:package-config",revision:"package-1"}));
-});

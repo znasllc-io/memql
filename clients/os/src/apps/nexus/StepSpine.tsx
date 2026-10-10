@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 
 import { Chip, formatDuration } from "../../kit";
@@ -93,8 +92,6 @@ export interface StepSpineRowProps {
    * a state that is only a tint is a state half the readers never get.
    */
   stale?: boolean;
-  /** The unseen-change marker for what opening this row reveals. */
-  marker?: ReactNode;
   /**
    * Which door answered for this step, when the journal has been read.
    *
@@ -118,7 +115,6 @@ export function StepSpineRow({
   decision = null,
   versions,
   stale = false,
-  marker = null,
 }: StepSpineRowProps) {
   const thought = stepThought(step);
   const kind = step.kind === "" ? "unclassified" : step.kind;
@@ -288,9 +284,8 @@ export function StepSpineRow({
             runs again
           </Chip>
         ) : null}
-        <span className="os-nexus-step-open os-attention-anchor">
+        <span className="os-nexus-step-open">
           <ChevronRight size={13} className="os-nexus-step-chevron" aria-hidden />
-          {marker}
         </span>
       </span>
     </button>

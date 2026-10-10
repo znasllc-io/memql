@@ -69,8 +69,7 @@ models below:
   bounded rollup statistics retain their summary layout. Account ledger record
   samples now use compact shared rows without inventing additional queries.
 
-No navigation model, authorization query, enrollment, token, database schema or
-attention revision is changed by this visual standardization.
+No navigation model, authorization query, enrollment, token, or database schema is changed by this visual standardization.
 
 ## Validation
 

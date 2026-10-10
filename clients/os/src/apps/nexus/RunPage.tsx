@@ -1,8 +1,6 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { GitBranch, Pin, Redo2, RotateCcw } from "lucide-react";
-
-import { AttentionMarker } from "../../attention/Attention";
 import { useSession } from "../../chrome/access";
 import {
   Button,
@@ -18,10 +16,9 @@ import { ActionBar, type Act, type ActionBarTone } from "../../kit/ActionBar";
 import { JournalPanel } from "./Journal";
 import { KindBand } from "./KindBand";
 import { StepSpineRow } from "./StepSpine";
-import { StepDetail, STEP_VERSIONS_TARGET } from "./StepDetail";
+import { StepDetail } from "./StepDetail";
 import { ComposerHost, type ComposerRequest } from "./ComposerHost";
 import { ValidatorLine, VerdictBelow, VerdictChoices, type DislikeDraft, type VerdictProps } from "./Verdict";
-import { NEXUS_APP_ID } from "./concepts";
 import { useMoveRunHead, useRecordFeedback, type DeriveRunState, type RerunReply } from "./actions";
 import {
   RUN_TARGET,
@@ -245,14 +242,6 @@ export function RunPage({
   const judgeable = terminal || run.rerun !== null;
 
   const timelineKeys = useMemo(() => steps.map((step) => step.key), [steps]);
-
-  // WHERE THE UNSEEN-CHANGE MARKER GOES. Every row opens the version area, but
-  // a dot on each of forty rows is a strobe, not a pointer: the marker sits on
-  // the steps a model or an app answered -- where running again with another
-  // intelligence and saying what was wrong matter most -- and on every row
-  // only when a run has none, so the change is always reachable.
-  const modelledStep = (step: StepRow) => kindCalledAModel(step.kind) !== false || step.childRunId !== "";
-  const anyModelled = steps.some(modelledStep);
 
   function stepVersions(step: StepRow): {
     versions: StepVersion[];
@@ -740,11 +729,7 @@ export function RunPage({
                     decision={decisions.get(step.key) ?? null}
                     versions={{ count: info.count, current: info.current }}
                     stale={run.staleSteps.includes(step.key)}
-                    marker={
-                      terminal && (!anyModelled || modelledStep(step)) ? (
-                        <AttentionMarker appId={NEXUS_APP_ID} sectionId="runs" target={STEP_VERSIONS_TARGET} />
-                      ) : null
-                    }
+
                   />
                   {isOpen ? (
                     <StepDetail
@@ -758,7 +743,6 @@ export function RunPage({
                       selectedVersion={pickedRow}
                       session={isSession(pickedRow ?? step)}
                       viewerId={viewerId}
-                      reachable={terminal}
                       continues={index < steps.length - 1}
                       onOpenRun={onOpenRun}
                       verdict={

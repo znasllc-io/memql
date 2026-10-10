@@ -1,4 +1,3 @@
-import { AttentionMarker } from "../attention/Attention";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import { horizontalListSortingStrategy, SortableContext, useSortable } from "@dnd-kit/sortable";
@@ -75,7 +74,7 @@ function DockApp({
       {...attributes}
       {...listeners}
     >
-      <Icon size={20} aria-hidden /><AttentionMarker appId={appId} />
+      <Icon size={20} aria-hidden />
       <span className="os-dock-dot" data-on={running || undefined} aria-hidden="true" />
     </button>
   );
@@ -105,7 +104,6 @@ const PIN_DRAG_PREFIXES = ["pin:", "item:", "artifact:"] as const;
  * does nothing reads as broken.
  */
 function DockFixture({
-  appId,
   name,
   icon: Icon,
   running,
@@ -114,7 +112,6 @@ function DockFixture({
   onHostFile,
   bubble,
 }: {
-  appId: string;
   name: string;
   icon: OsAppManifest["icon"];
   running: boolean;
@@ -157,7 +154,7 @@ function DockFixture({
           onHostFile();
         }}
       >
-        <Icon size={20} aria-hidden /><AttentionMarker appId={appId} />
+        <Icon size={20} aria-hidden />
         <span className="os-dock-dot" data-on={running || undefined} aria-hidden="true" />
       </button>
       {bubble === null ? null : (
@@ -502,7 +499,6 @@ export function Dock({
       {fixtures.map((app) => (
         <DockFixture
           key={app.id}
-          appId={app.id}
           name={app.name}
           icon={app.icon}
           running={runningIds.includes(app.id)}

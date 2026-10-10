@@ -37,8 +37,9 @@ export function memStorage(): Pick<Storage, "getItem" | "setItem"> & { dump: () 
 
 export function renderShell({
   access = OWNER,
+  layout = "desktop",
   storage = memStorage(),
-}: { access?: typeof OWNER; storage?: ReturnType<typeof memStorage> } = {}) {
+}: { access?: typeof OWNER; layout?: "desktop" | "phone"; storage?: ReturnType<typeof memStorage> } = {}) {
   // THE EFFECTIVE SET FOLLOWS THE ROLE THE HARNESS SIGNS IN AS (epic
   // memql#5289). The shell reads it from the cluster; with the connection
   // disabled nothing does, so the harness installs the role's seeded set --
@@ -47,7 +48,7 @@ export function renderShell({
   installSeededAccess(access.role);
   render(
     <Shell
-      layout="desktop"
+      layout={layout}
       onSignOut={vi.fn()}
       access={access}
       config={CONFIG}

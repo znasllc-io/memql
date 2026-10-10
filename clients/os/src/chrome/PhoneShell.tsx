@@ -1,4 +1,3 @@
-import { AttentionMarker, AttentionDestination } from "../attention/Attention";
 import { useRef, useState } from "react";
 import { ArrowLeft, LayoutGrid } from "lucide-react";
 
@@ -84,7 +83,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
         ) : (
           <Mark className="os-phone-mark" />
         )}
-        <span className="os-phone-title">{current ? current.name : "MemQL OS"}{current ? <AttentionMarker appId={current.id} /> : null}</span>
+        <span className="os-phone-title">{current ? current.name : "MemQL OS"}</span>
         <button type="button" className="os-link" onClick={onSignOut}>
           Sign out
         </button>
@@ -110,7 +109,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
                     aria-current={section.id === (activeSection?.parent ?? activeSection?.id) ? "page" : undefined}
                     onClick={() => setSectionId(section.id)}
                   >
-                    {section.name}<AttentionMarker appId={current.id} sectionId={section.id} />
+                    {section.name}
                     {settingsTone && section.id === current.settingsSection ? (
                       <ProvenanceDot tone={settingsTone} />
                     ) : null}
@@ -129,13 +128,13 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
               />
             ) : (
               <WindowErrorBoundary key={current.id} app={current.id} section={activeSection?.id ?? ""}>
-                <AttentionDestination appId={current.id} sectionId={activeSection?.id ?? ""}><current.component
+                <current.component
                   sectionId={activeSection?.id ?? ""}
                   reportSetupState={reportSetupState}
                   navigate={setSectionId}
                   askContext={appAsk.askContext}
                   askAbout={appAsk.askAbout}
-                /></AttentionDestination>
+                />
               </WindowErrorBoundary>
             )}
           </PageNavigationProvider>
@@ -146,7 +145,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
             const Icon = app.icon;
             return (
               <button key={app.id} type="button" className="os-tile" onClick={() => open(app.id)}>
-                <span className="os-attention-anchor"><Icon size={26} aria-hidden /><AttentionMarker appId={app.id} /></span>
+                <span><Icon size={26} aria-hidden /></span>
                 <span>{app.name}</span>
               </button>
             );

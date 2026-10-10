@@ -1,14 +1,12 @@
 import { InlineSkeleton } from "../../../kit/ContentSkeleton";
 import { useState, type ReactNode } from "react";
 import { Store } from "lucide-react";
-import { AttentionDestination } from "../../../attention/Attention";
 import { useOs } from "../../../chrome/state";
 import { Button, Fact, Facts, Head, Notice, Panel, RecordList, RecordListSkeleton, RecordRow, Subhead } from "../../../kit";
 import { ActionBar, type Act } from "../../../kit/ActionBar";
 import { Wizard } from "../../../kit/Wizard";
 import { useExternalConnections } from "../../../modules/connections/useExternalConnections";
 import { boundStoreId, previewStoreId } from "../rows";
-import { usePaneActive } from "../paneActivity";
 import { type PartsHeld } from "../parts";
 import type { DeploymentRow } from "../packages/rows";
 import { RefusalNotice } from "../preview/PreviewSection";
@@ -21,12 +19,7 @@ import { useStore, useStoreList, useStoreWrites } from "./useStore";
 type Destination = "testing" | "production";
 type Props = StorePanelProps & { result?: string; revision?: number; onWritten: () => void; runs?: readonly DeploymentRow[]; can?: PartsHeld };
 
-export function ShopifyStorePanel(props: Props) {
-  const active = usePaneActive();
-  return <AttentionDestination appId="deployables" sectionId="deployables" target="shopify-store" visible={active}><ShopifyStoreContent {...props} /></AttentionDestination>;
-}
-
-function ShopifyStoreContent({ site, canBind, trail, back, onWritten, can }: Props) {
+export function ShopifyStorePanel({ site, canBind, trail, back, onWritten, can }: Props) {
   const { actions } = useOs();
   const connections = useExternalConnections();
   const catalog = useStoreList();

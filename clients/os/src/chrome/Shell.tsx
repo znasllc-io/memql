@@ -2,11 +2,8 @@ import { AskNavigator } from "../ask/AskNavigator";
 import { SharedExternalConnectionsProvider } from "../modules/connections/useExternalConnections";
 import { SharedCredentialsProvider } from "../modules/connections/useSourceCredentials";
 import { SharedSourceConnectionsProvider } from "../modules/connections/connections";
-import { AttentionProvider } from "../attention/Attention";
 import { IdentityOpenDispatcher } from "../apps/identity/IdentityOpenDispatcher";
 import { SharedPackagesProvider } from "../apps/deployables/packages/usePackages";
-import { DeployablesAttentionFeed } from "../apps/deployables/attention";
-import { FleetSharingAttentionFeed } from "../apps/fleet/machines/sharingAttention";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { ChromeLayout } from "../app/layout";
@@ -51,7 +48,6 @@ import { Dock } from "./Dock";
 import { ShellDragScope } from "./dragScope";
 import { gridForViewport, OsProvider, useOs } from "./state";
 import { LauncherOverlay } from "./LauncherOverlay";
-import { OptionalReadiness } from "./OptionalReadiness";
 import { PhoneShell } from "./PhoneShell";
 import { useReadinessFeed } from "../live/readiness";
 
@@ -286,13 +282,7 @@ function ShellRoster({
           memql#4915). Renders nothing, and does nothing at all on a browser
           that did not arrive from a callback -- which is every other one. It
           sits INSIDE OsProvider because opening an app is a shell act. */}
-      <AttentionProvider apps={registry.apps}><SharedPackagesProvider><SharedCredentialsProvider><SharedSourceConnectionsProvider><SharedExternalConnectionsProvider><DeployablesAttentionFeed />
-      {/* Sharing a machine with people and groups (epic memql#5344, G15): a
-          runtime change, published only while the viewer owns a machine still
-          in the fleet. At shell lifetime, like the Deployables feed, so a
-          closed Fleet is marked too; it reads the machines feed the
-          MachinesProvider above already retains, and opens nothing new. */}
-      <FleetSharingAttentionFeed />
+      <SharedPackagesProvider><SharedCredentialsProvider><SharedSourceConnectionsProvider><SharedExternalConnectionsProvider>
       <ConnectReturnDispatcher />
       <SetupReturnDispatcher />
       {/* Whether the setup widget is on the active desk at all -- derived from
@@ -309,18 +299,12 @@ function ShellRoster({
       {/* A pipeline run named in the address opens Deployables' Runs on it
           (epic memql#5479): a check run's details link on GitHub. */}
       <RunOpenDispatcher />
-      {/* An optional readiness item nobody has answered marks the place it
-          is set up from -- Pipelines marks Settings (epic memql#5479, D15).
-          A runtime attention change at shell lifetime, so a closed Settings
-          is marked too; only the section's "Not now" clears it. Renders
-          nothing. */}
-      <OptionalReadiness />
       <IdentityOpenDispatcher />
       {/* Where a captured line comes from: the focused window's app and
           section, read from this provider's state at capture time. */}
       <CaptureContextInstaller />
       {children}
-      </SharedExternalConnectionsProvider></SharedSourceConnectionsProvider></SharedCredentialsProvider></SharedPackagesProvider></AttentionProvider>
+      </SharedExternalConnectionsProvider></SharedSourceConnectionsProvider></SharedCredentialsProvider></SharedPackagesProvider>
     </OsProvider>
   );
 }
