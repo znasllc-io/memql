@@ -15545,8 +15545,8 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-home .fleet-workspace-body { display: block; }
 .fleet-home .fleet-equipment-area { min-width: 0; }
 .os-local-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 22px; }
-.os-local-tabs button { border: 0; border-radius: var(--os-radius-xs); padding: 7px 10px; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; font-size: var(--os-text-sm); }
-.os-local-tabs button[aria-current="page"] { color: var(--os-ink); background: var(--os-raised); }
+.os-local-tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: var(--os-radius-xs); padding: 7px 10px; background: transparent; color: var(--os-muted); cursor: pointer; font: inherit; font-size: var(--os-text-sm); }
+.os-local-tabs button[aria-current="page"] { color: var(--os-ink); background: var(--os-accent-soft); border-bottom-color: var(--os-accent); }
 .fleet-home .fleet-equipment-rig { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,1fr); gap: 20px 32px; align-items: start; }
 .fleet-home .fleet-equipment-rig > .fleet-device { grid-column: 1; grid-row: 1; }
 .fleet-home .fleet-equipment-rig > .fleet-equipment-bank:first-child { grid-column: 1; grid-row: 2; }
