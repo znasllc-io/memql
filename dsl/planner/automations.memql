@@ -290,7 +290,7 @@ automation workSpineReplan {
  if !draft.available { return false }
  if !draft.ok { return builtin spineRemedyAsk(reason: "The re-plan for this run's failed step could not be made: " + draft.message) }
  if draft.goalAlreadyServed { return builtin spineRemedyAsk(reason: "The re-plan found nothing left to do: it judged the completed steps already serve the goal. Retry the failed step, or abandon the run.") }
- validation := builtin spineRemedyValidate()
+ validation := builtin spineRemedyValidate(preserveInvocation: [{from: "runAgentTurn", to: "ai", argument: "templateId"}])
  if !validation.ok {
   reason := logic workSpineReplanRefusal(stage: validation.stage, message: validation.message)
   return builtin spineRemedyAsk(reason: reason)

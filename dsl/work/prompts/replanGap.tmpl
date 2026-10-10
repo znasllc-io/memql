@@ -85,6 +85,12 @@ Reusable catalog (constructs already available to compose -- prefer these):
    successful prefix results and their source references. Intermediate
    drafts return text; save the final file once after assembly.
 
+   Preserve the execution capability required by the work. runAgentTurn can
+   discover and execute retrieval tools; ai only invokes a model. Never replace
+   research using runAgentTurn with ai, even with the same research prompt.
+   Split into smaller runAgentTurn calls instead. A plain model answer cannot
+   certify that a source was retrieved.
+
    Bound input as well as output. A research call about selected passages
    should receive those passages, the unchanged human instructions and
    relevant saved evidence, rather than the entire unrelated document.

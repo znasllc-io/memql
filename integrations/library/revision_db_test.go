@@ -43,6 +43,9 @@ type revisionAI struct {
 	assessmentError       error
 	assessmentCalls       atomic.Int32
 	headlessScope         string
+	researchDocument      string
+	researchPassages      string
+	editDocument          string
 	appStarted            chan struct{}
 	headlessStarted       chan struct{}
 	expectedReference     string
@@ -69,6 +72,8 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return nil, fmt.Errorf("local research started before the app attempt")
 			}
 			a.headlessScope = asString(data["gaps"])
+			a.researchDocument = asString(data["document"])
+			a.researchPassages = asString(data["passages"])
 			if a.headlessStarted != nil {
 				close(a.headlessStarted)
 				select {
@@ -138,6 +143,7 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				}
 				return reviewResult(map[string]any{"reply": reply})
 			}
+			a.editDocument = asString(data["document"])
 			passages, valid := data["passages"].(string)
 			expectedEvidence := "Editorial change:"
 			if a.needsResearch {
@@ -320,6 +326,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 		{"DocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
 		{"DocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure", testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure},
 		{"DocumentResearchRouting", testDocumentResearchRouting},
+		{"DocumentResearchScopesContext", testDocumentResearchScopesContext},
 		{"DocumentRetryReusesCompletedAppEvidence", testDocumentRetryReusesCompletedAppEvidence},
 		{"DocumentRevisionRecoveryOrdersByRequestAndRechecksAccess", testDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess},
 		{"DocumentRevisionRefusesStaleApprovalAndAllowsDecline", testDocumentRevisionRefusesStaleApprovalAndAllowsDecline},
@@ -860,5 +867,55 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	_, different, _, _, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), asString(args["requestId"]))
 	if err != nil || len(fmt.Sprint(different["previousRunIds"])) > 2 {
 		t.Fatalf("new feedback inherited old evidence: %v %v", different, err)
+	}
+}
+
+func testDocumentResearchScopesContext(t *testing.T, f *revisionDB) {
+	for _, scope := range []string{"selection", "document", "end"} {
+		t.Run(scope, func(t *testing.T) {
+			source := "# Research\n\nSelected claim.\n\n# Unrelated\n\n" + strings.Repeat("Unrelated material. ", 1500) + "\nEnd context."
+			anchor := map[string]any{"kind": "markdown", "startLine": 2, "endLine": 3, "sourceQuote": "Selected claim.", "quote": "Selected claim."}
+			if scope == "document" {
+				anchor = map[string]any{"kind": "document"}
+			}
+			if scope == "end" {
+				anchor = map[string]any{"kind": "document-end", "prefix": "Unrelated material. "}
+			}
+			f.ai.needsResearch = true
+			f.ai.appCalls.Store(0)
+			f.ai.researchCalls.Store(0)
+			artifact, doc := f.document(source)
+			args, note := f.submit(artifact, doc, anchor, "Verify the selected claim using sources.")
+			f.ai.answer = revisionAnswer{Summary: "Verified", Edits: []revisionReplacement{{Before: "Selected claim.", After: "Verified claim.", Reason: "Source", CommentIDs: []string{note}}}}
+			if scope == "end" {
+				f.ai.answer.Edits[0].Before = "End context."
+				f.ai.answer.Edits[0].After = "End context.\n\nAdditional verified claim.\n"
+			}
+			var wait *workstate.HumanWait
+			if err := f.execute(f.engine, asString(args["requestId"]), false); !errors.As(err, &wait) {
+				t.Fatal(err)
+			}
+			if f.ai.researchCalls.Load() != 1 || f.ai.editDocument != source {
+				t.Fatal("research tools or complete editing source lost")
+			}
+			if scope == "end" {
+				if f.ai.researchDocument != source {
+					t.Fatal("end-of-document feedback lost its context")
+				}
+			} else {
+				if f.ai.researchDocument != "" {
+					t.Fatal("research duplicated the full document")
+				}
+				if scope == "selection" && strings.Contains(f.ai.researchPassages, "Unrelated material.") {
+					t.Fatal("unrelated prose entered selected research")
+				}
+				if scope == "document" && !strings.Contains(f.ai.researchPassages, "Unrelated material.") {
+					t.Fatal("whole-document feedback lost content")
+				}
+			}
+			if !strings.Contains(f.ai.researchPassages, "Verify the selected claim using sources.") {
+				t.Fatal("human feedback was truncated")
+			}
+		})
 	}
 }

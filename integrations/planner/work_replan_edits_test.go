@@ -91,6 +91,24 @@ func TestReplanRefusesWholeSourceWhenSealedProgramIsAvailable(t *testing.T) {
 	}
 }
 
+func TestReplanCannotTurnResearchIntoTextOnlyInference(t *testing.T) {
+	const original = `@template
+automation summariseTickets {
+  gather := logic savedEvidence()
+  draft := builtin runAgentTurn(templateId: "lookupEvidence", data: {question: "Verify the claim"})
+  deliver := draft
+}`
+	rc := replanFixture()
+	rc.TemplateName = "summariseTickets"
+	rc.Template = []memql.SandboxConstruct{{Kind: "automation", Name: rc.TemplateName, Source: original}}
+	eng := &replanEngine{answer: map[string]any{"edits": []replanSourceEdit{{Find: "draft := builtin runAgentTurn", Replace: "draft := builtin ai"}}, "goalAlreadyServed": false}}
+	rec := &remedyRecorder{context: rc}
+	newRemedy(eng, rec).Replan(context.Background(), "v1:work:run:r1", "u1", "draft", "make research smaller")
+	if len(rec.installed) != 0 || len(rec.asked) != 1 || !strings.Contains(rec.asked[0], "required execution capability") || len(eng.wrote("createAuthoringBundle")) != 0 {
+		t.Fatalf("text-only research substitution escaped the declared Spine policy: installed=%v asked=%v", rec.installed, rec.asked)
+	}
+}
+
 func TestReplanEditsSplitFailedStepAndPreserveItsDownstreamBinding(t *testing.T) {
 	const original = `@template
 automation summariseTickets {

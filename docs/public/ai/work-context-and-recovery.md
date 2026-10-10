@@ -61,6 +61,12 @@ Missing or changed source stops recovery before inference; journal previews
 are never a substitute for the original program. Generated edits retain the
 normal caller trust and approval gates.
 
+The Spine also declares invocation substitutions that recovery must refuse.
+For example, replacing `runAgentTurn` with `ai` for the same research prompt
+would remove tool execution. The validator compares compiled calls, including
+nested branches and loops, before persisting the replacement. This check does
+not certify the factual quality of an evidence report.
+
 A timed-out attempt records its failure with a separate,
 short write deadline so that an expired model request cannot leave the same
 attempt eligible to run again on another replica. This finalization does not
@@ -76,6 +82,11 @@ The `researchApps` policy tries Codex with a balanced model, then Claude Code
 with Sonnet; each uses its own tools. Both reports reach the proposal stage,
 which combines complementary findings and checks disagreements against primary
 sources. Ordinary wording edits do not spend app quota.
+
+Selected source and human feedback travel together to the evidence stages.
+Those stages do not receive a second copy of the entire document; a request
+anchored at the end retains document context when it has no selected source.
+The exact-edit stage still receives the complete original document.
 
 App research is optional. Credit limits, missing apps, connection errors and
 bounded timeouts are journaled under the failed branch call. They never cancel

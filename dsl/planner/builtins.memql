@@ -297,7 +297,10 @@ builtin spineRemedyGenerate { prompt string! }
 
 /// Bounded operation inside the claimed remedy scope.
 @executor("integration.planner.spineRemedyValidate")
-builtin spineRemedyValidate {  }
+@args(profile="object")
+builtin spineRemedyValidate {
+ preserveInvocation []object
+}
 
 /// Bounded operation inside the claimed remedy scope.
 @executor("integration.planner.spineRemedyPersist")

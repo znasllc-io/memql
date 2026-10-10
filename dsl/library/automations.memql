@@ -252,6 +252,9 @@ automation archiveFileOnArtifactArchive {
 automation reviseLibraryDocument {
  args { requestId string! proposal object! }
  captured := builtin libraryRevisionInput(requestId: args.requestId)
+ // Selected source already travels in passagesJSON. Avoid sending the whole
+ // document a second time; end-of-document requests still need its context.
+ researchDocument := captured.passages.where(p => trim(p.source) != "").count() > 0 ? "" : captured.content
  references := builtin libraryRevisionReferences(requestId: args.requestId, templateId: "libraryRevisionImages", level: "fast")
  intent := builtin ai(templateId: "libraryRevisionIntent", data: {
   passages: captured.passagesJSON, references: references.references,
@@ -267,7 +270,7 @@ automation reviseLibraryDocument {
    priorEvidence := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "evidence.app/report")
    report := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
     priorEvidence: priorEvidence.select(receipt => receipt.result.value.reply), gaps: "Independent corroboration of this demanding research request.",
-    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    document: researchDocument, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction ?? captured.instruction, previous: captured.amendment.edits
    }) on error continue
    return report.reply ?? ""
@@ -284,7 +287,7 @@ automation reviseLibraryDocument {
     }
    }
    report := builtin ai(templateId: "libraryRevisionAppResearch", data: {
-    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    document: researchDocument, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction ?? captured.instruction, previous: captured.amendment.edits
    }) on error continue
    return {available: trim(report.reply ?? "") != "", report: report.reply ?? ""}
@@ -297,7 +300,7 @@ automation reviseLibraryDocument {
   // malformed assessment conservatively selects local research, never success.
   if evidence.app.available || trim(evidence.headless) != "" {
    assessment := builtin ai(templateId: "libraryRevisionEvidence", data: {
-    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    document: researchDocument, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction ?? captured.instruction,
     appEvidence: evidence.app.report, localEvidence: evidence.headless
    }) on error continue
@@ -311,7 +314,7 @@ automation reviseLibraryDocument {
    supplement := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
     priorEvidence: [evidence.app.report, evidence.headless],
     gaps: assessment.reply ?? "The evidence assessment was unavailable. Check source support and fill the missing evidence conservatively.",
-    document: captured.content, passages: captured.passagesJSON, references: references.references,
+    document: researchDocument, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction ?? captured.instruction, previous: captured.amendment.edits
    })
   }

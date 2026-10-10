@@ -31,5 +31,6 @@ logic workSpineReplanRefusal {
  args { stage string! message string! }
  if args.stage == "source" { return "The re-planned draft does not compile: " + args.message }
  if args.stage == "prefix" { return "The re-planned draft does not keep the completed steps where they would be served: " + args.message }
+ if args.stage == "invocation" { return "The revised plan would lose a capability needed to complete the work: " + args.message }
  return "The re-planned draft asks for arguments this run was not given: " + args.message
 }

@@ -163,7 +163,7 @@ func (s *remedyScope) generate(ctx context.Context, args map[string]any) (any, e
 	return map[string]any{"available": true, "ok": true, "goalAlreadyServed": draft.GoalAlreadyServed}, nil
 }
 
-func (s *remedyScope) validate(_ context.Context, _ map[string]any) (any, error) {
+func (s *remedyScope) validate(_ context.Context, args map[string]any) (any, error) {
 	if !s.generated || s.validated || s.closed || s.draft.Source == "" || s.draft.GoalAlreadyServed {
 		return nil, fmt.Errorf("replan validation requires one generated unfinished plan")
 	}
@@ -182,6 +182,9 @@ func (s *remedyScope) validate(_ context.Context, _ map[string]any) (any, error)
 		}
 		if err := replanPreservesDefinitions(original, auto, s.context); err != nil {
 			return fail("prefix", err)
+		}
+		if err := replanPreservesInvocation(original, auto, args["preserveInvocation"]); err != nil {
+			return fail("invocation", err)
 		}
 	}
 	resumeAt, keys, err := replanKeepsPrefix(auto, s.context)
