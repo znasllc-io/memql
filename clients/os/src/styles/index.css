@@ -16262,6 +16262,7 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-message .os-ask-result-context { color: var(--os-muted); font-size: var(--os-text-sm); font-weight: 500; line-height: 1.5; margin: 0 0 8px; }
 
 .os-ask-work-link { display: flex; justify-content: flex-start; margin-top: 8px; }
+.os-ask-work-link > .os-icon-button { border: 1px solid var(--os-line-strong); }
 
 .os-ask-question { display: grid; gap: 10px; margin-top: 12px; padding: 12px; border-radius: var(--os-radius-sm); background: var(--os-plate); }
 .os-ask-question > p { margin: 0; }
