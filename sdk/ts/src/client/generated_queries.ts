@@ -4744,16 +4744,20 @@ QueryClient.prototype.libraryFolders = function (this: QueryClient, args: Librar
 /** Bounded, owned durable image receipts for one document revision. */
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryImagesForRevision"] in generated_concepts.ts).
 export interface LibraryImagesForRevisionArgs {
+  requestId: string;
+  runId: string;
 }
 
 export function buildLibraryImagesForRevision(args: LibraryImagesForRevisionArgs): string {
-  void args;
-  return "query libraryImagesForRevision()";
+  const parts: string[] = [];
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query libraryImagesForRevision(" + parts.join(", ") + ")";
 }
 
 declare module "./query.js" {
   interface QueryClient {
-    libraryImagesForRevision(args?: LibraryImagesForRevisionArgs, opts?: QueryCallOptions): Promise<Result>;
+    libraryImagesForRevision(args: LibraryImagesForRevisionArgs, opts?: QueryCallOptions): Promise<Result>;
   }
 }
 

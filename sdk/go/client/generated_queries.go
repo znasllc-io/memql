@@ -4764,6 +4764,8 @@ func LibraryFoldersBuild(args LibraryFoldersArgs) string {
 //
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryImagesForRevision"] in generated_concepts.go).
 type LibraryImagesForRevisionArgs struct {
+	RequestId string
+	RunId     string
 }
 
 // LibraryImagesForRevision calls the engine query libraryImagesForRevision.
@@ -4773,8 +4775,17 @@ func (qc *QueryClient) LibraryImagesForRevision(ctx context.Context, args Librar
 }
 
 func LibraryImagesForRevisionBuild(args LibraryImagesForRevisionArgs) string {
-	_ = args
-	return "query libraryImagesForRevision()"
+	var b strings.Builder
+	b.WriteString("query libraryImagesForRevision(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
 }
 
 // LibraryItemsForAccount -- The Library items labelled with one account.
