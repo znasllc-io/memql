@@ -1164,6 +1164,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// record the durable journal's verified bytes and reserved file id.
 		// An actor.userId filter alone would let an owner forge that evidence.
 		{Path: "library/mutations.memql", Name: "recordStoredPipelineFile"}: true,
+		// The image adapter verifies immutable bytes and actual source/model
+		// provenance; actor.userId cannot attest either on a client's own row.
+		{Path: "library/mutations.memql", Name: "recordPreparedLibraryImage"}: true,
 
 		// Document history is authored only after a shared write lock, a fresh
 		// owned-row read and a revision comparison. Even the document's owner

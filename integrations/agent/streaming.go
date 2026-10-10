@@ -449,7 +449,7 @@ StreamLoop:
 			textChunks++
 		}
 
-		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, 20000)
+		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
 			return nil, compactErr
 		}

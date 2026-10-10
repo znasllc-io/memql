@@ -90,6 +90,8 @@ export function shippedRules(): Row[] {
     ruleRow({ name: "documentAppResearch", when: { prompt: "libraryRevisionAppResearch" }, policy: "researchApps", onUnavailable: "park", locked: true, precedence: 151 }),
     ruleRow({ name: "documentResearchIntent", when: { prompt: "libraryRevisionIntent" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 152 }),
     ruleRow({ name: "documentResearchEvidence", when: { prompt: "libraryRevisionEvidence" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 153 }),
+    ruleRow({ name: "documentImageGeneration", when: { prompt: "libraryRevisionImageGeneration" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 154 }),
+    ruleRow({ name: "documentImagePlanning", when: { prompt: "libraryRevisionImagePlan" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 155 }),
     ruleRow({ name: "embeddingsBound", when: { level: "embeddings" }, policy: "embeddingsBinding", onUnavailable: "park", locked: true, precedence: 110 }),
     ruleRow({ name: "compilerLocalOnly", when: { prompt: "compileRule" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 120 }),
     ruleRow({ name: "policyCompilerLocalOnly", when: { prompt: "composeRoutingPolicy" }, policy: "localOnly", onUnavailable: "park", locked: true, precedence: 121 }),

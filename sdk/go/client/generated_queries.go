@@ -4760,6 +4760,23 @@ func LibraryFoldersBuild(args LibraryFoldersArgs) string {
 	return "query libraryFolders()"
 }
 
+// LibraryImagesForRevision -- Bounded, owned durable image receipts for one document revision.
+//
+// Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryImagesForRevision"] in generated_concepts.go).
+type LibraryImagesForRevisionArgs struct {
+}
+
+// LibraryImagesForRevision calls the engine query libraryImagesForRevision.
+func (qc *QueryClient) LibraryImagesForRevision(ctx context.Context, args LibraryImagesForRevisionArgs) (*Result, error) {
+	call := LibraryImagesForRevisionBuild(args)
+	return qc.executeNamed(ctx, "libraryImagesForRevision", call)
+}
+
+func LibraryImagesForRevisionBuild(args LibraryImagesForRevisionArgs) string {
+	_ = args
+	return "query libraryImagesForRevision()"
+}
+
 // LibraryItemsForAccount -- The Library items labelled with one account.
 // `accountIds` is a LIST (D5 -- "one or two accounts" is the owner's own framing), so the tie term is membership rather than equality.
 // ARCHIVED ROWS ARE EXCLUDED, matching `libraryArtifacts` rather than this file's own `clientAccountsAll`: the account filter above is a view over the registry a person is administering, while this is a count of what is currently filed for a client. `row.archived != true` rather than `row.archived == false`, because a row promoted before the field existed carries no key at all and `row.archived == false` would silently exclude it.

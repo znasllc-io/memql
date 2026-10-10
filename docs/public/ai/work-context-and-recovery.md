@@ -176,9 +176,15 @@ storage, an invalid summary, or a checkpoint that saves no space returns a
 failure without mutating the caller's original conversation.
 
 The proactive working-set threshold is an estimate that includes message
-envelopes, tool schemas and arguments. The inference router also sizes each
-actual call with completion headroom; provider context-overflow recovery can
-request a smaller checkpoint. An active request and tool contracts can
+envelopes, tool schemas and arguments. Its preference is 20,000 tokens. When
+pinned authority, the original request, the latest human correction and tool
+contracts would leave less than 4,000 tokens of working room, the target
+becomes their estimated size plus that working room. Accumulated tool results, model replies and
+derived memories do not enlarge that allowance. This lets a large document
+reach an eligible model without deleting or summarizing its original request.
+The inference router also sizes each actual call with completion headroom;
+provider context-overflow recovery can request a strictly smaller checkpoint
+without this proactive floor. An active request and tool contracts can
 themselves exceed a provider's capacity. Compaction cannot guarantee that any
 arbitrary input fits any model.
 

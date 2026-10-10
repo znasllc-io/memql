@@ -599,6 +599,7 @@ export const BoundConcepts = {
   libraryFilesForOwner: "v1:library:file",
   libraryFolderById: "v1:library:folder",
   libraryFolders: "v1:library:folder",
+  libraryImagesForRevision: "v1:library:file",
   libraryItemsForAccount: "v1:library:artifact",
   libraryWatchedFolders: "v1:library:watchedFolder",
   libraryWorkspaceLiveSources: "v1:library:artifact",

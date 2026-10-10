@@ -49,21 +49,45 @@ func isWorkMemory(m common.ChatMessage) bool {
 	return m.Role == "user" && strings.HasPrefix(m.Content, "[Memory checkpoint ")
 }
 
+func workContextHumanBounds(messages []common.ChatMessage) (first, last int) {
+	first, last = -1, -1
+	for i, m := range messages {
+		if m.Role == "user" && !isWorkMemory(m) {
+			if first < 0 {
+				first = i
+			}
+			last = i
+		}
+	}
+	return first, last
+}
+
+// WorkContextTarget is a proactive history-compaction preference, not a model
+// window. A document and its tool contracts can exceed that preference before
+// any history exists. Preserve those pinned inputs plus bounded working room;
+// the router still enforces the complete request and output reserve against the
+// actual provider window. Do not use this floor for recovery from a real overflow.
+func WorkContextTarget(messages []common.ChatMessage, tools []common.ToolDefinition, preferred int) int {
+	if preferred <= 0 {
+		return preferred
+	}
+	first, last := workContextHumanBounds(messages)
+	pinned := make([]common.ChatMessage, 0, 4)
+	for i, m := range messages {
+		if i == first || i == last || m.Role == "system" || m.Role == "developer" {
+			pinned = append(pinned, m)
+		}
+	}
+	return max(preferred, WorkContextSize(pinned, tools)+preferred/5)
+}
+
 // Keep authority, the original request, the newest human correction and the
 // latest exchange verbatim. Six recent messages is a preference, never a cut
 // through a parallel call group. Short transcripts can still retire an older
 // complete exchange when the preferred tail occupies the entire conversation.
 func workContextChunk(messages []common.ChatMessage, sourceLimit int) (int, int) {
 	units := workContextUnits(messages)
-	firstUser, lastUser := -1, -1
-	for i, m := range messages {
-		if m.Role == "user" && !isWorkMemory(m) {
-			if firstUser < 0 {
-				firstUser = i
-			}
-			lastUser = i
-		}
-	}
+	firstUser, lastUser := workContextHumanBounds(messages)
 	eligible := func(u workContextUnit) bool {
 		if !u.complete || u.end == len(messages) {
 			return false

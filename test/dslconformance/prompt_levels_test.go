@@ -103,6 +103,9 @@ var promptLevels = map[string]string{
 	// Bounded image observations inform a human-reviewed proposal; fast vision
 	// identifies visible content and states uncertainty without controlling the UI.
 	"libraryRevisionImages": "fast",
+	// A bounded acquisition plan selects references from retrieved evidence;
+	// native validation enforces source, storage and local-generation boundaries.
+	"libraryRevisionImagePlan": "strong",
 	// A one-word classification gates optional app usage.
 	"libraryRevisionIntent":   "fast",
 	"libraryRevisionEvidence": "fast",

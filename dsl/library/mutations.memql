@@ -1140,6 +1140,8 @@ mutation documentComment removeDocumentAnnotation {
 }
 
 /// Only the image storage adapter can attest durable image bytes and provenance.
+/// An actor.userId filter scopes ownership but cannot prevent an owner forging
+/// storage digests, source evidence or the model that generated an image.
 @serverOnly
 @actor
 @createOnly("ownerUserId", "name", "mimeType", "size", "sha256", "blobUrl", "imageProvenance", "producedByRunId", "producedByStepKey")

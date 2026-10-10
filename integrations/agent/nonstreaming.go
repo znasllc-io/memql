@@ -368,7 +368,7 @@ BackgroundLoop:
 			}, fmt.Errorf("agent: %s after %s", turnWallclockSentinel, elapsed.Round(time.Second))
 		}
 
-		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, 20000)
+		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
 			return nil, compactErr
 		}

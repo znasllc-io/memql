@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"text/template"
 	"time"
@@ -17,6 +18,7 @@ import (
 type workContextFleet struct {
 	owner                         string
 	visits, calls, missingContext int
+	wantDocument                  string
 }
 
 func (f *workContextFleet) Catalog(ctx context.Context, owner string) ([]memql.FleetModel, error) {
@@ -42,10 +44,32 @@ func (f *workContextFleet) Call(ctx context.Context, req memql.FleetCallRequest)
 	if req.ActingUserId != f.owner || ac == nil || ac.UserId != f.owner || run.RunId != "adopted-run" {
 		return memql.FleetCallResult{}, fmt.Errorf("dispatch lost work owner or run")
 	}
+	if f.wantDocument != "" {
+		found := false
+		for _, message := range req.Messages {
+			found = found || message.Content == f.wantDocument
+		}
+		if !found || req.ContextTokens <= 20000 {
+			return memql.FleetCallResult{}, fmt.Errorf("large request or provider context reservation lost: document=%v context=%d", found, req.ContextTokens)
+		}
+	}
 	if req.OnDelta != nil {
 		req.OnDelta("Completed answer")
 	}
 	return memql.FleetCallResult{ToolCalls: outcomeCall(`{"status":"complete","response":"Completed answer"}`)}, nil
+}
+
+type proactiveWorkEngine struct {
+	workPromptEngine
+	compactions int
+}
+
+func (e *proactiveWorkEngine) CompactWorkContext(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition, target int) ([]common.ChatMessage, error) {
+	e.compactions++
+	if memql.WorkContextSize(messages, tools) > target {
+		return nil, fmt.Errorf("initial request rejected before provider selection")
+	}
+	return (&memql.MemQLEngine{}).CompactWorkContext(ctx, messages, tools, target)
 }
 
 // Start on the execution replica with identity restored from a persisted run,
@@ -66,7 +90,8 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 			ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "adopted-run", GoalId: "goal", OwnerUserId: owner})
 			ctx, cancel := context.WithTimeout(ctx, time.Minute)
 			defer cancel()
-			fleet := &workContextFleet{owner: owner}
+			document := strings.TrimSpace(strings.Repeat("Preserve this original document. ", 3000))
+			fleet := &workContextFleet{owner: owner, wantDocument: document}
 			providers := memql.NewProviderRegistryForTest()
 			providers.SetFleetInference(fleet)
 			rules := memql.NewRuleRegistry()
@@ -76,10 +101,10 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 			if err := rules.Finalize(); err != nil {
 				t.Fatal(err)
 			}
-			engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true}}, prompts: prompts}
+			engine := &proactiveWorkEngine{workPromptEngine: workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true}}, prompts: prompts}}
 			r := newTestReplier(engine)
 			r.router = router.New(providers, memql.NewPolicyRegistryForTest(map[string][]string{"local": {"fleet:strongest"}}), rules, nil, nil)
-			msg := &memqlv1.AgentGenerateTurnMsg{RequestId: "work-fleet", AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: "Answer this goal"}}}
+			msg := &memqlv1.AgentGenerateTurnMsg{RequestId: "work-fleet", AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: document}}}
 			if background {
 				msg.Hints = map[string]string{ExecutionLaneHintKey: ExecutionLaneBackground}
 			}
@@ -87,8 +112,13 @@ func TestOwnedWorkLanesPreserveFleetSelectionContext(t *testing.T) {
 			if err != nil {
 				t.Fatalf("owned fleet was hidden on execution replica: %v", err)
 			}
-			if fleet.visits == 0 || fleet.calls != 1 || fleet.missingContext != 0 || result.FinalText != "Completed answer" {
+			if engine.compactions != 1 || fleet.visits == 0 || fleet.calls != 1 || fleet.missingContext != 0 || result.FinalText != "Completed answer" {
 				t.Fatalf("actual lane did not use owned fleet: visits=%d calls=%d result=%+v", fleet.visits, fleet.calls, result)
+			}
+			used := 0
+			_, recovered := r.handOffContext(ctx, fmt.Errorf("context_length_exceeded"), []common.ChatMessage{{Role: "user", Content: document}}, &used, 0, "strict-overflow")
+			if recovered || used != 0 {
+				t.Fatal("actual overflow recovery must not inflate the strict target")
 			}
 		})
 	}
