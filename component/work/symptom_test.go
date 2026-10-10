@@ -96,6 +96,32 @@ func TestIdleModelRecoveryStillHonorsStallAndRetryLimits(t *testing.T) {
 	}
 }
 
+func TestModelCallCeilingReplansInsteadOfRetryingUnchanged(t *testing.T) {
+	for _, message := range []string{
+		"worker: model call exceeded its 10m0s ceiling",
+		`automation "profiles" execution failed: function "runAgentTurn" execution failed: runAgentTurn: stream: Ask local voice: model_call_failed worker: model call exceeded its 10m0s ceiling`,
+		"remote worker: model call exceeded its 1m30s ceiling (timeout)",
+	} {
+		signal := Signal{ErrorMessage: message, ErrorCode: "timeout"}
+		sym, evidence, ok := ClassifyByRules(signal)
+		if !ok || sym != SymptomPlan || evidence.RuleId != "plan.modelCallCeiling" || evidence.Source != EvidenceSourceRules {
+			t.Fatalf("whole-call limit misclassified: %q: %s %+v", message, sym, evidence)
+		}
+		if ActFor(sym, 0, 2) != ActReplan || ActFor(sym, 2, 2) != ActAsk {
+			t.Fatal("time-limit recovery must change the plan within the existing retry budget")
+		}
+		signal.RepeatedAction = true
+		if symptom, _, _ := ClassifyByRules(signal); symptom != SymptomHuman {
+			t.Fatal("time limit bypassed the repeated-action guard")
+		}
+	}
+	for _, message := range []string{"worker: model call exceeded its 0s ceiling", "worker: model call exceeded its unknown ceiling"} {
+		if _, _, ok := ClassifyByRules(Signal{ErrorMessage: message}); ok {
+			t.Fatalf("invalid limit claimed by a deterministic rule: %s", message)
+		}
+	}
+}
+
 // AN EXHAUSTED QUOTA ARRIVES AS A 429, which is the reason this rule has to
 // sit above transient.rateLimit rather than anywhere convenient. OpenAI
 // reports a spent balance with the same status it uses for ordinary rate

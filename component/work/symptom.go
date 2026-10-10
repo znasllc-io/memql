@@ -21,7 +21,10 @@ package work
 // the act for a contract miss is repair FROM THE FAILED STEP with the
 // prefix kept, never a rerun from the start.
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Symptom is the classifier's verdict. The values are the closed enum
 // v1:work:step.symptom declares; a sixth would need the concept changed.
@@ -248,6 +251,19 @@ var rules = []rule{
 		reason: "the work no longer fits the model's context window and compressing it freed nothing, so the same bytes would meet the same limit again",
 		match: func(s Signal) bool {
 			return s.ErrorCode == "context_length_exceeded" || anyOf(lower(s.ErrorMessage), contextExhaustedMarkers...)
+		},
+	},
+	{
+		id: "plan.modelCallCeiling", tier: "plan", symptom: SymptomPlan,
+		reason: "one model call used its entire time allowance; divide the unfinished work into smaller checkpointed steps instead of repeating the same request",
+		match: func(s Signal) bool {
+			// The worker's whole-call limit survives local and forwarded error
+			// wrappers as text. Unlike idle/network timeouts, waiting and sending
+			// the same workload again does not change this fixed envelope.
+			_, rest, found := strings.Cut(lower(s.ErrorMessage), "worker: model call exceeded its ")
+			limit, _, ceiling := strings.Cut(rest, " ceiling")
+			duration, err := time.ParseDuration(limit)
+			return found && ceiling && err == nil && duration > 0
 		},
 	},
 	{

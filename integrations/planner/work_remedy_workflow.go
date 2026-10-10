@@ -87,6 +87,12 @@ func (s *remedyScope) generate(ctx context.Context, args map[string]any) (any, e
 	}
 	rc := s.context
 	data := map[string]any{"statement": rc.Statement, "completedSteps": rc.CompletedSteps, "failedStep": rc.FailedStep, "inputKeys": inputKeys(rc.Variables), "now": s.remedy.clock().UTC().Format(time.RFC3339)}
+	source := make([]map[string]any, 0, len(rc.Template))
+	for _, construct := range rc.Template {
+		source = append(source, map[string]any{"kind": construct.Kind, "name": construct.Name, "source": construct.Source})
+	}
+	data["originalTemplate"] = source
+	data["templateName"] = rc.TemplateName
 	if strings.TrimSpace(s.reason) != "" {
 		data["remainingGoal"] = strings.TrimSpace(s.reason)
 	}
@@ -136,7 +142,17 @@ func (s *remedyScope) persist(ctx context.Context, _ map[string]any) (any, error
 		return nil, fmt.Errorf("replan persistence requires a validated prefix and may run once")
 	}
 	s.saved = true
-	out, err := s.remedy.loop.persistWorkDraft(ctx, CompileRequest{RunId: s.runID, OwnerUserId: s.owner, Statement: s.context.Statement}, CompileOutcome{}, authoringBundle{AutomationName: s.auto.Name, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: s.auto.Name, Source: s.draft.Source}}}, sandbox)
+	constructs := []memql.SandboxConstruct{{Kind: "automation", Name: s.auto.Name, Source: s.draft.Source}}
+	// The replacement may still call private helpers, especially in the fixed
+	// prefix. Carry the sealed dependencies to the new bundle so the executing
+	// replica has them too. Only the headline may be replaced by the model.
+	for _, construct := range s.context.Template {
+		if construct.Kind == "automation" && (construct.Name == s.context.TemplateName || construct.Name == s.auto.Name) {
+			continue
+		}
+		constructs = append(constructs, construct)
+	}
+	out, err := s.remedy.loop.persistWorkDraft(ctx, CompileRequest{RunId: s.runID, OwnerUserId: s.owner, Statement: s.context.Statement}, CompileOutcome{}, authoringBundle{AutomationName: s.auto.Name, Constructs: constructs}, sandbox)
 	if err != nil {
 		return map[string]any{"ok": false, "message": err.Error()}, nil
 	}

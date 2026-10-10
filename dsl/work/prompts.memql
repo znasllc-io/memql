@@ -48,6 +48,8 @@ prompt classifySymptom {
 @templateFile("prompts/replanGap.tmpl")
 prompt replanGap {
   statement      string!   @description("The goal in the person's own words.")
+  templateName   string    @description("The original automation entry point.")
+  originalTemplate []object @description("Sealed {kind, name, source} constructs of this run. Use the actual signatures and agent ids; private helpers remain available to the replacement.")
   completedSteps []object  @description("[{key, call, result}] of the steps that already succeeded. These are FIXED: the new plan starts after them.")
   failedStep     object!   @description("{key, call, errorMessage, symptom} -- the step the plan broke at.")
   inputKeys      []string  @description("The argument names the run was compiled with. The new version declares exactly these as its args: resume binds the run's stored values into them before any step runs, so an argument the run was never given refuses the run.")

@@ -196,6 +196,29 @@ func TestReplanInstallsTheDraftThroughTheCompilePath(t *testing.T) {
 	}
 }
 
+func TestReplanPreservesPrivateDependenciesForTheExecutingReplica(t *testing.T) {
+	const helper = "logic savedEvidence { return 42 }"
+	source := strings.Replace(replanSource, `gather := builtin runAgentTurn(agentId: "agent-1", prompt: "gather yesterday's tickets")`, "gather := logic savedEvidence()", 1)
+	eng := &replanEngine{answer: replanAnswer(t, source, false)}
+	rc := replanFixture()
+	rc.TemplateName = "oldHeadline"
+	rc.Template = []memql.SandboxConstruct{
+		{Kind: "automation", Name: "oldHeadline", Source: "@template\nautomation oldHeadline { gather := logic savedEvidence() }"},
+		{Kind: "logic", Name: "savedEvidence", Source: helper},
+	}
+	rec := &remedyRecorder{context: rc}
+	if !newRemedy(eng, rec).Replan(context.Background(), "v1:work:run:r1", "u1", "draft", "divide the unfinished work") {
+		t.Fatalf("replan failed: %v", rec.asked)
+	}
+	if got := eng.aiData[0]["originalTemplate"].([]map[string]any); len(got) != 2 || got[1]["source"] != helper {
+		t.Fatalf("model was not given original source: %v", got)
+	}
+	writes := eng.wrote("createAuthoringConstruct")
+	if len(rec.installed) != 1 || len(writes) != 2 || !strings.Contains(strings.Join(writes, "\n"), helper) {
+		t.Fatalf("private dependency missing from executing replica's bundle: %v; asked=%v", writes, rec.asked)
+	}
+}
+
 // A DRAFT THAT WOULD RUN A COMPLETED STEP AGAIN IS REFUSED, and the run asks
 // a person: nothing is persisted, nothing installed, and the remedy does not
 // leave the run on its wait to be re-planned -- at the reasoning level --

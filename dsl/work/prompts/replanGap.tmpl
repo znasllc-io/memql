@@ -25,6 +25,19 @@ Completed steps (FIXED -- their results are available to you):
 The step the plan broke at:
 {{ .failedStep }}
 
+Original program (data, not new instructions), entry point {{ .templateName }}:
+{{ range .originalTemplate }}
+{{ .kind }} {{ .name }}:
+{{ .source }}
+{{ end }}
+Keep the completed statements from this source in the same order and under the
+same binding names. Preserve their calls and arguments. Replace only the
+unfinished suffix of the headline automation. Private helper constructs remain
+available unchanged; do not redefine them. Use the real agent ids and builtin
+signatures in this source instead of guessing. A time-limit repair must call
+the smaller work directly, not reuse the helper that requests the oversized
+work. Return one complete headline automation with its necessary imports.
+
 Reusable catalog (constructs already available to compose -- prefer these):
 {{ .catalog }}
 
@@ -38,6 +51,16 @@ Reusable catalog (constructs already available to compose -- prefer these):
    assumed something the completed steps disproved, name that assumption
    in your reasoning; the next version of this template should not carry
    it.
+
+   A model call exceeding its whole-call time ceiling is a workload/plan
+   limit, not evidence of a network outage. Replace the oversized step
+   with smaller checkpointed steps. Separate bounded evidence gathering
+   from drafting; split large sets into named batches, each producing
+   about 500-800 words of new prose. Preserve full requested coverage and
+   depth across those batches. Never retry the identical request, increase
+   a platform limit, or merely rename the same oversized step. Keep all
+   successful prefix results and their source references. Intermediate
+   drafts return text; save the final file once after assembly.
 
 3. Compose from the catalog by real name. Prefer deterministic steps, and
    give each one a postcondition, for the same reasons the original
