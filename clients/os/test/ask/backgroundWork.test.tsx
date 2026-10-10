@@ -80,9 +80,11 @@ it("opens the acknowledgment receipt from its whole target and reflects real sta
  const onOpen = vi.fn(); const view = render(<AskWorkLink title="Find prior report preferences" state="queued" onOpen={onOpen} />);
  fireEvent.click(screen.getByRole("button", {name:/View work: Find prior report preferences/})); expect(onOpen).toHaveBeenCalledOnce();
  view.rerender(<AskWorkLink title="Find prior report preferences" state="waiting" onOpen={onOpen} />);
- expect(screen.getByText("Needs your input")).toBeTruthy();
+ expect(screen.getByRole("button", {name:/Needs your input:/}).title).toBe("Needs your input");
  view.rerender(<AskWorkLink title="Find prior report preferences" state="done" onOpen={onOpen} />);
- expect(screen.getByText("View work")).toBeTruthy(); expect(screen.queryByText("Queued work")).toBeNull();
+ const receipt = screen.getByRole("button", {name:/View work:/});
+ expect(receipt.title).toBe("View work"); expect(receipt.textContent).toBe("");
+ expect(screen.queryByText("Queued work")).toBeNull();
 });
 
 it("shows the durable run phase rather than calling every background request working", () => {
