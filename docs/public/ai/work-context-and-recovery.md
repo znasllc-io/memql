@@ -44,6 +44,12 @@ existing plan-review approval. There is no promise that every failure can be
 recovered automatically or that a language model can identify every platform
 bug correctly.
 
+If a plan failure exhausts automatic recovery, **Revise plan** authorizes one
+further replanning attempt for the unfinished work. It preserves the completed
+prefix and accumulated usage, and does not replenish automatic retries or
+raise resource limits. A transient failure's **Retry** instead repeats the
+failed step. Either decision is persisted for the cluster to resume safely.
+
 ## Browser research fallback
 
 The document DSL first assesses whether feedback needs external evidence using

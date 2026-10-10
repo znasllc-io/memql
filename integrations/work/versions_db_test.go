@@ -413,6 +413,43 @@ func testTheFailurePathsReleasesLandOnTheirRows(t *testing.T, a actsDB) {
 			t.Errorf("run.staleSteps = %v", stale)
 		}
 	})
+
+	t.Run("an exhausted plan failure's approved revision", func(t *testing.T) {
+		runId := a.openRun(t, nil)
+		approvalId := newRowId(approvalConcept)
+		a.writeVersion(t, runId, runId, "fetch", 0, 1, nil, "fetched", nil)
+		a.writeVersion(t, runId, runId, "draft", 1, 1, nil, "", map[string]any{"status": "failed", "errorCode": "step_failed", "errorMessage": "model call exceeded its ceiling"})
+		a.write(t, "updateWorkRun", map[string]any{"runId": runId, "status": runStatusWaiting, "stepOrder": []string{"fetch", "draft"},
+			"spent":     map[string]any{"retries": 2, "modelCalls": 40},
+			"waitingOn": map[string]any{"kind": "approval", "subject": approvalId, "since": rfc(now.Add(-time.Minute)), "approvalKind": work.ApprovalKindFeedback}})
+		resumed, err := a.i.resumeParkedRun(ownerActor(context.Background(), a.owner), runId, approvalId, "answered",
+			&failureRetry{stepKey: "draft", decidedBy: a.owner, symptom: work.SymptomPlan, reason: "divide unfinished work"}, now)
+		if err != nil || !resumed {
+			t.Fatalf("resumeParkedRun = %v, %v", resumed, err)
+		}
+		// A separate integration reads persisted state, with no approval-handler
+		// memory. This is what the planner's event consumer observes.
+		peer := New(a.eng, testLogger())
+		run, err := peer.store().runForOwner(ownerActor(context.Background(), a.owner), runId)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wait := rowMap(run, "waitingOn")
+		if rowString(run, "status") != runStatusWaiting || wait["kind"] != waitKindReplan || wait["subject"] != "draft" || wait["since"] != rfc(now) {
+			t.Fatalf("persisted recovery = %v", run)
+		}
+		if rowInt(rowMap(run, "spent"), "retries") != 2 || rowInt(rowMap(run, "spent"), "modelCalls") != 40 || len(rowMap(run, "rerun")) != 0 {
+			t.Fatalf("recovery changed spend or replayed the failure: %v", run)
+		}
+		if rowInt(run, "humanWaitMs") != 60000 || rowString(run, "humanResumeId") == "" {
+			t.Fatalf("recovery lost the explicit human continuation: %v", run)
+		}
+		for _, step := range a.query(t, a.owner, "query "+call("workStepsForOwnerRun", map[string]any{"runId": runId})) {
+			if rowString(step, "key") == "fetch" && (rowString(step, "status") != "done" || rowInt(step, "version") != 1) {
+				t.Fatalf("completed prefix was changed: %v", step)
+			}
+		}
+	})
 }
 
 // A branch's fork run type-checks with its head, its request and the goal

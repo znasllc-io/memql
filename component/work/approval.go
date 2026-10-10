@@ -183,8 +183,12 @@ const (
 func FailureApproval(kind, runId, stepKey string, symptom Symptom, errorMessage, question string, ev Evidence, now time.Time, ttl time.Duration) ApprovalRequest {
 	a := newApproval(kind, runId, stepKey, FailureSubject(symptom, stepKey, errorMessage), ev, now, ttl)
 	a.Question = question
+	label := "Retry"
+	if symptom == SymptomPlan {
+		label = "Revise plan"
+	}
 	a.Options = []map[string]any{
-		{"label": "Retry", "value": FailureAnswerRetry},
+		{"label": label, "value": FailureAnswerRetry},
 		{"label": "Abandon", "value": FailureAnswerAbandon},
 	}
 	return a
