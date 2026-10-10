@@ -165,6 +165,13 @@ var coverageAllowList = map[string]exemption{
 	"LICENSE": {
 		reason: "legal text; no gate reads it",
 	},
+	"NOTICE": {
+		reason: "legal attribution text; no gate reads it",
+		mentionedBy: map[string]string{
+			"component/identity/magiclink/passkey_only_test.go":   "a comment uses NOTICE for a sign-in notification; it does not read the legal attribution file",
+			"component/memql/platform_site_binding_guard_test.go": "a comment uses NOTICE as an English verb; it does not read the legal attribution file",
+		},
+	},
 	"assets/**": {
 		reason: "branding images, not embedded (the embedded SVG set is component/mcp/*.svg, routed to gates)",
 	},
