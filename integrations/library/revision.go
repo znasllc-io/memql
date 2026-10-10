@@ -255,7 +255,7 @@ func (i *Integration) handleRequestDocumentRevision(ctx context.Context, args ma
 			if err != nil {
 				return nil, err
 			}
-			if previousRun["status"] != "failed" && previousRun["status"] != "cancelled" && previousRun["status"] != "succeeded" && previousRun["cancelRequested"] != true {
+			if previousRun["status"] != "failed" && previousRun["status"] != "cancelled" && previousRun["status"] != "succeeded" && previousRun["status"] != "abandoned" && previousRun["cancelRequested"] != true {
 				continue
 			}
 			matches := sameRevisionInput(proposal, previousProposal)

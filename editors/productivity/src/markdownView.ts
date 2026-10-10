@@ -396,7 +396,7 @@ const selected = new Set<string>(state.included ?? []);
 const seen = new Set<string>(state.seen ?? []);
 feedback.value = state.draft ?? ""; instruction.value = state.instruction ?? "";
 function saveState() { const saved = { draft: feedback.value, attachments, purpose:composerPurpose, anchor: draftAnchor, source: sourceIdentity || state.source, instruction: instruction.value, reviewOpen: reviewRequested, included: [...selected], seen: [...seen], decisions, modifications, expanded, reviewSource, reviewTab, historySelection }; api.setState(saved); if (restored) api.postMessage({type:"draftState",state:saved}); }
-function activeRun() { return revision && !revision.removedCommentIds?.length && !revision.cancelRequested && !["succeeded", "failed", "cancelled"].includes(revision.status); }
+function activeRun() { return revision && !revision.removedCommentIds?.length && !revision.cancelRequested && !["succeeded", "failed", "cancelled", "abandoned"].includes(revision.status); }
 function renderEmptyDocument() {
   const empty = !!latestDocument && emptyDocument && !historyPreview;
   document.body.classList.toggle("document-empty-view", empty);
@@ -818,14 +818,14 @@ function renderRevisionContent() {
 }
 function renderProposal(status:Record<string,any>,panel:HTMLElement,actions:HTMLElement,historical=false) {
   const proposal=status.proposal??{};
-  const terminal = historical || !!status.cancelRequested || ["succeeded", "failed", "cancelled"].includes(status.status);
+  const terminal = historical || !!status.cancelRequested || ["succeeded", "failed", "cancelled", "abandoned"].includes(status.status);
   const awaiting = !terminal && !!status.approvalId && !status.decision && status.status === "waiting";
   const retrying = !terminal && !awaiting && (["retry","replan","repair"].includes(status.waitingOn?.kind) || status.status === "running" && Number(status.retryCount)>0);
   const paused = !retrying && !terminal && !awaiting && !status.decision && status.prepared !== false && status.status === "waiting";
-  const phase = status.cancelRequested ? (["cancelled", "failed"].includes(status.status) ? "Preparation stopped" : "Stop requested") : status.decision === "rejected" ? "Changes declined" : status.status === "succeeded" ? status.result?.applied ? "Changes applied" : "No changes needed"
-    : status.status === "failed" || status.status === "cancelled" ? "Couldn’t prepare changes" : awaiting ? "Proposed changes" : retrying ? "Retrying automatically…" : paused ? "Preparation paused" : status.decision === "approved" ? "Applying changes…" : "Preparing changes…";
+  const phase = status.cancelRequested ? (["cancelled", "failed", "abandoned"].includes(status.status) ? "Preparation stopped" : "Stop requested") : status.decision === "rejected" ? "Changes declined" : status.status === "succeeded" ? status.result?.applied ? "Changes applied" : "No changes needed"
+    : ["failed","cancelled","abandoned"].includes(status.status) ? status.decision === "approved" ? "Couldn’t apply changes" : "Couldn’t prepare changes" : awaiting ? "Proposed changes" : retrying ? "Retrying automatically…" : paused ? "Preparation paused" : status.decision === "approved" ? "Applying changes…" : "Preparing changes…";
   if(!historical)panel.append(textElement("h3", phase, !terminal && !awaiting && !paused ? "phase busy" : ""));
-  if (status.problem && !status.cancelRequested && (retrying || paused || ["failed","cancelled"].includes(status.status))) {
+  if (status.problem && !status.cancelRequested && (retrying || paused || ["failed","cancelled","abandoned"].includes(status.status))) {
     const notice=textElement("div","","review-error");
     renderProblem(notice, {...status.problem, message: retrying ? "The last attempt couldn’t finish. MemQL will retry automatically. Your feedback is saved." : paused ? `${status.problem.message} Your feedback is saved. Stop this attempt, then propose changes again.` : status.problem.message}, value=>api.postMessage(value));
     panel.append(notice);
@@ -892,7 +892,7 @@ function renderProposal(status:Record<string,any>,panel:HTMLElement,actions:HTML
   };
   if (typeof proposal.revisedContent === "string") { const compare = action("Compare full document", "compareRevision"); compare.className = "compare secondary"; panel.append(compare); }
   if(terminal){const requests=textElement("button","Review saved requests","passage request-link");requests.addEventListener("click",()=>selectReviewTab("requests",true));panel.append(requests);}
-  if((status.cancelRequested || ["failed","cancelled"].includes(status.status)) && proposal.amendment)actions.append(action("Try revision again","retryRevisionItem",undefined,true));
+  if((status.cancelRequested || ["failed","cancelled","abandoned"].includes(status.status)) && proposal.amendment)actions.append(action("Try revision again","retryRevisionItem",undefined,true));
   else if (status.prepared === false) actions.append(action("Retry submission", "resumePreparation", undefined, true));
   else if (awaiting) {
     const accepted=items.filter(item=>decisions[item.id]==="accepted").map(item=>item.id),remaining=items.filter(item=>!decisions[item.id]).length;

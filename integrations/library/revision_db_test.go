@@ -931,7 +931,7 @@ func testDocumentRetryReusesCompletedAppEvidence(t *testing.T, f *revisionDB) {
 	// An interrupted retry has no app/report receipt of its own. A later
 	// attempt must still find the original completed evidence.
 	nextIDs, _, _, _, _ := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), next)
-	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": nextIDs.RunID, "status": "cancelled"})
+	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": nextIDs.RunID, "status": "abandoned"})
 	args["requestId"] = "third-" + fmt.Sprint(time.Now().UnixNano())
 	if _, err = f.second.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
 		t.Fatal(err)

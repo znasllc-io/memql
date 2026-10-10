@@ -257,7 +257,7 @@ func (i *Integration) handleModifyRevisionItem(ctx context.Context, args map[str
 			if err != nil {
 				return nil, err
 			}
-			if latest["status"] != "failed" && latest["status"] != "cancelled" && latest["cancelRequested"] != true {
+			if latest["status"] != "failed" && latest["status"] != "cancelled" && latest["status"] != "abandoned" && latest["cancelRequested"] != true {
 				return nil, fmt.Errorf("another modification is already preparing; review that proposal first")
 			}
 		}
