@@ -14,6 +14,7 @@ const (
 	ModalityEmbedding      Modality = "embedding"
 	ModalitySpeech         Modality = "speech"
 	ModalityTranscribe     Modality = "transcribe"
+	ModalityImage          Modality = "image"
 )
 
 // Modalities is the closed set, for validation and for an error message.
@@ -21,7 +22,7 @@ func Modalities() []Modality {
 	return []Modality{
 		ModalityChat, ModalityStreamingChat, ModalityTools, ModalityStreamingTools,
 		ModalityStructured, ModalityVision, ModalityEmbedding, ModalitySpeech,
-		ModalityTranscribe,
+		ModalityTranscribe, ModalityImage,
 	}
 }
 

@@ -263,6 +263,7 @@ const (
 	modalityEmbedding
 	modalitySpeech
 	modalityTranscribe
+	modalityImage
 )
 
 // modalityName is what the report calls a modality an entry does not serve.
@@ -284,6 +285,8 @@ func modalityName(mod providerModality) string {
 		return "speech"
 	case modalityTranscribe:
 		return "transcription"
+	case modalityImage:
+		return "image generation"
 	default:
 		return "chat turns"
 	}
@@ -314,6 +317,8 @@ func servesModality(client any, mod providerModality) (bool, string) {
 		_, ok = client.(memql.SpeechAIProvider)
 	case modalityTranscribe:
 		_, ok = client.(memql.TranscriptionAIProvider)
+	case modalityImage:
+		_, ok = client.(memql.ImageAIProvider)
 	default:
 		_, ok = client.(common.ChatAIProvider)
 	}

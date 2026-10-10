@@ -233,7 +233,7 @@ func fleetNeedsFor(req ResolveRequest) memql.FleetNeeds {
 		Vision:           req.Needs.Vision || req.Modality == airoute.ModalityVision,
 		AudioIn:          req.Needs.AudioIn || req.Modality == airoute.ModalityTranscribe,
 		AudioOut:         req.Needs.AudioOut || req.Modality == airoute.ModalitySpeech,
-		ImageGen:         req.Needs.Image,
+		ImageGen:         req.Needs.Image || req.Modality == airoute.ModalityImage,
 		StructuredOutput: req.Needs.Structured,
 		// Embeddings is DERIVED from the modality rather than carried as a
 		// field on Needs, and adding the field back is the mistake to avoid:
@@ -247,7 +247,7 @@ func fleetNeedsFor(req ResolveRequest) memql.FleetNeeds {
 		Tools:            req.Needs.Tools,
 		MinContextWindow: req.Needs.MinContextTokens,
 	}
-	if req.Modality == airoute.ModalitySpeech || req.Modality == airoute.ModalityTranscribe {
+	if req.Modality == airoute.ModalitySpeech || req.Modality == airoute.ModalityTranscribe || req.Modality == airoute.ModalityImage {
 		needs.MinContextWindow = 0
 	}
 	return needs

@@ -93,9 +93,11 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 	case airoute.ModalityEmbedding:
 		client, resolved, err = r.resolveDirect(ctx, req, modalityEmbedding)
 	case airoute.ModalitySpeech:
-		client, resolved, err = r.resolveAudio(ctx, req, modalitySpeech)
+		client, resolved, err = r.resolveMedia(ctx, req, modalitySpeech)
 	case airoute.ModalityTranscribe:
-		client, resolved, err = r.resolveAudio(ctx, req, modalityTranscribe)
+		client, resolved, err = r.resolveMedia(ctx, req, modalityTranscribe)
+	case airoute.ModalityImage:
+		client, resolved, err = r.resolveMedia(ctx, req, modalityImage)
 	default:
 		// A modality the seam does not serve is a CALL-SITE fault, and the
 		// message says which: reporting it as an unavailable provider would
@@ -103,7 +105,7 @@ func (r *Router) ResolveFor(ctx context.Context, req ResolveRequest) (memql.Reso
 		// door.
 		return memql.ResolvedProvider{}, fmt.Errorf(
 			"the router does not serve modality %q: chat, streamingChat, tools, streamingTools, "+
-				"structured, vision, embedding, speech and transcribe are supported", req.Modality)
+				"structured, vision, embedding, speech, transcribe and image are supported", req.Modality)
 	}
 	if err != nil {
 		return memql.ResolvedProvider{}, err
