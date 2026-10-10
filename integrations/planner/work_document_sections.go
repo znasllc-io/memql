@@ -51,7 +51,7 @@ func (s *spineScope) refineSections(ctx context.Context, args map[string]any) (a
 	if err != nil {
 		return s.documentPlanningFailure(ctx, err)
 	}
-	sections, assembly, err := parseDocumentSections(response, config.MaxWords)
+	sections, assembly, err := parseDocumentSections(response, config.MaxWords, s.keys...)
 	if err != nil {
 		s.sectionRefinementError = err.Error()
 		return map[string]any{"ok": false, "message": err.Error()}, nil
@@ -60,7 +60,7 @@ func (s *spineScope) refineSections(ctx context.Context, args map[string]any) (a
 	return map[string]any{"ok": true, "message": ""}, nil
 }
 
-func parseDocumentSections(response any, maxWords int) ([]sectionSpec, string, error) {
+func parseDocumentSections(response any, maxWords int, inputKeys ...string) ([]sectionSpec, string, error) {
 	var raw []byte
 	if text, ok := response.(string); ok {
 		raw = []byte(text)
@@ -82,7 +82,10 @@ func parseDocumentSections(response any, maxWords int) ([]sectionSpec, string, e
 		return nil, "", fmt.Errorf("document plan needs 2-%d bounded sections and an assembly instruction", maxSectionFanout)
 	}
 	sections := make([]sectionSpec, 0, len(plan.Sections))
-	outputs := map[string]bool{}
+	available := map[string]bool{}
+	for _, key := range inputKeys {
+		available[key] = true
+	}
 	for _, entry := range plan.Sections {
 		var section sectionSpec
 		var size struct{ EstimatedWords int }
@@ -96,10 +99,15 @@ func parseDocumentSections(response any, maxWords int) ([]sectionSpec, string, e
 			return nil, "", fmt.Errorf("section %q must produce one named text output of 1-%d estimated words, with no file-writing effects; split multiple drafts into separate entries", section.Label, maxWords)
 		}
 		output := section.Outputs[0]
-		if output == "" || outputs[output] {
+		if strings.TrimSpace(output) == "" || available[output] {
 			return nil, "", fmt.Errorf("each document section needs a unique output name: %q", output)
 		}
-		outputs[output] = true
+		for _, input := range section.Inputs {
+			if !available[input] {
+				return nil, "", fmt.Errorf("section %q references unavailable input %q; use a goal input or an earlier section's exact output name", section.Label, input)
+			}
+		}
+		available[output] = true
 		// The estimate is part of the selected output contract. Carry it to
 		// execution even when the model omitted it from its instruction prose.
 		section.Instruction += fmt.Sprintf("\nOutput limit for this step: %d words total.", size.EstimatedWords)

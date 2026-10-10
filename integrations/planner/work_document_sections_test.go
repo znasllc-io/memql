@@ -55,6 +55,20 @@ type documentSectionsEngine struct {
 	reviews []any
 }
 
+func TestDocumentSectionsPreserveEvidenceDependencies(t *testing.T) {
+	for _, input := range []string{"evidence", "topic", "misspelledEvidence", "draft"} {
+		plan := map[string]any{"assembly": "Deliver draft", "sections": []map[string]any{
+			{"label": "Research", "instruction": "Gather evidence", "outputs": []string{"evidence"}, "estimatedWords": 200},
+			{"label": "Draft", "instruction": "Use the supplied evidence", "inputs": []string{input}, "outputs": []string{"draft"}, "estimatedWords": 600},
+		}}
+		_, _, err := parseDocumentSections(plan, 800, "topic")
+		valid := input == "evidence" || input == "topic"
+		if (err == nil) != valid {
+			t.Fatalf("input %q: expected valid=%v, error=%v", input, valid, err)
+		}
+	}
+}
+
 func (e *documentSectionsEngine) InvokeAI(ctx context.Context, name string, data map[string]any) (any, error) {
 	response, err := e.countingCompileEngine.InvokeAI(ctx, name, data)
 	if (name == "workDocumentSections" || name == "workDocumentSectionsRepair") && len(e.answers) > 0 {
