@@ -359,3 +359,12 @@ func TestMalformedMaterializerOutputIsNotANetworkFailure(t *testing.T) {
 		t.Fatal("actual transport EOF no longer retries")
 	}
 }
+
+func TestRemoteImageRefusalIsAPlanProblem(t *testing.T) {
+	for _, detail := range []string{"remote server returned HTTP 403", "remote server returned HTTP 404", "source returned a page instead of a raster image"} {
+		symptom, evidence, known := ClassifyByRules(Signal{ErrorMessage: "function libraryPrepareRevisionImage execution failed: image source unusable: " + detail})
+		if !known || symptom != SymptomPlan || evidence.RuleId != "plan.imageSource" {
+			t.Fatalf("remote source misclassified: %v %v %v", symptom, evidence, known)
+		}
+	}
+}

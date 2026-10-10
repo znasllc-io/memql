@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+// An unusable remote resource is evidence for the DSL to choose another source,
+// not a failure of the caller's MemQL permissions or of durable asset storage.
+type imageSourceUnavailable struct{ reason string }
+
+func (e *imageSourceUnavailable) Error() string { return "image source unusable: " + e.reason }
+func unavailableImageSource(format string, args ...any) error {
+	return &imageSourceUnavailable{reason: fmt.Sprintf(format, args...)}
+}
+
 func imagePublicAddress(ip net.IP) bool {
 	if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
 		return false
@@ -90,24 +99,27 @@ func fetchRevisionImageWithClient(ctx context.Context, source string, client *ht
 	req.Header.Set("Accept", "image/png,image/jpeg,image/gif,image/webp")
 	response, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("could not retrieve the image: %w", err)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, unavailableImageSource("could not retrieve the public image: %v", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("image source returned HTTP %d", response.StatusCode)
+		return nil, unavailableImageSource("remote server returned HTTP %d", response.StatusCode)
 	}
 	if !strings.HasPrefix(strings.ToLower(response.Header.Get("Content-Type")), "image/") {
-		return nil, fmt.Errorf("image source returned a page instead of an image")
+		return nil, unavailableImageSource("source returned a page instead of a raster image")
 	}
 	if response.ContentLength > 8<<20 {
-		return nil, fmt.Errorf("image exceeds 8 MiB")
+		return nil, unavailableImageSource("image exceeds 8 MiB")
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, (8<<20)+1))
 	if err != nil {
 		return nil, err
 	}
 	if len(body) > 8<<20 {
-		return nil, fmt.Errorf("image exceeds 8 MiB")
+		return nil, unavailableImageSource("image exceeds 8 MiB")
 	}
 	return body, nil
 }

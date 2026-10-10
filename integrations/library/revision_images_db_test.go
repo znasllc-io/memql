@@ -77,7 +77,7 @@ func TestPreparedRevisionImagesRecoverAndPinAcrossReplicas(t *testing.T) {
 	raw, _ := json.Marshal(spec)
 	var object map[string]any
 	json.Unmarshal(raw, &object)
-	call := map[string]any{"requestId": request, "specification": object, "level": "fast", "width": 512, "height": 512}
+	call := map[string]any{"requestId": request, "specification": object, "level": "fast", "width": 512, "height": 512, "reportSourceFailure": true}
 	if _, err = f.first.handlePrepareRevisionImage(ctx, call, 0); err == nil {
 		t.Fatal("lost storage response hidden")
 	}
@@ -155,5 +155,61 @@ func TestRevisionDSLPlansAcquiresAndProposesAnImage(t *testing.T) {
 	proposal := revisionMap(approval["subject"])
 	if proposal["preparedImages"] == nil || !strings.Contains(asString(proposal["revisedContent"]), store.artifact) {
 		t.Fatal("saved image did not reach proposal")
+	}
+}
+
+func TestRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch(t *testing.T) {
+	for _, secondFailure := range []bool{false, true} {
+		t.Run(fmt.Sprint(secondFailure), func(t *testing.T) {
+			f := newRevisionDB(t)
+			artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a researched portrait and a generated illustration.")
+			request := asString(args["requestId"])
+			original := revisionImageSpec{Mode: "import", Name: "portrait.png", Alt: "Historic portrait", URL: "https://museum.example/catalog", SourceURL: "https://museum.example/catalog", Attribution: "Artist", License: "Public domain"}
+			replacement := original
+			replacement.URL = "https://museum.example/media/portrait.png"
+			f.ai.imagePlan = []revisionImageSpec{original, {Mode: "generate", Name: "illustration.png", Alt: "Editorial illustration", Prompt: "An editorial illustration"}}
+			f.ai.replacementImagePlan = []revisionImageSpec{replacement}
+			f.ai.assessmentReply = "sufficient"
+			f.ai.needsResearch = true
+			f.ai.answer = revisionAnswer{Summary: "Requested images", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this paragraph.", Reason: "Requested images", CommentIDs: []string{note}}}}
+			generator := &preparedImageEngine{IntegrationEngineAccess: f.other}
+			f.second.engine = generator
+			store := &preparedImageStore{f: f, appendProposal: true}
+			f.second.SetImageAssets(store)
+			f.second.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			fetches := []string{}
+			f.second.imageFetch = func(ctx context.Context, source string) ([]byte, error) {
+				fetches = append(fetches, source)
+				if source == original.URL || secondFailure {
+					return nil, unavailableImageSource("remote server returned HTTP 403")
+				}
+				return attachmentPNG(), nil
+			}
+			err := f.execute(f.other, request, false)
+			if len(fetches) != 2 || fetches[0] != original.URL || fetches[1] != replacement.URL || f.ai.researchCalls.Load() != 1 || f.ai.imagePlanCalls.Load() != 2 {
+				t.Fatalf("unbounded or missing repair: fetches=%v research=%d plan=%d err=%v", fetches, f.ai.researchCalls.Load(), f.ai.imagePlanCalls.Load(), err)
+			}
+			if !strings.Contains(f.ai.headlessScope, "403") || f.ai.researchDocument != "" {
+				t.Fatal("repair lost actual failure or loaded unrelated document")
+			}
+			if secondFailure {
+				if err == nil || !strings.Contains(err.Error(), "image source unusable:") || generator.calls != 0 || store.writes != 0 {
+					t.Fatalf("second refusal was hidden or repeated: %v", err)
+				}
+				return
+			}
+			var wait *workstate.HumanWait
+			if !errors.As(err, &wait) || generator.calls != 1 || store.writes != 2 {
+				t.Fatalf("mixed batch did not reach approval: %v gen=%d writes=%d", err, generator.calls, store.writes)
+			}
+			f.first.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			f.query(f.engine, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
+			// Resume from the other replica using its own local integration state. All
+			// successful acquisitions and the repair evidence are durable receipts.
+			if err = f.execute(f.engine, request, true); err != nil || len(fetches) != 2 || store.writes != 2 || f.ai.researchCalls.Load() != 1 {
+				t.Fatalf("resume repeated acquisition/research: %v", err)
+			}
+		})
 	}
 }

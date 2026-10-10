@@ -404,12 +404,24 @@ builtin libraryRemoveDocumentAnnotation { artifactId string! commentId string! }
 /// Decode and validate an image acquisition plan before any effects.
 @executor("integration.library.revisionImagePlan")
 @args(profile="object")
-builtin libraryRevisionImagePlan { response string! }
+builtin libraryRevisionImagePlan {
+ response string!
+ minImages int
+ maxImages int
+ mode string
+}
 
 /// Acquire one requested image, with durable storage and source/model provenance.
 @executor("integration.library.prepareRevisionImage")
 @args(profile="object")
-builtin libraryPrepareRevisionImage { requestId string! specification object! level string! width int! height int! }
+builtin libraryPrepareRevisionImage {
+ requestId string!
+ specification object!
+ level string!
+ width int!
+ height int!
+ reportSourceFailure bool
+}
 
 /// Read verified images actually stored by this revision, never model-claimed URLs.
 @executor("integration.library.revisionPreparedImages")

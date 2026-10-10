@@ -56,6 +56,7 @@ type Integration struct {
 	reviewGoals     ReviewGoalOpener
 	revisionFiles   RevisionFileWriter
 	imageAssets     ImageAssetWriter
+	imageFetch      func(context.Context, string) ([]byte, error)
 	versionGate     func(context.Context, string) (func(), error)
 	fileVersionGate func(context.Context, string) (func(), error)
 

@@ -274,6 +274,11 @@ var rules = []rule{
 		},
 	},
 	{
+		id: "plan.imageSource", tier: "plan", symptom: SymptomPlan,
+		reason: "the selected public image source could not be acquired; research an accessible licensed source rather than changing the person's file permissions",
+		match:  func(s Signal) bool { return strings.Contains(lower(s.ErrorMessage), "image source unusable:") },
+	},
+	{
 		id: "transient.rateLimit", tier: "retryable", symptom: SymptomTransient,
 		reason: "the far side rate-limited the call",
 		match: func(s Signal) bool {

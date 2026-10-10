@@ -38,6 +38,8 @@ type revisionAI struct {
 	appCalls              atomic.Int32
 	needsResearch         bool
 	imagePlan             []revisionImageSpec
+	replacementImagePlan  []revisionImageSpec
+	imagePlanCalls        atomic.Int32
 	parallelResearch      bool
 	assessmentReply       string
 	assessmentError       error
@@ -111,7 +113,11 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return reviewResult(map[string]any{"reply": intent})
 			}
 			if args["templateId"] == "libraryRevisionImagePlan" {
-				raw, _ := json.Marshal(map[string]any{"images": a.imagePlan, "limitations": ""})
+				plan := a.imagePlan
+				if a.imagePlanCalls.Add(1) > 1 && a.replacementImagePlan != nil {
+					plan = a.replacementImagePlan
+				}
+				raw, _ := json.Marshal(map[string]any{"images": plan, "limitations": ""})
 				return reviewResult(map[string]any{"reply": string(raw)})
 			}
 			if args["templateId"] == "libraryRevisionAppResearch" {

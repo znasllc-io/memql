@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -81,6 +82,7 @@ func TestRevisionImageFetchRejectsPagesAndOversizedBodies(t *testing.T) {
 		{"image", string(attachmentPNG()), "image/png", 200, true},
 		{"page", "<html>not an image</html>", "text/html", 200, false},
 		{"missing", "missing", "image/png", 404, false},
+		{"forbidden", "refused", "text/html", 403, false},
 		{"large", strings.Repeat("x", (8<<20)+1), "image/png", 200, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -94,9 +96,30 @@ func TestRevisionImageFetchRejectsPagesAndOversizedBodies(t *testing.T) {
 			if (err == nil) != tc.ok {
 				t.Fatalf("result %v", err)
 			}
+			if !tc.ok {
+				var unavailable *imageSourceUnavailable
+				if !errors.As(err, &unavailable) {
+					t.Fatalf("remote failure misclassified: %v", err)
+				}
+			}
 			if tc.ok && string(got) != tc.body {
 				t.Fatal("image bytes changed")
 			}
 		})
+	}
+}
+
+func TestRevisionImageReplacementBounds(t *testing.T) {
+	spec := revisionImageSpec{Mode: "generate", Name: "portrait.png", Alt: "Portrait", Prompt: "Portrait"}
+	for _, tc := range []struct {
+		images []revisionImageSpec
+		mode   string
+	}{
+		{nil, "import"}, {[]revisionImageSpec{spec, spec}, "generate"}, {[]revisionImageSpec{spec}, "import"},
+	} {
+		raw, _ := json.Marshal(map[string]any{"images": tc.images, "limitations": ""})
+		if _, err := (&Integration{}).handleRevisionImagePlan(t.Context(), map[string]any{"response": string(raw), "minImages": 1, "maxImages": 1, "mode": tc.mode}, 0); err == nil {
+			t.Fatal("replacement silently omitted, expanded or changed acquisition mode")
+		}
 	}
 }

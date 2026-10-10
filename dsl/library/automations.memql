@@ -323,17 +323,36 @@ automation reviseLibraryDocument {
 
  // Image selection is authored here; native operations only acquire and verify one asset.
  if lower(trim(intent.reply)) == "images" {
-  imagePlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: {
+  imageSchema := {
    type: "object", additionalProperties: false, required: ["images", "limitations"], properties: {
     limitations: {type: "string"}, images: {type: "array", maxItems: 64, items: {
      type: "object", additionalProperties: false, required: ["mode", "name", "alt", "url", "sourceURL", "attribution", "license", "prompt"],
      properties: {mode: {type: "string", enum: ["import", "generate"]}, name: {type: "string"}, alt: {type: "string"}, url: {type: "string"}, sourceURL: {type: "string"}, attribution: {type: "string"}, license: {type: "string"}, prompt: {type: "string"}}
     }}
    }
-  }, data: {passages: captured.passagesJSON, instruction: captured.amendment.instruction ?? captured.instruction, evidence: combinedEvidence})
+  }
+  imagePlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: imageSchema, data: {passages: captured.passagesJSON, instruction: captured.amendment.instruction ?? captured.instruction, evidence: combinedEvidence})
   imageSpecs := builtin libraryRevisionImagePlan(response: imagePlan.reply)
   for imageSpec in imageSpecs.images {
-   builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: imageSpec, level: "fast", width: 512, height: 512)
+   acquired := builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: imageSpec, level: "fast", width: 512, height: 512, reportSourceFailure: true)
+   if trim(acquired.fileId ?? "") == "" {
+    // A remote 403, catalog page or unusable raster is not a MemQL permission
+    // failure. Research one replacement; never repeat a known-bad URL blindly.
+    replacementEvidence := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
+     document: "", passages: "[]", references: "", priorEvidence: [combinedEvidence],
+     instruction: "Find a usable openly licensed or public-domain raster source for ONLY this requested image: " + (imageSpec.alt + "; filename: " + imageSpec.name + "; failed URL: " + imageSpec.url + "; previous source page: " + imageSpec.sourceURL),
+     gaps: "The attempted acquisition failed: " + acquired.problem + ". Retrieve an accessible source page and its exact direct raster URL, attribution and reuse terms. A catalog page is not an image URL. Follow actual links; do not guess paths. Do not generate an illustration or repeat the failed URL. Return only the source evidence for this one image."
+    })
+    replacementPlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: imageSchema, data: {
+     passages: "[]", instruction: "Return exactly one import replacing this failed source for the same subject, using only the newly retrieved evidence: " + (imageSpec.alt + "; filename: " + imageSpec.name + "; failed URL: " + imageSpec.url + "; previous source page: " + imageSpec.sourceURL), evidence: replacementEvidence.reply
+    })
+    replacementSpecs := builtin libraryRevisionImagePlan(response: replacementPlan.reply, minImages: 1, maxImages: 1, mode: "import")
+    for replacementSpec in replacementSpecs.images {
+     // A second refusal goes through the run's bounded recovery; it cannot be
+     // silently omitted from the proposed document or repeat this repair loop.
+     builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: replacementSpec, level: "fast", width: 512, height: 512)
+    }
+   }
   }
   imageLimitations := imageSpecs.limitations
  } else {

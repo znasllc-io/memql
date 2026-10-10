@@ -72,6 +72,15 @@ short write deadline so that an expired model request cannot leave the same
 attempt eligible to run again on another replica. This finalization does not
 extend model execution; it rechecks the run's current state before writing.
 
+A document image acquisition distinguishes an unusable remote resource from a
+MemQL permission or storage failure. The DSL may receive a bounded refusal
+receipt for a remote HTTP denial, catalog page, oversized or invalid raster.
+It researches one alternative source and retries only that requested image,
+with its acquisition mode unchanged. A second refusal enters the run's bounded
+plan recovery; it cannot silently disappear from the document. Successful
+assets and research receipts survive a resume on another replica. This does
+not authorize bypassing a source's access restrictions.
+
 ## Browser research fallback
 
 The document DSL first assesses whether feedback needs external evidence using

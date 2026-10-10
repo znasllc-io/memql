@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -89,11 +90,22 @@ func (i *Integration) handleRevisionImagePlan(_ context.Context, args map[string
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return nil, fmt.Errorf("image plan has trailing data")
 	}
-	if len(plan.Images) > 64 || len(plan.Limitations) > 4000 {
+	maximum := intField(args, "maxImages")
+	if maximum == 0 {
+		maximum = 64
+	}
+	minimum := intField(args, "minImages")
+	if maximum < 1 || maximum > 64 || minimum < 0 || minimum > maximum {
+		return nil, fmt.Errorf("invalid image plan bounds")
+	}
+	if len(plan.Images) < minimum || len(plan.Images) > maximum || len(plan.Limitations) > 4000 {
 		return nil, fmt.Errorf("image plan exceeds its bounds")
 	}
 	seen := map[string]bool{}
 	for _, spec := range plan.Images {
+		if mode := asString(args["mode"]); mode != "" && spec.Mode != mode {
+			return nil, fmt.Errorf("image plan changed the requested acquisition mode")
+		}
 		if err := spec.validate(); err != nil {
 			return nil, err
 		}
@@ -177,8 +189,21 @@ func (i *Integration) handlePrepareRevisionImage(ctx context.Context, args map[s
 		return i.imageAssets.SaveImage(ctx, ImageAssetWrite{FileID: fileID, Name: spec.Name, MIME: mime, RunID: ids.RunID, StepKey: rc.StepKey, Data: content, Provenance: provenance})
 	}
 	if spec.Mode == "import" {
-		content, err := fetchRevisionImage(ctx, spec.URL)
+		fetch := i.imageFetch
+		if fetch == nil {
+			fetch = fetchRevisionImage
+		}
+		content, err := fetch(ctx, spec.URL)
+		if err == nil {
+			if _, invalid := reviewAttachmentMIME(spec.Name, content); invalid != nil {
+				err = unavailableImageSource("unsupported or invalid raster image: %v", invalid)
+			}
+		}
 		if err != nil {
+			var unavailable *imageSourceUnavailable
+			if ctx.Err() == nil && boolField(args, "reportSourceFailure") && errors.As(err, &unavailable) {
+				return reviewResult(map[string]any{"fileId": "", "problem": unavailable.Error()})
+			}
 			return nil, err
 		}
 		if err = save(ctx, content); err != nil {
