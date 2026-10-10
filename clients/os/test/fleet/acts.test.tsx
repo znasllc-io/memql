@@ -500,7 +500,6 @@ const CASES: ActsCase[] = [
       { name: `Model to pull onto ${MACHINE_LABEL}`, count: 1 },
       { name: "Pull", count: 1 },
       { name: `Recent calls on ${MACHINE_LABEL}`, count: 1 },
-      { name: "Refresh recent calls", count: 1, note: "the call history's own; telemetry is not broadcast" },
       { name: "Remove this machine", count: 1, note: "revoke, then the uninstall line (D12)" },
       { name: "Copy the uninstall command", count: 0, note: "offered inside the confirm, not beside the opener" },
 
@@ -650,7 +649,6 @@ const CASES: ActsCase[] = [
       await click(screen.getByRole("button", { name: /llama3.1:8b/ }));
     },
     acts: [
-      { name: "Refresh model library", count: 1 },
       { name: "Inference sources", count: 2, note: "the navigation destination and its named panel" },
       { name: "Your preferred order", count: 1 },
       { name: "Capabilities", count: 1, note: "one per model shown; the fixture has one model" },
@@ -712,7 +710,6 @@ const CASES: ActsCase[] = [
       await settle();
     },
     acts: [
-      { name: "Reconnect machine choice", count: 1 },
       { name: "Routing strategy", count: 1 },
       { name: "Routing fallback", count: 1 },
       { name: "Save", count: 0 },
@@ -733,7 +730,6 @@ const CASES: ActsCase[] = [
       { name: "Machines", count: 1 },
       { name: "History", count: 1 },
       { name: "About Routes", count: 1 },
-      { name: "Read the routes again", count: 1 },
       { name: "New route", count: 1 },
       { name: /^Open Local first,/, count: 1 },
       { name: /^Open Embeddings,/, count: 1 },
@@ -780,7 +776,6 @@ const CASES: ActsCase[] = [
     acts: [
       { name: "About How rules are tried", count: 1 },
       { name: "Refine rules", count: 2, note: "the affordance's group and its opener share the name" },
-      { name: "Read the rules again", count: 1 },
       { name: "Add a rule", count: 1 },
       { name: "Rules, in the order they are tried", count: 1 },
     ],
@@ -820,7 +815,6 @@ const CASES: ActsCase[] = [
     acts: [
       { name: "About History", count: 1 },
       { name: "Refine history", count: 2, note: "the affordance's group and its opener share the name" },
-      { name: "Read the history again", count: 1 },
       { name: "Recent routed calls", count: 1 },
     ],
   },
@@ -834,11 +828,6 @@ const CASES: ActsCase[] = [
       await settle();
     },
     acts: [
-      {
-        name: "Refresh app activity",
-        count: 1,
-        note: "standing here, unlike Routing: neither read on this screen is live",
-      },
       { name: "Delegation", count: 2 },
       { name: "Delegate eligible tasks to my local apps", count: 1 },
       { name: "Claude Code", count: 1 },
@@ -899,11 +888,6 @@ const CASES: ActsCase[] = [
       await settle();
     },
     acts: [
-      {
-        name: /^Reconnect (workspaces|replicas)$/,
-        count: 2,
-        note: "one per feed -- workspaces and replicas go behind independently",
-      },
       { name: "Show released", count: 1 },
       { name: "Workbench replicas", count: 2 },
       { name: "Your workspaces", count: 1 },

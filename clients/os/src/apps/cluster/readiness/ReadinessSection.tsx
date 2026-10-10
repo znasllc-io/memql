@@ -2,7 +2,7 @@ import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { useCallback, useMemo } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Head, Notice, Panel, Subhead, boolOr, stringsOf, useAppReach } from "../../../kit";
+import { AutoRefresh, Button, Caption, Head, Notice, Panel, Subhead, boolOr, stringsOf, useAppReach } from "../../../kit";
 import { useSession } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
@@ -72,17 +72,14 @@ export function ReadinessSection() {
   return (
     <div className="os-cluster">
       <Head title="Readiness" meta="nothing here blocks anything">
-        <Button
-          tone="quiet"
+        <AutoRefresh
           busy={inference.state === "reading" || passkeys.state === "reading"}
 
-          onClick={() => {
+          onRefresh={() => {
             inference.reread();
             passkeys.reread();
           }}
-        >
-          Read again
-        </Button>
+         />
       </Head>
       <Panel label="Readiness">
         <InferenceLine reading={inference} />

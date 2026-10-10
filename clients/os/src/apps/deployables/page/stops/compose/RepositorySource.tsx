@@ -1,7 +1,7 @@
 import { ContentSkeleton } from "../../../../../kit/ContentSkeleton";
 import { ManageGitHub } from "./GitHubSource";
 import { useEffect, useRef } from "react";
-import { Caption, Field, Notice, RefreshButton, Select } from "../../../../../kit";
+import { Caption, Field, Notice, Button, Select } from "../../../../../kit";
 import { WizardStepHeader } from "../../../../../kit/WizardStepHeader";
 import { shortRepo } from "../../../packages/rows";
 import { RepositoryPicker } from "../../../sources/RepositoryPicker";
@@ -57,7 +57,7 @@ export function RepositorySource({ connection, draft, onSelected, probe, onConne
     </WizardStepHeader>
     <Caption>Repositories from {connection.accountLogin}.</Caption>
     {accessRefusals.includes(repositories.refusal?.code ?? "") ? <Notice tone="warn" sentence="This source needs attention." next="Go Back to choose another organization or GitHub account." /> : null}
-    <RepositoryPicker showRefresh={false} showChosenLabel={false} page={repositories.page} readAt={repositories.readAt} busy={repositories.busy}
+    <RepositoryPicker showChosenLabel={false} page={repositories.page} readAt={repositories.readAt} busy={repositories.busy}
       refusal={repositories.refusal} installUrl=""
       chosen={draft.repoUrl ? shortRepo(draft.repoUrl) : ""} idPrefix="os-compose-repo"
       onChoose={choose} onLookAgain={() => void read(connection.credentialId, 1, connection.id)}
@@ -76,7 +76,7 @@ export function RepositoryProbeStatus({ draft, probe }: { draft: ComposeDraft; p
     {accessRefusals.includes(probe.reply?.reason ?? "") ? <Notice tone="warn" sentence="This source needs attention." next="Go Back to choose another organization or GitHub account." /> : null}
     {probe.reply && probeNote(probe.reply) ? <p className="os-stop-verdict" data-tone={probe.reply.reason === "ok" ? "ok" : "warn"} role="status">{probeNote(probe.reply)}</p> : null}
     {probe.error ? <Notice tone="warn" sentence="This cluster could not check the repository just now." detail={probe.error} /> : null}
-    {probe.error || parked ? <RefreshButton label="Check repository again" busy={probe.busy} onClick={() => void probe.probe(draft.repoUrl, draft.credentialId, draft.sourceConnectionId)} /> : null}
+    {probe.error || parked ? <Button busy={probe.busy} onClick={() => void probe.probe(draft.repoUrl, draft.credentialId, draft.sourceConnectionId)}>Try again</Button> : null}
   </>;
 }
 

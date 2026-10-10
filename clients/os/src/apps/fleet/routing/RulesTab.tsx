@@ -3,7 +3,7 @@ import { GripVertical, Lock } from "lucide-react";
 
 import { AddButton } from "../../../kit/AddButton";
 import { InfoDetail } from "../../../kit/InfoDetail";
-import { EmptyState, Notice, RecordList, RecordListSkeleton, RefreshButton, Refine, Select } from "../../../kit";
+import { EmptyState, Notice, RecordList, RecordListSkeleton, AutoRefresh, Refine, Select } from "../../../kit";
 import { LEVELS } from "../../settings/routingFacts";
 import {
   FLOOR_RULE_SENTENCE,
@@ -243,7 +243,7 @@ function RuleList({
               </Select>
             </Refine>
           ) : null}
-          <RefreshButton label="Read the rules again" busy={rules.loading} onClick={onReload} />
+          <AutoRefresh busy={rules.loading} onRefresh={onReload} />
           {actions.supported && rules.supported ? <AddButton label="Add a rule" onClick={onAdd} /> : null}
         </>,
         rules.read && !rules.loading && !rules.error && rules.supported ? shown.length : undefined,

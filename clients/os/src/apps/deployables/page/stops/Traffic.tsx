@@ -1,7 +1,7 @@
 import { ContentSkeleton } from "../../../../kit/ContentSkeleton";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Caption, Fact, Facts, useNow, RefreshButton, Notice } from "../../../../kit";
+import { Caption, Fact, Facts, useNow, AutoRefresh, Notice } from "../../../../kit";
 import { formatFreshness, formatMoment } from "../../../../kit/format";
 import { useOsConnection } from "../../../../live/connection";
 import { useDeployablesSettings } from "../../settingsContext";
@@ -135,13 +135,7 @@ export function TrafficPanel({ site }: { site: SiteRow }) {
 
   useEffect(() => {
     void read();
-    const spec = windowSpec(window);
-    const timer = setInterval(() => void read(), spec.refreshMs);
-    return () => clearInterval(timer);
-    // KEYED ON `read`, which is keyed on the identities that decide WHAT is
-    // read -- the connection, the deployable, the window. Never on the
-    // reading itself: an effect that re-registered when its own result
-    // arrived would poll as fast as the network allows.
+    return () => { asked.current++; };
   }, [read, window]);
 
   if (systemOwned) {
@@ -156,6 +150,7 @@ export function TrafficPanel({ site }: { site: SiteRow }) {
 
   return (
     <section className="os-report-part">
+      <AutoRefresh onRefresh={read} busy={state === "loading"} enabled={connection !== null} intervalMs={windowSpec(window).refreshMs} />
       <div className="os-traffic-head">
         <h4 className="os-report-heading">Traffic</h4>
         <div className="os-choice-row os-traffic-windows" role="radiogroup" aria-label="Traffic window">
@@ -178,9 +173,7 @@ export function TrafficPanel({ site }: { site: SiteRow }) {
       </div>
 
       {state === "failed" ? (
-        <Notice tone="error" sentence="Traffic could not be loaded." detail={failure} next="Try refreshing the selected period.">
-          <RefreshButton label="Refresh traffic" onClick={() => void read()} />
-        </Notice>
+        <Notice tone="error" sentence="Traffic could not be loaded." detail={failure} next="Retrying automatically." />
       ) : reading === null ? (
         state === "loading" ? <ContentSkeleton kind="metrics" label="Loading traffic figures" /> : <Caption>{unmeasuredSentence(window)}</Caption>
       ) : (

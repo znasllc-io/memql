@@ -2,7 +2,7 @@ import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import { useCallback, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Head, Notice, Panel, Subhead, RecordList, RecordRow } from "../../../kit";
+import { AutoRefresh, Button, Caption, Head, Notice, Panel, Subhead, RecordList, RecordRow } from "../../../kit";
 import { Measure } from "../../../kit/MeasureView";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
@@ -119,17 +119,14 @@ export function OriginsSection() {
           numbers were refreshed and half were not is worse than one where
           none were. */}
       <Head title="Data origins" meta={inventory.state === "read" && !inventory.error ? join.rows.length : undefined}>
-        <Button
-          tone="quiet"
+        <AutoRefresh
           busy={inventory.state === "reading" || health.state === "reading"}
 
-          onClick={() => {
+          onRefresh={() => {
             inventory.reread();
             health.reread();
           }}
-        >
-          Read again
-        </Button>
+         />
       </Head>
 
       {inventory.state === "read" ? <Caption>{join.withConnector} of {join.declared} declared concepts have a connector</Caption> : null}

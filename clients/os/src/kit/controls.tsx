@@ -7,6 +7,7 @@ import {
   Fragment,
   isValidElement,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -17,7 +18,7 @@ import { createPortal } from "react-dom";
 // `Check` is aliased because this module already exports a control by that
 // name -- the checkbox. One of the two has to say which it is, and the glyph
 // is the one that is not part of the kit's vocabulary.
-import { ArrowLeft, ArrowUpDown, Check as CheckGlyph, ChevronDown, Copy, Search, X } from "lucide-react";
+import { ArrowLeft, ArrowDownWideNarrow, ArrowUpWideNarrow, Check as CheckGlyph, ChevronDown, Copy, Search, X } from "lucide-react";
 
 // The OS's shared controls.
 //
@@ -66,6 +67,7 @@ export function Button({
   busyLabel,
   ariaLabel,
   ariaExpanded,
+  title,
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -76,6 +78,7 @@ export function Button({
   busyLabel?: string;
   ariaLabel?: string;
   ariaExpanded?: boolean;
+  title?: string;
 }) {
   return (
     <button
@@ -90,6 +93,7 @@ export function Button({
       aria-busy={busy || undefined}
       aria-label={ariaLabel}
       aria-expanded={ariaExpanded}
+      title={title}
       onClick={onClick}
     >
       {busy && busyLabel ? busyLabel : children}
@@ -721,36 +725,23 @@ export function Select({
   );
 }
 
-/**
- * Rule 3: sort is not a button. A quiet text control on the list's own scope
- * line -- click swaps the order, the accessible name says what it is and what
- * a click does. The default order stays an app-settings preference; this
- * steers the session.
- */
-export function SortControl({
-  ascending,
-  onToggle,
-  descLabel = "Newest first",
-  ascLabel = "Oldest first",
-}: {
+/** A quiet order menu, shared by lists. Settings still owns the default. */
+export function SortControl({ ascending, onToggle, descLabel = "Newest first", ascLabel = "Oldest first" }: {
   ascending: boolean;
   onToggle: () => void;
   descLabel?: string;
   ascLabel?: string;
 }) {
-  const current = ascending ? ascLabel : descLabel;
-  const other = ascending ? descLabel : ascLabel;
-  return (
-    <button
-      type="button"
-      className="os-sort"
-      aria-label={`Sorted ${current.toLowerCase()} -- switch to ${other.toLowerCase()}`}
-      onClick={onToggle}
-    >
-      <ArrowUpDown size={11} aria-hidden />
-      {current}
-    </button>
-  );
+  const id = useId();
+  const Glyph = ascending ? ArrowUpWideNarrow : ArrowDownWideNarrow;
+  return <div className="os-sort">
+    <Glyph size={14} aria-hidden />
+    <Select id={id} label="Sort order" value={ascending ? "ascending" : "descending"}
+      onChange={value => { if ((value === "ascending") !== ascending) onToggle(); }}>
+      <option value="descending">{descLabel}</option>
+      <option value="ascending">{ascLabel}</option>
+    </Select>
+  </div>;
 }
 
 /** One active constraint shown while Refine is collapsed; removable in place. */

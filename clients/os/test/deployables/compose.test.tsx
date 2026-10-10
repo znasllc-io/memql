@@ -399,7 +399,7 @@ describe("the compose flow: the Source stop's probe", () => {
 
     expect(await within(region).findByText("source_unreadable: api.github.com is unreachable")).toBeTruthy();
     // A transient probe failure remains visible on Configuration with retry.
-    expect(within(region).getByRole("button", { name: "Check repository again" })).toBeTruthy();
+    expect(within(region).getByRole("button", { name: "Try again" })).toBeTruthy();
     await fill(NAME_FIELD, "storefront");
     expect(forwardAct("Analyze")).toBeTruthy();
   });

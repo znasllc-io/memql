@@ -70,7 +70,7 @@ describe("the per-machine call history", () => {
     // v1:worker:invocation is deliberately excluded from broadcast routing on
     // volume grounds, so an absence of new rows must not read as "nothing is
     // happening" when it means "nobody has asked lately".
-    expect(await screen.findByText(/Refresh to see newer calls/)).toBeTruthy();
+    expect(await screen.findByText(/Updates automatically/)).toBeTruthy();
   });
 
   it("re-reads on request", async () => {
@@ -79,7 +79,7 @@ describe("the per-machine call history", () => {
     await click(screen.getByRole("button", { name: "Recent calls on Studio mini" }));
     await waitFor(() => expect(connection.query.invocationsForWorker).toHaveBeenCalledTimes(1));
 
-    await click(screen.getByRole("button", { name: "Refresh recent calls" }));
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
     await waitFor(() => expect(connection.query.invocationsForWorker).toHaveBeenCalledTimes(2));
   });
 
@@ -115,7 +115,7 @@ describe("the per-machine call history", () => {
     expect(await screen.findByText("No calls recorded")).toBeTruthy();
 
     connection.query.invocationsForWorker.mockRejectedValue(new Error("read refused"));
-    await click(screen.getByRole("button", { name: "Refresh recent calls" }));
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
     await waitFor(() => expect(screen.getByText("read refused")).toBeTruthy());
     expect(screen.getByText("The call history could not be read.")).toBeTruthy();
   });
@@ -127,7 +127,7 @@ describe("the per-machine call history", () => {
     await screen.findByText("rerouted");
 
     connection.query.invocationsForWorker.mockRejectedValue(new Error("read refused"));
-    await click(screen.getByRole("button", { name: "Refresh recent calls" }));
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
 
     await waitFor(() => expect(screen.getByText("read refused")).toBeTruthy());
     // A stale answer beats no answer.

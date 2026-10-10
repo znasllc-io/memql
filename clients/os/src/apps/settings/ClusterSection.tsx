@@ -1,7 +1,7 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { ContentSkeleton, InlineSkeleton } from "../../kit/ContentSkeleton";
-import { RecordList, RecordRow, Subhead } from "../../kit";
-import { Button, Caption } from "../../kit";
+import { AutoRefresh, RecordList, RecordRow, Subhead } from "../../kit";
+import { Caption } from "../../kit";
 import { useSession } from "../../chrome/access";
 import { useOsConnection } from "../../live/connection";
 import { resolvedVersion, ridesTheSpine } from "./clusterRows";
@@ -275,9 +275,7 @@ function Refresh({
   const stamp = serverStamp || (facts.fetchedAt === null ? "" : new Date(facts.fetchedAt).toISOString());
   return (
     <div className="os-refresh-row">
-      <Button onClick={facts.reload} busy={facts.loading}>
-        Refresh
-      </Button>
+      <AutoRefresh onRefresh={facts.reload} busy={facts.loading} />
       <Caption>
         {stamp ? `Read at ${stamp}. ` : ""}A projection of one node's own
         registry -- which replica answered is not knowable from here.

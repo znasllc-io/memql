@@ -158,10 +158,9 @@ export interface SourceRepositoriesActions extends WriteState {
   /**
    * Read a page.
    *
-   * PAGE 1 REPLACES AND ANY OTHER APPENDS, which is what makes "Look again"
-   * and "Read more" two different acts on one call: looking again is asking
-   * the same question over, and reading more is continuing a walk. Appending
-   * on a re-read would show every repository twice.
+   * Page 1 refreshes the already loaded walk atomically; later pages append.
+   * Automatic updates must preserve how far the person has browsed and keep
+   * the last good list if any page fails.
    */
   read: (credentialId: string, page: number, connectionId?: string) => Promise<boolean>;
 }
@@ -174,11 +173,13 @@ export function useSourceRepositories(): SourceRepositoriesActions {
   const latestRead = useRef(0);
   useEffect(() => () => { latestRead.current++; }, []);
   const credential = useRef("");
+  const loadedPages = useRef(1);
   const clearWriteRef = useRef(clearWrite);
   clearWriteRef.current = clearWrite;
   const clear = useCallback(() => {
     latestRead.current++;
     credential.current = "";
+    loadedPages.current = 1;
     setBusy(false);
     setPage(EMPTY_PAGE);
     setReadAt("");
@@ -197,12 +198,23 @@ export function useSourceRepositories(): SourceRepositoriesActions {
       setBusy(true);
       const answered = await run(async (query) => {
         try {
-          const result = await readSourceRepositories(query, credentialId, wanted, connectionId);
-          if (request !== latestRead.current) return null;
-          if (result.reason !== "" && result.reason !== "ok") {
-            throw new Error(`${result.reason}: ${reasonSentence(result.reason)}`);
+          const depth = wanted === 1 ? loadedPages.current : 1;
+          let result = EMPTY_PAGE;
+          let next = wanted;
+          let count = 0;
+          const visited = new Set<number>();
+          while (next > 0 && count < depth && !visited.has(next)) {
+            visited.add(next);
+            const answer = await readSourceRepositories(query, credentialId, next, connectionId);
+            if (request !== latestRead.current) return null;
+            if (answer.reason !== "" && answer.reason !== "ok") {
+              throw new Error(`${answer.reason}: ${reasonSentence(answer.reason)}`);
+            }
+            result = { ...answer, repositories: [...result.repositories, ...answer.repositories] };
+            next = answer.nextPage;
+            count++;
           }
-          return result;
+          return { page: result, count };
         } catch (error) {
           if (request !== latestRead.current) return null;
           throw error;
@@ -214,18 +226,14 @@ export function useSourceRepositories(): SourceRepositoriesActions {
       if (request !== latestRead.current) return false;
       setBusy(false);
       if (answered === null) return false;
-      setPage((held) =>
-        wanted > 1 && !changedCredential
-          ? {
-              ...answered,
-              repositories: [...held.repositories, ...answered.repositories],
-              // The walk's page 1 is the one that named the installations
-              // and the pending organizations; a later page repeats them,
-              // and taking the newer answer keeps one reading rather than
-              // merging two.
-            }
-          : answered,
-      );
+      loadedPages.current = wanted === 1 ? answered.count : loadedPages.current + answered.count;
+      setPage((held) => {
+        const rows = wanted > 1 && !changedCredential
+          ? [...held.repositories, ...answered.page.repositories]
+          : answered.page.repositories;
+        // Repositories can cross page boundaries between reads.
+        return { ...answered.page, repositories: [...new Map(rows.map(row => [row.fullName, row])).values()] };
+      });
       setReadAt(new Date().toISOString());
       return true;
     },

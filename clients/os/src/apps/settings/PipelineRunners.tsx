@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { Button, Caption, RecordListSkeleton, RecordList, RecordRow, Notice } from "../../kit";
+import { AutoRefresh, Caption, RecordListSkeleton, RecordList, RecordRow, Notice } from "../../kit";
 import { useOsConnection } from "../../live/connection";
 import { readRunnerReport, runnerWords, type RunnerReport } from "./runnerReadiness";
 
@@ -56,9 +56,7 @@ export function PipelineRunners() {
           secondary={state} />;
       })}
     </RecordList> : null}
-    {connection === null ? null : <div className="os-pipelines-act"><Button onClick={() => setEpoch((value) => value + 1)} busy={reading} busyLabel="Refreshing">
-      Refresh readiness
-    </Button></div>}
+    {connection === null ? null : <div className="os-pipelines-act"><AutoRefresh onRefresh={() => setEpoch((value) => value + 1)} busy={reading} /></div>}
     <Caption>Reads the last isolation checks. A run checks again when needed.</Caption>
   </div>;
 }

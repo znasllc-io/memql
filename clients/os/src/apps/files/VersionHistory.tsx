@@ -1,34 +1,15 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { Download, RotateCw } from "lucide-react";
+import { Download } from "lucide-react";
 
-import { Button, Chip, Notice, Subhead, formatBytes, formatFreshness, formatMoment, useNow } from "../../kit";
+import { AutoRefresh, Button, Chip, Notice, Subhead, formatBytes, formatFreshness, formatMoment, useNow } from "../../kit";
 import type { MachinePresence } from "../../items/provenance";
 import { shortDigest, versionStory, type VersionEntry, type VersionHistory as History } from "./versions";
 
-// The version history panel (epic memql#4806, #4808).
-//
-// ===========================================================================
-// A HISTORY IS A TIMELINE, NOT A TABLE
-// ===========================================================================
-// Version numbers are a real sequence -- v3 came after v2 because somebody
-// uploaded it -- so the stack is drawn as a spine with a node per version:
-// filled at the one the file holds now, hollow below it. That is the one
-// visual device this panel adds, and it earns its place by carrying
-// information the rows would otherwise only imply.
-//
-// EVERY VERSION REPEATS THE HEADER'S STORY LANGUAGE. The sentence and the
-// presence dot at the top of the inspector are the thing this platform can say
-// that a folder of bytes cannot; a history where each entry says where THOSE
-// bytes came from is the same claim over time. A version pushed from a laptop
-// says so, next to a version dropped from a browser that says "Uploaded here",
-// because that is what happened.
-//
-// NOTHING RENDERS BLANK. An unmeasured hash is a dash, not an error and not an
-// empty cell -- absent means "not measured yet", which the concept says in as
-// many words.
+// A compact version list. Each entry describes its own recorded origin;
+// missing upload attribution is not evidence of a browser upload.
 
 function entryTitle(entry: VersionEntry): string {
-  const uploaded = `Uploaded ${formatMoment(entry.uploadedAt)}`;
+  const uploaded = `Saved ${formatMoment(entry.uploadedAt)}`;
   if (entry.supersededAt === "") return uploaded;
   return `${uploaded}. Superseded ${formatMoment(entry.supersededAt)}.`;
 }
@@ -62,16 +43,7 @@ export function VersionHistory({
     <section className="os-files-versions" aria-label="Version history">
       <div className="os-files-versions-head">
         <Subhead meta={!loading && !error && readAt !== null ? history.total : undefined}>Versions</Subhead>
-        <span className="os-caption">
-          {/* WHEN THIS WAS READ, said plainly. These rows carry no broadcast
-              routing rule, so this panel is a read rather than a feed -- and a
-              surface that looked live while sitting still would be the lie
-              worth avoiding here. */}
-          {readAt === null ? null : `Read ${formatFreshness(readAt.toISOString(), now)}`}
-        </span>
-        <Button onClick={onRefresh} ariaLabel="Read the version history again">
-          <RotateCw size={12} aria-hidden />
-        </Button>
+        <AutoRefresh onRefresh={onRefresh} busy={loading} />
       </div>
 
       {error !== "" ? (
@@ -93,7 +65,7 @@ export function VersionHistory({
         // panel's job there is to teach what the action does rather than to
         // render a list of one.
         <p className="os-files-versions-only">
-          Previous versions stay available when you upload a replacement.
+          Previous versions stay available when this file changes.
         </p>
       ) : null}
 

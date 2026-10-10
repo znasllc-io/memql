@@ -36,7 +36,7 @@ import { SourceFacets } from "./SourceFacets";
 // AN ON-DEMAND READ THAT SAYS WHEN IT WAS READ. A preset window is anchored
 // to the moment the question was asked -- "the last 24 hours" as of the read,
 // not a window that slides under the rows while somebody reads them -- and
-// "Read again" re-anchors it. The sources catalogue is keyed on the same
+// "Run search" re-anchors it. The sources catalogue is keyed on the same
 // anchor, so the two never describe different windows.
 //
 // A `{ subject, subjectConcept }` intent lands here narrowed, with the
@@ -182,7 +182,7 @@ export function SearchSection({
                 : ` · read ${formatFreshness(search.readAt.toISOString(), now)}`}
             </span>
             <Button onClick={() => setGeneration((g) => g + 1)} busy={search.state === "reading"}>
-              Read again
+              Run search
             </Button>
           </div>
 

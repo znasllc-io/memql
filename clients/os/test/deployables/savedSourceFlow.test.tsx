@@ -234,7 +234,7 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(connection.callsNamed("sourceRepositories")).toHaveLength(1);
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
     answers["github-me"] = probeReply({ branches: ["main", "release"] });
-    await click(within(region).getByRole("button", { name: "Check repository again" }));
+    await click(within(region).getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(floorAct("Analyze")).toBeTruthy());
     expect(connection.callsNamed("sourceProbe")).toEqual(Array(2).fill('builtin sourceProbe(repoUrl: "https://github.com/acme/source-alpha", credentialId: "github-me", connectionId: "source-github-me-i-acme")'));
     expect(within(region).queryByText("this token cannot see it")).toBeNull();
@@ -249,7 +249,7 @@ describe("GitHub Sources in Add a deployable", () => {
     await addRepository(region, "source-alpha");
     expectCurrentStage(region, "Configuration");
     expect(await within(region).findByText("GitHub probe temporarily unavailable")).toBeTruthy();
-    expect(within(region).getByRole("button", { name: "Check repository again" })).toBeTruthy();
+    expect(within(region).getByRole("button", { name: "Try again" })).toBeTruthy();
     await waitFor(() => expect(floorAct("Analyze")).toBeTruthy());
     expect(connection.callsNamed("createPackage")).toHaveLength(0);
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
@@ -449,7 +449,7 @@ describe("GitHub Sources in Add a deployable", () => {
     expect(await within(region).findByText("Loading existing deployables")).toBeTruthy();
     expect(floorAct("Analyze")).toBeNull();
     await act(async () => rejectRead(new Error("Placements cannot be read")));
-    expect(await within(region).findByText("Existing deployables could not be read. Refresh Deployables before continuing.")).toBeTruthy();
+    expect(await within(region).findByText("Existing deployables could not be read. Retrying automatically.")).toBeTruthy();
     expect(floorAct("Analyze")).toBeNull();
     expect(connection.callsNamed("packageDeploy")).toHaveLength(0);
   });

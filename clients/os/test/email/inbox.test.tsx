@@ -26,7 +26,7 @@ describe("Email inbox", () => {
     fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Search email" }), { target: { value: "missing" } });
     expect(screen.getByText("No matching email")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Refresh inbox" }));
+    fireEvent.focus(window);
     await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
   });
   it("does not claim external inbound mail is connected", async () => {
@@ -40,7 +40,7 @@ describe("Email inbox", () => {
     const view = render(<EmailInbox />);
     await screen.findByRole("button", { name: /Verify your email/ });
     read.mockRejectedValueOnce(new Error("Connection lost"));
-    fireEvent.click(screen.getByRole("button", { name: "Refresh inbox" }));
+    fireEvent.focus(window);
     await screen.findByText("Could not read email.");
     expect(screen.getByRole("button", { name: /Verify your email/ })).toBeTruthy();
     h.connection = null;

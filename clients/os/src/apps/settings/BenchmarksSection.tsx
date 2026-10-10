@@ -1,5 +1,5 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { Button, Caption, Fact, Facts, Head, Notice, Panel, Subhead, formatFreshness, useNow } from "../../kit";
+import { AutoRefresh, Caption, Fact, Facts, Head, Notice, Panel, Subhead, formatFreshness, useNow } from "../../kit";
 import {
   FAMILY_ORDER,
   absenceSentence,
@@ -84,9 +84,7 @@ export function BenchmarksSection() {
         <Caption>
           Every figure is a median with its spread and its N, stamped with the commit it came from.
           {b.readAt === "" ? " " : ` Figures read ${formatFreshness(b.readAt, now)}. `}
-          <Button onClick={b.reload} busy={b.loadingSamples}>
-            Look again
-          </Button>
+          <AutoRefresh onRefresh={b.reload} busy={b.loadingSamples} />
         </Caption>
       </Panel>
 

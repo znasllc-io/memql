@@ -107,16 +107,7 @@ export function fileVersionFromRow(raw: Row): FileVersion {
   };
 }
 
-/**
- * One version's provenance, in the language the inspector's header already
- * speaks. Deliberately narrower than `fileStory`: a version row records how
- * THESE bytes arrived and nothing else, so there is no plan reading and no
- * computer-use reading to give. Inventing one would be inventing provenance.
- *
- * THE DOT NEVER GUESSES, exactly as the header's does: a version that names a
- * machine the fleet has nothing to say about renders "unknown", which the kit
- * draws as no dot at all.
- */
+/** Origin recorded for these bytes, independently of the file's first version. */
 export interface VersionStory {
   sentence: string;
   tone: ProvenanceTone;
@@ -127,9 +118,9 @@ export function versionStory(
   machine: MachinePresence | null,
 ): VersionStory {
   if (facts.uploadedFromWorkerId.trim() === "") {
-    // A browser cannot name a machine and sends nothing. That is a fact about
-    // the upload, not a gap in the record.
-    return { sentence: "Uploaded here", tone: "reachable" };
+    // Versions also arrive through generation and editing. Without a recorded
+    // upload origin, state only that the bytes were saved in MemQL.
+    return { sentence: "Saved in MemQL", tone: "reachable" };
   }
   const name = facts.uploadedFromWorkerName.trim() || machine?.name || "one of your machines";
   return {

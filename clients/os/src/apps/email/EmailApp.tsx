@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Mail } from "lucide-react";
-import { Button, EmptyState, Fact, Facts, Head, RefreshButton, Input, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, formatMoment } from "../../kit";
+import { Button, EmptyState, Fact, Facts, Head, AutoRefresh, Input, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, formatMoment } from "../../kit";
 import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
 import { AppLogsSection } from "../../logs/AppLogsSection";
@@ -53,9 +53,7 @@ export function EmailInbox() {
   }, [connection]);
   useEffect(() => {
     void refresh();
-    const focus = () => { void refresh(); };
-    window.addEventListener("focus", focus);
-    return () => { generation.current++; window.removeEventListener("focus", focus); };
+    return () => { generation.current++; };
   }, [refresh]);
   const message = messages.find((item) => item.id === selected);
   if (message) return <div className="os-app-stack">
@@ -75,7 +73,7 @@ export function EmailInbox() {
   const filtered = messages.filter((item) => `${item.Subject} ${item.To} ${item.from}`.toLowerCase().includes(needle));
   return <div className="os-app-stack">
     <Head title="Inbox" meta={mode === "capture" ? "Captured for testing" : undefined}>
-      <RefreshButton label="Refresh inbox" busy={loading || !connection} onClick={() => { void refresh(); }} />
+      <AutoRefresh busy={loading || !connection} onRefresh={() => { void refresh(); }} />
     </Head>
     {error ? <Notice tone="warn" sentence="Could not read email." detail={error} /> : null}
     {loading && !readAt ? <RecordListSkeleton label="Loading email" /> : null}

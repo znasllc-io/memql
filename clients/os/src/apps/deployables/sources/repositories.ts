@@ -11,7 +11,7 @@ import { flatten } from "../../../kit/rows";
 // `sourceRepositories` asks GitHub, through the cluster, what this person's
 // installations hold right now. Nothing broadcasts a repository, and nothing
 // could: the rows are not in this graph. So the picker prints WHEN it read
-// and offers to look again, and this module has no subscription, no
+// and the picker periodically reads again. This module has no subscription, no
 // fingerprint and no arrival cue -- captioning liveness that is not there is
 // the failure clients/os/README.md names for the on-demand surfaces.
 //

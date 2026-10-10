@@ -59,7 +59,7 @@ export function GitHubOrganizationDetails({ account, installation, connection, b
         </Facts></Panel>
         {connection ? <Panel label="Repositories"><Subhead>Repositories</Subhead>
           <RepositoryPicker page={repositories.page} readAt={repositories.readAt} busy={repositories.busy} refusal={repositories.refusal}
-            showRefresh={false} showChosenLabel={false} showGroupHeading={false} idPrefix="os-settings-repositories" onChoose={setRepository}
+            showChosenLabel={false} showGroupHeading={false} idPrefix="os-settings-repositories" onChoose={setRepository}
             onLookAgain={() => void read(account.id, 1, connection.id)}
             onReadMore={() => void read(account.id, repositories.page.nextPage, connection.id)} />
           {repositories.refusal ? <Button onClick={() => void read(account.id, 1, connection.id)}>Try again</Button> : null}

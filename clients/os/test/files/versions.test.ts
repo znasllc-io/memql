@@ -148,7 +148,7 @@ describe("versionStory", () => {
   it("says a browser upload arrived here", () => {
     expect(
       versionStory({ uploadedFromWorkerId: "", uploadedFromWorkerName: "" }, null),
-    ).toEqual({ sentence: "Uploaded here", tone: "reachable" });
+    ).toEqual({ sentence: "Saved in MemQL", tone: "reachable" });
   });
 
   // PROVENANCE IS PER VERSION AND NEVER INHERITED: a file first pushed from a
@@ -160,7 +160,7 @@ describe("versionStory", () => {
       [version(1, { uploadedFromWorkerId: "wrk-1", uploadedFromWorkerName: "MacBook-Pro" })],
     );
     const stories = folded.entries.map((e) => versionStory(e, { name: "MacBook-Pro", online: true }).sentence);
-    expect(stories).toEqual(["Uploaded here", "Uploaded from MacBook-Pro"]);
+    expect(stories).toEqual(["Saved in MemQL", "Uploaded from MacBook-Pro"]);
   });
 });
 

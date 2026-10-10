@@ -35,6 +35,16 @@ async function openInspector(title: string): Promise<HTMLElement> {
 }
 
 describe("the label facet", () => {
+  it("keeps labels in details, without putting chips on file rows", async () => {
+    h.connection = fakeConnection({ artifacts: [BRIEF, VIDEO, PLAIN] });
+    await renderFiles();
+    const item = screen.getByRole("button", { name: /brief\.pdf/ });
+    expect(within(item).queryByText("client-acme")).toBeNull();
+    expect(within(item).queryByText("urgent")).toBeNull();
+    const details = await openInspector("brief\\.pdf");
+    expect(within(details).getByRole("button", { name: "Remove label client-acme" })).toBeTruthy();
+  });
+
   it("shows NO standing label control while Refine is collapsed", async () => {
     h.connection = fakeConnection({ artifacts: [BRIEF, VIDEO, PLAIN] });
     await renderFiles();
@@ -265,14 +275,15 @@ describe("the label editor in the inspector", () => {
     expect(within(inspector).getAllByText(/Use labels to find related files/)).toHaveLength(1);
   });
 
-  it("says None yet rather than hiding the control on a file with no labels", async () => {
+  it("keeps the input available without an empty label list", async () => {
     h.connection = fakeConnection({ artifacts: [PLAIN] });
     await renderFiles();
     const inspector = await openInspector("notes\\.txt");
 
     // The editor is how a label gets ONTO a file, so hiding it when there are
     // none is hiding the only way in.
-    expect(within(inspector).getByText("None yet.")).toBeTruthy();
+    expect(within(inspector).queryByText("None yet.")).toBeNull();
+    expect(within(inspector).queryByRole("list", { name: "Labels" })).toBeNull();
     expect(within(inspector).getByLabelText("Add a label")).toBeTruthy();
   });
 });

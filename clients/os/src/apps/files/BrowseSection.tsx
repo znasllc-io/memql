@@ -96,6 +96,7 @@ const PLACE_TITLE: Record<FilesPlace, string> = {
 export function BrowseSection({
   list,
   artifacts,
+  files,
   foldersState,
   tree,
   content,
@@ -120,6 +121,7 @@ export function BrowseSection({
 }: {
   list: LiveView<ArtifactRow> | null;
   artifacts: LiveCollectionHandle<Row>;
+  files: readonly Row[];
   foldersState: LiveState;
   tree: FolderTree;
   content: ArtifactRow[];
@@ -916,6 +918,7 @@ export function BrowseSection({
             renderRow={(row, tick) => (
               <FileLine
                 row={row}
+                composition={materialized.get(row.id) ?? null}
                 tick={tick}
                 searching={searching || !filter.folderId}
                 folderNameOf={folderNameOf}
@@ -952,6 +955,7 @@ export function BrowseSection({
           <Inspector
             key={selected.id}
             row={selected}
+            files={files}
             composition={materialized.get(selected.id) ?? null}
             folderNameOf={folderNameOf}
             archivedFolderIds={archivedFolderIdSet}
@@ -1280,6 +1284,7 @@ function UploadPlaceholder({ task }: { task: UploadTask }) {
 
 function FileLine({
   row,
+  composition,
   tick,
   searching,
   folderNameOf,
@@ -1290,6 +1295,7 @@ function FileLine({
   onMenu,
 }: {
   row: ArtifactRow;
+  composition: CompositionRow | null;
   tick: "added" | "updated" | null;
   searching: boolean;
   folderNameOf: (folderId: string) => string;
@@ -1303,8 +1309,7 @@ function FileLine({
   onToggle: () => void;
   onMenu: (x: number, y: number) => void;
 }) {
-  const story = fileStory(row, row.producedByWorkerId ? presence(row.producedByWorkerId) : null);
-  const extraLabels = row.labels.length > 2 ? row.labels.length - 2 : 0;
+  const story = fileStory(row, row.producedByWorkerId ? presence(row.producedByWorkerId) : null, composition);
   // DRAGGABLE TO THE BIN (memql#4784). The payload travels with the drag,
   // because the dock holds no Library feed of its own.
   //
@@ -1352,12 +1357,6 @@ function FileLine({
         <Chip tone="muted">in {folderNameOf(row.folderId)}</Chip>
       ) : null}
       {deskIndex !== null ? <Chip tone="muted">Desk {deskIndex + 1}</Chip> : null}
-      {row.labels.slice(0, 2).map((label) => (
-        <Chip key={label} tone="neutral">
-          {label}
-        </Chip>
-      ))}
-      {extraLabels > 0 ? <Chip tone="muted">+{extraLabels}</Chip> : null}
       {row.kind === "document" && row.validationStatus !== "" ? (
         <Chip tone="muted" title="The training pipeline's verdict on this document">
           {row.validationStatus}

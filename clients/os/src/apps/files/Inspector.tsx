@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, CornerUpRight, Download, FilePlus2, RotateCcw } from "lucide-react";
+import { Trash2, CornerUpRight, Download, FilePlus2, RotateCcw } from "lucide-react";
 
 import { useAuthSource } from "../../auth/context";
 import { useSession } from "../../chrome/access";
@@ -16,10 +16,10 @@ import { useAccountOptions } from "../accounts/tie";
 import { useArtifactAccounts } from "./actions/accounts";
 import { useFileVersions } from "./actions/versions";
 import { VersionHistory } from "./VersionHistory";
-import type { VersionEntry } from "./versions";
+import { fileHeadFromRow, type VersionEntry } from "./versions";
 import { useOsConnection } from "../../live/connection";
 import type { UploadProvider } from "../../items/upload";
-import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
+import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
 import { MATERIALIZER_APP, MATERIALIZER_COMPOSER } from "./materializer";
 import {
@@ -31,56 +31,9 @@ import {
 import { downloadWorkerRegistration, runWorkerDownload } from "./actions/downloadWorker";
 import { artifactName, fileStory, type ArtifactRow, type CompositionRow } from "./rows";
 
-// The inspector (design D1): the file's story, its facts, and the five
-// actions -- open in VS Code, send to desktop, download, upload a new version,
-// archive -- plus the version history. THE STORY LEADS: where a file came from
-// is the fact this platform can tell that a generic file manager cannot, so it
-// is the header, not a row in a table.
-//
-// THE HISTORY SITS UNDER THE ACTION THAT GROWS IT (epic memql#4806). "Upload
-// new version" is beside Download, and the stack it appends to is directly
-// below -- so the refusal renders next to the control that produced it and the
-// result appears where the person is already looking.
-//
-// ===========================================================================
-// THE PANEL IS FOUR GROUPS, AND THE TWO OPAQUE VALUES ARE COPYABLE
-// ===========================================================================
-// It was a flat stack of ten things and it scrolled SIDEWAYS. An artifact id
-// is one unbreakable word, and the facts grid's `1fr` column refused to shrink
-// below it, so the panel grew past its own container. The fix is at the cause
-// (`minmax(0, 1fr)` in the stylesheet); an id nobody can select out of a
-// truncated line is only half an answer, so `Id` and `Run` render as
-// `CopyValue` -- ellipsized, with the whole value on `title` and in the
-// clipboard. The short human facts get no button: one beside "Created" is
-// furniture.
-//
-// After the lead, the rest groups under Subheads (DESIGN.md rule 8): the
-// file's own details, the clients it is about, the actions, the versions. Two
-// rules the grouping had to respect.
-//
-//   - SAY IT ONCE (rule 7). The kind was a glyph in the header AND a `Kind`
-//     row in the facts. The glyph stays -- it is the same mark the list row
-//     carries, so the panel that opens is visibly the thing that was clicked
-//     -- and it is NAMED now (`role="img"`), which is what keeps the kind in
-//     the reading for somebody who never sees a glyph. The fact row goes.
-//   - EVERY NOTICE STAYS WITH ITS ACTION. One error slot per action was a
-//     recorded decision before this pass, so the whole block moved into the
-//     Actions group in its existing order and nothing was consolidated. A
-//     download refusal must never sit under the archive button.
-//
-// ONE PRIMARY, AND `Archive` KEEPS ITS TONE. "Open in VS Code" is the one
-// thing this surface is for; "Restore" was a second primary and is quiet now.
-// "Archive" stays `danger` because tone here is about CONSEQUENCE rather than
-// emphasis (the Button contract says so) -- dropping it to quiet would make
-// archiving look exactly like downloading.
-//
-// ASK IS THE SHELL'S ASK AFFORDANCE, IN THE HEADER (the deployable page's pattern),
-// not a full-width button at the foot of the panel. The tag string is
-// unchanged: it is a contract with the Ask surface.
-//
-// MOVING A FILE IS NOT HERE ANY MORE. Re-filing is something you do TO a row,
-// so it lives on the row's own context menu rather than as a standing picker
-// at the bottom of a reading surface.
+// File details occupy the page. Origin belongs with the other facts;
+// editing labels and clients, file actions, and version history follow.
+// Each action keeps its own pending/error state next to its controls.
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -88,6 +41,7 @@ function describe(err: unknown): string {
 
 export function Inspector({
   row,
+  files,
   composition,
   folderNameOf,
   archivedFolderIds,
@@ -99,6 +53,7 @@ export function Inspector({
   breadcrumbs,
 }: {
   row: ArtifactRow;
+  files: readonly Row[];
   /**
    * The composition that produced this file, if one did (epic memql#4981,
    * #4983). ONE SENTENCE AND ONE ACT is the whole of what Files says about
@@ -137,7 +92,7 @@ export function Inspector({
 
   const name = artifactName(row);
   const machine = row.producedByWorkerId ? presence(row.producedByWorkerId) : null;
-  const story = fileStory(row, machine);
+  const story = fileStory(row, machine, composition);
 
   // Every action reports beside itself, in surface. One error slot per
   // action, so a download refusal never sits under the archive button.
@@ -162,7 +117,10 @@ export function Inspector({
     () => (row.kind === "file" ? (row.sourceConceptRef.split(":").pop() ?? "") : ""),
     [row.kind, row.sourceConceptRef],
   );
-  const versions = useFileVersions(fileId);
+  const liveHead = files.find(file => rowString(file, "id") === fileId);
+  const liveVersion = liveHead ? fileHeadFromRow(liveHead) : null;
+  const headRevision = liveVersion ? `${liveVersion.versionNumber}:${liveVersion.sha256}:${liveVersion.versionUploadedAt}` : "";
+  const versions = useFileVersions(fileId, headRevision);
   const refreshVersions = versions.refresh;
   const picker = useRef<HTMLInputElement | null>(null);
   const [newVersionError, setNewVersionError] = useState("");
@@ -257,10 +215,8 @@ export function Inspector({
             : `Version ${result.versionNumber} landed.`,
         );
         pending.current = null;
-        // Read the history again: these rows carry no broadcast rule, so this
-        // is what makes the stack below show what just happened. The LIST
-        // updates on its own -- the artifact index is re-stamped server-side
-        // and arrives on the feed the browse already reads.
+        // Confirm our own upload immediately; remote changes arrive through
+        // the retained file feed and invalidate the same history reading.
         refreshVersions();
       } catch (err: unknown) {
         setNewVersionError(describe(err));
@@ -386,20 +342,14 @@ export function Inspector({
     <section className="os-file-detail" aria-label="File details" data-os-page-context={JSON.stringify({ page: "File details", fileId: row.id, name, kind: row.kind })}>
       <Head title={name} breadcrumbs={breadcrumbs} back={{label: backLabel, onSelect: onClose}} />
 
-      {/* The provenance story -- the one sentence this platform can say that
-          a folder of bytes cannot. The dot is the machine's presence where a
-          machine is named, and absent where nothing is known. */}
-      <p className="os-files-story">
-        <span>{story.sentence}</span>
-      </p>
       {row.archived ? <Chip tone="muted">archived</Chip> : null}
-      {/* The file's own words sit with the story rather than under the table:
-          both are prose about this file, and what follows is the table. */}
+      {/* A summary describes the contents; origin is a fact below. */}
       {row.summary.trim() !== "" ? <p className="os-files-summary">{row.summary}</p> : null}
 
       <div className="os-files-group">
         <Subhead>Details</Subhead>
         <Facts>
+          <Fact label="Origin" value={story.sentence} />
           <Fact label="Kind" value={row.kind.replaceAll("_", " ")} />
           <Fact label="Filed in" value={filedIn} />
           <Fact label="Format" value={row.format || row.mimeType} mono />
@@ -501,21 +451,19 @@ export function Inspector({
 
       <div className="os-files-group">
         <Subhead>Actions</Subhead>
-        {/* ONE PRIMARY LEADS, FULL WIDTH; THE REST PAIR UP UNDER IT. The row
-            was six equal buttons wrapping raggedly at a width the panel picks
-            for itself, so which action sat beside which changed with the
-            label lengths. The grid below is either one column or two, and
-            every cell is the same size -- predictable at any panel width. */}
+        {/* Compact actions share the control height. Icons retain their names
+            for hover, keyboard and assistive technology. */}
         <div className="os-files-actions">
-          <Button tone="primary" onClick={isZipArtifact(row) ? () => void download() : openVsCode} busy={isZipArtifact(row) && downloadBusy}>
-            {isZipArtifact(row) ? "Download ZIP" : "Open in editor"}
+          <Button tone="primary" onClick={isZipArtifact(row) ? () => void download() : openVsCode} busy={isZipArtifact(row) && downloadBusy}
+            ariaLabel={isZipArtifact(row) ? "Download ZIP" : undefined} title={isZipArtifact(row) ? "Download ZIP" : undefined}>
+            {isZipArtifact(row) ? <Download size={16} aria-hidden /> : "Open"}
           </Button>
           <div className="os-files-actions-more">
-            <Button onClick={sendToDesk}>
-              <CornerUpRight size={13} aria-hidden /> Send to desktop
+            <Button onClick={sendToDesk} ariaLabel="Send to desktop" title="Send to desktop">
+              <CornerUpRight size={16} aria-hidden />
             </Button>
-            {!isZipArtifact(row) && <Button onClick={() => void download()} busy={downloadBusy} busyLabel="Downloading">
-              <Download size={13} aria-hidden /> Download
+            {!isZipArtifact(row) && <Button onClick={() => void download()} busy={downloadBusy} ariaLabel={downloadBusy ? "Downloading" : "Download"} title="Download">
+              <Download size={16} aria-hidden />
             </Button>}
             {/* NEW VERSION, beside Download and only for files. The person
                 NAMES the file this replaces by acting from its own inspector,
@@ -535,10 +483,11 @@ export function Inspector({
               <Button
                 tone="danger"
                 busy={archiveBusy}
-                busyLabel="Archiving"
+                ariaLabel={archiveBusy ? "Deleting" : "Delete"}
+                title="Delete"
                 onClick={() => (confirmBeforeArchive ? setConfirmingArchive(true) : void archive())}
               >
-                <Archive size={13} aria-hidden /> Move to Bin
+                <Trash2 size={16} aria-hidden />
               </Button>
             ) : (
               <Button busy={archiveBusy} busyLabel="Restoring" onClick={() => void restore()}>
@@ -600,12 +549,12 @@ export function Inspector({
         {confirmingArchive ? (
           <Notice
             tone="warn"
-            sentence={`Move "${name}" to the Bin?`}
+            sentence={`Delete "${name}"?`}
             next="You can restore it from the Bin until it is purged."
           >
             <div className="os-files-confirm">
               <Button tone="danger" onClick={() => void archive()}>
-                Move to Bin
+                Delete
               </Button>
               <Button onClick={() => setConfirmingArchive(false)}>Cancel</Button>
             </div>

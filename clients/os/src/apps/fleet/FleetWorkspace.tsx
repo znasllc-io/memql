@@ -13,7 +13,7 @@ import { InfoDetail } from "../../kit/InfoDetail";
 import { useLiveView } from "../../live/liveView";
 import { useMachines } from "../../live/machines";
 import { useAppSessions } from "./apps/useAppSessions";
-import { RefreshButton, useFleetScroll } from "./FleetControls";
+import { AutoRefresh, useFleetScroll } from "./FleetControls";
 import { AddMachinePage } from "./addMachine/AddMachinePage";
 import type { AddMachineFlow } from "./addMachine/useAddMachineFlow";
 import { MachineDetail, MachineAppsHelp } from "./machines/MachineDetail";
@@ -116,18 +116,18 @@ export function FleetWorkspace({ flow, showRevoked, selection, select, navigate,
       </Head>
       {machine ? <LocalTabs label="Machine views" value={selection.view} onChange={view => select({ machineId: machine.id, view })} options={(Object.keys(VIEW_NAMES) as MachineView[]).map(view => [view, VIEW_NAMES[view]] as const)}  /> : null}
       </div>
-      {behind ? <Notice tone="warn" sentence="Machine updates are interrupted." next="Showing the last known state." detail={snapshot?.error || undefined}><RefreshButton label="Reconnect machines" onClick={reload} /></Notice> : null}
+      {behind ? <Notice tone="warn" sentence="Machine updates are interrupted." next="Showing the last known state." detail={snapshot?.error || undefined}><AutoRefresh onRefresh={reload} /></Notice> : null}
       <div className="fleet-workspace-body" data-has-machines={machines.length > 0 || undefined}>
         <main className="fleet-equipment-area" aria-label="Machine workspace">
           {!settled && machines.length === 0 && !snapshot?.error ? <RecordListSkeleton label="Loading machines" rows={3} />
-            : snapshot?.error && machines.length === 0 ? <EmptyState title="Machines unavailable" action={<RefreshButton label="Retry reading machines" onClick={reload} />}>Reconnect to read your machine inventory. No changes have been made.</EmptyState>
+            : snapshot?.error && machines.length === 0 ? <EmptyState title="Machines unavailable">Reconnect to read your machine inventory. No changes have been made.</EmptyState>
             : machine ? retained.map(item => {
               const retainedMachine = machines.find(value => value.id === item.machineId);
               if (!retainedMachine) return null;
               const shown = item.machineId === machine.id && item.view === selection.view;
               return <div key={`${item.machineId}:${item.view}`} hidden={!shown}>
                 {item.view === "equipment" ? <><MachineEquipment machine={retainedMachine} now={now} onInspect={view => select({ machineId: item.machineId, view })} />
-                <section className="fleet-recent-work" aria-label="Recent app sessions"><div className="fleet-bank-heading"><Subhead meta={sessions.readAt && !sessions.loading && !sessions.error ? sessions.sessions.filter(session => session.workerId === item.machineId).slice(0, 5).length : undefined}>Recent work</Subhead><span className="fleet-heading-actions"><RefreshButton label="Refresh recent work" busy={sessions.loading} onClick={sessions.reread} /><IconButton label="All app sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton></span></div>
+                <section className="fleet-recent-work" aria-label="Recent app sessions"><div className="fleet-bank-heading"><Subhead meta={sessions.readAt && !sessions.loading && !sessions.error ? sessions.sessions.filter(session => session.workerId === item.machineId).slice(0, 5).length : undefined}>Recent work</Subhead><span className="fleet-heading-actions"><AutoRefresh busy={sessions.loading} onRefresh={sessions.reread} /><IconButton label="All app sessions" onClick={() => navigate("apps", { fromContent: true })}><ArrowUpRight size={16} aria-hidden /></IconButton></span></div>
                   {sessions.error ? <Notice sentence="Recent app sessions could not be read." detail={sessions.error} /> : null}
                   {sessions.loading && sessions.sessions.length === 0 && !sessions.error ? <RecordListSkeleton label="Loading recent app sessions" /> : null}
                   <RecordList as="ul" label="Recent app sessions">{sessions.sessions.filter(session => session.workerId === item.machineId).slice(0, 5).map(session => <RecordRow key={session.id} name={session.app} secondary={session.runId || session.id} onOpen={onOpenSession ? () => onOpenSession(session.id) : undefined} state={session.status} />)}</RecordList>

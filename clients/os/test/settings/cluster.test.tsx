@@ -291,7 +291,7 @@ describe("cluster facts (memql#4742)", () => {
       .getAllByRole("button")
       .filter((b) => !policy.contains(b))
       .map((b) => b.textContent);
-    expect(new Set(outside)).toEqual(new Set(["Refresh"]));
+    expect(new Set(outside)).toEqual(new Set());
     expect(within(policy).getByRole("button", { name: "Save" })).toBeTruthy();
   });
 
@@ -386,7 +386,7 @@ describe("cluster facts (memql#4742)", () => {
 
     expect(h.state.integrationCalls).toBe(1);
     await act(async () => {
-      fireEvent.click(within(panel).getByRole("button", { name: "Refresh" }));
+      fireEvent.focus(window);
       await Promise.resolve();
     });
     expect(h.state.integrationCalls).toBe(2);

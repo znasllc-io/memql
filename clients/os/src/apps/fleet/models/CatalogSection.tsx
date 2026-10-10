@@ -138,7 +138,7 @@ export function CatalogSection({
         <Notice
           tone="info"
           sentence="We could not read the model catalog."
-          next="Refresh to try reading the catalog again."
+          next="The catalog is checked again automatically."
           detail={profilesError}
         />
       </>

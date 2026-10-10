@@ -1,7 +1,7 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { useEffect, useState } from "react";
 
-import { Button, Caption, Head, Subhead, RecordList, RecordRow, Chip, Chips, Fact, Facts, Field, Input, Notice, findRegion, revealRegion } from "../../kit";
+import { AutoRefresh, Button, Caption, Head, Subhead, RecordList, RecordRow, Chip, Chips, Fact, Facts, Field, Input, Notice, findRegion, revealRegion } from "../../kit";
 import { useSession } from "../../chrome/access";
 import type { OsAppProps } from "../../system/registry";
 import {
@@ -515,9 +515,7 @@ function Refresh({ facts }: { facts: IntegrationsFacts }) {
     (facts.fetchedAt === null ? "" : new Date(facts.fetchedAt).toISOString());
   return (
     <div className="os-refresh-row">
-      <Button onClick={facts.reload} busy={facts.loading}>
-        Refresh
-      </Button>
+      <AutoRefresh onRefresh={facts.reload} busy={facts.loading} />
       <Caption>
         {stamp ? `Read at ${stamp}. ` : ""}A projection of one node&apos;s own
         registry -- which replica answered is not knowable from here.
