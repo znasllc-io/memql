@@ -129,9 +129,6 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 			}
 			if args["templateId"] == "libraryRevisionIntent" {
 				intent := "edit"
-				if len(a.imagePlan) > 0 {
-					return reviewResult(map[string]any{"reply": "images"})
-				}
 				if a.needsResearch {
 					intent = "research"
 				}
@@ -139,6 +136,12 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 					intent = "parallel"
 				}
 				return reviewResult(map[string]any{"reply": intent})
+			}
+			if args["templateId"] == "libraryRevisionImageIntent" {
+				if len(a.imagePlan) > 0 {
+					return reviewResult(map[string]any{"reply": "acquire"})
+				}
+				return reviewResult(map[string]any{"reply": "none"})
 			}
 			if args["templateId"] == "libraryRevisionImagePlan" {
 				a.imagePlanPrevious = asString(data["previous"])

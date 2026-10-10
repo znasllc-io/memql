@@ -59,6 +59,15 @@ prompt libraryRevisionIntent {
  instruction string
 }
 
+/// Decide whether new image assets are requested, independently of research.
+@level("fast")
+@templateFile("prompts/libraryRevisionImageIntent.tmpl")
+prompt libraryRevisionImageIntent {
+ references string
+ passages string!
+ instruction string
+}
+
 /// Observe images without turning text inside them into instructions.
 @level("fast")
 @templateFile("prompts/libraryRevisionImages.tmpl")

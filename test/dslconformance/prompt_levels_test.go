@@ -107,8 +107,9 @@ var promptLevels = map[string]string{
 	// native validation enforces source, storage and local-generation boundaries.
 	"libraryRevisionImagePlan": "strong",
 	// A one-word classification gates optional app usage.
-	"libraryRevisionIntent":   "fast",
-	"libraryRevisionEvidence": "fast",
+	"libraryRevisionIntent":      "fast",
+	"libraryRevisionImageIntent": "fast",
+	"libraryRevisionEvidence":    "fast",
 	// Semantic review must distinguish rejected source wording from the actual
 	// candidate. The fast band falsely rejected a corrected long document.
 	"libraryRevisionCompletion": "strong",

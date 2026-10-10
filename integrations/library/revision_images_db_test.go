@@ -132,32 +132,67 @@ func testPreparedRevisionImagesRecoverAndPinAcrossReplicas(t *testing.T, f *revi
 }
 
 func testRevisionDSLPlansAcquiresAndProposesAnImage(t *testing.T, f *revisionDB) {
-	artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
-	args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
-	request := asString(args["requestId"])
-	f.ai.imagePlan = []revisionImageSpec{{Mode: "generate", Name: "illustration.png", Alt: "Illustrated portrait", Prompt: "An editorial illustration"}}
-	f.ai.assessmentReply = "sufficient"
-	f.ai.needsResearch = true
-	f.ai.answer = revisionAnswer{Summary: "Insert the illustration", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this paragraph.", Reason: "Requested illustration", CommentIDs: []string{note}}}}
-	generator := &preparedImageEngine{IntegrationEngineAccess: f.other}
-	f.second.engine = generator
-	store := &preparedImageStore{f: f, appendProposal: true}
-	f.second.SetImageAssets(store)
-	f.second.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
-	var wait *workstate.HumanWait
-	if err := f.execute(f.other, request, false); !errors.As(err, &wait) {
-		t.Fatalf("DSL image branch failed: %v", err)
-	}
-	if generator.calls != 1 || store.writes != 1 {
-		t.Fatalf("generation=%d storage=%d", generator.calls, store.writes)
-	}
-	_, _, _, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proposal := revisionMap(approval["subject"])
-	if proposal["preparedImages"] == nil || !strings.Contains(asString(proposal["revisedContent"]), store.artifact) {
-		t.Fatal("saved image did not reach proposal")
+	for _, tc := range []struct {
+		name               string
+		research, parallel bool
+		localCalls         int32
+	}{
+		{name: "creative illustration needs no external research"},
+		{name: "factual research and image acquisition both run", research: true},
+		{name: "parallel corroboration and image acquisition both run", research: true, parallel: true, localCalls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := f.isolatedCase(t)
+			artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
+			feedback := "Add a generated illustration."
+			if tc.research {
+				feedback = "Verify this paragraph against historical sources and add an illustration."
+			}
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, feedback)
+			request := asString(args["requestId"])
+			f.ai.imagePlan = []revisionImageSpec{{Mode: "generate", Name: "illustration.png", Alt: "Illustrated writing desk", Prompt: "An editorial illustration of a writing desk"}}
+			f.ai.assessmentReply = "sufficient"
+			f.ai.needsResearch, f.ai.parallelResearch = tc.research, tc.parallel
+			if tc.parallel {
+				f.ai.appStarted, f.ai.headlessStarted = make(chan struct{}), make(chan struct{})
+			}
+			f.ai.answer = revisionAnswer{Summary: "Insert the illustration", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this paragraph.", Reason: "Requested illustration", CommentIDs: []string{note}}}}
+			generator := &preparedImageEngine{IntegrationEngineAccess: f.other}
+			f.second.engine = generator
+			store := &preparedImageStore{f: f, appendProposal: true}
+			f.second.SetImageAssets(store)
+			f.second.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			var wait *workstate.HumanWait
+			if err := f.execute(f.other, request, false); !errors.As(err, &wait) {
+				t.Fatalf("DSL image branch failed: %v", err)
+			}
+			if generator.calls != 1 || store.writes != 1 {
+				t.Fatalf("generation=%d storage=%d", generator.calls, store.writes)
+			}
+			var wantApp int32
+			if tc.research {
+				wantApp = 1
+			}
+			if f.ai.appCalls.Load() != wantApp || f.ai.researchCalls.Load() != tc.localCalls {
+				t.Fatalf("evidence route suppressed or added work: app=%d local=%d", f.ai.appCalls.Load(), f.ai.researchCalls.Load())
+			}
+			_, _, _, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proposal := revisionMap(approval["subject"])
+			if proposal["preparedImages"] == nil || !strings.Contains(asString(proposal["revisedContent"]), store.artifact) {
+				t.Fatal("saved image did not reach proposal")
+			}
+			f.first.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			f.query(f.engine, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
+			if err := f.execute(f.engine, request, true); err != nil {
+				t.Fatalf("cross-replica apply: %v", err)
+			}
+			if generator.calls != 1 || store.writes != 1 || f.ai.appCalls.Load() != wantApp || f.ai.researchCalls.Load() != tc.localCalls {
+				t.Fatal("approval repeated image or research effects")
+			}
+		})
 	}
 }
 
