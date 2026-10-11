@@ -7,7 +7,7 @@
 
 ## In plain terms
 
-- **Layouts.** An email template is a structured document: a layout (a column of blocks: logo, banner, tinted body, button, signature, social links, footer) plus a theme (brand colours and fonts). Four built-in layouts come from the owner's eight production emails (Fylo "Welcome 1", "Welcome 2", "Stage B1" to "B6"): **Confirmation**, **Letter**, **Article** and **Spotlight**. An organization saves its own finished email as a layout, keeping its logo, footer and signature, so the next email in the series comes out identical apart from the words and pictures. Given the same resources the renderer reproduces the originals; a screenshot comparison against the owner's examples is the acceptance check.
+- **Layouts.** An email template is a structured document: a layout (a column of blocks: logo, banner, tinted body, button, signature, social links, footer) plus a theme (brand colours and fonts). Four built-in layouts come from the eight production emails the owner supplied for a client (a two-email welcome and a six-email series): **Confirmation**, **Letter**, **Article** and **Spotlight**. An organization saves its own finished email as a layout, keeping its logo, footer and signature, so the next email in the series comes out identical apart from the words and pictures. Given the same resources the renderer reproduces the originals; a screenshot comparison against the owner's examples is the acceptance check.
 - **VS Code is where an email is written.** "New email" opens a page in the productivity tool: choose the organization and a layout, describe the email, and the Materializer writes it into the layout; or start from the layout and write it yourself. The editor shows the rendered email beside an outline of its blocks; selecting a block edits its words, link or picture. Publishing makes it a template in the Email app.
 - **One Email app.** Campaigns moves into Email. Its tabs are nouns: Overview, Campaigns, Automations, Audiences, Templates (and Inbox for owners and developers on a capture cluster). Adding anything runs the kit `Wizard`; every record has one page with one `ActionBar`. Setup (sending domains, senders, the testing audience) lives in the app's Settings. The `MEMQL_EMAIL_APP_ENABLED` switch that hid Email in production is removed.
 - **Automations.** An automation is a trigger followed by steps, drawn as a vertical flow: "When someone joins Newsletter" -> "Send Welcome 1 and wait for them to confirm (7 days)" -> "Send Welcome 2" -> "Wait 3 days" -> "Send Stage B1" ... Build it by hand in the flow, or describe it in a sentence and review the drafted flow before turning it on (Fleet's "Describe it instead" pattern). Double opt-in is real: a confirmation email carries a confirm link, and unconfirmed addresses never receive marketing.
@@ -23,7 +23,7 @@
 | Images in a document | `artifact:<artifactId>` references to Library files (or `data:` rasters); resolved and embedded at render and publish | Editable source, reusable brand assets; published snapshots stay self-contained (CID at send, as today) |
 | Where rendering runs | One Go renderer (`component/compose/emaildoc`), exposed to editors as the `emailRender` builtin | One renderer means the preview is the email that is sent |
 | Creating a template from the OS | "Create new template" in the campaign wizard opens the VS Code "New email" page with the organization chosen; the wizard waits for the published template and selects it | The owner's words: it opens the productivity tool, like opening a `.md` file |
-| Event triggers | Existing rules (event -> one email) stay, are listed and drawn in Automations, and are fixed (cross-node arming, pagination). Journeys add audience triggers with multi-step sequences | Keeps every shipped capability; the Fylo series needs audience triggers and waits, which rules never had |
+| Event triggers | Existing rules (event -> one email) stay, are listed and drawn in Automations, and are fixed (cross-node arming, pagination). Journeys add audience triggers with multi-step sequences | Keeps every shipped capability; the welcome-and-series emails need audience triggers and waits, which rules never had |
 | Newsletter welcome | The binding's welcome template becomes optional; an automation on the audience is the recommended welcome | Avoids two welcome mechanisms sending twice |
 | Confirm link safety | GET shows a page with a Confirm button; POST confirms | Link scanners prefetch GETs |
 
@@ -33,12 +33,12 @@
 
 ```jsonc
 {
-  "subject": "How to end the brushing battle",        // required, one line, < 999 bytes
-  "preheader": "Four ways to hand over a little control tonight", // optional, <= 200 chars
+  "subject": "Three ways to get more from your plan",   // required, one line, < 999 bytes
+  "preheader": "A short guide for your first week",      // optional, <= 200 chars
   "layout": "builtin:article",                        // or "org:<layoutId>"; provenance only
-  "theme": { "page": "#f0f1f5", "canvas": "#ffffff", "primary": "#118a8c", "secondary": "#55b9bd",
-             "accent": "#ee7c8b", "tint": "#f4f3ee", "text": "#303030", "muted": "#8f8f8f",
-             "headingFont": "Sansita", "bodyFont": "Inter" },
+  "theme": { "page": "#eef0f3", "canvas": "#ffffff", "primary": "#2f5d8a", "secondary": "#6f93b8",
+             "accent": "#d9822b", "tint": "#f5f4f0", "text": "#2b2b2b", "muted": "#8a8a8a",
+             "headingFont": "Georgia", "bodyFont": "Helvetica" },
   "blocks": [ /* see 1.2 */ ]
 }
 ```
@@ -52,10 +52,10 @@ Every block has `id` (stable, unique in the document), `type`, and optional `rol
 | type | fields | used for |
 |---|---|---|
 | `image` | `src` (`artifact:<id>` or `data:image/png|jpeg|gif`), `alt`, `width` (px <= 600), `align`, `href?`, `bleed?` (full width, no side padding) | logo, banner, mascot, photo |
-| `heading` | `text`, `size` (px), `color`, `align`, `italic?`, `weight?`, `font` (`heading`/`body`) | "WELCOME!", "Have a question about any of this?" |
+| `heading` | `text`, `size` (px), `color`, `align`, `italic?`, `weight?`, `font` (`heading`/`body`) | a welcome headline, a two-tone question prompt |
 | `text` | `text` (Markdown subset: paragraphs, `**bold**`, `*italic*`, `- ` and `1. ` lists, links, merge tags), `size`, `lineHeight`, `color`, `align`, `font` | letter and article bodies |
 | `highlight` | `text` | the accent band statement |
-| `button` | `label`, `href`, `color`, `width` | "Confirm my email", "Ask Dr. Valenzuela" |
+| `button` | `label`, `href`, `color`, `width` | "Confirm my email", "Ask a question" |
 | `divider` | `color` | hairlines |
 | `spacer` | `height` | |
 | `section` | `background`, `blocks` (no nested sections) | tinted body, brand-colour hero, signature band |
@@ -75,7 +75,7 @@ Merge tags anywhere text appears: `{{displayName}} {{email}} {{accountName}} {{f
 
 ### 1.4 Layouts
 
-- **Built-in** (Go-embedded documents, neutral example brand and copy): `builtin:confirmation`, `builtin:letter`, `builtin:article`, `builtin:spotlight`. Their structure, sizes and spacing are taken from the owner's examples. They contain no Fylo material: this repository is public; the Fylo reproduction lives in that organization's own saved layouts and in a local fidelity harness (section 7).
+- **Built-in** (Go-embedded documents, neutral example brand and copy): `builtin:confirmation`, `builtin:letter`, `builtin:article`, `builtin:spotlight`. Their structure, sizes and spacing are taken from the owner's examples. They contain none of the client's copy, pictures or brand: this repository is public; the client reproduction lives in that organization's own saved layouts and in a local fidelity harness (section 7).
 - **Organization layouts:** `v1:campaigns:emailLayout {ownerUserId!, accountId!, name!, description, document object!, sourceArtifactId, status (active|archived)}`; `@rowAuthz(owner, clusterOwner, account)`. Saved from a finished email with "Save as layout": the whole document, with each block's role. Brand blocks keep their content; content blocks keep theirs as the example the AI writes against.
 - `emailLayouts({accountId})` lists built-ins then the organization's active layouts. `campaignSaveLayout({layoutId, accountId, name, description, document, expectedRevision})` validates with `emaildoc.Parse` and saves; archive and restore follow the template pattern.
 
@@ -228,7 +228,7 @@ Pages are minimal, branded with the organization name only, no scripts.
 - **OS** (vitest): wizard flows, ActionBar acts per state (absent, never disabled), Flow editing by keyboard, Describe-it-instead states, intent round trip, the guard tests from sub-project 1, navigation contract regenerated.
 - **VS Code**: New email page states, editor selection and edits, publish, save as layout, jsdom tests for the new page scripts.
 - **Fidelity harness** (`scripts/email/fidelity.sh`, local only): renders documents describing the owner's eight examples (kept outside this repository, path from `MEMQL_EMAIL_FIDELITY_DIR`), screenshots both with headless Chrome at 600px and reports a per-email pixel difference.
-- **Live**: on the owner's local cluster (only after the owner says go): create the Fylo layouts from the examples' resources, write a new Stage email by description, publish, build the Welcome-and-Stage automation by hand and by description, sign up through a storefront form, confirm, and read the mail in the capture inbox.
+- **Live**: on the owner's local cluster (only after the owner says go): create the client's layouts from the examples' resources, write a new Stage email by description, publish, build the Welcome-and-Stage automation by hand and by description, sign up through a storefront form, confirm, and read the mail in the capture inbox.
 
 ## Out of scope
 
