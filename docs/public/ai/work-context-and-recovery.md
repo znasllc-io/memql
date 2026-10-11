@@ -81,6 +81,12 @@ plan recovery; it cannot silently disappear from the document. Successful
 assets and research receipts survive a resume on another replica. This does
 not authorize bypassing a source's access restrictions.
 
+Image acquisition intent is classified from human feedback and additional
+direction alone. Old source passages and attached draft contents do not enter
+that routing call. A mixed request to reuse one supplied image and acquire
+another still requires acquisition; the later planner reuses the supplied
+asset and plans only the missing one.
+
 Image planning can also expose missing evidence before any download: a catalog
 record without its associated raster URL is not a usable acquisition. Even if
 prose research was sufficient, the document DSL performs one targeted research

@@ -63,8 +63,7 @@ prompt libraryRevisionIntent {
 @level("fast")
 @templateFile("prompts/libraryRevisionImageIntent.tmpl")
 prompt libraryRevisionImageIntent {
- references string
- passages string!
+ passages []object!
  instruction string
 }
 

@@ -176,7 +176,7 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				body, _ := json.Marshal(structured)
 				return reviewResult(map[string]any{"reply": string(body), "structured": structured})
 			}
-			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
+			if args["templateId"] != "libraryRevisionImageIntent" && a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
 				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
 			}
 			if args["templateId"] == "libraryRevisionIntent" {
@@ -190,6 +190,16 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return reviewResult(map[string]any{"reply": intent})
 			}
 			if args["templateId"] == "libraryRevisionImageIntent" {
+				passages, ok := data["passages"].([]any)
+				if !ok || len(passages) == 0 || data["references"] != nil {
+					return nil, fmt.Errorf("image intent did not isolate human feedback from reference contents")
+				}
+				for _, passage := range passages {
+					p := revisionMap(passage)
+					if p["source"] != nil || p["comments"] == nil {
+						return nil, fmt.Errorf("image intent included obsolete source or lost feedback")
+					}
+				}
 				if len(a.imagePlan) > 0 || a.imagePlanLimitations != "" {
 					return reviewResult(map[string]any{"reply": "acquire"})
 				}
