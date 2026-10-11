@@ -4,8 +4,9 @@
 // executable on the machine. Everything that makes that safe is asserted here:
 // it downloads exactly the artifact tool-pins.env names, it refuses anything
 // whose sha256 does not match, --dry-run writes nothing, and it records whether
-// the tool ALREADY existed outside the install dir -- the flag that stops a
-// later uninstall from deleting the user's own k3d.
+// the FILE it would leave in the install dir was somebody else's -- the flag
+// that stops a later uninstall from deleting the user's own k3d -- with a
+// provenance marker beside every binary it places or adopts.
 //
 // The tests are hermetic. Pins point at file:// artifacts the test creates, so
 // nothing here touches the network, and dest is always a t.TempDir(): the real
@@ -296,8 +297,11 @@ func TestInstallVerifiesAndPlaces(t *testing.T) {
 	if info.Mode().Perm()&0o111 == 0 {
 		t.Errorf("installed binary is not executable (mode %v)", info.Mode().Perm())
 	}
-	if names := dirEntries(t, dest); len(names) != 1 {
-		t.Errorf("dest holds %v -- a staging file was left behind", names)
+	if names := dirEntries(t, dest); strings.Join(names, ",") != ".memql-installed-k3d,k3d" {
+		t.Errorf("dest holds %v -- want exactly the binary and its provenance marker", names)
+	}
+	if r.PreExisting == nil || *r.PreExisting {
+		t.Errorf("preExisting=%v, want false -- this run placed the binary", r.PreExisting)
 	}
 }
 
@@ -330,22 +334,35 @@ func TestDigestMismatchIsRefusedAndLeavesNothing(t *testing.T) {
 	}
 }
 
-// TestPreExistingTracksToolsOutsideDest is the flag that protects the user's own
-// tooling. preExisting=true means "this machine already had k3d before we ran",
-// which is what a later uninstall reads to decide it must NOT remove it.
-func TestPreExistingTracksToolsOutsideDest(t *testing.T) {
-	pins, _, _ := k3dPins(t)
+// TestPreExistingIsAboutTheTargetFile is the flag that protects the user's own
+// tooling. preExisting=true means "the file this run leaves at dest/<tool> was
+// somebody else's", which is what a later uninstall reads before removing that
+// file. It used to mean "the tool resolves on PATH from outside dest" -- and on
+// a machine with its own ~/.local/bin/k3d that recorded MemQL's OWN download as
+// the user's, so the uninstall refused to remove it. Removing dest/<tool> never
+// touches another copy on PATH, so that copy decides nothing.
+func TestPreExistingIsAboutTheTargetFile(t *testing.T) {
+	pins, _, body := k3dPins(t)
 
-	t.Run("tool already on PATH outside dest", func(t *testing.T) {
+	t.Run("another copy on PATH does not make our download pre-existing", func(t *testing.T) {
 		home := t.TempDir()
 		pathDir := installPATH(t)
 		writeStub(t, pathDir, "k3d", `echo "k3d version v5.0.0"`)
 		dest := filepath.Join(t.TempDir(), "bin")
 
-		r := decodeInstall(t, mustInstall(t, pathDir, home,
-			"--tool=k3d", "--pins="+pins, "--dest="+dest, "--dry-run"))
-		if r.PreExisting == nil || !*r.PreExisting {
-			t.Errorf("preExisting=%v, want true -- the user's own k3d is on PATH", r.PreExisting)
+		env, out, code := runInstall(t, pathDir, home, "--tool=k3d", "--pins="+pins, "--dest="+dest)
+		if code != 0 {
+			t.Fatalf("install exited %d\noutput:\n%s", code, out)
+		}
+		r := decodeInstall(t, env)
+		if r.PreExisting == nil || *r.PreExisting {
+			t.Errorf("preExisting=%v, want false -- this run created %s; the other k3d is a different file", r.PreExisting, r.Path)
+		}
+		if !strings.Contains(out, "another k3d is on PATH at "+filepath.Join(pathDir, "k3d")) {
+			t.Errorf("the other copy on PATH was not reported:\n%s", out)
+		}
+		if _, err := os.Stat(filepath.Join(dest, ".memql-installed-k3d")); err != nil {
+			t.Errorf("no provenance marker beside the placed binary: %v", err)
 		}
 	})
 
@@ -355,25 +372,73 @@ func TestPreExistingTracksToolsOutsideDest(t *testing.T) {
 		r := decodeInstall(t, mustInstall(t, installPATH(t), home,
 			"--tool=k3d", "--pins="+pins, "--dest="+dest, "--dry-run"))
 		if r.PreExisting == nil || *r.PreExisting {
-			t.Errorf("preExisting=%v, want false -- nothing is on PATH", r.PreExisting)
+			t.Errorf("preExisting=%v, want false -- nothing is there", r.PreExisting)
+		}
+		if names := dirEntries(t, dest); len(names) != 0 {
+			t.Errorf("a dry run wrote %v", names)
 		}
 	})
 
-	t.Run("tool on PATH but only inside dest", func(t *testing.T) {
+	t.Run("a marked binary from a previous install is ours", func(t *testing.T) {
 		home := t.TempDir()
-		pathDir := installPATH(t)
 		dest := filepath.Join(t.TempDir(), "bin")
 		if err := os.MkdirAll(dest, 0o755); err != nil {
 			t.Fatalf("mkdir dest: %v", err)
 		}
 		writeStub(t, dest, "k3d", `echo "k3d version v5.9.0"`)
-
-		// dest itself on PATH: this is the state after a previous install.
-		r := decodeInstall(t, mustInstall(t, pathDir+":"+dest, home,
+		if err := os.WriteFile(filepath.Join(dest, ".memql-installed-k3d"), []byte("marker\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		r := decodeInstall(t, mustInstall(t, installPATH(t)+":"+dest, home,
 			"--tool=k3d", "--pins="+pins, "--dest="+dest, "--dry-run"))
 		if r.PreExisting == nil || *r.PreExisting {
-			t.Errorf("preExisting=%v, want false -- the only k3d is the one WE manage, "+
-				"and mistaking it for the user's makes uninstall refuse to clean up", r.PreExisting)
+			t.Errorf("preExisting=%v, want false -- the marker says MemQL put it there", r.PreExisting)
+		}
+	})
+
+	t.Run("an unmarked file outside MemQL's tool directory stays protected", func(t *testing.T) {
+		home := t.TempDir()
+		dest := filepath.Join(t.TempDir(), "bin")
+		if err := os.MkdirAll(dest, 0o755); err != nil {
+			t.Fatalf("mkdir dest: %v", err)
+		}
+		writeStub(t, dest, "k3d", `echo "k3d version v5.0.0"`)
+		env, out, code := runInstall(t, installPATH(t), home, "--tool=k3d", "--pins="+pins, "--dest="+dest)
+		if code != 0 {
+			t.Fatalf("install exited %d\noutput:\n%s", code, out)
+		}
+		r := decodeInstall(t, env)
+		if r.PreExisting == nil || !*r.PreExisting {
+			t.Errorf("preExisting=%v, want true -- %s was somebody else's before this run", r.PreExisting, r.Path)
+		}
+		if _, err := os.Stat(filepath.Join(dest, ".memql-installed-k3d")); !os.IsNotExist(err) {
+			t.Errorf("a file that was somebody else's was marked as MemQL's (stat err=%v)", err)
+		}
+	})
+
+	t.Run("an unmarked binary in MemQL's own tool directory is adopted", func(t *testing.T) {
+		// The state an install from before the marker left behind: the pinned
+		// binary in ~/.memql/bin, no marker, and possibly a receipt that called
+		// it pre-existing. A run of this script adopts it, so it can be removed.
+		home := t.TempDir()
+		dest := filepath.Join(home, ".memql", "bin")
+		if err := os.MkdirAll(dest, 0o755); err != nil {
+			t.Fatalf("mkdir dest: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dest, "k3d"), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		pathDir := installPATH(t)
+		writeStub(t, pathDir, "k3d", `echo "k3d version v5.0.0"`)
+		r := decodeInstall(t, mustInstall(t, pathDir, home, "--tool=k3d", "--pins="+pins))
+		if r.AlreadyInstalled == nil || !*r.AlreadyInstalled {
+			t.Fatalf("alreadyInstalled=%v, want true -- the pinned binary was already there", r.AlreadyInstalled)
+		}
+		if r.PreExisting == nil || *r.PreExisting {
+			t.Errorf("preExisting=%v, want false -- only the installer puts the pinned k3d in ~/.memql/bin", r.PreExisting)
+		}
+		if _, err := os.Stat(filepath.Join(dest, ".memql-installed-k3d")); err != nil {
+			t.Errorf("the adopted binary got no provenance marker: %v", err)
 		}
 	})
 }

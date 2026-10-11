@@ -22,9 +22,13 @@
 #   retry or prerequisite will make a tool appear in a manifest that does not
 #   pin it.
 #
-#   preExisting records whether the tool ALREADY resolved on PATH from outside
-#   dest. That flag is what a later uninstall reads to leave the user's own k3d
-#   alone: we clean up what we put there, never what we found.
+#   preExisting records whether the FILE at dest/tool was already there and
+#   is not MemQL's. That flag is what a later uninstall reads before it removes
+#   that file: we clean up what we put there, never what we found. A copy of
+#   the tool elsewhere on PATH is a different file that removing ours never
+#   touches, so it is reported and decides nothing. Every binary this script
+#   places or adopts gets a provenance marker beside it (dest/.memql-installed-
+#   <tool>), which remove-artifact.sh reads the way it reads the CA's marker.
 #
 # A digest mismatch is exit 5 and the staged bytes are destroyed. There is no
 # install-with-a-warning path -- an unverified artifact is simply not installed.
@@ -182,6 +186,30 @@ function _install_on_exit() {
 trap _install_on_exit EXIT
 
 #=============================================================================
+# PROVENANCE
+#=============================================================================
+
+# Beside every binary this script places or adopts: dest/.memql-installed-<tool>.
+# remove-artifact.sh carries the same prefix; the two must agree.
+readonly MEMQL_BINARY_MARKER_PREFIX=".memql-installed-"
+
+# is_default_dest <absolute-dest> -- the MemQL home's own tool directory, where
+# the installer puts these tools. Compared after resolving, so a symlinked HOME
+# still matches.
+function is_default_dest() {
+    local default="${HOME:-/root}/.memql/bin"
+    [[ -d "$default" ]] && default="$(cd "$default" && pwd)"
+    [[ "$1" == "$default" ]]
+}
+
+# mark_ours <marker> -- record that MemQL owns the binary beside it. Best
+# effort: a marker that cannot be written leaves the receipt's preExisting=false
+# as the record, which is what every install before the marker relied on.
+function mark_ours() {
+    printf 'MemQL installed the binary beside this file. Removing this file makes an\nuninstall decide from its install record alone.\n' > "$1" 2>/dev/null || true
+}
+
+#=============================================================================
 # ENTRY POINT
 #=============================================================================
 
@@ -232,24 +260,38 @@ function main() {
     fi
     _sha256_of /dev/null >/dev/null 2>&1 || cap_fail 4 "no sha256 tool found (need sha256sum or shasum)"
 
-    # --- pre-existing on PATH, from OUTSIDE dest ------------------------
-    # The flag uninstall reads: true means the machine already had this tool
-    # before we arrived, so removing dest must not take it away.
+    # --- pre-existing: a fact about the FILE an uninstall would remove ---
+    # It used to be "does the tool resolve on PATH from outside dest", which
+    # answers a different question. On a machine with its own ~/.local/bin/k3d
+    # that probe recorded the copy MemQL then downloaded into dest as "already
+    # here", the uninstall refused to remove MemQL's own download, and a later
+    # run -- finding dest first on PATH -- flipped the answer. Removing the file
+    # in dest never touches another copy, so that copy is reported, not used.
+    #
+    # The target file is ours when we place it, when our marker sits beside it,
+    # or when it is already in MemQL's own tool directory, where this installer
+    # is what puts these tools (adopted, so an install from before the marker
+    # can still be cleaned up). Anywhere else an unmarked file is somebody
+    # else's: it stays protected even if we replace it.
     local resolved dest_abs pre_existing=false
     dest_abs="$dest"
     if [[ -d "$dest" ]]; then
         dest_abs="$(cd "$dest" && pwd)"
     fi
     resolved="$(command -v "$tool" 2>/dev/null || true)"
-    if [[ -n "$resolved" && "$resolved" != "${dest_abs}/"* && "$resolved" != "${dest}/"* ]]; then
-        pre_existing=true
-    fi
 
     local target="${dest}/${tool}"
+    local marker="${dest}/${MEMQL_BINARY_MARKER_PREFIX}${tool}"
+    if [[ -e "$target" && ! -f "$marker" ]] && ! is_default_dest "$dest_abs"; then
+        pre_existing=true
+    fi
     cap_info "${tool} ${version} -> ${target}"
     cap_info "pinned sha256 ${digest}"
+    if [[ -n "$resolved" && "$resolved" != "${dest_abs}/"* && "$resolved" != "${dest}/"* ]]; then
+        cap_info "note: another ${tool} is on PATH at ${resolved}; it is not managed by MemQL and stays as it is"
+    fi
     if [[ "$pre_existing" == "true" ]]; then
-        cap_info "note: ${tool} already on PATH at ${resolved} (not managed by us)"
+        cap_info "note: ${target} was already here and is not MemQL's, so an uninstall will leave it"
     fi
 
     cap_result_set     tool        "$tool"
@@ -263,6 +305,9 @@ function main() {
     # --- already installed and verified? --------------------------------
     if [[ -f "$target" ]] && [[ "$(_sha256_of "$target")" == "$digest" ]]; then
         cap_info "${tool} is already installed at the pinned digest -- nothing to do."
+        if [[ -z "$dry_run" && "$pre_existing" == "false" ]]; then
+            mark_ours "$marker"
+        fi
         cap_result_set_raw installed        true
         cap_result_set_raw alreadyInstalled true
         cap_result_set_raw dryRun           "$( [[ -n "$dry_run" ]] && echo true || echo false )"
@@ -302,6 +347,9 @@ function main() {
     mkdir -p "$dest"     || cap_fail 5 "could not create the install directory ${dest}"
     mv "$staged" "$target" || cap_fail 5 "could not move ${tool} into ${target}"
     cap_changed
+    if [[ "$pre_existing" == "false" ]]; then
+        mark_ours "$marker"
+    fi
     cap_info "Installed ${tool} ${version} at ${target}"
 
     cap_result_set_raw installed true

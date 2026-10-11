@@ -90,6 +90,10 @@ readonly MEMQL_CA_MARKER=".memql-created"
 # artifacts may not share one.
 readonly MEMQL_PAIR_MARKER=".memql-issued"
 
+# install-binary.sh writes this prefix plus the tool name beside every binary it
+# places or adopts. The two scripts must agree on it.
+readonly MEMQL_BINARY_MARKER_PREFIX=".memql-installed-"
+
 _CAP_PRUNED=()
 cap_init "install.removeArtifact" \
     "Remove one installer-created artifact: binary | checkout | hostsEntries | mkcertCA | stack | images."
@@ -173,12 +177,24 @@ function remove_binary() {
     # Absence is checked first now. What is not there cannot be taken from
     # anyone, so it reports the honest no-op; the guard still stands between the
     # flag and the damage for everything that IS there.
+    local marker
+    marker="$(dirname "$path")/${MEMQL_BINARY_MARKER_PREFIX}$(basename "$path")"
     if [[ ! -e "$path" && ! -L "$path" ]]; then
+        rm -f "$marker"
         cap_info "No binary at ${path} -- nothing to remove."
         finish binary "$path" false "already absent"
     fi
-    refuse_if_pre_existing binary "$path"
-    rm -f "$path" || cap_fail 5 "could not remove ${path}"
+    # THE MARKER OUTRANKS THE RECEIPT, exactly as for the CA below. A receipt
+    # from before install-binary.sh decided pre-existence by the FILE recorded
+    # MemQL's own download as "already here" whenever another copy of the tool
+    # was on PATH; the marker is written by the run that placed the binary.
+    if [[ -f "$marker" ]]; then
+        cap_info "${marker} says MemQL installed this binary."
+    else
+        refuse_if_pre_existing binary "$path"
+    fi
+    # The marker goes with what it describes, so the directory can be pruned.
+    rm -f "$path" "$marker" || cap_fail 5 "could not remove ${path}"
     cap_changed
     cap_info "Removed ${path}."
     prune_empty_parents "$path"

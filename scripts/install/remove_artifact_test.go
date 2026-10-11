@@ -373,6 +373,33 @@ func TestRemoveArtifactPreExistingLeavesFilesAlone(t *testing.T) {
 	}
 }
 
+// TestRemoveArtifactBinaryMarkerOutranksTheReceipt: install-binary.sh marks
+// every binary it places. A receipt written before it decided pre-existence by
+// the file called MemQL's own download "already here" whenever another copy was
+// on PATH, so the marker -- written by the run that placed the binary -- wins,
+// and goes with the binary so the directory can be pruned. Without a marker the
+// receipt still decides, which the refusal tests above pin.
+func TestRemoveArtifactBinaryMarkerOutranksTheReceipt(t *testing.T) {
+	w := raNewWorld(t, raClusterList, raImageList)
+	bin := raBinaryFile(t)
+	marker := filepath.Join(filepath.Dir(bin), ".memql-installed-"+filepath.Base(bin))
+	if err := os.WriteFile(marker, []byte("MemQL installed the binary beside this file.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stdout, stderr, code := raRun(t, w.env, "--kind=binary", "--path="+bin, "--pre-existing=true")
+	if code != 0 {
+		t.Fatalf("a marked binary was refused (exit %d)\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if _, res := raParse(t, stdout); !res.Removed {
+		t.Error("result.removed=false for a marked binary")
+	}
+	for _, p := range []string{bin, marker} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s is still on disk (stat err=%v)", p, err)
+		}
+	}
+}
+
 // TestRemoveArtifactPreExistingTruthiness: the flag arrives from a JSON
 // receipt, a shell, or an executor, in whatever spelling each of those uses.
 // Anything that is not plainly false must refuse -- a garbled value is a

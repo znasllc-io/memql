@@ -1020,10 +1020,15 @@ test("withInstalledTools -- the tool directory goes to the FRONT of PATH", () =>
 
 test("withInstalledTools -- idempotent, so a session's own choice stays first", () => {
   // The install session passes an env that already names its tool directory.
-  // Prepending a duplicate is harmless but untidy, and a caller that has
-  // deliberately chosen a directory should see it stay where it put it.
   const already = { HOME: "/home/op", PATH: `/home/op/.memql/bin${path.delimiter}/usr/bin` };
   assert.equal(withInstalledTools(already).PATH, already.PATH);
+});
+
+test("withInstalledTools -- a tool directory later on PATH moves to the front", () => {
+  // A profile that APPENDS ~/.memql/bin leaves the person's own k3d first, and
+  // the scripts would run it instead of the pinned one the receipt records.
+  const appended = { HOME: "/home/op", PATH: ["/home/op/.local/bin", "/home/op/.memql/bin", "/usr/bin"].join(path.delimiter) };
+  assert.equal(withInstalledTools(appended).PATH, ["/home/op/.memql/bin", "/home/op/.local/bin", "/usr/bin"].join(path.delimiter));
 });
 
 test("withInstalledTools -- an explicit toolDir wins over the default", () => {

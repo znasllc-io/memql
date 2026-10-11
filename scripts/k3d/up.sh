@@ -174,7 +174,6 @@ APP_COMPARE_TIMEOUT="${MEMQL_K3D_APP_COMPARE_TIMEOUT:-180}"
 OPERATOR_STACK_TIMEOUT="${MEMQL_K3D_OPERATOR_STACK_TIMEOUT:-1200}"
 
 # Outcome tracking (result envelope + idempotency reporting).
-CLUSTER_CREATED=false
 ARGOCD_READY=false
 OPERATOR_STACK_READY=false
 WORKLOADS_READY=false
@@ -337,11 +336,22 @@ function create_cluster() {
     section "Creating k3d cluster '${CLUSTER_NAME}'"
     cap_progress "Creating the cluster"
 
+    # WHICH CLUSTER, AND WHETHER THIS RUN MADE IT, ARE RECORDED NOW rather than
+    # with the rest of the result at the very end. A failure anywhere later --
+    # a cold ArgoCD source fetch timing out was the common one -- used to emit
+    # an envelope without them, the receipt then read the missing field as
+    # "already here", and cleaning up the failed install refused to delete the
+    # cluster it had just created.
+    cap_result_set cluster "$CLUSTER_NAME"
     if k3d cluster list 2>/dev/null | grep -q "^${CLUSTER_NAME}[[:space:]]"; then
         info "Cluster '${CLUSTER_NAME}' already exists -- skipping creation."
         info "To recreate: make down && make up"
+        cap_result_set_raw clusterCreated false
         return 0
     fi
+    # Before `k3d cluster create`: whatever cluster of this name exists after
+    # this point, this run made it -- including one a failed create left behind.
+    cap_result_set_raw clusterCreated true
 
     info "Creating cluster with ${K3D_SERVERS} server(s) and ${K3D_AGENTS} agent(s)..."
 
@@ -382,7 +392,6 @@ function create_cluster() {
         --timeout "120s" >&2
 
     info "Cluster '${CLUSTER_NAME}' created."
-    CLUSTER_CREATED=true
     cap_changed
 
     # Merge kubeconfig for this cluster.
@@ -1605,12 +1614,11 @@ function main() {
     wait_for_workloads
     print_summary
 
-    cap_result_set     cluster        "$CLUSTER_NAME"
+    # `cluster` and `clusterCreated` were recorded by create_cluster.
     cap_result_set     revision       "$TARGET_REVISION"
     cap_result_set     namespace      "$NAMESPACE"
     cap_result_set_raw servers        "$K3D_SERVERS"
     cap_result_set_raw agents         "$K3D_AGENTS"
-    cap_result_set_raw clusterCreated "$CLUSTER_CREATED"
     cap_result_set     domain         "$DOMAIN"
     cap_result_set_raw argocdReady    "$ARGOCD_READY"
     cap_result_set_raw operatorStack  "$OPERATOR_STACK_READY"
