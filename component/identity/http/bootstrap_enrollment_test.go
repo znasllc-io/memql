@@ -77,6 +77,13 @@ func (e *bootstrapEngine) Execute(ctx context.Context, q string) (*memqlengine.E
 		if !auth.OriginFromContext(ctx).IsInternal() {
 			return nil, errors.New("organization setup must be internal")
 		}
+		// As integrations/groups/setup.go does: a blank name is refused. The
+		// fake used to accept any name, which is how an installer claim with no
+		// organization name -- refused for real, after the passkey was saved --
+		// passed every test here.
+		if strings.TrimSpace(extractField(q, "name")) == "" {
+			return nil, errors.New("organization setup requires a name (at most 200 characters) and an owner")
+		}
 		e.organization = extractField(q, "name")
 		e.organizationOwner = extractField(q, "ownerUserId")
 	case strings.Contains(q, "signInIdentitiesForUser(") && strings.Contains(q, "includeHistory: true"):

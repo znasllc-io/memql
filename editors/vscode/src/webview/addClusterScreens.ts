@@ -818,7 +818,7 @@ function recoveryKeyBlock(key: RecoveryKeyView | undefined): string {
     case "alreadyClaimed":
       return `<p class="ac-quiet">Your recovery key was saved during an earlier install.</p>`;
     case "awaitingOwner":
-      return `<p class="ac-quiet">Your recovery key is created after you first sign in.</p>`;
+      return `<p class="ac-quiet">Your recovery key appears here once you register the owner passkey.</p>`;
     case "revealLost":
       // NO PLACE IS NAMED. MemQL OS has no recovery-key screen to send anyone
       // to (the rotation is an owner's admin call, or `memql recovery-key
@@ -887,7 +887,10 @@ export function doneScreen(input: DoneInput): RegionParts {
       state: "done",
       ...(input.now === undefined ? {} : { now: input.now }),
     }) +
-    `<div class="ac-column">${facts(rows)}${recoveryKeyBlock(input.recoveryKey)}${!input.signedIn && (input.canEnrol || input.claim) && input.notListed !== true ? "<p>Register your owner passkey to finish setup. Use the email entered during installation.</p>" : ""}</div>` +
+    // What the act does comes before what follows it: the status already says
+    // a passkey is required, so the line names the consequence (a browser
+    // page) and the one thing to check there.
+    `<div class="ac-column">${facts(rows)}${!input.signedIn && (input.canEnrol || input.claim) && input.notListed !== true ? "<p>Your browser opens to create the passkey. Confirm the email you entered during installation.</p>" : ""}${recoveryKeyBlock(input.recoveryKey)}</div>` +
     (input.startedAt === undefined ? "" : logsDisclosure(input.logsOpen === true, input.logLines ?? []));
 
   // BACK, as a quiet text act: to the landing, which looks at this computer

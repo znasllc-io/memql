@@ -230,9 +230,9 @@ function main() {
         cap_result_set     recoveryKey       ""
         cap_result_set_raw ownerClaimed      false
         cap_result_set     recoveryKeyState  "awaitingOwner"
-        cap_result_set     nextStep     "sign in with the owner magic link -- on a cluster with no owner account, that first sign-in is what creates one -- then run this again to claim the recovery key"
-        cap_info "this cluster has no owner yet. An install that seeds the owner details names the owner as the cluster starts, and the key is minted for them then, so this cluster was started without them."
-        cap_info "Sign in to create the owner, then claim the recovery key and store it somewhere the cluster is not."
+        cap_result_set     nextStep     "register the owner passkey to claim the cluster -- the owner and their recovery key are created then -- and claim the key afterwards"
+        cap_info "this cluster has no owner yet, so there is no recovery key to claim. The owner is created when the first owner passkey is registered, and the key is minted for them at that moment."
+        cap_info "Register the owner passkey, then claim the recovery key and store it somewhere the cluster is not."
         cap_ok
     fi
 

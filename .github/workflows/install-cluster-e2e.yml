@@ -376,12 +376,14 @@ jobs:
       - name: Refresh the package index the install will use
         run: scripts/ci/retry.sh -- timeout 120 sudo apt-get update -qq
 
-      # Identical reasoning to install-e2e.yml, and it matters MORE here:
-      # install.binary's pre-existence flag is PATH-WIDE, so the runner's
-      # preinstalled kubectl would make the receipt say our copy pre-existed,
-      # remove-artifact.sh would refuse to delete it, and the memqlHome surface
-      # would legitimately fail to come back -- a red lane about the runner
-      # image rather than about MemQL.
+      # Written when install.binary's pre-existence flag was PATH-WIDE: the
+      # runner's preinstalled kubectl made the receipt say our copy pre-existed,
+      # remove-artifact.sh refused to delete it, and the memqlHome surface
+      # failed to come back. The flag is decided by the target file and its
+      # provenance marker now (TestPreExistingIsAboutTheTargetFile), so a copy
+      # elsewhere on PATH no longer changes the receipt; the step stays so every
+      # `command -v` in the snapshots and the install sees the machine an
+      # operator without these tools has.
       - name: Take preinstalled pinned tools out of the way
         run: |
           set -euo pipefail
@@ -398,6 +400,23 @@ jobs:
         run: |
           npm ci
           npm run build:install-cli
+
+      # A DESKTOP HAS A BROWSER PROFILE AND THIS RUNNER DOES NOT. mkcert puts the
+      # local CA into every NSS database it finds -- on Linux, Chrome's is
+      # ~/.pki/nssdb -- and on a machine that has never opened a browser it
+      # finds none ("no Firefox and/or Chrome/Chromium security databases
+      # found"), so the CA reaches only the system store, which Chromium on
+      # Linux does not read, and the owner claim below met
+      # ERR_CERT_AUTHORITY_INVALID. An empty database is what Chrome creates on
+      # its first start, so the claim's browser trusts the CA through the
+      # installer's own browser-trust path rather than around it. Before the
+      # BEFORE snapshot, so the baseline includes it.
+      - name: Give the runner the browser profile a desktop has
+        if: matrix.leg == 'from-source'
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.pki/nssdb"
+          certutil -d "sql:$HOME/.pki/nssdb" -N --empty-password
 
       # ALL THREE SNAPSHOTS RUN THE SAME WAY, and neither half of that is
       # cosmetic.
@@ -659,6 +678,44 @@ jobs:
               *) echo "[ ] ERROR: ${required} did not change -- no cluster was built" >&2; exit 1 ;;
             esac
           done
+
+      # ====================================================================
+      # LEG: from-source -- the owner claims the cluster, the editor signs in
+      # ====================================================================
+      #
+      # Every check above stops at the front door, which is how a claim that
+      # locked every local owner out -- a blank organization name, refused
+      # AFTER the passkey was saved -- shipped green. Only this leg runs the
+      # revision's own identity and OS (it builds them), so only here can a
+      # claim test the pull request. editors/vscode/test-host/ownerClaim.ts
+      # drives the editor's own sign-in code with a Chromium virtual
+      # authenticator standing in for the owner: Register owner passkey,
+      # connect, Sign Out, then Sign In with the passkey alone.
+      #
+      # UNDER SUDO, like the install: mkcert trusted the CA as root in this
+      # HOME's NSS database and left rootCA-key.pem root-owned. Playwright's
+      # Chromium runs unsandboxed as root by default.
+      - name: The owner claims the cluster with a passkey, and the editor signs in
+        if: matrix.leg == 'from-source'
+        timeout-minutes: 15
+        working-directory: editors/vscode
+        run: |
+          set -euo pipefail
+          scripts_retry="$GITHUB_WORKSPACE/scripts/ci/retry.sh"
+          "$scripts_retry" -- npx playwright install --with-deps chromium
+          # The harness drives the editor's own connection code, which imports
+          # the file: SDK packages; "Build the install CLI" bundles nothing
+          # that needs them, so nothing on this runner has built them yet.
+          "$scripts_retry" -- bash "$GITHUB_WORKSPACE/scripts/vscode/deps.sh"
+          node_modules/.bin/esbuild test-host/ownerClaim.ts --bundle --platform=node \
+            --format=cjs --target=node20 --external:playwright \
+            --outfile="$RUNNER_TEMP/owner-claim.js"
+          # Its one line per step in this log is the evidence; screenshots
+          # (OUT=) are for a person at a desk, and the bounded ownership
+          # handoff below transfers files, not a root-owned directory of them.
+          sudo -E env "HOME=$HOME" "PATH=$PATH" "NODE_PATH=$PWD/node_modules" \
+            "OWNER_EMAIL=ci@example.com" "DOMAIN=$DOMAIN" \
+            node "$RUNNER_TEMP/owner-claim.js"
 
       # ====================================================================
       # LEG: pipelines

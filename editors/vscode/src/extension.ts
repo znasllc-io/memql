@@ -4672,6 +4672,19 @@ async function signInToCluster(
   return signInFlights.run(cluster.name, () => runSignInToCluster(cluster, deps, flow));
 }
 
+/**
+ * The owner email this computer's install recorded for a local cluster, or ""
+ * -- the ownership page's prefill. The receipt describes whichever cluster was
+ * installed last, so it answers only for the cluster whose domain it recorded.
+ */
+async function ownerEmailFor(cluster: ClusterConfig): Promise<string> {
+  if (cluster.local !== true) return '';
+  const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+  const domain = recordedDomain(receipt);
+  if (domain !== '' && (cluster.domain ?? '') !== '' && domain !== cluster.domain) return '';
+  return recordedOwner(receipt).email;
+}
+
 /** The progress line for each phase of a browser sign-in. */
 const SIGN_IN_PHASE_LINES: Readonly<Record<SignInPhase, string>> = {
   opening: 'Opening your browser',
@@ -4738,10 +4751,11 @@ async function runSignInToCluster(
         (await env.asExternalUri(Uri.parse(url))).toString(true);
       const runDevice = (signal: AbortSignal | undefined): ReturnType<typeof runDeviceCodeFlow> =>
         runDeviceCodeFlow(cluster, { signal, onUserCode, fetch: desktopTrust.fetch });
-      const runBrowser = (signal: AbortSignal | undefined): ReturnType<typeof signInWithDeviceCodeFallback> =>
+      const runBrowser = async (signal: AbortSignal | undefined): ReturnType<typeof signInWithDeviceCodeFallback> =>
         signInWithDeviceCodeFallback(cluster, {
           signal,
           ownerSetup,
+          ...(ownerSetup ? { loginHint: await ownerEmailFor(cluster) } : {}),
           fetch: desktopTrust.fetch,
           onUserCode,
           resolveExternalUri,

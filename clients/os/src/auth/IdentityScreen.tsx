@@ -7,7 +7,7 @@ import { Wizard } from "../kit/Wizard";
 import { OwnershipWizard } from "./OwnershipWizard";
 import { EntryLayout } from "../kit/EntryLayout";
 import { EntryPending } from "../kit/EntryPending";
-import { loginWithPasskey, registerPasskey } from "./passkeys";
+import { loginWithPasskey, onlySecurityKeys, registerPasskey } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
 import { IdentityAccount } from "../apps/identity/IdentityAccount";
 import { SignInPage, signInProblem, type SignInProblem } from "./SignInPage";
@@ -15,6 +15,10 @@ import { IdentityFrame } from "./IdentityFrame";
 import { DeviceApproval, deviceTitle } from "./DeviceApproval";
 import { Mark } from "../chrome/Mark";
 import ReactMarkdown from "react-markdown";
+
+// The local ownership wizard's one sentence, the same on both of its pages:
+// the stage below it changes from the email to the passkey, the wizard does not.
+const LOCAL_OWNER_LEAD = "The passkey is how the owner signs in to this local installation. No email is used.";
 
 export function IdentityScreen({ initialPath, embedded = false }: { initialPath: string; embedded?: boolean }) {
   const { config, authSource, status, completeSignIn } = useAuth();
@@ -64,6 +68,15 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   }, [config, authSource, status, completeSignIn]);
 
   useEffect(() => { void load(initialPath); return () => { generation.current++; }; }, [initialPath, load]);
+  // Asked only where a passkey is created. A browser that can keep it only on
+  // a security key leaves someone without one stuck at its prompt otherwise.
+  const [securityKeyOnly, setSecurityKeyOnly] = useState(false);
+  useEffect(() => {
+    if (page?.page !== "setup_passkey") return;
+    let live = true;
+    void onlySecurityKeys().then(only => { if (live) setSecurityKeyOnly(only); });
+    return () => { live = false; };
+  }, [page?.page]);
   const data = page?.data || {};
   const submit = (next: string, form: Record<string, string>) => { if (!busy) void load(next, form); };
   const run = async (action: () => Promise<void>, signingIn = false) => {
@@ -109,6 +122,23 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
 
   if (page?.page === "setup_wizard") return <EntryLayout><OwnershipWizard data={data} busy={busy} error={error} submit={submit} /></EntryLayout>;
 
+  // A LOCAL installation names its owner at install time, so its first owner
+  // step is the last stop of the ownership wizard, not a separate card: the
+  // email is confirmed in the same surface that then creates the passkey.
+  if (page?.page === "setup_resume" && data.Local === true && data.HasProof !== true) {
+    const steps = ["Organization and owner", "Your installation", "Joining the cluster", "Register passkey"];
+    const valid = /^[^\s@]+@[^\s@]+$/.test((fields.email || "").trim());
+    const proceed = () => { if (valid) submit("/auth/setup/resume", { ...oauthFields(data), ...fields }); };
+    return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Register owner passkey"
+      lead={LOCAL_OWNER_LEAD}
+      label="Ownership setup" open="passkey" onOpen={() => {}}
+      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done",
+        body: i === steps.length - 1 ? <form className="os-identity-fields" onSubmit={event => { event.preventDefault(); if (!busy) proceed(); }}><p>Confirm the owner email used during installation.</p>{field("email", "Owner email", "email")}</form> : undefined }))}
+      notices={error ? <p role="alert">{error}</p> : undefined}
+      status={{ word: busy ? "Checking the owner email" : valid ? "Your turn" : "Enter the owner email", tone: busy ? "busy" : "none" }}
+      acts={busy || !valid ? [] : [{ label: "Continue to passkey", tone: "primary", onAct: proceed }]} /></EntryLayout>;
+  }
+
   if (page?.page === "setup_passkey") {
     const steps = ["Organization and owner", "Your installation", "Joining the cluster", ...(data.Local === true ? [] : ["Verify email"]), "Register passkey"];
     const complete = () => void run(async () => {
@@ -116,10 +146,14 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       if (!destination) throw new Error("Setup is still incomplete. Retry this step.");
       window.location.assign(destination);
     });
-    return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Finish ownership setup"
-      lead={data.Local === true ? "Your passkey is required. No email verification is used on this local installation." : "Email verified. Register a passkey before you can enter MemQL OS."}
+    return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title={data.Local === true ? "Register owner passkey" : "Finish ownership setup"}
+      lead={data.Local === true ? LOCAL_OWNER_LEAD : "Email verified. Register a passkey before you can enter MemQL OS."}
       label="Ownership setup" open="passkey" onOpen={() => {}}
-      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <><p>Create a passkey with your device or security key. Your browser will ask you to confirm.</p><p>Canceling leaves setup incomplete. You can retry this step.</p></> }))}
+      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <>
+        <p>{securityKeyOnly
+          ? "This browser can save a passkey only to a security key. Without one, use Chrome, which can save it to your Google account or your phone."
+          : "Create a passkey with your device or security key. Your browser will ask you to confirm."}</p>
+        <p>Canceling leaves setup incomplete. You can retry this step.</p></> }))}
       notices={error ? <p role="alert">{error}</p> : undefined}
       status={{ word: busy ? "Waiting for passkey" : "Passkey required", tone: busy ? "busy" : "none" }}
       acts={busy ? [] : [{ label: data.HasProof ? "Finish setup" : "Create passkey and finish", tone: "primary", onAct: complete }, ...(error ? [{ label: "Reload setup", text: true, onAct: () => window.location.assign("/") }] : [])]} /></EntryLayout>;

@@ -258,6 +258,9 @@ func (a *App) integrationsIdentity() {
 		// An OIDC first sign-in reaches this only once the provider has
 		// VERIFIED the address -- provisionOidcUser returns early otherwise.
 		OnUserProvisioned: placer.placeFirstSignIn,
+		// The owner exists from this moment, so the recovery-key invariant is
+		// evaluated now rather than at the next identity start.
+		OnOwnerClaimed: func(ctx context.Context) { a.ensureOwnerRecoveryKey(ctx, store) },
 	}
 	// UPSTREAM FEDERATION (memql#4611). Wired unconditionally: both hooks are
 	// inert unless MEMQL_IDENTITY_OIDC_ENABLED is set, and the routes 404

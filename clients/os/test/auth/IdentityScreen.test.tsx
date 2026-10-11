@@ -110,6 +110,28 @@ it.each([true, false])("recovers a skipped passkey with the original owner email
   expect(Object.fromEntries(posts[0]?.[1]?.body as URLSearchParams)).toMatchObject({ email: "ada@example.test", client_id: "editor", code_challenge: "challenge", code_challenge_method: "S256" });
 });
 
+it("opens a local installation's first owner step under the editor's act, with the recorded email filled in", async () => {
+  // The editor sends the email its install recorded as login_hint, and identity
+  // echoes a plain address back as PrefillEmail; the person confirms, not types.
+  vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_resume", csrf: "resume-csrf", data: { Local: true, HasProof: false, PrefillEmail: "ada@example.test" } })));
+  render(<IdentityScreen initialPath="/setup" />);
+  await screen.findByRole("heading", { name: "Register owner passkey" });
+  expect((screen.getByLabelText("Owner email") as HTMLInputElement).value).toBe("ada@example.test");
+  expect(screen.queryByText("Ownership setup has started but is not complete.")).toBeNull();
+  expect(screen.getByRole("button", { name: "Continue to passkey" })).toBeTruthy();
+});
+
+it("offers the forward act only once there is an owner email to confirm", async () => {
+  // An act that is not legal is absent, never disabled (DESIGN.md rule 12).
+  vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_resume", csrf: "resume-csrf", data: { Local: true, HasProof: false } })));
+  render(<IdentityScreen initialPath="/setup" />);
+  const input = await screen.findByLabelText("Owner email");
+  expect(screen.queryByRole("button", { name: "Continue to passkey" })).toBeNull();
+  expect(screen.getByText("Enter the owner email")).toBeTruthy();
+  fireEvent.change(input, { target: { value: "ada@example.test" } });
+  expect(screen.getByRole("button", { name: "Continue to passkey" })).toBeTruthy();
+});
+
 it("keeps a local claim with attestation on its existing passkey", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_resume", data: { Local: true, HasProof: true } })));
   render(<IdentityScreen initialPath="/setup" />);
@@ -130,4 +152,25 @@ it("reaches unfinished owner setup from sign-in without losing the editor reques
   expect(request?.searchParams.get("client_id")).toBe("editor");
   expect(request?.searchParams.get("state")).toBe("pending-state");
   expect(request?.searchParams.get("code_challenge")).toBe("challenge");
+});
+
+const SECURITY_KEY_ONLY = "This browser can save a passkey only to a security key. Without one, use Chrome, which can save it to your Google account or your phone.";
+const ANY_AUTHENTICATOR = "Create a passkey with your device or security key. Your browser will ask you to confirm.";
+
+it.each([
+  // What Firefox on Linux reports: a local owner with no security key had no way forward.
+  ["only a security key", { passkeyPlatformAuthenticator: false, hybridTransport: false }, SECURITY_KEY_ONLY],
+  ["a passkey store and a phone", { passkeyPlatformAuthenticator: true, hybridTransport: true }, ANY_AUTHENTICATOR],
+  ["a phone but no passkey store", { passkeyPlatformAuthenticator: false, hybridTransport: true }, ANY_AUTHENTICATOR],
+  ["nothing it can describe", undefined, ANY_AUTHENTICATOR],
+])("says where the owner passkey can go when the browser offers %s", async (_offer, capabilities, sentence) => {
+  const probe = vi.fn(async () => capabilities);
+  if (capabilities) vi.stubGlobal("PublicKeyCredential", { getClientCapabilities: probe });
+  vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_passkey", data: { Local: true, EnrollmentToken: "enrollment" } })));
+  render(<IdentityScreen initialPath="/auth/setup/passkey" />);
+  await screen.findByRole("button", { name: "Create passkey and finish" });
+  if (capabilities) await waitFor(() => expect(probe).toHaveBeenCalled());
+  expect(await screen.findByText(sentence)).toBeTruthy();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(screen.queryByText(sentence === SECURITY_KEY_ONLY ? ANY_AUTHENTICATOR : SECURITY_KEY_ONLY)).toBeNull();
 });

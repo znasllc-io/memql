@@ -157,6 +157,24 @@ test("appendReceiptEntry replaces an entry for a step that ran twice, but preExi
   );
 });
 
+test("a later run that does not report the artifact's location keeps the recorded one", async () => {
+  // A repair whose clusterUp ran an older checkout's up.sh failed before that
+  // script reported the cluster, and newest-wins erased the name the install
+  // had recorded -- leaving the uninstall nothing to remove.
+  const dir = await tempDir();
+  const file = path.join(dir, "r.json");
+  const stack = { stepId: "clusterUp", script: "k3d.up", receipt: "stack", params: {} };
+  await appendReceiptEntry(file, "install-main", entry({ ...stack, result: { cluster: "memql", clusterCreated: true } }));
+  await appendReceiptEntry(file, "install-main", entry({ ...stack, preExisting: true, result: { reason: "ArgoCD timed out" } }));
+  let r = await readReceipt(file);
+  assert.equal(entryFor(r!, "clusterUp")?.result.cluster, "memql");
+  assert.equal(entryFor(r!, "clusterUp")?.result.reason, "ArgoCD timed out", "the rest of the entry is still the newest run's");
+  // A run that reports a location is still believed.
+  await appendReceiptEntry(file, "install-main", entry({ ...stack, result: { cluster: "other" } }));
+  r = await readReceipt(file);
+  assert.equal(entryFor(r!, "clusterUp")?.result.cluster, "other");
+});
+
 test("preExisting stays true when it was true from the start", async () => {
   // The ratchet only runs one way. An artifact genuinely already on the machine
   // stays protected no matter how many times the step re-runs.

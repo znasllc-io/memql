@@ -58,11 +58,43 @@ SDK_CORE_DIR="${REPO_ROOT}/sdk/ts"
 # in CI and add seconds to every install.
 NPM_FLAGS=(--no-audit --no-fund)
 
+# `npm ci` is the one network operation in this script, and npm does not retry
+# a registry read that times out partway through a tarball. The local
+# installer runs this inside the edge image build, where one dropped read used
+# to fail the whole cluster install. `npm ci` starts from a clean node_modules,
+# so it is safe to repeat; nothing that compiles, type-checks or tests is.
+NPM_CI_ATTEMPTS="${MEMQL_NPM_CI_ATTEMPTS:-3}"
+NPM_RETRY_DELAY_SECONDS="${MEMQL_NPM_RETRY_DELAY_SECONDS:-10}"
+
 #=============================================================================
 # FUNCTIONS
 #=============================================================================
 
 function info() { echo "INFO: $*" >&2; }
+
+# npm_ci DIR -- `npm ci` in DIR, repeated up to NPM_CI_ATTEMPTS times with a
+# growing pause. Says so on stderr when it retries, because a download that
+# needed a second attempt is a signal about the network, not noise.
+function npm_ci() {
+    local dir="$1" attempt=1 status
+    while true; do
+        status=0
+        ( cd "${dir}" && npm ci "${NPM_FLAGS[@]}" ) || status=$?
+        if (( status == 0 )); then
+            if (( attempt > 1 )); then
+                info "npm ci in ${dir#"${REPO_ROOT}"/} succeeded on attempt ${attempt} of ${NPM_CI_ATTEMPTS}."
+            fi
+            return 0
+        fi
+        if (( attempt >= NPM_CI_ATTEMPTS )); then
+            echo "ERROR: npm ci in ${dir#"${REPO_ROOT}"/} failed after ${attempt} attempt(s) (exit ${status})." >&2
+            return "${status}"
+        fi
+        echo "WARN: npm ci in ${dir#"${REPO_ROOT}"/} failed (exit ${status}); retrying in $(( NPM_RETRY_DELAY_SECONDS * attempt ))s (attempt $(( attempt + 1 )) of ${NPM_CI_ATTEMPTS})." >&2
+        sleep "$(( NPM_RETRY_DELAY_SECONDS * attempt ))"
+        attempt=$(( attempt + 1 ))
+    done
+}
 
 function check_node() {
     if ! command -v npm >/dev/null 2>&1; then
@@ -85,7 +117,7 @@ function install_os() {
         exit 4
     fi
     info "Installing OS dependencies (npm ci)..."
-    ( cd "${OS_DIR}" && npm ci "${NPM_FLAGS[@]}" )
+    npm_ci "${OS_DIR}"
 }
 
 # build_workspace_deps builds the `file:` dependency so its dist/ exists
@@ -96,7 +128,8 @@ function install_os() {
 # when the SPA stage of the Docker build already built it.
 function build_workspace_deps() {
     info "Building @znasllc-io/memql-sdk-core (sdk/ts)..."
-    ( cd "${SDK_CORE_DIR}" && npm ci "${NPM_FLAGS[@]}" && npm run build )
+    npm_ci "${SDK_CORE_DIR}"
+    ( cd "${SDK_CORE_DIR}" && npm run build )
 }
 
 function run_install() {

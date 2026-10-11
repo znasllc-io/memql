@@ -44,12 +44,13 @@ test("the installed CA covers discovery, owner setup, OAuth and WebSocket on the
     await assert.rejects(fetch(issuer), /fetch failed/);
     assert.equal(await readOwnerSetupState(cluster, trust.fetch), "unclaimed");
     const tokens = await runAuthorizationFlow(cluster, {
-      ownerSetup: true, fetch: trust.fetch, timeoutMs: 3000,
+      ownerSetup: true, loginHint: "owner@example.test", fetch: trust.fetch, timeoutMs: 3000,
       resolveExternalUri: url => url,
       openExternal: async url => {
         const setup = new URL(url);
         assert.equal(setup.pathname, "/setup");
         assert.equal(setup.searchParams.get("code_challenge_method"), "S256");
+        assert.equal(setup.searchParams.get("login_hint"), "owner@example.test", "the recorded owner email prefills the ownership page");
         assert.equal(exchanges, 0, "no token before the owner ceremony finishes");
         ownerState = "claimed";
         const callback = new URL(setup.searchParams.get("redirect_uri")!);

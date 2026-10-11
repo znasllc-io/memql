@@ -221,3 +221,115 @@ func TestOwnerRecoveryUsesInstallerConfigurationBeforeSettingsExist(t *testing.T
 	begin := bootstrapRegister(t, second, token, false, map[string]string{})
 	require.Equal(t, 200, begin.Code, begin.Body.String())
 }
+
+// THE LOCAL INSTALLER'S CLAIM, as it actually arrives: the installer seeds the
+// owner's name and email and no organization, and nothing configures a brand
+// name. configureSelfAccount refuses a blank name, and that refusal landed at
+// the END of the passkey ceremony -- after the passkey and the owner row were
+// written -- so every retry, and every later passkey sign-in, failed the same
+// way. The owner of a fresh local cluster could never get in.
+func TestLocalInstallerClaimWithNoOrganizationNameCompletes(t *testing.T) {
+	first, second, engine := bootstrapServers(t, "docker-local")
+	first.Cfg.Bootstrap = identity.BootstrapConfig{Domain: "test", OwnerEmail: "owner@example.test", OwnerFirstName: "Ada", OwnerLastName: "Owner", RegistrationMode: "invite_only"}
+	// The local deploy sets no MEMQL_IDENTITY_BRAND_NAME; the test server's
+	// "MemQL Test" brand is what hid this.
+	first.Cfg.BrandName, second.Cfg.BrandName = "", ""
+	engine.settings = nil
+	response := recoveryPage(t, first, "owner@example.test", nil)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	var token string
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == identity.BootstrapCookie {
+			token = cookie.Value
+		}
+	}
+	require.NotEmpty(t, token)
+	claimed := 0
+	first.OnOwnerClaimed = func(context.Context) { claimed++ }
+	begin := bootstrapRegister(t, second, token, false, map[string]string{})
+	require.Equal(t, 200, begin.Code, begin.Body.String())
+	challenge := decodeBegin(t, begin)
+	a := newHTTPSoftwareAuthenticator(t)
+	done := bootstrapRegister(t, first, token, true, WebAuthnRegisterFinishRequest{ChallengeId: challenge.ChallengeId, Credential: a.create(challenge.CreationOptions.Response.Challenge.String())})
+	require.Equal(t, 200, done.Code, done.Body.String())
+	require.Equal(t, 1, claimed, "a completed claim evaluates the recovery-key invariant at once")
+	require.Equal(t, "Ada Owner", engine.organization, "a claim with no organization name is named for its owner")
+	require.Equal(t, "Ada Owner", engine.settings["brandName"])
+	require.NotEmpty(t, engine.settings["bootstrappedAt"])
+	require.NotEmpty(t, done.Result().Cookies())
+}
+
+// A claim the earlier code froze with a blank organization name -- the passkey
+// saved as proof, the organization refused -- must finish on the next attempt
+// rather than refuse forever: once proof exists the reserved settings cannot be
+// re-entered, so the finish itself supplies the owner-named default.
+func TestLocalClaimFrozenWithNoOrganizationNameFinishesOnRetry(t *testing.T) {
+	first, second, engine := bootstrapServers(t, "docker-local")
+	first.Cfg.Bootstrap = identity.BootstrapConfig{Domain: "test", OwnerEmail: "owner@example.test", OwnerFirstName: "Ada", OwnerLastName: "Owner", RegistrationMode: "invite_only"}
+	// The local deploy sets no MEMQL_IDENTITY_BRAND_NAME; the test server's
+	// "MemQL Test" brand is what hid this.
+	first.Cfg.BrandName, second.Cfg.BrandName = "", ""
+	engine.settings = nil
+	response := recoveryPage(t, first, "owner@example.test", nil)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	var token string
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == identity.BootstrapCookie {
+			token = cookie.Value
+		}
+	}
+	begin := bootstrapRegister(t, first, token, false, map[string]string{})
+	require.Equal(t, 200, begin.Code, begin.Body.String())
+	challenge := decodeBegin(t, begin)
+	a := newHTTPSoftwareAuthenticator(t)
+	claimed := 0
+	first.OnOwnerClaimed = func(context.Context) { claimed++ }
+	second.OnOwnerClaimed = first.OnOwnerClaimed
+	engine.fail = "configureSelfAccount"
+	failed := bootstrapRegister(t, first, token, true, WebAuthnRegisterFinishRequest{ChallengeId: challenge.ChallengeId, Credential: a.create(challenge.CreationOptions.Response.Challenge.String())})
+	require.NotEqual(t, 200, failed.Code)
+	require.Zero(t, claimed, "an unfinished claim has no owner to mint a recovery key for")
+	// What the earlier code left behind: proof saved, organization name blank.
+	_, err := first.Store.DirectDB().Exec(`UPDATE identity_bootstrap_enrollment SET payload = jsonb_set(payload, '{Settings,BrandName}', '""'::jsonb)`)
+	require.NoError(t, err)
+	engine.fail = ""
+	resumed := bootstrapRegister(t, second, token, true, map[string]string{})
+	require.Equal(t, 200, resumed.Code, resumed.Body.String())
+	require.Equal(t, 1, claimed)
+	require.Equal(t, "Ada Owner", engine.organization)
+	require.NotEmpty(t, engine.settings["bootstrappedAt"])
+}
+
+// The VS Code extension carries the email its local install recorded as
+// login_hint, so the owner confirms it instead of retyping it. Only a plain
+// address the caller sent comes back, and only into the field it fills; with
+// no hint the page still names nobody.
+func TestSetupResumePrefillsOnlyTheCallersOwnHint(t *testing.T) {
+	server, _, engine := bootstrapServers(t, "docker-local")
+	recoverySettings(engine, false)
+	web, err := identityweb.NewServer(server.Cfg, server.Logger, nil)
+	require.NoError(t, err)
+	web.Store = server.Store
+	mux := http.NewServeMux()
+	web.Mount(mux)
+	page := func(query string) string {
+		get := httptest.NewRequest("GET", "https://identity.test/setup?"+query, nil)
+		get.Header.Set("Accept", identityweb.NativeMediaType)
+		get.Header.Set("Origin", "https://os.test")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, get)
+		require.Equal(t, 200, response.Code, response.Body.String())
+		var body struct {
+			Page string
+			Data map[string]any
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+		require.Equal(t, "setup_resume", body.Page)
+		hint, _ := body.Data["PrefillEmail"].(string)
+		return hint
+	}
+	require.Equal(t, "owner@example.test", page("client_id=memql-vscode&login_hint=owner%40example.test"))
+	require.Equal(t, "", page("login_hint=Owner+%3Cowner%40example.test%3E"), "a display-name form is not one plain address")
+	require.Equal(t, "", page("login_hint=not-an-email"))
+	require.Equal(t, "", page("client_id=memql-vscode"), "no hint, no email on the page")
+}

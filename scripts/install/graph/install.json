@@ -133,7 +133,7 @@
       "retainedReason": "certutil is a general system tool other software uses. MemQL installs it because without it Firefox and Chrome cannot trust the local CA and the front door is unreachable in a browser -- but an application uninstaller that removes distribution packages is how installers earn their reputation, so this one is never taken back.",
       "verify": {
         "kind": "resultTrue",
-        "field": "result.installed"
+        "field": "result.ready"
       }
     },
     {
@@ -192,7 +192,7 @@
     {
       "id": "clusterUp",
       "script": "k3d.up",
-      "timeoutSeconds": 3600,
+      "timeoutSeconds": 5400,
       "label": "Creating the cluster",
       "description": "Creating the cluster and starting MemQL's services in it.",
       "dependsOn": [

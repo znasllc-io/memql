@@ -191,10 +191,25 @@ function main() {
         cap_result_set     package      ""
         cap_result_set_raw preExisting  true
         cap_result_set_raw installed    true
+        cap_result_set_raw ready        true
         cap_ok
     fi
 
     manager="$(nss_manager "$manager_override")"
+    if [[ -z "$manager" ]] && [[ "$(uname -s 2>/dev/null || true)" != "Linux" ]]; then
+        # macOS trusts the local CA through the system keychain, which Safari and
+        # Chrome read; only Firefox needs NSS there, and mkcert-setup.sh already
+        # continues without it. Refusing here stopped the whole install on any
+        # Mac without Homebrew, for a browser the person may not use.
+        cap_info "certutil is not installed and Homebrew is not available -- Safari and Chrome will trust the local CA through the keychain; Firefox will not until you run: brew install nss"
+        cap_result_set     certutil     ""
+        cap_result_set     manager      ""
+        cap_result_set     package      ""
+        cap_result_set_raw preExisting  false
+        cap_result_set_raw installed    false
+        cap_result_set_raw ready        true
+        cap_ok
+    fi
     if [[ -z "$manager" ]]; then
         cap_fail 4 "certutil is missing and no package manager this script knows (apt-get, dnf, yum, pacman, zypper, brew) is on this machine. Install the NSS tools package for this system by hand, then retry."
     fi
@@ -221,6 +236,7 @@ function main() {
     cap_result_set     package      "$package"
     cap_result_set_raw preExisting  false
     cap_result_set_raw installed    true
+    cap_result_set_raw ready        true
     cap_ok
 }
 

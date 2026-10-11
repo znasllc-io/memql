@@ -214,9 +214,9 @@ function main() {
         cap_result_set link ""
         cap_result_set linkState "none"
         cap_info "No magic link in the last ${since} of ${target} logs\
-${email:+ for ${email}}. Identity logs a link when one is REQUESTED, and a \
-restarted pod carries none; request one at the login page and re-run if you \
-need this route. A passkey enrolment link is minted separately."
+${email:+ for ${email}}. A local cluster signs in with passkeys only and issues \
+no magic links, so none is expected there; on a hosted cluster identity logs a \
+link when one is REQUESTED, and a restarted pod carries none."
         cap_ok
     fi
 

@@ -73,15 +73,14 @@ cap_spec_param "binary"     "path to the memql binary inside the pod (default /a
 # no owner account has nobody to enrol, so no link exists, and a verify demanding
 # one turns that into a failed step.
 #
-# `minted` IS THE ORDINARY ANSWER ON A FRESH INSTALL, and was not always. An
-# install that seeded MEMQL_IDENTITY_BOOTSTRAP_* gets its owner ROW written on the
-# identity node's own first boot (App.provisionBootstrapOwner,
-# app/integrations_identity.go -- memql#3591), so by the time this runs there is
-# an account and the mint below succeeds. `awaitingFirstSignIn` survives for the
-# cluster that was never given those values, and for the boot where naming the
-# owner failed; the state is set on both paths and every genuine failure exits
-# non-zero before reaching either -- so a state here means the question was
-# answered, not that a link was produced.
+# `awaitingFirstSignIn` IS THE ORDINARY ANSWER ON A FRESH INSTALL NOW. The owner
+# row is no longer written at identity boot: it is created when the cluster is
+# CLAIMED -- on a local cluster by registering the first owner passkey (no email
+# is involved), on a hosted one after the owner email is verified -- and the
+# claim itself is the passkey enrolment. `minted` is what a cluster that already
+# has its owner answers. The state is set on both paths and every genuine
+# failure exits non-zero before reaching either -- so a state here means the
+# question was answered, not that a link was produced.
 
 # The minted link is <base>/enroll?code=mql_enr_<43>. Matched rather than
 # trusted-verbatim so a stray log line on the pod's stdout cannot be mistaken
@@ -148,16 +147,11 @@ function mint_link() {
     rm -f "$errfile"
 
     if [[ "$rc" != "0" ]]; then
-        # NO OWNER ACCOUNT YET, which is not a failure -- and is no longer the
-        # ordinary fresh install. The env bootstrap writes the clusterSettings row
-        # AND names the owner (App.provisionBootstrapOwner, memql#3591), so an
-        # install that seeded MEMQL_IDENTITY_BOOTSTRAP_* has an account here and
-        # takes the mint path instead. This branch is what remains: a cluster that
-        # was never given those values -- where the user is created by
-        # CreateUserOnFirstLogin when the owner's magic link is verified
-        # (component/identity/magiclink/verifier.go) -- and a boot where naming the
-        # owner did not succeed. Reporting either as a broken mint would turn a
-        # working cluster into a failed install.
+        # NO OWNER ACCOUNT YET, which is not a failure: it is every fresh
+        # install. The owner is created when the cluster is claimed with its
+        # first passkey (component/identity/http/bootstrap_enrollment.go), so
+        # there is nobody to enrol until then. Reporting it as a broken mint
+        # would turn a working cluster into a failed install.
         if printf '%s' "$_EL_STDERR" | grep -q 'no user with primary email'; then
             _EL_UNCLAIMED=1
             return 0
@@ -226,18 +220,16 @@ function main() {
     # next step belongs in the result because this is the last thing an install
     # says to the operator.
     #
-    # THE ADVICE IS BRANCH-SPECIFIC, and saying so is the point. On THIS cluster
-    # there is no owner account, so the magic link's first sign-in is what makes
-    # one -- but that is not the general rule any more, and stating it as one is
-    # what sent operators of an ordinary install looking for a sign-in they had
-    # already been given an account for.
+    # THE ADVICE NAMES THE CLAIM, not a magic link: a local cluster signs in
+    # with passkeys only and refuses magic links, and the claim already IS the
+    # passkey enrolment, so there is nothing to enrol from /me/devices first.
     if [[ "$_EL_UNCLAIMED" == "1" ]]; then
         cap_result_set     enrolUrl        ""
         cap_result_set_raw ownerClaimed    false
         cap_result_set     enrolmentState  "awaitingFirstSignIn"
-        cap_result_set     nextStep     "sign in with the owner magic link -- on a cluster with no owner account, that first sign-in is what creates one -- then enrol a passkey from /me/devices"
-        cap_info "no account for ${email} yet. An install that seeds the owner details names the owner as the cluster starts, so this cluster was started without them."
-        cap_info "Sign in with the magic link this install recovered -- that creates the account -- then enrol a passkey from /me/devices."
+        cap_result_set     nextStep     "register the owner passkey to claim the cluster: Register owner passkey in VS Code, or open ${base:-the identity service}/setup and enter ${email}"
+        cap_info "${email} has no account yet: the owner is created when the first owner passkey is registered, which is how this cluster is claimed."
+        cap_info "Register the owner passkey (VS Code: Register owner passkey) -- the passkey it creates is the owner's sign-in."
         cap_ok
     fi
 

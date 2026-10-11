@@ -488,10 +488,20 @@ function main() {
 
     local state cloned=false updated=false
     state="$(classify_dest "$dest")"
+    if [[ "$state" == "occupied" ]]; then
+        cap_fail 3 "refusing to overwrite ${dest}: it exists and is not a MemQL checkout; move it aside or pass --dest"
+    fi
+    # WHERE THE CHECKOUT IS, AND WHETHER THIS RUN CREATES IT, ARE RECORDED
+    # BEFORE ANY NETWORK WORK. A clone that dies partway (a dropped connection
+    # on a 270 MB repository) used to emit an envelope without them: the receipt
+    # then read the missing field as "already here", and cleaning up the failed
+    # install left the partial ~/.memql/src behind.
+    if [[ "$state" == "absent" || "$state" == "empty" ]]; then
+        cloned=true
+    fi
+    cap_result_set     dest   "$dest"
+    cap_result_set_raw cloned "$cloned"
     case "$state" in
-        occupied)
-            cap_fail 3 "refusing to overwrite ${dest}: it exists and is not a MemQL checkout; move it aside or pass --dest"
-            ;;
         absent|empty)
             case "$ref_kind" in
                 tag)
@@ -509,7 +519,6 @@ function main() {
                     fetch_and_detach "$git_bin" "$repo" "$dest" "$depth" "$want_commit"
                     ;;
             esac
-            cloned=true
             cap_changed
             ;;
         checkout)
@@ -581,9 +590,7 @@ function main() {
     cap_result_set     tag     "$tag"
     cap_result_set     ref     "$ref_name"
     cap_result_set     refKind "$ref_kind"
-    cap_result_set     dest    "$dest"
     cap_result_set     commit  "$commit"
-    cap_result_set_raw cloned  "$cloned"
     cap_result_set_raw updated "$updated"
     cap_ok
 }

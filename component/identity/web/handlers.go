@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"os"
 	"strings"
@@ -666,6 +667,23 @@ func usableSetupDomain(raw string) string {
 	return d
 }
 
+// loginHint is the caller's own guess at the owner email (OAuth's login_hint):
+// the VS Code extension sends the email its local install recorded, so the
+// owner confirms it rather than retyping it. Echoed only into the field it
+// fills, which reveals nothing -- the caller supplied it -- and the resume
+// still compares it with the installer's contact email. Anything that is not
+// one plain address is dropped.
+func loginHint(r *http.Request) string {
+	hint := strings.TrimSpace(r.URL.Query().Get("login_hint"))
+	if hint == "" || len(hint) > 254 {
+		return ""
+	}
+	if addr, err := mail.ParseAddress(hint); err != nil || addr.Address != hint {
+		return ""
+	}
+	return hint
+}
+
 // handleSetupGet renders the first-run wizard. 404s unless the cluster
 // is provably unclaimed -- see setupSealed (memql#3415).
 func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
@@ -684,7 +702,7 @@ func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				return
 			}
-			writeNative(w, map[string]any{"page": "setup_resume", "csrf": CSRFTokenFromRequest(r), "data": map[string]any{"Local": s.Cfg.LocalPasskeyOnly(), "HasProof": len(pending.Proof) > 0, "ReturnTo": r.URL.Query().Get("return_to"), "ClientID": r.URL.Query().Get("client_id"), "RedirectURI": r.URL.Query().Get("redirect_uri"), "OAuthState": r.URL.Query().Get("state"), "CodeChallenge": r.URL.Query().Get("code_challenge"), "CodeChallengeMethod": r.URL.Query().Get("code_challenge_method")}})
+			writeNative(w, map[string]any{"page": "setup_resume", "csrf": CSRFTokenFromRequest(r), "data": map[string]any{"Local": s.Cfg.LocalPasskeyOnly(), "HasProof": len(pending.Proof) > 0, "PrefillEmail": loginHint(r), "ReturnTo": r.URL.Query().Get("return_to"), "ClientID": r.URL.Query().Get("client_id"), "RedirectURI": r.URL.Query().Get("redirect_uri"), "OAuthState": r.URL.Query().Get("state"), "CodeChallenge": r.URL.Query().Get("code_challenge"), "CodeChallengeMethod": r.URL.Query().Get("code_challenge_method")}})
 			return
 		}
 	}

@@ -39,3 +39,19 @@ export async function loginWithPasskey(config: OsRuntimeConfig, context: Record<
   if (!finish.redirectTo) throw new Error("Sign-in did not return a destination");
   return finish.redirectTo;
 }
+
+/**
+ * Whether this browser says it can keep a new passkey only on a security key:
+ * no passkey store of its own and no phone sign-in, as Firefox on Linux
+ * reports. A browser that cannot answer, or answers anything else, is false.
+ */
+export async function onlySecurityKeys(): Promise<boolean> {
+  const credential = globalThis.PublicKeyCredential as unknown as { getClientCapabilities?: () => Promise<Record<string, boolean | undefined>> } | undefined;
+  if (typeof credential?.getClientCapabilities !== "function") return false;
+  try {
+    const capabilities = await credential.getClientCapabilities();
+    return capabilities.passkeyPlatformAuthenticator === false && capabilities.hybridTransport === false;
+  } catch {
+    return false;
+  }
+}

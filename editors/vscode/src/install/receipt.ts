@@ -383,6 +383,12 @@ export async function appendReceiptEntry(file: string, graph: string, entry: Rec
       // direction: an artifact ever seen as pre-existing stays protected.
       const previous = receipt.entries[at];
       if (previous.preExisting === false) recorded.preExisting = false;
+      // WHERE THE ARTIFACT IS survives a later run that did not say. A re-run
+      // that failed before reporting it -- a repair running an older checkout's
+      // script, which recorded the cluster only at the very end -- replaced the
+      // entry and erased the location, and the uninstall that followed had
+      // nothing to name. A run that does report a location still wins.
+      recorded.result = carryForwardLocation(recorded.receipt, previous.result, recorded.result);
       receipt.entries[at] = recorded;
     } else {
       receipt.entries.push(recorded);
@@ -511,6 +517,23 @@ const REMOVAL_TARGETS: Record<string, RemovalTarget[]> = {
   // k3d.up reports the cluster it created as result.cluster.
   stack: [{ flag: "cluster", resultField: "cluster", paramField: "cluster", required: false }],
 };
+
+/** `next`, with any removal-target field it lacks taken from `previous`. */
+function carryForwardLocation(
+  kind: string,
+  previous: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Record<string, unknown> {
+  let merged = next;
+  for (const target of REMOVAL_TARGETS[kind] ?? []) {
+    const known = previous[target.resultField];
+    const reported = next[target.resultField];
+    if ((typeof reported !== "string" || reported.trim() === "") && typeof known === "string" && known.trim() !== "") {
+      merged = { ...merged, [target.resultField]: known };
+    }
+  }
+  return merged;
+}
 
 /**
  * The flags an uninstall step passes to remove-artifact.sh for this entry, or

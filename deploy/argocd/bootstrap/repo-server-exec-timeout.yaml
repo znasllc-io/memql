@@ -9,9 +9,17 @@
 #   Failed to load target state: ... `git fetch origin --tags --force --prune`
 #   failed timeout after 1m30s
 #
-# 90s is too tight for the initial fetch; 300s gives comfortable headroom while
-# still bounding a genuinely hung fetch. Applies in every environment (same
-# repo), so it lives in the shared bootstrap rather than a local-only overlay.
+# 300s WAS NOT ENOUGH EITHER, and the reason is worth keeping. A cold fetch is
+# the whole repository -- about 133,000 objects and 230 MB -- and git does not
+# resume one: a fetch killed at the ceiling throws away its partial pack and the
+# next attempt starts from zero. Measured inside a k3d cluster on a home
+# connection (1.5-3.9 MiB/s), that fetch took about five minutes, so every
+# attempt died just short of finishing and "Continue setup" could never get
+# past the cluster step. 1800s completes the same fetch down to roughly
+# 130 KiB/s -- this machine's WiFi has measured as low as 265 KiB/s -- and
+# still bounds a genuinely hung one. Applies in every environment
+# (same repo), so it lives in the shared bootstrap rather than a local overlay;
+# a fast cloud link never comes near it.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -23,4 +31,4 @@ spec:
         - name: argocd-repo-server
           env:
             - name: ARGOCD_EXEC_TIMEOUT
-              value: "300s"
+              value: "1800s"

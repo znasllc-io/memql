@@ -61,8 +61,13 @@ export function installedToolDir(env: NodeJS.ProcessEnv = process.env): string {
  * instance.
  *
  * IDEMPOTENT. The session passes an env that already names its own tool
- * directory; prepending a duplicate would be harmless but untidy, and a caller
- * that has deliberately chosen a directory should see it stay first.
+ * directory first, and that env is returned unchanged.
+ *
+ * FIRST, NOT MERELY PRESENT. A shell profile that appends ~/.memql/bin puts it
+ * after ~/.local/bin or /usr/local/bin, where a k3d or kubectl of the person's
+ * own would win -- and the scripts would run an unpinned version while the
+ * receipt recorded the pinned one. So a directory found later is moved to the
+ * front rather than left where it was.
  */
 export function withInstalledTools(
   base: NodeJS.ProcessEnv,
@@ -71,9 +76,9 @@ export function withInstalledTools(
   const dir = (toolDir ?? installedToolDir(base)).trim();
   if (dir === "") return base;
   const current = base.PATH ?? "";
-  const entries = current.split(path.delimiter);
-  if (entries.includes(dir)) return base;
-  return { ...base, PATH: current === "" ? dir : `${dir}${path.delimiter}${current}` };
+  const entries = current === "" ? [] : current.split(path.delimiter);
+  if (entries[0] === dir) return base;
+  return { ...base, PATH: [dir, ...entries.filter((entry) => entry !== dir)].join(path.delimiter) };
 }
 
 /** The `error` block of a failed envelope. */

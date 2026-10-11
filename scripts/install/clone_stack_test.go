@@ -481,6 +481,37 @@ func TestCloneStackUnreachableRepoIsExitFive(t *testing.T) {
 	}
 }
 
+// A clone that fails after the ref resolved -- a dropped connection partway
+// through a large repository -- must still say where the checkout is and that
+// this run created it. The receipt reads a missing `cloned` as "already here",
+// and cleaning up the failed install then left the partial checkout behind.
+func TestCloneStackRecordsTheCheckoutBeforeAFailedClone(t *testing.T) {
+	origin := newCloneOrigin(t)
+	dest := cloneDest(t)
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is not on PATH")
+	}
+	// Resolution (ls-remote) reaches the real git; the transfer fails the way a
+	// dropped connection does.
+	wrapper := filepath.Join(t.TempDir(), "git")
+	script := "#!/bin/sh\nfor a in \"$@\"; do case \"$a\" in clone|fetch) echo 'fatal: early EOF' >&2; exit 128;; esac; done\nexec '" + realGit + "' \"$@\"\n"
+	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	env, code, out := cloneRun(t, "--repo="+origin.path, "--tag=v1.0.0", "--dest="+dest, "--git="+wrapper)
+	if code != 5 || env.OK {
+		t.Fatalf("exit %d ok=%v, want a failed clone (exit 5): %s", code, env.OK, out)
+	}
+	if env.Result["dest"] != dest {
+		t.Errorf("result.dest = %v, want %s -- cleanup cannot remove a checkout it was never told about: %s", env.Result["dest"], dest, out)
+	}
+	if env.Result["cloned"] != true {
+		t.Errorf("result.cloned = %v, want true -- this run created the checkout, so cleanup may remove it: %s", env.Result["cloned"], out)
+	}
+}
+
 func TestCloneStackMissingGitIsExitFour(t *testing.T) {
 	origin := newCloneOrigin(t)
 	env, code, out := cloneRun(t, "--repo="+origin.path, "--tag=v1.0.0",

@@ -54,6 +54,7 @@ func (s *Store) PendingOwnerSetup(ctx context.Context, cfg Config) (*BootstrapEn
 	if settings.BrandName == "" {
 		settings.BrandName = cfg.BrandName
 	}
+	settings.BrandName = OrganizationNameFor(*settings)
 	owners, err := s.OwnerUserIds(ctx)
 	if err != nil {
 		return nil, err
