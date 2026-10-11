@@ -109,11 +109,11 @@ func TestEveryCIJobHasATimeout(t *testing.T) {
 var timeoutMedianMinutes = map[string]float64{
 	"changes":   0.1,
 	"go-checks": 6.3,
-	// Re-measured 2026-09-13: the median of 13 successful db-tests runs on
-	// main and PRs, spread 15.3-19.9 min by runner. The audit's 5.8 predates
-	// most of the packages the lane now owns, and a 20-minute cap sized
-	// against it cancelled healthy runs, one of them a push to main.
-	"db-tests":         19.4,
+	// Re-measured 2026-10-11 from the sharded lane: the median, over the M0
+	// window's 212 Go-touching pull-request runs, of each run's slowest
+	// db-tests shard (scripts/ci/prtiming, memql#5697); the maximum was 12.0.
+	// The 19.4 it replaces was the unsharded lane's.
+	"db-tests":         7.4,
 	"vscode-extension": 4.0,
 	"build-node-tags":  1.9,
 	"conformance":      1.6,
