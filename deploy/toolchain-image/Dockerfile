@@ -82,7 +82,7 @@ FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddf
 # green: move K3S_VERSION and this line together. Its embedded kustomize,
 # v5.5.0, renders the `components:` these overlays use, which Debian's own
 # kubectl, 1.20.2, cannot. The binary is static, so it runs on the base below.
-FROM registry.k8s.io/kubectl:v1.32.13@sha256:fbfd671cd51f0be98174170f2000cbb97d2788e2270bc1697323d401558307e1 AS kubectl-dist
+FROM registry.k8s.io/kubectl:v1.37.1@sha256:b7cab618e281b1ee7484e7b706a96e2135fbb6e072c2a573a7dab4e87d7f2385 AS kubectl-dist
 
 # The Docker CLIENT and nothing else: the official cli image, by digest, copied
 # out by stage name without its buildx and compose plugins. There is NO daemon
