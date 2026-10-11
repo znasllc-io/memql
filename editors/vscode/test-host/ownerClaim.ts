@@ -37,6 +37,8 @@ const out = process.env.OUT ?? "";
 const cluster = { name: "memql", domain, endpoint: `api.${domain}:443`, issuer: `https://identity.${domain}`, local: true } as ClusterConfig;
 const trust = new DesktopTrust(async () => [cluster]);
 let shots = 0;
+/** What the ownership page's email field held when it first appeared, before anything was typed. */
+let arrivedWith: string | undefined;
 
 function step(message: string): void {
   console.log(`[x] ${message}`);
@@ -67,8 +69,10 @@ async function playTheOwner(page: Page, url: string, done: { settled: boolean })
       return true;
     };
     const ownerEmail = page.getByLabel("Owner email");
-    if ((await ownerEmail.count()) > 0 && (await ownerEmail.first().inputValue()) !== email) {
-      await ownerEmail.first().fill(email);
+    if ((await ownerEmail.count()) > 0) {
+      const value = await ownerEmail.first().inputValue();
+      arrivedWith ??= value;
+      if (value !== email) await ownerEmail.first().fill(email);
     }
     if (await press(/^Continue to passkey$/, "owner-email")) continue;
     if (await press(/^(Create passkey and finish|Finish setup)$/, "create-passkey")) continue;
@@ -132,6 +136,8 @@ async function main(): Promise<void> {
     await addVirtualAuthenticator(await context.newCDPSession(page));
 
     const claim = await signIn(page, true);
+    if (arrivedWith !== email) throw new Error(`the ownership page arrived with ${JSON.stringify(arrivedWith ?? "no email field")}, not the install's owner email`);
+    step("the ownership page arrived with the install's owner email filled in");
     step("Register owner passkey: the passkey claimed the cluster and the editor received its tokens");
     const after = await readOwnerSetupState(cluster, trust.fetch as never);
     if (after !== "claimed") throw new Error(`the claim completed but the cluster reads ${after}`);
