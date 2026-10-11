@@ -30,6 +30,7 @@ prompt libraryRevisionItem {
 @level("strong")
 @templateFile("prompts/libraryRevisionResearch.tmpl")
 prompt libraryRevisionResearch {
+ imageSourceOnly bool
  references string
  priorEvidence []string
  gaps string
@@ -63,8 +64,7 @@ prompt libraryRevisionIntent {
 @level("fast")
 @templateFile("prompts/libraryRevisionImageIntent.tmpl")
 prompt libraryRevisionImageIntent {
- references string
- passages string!
+ passages []object!
  instruction string
 }
 
@@ -97,12 +97,14 @@ prompt libraryRevisionImagePlan {
  instruction string
  evidence string!
  previous string
+ gaps string
 }
 
 /// Judge actual proposed prose against all feedback, including partial edits.
 @level("strong")
 @templateFile("prompts/libraryRevisionCompletion.tmpl")
 prompt libraryRevisionCompletion {
+ edits []object!
  previousFindings []object
  recovery string
  imageUsage string

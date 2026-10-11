@@ -44,7 +44,8 @@
           {
             "args": {
               "data": {
-                "instruction": null
+                "instruction": null,
+                "passages": []
               },
               "templateId": "libraryRevisionImageIntent"
             },
@@ -365,7 +366,8 @@
           {
             "args": {
               "data": {
-                "instruction": null
+                "instruction": null,
+                "passages": []
               },
               "templateId": "libraryRevisionImageIntent"
             },

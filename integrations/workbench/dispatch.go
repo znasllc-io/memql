@@ -387,19 +387,38 @@ func (i *Integration) handleHTTPFetch(ctx context.Context, _ *workspace, args ma
 	}
 	truncated := false
 	if len(bodyBytes) > maxHTTPRespBytes {
-		bodyBytes = bodyBytes[:maxHTTPRespBytes]
+		// Avoid treating a UTF-8 rune split by the hard cap as binary.
+		end := maxHTTPRespBytes
+		for end > maxHTTPRespBytes-(utf8.UTFMax-1) && !utf8.RuneStart(bodyBytes[end]) {
+			end--
+		}
+		if utf8.FullRune(bodyBytes[end:maxHTTPRespBytes]) {
+			// FullRune also recognizes an invalid byte. Do not conceal invalid
+			// input by trimming it as though it were an incomplete valid rune.
+			end = maxHTTPRespBytes
+		}
+		bodyBytes = bodyBytes[:end]
 		truncated = true
 	}
 	sourceBytes := len(bodyBytes)
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
+	binaryType := (strings.HasPrefix(contentType, "image/") && contentType != "image/svg+xml") ||
+		strings.HasPrefix(contentType, "audio/") || strings.HasPrefix(contentType, "video/") ||
+		strings.HasPrefix(contentType, "font/") || contentType == "application/pdf" || contentType == "application/octet-stream"
+	if binaryType || !utf8.Valid(bodyBytes) || bytes.IndexByte(bodyBytes, 0) >= 0 {
+		// This is a text tool, not an asset download. Returning binary bytes as
+		// text corrupts evidence and floods model context/checkpoint storage.
+		result := errResult("http_fetch", "unsupported_content", "http_fetch returns UTF-8 text only. Use an image or file acquisition capability for binary assets or unsupported text encodings.")
+		result.Payload = map[string]any{"url": url, "method": method, "status": resp.StatusCode, "contentType": contentType, "body": "", "sourceBytes": sourceBytes, "truncated": truncated}
+		return result
+	}
 	if extractText {
 		bodyBytes = []byte(readabletext.Extract(string(bodyBytes), resp.Header.Get("Content-Type")))
 	}
 	if len(bodyBytes) > outputLimit {
 		end := outputLimit
-		if extractText {
-			for end > 0 && !utf8.RuneStart(bodyBytes[end]) {
-				end--
-			}
+		for end > 0 && !utf8.RuneStart(bodyBytes[end]) {
+			end--
 		}
 		bodyBytes = bodyBytes[:end]
 		truncated = true

@@ -3,6 +3,7 @@
 /// http_fetch accepts {url, method?, headers?, body?, timeoutSec?, extractText?, maxBytes?}.
 /// For web-page research use extractText=true; this returns readable prose capped at 12 KiB by default.
 /// maxBytes bounds the returned body; truncated=true means the result is an excerpt.
+/// Binary responses are refused as unsupported_content; use an image/file acquisition tool for assets.
 /// For research without search APIs, use public search pages. If headless research
 /// cannot obtain evidence, probe workerStatus and use an authorized workerComputer
 /// browser session when computerUseOnline=true. Preserve findings across fallback;

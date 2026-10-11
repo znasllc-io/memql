@@ -46,6 +46,7 @@ func TestDocumentRevisionCompletionOmitsObsoleteSource(t *testing.T) {
 		t.Fatal("missing completion prompt")
 	}
 	data := map[string]any{
+		"edits":       []any{},
 		"document":    "### Corrected profile\nVerified current prose.",
 		"instruction": "Change only this profile.", "explanation": "Corrected the profile.",
 		"passages": []any{map[string]any{
@@ -89,5 +90,175 @@ func TestDocumentRevisionCompletionOmitsObsoleteSource(t *testing.T) {
 	data["previousFindings"] = "not a findings array"
 	if err := prompt.ValidateData(data); err == nil {
 		t.Fatal("invalid prior findings admitted")
+	}
+}
+
+// The preview contains untouched sections; edit scope comes from native patches,
+// not from counting profiles in that preview. Old prose and model reasons must
+// not become competing candidates in the reviewer prompt.
+func TestDocumentRevisionCompletionCarriesMeasuredEditScope(t *testing.T) {
+	prompts, _ := loadCorpusPrompts(t)
+	prompt, ok := prompts.Get("libraryRevisionCompletion")
+	if !ok {
+		t.Fatal("missing completion prompt")
+	}
+	data := map[string]any{
+		"document":    "# Report\n\nUntouched introduction.\n\n### First\nNew first.\n\n### Second\nNew second.\n\nUntouched conclusion.",
+		"instruction": "Replace exactly two profiles; keep everything else.",
+		"explanation": "Two replacements.", "passages": []any{},
+		"edits": []any{
+			map[string]any{"startLine": 5, "endLine": 7, "commentIds": []any{"request-first"}, "before": "Obsolete first prose.", "after": "New first.", "reason": "Untrusted editor claim."},
+			map[string]any{"startLine": 9, "endLine": 11, "commentIds": []any{"request-second"}, "before": "Obsolete second prose.", "after": "New second."},
+		},
+	}
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := prompt.Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Validated edit count: 2", "Original lines 5–7", "Original lines 9–11", "request-first", "request-second", "Untouched introduction.", "Untouched conclusion."} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("missing measured scope or preview context %q", want)
+		}
+	}
+	for _, obsolete := range []string{"Obsolete first prose.", "Obsolete second prose.", "Untrusted editor claim."} {
+		if strings.Contains(rendered, obsolete) {
+			t.Fatalf("obsolete/editor text leaked into measured scope: %q", obsolete)
+		}
+	}
+	data["edits"] = []any{}
+	rendered, err = prompt.Render(data)
+	if err != nil || !strings.Contains(rendered, "Validated edit count: 0") {
+		t.Fatalf("lost no-op scope: %v", err)
+	}
+	data["edits"] = "not an edit list"
+	if err := prompt.ValidateData(data); err == nil {
+		t.Fatal("invalid edit scope admitted")
+	}
+}
+
+func TestDocumentRevisionImagePlanCarriesMissingEvidence(t *testing.T) {
+	prompts, _ := loadCorpusPrompts(t)
+	prompt, ok := prompts.Get("libraryRevisionImagePlan")
+	if !ok {
+		t.Fatal("missing image planning prompt")
+	}
+	data := map[string]any{
+		"passages": "Requested portraits", "references": "Attached references",
+		"evidence": "Exact raster and its catalog association", "previous": `{"images":[],"limitations":"Missing raster"}`,
+		"gaps": "Missing raster",
+	}
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := prompt.Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Missing raster", "Exact raster and its catalog association", "structurally valid but incomplete", "retaining its already verified entries unchanged"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("missing recovery context %q: %s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "previous plan failed validation") {
+		t.Fatal("missing evidence misrepresented as invalid JSON")
+	}
+	delete(data, "gaps")
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err = prompt.Render(data)
+	if err != nil || !strings.Contains(rendered, "previous plan failed validation") {
+		t.Fatalf("contract repair lost: %s %v", rendered, err)
+	}
+	delete(data, "previous")
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prompt.Render(data); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDocumentImageIntentUsesOnlyHumanRequests(t *testing.T) {
+	prompts, _ := loadCorpusPrompts(t)
+	prompt, ok := prompts.Get("libraryRevisionImageIntent")
+	if !ok {
+		t.Fatal("missing image intent prompt")
+	}
+	data := map[string]any{
+		"passages": []any{map[string]any{
+			"source":   "OBSOLETE_SOURCE_SENTINEL",
+			"comments": []any{map[string]any{"feedback": "Reuse the supplied portrait of A and find an archival portrait of B.", "quote": "QUOTED_SOURCE_SENTINEL"}},
+		}},
+		"instruction": "Acquire only B; preserve A.",
+	}
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := prompt.Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Reuse the supplied portrait of A and find an archival portrait of B.", "Acquire only B; preserve A."} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("lost human direction %q", want)
+		}
+	}
+	for _, absent := range []string{"OBSOLETE_SOURCE_SENTINEL", "QUOTED_SOURCE_SENTINEL"} {
+		if strings.Contains(rendered, absent) {
+			t.Fatalf("image routing includes irrelevant source: %s", absent)
+		}
+	}
+	data["passages"] = "unstructured source and feedback"
+	if err := prompt.ValidateData(data); err == nil {
+		t.Fatal("unstructured routing input accepted")
+	}
+}
+
+// Image recovery must leave enough active context for source metadata and tools,
+// and must not inherit prose-writing or pixel-inspection tasks from the full brief.
+func TestDocumentRevisionImageSourceResearchIsScoped(t *testing.T) {
+	prompts, _ := loadCorpusPrompts(t)
+	prompt, ok := prompts.Get("libraryRevisionResearch")
+	if !ok {
+		t.Fatal("missing research prompt")
+	}
+	data := map[string]any{
+		"imageSourceOnly": true, "document": "Obsolete document prose.",
+		"passages": "Unrelated editing brief.", "references": "Unapproved reference draft.",
+		"instruction": "Rewrite two biographies.", "previous": []any{map[string]any{"after": "Prior proposed prose."}},
+		"gaps":          "Missing subject's catalog-to-raster link.",
+		"priorEvidence": []any{"Retrieved catalog https://museum.example/record and its rights."},
+	}
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := prompt.Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Missing subject's catalog-to-raster link.", "https://museum.example/record", "return the ledger immediately", "pixels have not yet been inspected", "Do not fetch binary images"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("missing source handoff contract %q", want)
+		}
+	}
+	for _, unwanted := range []string{"Obsolete document prose.", "Unrelated editing brief.", "Unapproved reference draft.", "Rewrite two biographies.", "Prior proposed prose.", "When visual inspection is available"} {
+		if strings.Contains(rendered, unwanted) {
+			t.Fatalf("unrelated work leaked into image lookup: %q", unwanted)
+		}
+	}
+	if len(rendered) > 4000 {
+		t.Fatalf("source lookup prompt grew beyond its compact brief: %d bytes", len(rendered))
+	}
+	delete(data, "imageSourceOnly")
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err = prompt.Render(data)
+	if err != nil || !strings.Contains(rendered, "Obsolete document prose.") || strings.Contains(rendered, "return the ledger immediately") {
+		t.Fatalf("ordinary research contract changed: %v", err)
 	}
 }

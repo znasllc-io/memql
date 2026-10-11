@@ -299,13 +299,23 @@ seed capability cap-developer-read-app-accounts-logs { roleSlug: "developer"  ve
 seed capability cap-admin-read-app-accounts-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:accounts/logs"  predefined: true }
 
 // ---- app:campaigns (registry floor: no floor) ----
-@description("owner: inspect the restricted Email test inbox.")
+@description("owner: open the email app.")
 seed capability cap-owner-read-app-email { roleSlug: "owner" verb: "read" resourceType: "app:email" predefined: true }
+@description("developer: open the email app.")
+seed capability cap-developer-read-app-email { roleSlug: "developer" verb: "read" resourceType: "app:email" predefined: true }
+@description("admin: open the email app.")
+seed capability cap-admin-read-app-email { roleSlug: "admin" verb: "read" resourceType: "app:email" predefined: true }
+@description("user: open the email app.")
+seed capability cap-user-read-app-email { roleSlug: "user" verb: "read" resourceType: "app:email" predefined: true }
+@description("viewer: open the email app.")
+seed capability cap-viewer-read-app-email { roleSlug: "viewer" verb: "read" resourceType: "app:email" predefined: true }
+@description("owner: inspect the restricted Email test inbox, which can hold sign-in links for any test recipient.")
+seed capability cap-owner-read-app-email-inbox { roleSlug: "owner" verb: "read" resourceType: "app:email/inbox" predefined: true }
+@description("developer: inspect the restricted Email test inbox, which can hold sign-in links for any test recipient.")
+seed capability cap-developer-read-app-email-inbox { roleSlug: "developer" verb: "read" resourceType: "app:email/inbox" predefined: true }
 seed capability cap-owner-read-app-email-logs { roleSlug: "owner" verb: "read" resourceType: "app:email/logs" predefined: true }
 seed capability cap-developer-read-app-email-logs { roleSlug: "developer" verb: "read" resourceType: "app:email/logs" predefined: true }
 seed capability cap-admin-read-app-email-logs { roleSlug: "admin" verb: "read" resourceType: "app:email/logs" predefined: true }
-@description("developer: inspect the restricted Email test inbox.")
-seed capability cap-developer-read-app-email { roleSlug: "developer" verb: "read" resourceType: "app:email" predefined: true }
 @description("owner: open the campaigns app -- reproduces the OS registry floor no floor (memql#5300).")
 seed capability cap-owner-read-app-campaigns { roleSlug: "owner"  verb: "read"  resourceType: "app:campaigns"  predefined: true }
 @description("developer: open the campaigns app -- reproduces the OS registry floor no floor (memql#5300).")

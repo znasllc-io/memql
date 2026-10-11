@@ -81,6 +81,27 @@ plan recovery; it cannot silently disappear from the document. Successful
 assets and research receipts survive a resume on another replica. This does
 not authorize bypassing a source's access restrictions.
 
+Image acquisition intent is classified from human feedback and additional
+direction alone. Old source passages and attached draft contents do not enter
+that routing call. A mixed request to reuse one supplied image and acquire
+another still requires acquisition; the later planner reuses the supplied
+asset and plans only the missing one.
+
+Image planning can also expose missing evidence before any download: a catalog
+record without its associated raster URL is not a usable acquisition. Even if
+prose research was sufficient, the document DSL performs one targeted research
+pass for the plan's specific missing assets and one plan completion. Existing
+verified entries and research are retained. The completed plan passes the same
+native validation. Unresolved evidence stops before image effects or prose
+editing, rather than sending a missing-asset problem to a text-only repair.
+This bounded recovery uses the existing run budget and durable step receipts.
+Source recovery receives only the selected image gaps and prior evidence, without
+repeating document passages or reference drafts. It returns as soon as the source
+record establishes the subject, exact raster link and reuse terms. Binary
+acquisition and visual review belong to the subsequent stages; source research
+must not spend its remaining context and calls probing images through text tools.
+A source ledger does not claim that pixels have already been inspected.
+
 A saved image is not a completed document edit. Revision proposals check actual
 Markdown image nodes against the prepared asset manifest; prose links and code
 examples do not count as embedded images. The DSL makes one corrective edit
@@ -93,6 +114,12 @@ model assessments guide recovery; they do not replace human factual review.
 The assessment uses the prose judgment level and treats the proposed document
 as the source of truth for its contents. Original selections and quoted feedback
 are context, not proof that rejected wording remains in the candidate.
+Every assessment also receives the validated patch count, original line ranges
+and feedback IDs. The full preview must retain unaffected sections; those
+sections are not additional edits. Patch metadata establishes the proposed
+scope, while the model still checks the requested content and evidence. Old
+replacement text and the editor's reasons are not repeated in this scope
+summary, and execution provenance is not inferred from document front matter.
 
 Before an assessment's objections trigger an edit or block a repaired proposal,
 the DSL requests one independent reassessment of those objections against the
@@ -109,7 +136,10 @@ preserves the original source/model attribution. Changed feedback does not
 inherit that authority. Research and generation are not repeated on approval.
 
 When a person modifies one proposed item, the new request captures the prior
-proposal’s verified image receipts. Images retained in the revised Markdown
+proposal’s verified image receipts. Earlier research may still be reused, but
+its image acquisition batch is not treated as a new acquisition for changed
+feedback. This also applies when the parent proposal itself reused images from
+a stopped attempt. Images retained in the revised Markdown
 keep their exact bytes and provenance; removed images need not remain in the
 manifest. Approval and application revalidate those retained assets on the
 receiving replica. Supplying another request’s image identifiers or claiming
@@ -261,6 +291,14 @@ Archives and execution checkpoints live in shared persistent storage, under
 the run owner's authority. Retrieval from another replica must not depend on
 the first replica's memory. A reference grants no access to another owner's
 data or another run's archive.
+
+Execution continuations preserve complete tool exchanges in an encoded JSON
+receipt, including control characters that the storage layer cannot accept
+as plain text. Restoration verifies the original content hash; existing
+receipts remain readable. The workbench's `http_fetch` is a UTF-8 text surface:
+binary responses return `unsupported_content` with source metadata, rather
+than putting image or file bytes into model context. Workflows acquire binary
+assets through their image or file capabilities.
 
 Active context and retrieval pages are bounded. The durable journal grows
 with actual work; that is retained evidence, not an in-process cache. Retention

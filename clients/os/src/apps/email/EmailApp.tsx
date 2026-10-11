@@ -18,7 +18,8 @@ export interface CapturedEmail {
 export function EmailApp({ sectionId, intent, consumeIntent }: OsAppProps) {
   if (sectionId === "logs") return <AppLogsSection app="email" subjectConcepts={["v1:email:capturedMessage"]} intent={intent} consumeIntent={consumeIntent} />;
   if (sectionId === "settings") return <div className="os-settings"><Head title="Email settings" /><Panel label="Email delivery"><p>Delivery is managed in Settings, under Integrations. A capture transport keeps test messages in this installation. Connecting an incoming mail server will be available in a future update.</p></Panel></div>;
-  return <EmailInbox />;
+  if (sectionId === "inbox") return <EmailInbox />;
+  return null;
 }
 
 export function EmailInbox() {
