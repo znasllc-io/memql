@@ -420,14 +420,25 @@ func (s *Store) SendToRecipient(ctx context.Context, templateID, recipientID, se
 // AddRecipient enrols a row-derived address into the rule's audience, so it
 // gains a membership, a subscription state and a working unsubscribe. `signup`
 // is the honest source value: a product flow added it.
-func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName string) error {
-	return s.exec(ctx, call("mutation", "addRecipient",
-		arg{"recipientId", recipientID},
-		arg{"audienceId", memql.BareShortId(audienceID)},
-		arg{"email", email},
-		arg{"displayName", displayName},
-		arg{"source", "signup"},
-	))
+//
+// accountID is the rule's organization, as a BARE id -- the caller bare-ifies it
+// once, because BareShortId is not idempotent (memql#2981). A recipient is an
+// organization-scoped row and the send refuses one outside the campaign's
+// organization, so an address enrolled without it is a recipient the very next
+// step would refuse. A rule that names no organization (one that predates
+// organizations) leaves it off the call, and addRecipient stamps "".
+func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, accountID string) error {
+	args := []arg{
+		{"recipientId", recipientID},
+		{"audienceId", memql.BareShortId(audienceID)},
+		{"email", email},
+		{"displayName", displayName},
+		{"source", "signup"},
+	}
+	if accountID != "" {
+		args = append(args, arg{"accountId", accountID})
+	}
+	return s.exec(ctx, call("mutation", "addRecipient", args...))
 }
 
 // UsersInRoles reads the cluster people the operational lane mails.

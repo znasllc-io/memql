@@ -332,7 +332,8 @@ func (f *Firer) fireAudience(ctx context.Context, rule Rule, nodeID string, even
 // enrolled into the rule's audience first, because an unsubscribe token is
 // minted from (owner, recipient, campaign) -- an address with no recipient row
 // has no way to opt out, and marketing mail nobody can unsubscribe from is the
-// one thing this engine will not send.
+// one thing this engine will not send. The enrolment names the rule's
+// organization, because the send refuses a recipient outside the campaign's.
 func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, event map[string]any, out *FireOutcome) error {
 	address := strings.TrimSpace(payloadField(event, rule.RecipientField))
 	if address == "" {
@@ -360,7 +361,7 @@ func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, ev
 		// enrolment is what an unsubscribe later acts on, so a second firing
 		// for the same address consults the state the first one gave it.
 		target = "rcp" + dedupeKey(rule.AudienceID, address, "")
-		if err := f.store.AddRecipient(ctx, target, rule.AudienceID, address, payloadField(event, "displayName")); err != nil {
+		if err := f.store.AddRecipient(ctx, target, rule.AudienceID, address, payloadField(event, "displayName"), memql.BareShortId(rule.AccountID)); err != nil {
 			return err
 		}
 	}
