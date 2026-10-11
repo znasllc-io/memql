@@ -112,7 +112,7 @@ jobs:
       # bytes that were about to be published.
       - name: keep the archive
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: memql-${{ matrix.target }}.vsix
           path: ${{ runner.temp }}/memql-${{ matrix.target }}.vsix
@@ -151,7 +151,7 @@ jobs:
           cache: false
       - name: package web without native executables
         run: bash scripts/vscode/package.sh --target=web --out="$RUNNER_TEMP/memql-web.vsix"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: memql-web.vsix
           path: ${{ runner.temp }}/memql-web.vsix
