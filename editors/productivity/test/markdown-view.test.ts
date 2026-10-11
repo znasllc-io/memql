@@ -33,6 +33,38 @@ test("a message from another origin is ignored; the host's own origin still rend
   f.dom.window.close();
 });
 
+test("applied review consumes its additional direction and the next request starts clean", () => {
+  const f=fixture();f.send({type:"restoreDraft"});f.document();
+  f.send({type:"comments",rows:[{id:"first",body:"First change",anchor:{kind:"document"}}]});
+  f.input("revision-instruction","  Use the supplied evidence.  ");
+  const status={status:"running",proposal:{artifactId:"a",revision:"file:1",version:1,instruction:"Use the supplied evidence."}};
+  f.send({type:"revision",status});
+  f.send({type:"revision",status:{...status,status:"failed"}});
+  assert.equal((f.el("revision-instruction") as HTMLTextAreaElement).value,"  Use the supplied evidence.  ","failure must retain retry guidance");
+  const applied={...status,status:"succeeded",result:{applied:true}};
+  f.send({type:"revision",status:applied});f.send({type:"revisionIdle"});
+  assert.equal((f.el("revision-instruction") as HTMLTextAreaElement).value,"");
+  assert.equal(f.state().instruction,"");
+  f.document("# Next version\n\nSaved content.\n",18);
+  f.send({type:"comments",rows:[{id:"second",body:"Next change",anchor:{kind:"document"}}]});
+  f.el("review-tab-requests").click();f.el("prepare-revision").click();
+  const request=f.messages.findLast(m=>m.type==="prepareRevision");
+  assert.equal(request.instruction,"");assert.deepEqual(Array.from(request.commentIds),["second"]);
+  f.input("revision-instruction","New review guidance.");
+  f.send({type:"revision",status:applied});
+  assert.equal(f.state().instruction,"New review guidance.","polling the completed receipt must preserve new drafts");
+  f.dom.window.close();
+});
+test("reopening an applied review clears consumed direction without erasing a different draft", () => {
+  for(const draft of ["Old review guidance.","A new unsent draft."]){
+    const f=fixture();f.send({type:"restoreDraft",state:{instruction:draft}});f.document();
+    f.send({type:"revision",status:{status:"succeeded",proposal:{instruction:"Old review guidance."},result:{applied:true}}});
+    const expected=draft==="Old review guidance."?"":draft;
+    assert.equal((f.el("revision-instruction") as HTMLTextAreaElement).value,expected);
+    assert.equal(f.state().instruction,expected);f.dom.window.close();
+  }
+});
+
 test("section and footnote links focus and highlight their destination without closing review", () => {
   const f = fixture();
   f.document("# Paper\n\n[Methods](#methods) and evidence.[^e]\n\n## Methods\n\nA procedure.\n\n[^e]: A source.\n");
