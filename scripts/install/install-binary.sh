@@ -146,16 +146,8 @@ function fetch() {
             [[ -f "$src" ]] || return 1
             cp "$src" "$out" ;;
         http://*|https://*)
-            # A STALLED DOWNLOAD IS ABANDONED AND RETRIED, not waited out. On a
-            # home connection a transfer can stop dead partway (seen: kubectl
-            # frozen at 11 of 60 MB), and with only --max-time curl sat on it for
-            # ten minutes before trying again. Under 1 KB/s for 30 seconds now
-            # counts as failed, and --retry-all-errors retries that like any
-            # other transport error; the digest check below still judges the
-            # bytes.
             if command -v curl &>/dev/null; then
-                curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
-                    --speed-limit 1024 --speed-time 30 --max-time 600 -o "$out" "$url"
+                fetch_with_curl "$url" "$out"
             elif command -v wget &>/dev/null; then
                 wget -q --tries=5 --timeout=30 -O "$out" "$url"
             else
@@ -164,6 +156,52 @@ function fetch() {
         *)
             cap_fail 2 "unsupported URL scheme in the pins manifest: ${url}" ;;
     esac
+}
+
+# fetch_with_curl <url> <out> -- a fresh curl per attempt, alternating between
+# the system's choice and IPv4.
+#
+# A STALLED DOWNLOAD IS ABANDONED AND RETRIED, not waited out: under 1 KB/s for
+# 30 seconds fails the attempt (with only --max-time, a transfer frozen at 11 of
+# 60 MB held the install for ten minutes).
+#
+# AND THE RETRY MAY NOT GO DOWN THE SAME BROKEN PATH. On the reporter's network
+# IPv6 to dl.k8s.io's CDN connects and then carries nothing, while IPv4 to the
+# same host downloads at 1.7 MB/s. curl prefers IPv6 when the handshake answers,
+# and its own --retry kept choosing it, so six attempts stalled one after
+# another and the install failed. Every second attempt forces IPv4; the others
+# leave the choice to the system, so an IPv6-only network still works. The
+# digest check after the download still judges the bytes.
+FETCH_ATTEMPTS="${MEMQL_FETCH_ATTEMPTS:-6}"
+FETCH_RETRY_DELAY_SECONDS="${MEMQL_FETCH_RETRY_DELAY_SECONDS:-2}"
+function fetch_with_curl() {
+    local url="$1" out="$2" attempt
+    for (( attempt = 1; attempt <= FETCH_ATTEMPTS; attempt++ )); do
+        if (( attempt % 2 == 0 )); then
+            if curl_once "$url" "$out" -4; then return 0; fi
+        else
+            if curl_once "$url" "$out"; then return 0; fi
+        fi
+        if (( attempt == FETCH_ATTEMPTS )); then
+            break
+        fi
+        if (( attempt % 2 == 1 )); then
+            cap_info "download attempt ${attempt} of ${FETCH_ATTEMPTS} failed; retrying over IPv4."
+        else
+            cap_info "download attempt ${attempt} of ${FETCH_ATTEMPTS} failed; retrying."
+        fi
+        sleep "$(( FETCH_RETRY_DELAY_SECONDS * attempt ))"
+    done
+    return 1
+}
+
+# curl_once <url> <out> [curl flags...] -- one attempt on a fresh connection.
+# Extra flags come through "$@", which bash 3.2 (macOS) expands safely when
+# empty under `set -u` -- an empty array would not.
+function curl_once() {
+    local url="$1" out="$2"
+    shift 2
+    curl -fsSL "$@" --connect-timeout 30 --speed-limit 1024 --speed-time 30 --max-time 600 -o "$out" "$url"
 }
 
 #=============================================================================

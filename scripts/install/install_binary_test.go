@@ -305,10 +305,13 @@ func TestInstallVerifiesAndPlaces(t *testing.T) {
 	}
 }
 
-// TestDownloadAbandonsAStalledTransfer: a transfer that stops partway is given
-// up quickly and retried, rather than held open until the ten-minute ceiling.
-// A stub curl records how it was asked and serves the artifact.
-func TestDownloadAbandonsAStalledTransfer(t *testing.T) {
+// TestDownloadAbandonsAStalledTransferAndRetriesOverIPv4: a transfer that stops
+// partway is given up after 30 seconds rather than held to the ten-minute
+// ceiling, and the next attempt is a fresh connection forced onto IPv4. On the
+// reporter's network IPv6 to the kubectl CDN connected and then carried
+// nothing, curl kept choosing it, and every attempt stalled. The stub curl
+// fails like that stall (exit 28) unless it is told -4.
+func TestDownloadAbandonsAStalledTransferAndRetriesOverIPv4(t *testing.T) {
 	home := t.TempDir()
 	body := strings.Repeat("k3d-release-bytes\n", 64)
 	pins := writePins(t, map[string][3]string{"k3d": {"v5.9.0", "https://example.invalid/k3d", sha256Hex([]byte(body))}})
@@ -317,20 +320,40 @@ func TestDownloadAbandonsAStalledTransfer(t *testing.T) {
 		t.Fatal(err)
 	}
 	pathDir := installPATH(t)
-	argv := filepath.Join(t.TempDir(), "curl-argv")
-	writeStub(t, pathDir, "curl", `printf '%s\n' "$*" > "`+argv+`"
-out=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
+	calls := filepath.Join(t.TempDir(), "curl-calls")
+	writeStub(t, pathDir, "curl", `printf '%s\n' "$*" >> "`+calls+`"
+v4=0; out=""
+while [ $# -gt 0 ]; do [ "$1" = "-4" ] && v4=1; [ "$1" = "-o" ] && out="$2"; shift; done
+[ "$v4" = 1 ] || { echo "curl: (28) Operation too slow." >&2; exit 28; }
 cp "`+src+`" "$out"`)
 	dest := filepath.Join(t.TempDir(), "bin")
-	mustInstall(t, pathDir, home, "--tool=k3d", "--pins="+pins, "--dest="+dest)
-	raw, err := os.ReadFile(argv)
+	cmd := exec.Command("bash", scriptPath(t, "install-binary.sh"), "--tool=k3d", "--pins="+pins, "--dest="+dest)
+	cmd.Env = []string{"PATH=" + pathDir, "HOME=" + home, "MEMQL_FETCH_RETRY_DELAY_SECONDS=0"}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("install failed although IPv4 worked: %v\n%s", err, out)
+	}
+	raw, err := os.ReadFile(calls)
 	if err != nil {
 		t.Fatalf("curl was never asked: %v", err)
 	}
-	for _, flag := range []string{"--speed-limit 1024", "--speed-time 30", "--retry-all-errors", "--max-time 600"} {
-		if !strings.Contains(string(raw), flag) {
-			t.Errorf("curl was not given %s: %s", flag, raw)
+	attempts := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(attempts) != 2 {
+		t.Fatalf("want two attempts (the stalled one, then IPv4), got %d:\n%s", len(attempts), raw)
+	}
+	for _, flag := range []string{"--speed-limit 1024", "--speed-time 30", "--max-time 600"} {
+		if !strings.Contains(attempts[0], flag) {
+			t.Errorf("the first attempt was not given %s: %s", flag, attempts[0])
 		}
+	}
+	if strings.Contains(attempts[0], "-4 ") {
+		t.Errorf("the first attempt forced IPv4; it should leave the choice to the system: %s", attempts[0])
+	}
+	if !strings.Contains(attempts[1], "-4 ") {
+		t.Errorf("the retry did not force IPv4: %s", attempts[1])
+	}
+	if !strings.Contains(string(out), "retrying over IPv4") {
+		t.Errorf("the retry was not announced:\n%s", out)
 	}
 }
 
