@@ -376,7 +376,7 @@ FROM ${SPA_DIST_STAGE} AS spa-dist
 # go and read. The engine runs as root, so a build running as root could read
 # /proc/1/environ and take every secret the pod holds. It runs as uid 10001
 # instead, which cannot.
-FROM debian:12-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS workbench-runtime
+FROM debian:12-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS workbench-runtime
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
