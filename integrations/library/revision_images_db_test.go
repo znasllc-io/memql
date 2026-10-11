@@ -131,6 +131,14 @@ func testPreparedRevisionImagesRecoverAndPinAcrossReplicas(t *testing.T, f *revi
 	}
 }
 
+// Carry a saved reference through the real request capture and every model seam,
+// including initial planning, contract repair and failed-source replacement.
+func imagePlanReference(f *revisionDB) reviewAttachment {
+	f.ai.expectedReference = "Reuse the supplied image; replace only the rejected portrait."
+	artifact, doc := f.document("# Image references\n\n" + f.ai.expectedReference)
+	return reviewAttachment{ArtifactID: artifact, Version: doc.version, Revision: doc.revision}
+}
+
 func testRevisionDSLPlansAcquiresAndProposesAnImage(t *testing.T, f *revisionDB) {
 	for _, tc := range []struct {
 		name               string
@@ -148,7 +156,7 @@ func testRevisionDSLPlansAcquiresAndProposesAnImage(t *testing.T, f *revisionDB)
 			if tc.research {
 				feedback = "Verify this paragraph against historical sources and add an illustration."
 			}
-			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, feedback)
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, feedback, imagePlanReference(f))
 			request := asString(args["requestId"])
 			f.ai.imagePlan = []revisionImageSpec{{Mode: "generate", Name: "illustration.png", Alt: "Illustrated writing desk", Prompt: "An editorial illustration of a writing desk"}}
 			f.ai.assessmentReply = "sufficient"
@@ -203,7 +211,7 @@ func testRevisionDSLRepairsImagePlanBeforeEffects(t *testing.T, f *revisionDB) {
 		t.Run(fmt.Sprint(invalidAgain), func(t *testing.T) {
 			f := f.isolatedCase(t)
 			artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
-			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.", imagePlanReference(f))
 			request := asString(args["requestId"])
 			invalid := revisionImageSpec{Mode: "generate", Name: "desk.png", Alt: "Early-republic writing desk", Prompt: "A writing desk, quill and inkwell; no people", Attribution: "AI-generated conceptual illustration"}
 			corrected := invalid
@@ -315,7 +323,7 @@ func testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch(t *testing.T,
 		t.Run(fmt.Sprint(secondFailure), func(t *testing.T) {
 			f := f.isolatedCase(t)
 			artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
-			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a researched portrait and a generated illustration.")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a researched portrait and a generated illustration.", imagePlanReference(f))
 			request := asString(args["requestId"])
 			original := revisionImageSpec{Mode: "import", Name: "portrait.png", Alt: "Historic portrait", URL: "https://museum.example/catalog", SourceURL: "https://museum.example/catalog", Attribution: "Artist", License: "Public domain"}
 			replacement := original
