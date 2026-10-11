@@ -498,7 +498,11 @@ func (i *Integration) handleRevisionProposal(ctx context.Context, args map[strin
 	if !boolField(args, "allowIncomplete") && (len(missing) > 0 || (boolField(args, "requireChanges") && (!changed || !requestChanged))) {
 		return nil, fmt.Errorf("document edits incomplete: the requested outcome still needs concrete edits; missing images: %v", missing)
 	}
-	return reviewResult(map[string]any{"proposal": proposal, "changed": changed, "requestChanged": requestChanged, "complete": len(missing) == 0, "missingImages": missing, "summary": proposal["summary"]})
+	imageUsage, err := revisionImageUsage(captured, asString(proposal["revisedContent"]), pinned)
+	if err != nil {
+		return nil, err
+	}
+	return reviewResult(map[string]any{"proposal": proposal, "changed": changed, "requestChanged": requestChanged, "complete": len(missing) == 0, "missingImages": missing, "imageUsage": imageUsage, "summary": proposal["summary"]})
 }
 
 func (i *Integration) handleReviewRevision(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

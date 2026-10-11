@@ -123,3 +123,36 @@ func TestRevisionImageReplacementBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestRevisionImageUsage(t *testing.T) {
+	image := reviewAttachment{ArtifactID: "portrait-1", Name: "Portrait (1).jpg", MIME: "image/jpeg", URI: "../portrait-1/Portrait%20%281%29.jpg"}
+	prepared := reviewAttachment{ArtifactID: "figure-2", Name: "Figure.png", MIME: "image/png", URI: "../figure-2/Figure.png"}
+	captured := map[string]any{"comments": []map[string]any{{"attachments": []reviewAttachment{image, {ArtifactID: "notes", Name: "Evidence.md", MIME: "text/markdown", URI: "../notes/Evidence.md"}}}}}
+	for _, tc := range []struct {
+		name, content string
+		want          bool
+	}{
+		{"inline", "![Portrait](" + image.URI + ")", true},
+		{"reference", "![Portrait][photo]\n\n[photo]: " + image.URI, true},
+		{"prose", image.URI, false},
+		{"ordinary link", "[Portrait](" + image.URI + ")", false},
+		{"inline code", "`![Portrait](" + image.URI + ")`", false},
+		{"fenced code", "```md\n![Portrait](" + image.URI + ")\n```", false},
+		{"different artifact same name", "![Portrait](../portrait-9/Portrait%20%281%29.jpg)", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			content := tc.content + "\n\n![Figure](" + prepared.URI + ")"
+			raw, err := revisionImageUsage(captured, content, []preparedRevisionImage{{Reference: prepared}})
+			var usage []map[string]any
+			if err != nil || json.Unmarshal([]byte(raw), &usage) != nil || len(usage) != 2 {
+				t.Fatalf("image-only usage facts: %s (%v)", raw, err)
+			}
+			if usage[0]["embedded"] != tc.want || usage[0]["uri"] != image.URI || usage[0]["source"] != "attachment" || usage[1]["embedded"] != true || usage[1]["source"] != "prepared" {
+				t.Fatalf("wrong reference comparison: %s", raw)
+			}
+		})
+	}
+	if raw, err := revisionImageUsage(nil, "No images.", nil); err != nil || raw != "[]" {
+		t.Fatalf("empty facts must be a JSON array: %s (%v)", raw, err)
+	}
+}

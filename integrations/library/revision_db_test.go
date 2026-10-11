@@ -37,6 +37,7 @@ type revisionAI struct {
 	completionAfterRepair string
 	completionDocuments   []string
 	completionSchema      any
+	completionImageUsage  []string
 	onCompletion          func(context.Context, int32) error
 	completionCalls       atomic.Int32
 	repairCalls           atomic.Int32
@@ -107,6 +108,11 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
 			if args["templateId"] == "libraryRevisionCompletion" {
+				imageUsage, ok := data["imageUsage"].(string)
+				if !ok || !json.Valid([]byte(imageUsage)) {
+					return nil, fmt.Errorf("completion assessment lacks measured image usage")
+				}
+				a.completionImageUsage = append(a.completionImageUsage, imageUsage)
 				a.completionSchema = args["responseSchema"]
 				schema := revisionMap(a.completionSchema)
 				properties := revisionMap(schema["properties"])

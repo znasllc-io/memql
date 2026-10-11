@@ -434,7 +434,7 @@ func (i *Integration) revisionImageSource(ctx context.Context, requestID, source
 }
 
 // Verify actual Markdown image nodes, not filenames in prose, code or links.
-func missingPreparedImages(content string, images []preparedRevisionImage) []string {
+func embeddedRevisionImages(content string) map[string]bool {
 	embedded := map[string]bool{}
 	root := goldmark.DefaultParser().Parse(text.NewReader([]byte(content)))
 	_ = ast.Walk(root, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -443,6 +443,11 @@ func missingPreparedImages(content string, images []preparedRevisionImage) []str
 		}
 		return ast.WalkContinue, nil
 	})
+	return embedded
+}
+
+func missingPreparedImages(content string, images []preparedRevisionImage) []string {
+	embedded := embeddedRevisionImages(content)
 	missing := []string{}
 	for _, image := range images {
 		if !embedded[image.Reference.URI] {
@@ -450,4 +455,33 @@ func missingPreparedImages(content string, images []preparedRevisionImage) []str
 		}
 	}
 	return missing
+}
+
+// Image-reference equality is a mechanical fact, not a language-model judgment.
+// Report actual image nodes for every supplied/prepared image. An attachment
+// alone does not require insertion, and a matching URI proves neither subject
+// identity nor rights; the DSL reviewer still decides whether feedback is met.
+func revisionImageUsage(captured map[string]any, content string, images []preparedRevisionImage) (string, error) {
+	refs, err := proposalAttachmentRefs(captured)
+	if err != nil {
+		return "", err
+	}
+	embedded := embeddedRevisionImages(content)
+	usage := []map[string]any{}
+	add := func(ref reviewAttachment, source string) {
+		usage = append(usage, map[string]any{
+			"artifactId": ref.ArtifactID, "name": ref.Name, "uri": ref.URI,
+			"source": source, "embedded": ref.URI != "" && embedded[ref.URI],
+		})
+	}
+	for _, ref := range refs {
+		if strings.HasPrefix(ref.MIME, "image/") {
+			add(ref, "attachment")
+		}
+	}
+	for _, image := range images {
+		add(image.Reference, "prepared")
+	}
+	raw, err := json.Marshal(usage)
+	return string(raw), err
 }

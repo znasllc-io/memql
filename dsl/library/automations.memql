@@ -409,7 +409,7 @@ automation reviseLibraryDocument {
    response: {edits: captured.amendment.edits, summary: "Previous proposed changes"}, sourceRunId: preparedImages.sourceRunId, allowIncomplete: true)
   amendmentAssessment := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
    references: references.references, evidence: combinedEvidence,
-   document: previousCandidate.proposal.revisedContent, passages: captured.passagesJSON,
+   imageUsage: previousCandidate.imageUsage, document: previousCandidate.proposal.revisedContent, passages: captured.passagesJSON,
    instruction: captured.amendment.instruction, explanation: "Assess the previous proposal against the new direction."
   })
   amendmentVerdict := amendmentAssessment.structured
@@ -439,7 +439,7 @@ automation reviseLibraryDocument {
   } else {
    completion := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
     references: references.references, evidence: combinedEvidence,
-    document: candidate.proposal.revisedContent, passages: captured.passagesJSON,
+    imageUsage: candidate.imageUsage, document: candidate.proposal.revisedContent, passages: captured.passagesJSON,
     instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary
    })
   }
@@ -466,7 +466,7 @@ automation reviseLibraryDocument {
   repairedCandidate := builtin libraryRevisionProposal(requestId: args.requestId, response: repaired.reply, sourceRunId: preparedImages.sourceRunId, requireChanges: true)
   finalAssessment := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
    references: references.references, evidence: combinedEvidence,
-   document: repairedCandidate.proposal.revisedContent, passages: captured.passagesJSON,
+   imageUsage: repairedCandidate.imageUsage, document: repairedCandidate.proposal.revisedContent, passages: captured.passagesJSON,
    instruction: captured.amendment.instruction ?? captured.instruction, explanation: repairedCandidate.summary
   })
   finalVerdict := finalAssessment.structured

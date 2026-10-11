@@ -198,7 +198,7 @@ builtin libraryDocumentRevisionStatus {
 @args(profile="object")
 builtin libraryRevisionInput { requestId string! }
 
-/// Decode and validate replacements only within the selected source passages.
+/// Validate exact replacements and report measured image usage for DSL review.
 @executor("integration.library.revisionProposal")
 @args(profile="object")
 builtin libraryRevisionProposal {
