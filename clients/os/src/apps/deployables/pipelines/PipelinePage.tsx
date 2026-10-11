@@ -11,6 +11,8 @@ import type { PackageRow } from "../packages/rows";
 import { ProblemNotice } from "../packages/ReportView";
 import { toneFor } from "../packages/refusals";
 import type { PartsHeld } from "../parts";
+import { useSourceProbe } from "../sources/useProbes";
+import { BranchChoice } from "./BranchChoice";
 import { disconnectPipeline, problemFrom, runLatestPipeline, type Problem } from "./calls";
 import type { PipelineRow, RunRow } from "./rows";
 import { computeShort, computeWords, deliveryShort, deliveryWords } from "./words";
@@ -27,10 +29,12 @@ import "./checks.css";
 // manifest's, read at each commit -- and its runs are one click away, on Runs.
 //
 // THE ACTS FOLLOW THE STATE, IN THE BAR (DESIGN.md rule 12). A pipeline that
-// runs offers Disconnect and Change; a disconnected one, Connect again. Change
-// and Connect again open the connect rail over this source, prefilled, and
-// nothing is written until it is confirmed there. Disconnect asks first, in
-// the bar, because it stops checks on every push of the repository.
+// runs offers Disconnect and Change; a disconnected one, Connect again and a
+// manual run -- of the default branch (Run latest) or of another (Other
+// branch, which asks for the branch under the facts). Change and Connect again
+// open the connect rail over this source, prefilled, and nothing is written
+// until it is confirmed there. Disconnect asks first, in the bar, because it
+// stops checks on every push of the repository.
 //
 // NOTHING IS FLIPPED HERE. A disconnect the cluster accepted is not yet a
 // disconnected pipeline on this page: the row arrives on the root's feed and
@@ -62,6 +66,9 @@ export function PipelinePage({ pkg, pipeline, runs, can, backLabel, onBack, brea
   const [sent, setSent] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [manualRun, setManualRun] = useState<{ runId: string; sha: string; branch: string } | null>(null);
+  const [choosing, setChoosing] = useState(false);
+  const [branch, setBranch] = useState("");
+  const probe = useSourceProbe();
   const active = pipeline.status === "active";
 
   useEffect(() => {
@@ -77,6 +84,8 @@ export function PipelinePage({ pkg, pipeline, runs, can, backLabel, onBack, brea
   useEffect(() => {
     if (active) {
       setManualRun(null);
+      setChoosing(false);
+      setBranch("");
       return;
     }
     setSent(false);
@@ -98,19 +107,35 @@ export function PipelinePage({ pkg, pipeline, runs, can, backLabel, onBack, brea
     }
   }
 
-  async function runLatest() {
+  // A refused branch keeps the question open with the name as typed, so the
+  // fix is one edit rather than starting over.
+  async function runLatest(named = "") {
     if (!connection) return;
     setBusy(true);
     setProblem(null);
     try {
-      const result = await runLatestPipeline(connection.query, pipeline.id);
+      const result = await runLatestPipeline(connection.query, pipeline.id, named);
       if (result.runId === "") throw new Error("The cluster did not return a run id for the manual rehearsal.");
       setManualRun(result);
+      setChoosing(false);
+      setBranch("");
     } catch (err) {
       setProblem(problemFrom(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  function chooseBranch() {
+    setProblem(null);
+    setBranch("");
+    setChoosing(true);
+    void probe.probe(pkg.repoUrl, pkg.credentialId, pkg.sourceConnectionId ?? "");
+  }
+
+  function stopChoosing() {
+    setChoosing(false);
+    setBranch("");
   }
 
   const waiting = sent && active;
@@ -144,19 +169,38 @@ export function PipelinePage({ pkg, pipeline, runs, can, backLabel, onBack, brea
             detail: `${manualRun.branch} · ${manualRun.sha.slice(0, 7)}`,
             tone: "busy",
             acts: [
-              ...(runs.some((run) => run.id === manualRun.runId) && onOpenRun ? [{ label: "Open run", tone: "primary" as const, onAct: () => onOpenRun(manualRun.runId) }] : []),
               ...(can.connect ? [{ label: "Connect again", text: true, onAct: onChange }] : []),
+              ...(runs.some((run) => run.id === manualRun.runId) && onOpenRun ? [{ label: "Open run", tone: "primary" as const, onAct: () => onOpenRun(manualRun.runId) }] : []),
             ],
           }
-        : {
-            state: "Disconnected",
-            detail: "",
-            tone: "none",
-            acts: [
-              ...(can.rerun ? [{ label: "Run latest", tone: "primary" as const, busy, onAct: () => void runLatest() }] : []),
-              ...(can.connect ? [{ label: "Connect again", text: true, onAct: onChange }] : []),
-            ],
-          };
+        : choosing && can.rerun
+          ? {
+              // The pipeline is still disconnected while it is asked; the dot
+              // speaks for the pipeline, not for the question.
+              state: "Run a branch",
+              detail: "Runs its newest commit.",
+              tone: "none",
+              acts: [
+                { label: "Cancel", text: true, onAct: stopChoosing },
+                ...(branch.trim() !== "" ? [{ label: "Run", tone: "primary" as const, busy, onAct: () => void runLatest(branch) }] : []),
+              ],
+            }
+          : {
+              state: "Disconnected",
+              detail: "",
+              tone: "none",
+              acts: [
+                ...(can.connect ? [{ label: "Connect again", text: true, onAct: onChange }] : []),
+                ...(can.rerun
+                  ? [
+                      { label: "Other branch", text: true, onAct: chooseBranch },
+                      { label: "Run latest", tone: "primary" as const, busy, onAct: () => void runLatest() },
+                    ]
+                  : []),
+              ],
+            };
+  // The field is drawn exactly when the bar asks for it.
+  const asked = choosing && can.rerun && !active && manualRun === null;
 
   const label = sourceName(pkg);
   return (
@@ -182,6 +226,18 @@ export function PipelinePage({ pkg, pipeline, runs, can, backLabel, onBack, brea
             <Fact label="Installation" value={pipeline.installationId} mono />
             <Fact label="Connected" value={formatMoment(pipeline.connectedAt)} />
           </Facts>
+
+          {asked ? (
+            <BranchChoice
+              branches={probe.reply?.branches ?? []}
+              defaultBranch={pipeline.defaultBranch}
+              loading={probe.busy}
+              value={branch}
+              onChange={setBranch}
+              onRun={() => void runLatest(branch)}
+              onCancel={stopChoosing}
+            />
+          ) : null}
 
           {problem !== null ? <ProblemNotice problem={problem} tone={toneFor(problem.code)} /> : null}
 
