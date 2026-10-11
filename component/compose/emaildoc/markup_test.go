@@ -18,6 +18,7 @@ const (
 	wantUnbalanced = "html blocks must close the tags they open, in order"
 	wantPicture    = "html blocks cannot contain pictures; use an image block"
 	wantStyle      = "html block styles cannot load resources"
+	wantStyleTag   = "html block styles cannot contain merge tags"
 	wantTooDeep    = "html blocks are nested too deeply"
 )
 
@@ -93,6 +94,8 @@ var acceptedMarkup = []struct{ name, src, want string }{
 	{"a slash does not close a div", `<div/>x</div>`, `<div>x</div>`},
 	{"a rule closes a paragraph", `<p>a<hr>b</p>`, `<p>a</p><hr/>b<p></p>`},
 	{"a table closes a paragraph", `<p><table><tr><td>x</td></tr></table></p>`, `<p></p><table><tbody><tr><td>x</td></tr></tbody></table><p></p>`},
+	{"a tag in a title is text", `<p title="Hi {{displayName}}">x</p>`, `<p title="Hi {{displayName}}">x</p>`},
+	{"a style without a tag", `<p style="color:#333; width:100%">x</p>`, `<p style="color:#333; width:100%">x</p>`},
 	{"a quote in an attribute is escaped", `<a title='x" onmouseover="alert(1)'>x</a>`, `<a title="x&#34; onmouseover=&#34;alert(1)">x</a>`},
 	{"a line break is a void element", `a<br>b<br/>c`, `a<br/>b<br/>c`},
 	{"a hundred levels deep", strings.Repeat("<div>", 100) + "x" + strings.Repeat("</div>", 100), strings.Repeat("<div>", 100) + "x" + strings.Repeat("</div>", 100)},
@@ -225,6 +228,21 @@ var refusedMarkup = []struct{ name, src, want string }{
 	{"a style behavior", `<p style="behavior:url(x)">x</p>`, wantStyle},
 	{"a style binding", `<p style="-moz-binding:x">x</p>`, wantStyle},
 	{"a style import", `<p style="@import 'x'">x</p>`, wantStyle},
+	// A merge tag is replaced with a value a recipient supplied; in a style that
+	// value would be CSS, and the checks above cannot see what it becomes.
+	{"a tag alone in a style", `<p style="color:{{fields.c}}">x</p>`, wantStyleTag},
+	{"a tag after a valid declaration", `<p style="color:#333; width:{{fields.w}}">x</p>`, wantStyleTag},
+	{"a tag that is a whole declaration", `<p style="{{fields.css}}">x</p>`, wantStyleTag},
+	{"a tag in a length", `<p style="padding:{{fields.p}}px">x</p>`, wantStyleTag},
+	{"a tag that could spell url", `<p style="background:u{{fields.a}}rl(https://example.com/a.png)">x</p>`, wantStyleTag},
+	{"a tag in the middle of url", `<p style="background:ur{{fields.a}}(https://example.com/a.png)">x</p>`, wantStyleTag},
+	{"a tag inside a url call", `<p style="background:url({{fields.u}})">x</p>`, wantStyleTag},
+	{"a name tag in a style", `<p style="color:{{displayName}}">x</p>`, wantStyleTag},
+	{"a link tag in a style", `<p style="background:{{viewUrl}}">x</p>`, wantStyleTag},
+	{"a tag written with entities", `<p style="color:&#123;&#123;fields.c&#125;&#125;">x</p>`, wantStyleTag},
+	{"a tag in a style attribute in capitals", `<p STYLE="color:{{fields.c}}">x</p>`, wantStyleTag},
+	{"a tag in the style of a cell", `<table><tr><td style="width:{{fields.w}}">x</td></tr></table>`, wantStyleTag},
+	{"a tag in the style of a link", `<a href="https://example.com" style="color:{{fields.c}}">x</a>`, wantStyleTag},
 	{"nested a hundred and one deep", strings.Repeat("<div>", 101) + strings.Repeat("</div>", 101), wantTooDeep},
 	{"nested far too deep", strings.Repeat("<div>", 5000), wantTooDeep},
 }
@@ -326,6 +344,7 @@ func TestSafeMarkupChecksWhatTheParserBuilds(t *testing.T) {
 		{"a picture", element("img"), wantPicture},
 		{"a handler", element("p", html.Attribute{Key: "onclick", Val: "x"}), "html blocks cannot use the onclick attribute"},
 		{"a loading style", element("p", html.Attribute{Key: "style", Val: "background:url(x)"}), wantStyle},
+		{"a style with a merge tag", element("p", html.Attribute{Key: "style", Val: "color:{{fields.c}}"}), wantStyleTag},
 		{"a script link", element("a", html.Attribute{Key: "href", Val: "javascript:x"}), "a link must be"},
 		{"a host tag", element("a", html.Attribute{Key: "href", Val: "https://{{fields.host}}/"}), "a web address cannot take a merge tag"},
 		{"a namespaced attribute", element("a", html.Attribute{Namespace: "xlink", Key: "href", Val: "https://example.com"}), "html blocks cannot use the href attribute"},

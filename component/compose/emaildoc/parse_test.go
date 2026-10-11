@@ -1022,6 +1022,66 @@ func TestLinksAndColumnsRefuseTheKeysOfOtherObjects(t *testing.T) {
 	}
 }
 
+func TestNoOtherFieldCarriesAMergeTagIntoCSS(t *testing.T) {
+	// Besides the style attribute of an html block, what a renderer writes into
+	// CSS is a theme colour or font, the name of a theme colour, an enumerated
+	// word, a number or a length in em. None of those can hold a merge tag, so
+	// a value a recipient supplied never becomes CSS. The text fields (text,
+	// label, alt, title, lines, network, separator) are written as HTML text or
+	// attributes and never as CSS.
+	theme := neutralTheme()
+	withTheme := func(old, replacement string) string {
+		return `{"subject":"x","theme":` + strings.Replace(theme, old, replacement, 1) + `,"blocks":[]}`
+	}
+	expectRefused(t, []refusal{
+		{"theme colour as a tag", withTheme(`"#eef0f3"`, `"{{fields.x}}"`), "theme: page must be a #rrggbb colour"},
+		{"theme colour with a tag after it", withTheme(`"#8a8f98"`, `"#8a8f98{{fields.x}}"`), "theme: muted must be a #rrggbb colour"},
+		{"heading font as a tag", withTheme(`"Georgia"`, `"{{fields.x}}"`), "theme: headingFont must be a font family name"},
+		{"heading font with a tag after it", withTheme(`"Georgia"`, `"Georgia{{fields.x}}"`), "theme: headingFont must be a font family name"},
+		{"body font with a tag in a list", withTheme(`"Arial"`, `"Arial, {{fields.x}}"`), "theme: bodyFont must be a font family name"},
+		{"block id as a tag", layoutJSON(`{"id":"{{fields.x}}","type":"spacer"}`), "must be lowercase letters, digits and hyphens"},
+	})
+	for _, c := range []struct{ typ, key, value, want string }{
+		{"heading", "color", `"{{fields.x}}"`, "color must name a theme colour"},
+		{"heading", "color", `"primary{{fields.x}}"`, "color must name a theme colour"},
+		{"button", "textColor", `"{{fields.x}}"`, "textColor must name a theme colour"},
+		{"text", "linkColor", `"{{fields.x}}"`, "linkColor must name a theme colour"},
+		{"highlight", "background", `"{{fields.x}}"`, "background must name a theme colour"},
+		{"heading", "letterSpacing", `"{{fields.x}}em"`, "letterSpacing must be a length in em"},
+		{"heading", "letterSpacing", `"1{{fields.x}}em"`, "letterSpacing must be a length in em"},
+		{"heading", "align", `"{{fields.x}}"`, "align must be left, center or right"},
+		{"heading", "font", `"{{fields.x}}"`, "font must be heading, body or base"},
+		{"heading", "weight", `"{{fields.x}}"`, "weight must be a whole number"},
+		{"heading", "role", `"{{fields.x}}"`, `role must be "brand" or "content"`},
+		{"heading", "size", `"{{fields.x}}"`, "size must be a number"},
+		{"heading", "lineHeight", `"{{fields.x}}"`, "lineHeight must be a number"},
+		{"text", "listLineHeight", `"{{fields.x}}"`, "listLineHeight must be a number"},
+		{"text", "gap", `"{{fields.x}}"`, "gap must be a number"},
+		{"spacer", "height", `"{{fields.x}}"`, "height must be a number"},
+		{"button", "paddingY", `"{{fields.x}}"`, "paddingY must be a number"},
+		{"section", "maxWidth", `"{{fields.x}}"`, "maxWidth must be a number"},
+		{"section", "cellPadding", `"{{fields.x}}"`, "cellPadding must be a number"},
+		{"columns", "stackBelow", `"{{fields.x}}"`, "stackBelow must be a number"},
+		{"footer", "after", `"{{fields.x}}"`, "after must be a number"},
+		{"heading", "padding", `["{{fields.x}}",0,0,0]`, "padding must be four numbers"},
+		{"section", "inset", `["{{fields.x}}",0,0,0]`, "inset must be four numbers"},
+		{"image", "width", `"{{fields.x}}"`, "width must be a whole number"},
+		{"button", "width", `"{{fields.x}}"`, "width must be a whole number"},
+	} {
+		t.Run(c.typ+"/"+c.key+"/"+c.value, func(t *testing.T) {
+			doc := layoutJSON(blockOf(c.typ, [2]string{c.key, c.value}))
+			if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("%s\nwant %q, got %v", doc, c.want, err)
+			}
+		})
+	}
+	// A column's width is a number as well.
+	doc := layoutJSON(`{"id":"b","type":"columns","columns":[{"width":"{{fields.x}}","blocks":[]}]}`)
+	if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "column 1: width must be a number") {
+		t.Errorf("column width: %v", err)
+	}
+}
+
 func TestParseRefusesUnsafeHTMLBlocks(t *testing.T) {
 	// The renderer splices an html block inside a table cell. These are the
 	// fragments that would otherwise run, hide the rest of the email or
@@ -1045,6 +1105,7 @@ func TestParseRefusesUnsafeHTMLBlocks(t *testing.T) {
 		{"closing the renderer's cell", htmlBlock(`</td></tr></table><p>after</p>`), unbalanced},
 		{"left open", htmlBlock(`<p>one`), unbalanced},
 		{"closed out of order", htmlBlock(`<p><b>x</p></b>`), unbalanced},
+		{"merge tag in a style", htmlBlock(`<p style="color:{{fields.c}}">x</p>`), `block "x": html block styles cannot contain merge tags`},
 		{"bare cell", htmlBlock(`<td>x</td>`), `block "x": html blocks can use <td> only inside a <table> the block opens`},
 		{"bare row", htmlBlock(`<tr><td>x</td></tr>`), `block "x": html blocks can use <tr> only inside a <table> the block opens`},
 		{"entity-encoded tab in a scheme", htmlBlock(`<a href="java&#x09;script:x">x</a>`), `block "x": a link cannot contain spaces or control characters`},

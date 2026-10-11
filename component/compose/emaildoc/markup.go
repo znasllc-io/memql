@@ -72,7 +72,8 @@ var (
 //   - every end tag closes the innermost element the fragment opened, and every
 //     element is closed: `</td></tr></table>` cannot close the renderer's cell;
 //   - table rows and cells only inside a table the fragment opened;
-//   - only the allowed tags and attributes, links by the link rule.
+//   - only the allowed tags and attributes, links by the link rule, and no merge
+//     tag in a style (a substituted value would be CSS).
 //
 // What passes is then read the way a browser reads it, as the content of a
 // table cell, and written out again: the result is balanced by construction,
@@ -193,6 +194,13 @@ func checkElement(name string, attrs []html.Attribute) error {
 		}
 		switch attr.Key {
 		case "style":
+			// A merge tag is replaced with a value a recipient supplied, and in a
+			// style that value would be CSS. Nothing below can see what it will
+			// become: u{{fields.a}}rl( turns into url( at send time. So a style
+			// holds no merge tag; the other attributes may, as text.
+			if strings.Contains(attr.Val, "{{") {
+				return errors.New("html block styles cannot contain merge tags")
+			}
 			value := strings.ToLower(attr.Val)
 			for _, forbidden := range forbiddenInStyle {
 				if strings.Contains(value, forbidden) {
