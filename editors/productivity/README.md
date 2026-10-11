@@ -125,7 +125,9 @@ requests, open its saved document, or compare its exact saved bytes with the
 previous version. The latest completed proposal also retains its accepted-item
 comparisons and authorship. Declined items never appear as applied changes.
 Completed work leaves the current proposal view; status polling preserves the
-chosen tab, decisions, drafts and expanded explanations. The header's history
+chosen tab, decisions, drafts and expanded explanations. Additional direction is cleared
+after its review is applied, while failed attempts retain it for retry and different
+unsent guidance is preserved. The header's history
 control opens this same History tab while in Review; Read retains version browsing.
 
 Review each proposal with **Accept**, **Decline**, or **Modify with AI**, then

@@ -1024,6 +1024,10 @@ window.addEventListener("message",event=>{
     const firstStatus=!revision;
     revision=message.status;
     if(revision?.result?.applied)completedReview=revision;
+    // Additional direction belongs to the completed review, not the next one.
+    // Preserve any different draft already entered while its receipt arrived.
+    const appliedInstruction=revision?.proposal?.instruction;
+    if(appliedNow && typeof appliedInstruction === "string" && instruction.value.trim() === appliedInstruction.trim())instruction.value="";
     if(appliedNow){historyStale=true;if(reviewTab==="changes" || firstStatus&&!state.reviewTab){if(!firstStatus||state.historySelection===undefined)historySelection=undefined;selectReviewTab("history");}}
     else if(firstStatus&&revision&&!revision.result?.applied&&!state.reviewTab)selectReviewTab("changes");
     if(different)renderRevision();controls();if(changed){byId("status").textContent="";showReview(true);}saveState();}
