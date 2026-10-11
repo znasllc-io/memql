@@ -300,7 +300,8 @@ func waitComposition(t *testing.T, i *Integration, ctx context.Context, composit
 	}
 }
 
-// blankOutcome is what a blank request left behind once its run finished.
+// blankOutcome is what a request that was filed blank left behind once its run
+// finished.
 type blankOutcome struct {
 	row     map[string]any
 	file    map[string]any
@@ -308,15 +309,25 @@ type blankOutcome struct {
 	journal *automations.RunJournal
 }
 
-// materializeBlankDB drives one blank request through the real engine the way
-// two replicas would: one accepts it (and opens the goal), another adopts the
-// run and executes it. Opening a goal dispatches nothing by itself -- the run's
-// own `running` event is what reaches an agent replica -- so a test that only
-// accepts would wait on a composition nothing is working on.
-//
-// No composer is wired on the executing node on purpose: a blank request must
-// never need a model, and a stray call would fail the run loudly.
+// materializeBlankDB drives one blank request of the given format through the
+// real engine (see materializeRequestDB).
 func materializeBlankDB(t *testing.T, format pure.Format) blankOutcome {
+	t.Helper()
+	return materializeRequestDB(t, materializeArgs{Name: "Blank", Format: format})
+}
+
+// materializeRequestDB drives one request that is filed blank through the real
+// engine the way two replicas would: one accepts it (and opens the goal),
+// another adopts the run and executes it. Opening a goal dispatches nothing by
+// itself -- the run's own `running` event is what reaches an agent replica -- so
+// a test that only accepts would wait on a composition nothing is working on.
+//
+// The request is made the way a person's client makes it: outside any work run,
+// as an actor with no run on its context.
+//
+// No composer is wired on the executing node on purpose: a request that is filed
+// blank must never need a model, and a stray call would fail the run loudly.
+func materializeRequestDB(t *testing.T, args materializeArgs) blankOutcome {
 	t.Helper()
 	accepting := materializeDBEngine(t)
 	executing := materializeDBEngine(t)
@@ -336,9 +347,9 @@ func materializeBlankDB(t *testing.T, format pure.Format) blankOutcome {
 	exec := automations.NewExecutor(automations.ExecutorOptions{Engine: executing, Logger: executing.Logger, StepRegistry: steps.NewRegistry()})
 	t.Cleanup(exec.Close)
 
-	owner := fmt.Sprintf("compose-blank-%s-%d", format, time.Now().UnixNano())
+	owner := fmt.Sprintf("compose-blank-%s-%d", args.Format, time.Now().UnixNano())
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
-	args := materializeArgs{Name: "Blank", Format: format, RequestId: "r-" + owner}
+	args.RequestId = "r-" + owner
 	accepted, err := accept.materialize(ctx, owner, "", args)
 	if err != nil {
 		t.Fatal(err)
@@ -417,5 +428,35 @@ func TestMaterializeDB_BlankTextIsReadyAsAZeroByteFile(t *testing.T) {
 	}
 	if out.journal.Status != "succeeded" {
 		t.Fatalf("the blank run did not succeed: %+v", out.journal)
+	}
+}
+
+// A person's description reaches the real engine as a saved request, and every
+// replica must read it the same way: that it is filed blank is part of what the
+// adopting replica loads from the database, not something the accepting replica
+// remembered. The executing node has no composer, so a described request that
+// went to the model would fail the run instead of passing.
+func TestMaterializeDB_DescribedMarkdownIsReadyAsABlankFile(t *testing.T) {
+	statement := "A one-page launch brief for the autumn release"
+	out := materializeRequestDB(t, materializeArgs{Name: "Launch brief", Format: pure.FormatMarkdown, Statement: statement})
+	if stringOf(out.row["outputFileId"]) == "" || stringOf(out.row["sourceFileId"]) != "" {
+		t.Fatalf("a described file is one file with no source package: %v", out.row)
+	}
+	if out.upload.calls != 1 || string(out.upload.bytes) != "\n" {
+		t.Fatalf("described db run uploaded %q in %d uploads, want a single newline once", out.upload.bytes, out.upload.calls)
+	}
+	// The description stays on the record: it is what the person's client hands to
+	// the revision workflow, and what is left if the client never does.
+	if out.row["statement"] != statement {
+		t.Fatalf("composition statement = %q, want the request's own", out.row["statement"])
+	}
+	if out.row["provenanceNote"] != "Created blank. Its history is kept on its composition, not in the file." {
+		t.Fatalf("described composition note = %q", out.row["provenanceNote"])
+	}
+	if out.file == nil || out.file["name"] != "Launch brief.md" || out.file["status"] != "ready" || runCountOf(out.file["size"]) != 1 || out.file["summary"] != "Created blank." {
+		t.Fatalf("the filed file is not a ready one-byte Launch brief.md summarised as created blank: %v", out.file)
+	}
+	if out.journal.Status != "succeeded" {
+		t.Fatalf("the described run did not succeed: %+v", out.journal)
 	}
 }

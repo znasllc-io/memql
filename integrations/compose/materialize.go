@@ -68,6 +68,30 @@ func (a materializeArgs) blank() bool {
 		len(a.Sources) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == ""
 }
 
+// describedMarkdown is a Markdown file asked for by DESCRIBING it: a statement,
+// and nothing of the document's own to compose from -- no draft, sections,
+// template, recipe or special output. Sources may come with it; they are what
+// the description is about, and they are passed on with it.
+//
+// Such a request is filed as the empty page with its statement kept on the
+// composition. Writing the document is the Library's revision workflow, and the
+// person's own client hands the description to it: a work run may not (see
+// fromARun).
+func (a materializeArgs) describedMarkdown() bool {
+	return a.Format == pure.FormatMarkdown && a.Statement != "" && strings.TrimSpace(a.Draft) == "" &&
+		len(a.SectionKeys) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == ""
+}
+
+// fromARun says a work run is making this call, and not a person's own client.
+// It is the condition under which the Library refuses a revision request ("a
+// person must prepare the document revision request",
+// integrations/library/revision.go), so it is also the condition under which
+// there is no client to hand a description on.
+func fromARun(ctx context.Context) bool {
+	rc, ok := common.RunFromContext(ctx)
+	return ok && rc.RunId != ""
+}
+
 func (i *Integration) handleMaterialize(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	ac, err := requirePrincipal(ctx)
 	if err != nil {
@@ -181,6 +205,13 @@ type executionRequest struct {
 	Recipe       *pure.RenderRecipe `json:"recipe,omitempty"`
 	TemplateBody string             `json:"templateBody,omitempty"`
 	Sections     *sectionAssembly   `json:"sections,omitempty"`
+	// Described says a person described this Markdown file and it is to be filed
+	// as the empty page (see describedMarkdown). It is decided ONCE, when the
+	// request is accepted, and saved with the request: the replica that executes
+	// the run is usually not the one that accepted it, and only the accepting call
+	// knows whether a person or a run made it. omitempty keeps every other saved
+	// request exactly as it was.
+	Described bool `json:"described,omitempty"`
 }
 
 var materializeIDEngine = id.NewUntracked()
@@ -257,9 +288,9 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 		//
 		// THIS IS READ-THEN-WRITE, not a claim on the id: two identical requests
 		// that arrive at the same moment on different replicas can both miss the
-		// lookup and each open a goal. Clients dedupe in flight (they do not send
-		// a second start while one is pending), and that is what keeps the window
-		// shut in practice.
+		// lookup and each open a goal. Callers are expected to dedupe in flight
+		// (not send a second start while one is pending), and that is what keeps
+		// the window shut in practice.
 		compositionId = stableMaterializeID("request", memql.BareShortId(userId), a.RequestId)
 		existing, err := i.store().compositionById(ctx, compositionId)
 		if err != nil {
@@ -280,6 +311,15 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 		return nil, err
 	}
 	request := executionRequest{Args: a, Resolved: resolved, Started: i.clock().UTC()}
+	// FILED BLANK ONLY WHEN A PERSON ASKED. The empty page is the first half of a
+	// hand-off: the person's client reads the description off the composition and
+	// gives it to the Library's revision workflow. The second half cannot be done
+	// from inside a run -- the Library refuses a revision request made by one -- so
+	// a call made BY a run (the planner's file delivery, an agent's composeFile:
+	// both say "write this" in a statement) has no client to finish it, and filing
+	// it blank would end the run with an empty document and nobody to write it.
+	// Those keep the composer.
+	request.Described = a.describedMarkdown() && !fromARun(ctx)
 	if len(a.SectionKeys) > 0 {
 		request.Sections, err = i.captureSections(ctx, rc, a.SectionKeys)
 		if err != nil {
@@ -494,6 +534,10 @@ func (i *Integration) checkCompositionCancellation(ctx context.Context, composit
 func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, compositionId, goalId, runId string, request executionRequest) (map[string]any, error) {
 	st := i.store()
 	a, resolved, started := request.Args, request.Resolved, request.Started
+	// filedBlank: this request is written as its format's empty document -- because
+	// there was nothing to compose it from (blank), or because a person described it
+	// and their client hands the description on (described).
+	filedBlank := a.blank() || request.Described
 	fail := func(reason string, cause error) (map[string]any, error) {
 		if cause == nil {
 			cause = errors.New("compose: " + reason)
@@ -509,8 +553,8 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 	var sourceFileId, fileId, fileName, mimeType string
 	var needsSource, sourceComplete bool
 	// blankDraft is set by composeBlankDraft and read by composeRenderOutput,
-	// which stamps it on the recipe it saves: a blank request has no draft to
-	// render, only its format's empty document.
+	// which stamps it on the recipe it saves: a request filed blank has no draft
+	// to render, only its format's empty document.
 	var blankDraft bool
 	var templateName, templateBody string
 	draft := pure.Draft{Title: a.Name, Body: a.Draft}
@@ -532,7 +576,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 			}
 			sourceFileId = ""
 			// A blank file has no recipe worth rebuilding, so it files no source package.
-			needsSource = !a.blank() && ((a.Format != pure.FormatText && a.Format != pure.FormatMarkdown) || a.DeployableKind != "" || a.OutputKind != "")
+			needsSource = !filedBlank && ((a.Format != pure.FormatText && a.Format != pure.FormatMarkdown) || a.DeployableKind != "" || a.OutputKind != "")
 			if needsSource {
 				sourceFileId = stableMaterializeID("materialized-source", compositionId)
 			}
@@ -595,10 +639,10 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 		},
 		"composeWorkflowFacts": func(context.Context, map[string]any) (any, error) {
 			// isBlank is false once a recipe snapshot exists, and that is safe: the
-			// snapshot a blank request saves is marked Blank (see composeRenderOutput),
-			// so a resumed run takes the restore branch and still renders the empty
-			// document rather than the draft it restored.
-			return map[string]any{"savedRecipe": request.Recipe != nil, "hasSections": request.Sections != nil, "hasComposer": i.composerRef() != nil, "hasDraft": strings.TrimSpace(draft.Body) != "", "hasRows": len(draft.Rows) > 0, "format": string(a.Format), "outputKind": a.OutputKind, "needsSource": needsSource, "sourceComplete": sourceComplete, "hasRecipeId": a.RecipeId != "", "isBlank": a.blank() && request.Recipe == nil}, nil
+			// snapshot a blank or described request saves is marked Blank (see
+			// composeRenderOutput), so a resumed run takes the restore branch and still
+			// renders the empty document rather than the draft it restored.
+			return map[string]any{"savedRecipe": request.Recipe != nil, "hasSections": request.Sections != nil, "hasComposer": i.composerRef() != nil, "hasDraft": strings.TrimSpace(draft.Body) != "", "hasRows": len(draft.Rows) > 0, "format": string(a.Format), "outputKind": a.OutputKind, "needsSource": needsSource, "sourceComplete": sourceComplete, "hasRecipeId": a.RecipeId != "", "isBlank": filedBlank && request.Recipe == nil}, nil
 		},
 		"composeRestoreDraft": func(context.Context, map[string]any) (any, error) {
 			if request.Recipe == nil {
@@ -778,6 +822,9 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 				return fail("materialization stopped", err)
 			}
 			runContext, _ := common.RunFromContext(ctx)
+			// The recipe, not blankDraft, says whether this file is blank: a resumed
+			// pass restores the saved recipe and never takes the blank branch itself.
+			summary := fileSummary(a, prov, recipe.Blank)
 			if err := st.createLibraryFile(ctx, map[string]any{
 				"fileId":            fileId,
 				"name":              fileName,
@@ -789,12 +836,12 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 				"producedByRunId":   runId,
 				"producedByStepKey": runContext.StepKey,
 				"format":            libraryFormatFor(a.Format, a.DeployableKind),
-				"summary":           fileSummary(a, prov),
+				"summary":           summary,
 				"folderId":          a.FolderId,
 			}); err != nil {
 				return fail("the output could not be filed in your Library: "+err.Error(), err)
 			}
-			if err := st.setLibraryFileReady(ctx, fileId, fileSummary(a, prov)); err != nil {
+			if err := st.setLibraryFileReady(ctx, fileId, summary); err != nil {
 				// The native work step completes only after the durable delivery
 				// receipt exists. A stored blob alone cannot mark the run successful.
 				return fail("the output file could not be marked ready", err)
@@ -1053,7 +1100,13 @@ func libraryFormatFor(f pure.Format, deployableKind string) string {
 	return f.LibraryFormat()
 }
 
-func fileSummary(a materializeArgs, p pure.Provenance) string {
+// fileSummary is the one line the Library lists a file by. A file filed blank
+// says so: "Materialized from no sources" reads as a fault on a file that was
+// never going to be made from any.
+func fileSummary(a materializeArgs, p pure.Provenance, blank bool) string {
+	if blank {
+		return "Created blank."
+	}
 	if a.DeployableKind != "" {
 		return fmt.Sprintf("A %s package source, materialized from %s.", a.DeployableKind, p.SourceSummary())
 	}

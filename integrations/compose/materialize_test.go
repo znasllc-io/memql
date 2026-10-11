@@ -27,6 +27,7 @@ type materializeEngine struct {
 	source         map[string]any
 	account        map[string]any
 	recipe         map[string]any
+	template       map[string]any
 	failReady      bool
 	failFileReady  bool
 	fileReadyError string
@@ -108,6 +109,8 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 		row = e.account
 	case "composeRecipeById":
 		row = e.recipe
+	case "composeTemplateById":
+		row = e.template
 	case "cancelGoal":
 		return memql.NewResultWithOutput(map[string]any{"runsAsked": 1}), nil
 	case "createGoal":
@@ -1063,6 +1066,349 @@ func TestOutputFileNameAddsTheExtensionOnce(t *testing.T) {
 	} {
 		if got := outputFileName(tc.name, tc.format, ""); got != tc.want {
 			t.Fatalf("outputFileName(%q, %s) = %q, want %q", tc.name, tc.format, got, tc.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Described Markdown: filed blank, and the person's client hands it on
+// (epic #6023, task #6025)
+// ---------------------------------------------------------------------------
+//
+// A Markdown request that only DESCRIBES the document is filed as the empty
+// page. The description is not lost: it stays on the composition, and the
+// person's own client gives it to the Library's revision workflow, which a work
+// run is forbidden to do on a person's behalf (integrations/library/revision.go).
+// That is why these requests are made the way a person's client makes them --
+// accepted outside any run by one replica, executed by another that adopts the
+// run it opened -- and not through nestedMaterializeContext.
+
+const describedStatement = "A one-page launch brief for the autumn release"
+
+// describedArgs is a Markdown file asked for by describing it: a statement and
+// nothing to compose from.
+func describedArgs() materializeArgs {
+	return materializeArgs{Name: "Launch brief", Format: pure.FormatMarkdown, Statement: describedStatement}
+}
+
+// forbidComposer is a composer that fails the test when the model is reached.
+func forbidComposer(t *testing.T) materializeComposerFunc {
+	return func(context.Context, ComposeRequest) (ComposeReply, error) {
+		t.Helper()
+		t.Fatal("the model was reached for a file that is filed blank")
+		return ComposeReply{}, nil
+	}
+}
+
+// acceptAsAPerson sends a request the way a person's client does: outside any
+// work run. The replica that accepts opens the goal and returns; nothing is
+// dispatched from there, so the saved request waits for a replica to adopt the
+// run. It returns the composition and the input the adopting run is given.
+func acceptAsAPerson(t *testing.T, accepting *Integration, a materializeArgs) (string, map[string]any) {
+	t.Helper()
+	opener := &directMaterializeGoal{}
+	accepting.SetGoalOpener(opener)
+	out, err := accepting.materialize(materializeContext(), "u-alice", "", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stringOf(out["compositionId"]), opener.goal.Input
+}
+
+// adoptTheRun executes an accepted request on the given replica, under the run
+// the accepting replica's goal opened.
+func adoptTheRun(replica *Integration, input map[string]any) error {
+	ctx := common.ContextWithRun(materializeContext(), common.RunContext{RunId: "v1:work:run:direct", GoalId: "v1:work:goal:direct", StepKey: "compose", OwnerUserId: "u-alice"})
+	_, err := replica.handleExecute(ctx, input, 0)
+	return err
+}
+
+// anotherReplica is a second node over the same engine: none of the first
+// node's local state, and the composer the caller gives it.
+func anotherReplica(e Engine, u *materializeUploader, composer Composer) *Integration {
+	r := New(e, nil)
+	r.SetUploader(u, "files")
+	if composer != nil {
+		r.SetComposer(composer)
+	}
+	return r
+}
+
+func TestDescribedMarkdownIsFiledBlankWithoutAModelCall(t *testing.T) {
+	i, e, u := materializeFixture(t)
+	i.SetComposer(forbidComposer(t))
+	compositionId, input := acceptAsAPerson(t, i, describedArgs())
+
+	// The description is on record the moment the request is accepted, before
+	// anything has run: if the client never hands it on, it is still there.
+	if row := e.compositions[compositionId]; row["statement"] != describedStatement || row["status"] != "draft" {
+		t.Fatalf("an accepted request must already carry its statement: %v", row)
+	}
+
+	if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+		t.Fatal(err)
+	}
+	row := e.compositions[compositionId]
+	if row["status"] != "ready" || stringOf(row["outputFileId"]) == "" {
+		t.Fatalf("the described request did not complete: %v", row)
+	}
+	if row["statement"] != describedStatement {
+		t.Fatalf("the statement on the composition = %q, want the request's own", row["statement"])
+	}
+	// One newline: no front matter, no heading, so the editor shows its empty page
+	// and its "Describe document" call to action.
+	if u.calls != 1 || string(u.bytes) != "\n" {
+		t.Fatalf("described markdown must be filed as a single newline, got %q after %d uploads", u.bytes, u.calls)
+	}
+	if row["provenanceEmbedded"] != false || row["provenanceNote"] != "Created blank. Its history is kept on its composition, not in the file." {
+		t.Fatalf("provenance = embedded %v, note %q", row["provenanceEmbedded"], row["provenanceNote"])
+	}
+	if len(e.files) != 1 {
+		t.Fatalf("a described file is one file with no source package, got %d", len(e.files))
+	}
+	if f := e.files[stringOf(row["outputFileId"])]; f["name"] != "Launch brief.md" {
+		t.Fatalf("filed name = %v, want Launch brief.md", f["name"])
+	}
+}
+
+func TestDescribedMarkdownWithLibrarySourcesStillFilesBlank(t *testing.T) {
+	i, e, u := materializeFixture(t)
+	// A reference the person attached, which their client hands on with the
+	// description. It resolves like any other source.
+	e.files["notes-file"] = map[string]any{"name": "meeting-notes.md", "mimeType": "text/markdown"}
+	a := describedArgs()
+	a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes-file", Label: "Meeting notes"}}
+	compositionId, input := acceptAsAPerson(t, i, a)
+
+	if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+		t.Fatal(err)
+	}
+	row := e.compositions[compositionId]
+	if row["status"] != "ready" || u.calls != 1 || string(u.bytes) != "\n" {
+		t.Fatalf("described markdown with a source must still be filed as a single newline: row=%v bytes=%q uploads=%d", row, u.bytes, u.calls)
+	}
+	// The source is the composition's provenance, so it stays on the record.
+	recorded, _ := json.Marshal(row["sources"])
+	if !strings.Contains(string(recorded), `"ref":"notes-file"`) || !strings.Contains(string(recorded), `"label":"Meeting notes"`) {
+		t.Fatalf("the source was dropped from the composition: %s", recorded)
+	}
+	// The attached file and the one new file; nothing else is filed for a source.
+	if len(e.files) != 2 || stringOf(row["sourceFileId"]) != "" {
+		t.Fatalf("a described file with sources files only its one output: files=%d sourceFileId=%v", len(e.files), row["sourceFileId"])
+	}
+}
+
+// Source capture is the composition's provenance, so a reference the person
+// opted in is captured at accept time exactly as before; the empty file just
+// does not need it, so the replica that executes the run reads nothing.
+func TestDescribedMarkdownKeepsCapturingOptedInReferences(t *testing.T) {
+	i, e, u := materializeFixture(t)
+	data := []byte("Launch notes: ship on the first Tuesday")
+	reader := &referenceReader{data: data}
+	i.SetSourceDownloader(reader)
+	e.files["reference-file"] = map[string]any{"name": "launch-notes.md", "blobUrl": "stored-object", "sha256": (pure.Result{Bytes: data}).SHA256()}
+	a := describedArgs()
+	a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference-file", Label: "Launch notes", Content: true}}
+	compositionId, input := acceptAsAPerson(t, i, a)
+	if reader.calls != 1 {
+		t.Fatalf("an opted-in reference must still be read once at accept time, was read %d times", reader.calls)
+	}
+	captured, _ := json.Marshal(e.inputs[compositionId]["request"])
+	if !strings.Contains(string(captured), "ship on the first Tuesday") {
+		t.Fatalf("the reference was not captured in the owner-only input: %s", captured)
+	}
+
+	// The executing replica has no downloader and must not need one.
+	if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+		t.Fatal(err)
+	}
+	if reader.calls != 1 || string(u.bytes) != "\n" || e.compositions[compositionId]["status"] != "ready" {
+		t.Fatalf("the empty file should need no reference read: reads=%d bytes=%q row=%v", reader.calls, u.bytes, e.compositions[compositionId])
+	}
+}
+
+func TestDescribedMarkdownWithATemplateStillUsesTheComposer(t *testing.T) {
+	i, e, u := materializeFixture(t)
+	e.template = map[string]any{"id": "template-1", "name": "House style"}
+	a := describedArgs()
+	a.TemplateId = "template-1"
+	compositionId, input := acceptAsAPerson(t, i, a)
+
+	// The person asked for a template, and only the composer renders through one.
+	var asked []ComposeRequest
+	worker := anotherReplica(e, u, materializeComposerFunc(func(_ context.Context, r ComposeRequest) (ComposeReply, error) {
+		asked = append(asked, r)
+		return ComposeReply{Draft: pure.Draft{Body: "Written through the template"}}, nil
+	}))
+	if err := adoptTheRun(worker, input); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0].TemplateName != "House style" || asked[0].Statement != describedStatement {
+		t.Fatalf("the composer was not asked to write through the template: %+v", asked)
+	}
+	if !strings.Contains(string(u.bytes), "Written through the template") || string(u.bytes) == "\n" {
+		t.Fatalf("a described request with a template must carry the composed document, got %q", u.bytes)
+	}
+	if row := e.compositions[compositionId]; row["status"] != "ready" {
+		t.Fatalf("the templated request did not complete: %v", row)
+	}
+}
+
+// The same recovery Task 1 pins for a blank request, for a described one: the
+// resumed pass finds a saved recipe and restores it, so the blank-ness has to be
+// on that recipe -- and the pass that restores it is not the pass that decided.
+func TestDescribedMarkdownRecoveredFromItsRecipeStaysBlank(t *testing.T) {
+	e := newMaterializeEngine(t)
+	flaky := &failOnce{materializeEngine: e, construct: "createLibraryFile", message: "connection reset by peer"}
+	u := &materializeUploader{}
+	compositionId, input := acceptAsAPerson(t, anotherReplica(flaky, u, nil), describedArgs())
+
+	err := adoptTheRun(anotherReplica(flaky, u, forbidComposer(t)), input)
+	if err == nil || strings.Contains(err.Error(), terminalFailureCode) {
+		t.Fatalf("the interruption must stay resumable, got %v", err)
+	}
+	if row := e.compositions[compositionId]; row["status"] != "draft" || len(e.files) != 0 {
+		t.Fatalf("an interrupted described request must stay resumable with nothing filed: row=%v files=%d", row, len(e.files))
+	}
+	// What the next replica restores: the recipe the first pass saved before it
+	// tried to file, marked blank, in a request that still knows it was described.
+	saved, err := json.Marshal(e.inputs[compositionId]["request"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var snapshot executionRequest
+	if err := json.Unmarshal(saved, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Recipe == nil || !snapshot.Recipe.Blank || !snapshot.Described {
+		t.Fatalf("the interrupted pass did not leave a blank recipe to resume from: described=%v recipe=%+v", snapshot.Described, snapshot.Recipe)
+	}
+
+	if err := adoptTheRun(anotherReplica(flaky, u, forbidComposer(t)), input); err != nil {
+		t.Fatal(err)
+	}
+	if string(u.bytes) != "\n" {
+		t.Fatalf("the resumed described request filed %q, want the single newline an editor opens as an empty page", u.bytes)
+	}
+	row := e.compositions[compositionId]
+	if row["status"] != "ready" || len(e.files) != 1 || row["statement"] != describedStatement {
+		t.Fatalf("the resumed described request did not finish with its one file and its statement: row=%v files=%d", row, len(e.files))
+	}
+}
+
+// The blank file is half of a hand-off, and only a person's client makes the
+// other half. A call made INSIDE a work run -- the planner's file delivery, an
+// agent's composeFile -- says "write this" in its statement and has no client
+// to give the description to the revision workflow, which refuses a run that
+// tries. Filing it blank would end the run with an empty document and nobody to
+// write it, so it keeps the composer.
+func TestDescribedMarkdownInsideARunStillUsesTheComposer(t *testing.T) {
+	i, e, u := materializeFixture(t)
+	var asked []ComposeRequest
+	i.SetComposer(materializeComposerFunc(func(_ context.Context, r ComposeRequest) (ComposeReply, error) {
+		asked = append(asked, r)
+		return ComposeReply{Draft: pure.Draft{Body: "Written from the statement"}}, nil
+	}))
+	out, err := i.materialize(nestedMaterializeContext(), "u-alice", "", describedArgs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0].Statement != describedStatement {
+		t.Fatalf("an in-run described request must be written by the composer: %+v", asked)
+	}
+	if !strings.Contains(string(u.bytes), "Written from the statement") || string(u.bytes) == "\n" {
+		t.Fatalf("an in-run described request was filed blank: %q", u.bytes)
+	}
+	if row := e.compositions[stringOf(out["compositionId"])]; row["status"] != "ready" {
+		t.Fatalf("the in-run request did not complete: %v", row)
+	}
+}
+
+// fromARun is the Library's own test for "a person is not making this call":
+// handleRequestDocumentRevision refuses when a run id is on the context.
+func TestFromARunIsTheConditionTheLibraryRefusesARevisionRequestFor(t *testing.T) {
+	if fromARun(materializeContext()) {
+		t.Fatal("a call with no run on its context is a person's")
+	}
+	if !fromARun(nestedMaterializeContext()) {
+		t.Fatal("a call inside a work run is not a person's")
+	}
+	noRunId := common.ContextWithRun(materializeContext(), common.RunContext{GoalId: "v1:work:goal:nexus", StepKey: "file", OwnerUserId: "u-alice"})
+	if fromARun(noRunId) {
+		t.Fatal("a run context with no run id is what the Library lets through, so it is a person's")
+	}
+}
+
+func TestDescribedMarkdownMeansAStatementAndNothingToComposeFrom(t *testing.T) {
+	if !describedArgs().describedMarkdown() {
+		t.Fatal("a Markdown name and statement alone are a described request")
+	}
+	// What the document is made from, where it goes and the limits its run keeps
+	// are not what makes it a description: references are passed on with it, and a
+	// whitespace-only draft is no draft.
+	around := describedArgs()
+	around.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes-file", Label: "Notes"}, {Kind: KindQuery, Ref: "sourceRows()"}}
+	around.FolderId, around.AccountIds, around.Ceilings, around.Draft, around.RequestId = "folder-1", []string{"account-1"}, map[string]any{"maxRetries": 1}, " \n ", "req-1"
+	if !around.describedMarkdown() {
+		t.Fatal("sources, a folder, account tags, ceilings, a request id and a whitespace-only draft do not stop a request being described")
+	}
+	for name, with := range map[string]func(*materializeArgs){
+		"no statement":   func(a *materializeArgs) { a.Statement = "" },
+		"html":           func(a *materializeArgs) { a.Format = pure.FormatHTML },
+		"text":           func(a *materializeArgs) { a.Format = pure.FormatText },
+		"csv":            func(a *materializeArgs) { a.Format = pure.FormatCSV },
+		"json":           func(a *materializeArgs) { a.Format = pure.FormatJSON },
+		"docx":           func(a *materializeArgs) { a.Format = pure.FormatDOCX },
+		"pdf":            func(a *materializeArgs) { a.Format = pure.FormatPDF },
+		"a draft":        func(a *materializeArgs) { a.Draft = "Some words" },
+		"section keys":   func(a *materializeArgs) { a.SectionKeys = []string{"chapter-1"} },
+		"a template":     func(a *materializeArgs) { a.TemplateId = "template-1" },
+		"a recipe":       func(a *materializeArgs) { a.RecipeId = "recipe-1" },
+		"an output kind": func(a *materializeArgs) { a.OutputKind = "email_template" },
+		"a deployable":   func(a *materializeArgs) { a.DeployableKind = "spa" },
+	} {
+		a := describedArgs()
+		with(&a)
+		if a.describedMarkdown() {
+			t.Fatalf("a request with %s is not a described Markdown request", name)
+		}
+	}
+	// A request is blank or described, never both: blank has no words at all.
+	if describedArgs().blank() || blankArgs(pure.FormatMarkdown).describedMarkdown() {
+		t.Fatal("blank and described requests overlap")
+	}
+}
+
+// The Library lists a file by its summary, and "Materialized from no sources"
+// reads as a fault on a file that was never going to have any.
+func TestBlankAndDescribedFilesAreSummarisedAsCreatedBlank(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	if _, err := i.materialize(nestedMaterializeContext(), "u-alice", "", blankArgs(pure.FormatMarkdown)); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range e.files {
+		if f["summary"] != "Created blank." {
+			t.Fatalf("a blank file's summary = %q, want Created blank.", f["summary"])
+		}
+	}
+
+	described, de, du := materializeFixture(t)
+	compositionId, input := acceptAsAPerson(t, described, describedArgs())
+	if err := adoptTheRun(anotherReplica(de, du, nil), input); err != nil {
+		t.Fatal(err)
+	}
+	if f := de.files[stringOf(de.compositions[compositionId]["outputFileId"])]; f["summary"] != "Created blank." {
+		t.Fatalf("a described file's summary = %q, want Created blank.", f["summary"])
+	}
+
+	// An ordinary file keeps saying what it was made from.
+	ordinary, oe, _ := materializeFixture(t)
+	if _, err := ordinary.materialize(nestedMaterializeContext(), "u-alice", "", materializeDraft()); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range oe.files {
+		if f["summary"] != "Materialized from no sources." {
+			t.Fatalf("an ordinary file's summary = %q, want Materialized from no sources.", f["summary"])
 		}
 	}
 }

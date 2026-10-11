@@ -981,7 +981,7 @@ func ComposeCancelBuild(args ComposeCancelArgs) string {
 type ComposeMaterializeArgs struct {
 	// What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is.
 	Name string
-	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on.
+	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind) is created EMPTY when a person's own client asks, and the statement stays on its composition: the client hands it to the Library's revision workflow, which writes the document. Inside a work run the composer still writes the file from the statement.
 	Statement string
 	// markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.
 	Format string
