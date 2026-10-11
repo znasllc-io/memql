@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -458,8 +459,10 @@ func missingPreparedImages(content string, images []preparedRevisionImage) []str
 }
 
 // Image-reference equality is a mechanical fact, not a language-model judgment.
-// Report actual image nodes for every supplied/prepared image. An attachment
-// alone does not require insertion, and a matching URI proves neither subject
+// Report every supplied/prepared reference and every other actual image node.
+// A replacement may have been saved by a previous run without being attached
+// to this request. Omitting it would give the reviewer only the obsolete image.
+// An attachment alone does not require insertion, and a matching URI proves neither subject
 // identity nor rights; the DSL reviewer still decides whether feedback is met.
 func revisionImageUsage(captured map[string]any, content string, images []preparedRevisionImage) (string, error) {
 	refs, err := proposalAttachmentRefs(captured)
@@ -467,8 +470,10 @@ func revisionImageUsage(captured map[string]any, content string, images []prepar
 		return "", err
 	}
 	embedded := embeddedRevisionImages(content)
+	reported := map[string]bool{}
 	usage := []map[string]any{}
 	add := func(ref reviewAttachment, source string) {
+		reported[ref.URI] = true
 		usage = append(usage, map[string]any{
 			"artifactId": ref.ArtifactID, "name": ref.Name, "uri": ref.URI,
 			"source": source, "embedded": ref.URI != "" && embedded[ref.URI],
@@ -481,6 +486,18 @@ func revisionImageUsage(captured map[string]any, content string, images []prepar
 	}
 	for _, image := range images {
 		add(image.Reference, "prepared")
+	}
+	// A parsed destination proves presence only. Do not infer an artifact ID,
+	// existence, authorization or provenance from an untrusted Markdown URI.
+	other := []string{}
+	for uri := range embedded {
+		if !reported[uri] {
+			other = append(other, uri)
+		}
+	}
+	sort.Strings(other)
+	for _, uri := range other {
+		usage = append(usage, map[string]any{"uri": uri, "source": "candidate", "embedded": true})
 	}
 	raw, err := json.Marshal(usage)
 	return string(raw), err
