@@ -327,6 +327,33 @@ func newFunctionRegistry() *FunctionRegistry {
 	}
 }
 
+// lazyLookup answers a name exactly as LookupIndex keys it -- a qualified
+// name, a real bare name, or an unambiguous bare alias, with an ambiguous one
+// missing -- but clones an entry only when it is first asked for, and answers
+// later asks for the same name with that same copy.
+//
+// LookupIndex clones the WHOLE registry. Plan expansion used to take it on
+// every Execute whose plan was not cached, which is every call carrying a
+// fresh id, to resolve the handful of constructs one query names: a third of
+// the CPU of the document-revision suite, and most of its garbage collection,
+// went to cloning thousands of definitions nothing read. Each lookup still
+// returns its own copy, so what an expansion holds stays isolated from the
+// registry as before.
+func (r *FunctionRegistry) lazyLookup() func(string) (*Function, bool) {
+	seen := map[string]*Function{}
+	return func(name string) (*Function, bool) {
+		if fn, ok := seen[name]; ok {
+			return fn, fn != nil
+		}
+		fn, ok := r.Lookup(name)
+		if !ok {
+			fn = nil
+		}
+		seen[name] = fn
+		return fn, ok
+	}
+}
+
 // add inserts a function into the registry. Errors when the name
 // is already taken.
 func (r *FunctionRegistry) add(fn *Function) error {
