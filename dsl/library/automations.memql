@@ -327,9 +327,12 @@ automation reviseLibraryDocument {
   combinedEvidence := "App research report:\n" + (evidence.app.available ? evidence.app.report : "App research was unavailable; no app findings were obtained.") + "\nIndependent local report:\n" + evidence.headless + "\nEvidence assessment:\n" + (assessment.reply ?? "Unavailable") + "\nTargeted local research:\n" + supplement.reply
  }
 
- // Reuse a completed acquisition batch only for the same immutable request.
- // The native manifest reader revalidates ownership, bytes and provenance.
- retainedImages := query workCompletedStepsForOwnerRuns(runIds: captured.evidenceRunIds, stepKey: "preparedImages")
+ // A prose amendment inherits only the reviewed proposal's pinned images.
+ // Its research predecessors have different feedback, so their acquisition
+ // batches cannot be imported as fresh assets for this request. Native gates
+ // still revalidate ownership, bytes and provenance for both kinds of receipt.
+ imageRuns := captured.amendment != nil ? [captured.runId] : captured.evidenceRunIds
+ retainedImages := query workCompletedStepsForOwnerRuns(runIds: imageRuns, stepKey: "preparedImages")
  if retainedImages.count() > 0 && retainedImages.first().result.value.references != "[]" {
   imageSourceRun := retainedImages.first().result.value.sourceRunId ?? retainedImages.first().runId
  } else {

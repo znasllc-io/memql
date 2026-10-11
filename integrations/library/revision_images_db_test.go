@@ -564,6 +564,14 @@ func TestPreparedImageMustBeRenderedMarkdown(t *testing.T) {
 // An item revision must carry the original image receipt across a replica hop,
 // even though its new request has different feedback and no image-generation step.
 func testRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T, f *revisionDB) {
+	for _, retried := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retried=%v", retried), func(t *testing.T) {
+			testRevisionAmendmentImagePins(t, f.isolatedCase(t), retried)
+		})
+	}
+}
+
+func testRevisionAmendmentImagePins(t *testing.T, f *revisionDB, retried bool) {
 	artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
 	args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add a generated illustration.")
 	request := asString(args["requestId"])
@@ -581,6 +589,25 @@ func testRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T, f *revi
 	var wait *workstate.HumanWait
 	if err := f.execute(f.other, request, false); !errors.As(err, &wait) {
 		t.Fatal(err)
+	}
+	if retried {
+		// The reviewed proposal reused an acquisition from a stopped attempt.
+		// Its amendment may reuse research from that predecessor, but the
+		// previous acquisition belongs to different feedback and must travel
+		// through the pinned inheritance manifest instead.
+		ids, _, _, _, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "updateWorkRun", map[string]any{"runId": ids.RunID, "status": "cancelled"})
+		request += "-retry"
+		args["requestId"] = request
+		if _, err = f.first.handleRequestDocumentRevision(f.ctx, args, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err = f.execute(f.engine, request, false); !errors.As(err, &wait) {
+			t.Fatal(err)
+		}
 	}
 	_, _, _, approval, err := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
 	if err != nil {
