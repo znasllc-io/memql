@@ -1,9 +1,35 @@
 # The Materializer as the one way a file is created
 
 - **Date:** 2026-10-11
-- **Status:** design, awaiting review
+- **Status:** approved 2026-10-11; implementation plan in `docs/superpowers/plans/2026-10-11-materializer-front-door.md`
 - **Branch:** `docs/materializer-front-door-spec`, cut from `origin/main` at `78ed527f3`
 - **Program:** sub-project 1 of 5 in the email, campaigns and materializer rework (see "The program" below)
+
+## Amendments from planning
+
+Found while writing the implementation plan; they refine, not change, the design.
+
+1. **A blank file has no provenance block.** The Markdown writer puts YAML front
+   matter at the top of every file, and the editor's empty-document page appears
+   only when the source is empty (`editors/productivity/src/markdownView.ts:989`).
+   Blank files are therefore written by a separate blank writer (Markdown is
+   exactly `"\n"`, JSON `{}`, HTML an empty document, text and CSV empty); their
+   history lives on the composition row. A described Markdown request also
+   starts from this blank file.
+2. **The revision step waits for the Files entry.** A new file's Library index
+   row is written by the `indexFileOnCreate` automation after the file is
+   created, so `composeRequestRevision` polls for it for a bounded time (30
+   attempts, one second apart, configurable) before posting the comment against
+   `expectedVersion 1` / `expectedRevision "file:1"`. If the row never appears,
+   it records `revisionFailure` and the file stays.
+3. **The OS follows compositions live.** The SDK module exposes
+   `startMaterialize` and `followComposition` as well as `materialize`. The OS
+   Materializer app starts through `startMaterialize` and keeps following on its
+   live composition feed, because OS rules prefer subscriptions to polling; the
+   editors use the polling `followComposition`.
+4. **Names are cleaned on the server.** A trailing extension matching the format
+   is stripped (`Plan.md` stays `Plan.md`, never `Plan.md.md`) and a name with a
+   slash is refused before anything is written.
 
 ## In plain terms
 
