@@ -485,6 +485,7 @@ func testRevisionPartialFeedbackRepair(t *testing.T, shared *revisionDB) {
 			f.ai.firstAnswer = &revisionAnswer{Summary: "Both corrected", Edits: []revisionReplacement{{Before: "First claim. Second claim.", After: "First corrected. Second claim.", Reason: "Correction", CommentIDs: []string{note}}}}
 			f.ai.answer = revisionAnswer{Summary: "Both corrected", Edits: []revisionReplacement{{Before: "First claim. Second claim.", After: "First corrected. Second corrected.", Reason: "Both requested corrections", CommentIDs: []string{note}}}}
 			f.ai.completionReply = "incomplete: Second claim remains unchanged."
+			f.ai.completionQuotes = []string{"Second claim.", "Second claim."}
 			f.ai.completionDocuments = []string{"# Guide\n\nFirst corrected. Second claim.\n", "# Guide\n\nFirst corrected. Second corrected.\n"}
 			if unresolved {
 				f.ai.answer = *f.ai.firstAnswer
@@ -504,12 +505,16 @@ func testRevisionPartialFeedbackRepair(t *testing.T, shared *revisionDB) {
 				value map[string]any
 				valid bool
 			}{
-				{map[string]any{"verdict": "satisfied", "details": ""}, true},
-				{map[string]any{"verdict": "incomplete", "details": "Second claim remains."}, true},
-				{map[string]any{"verdict": "probably", "details": "Looks fine."}, false},
-				{map[string]any{"verdict": "incomplete", "details": strings.Repeat("x", 1201)}, false},
+				{map[string]any{"findings": []any{}}, true},
+				{map[string]any{"findings": []any{map[string]any{"kind": "present_text", "quote": "Second claim.", "explanation": "Second claim remains."}}}, true},
+				{map[string]any{"findings": []any{map[string]any{"kind": "missing_requirement", "quote": "", "explanation": "Requested appendix absent."}}}, true},
+				{map[string]any{"verdict": "probably", "findings": []any{}}, false},
+				{map[string]any{"verdict": "satisfied", "findings": []any{map[string]any{"kind": "present_text", "quote": "Claim.", "explanation": "Contradictory observation."}}}, false},
+				{map[string]any{"findings": []any{map[string]any{"kind": "present_text", "quote": "", "explanation": "Missing quote."}}}, false},
+				{map[string]any{"findings": []any{map[string]any{"kind": "missing_requirement", "quote": "Not absent.", "explanation": "Wrong kind."}}}, false},
+				{map[string]any{"findings": []any{map[string]any{"kind": "present_text", "quote": "Claim.", "explanation": strings.Repeat("x", 401)}}}, false},
 				{map[string]any{"verdict": "satisfied"}, false},
-				{map[string]any{"verdict": "satisfied", "details": "", "document": "Replacement"}, false},
+				{map[string]any{"findings": []any{}, "document": "Replacement"}, false},
 			} {
 				if valid := schema.Validate(tc.value) == nil; valid != tc.valid {
 					t.Fatalf("invalid assessment contract: %v, accepted=%v", tc.value, valid)

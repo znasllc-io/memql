@@ -422,6 +422,29 @@ QueryClient.prototype.knowledgeRefreshEligible = function (this: QueryClient, ar
   return this.executeNamed("knowledgeRefreshEligible", buildKnowledgeRefreshEligible(args), opts);
 };
 
+/** Validate review evidence against the candidate, never an attached older draft. Presence is mechanical; correctness and missing requirements remain model judgments. */
+export interface LibraryRevisionReviewGroundingArgs {
+  document: string;
+  assessment: Record<string, unknown>;
+}
+
+export function buildLibraryRevisionReviewGrounding(args: LibraryRevisionReviewGroundingArgs): string {
+  const parts: string[] = [];
+  parts.push("document: " + renderMemQLValue(args.document));
+  parts.push("assessment: " + renderMemQLValue(args.assessment));
+  return "logic libraryRevisionReviewGrounding(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    libraryRevisionReviewGrounding(args: LibraryRevisionReviewGroundingArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.libraryRevisionReviewGrounding = function (this: QueryClient, args: LibraryRevisionReviewGroundingArgs = {} as LibraryRevisionReviewGroundingArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("libraryRevisionReviewGrounding", buildLibraryRevisionReviewGrounding(args), opts);
+};
+
 /** Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any subsequent click is idempotently rejected by the consume handler's own expiresAt guard. */
 export interface MagicLinkExpirySweepArgs {
   event: Record<string, unknown>;

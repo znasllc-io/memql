@@ -240,21 +240,72 @@
               "responseSchema": {
                 "additionalProperties": false,
                 "properties": {
-                  "details": {
-                    "maxLength": 1200,
-                    "type": "string"
-                  },
-                  "verdict": {
-                    "enum": [
-                      "satisfied",
-                      "incomplete"
-                    ],
-                    "type": "string"
+                  "findings": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "explanation": {
+                              "maxLength": 400,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "present_text"
+                              ],
+                              "type": "string"
+                            },
+                            "quote": {
+                              "maxLength": 600,
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "quote",
+                            "explanation"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "explanation": {
+                              "maxLength": 400,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "missing_requirement"
+                              ],
+                              "type": "string"
+                            },
+                            "quote": {
+                              "enum": [
+                                ""
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "quote",
+                            "explanation"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "maxItems": 8,
+                    "type": "array"
                   }
                 },
                 "required": [
-                  "verdict",
-                  "details"
+                  "findings"
                 ],
                 "type": "object"
               },
@@ -511,21 +562,72 @@
               "responseSchema": {
                 "additionalProperties": false,
                 "properties": {
-                  "details": {
-                    "maxLength": 1200,
-                    "type": "string"
-                  },
-                  "verdict": {
-                    "enum": [
-                      "satisfied",
-                      "incomplete"
-                    ],
-                    "type": "string"
+                  "findings": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "explanation": {
+                              "maxLength": 400,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "present_text"
+                              ],
+                              "type": "string"
+                            },
+                            "quote": {
+                              "maxLength": 600,
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "quote",
+                            "explanation"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "explanation": {
+                              "maxLength": 400,
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "kind": {
+                              "enum": [
+                                "missing_requirement"
+                              ],
+                              "type": "string"
+                            },
+                            "quote": {
+                              "enum": [
+                                ""
+                              ],
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "quote",
+                            "explanation"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "maxItems": 8,
+                    "type": "array"
                   }
                 },
                 "required": [
-                  "verdict",
-                  "details"
+                  "findings"
                 ],
                 "type": "object"
               },

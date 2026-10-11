@@ -1,0 +1,1053 @@
+{
+  "construct": "library/logic.memql libraryRevisionReviewGrounding",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {},
+          "document": "s-document"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
+          "valid": false
+        }
+      }
+    },
+    "variant 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {
+            "findings": []
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "",
+          "valid": true,
+          "verdict": "satisfied"
+        }
+      }
+    },
+    "variant 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {
+            "findings": []
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "",
+          "valid": true,
+          "verdict": "satisfied"
+        }
+      }
+    },
+    "variant 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {
+            "findings": []
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "",
+          "valid": true,
+          "verdict": "satisfied"
+        }
+      }
+    },
+    "variant 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {
+            "findings": []
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "",
+          "valid": true,
+          "verdict": "satisfied"
+        }
+      }
+    },
+    "variant 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {
+            "findings": []
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "",
+          "valid": true,
+          "verdict": "satisfied"
+        }
+      }
+    },
+    "variant 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {
+            "findings": []
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "",
+          "valid": true,
+          "verdict": "satisfied"
+        }
+      }
+    },
+    "variant 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {
+            "findings": []
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "",
+          "valid": true,
+          "verdict": "satisfied"
+        }
+      }
+    },
+    "variant 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {
+            "findings": []
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "",
+          "valid": true,
+          "verdict": "satisfied"
+        }
+      }
+    },
+    "variant 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Remove old wording.",
+                "kind": "present_text",
+                "quote": "Old draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "This exact quoted text is absent from the proposed document: Old draft.. Do not confuse an original selection or reference draft with the current candidate.",
+          "valid": false
+        }
+      }
+    },
+    "variant 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Remove old wording.",
+                "kind": "present_text",
+                "quote": "Old draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "This exact quoted text is absent from the proposed document: Old draft.. Do not confuse an original selection or reference draft with the current candidate.",
+          "valid": false
+        }
+      }
+    },
+    "variant 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Remove old wording.",
+                "kind": "present_text",
+                "quote": "Old draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "This exact quoted text is absent from the proposed document: Old draft.. Do not confuse an original selection or reference draft with the current candidate.",
+          "valid": false
+        }
+      }
+    },
+    "variant 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Remove old wording.",
+                "kind": "present_text",
+                "quote": "Old draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "This exact quoted text is absent from the proposed document: Old draft.. Do not confuse an original selection or reference draft with the current candidate.",
+          "valid": false
+        }
+      }
+    },
+    "variant 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Remove old wording.",
+                "kind": "present_text",
+                "quote": "Old draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "This exact quoted text is absent from the proposed document: Old draft.. Do not confuse an original selection or reference draft with the current candidate.",
+          "valid": false
+        }
+      }
+    },
+    "variant 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Remove old wording.",
+                "kind": "present_text",
+                "quote": "Old draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "This exact quoted text is absent from the proposed document: Old draft.. Do not confuse an original selection or reference draft with the current candidate.",
+          "valid": false
+        }
+      }
+    },
+    "variant 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Remove old wording.",
+                "kind": "present_text",
+                "quote": "Old draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "This exact quoted text is absent from the proposed document: Old draft.. Do not confuse an original selection or reference draft with the current candidate.",
+          "valid": false
+        }
+      }
+    },
+    "variant 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Remove old wording.",
+                "kind": "present_text",
+                "quote": "Old draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "problem": "This exact quoted text is absent from the proposed document: Old draft.. Do not confuse an original selection or reference draft with the current candidate.",
+          "valid": false
+        }
+      }
+    },
+    "variant 2 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Apply requested wording.",
+                "kind": "present_text",
+                "quote": "Current draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Apply requested wording.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 2 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Apply requested wording.",
+                "kind": "present_text",
+                "quote": "Current draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Apply requested wording.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 2 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Apply requested wording.",
+                "kind": "present_text",
+                "quote": "Current draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Apply requested wording.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 2 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Apply requested wording.",
+                "kind": "present_text",
+                "quote": "Current draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Apply requested wording.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 2 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Apply requested wording.",
+                "kind": "present_text",
+                "quote": "Current draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Apply requested wording.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 2 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Apply requested wording.",
+                "kind": "present_text",
+                "quote": "Current draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Apply requested wording.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 2 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Apply requested wording.",
+                "kind": "present_text",
+                "quote": "Current draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Apply requested wording.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 2 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Apply requested wording.",
+                "kind": "present_text",
+                "quote": "Current draft."
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Apply requested wording.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 3 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Add the requested image.",
+                "kind": "missing_requirement",
+                "quote": ""
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Add the requested image.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 3 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Add the requested image.",
+                "kind": "missing_requirement",
+                "quote": ""
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Add the requested image.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 3 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Add the requested image.",
+                "kind": "missing_requirement",
+                "quote": ""
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Add the requested image.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 3 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Add the requested image.",
+                "kind": "missing_requirement",
+                "quote": ""
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Add the requested image.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 3 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Add the requested image.",
+                "kind": "missing_requirement",
+                "quote": ""
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Add the requested image.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 3 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Add the requested image.",
+                "kind": "missing_requirement",
+                "quote": ""
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Add the requested image.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 3 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Add the requested image.",
+                "kind": "missing_requirement",
+                "quote": ""
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Add the requested image.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    },
+    "variant 3 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "assessment": {
+            "findings": [
+              {
+                "explanation": "Add the requested image.",
+                "kind": "missing_requirement",
+                "quote": ""
+              }
+            ]
+          },
+          "document": "Current draft."
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "details": "Add the requested image.",
+          "valid": true,
+          "verdict": "incomplete"
+        }
+      }
+    }
+  }
+}

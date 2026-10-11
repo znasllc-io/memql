@@ -135,7 +135,8 @@ RUN set -e; \
         *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;; \
     esac; \
     mkdir -p bin/tools; \
-    curl -sSL --fail --retry 5 --retry-all-errors --retry-delay 2 \
+    curl -sSL --fail --connect-timeout 30 --speed-limit 1024 --speed-time 30 --max-time 600 \
+        --retry 5 --retry-all-errors --retry-delay 2 \
         -o "bin/tools/tailwindcss-${platform}" \
         "https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-${platform}"; \
     chmod +x "bin/tools/tailwindcss-${platform}"

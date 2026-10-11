@@ -1,0 +1,27 @@
+/// Validate review evidence against the candidate, never an attached older draft.
+/// Presence is mechanical; correctness and missing requirements remain model judgments.
+logic libraryRevisionReviewGrounding {
+ args {
+  document string!
+  assessment object!
+ }
+ if args.assessment.findings == nil {
+  return {valid: false, problem: "Return a findings array, empty only when every requested change is satisfied."}
+ }
+ if args.assessment.findings.count() == 0 {
+  return {valid: true, verdict: "satisfied", details: ""}
+ }
+ for finding in args.assessment.findings {
+  if trim(finding.explanation) == "" {
+   return {valid: false, problem: "Every finding must explain the specific unmet human requirement."}
+  }
+  if finding.kind == "present_text" {
+   if trim(finding.quote) == "" || !args.document.includes(finding.quote) {
+    return {valid: false, problem: "This exact quoted text is absent from the proposed document: " + finding.quote + ". Do not confuse an original selection or reference draft with the current candidate."}
+   }
+  } else if finding.kind != "missing_requirement" || finding.quote != "" {
+   return {valid: false, problem: "Use present_text with a candidate quote for existing prose, or missing_requirement with an empty quote for omitted requested material."}
+  }
+ }
+ return {valid: true, verdict: "incomplete", details: args.assessment.findings.reduce("", (acc, finding) => acc + (acc == "" ? "" : "\n") + finding.explanation)}
+}
