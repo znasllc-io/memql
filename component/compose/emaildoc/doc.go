@@ -187,9 +187,9 @@ type customFile struct {
 }
 
 // JSON returns the canonical bytes of the file: two-space indentation, keys in
-// the order of the format, markup left readable (a "<" is not written as
-// <) and one trailing newline. Parse(d.JSON()) is d, and the bytes of a
-// document that was parsed from canonical bytes are those bytes.
+// the order of the format, markup left readable (HTML escaping is off, so "<"
+// and "&" are written as they are) and one trailing newline. Parse(d.JSON())
+// is d, and a document parsed from canonical bytes writes those bytes again.
 func (d Document) JSON() ([]byte, error) {
 	var file any
 	if d.Mode() == ModeLayout {

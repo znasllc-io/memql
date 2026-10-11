@@ -12,8 +12,11 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+
+	"golang.org/x/net/html"
 )
 
 func neutralTheme() string {
@@ -70,7 +73,7 @@ func TestParseRefuses(t *testing.T) {
 		{"html script", layoutJSON(`{"id":"x","type":"html","html":"<script>1</script>"}`), `block "x": html blocks cannot use <script>`},
 		{"html handler", layoutJSON(`{"id":"x","type":"html","html":"<p onclick=\"x\">a</p>"}`), `block "x": html blocks cannot use the onclick attribute`},
 		{"html css url", layoutJSON(`{"id":"x","type":"html","html":"<p style=\"background:url(x)\">a</p>"}`), `block "x": html block styles cannot load resources`},
-		{"html conditional", layoutJSON(`{"id":"x","type":"html","html":"<!--[if mso]><v:rect/><![endif]-->"}`), `block "x": html blocks cannot contain conditional comments`},
+		{"html conditional", layoutJSON(`{"id":"x","type":"html","html":"<!--[if mso]><v:rect/><![endif]-->"}`), `block "x": html blocks cannot contain comments`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -117,7 +120,7 @@ func expectRefused(t *testing.T, cases []refusal) {
 	}
 }
 
-func spacer(id string) string { return fmt.Sprintf(`{"id":%q,"type":"spacer","height":4}`, id) }
+func spacer(id string) string { return `{"id":` + jsonString(id) + `,"type":"spacer","height":4}` }
 
 func repeatJoin(n int, one func(i int) string) string {
 	parts := make([]string, n)
@@ -310,6 +313,7 @@ func TestParseRefusesBadPicturesAndLinks(t *testing.T) {
 		{"data picture that is not an image", picture("data:image/png;base64," + notAnImage), `block "i": email image must contain valid PNG, JPEG, or GIF bytes`},
 		{"png bytes labelled jpeg", picture(pngAsJPEG), `block "i": email image must contain valid PNG, JPEG, or GIF bytes`},
 		{"data picture over 1 MiB", picture("data:image/png;base64," + over), `block "i": email image exceeds 1 MiB`},
+		{"data picture with no bytes", picture("data:image/png;base64,"), `block "i": the embedded picture is empty`},
 		{"button without a label", layoutJSON(`{"id":"b","type":"button","href":"https://example.com"}`), `block "b": label must be 1 to 200 bytes`},
 		{"button label of 201 bytes", layoutJSON(`{"id":"b","type":"button","label":"` + strings.Repeat("l", 201) + `"}`), `block "b": label must be 1 to 200 bytes`},
 		{"button wider than 600", layoutJSON(`{"id":"b","type":"button","label":"Go","width":601}`), `block "b": width must be between 0 and 600 pixels`},
@@ -424,19 +428,17 @@ func TestParseAcceptsLinkForms(t *testing.T) {
 		"[wiki](https://en.wikipedia.org/wiki/Foo_(bar))",
 		"- [a](mailto:a@example.com)\n- [b](tel:+15551234567)",
 	} {
-		doc := layoutJSON(`{"id":"t","type":"text","text":` + mustQuote(text) + `}`)
+		doc := layoutJSON(`{"id":"t","type":"text","text":` + jsonString(text) + `}`)
 		if _, err := Parse([]byte(doc)); err != nil {
 			t.Errorf("text %q: %v", text, err)
 		}
 	}
 }
 
-func mustQuote(s string) string { return fmt.Sprintf("%q", s) }
-
 func TestParseKeepsMarkupInTextAsData(t *testing.T) {
 	// Text is data. Parse keeps it exactly as written and the renderer escapes
 	// it; the one place markup is read as markup is an html block, and that is
-	// validated (TestValidateMarkup).
+	// validated (markup_test.go).
 	hostile := `<script>alert(1)</script> & "quoted" <b>x</b>`
 	quoted, err := json.Marshal(hostile)
 	if err != nil {
@@ -471,7 +473,7 @@ func TestCustomModeKeepsTheAuthorsHTML(t *testing.T) {
 	// layouts, so it stays valid without a converter. Only the size, the
 	// subject and the plain-text body are checked.
 	html := `<html><body><script>1</script><img src="https://cdn.example/a.png"><a href="{{fields.x}}">x</a></body></html>`
-	d, err := Parse([]byte(`{"subject":"x","textBody":"y","htmlBody":` + mustQuote(html) + `}`))
+	d, err := Parse([]byte(`{"subject":"x","textBody":"y","htmlBody":` + jsonString(html) + `}`))
 	if err != nil || d.Mode() != ModeCustom || d.HTMLBody != html {
 		t.Fatalf("custom html: %+v %v", d, err)
 	}
@@ -696,88 +698,367 @@ func TestParentPackageDoesNotImportEmaildoc(t *testing.T) {
 	}
 }
 
-func TestValidateMarkup(t *testing.T) {
-	accepted := []string{
-		``,
-		`plain text & more`,
-		`<table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%; background:#fff"><tr><td align="center" style="padding:0 24px; font-family:Arial, sans-serif">A &amp; B<br/>C</td></tr></table>`,
-		`<p><strong>bold</strong> <em>em</em> <a href="https://example.com/a?b=1" target="_blank" rel="noopener">link</a></p>`,
-		`<a href="{{unsubscribeUrl}}">x</a><a href="{{preferencesUrl}}">x</a><a href="{{viewUrl}}">x</a><a href="{{confirmUrl}}">x</a>`,
-		`<a href="mailto:a@example.com">x</a><a href="tel:+15551234567">x</a><a href="">x</a>`,
-		`<UL><LI>upper case tags</LI></UL>`,
-		// The tokenizer keeps the first of two equal attributes, as browsers do,
-		// so only the first href is ever used.
-		`<a href="https://ok" href="javascript:alert(1)">x</a>`,
-		`<ul><li>one</li></ul><ol><li>two</li></ol><h1>h</h1><hr><blockquote>q</blockquote><pre>p</pre><code>c</code><center>c</center><font face="Arial" color="#333" size="2">f</font>`,
-		`<!-- a plain comment -->`,
-		`<!-- [note] -->`,
-		`<div class="a" id="b" title="t" lang="en" dir="ltr" role="presentation" aria-label="l" aria-hidden="true">x</div>`,
-		`<td bgcolor="#fff" valign="top" colspan="2" rowspan="2" scope="col" width="10" height="10">x</td>`,
-		`<span style="font-size:14px; line-height:20px; color:#333333; letter-spacing:0.5px">x</span>`,
+func jsonString(s string) string {
+	data, err := json.Marshal(s)
+	if err != nil {
+		panic(err)
 	}
-	for _, src := range accepted {
-		if err := validateMarkup(src); err != nil {
-			t.Errorf("refused %q: %v", src, err)
-		}
-	}
-	refused := []struct{ src, want string }{
-		{`<img src="x">`, "html blocks cannot contain pictures; use an image block"},
-		{`<IMG SRC="x">`, "html blocks cannot contain pictures; use an image block"},
-		{`<img>`, "html blocks cannot contain pictures; use an image block"},
-		{`<script>1</script>`, "html blocks cannot use <script>"},
-		{`<SCRIPT>1</SCRIPT>`, "html blocks cannot use <script>"},
-		{`<style>p{}</style>`, "html blocks cannot use <style>"},
-		{`<svg><image href="https://x"/></svg>`, "html blocks cannot use <svg>"},
-		{`<iframe src="x"></iframe>`, "html blocks cannot use <iframe>"},
-		{`<form><input name="a"></form>`, "html blocks cannot use <form>"},
-		{`<link rel="stylesheet" href="x">`, "html blocks cannot use <link>"},
-		{`<meta http-equiv="refresh" content="0">`, "html blocks cannot use <meta>"},
-		{`<base href="https://x">`, "html blocks cannot use <base>"},
-		{`<object data="x"></object>`, "html blocks cannot use <object>"},
-		{`<video src="x"></video>`, "html blocks cannot use <video>"},
-		{`<picture><source srcset="x"></picture>`, "html blocks cannot use <picture>"},
-		{`<html><body>x</body></html>`, "html blocks cannot use <html>"},
-		{`<head></head>`, "html blocks cannot use <head>"},
-		{`<title>x</title>`, "html blocks cannot use <title>"},
-		{`<v:rect/>`, "html blocks cannot use <v:rect>"},
-		{`<p onclick="x">a</p>`, "html blocks cannot use the onclick attribute"},
-		{`<p onmouseover="x">a</p>`, "html blocks cannot use the onmouseover attribute"},
-		{`<p data-x="1">a</p>`, "html blocks cannot use the data-x attribute"},
-		{`<a href="https://x" ping="https://y">x</a>`, "html blocks cannot use the ping attribute"},
-		{`<table background="https://x"><tr><td>x</td></tr></table>`, "html blocks cannot use the background attribute"},
-		{`<div src="x">x</div>`, "html blocks cannot use the src attribute"},
-		{`<div srcset="x">x</div>`, "html blocks cannot use the srcset attribute"},
-		{`<div href="https://x">x</div>`, "html blocks cannot use the href attribute"},
-		{`<p style="background:url(https://x)">x</p>`, "html block styles cannot load resources"},
-		{`<p style="background:URL(https://x)">x</p>`, "html block styles cannot load resources"},
-		{`<p style="background:u\72l(https://x)">x</p>`, "html block styles cannot load resources"},
-		{`<p style="background:u/**/rl(https://x)">x</p>`, "html block styles cannot load resources"},
-		{`<p style="background:u&#x72;l(https://x)">x</p>`, "html block styles cannot load resources"},
-		{`<p style="background:image('https://x')">x</p>`, "html block styles cannot load resources"},
-		{`<p style="background:image-set('x' 1x)">x</p>`, "html block styles cannot load resources"},
-		{`<p style="width:expression(alert(1))">x</p>`, "html block styles cannot load resources"},
-		{`<p style="behavior:url(x)">x</p>`, "html block styles cannot load resources"},
-		{`<p style="-moz-binding:x">x</p>`, "html block styles cannot load resources"},
-		{`<p style="@import 'x'">x</p>`, "html block styles cannot load resources"},
-		{`<a href="javascript:alert(1)">x</a>`, "a link must be"},
-		{`<a href="JavaScript:alert(1)">x</a>`, "a link must be"},
-		{`<a href="jav&#x61;script:alert(1)">x</a>`, "a link must be"},
-		{`<a href=" https://example.com">x</a>`, "a link cannot contain spaces or control characters"},
-		{`<a href="https://example.com/a b">x</a>`, "a link cannot contain spaces or control characters"},
-		{`<a href="{{fields.url}}">x</a>`, "a link must be"},
-		{`<a href="#top">x</a>`, "a link must be"},
-		{`<a href="/relative">x</a>`, "a link must be"},
-		{`<a href="data:text/html;base64,AAAA">x</a>`, "a link must be"},
-		{`<a href="javascript:alert(1)" href="https://ok">x</a>`, "a link must be"},
-		{`<!--[if mso]><v:rect/><![endif]-->`, "html blocks cannot contain conditional comments"},
-		{`<!--[if mso]>x<![endif]-->`, "html blocks cannot contain conditional comments"},
-		{`<!-- a <b> inside a comment -->`, "html blocks cannot contain conditional comments"},
-		{`<![if !mso]><p>x</p><![endif]>`, "html blocks cannot contain conditional comments"},
-		{`<!--[if mso]>x-->`, "html blocks cannot contain conditional comments"},
+	return string(data)
+}
+
+// The same address in the three places a document can carry one that is not a
+// plain field: a button, a Markdown link and an anchor in an html block.
+var addressContexts = []struct {
+	name string
+	doc  func(href string) string
+}{
+	{"button", func(href string) string {
+		return layoutJSON(`{"id":"b","type":"button","label":"Go","href":` + jsonString(href) + `}`)
+	}},
+	{"markdown", func(href string) string {
+		return layoutJSON(`{"id":"t","type":"text","text":` + jsonString("[x]("+href+")") + `}`)
+	}},
+	{"html", func(href string) string {
+		return layoutJSON(`{"id":"x","type":"html","html":` + jsonString(`<a href="`+html.EscapeString(href)+`">x</a>`) + `}`)
+	}},
+}
+
+func TestParseKeepsMergeTagsOutOfTheHost(t *testing.T) {
+	// A merge tag is replaced with a recipient-supplied value. In the path,
+	// query or fragment that only changes which page of the sender's choice a
+	// link opens; in the host, user name or port it would choose the site.
+	const host = "a web address cannot take a merge tag in its host, user name or port"
+	const mail = "email and phone links cannot hold a merge tag"
+	refused := []struct{ href, want string }{
+		{"https://{{fields.host}}/x", host},
+		{"https://{{fields.url}}", host},
+		{"http://{{email}}", host},
+		{"https://example.com{{fields.p}}", host},
+		{"https://exa{{fields.part}}mple.com/", host},
+		{"https://example.com@{{fields.host}}/", host},
+		{"https://{{fields.user}}@example.com/", host},
+		{"https://user:{{fields.pw}}@example.com/", host},
+		{"https://example.com:{{fields.port}}/", host},
+		{"https://example.com:{{fields.port}}", host},
+		{"https://{{fields.host}}?x=1", host},
+		{"https://{{fields.host}}#x", host},
+		{"HTTPS://{{fields.host}}/", host},
+		// A browser skips extra slashes after the two, so the host is what follows them.
+		{"https:///{{fields.host}}/x", host},
+		{"https:////{{fields.host}}/x", host},
+		{"mailto:{{email}}", mail},
+		{"mailto:a@example.com?subject={{fields.subject}}", mail},
+		{"mailto:{{unsubscribeUrl}}", mail},
+		{"MAILTO:{{email}}", mail},
+		{"tel:{{fields.phone}}", mail},
+		{"tel:+1555{{fields.extension}}", mail},
 	}
 	for _, c := range refused {
-		if err := validateMarkup(c.src); err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%q: want %q, got %v", c.src, c.want, err)
+		for _, where := range addressContexts {
+			t.Run(where.name+" "+c.href, func(t *testing.T) {
+				if _, err := Parse([]byte(where.doc(c.href))); err == nil || !strings.Contains(err.Error(), c.want) {
+					t.Fatalf("want %q, got %v", c.want, err)
+				}
+			})
+		}
+	}
+	for _, link := range []string{
+		`{"id":"s","type":"social","links":[{"network":"n","href":"https://{{fields.host}}/"}]}`,
+		`{"id":"f","type":"footer","links":[{"label":"l","href":"https://{{fields.host}}/"}]}`,
+		`{"id":"i","type":"image","width":10,"href":"https://{{fields.host}}/"}`,
+	} {
+		if _, err := Parse([]byte(layoutJSON(link))); err == nil || !strings.Contains(err.Error(), host) {
+			t.Errorf("%s: got %v", link, err)
+		}
+	}
+	for _, href := range []string{
+		"https://example.com/?e={{email}}",
+		"https://example.com?e={{email}}",
+		"https://example.com/{{fields.slug}}",
+		"https://example.com/a/{{fields.slug}}/b?x={{fields.y}}#{{fields.z}}",
+		"https://example.com#{{fields.frag}}",
+		"http://example.com:8080/?e={{email}}",
+		"https://user@example.com/{{fields.p}}",
+		"https://[::1]:8080/{{fields.p}}",
+		"mailto:a@example.com?subject=Hello",
+		"tel:+15551234567",
+		TagViewURL,
+	} {
+		for _, where := range addressContexts {
+			if _, err := Parse([]byte(where.doc(href))); err != nil {
+				t.Errorf("%s %q: %v", where.name, href, err)
+			}
+		}
+	}
+}
+
+func TestParseRefusesCharactersAnAddressMustEncode(t *testing.T) {
+	// A valid address percent-encodes these, so one in a link is a mistake or an
+	// attempt to leave the attribute it is written in.
+	const sentence = "a link cannot contain quotes, angle brackets, backticks or backslashes"
+	for name, href := range map[string]string{
+		"double quote":        `https://example.com/a"b`,
+		"less-than":           `https://example.com/a<b`,
+		"greater-than":        `https://example.com/a>b`,
+		"backtick":            "https://example.com/a`b",
+		"backslash":           `https://example.com/a\b`,
+		"quote in an email":   `mailto:a"b@example.com`,
+		"quote in a phone":    `tel:+1"5`,
+		"angle bracket form":  `<https://example.com>`,
+		"quote after a query": `https://example.com/?q="x"`,
+	} {
+		for _, where := range addressContexts {
+			t.Run(where.name+" "+name, func(t *testing.T) {
+				if _, err := Parse([]byte(where.doc(href))); err == nil || !strings.Contains(err.Error(), sentence) {
+					t.Fatalf("want %q, got %v", sentence, err)
+				}
+			})
+		}
+	}
+	// An apostrophe is a valid address character.
+	for _, where := range addressContexts {
+		if _, err := Parse([]byte(where.doc("https://example.com/it's"))); err != nil {
+			t.Errorf("%s: %v", where.name, err)
+		}
+	}
+}
+
+// sampleValue is, for each key a block can carry, a value that is valid on
+// every type that accepts the key.
+var sampleValue = map[string]string{
+	"role": `"brand"`, "padding": `[1,2,3,4]`, "text": `"x"`, "size": `16`, "lineHeight": `20`, "listLineHeight": `20`,
+	"gap": `4`, "color": `"text"`, "textColor": `"white"`, "linkColor": `"primary"`, "background": `"tint"`,
+	"align": `"center"`, "italic": `true`, "weight": `700`, "font": `"body"`, "letterSpacing": `"0.05em"`,
+	"src": `"artifact:abc"`, "alt": `"a"`, "width": `10`, "height": `10`, "href": `"https://example.com"`, "bleed": `true`,
+	"label": `"Go"`, "paddingY": `8`, "inset": `[1,2,3,4]`, "maxWidth": `500`, "cellPadding": `4`, "stackBelow": `450`,
+	"blocks": `[]`, "columns": `[{"width":100,"blocks":[]}]`, "title": `"t"`, "lines": `["x"]`, "separator": `"|"`,
+	"after": `8`, "html": `"<p>x</p>"`,
+}
+
+// sampleFor is a valid value for the key on the type.
+func sampleFor(typ, key string) string {
+	if key == "links" {
+		switch typ {
+		case "social":
+			return `[{"network":"n","href":"https://example.com","icon":"artifact:i","width":10}]`
+		case "footer":
+			return `[{"label":"l","href":"https://example.com"}]`
+		}
+		return `[]`
+	}
+	return sampleValue[key]
+}
+
+// blockOf writes a block of the type with the keys it cannot do without and
+// then the extra keys, each with a sample value unless the pair gives one.
+func blockOf(typ string, extra ...[2]string) string {
+	members := map[string]string{"id": `"b"`, "type": jsonString(typ)}
+	for _, key := range map[string][]string{"image": {"width"}, "button": {"label"}, "columns": {"columns"}, "social": {"links"}}[typ] {
+		members[key] = sampleFor(typ, key)
+	}
+	for _, pair := range extra {
+		members[pair[0]] = pair[1]
+	}
+	keys := make([]string, 0, len(members))
+	for key := range members {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, key := range keys {
+		parts[i] = jsonString(key) + ":" + members[key]
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
+// specKeys is the key table of the format, written out here a second time so
+// the tests check the parser against the specification and not against its own
+// table. Every type also takes id, type and role, and every type but spacer
+// takes padding.
+var specKeys = map[string]string{
+	"image":     "src alt width height align href bleed",
+	"heading":   "text size lineHeight color align italic weight font letterSpacing",
+	"text":      "text size lineHeight listLineHeight gap color linkColor align italic weight font letterSpacing",
+	"highlight": "text size lineHeight gap color background align italic weight font letterSpacing",
+	"button":    "label href color textColor width align size paddingY font",
+	"divider":   "color height",
+	"spacer":    "height",
+	"section":   "background inset maxWidth cellPadding blocks",
+	"columns":   "background inset maxWidth gap stackBelow columns",
+	"social":    "title links maxWidth gap",
+	"footer":    "links lines background inset maxWidth cellPadding size lineHeight letterSpacing color linkColor separator gap after font",
+	"html":      "html",
+}
+
+// specBlockKeys is the set of keys a block of the type accepts.
+func specBlockKeys(typ string) map[string]bool {
+	keys := wordSet("id type role " + specKeys[typ])
+	if typ != "spacer" {
+		keys["padding"] = true
+	}
+	return keys
+}
+
+func specAllBlockKeys() map[string]bool {
+	every := map[string]bool{}
+	for typ := range specKeys {
+		for key := range specBlockKeys(typ) {
+			every[key] = true
+		}
+	}
+	return every
+}
+
+func TestKeySetsAreTheSpecifiedOnes(t *testing.T) {
+	if got, want := len(blockKeys), len(specKeys); got != want {
+		t.Errorf("%d block types, the format has %d", got, want)
+	}
+	for typ := range specKeys {
+		got, ok := blockKeys[typ]
+		if !ok {
+			t.Errorf("block type %q is missing", typ)
+			continue
+		}
+		if want := specBlockKeys(typ); !reflect.DeepEqual(sortedKeys(got), sortedKeys(want)) {
+			t.Errorf("%s takes %v, the format says %v", typ, sortedKeys(got), sortedKeys(want))
+		}
+	}
+	for _, c := range []struct {
+		name string
+		got  map[string]bool
+		want string
+	}{
+		{"a layout document", layoutKeys, "subject preheader layout theme blocks"},
+		{"a custom document", customKeys, "subject preheader textBody htmlBody"},
+		{"the theme", themeKeys, "page canvas primary secondary accent tint text muted headingFont bodyFont webFonts"},
+		{"a column", columnKeys, "width cellPadding blocks"},
+		{"a social link", socialLinkKeys, "network href icon width"},
+		{"a footer link", footerLinkKeys, "label href"},
+	} {
+		if want := wordSet(c.want); !reflect.DeepEqual(sortedKeys(c.got), sortedKeys(want)) {
+			t.Errorf("%s takes %v, the format says %v", c.name, sortedKeys(c.got), sortedKeys(want))
+		}
+	}
+}
+
+func TestEveryTypeAcceptsEveryKeyItOwns(t *testing.T) {
+	for typ := range specKeys {
+		for _, key := range sortedKeys(specBlockKeys(typ)) {
+			if key == "id" || key == "type" {
+				continue
+			}
+			value := sampleFor(typ, key)
+			if value == "" {
+				t.Fatalf("no sample value for the key %q: add one to sampleValue", key)
+			}
+			t.Run(typ+"/"+key, func(t *testing.T) {
+				doc := layoutJSON(blockOf(typ, [2]string{key, value}))
+				if _, err := Parse([]byte(doc)); err != nil {
+					t.Fatalf("%s: %v", doc, err)
+				}
+			})
+		}
+	}
+}
+
+func TestEveryTypeRefusesEveryKeyItDoesNotOwn(t *testing.T) {
+	// The keys of the other types, and three that belong to none: a made-up
+	// one and the two spellings encoding/json would have matched.
+	foreign := append(sortedKeys(specAllBlockKeys()), "bogus", "Text", "ID")
+	for typ := range specKeys {
+		keys := specBlockKeys(typ)
+		for _, key := range foreign {
+			if keys[key] {
+				continue
+			}
+			t.Run(typ+"/"+key, func(t *testing.T) {
+				value := sampleValue[key]
+				if value == "" {
+					value = `1`
+				}
+				doc := layoutJSON(blockOf(typ, [2]string{key, value}))
+				want := fmt.Sprintf("block \"b\": unknown field %q", key)
+				if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("%s\nwant %q, got %v", doc, want, err)
+				}
+			})
+		}
+	}
+}
+
+func TestLinksAndColumnsRefuseTheKeysOfOtherObjects(t *testing.T) {
+	every := specAllBlockKeys()
+	// A social link takes network, href, icon and width; a footer link takes
+	// label and href; a column takes width, cellPadding and blocks.
+	for _, c := range []struct {
+		name  string
+		own   map[string]bool
+		doc   func(member string) string
+		where string
+	}{
+		{"social link", wordSet("network href icon width"), func(m string) string {
+			return layoutJSON(`{"id":"b","type":"social","links":[{"network":"n",` + m + `}]}`)
+		}, `block "b": link 1: unknown field `},
+		{"footer link", wordSet("label href"), func(m string) string {
+			return layoutJSON(`{"id":"b","type":"footer","links":[{"label":"l",` + m + `}]}`)
+		}, `block "b": link 1: unknown field `},
+		{"column", wordSet("width cellPadding blocks"), func(m string) string {
+			return layoutJSON(`{"id":"b","type":"columns","columns":[{"width":100,` + m + `}]}`)
+		}, `block "b": column 1: unknown field `},
+	} {
+		foreign := append(sortedKeys(every), "network", "bogus")
+		for _, key := range foreign {
+			if c.own[key] {
+				continue
+			}
+			t.Run(c.name+"/"+key, func(t *testing.T) {
+				doc := c.doc(jsonString(key) + `:1`)
+				want := c.where + strconv.Quote(key)
+				if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), want) {
+					t.Fatalf("%s\nwant %q, got %v", doc, want, err)
+				}
+			})
+		}
+	}
+}
+
+func TestParseRefusesUnsafeHTMLBlocks(t *testing.T) {
+	// The renderer splices an html block inside a table cell. These are the
+	// fragments that would otherwise run, hide the rest of the email or
+	// close the cell; each is refused with a sentence that names the problem.
+	htmlBlock := func(markup string) string {
+		return layoutJSON(`{"id":"x","type":"html","html":` + jsonString(markup) + `}`)
+	}
+	const cutOff = `block "x": html blocks cannot end inside a tag; close every tag with >`
+	const unbalanced = `block "x": html blocks must close the tags they open, in order`
+	const comments = `block "x": html blocks cannot contain comments`
+	expectRefused(t, []refusal{
+		{"picture cut off", htmlBlock(`<img src="https://evil.example/p.gif"`), cutOff},
+		{"link cut off", htmlBlock(`<a href="javascript:alert(1)"`), cutOff},
+		{"script cut off", htmlBlock(`<script src=https://evil.example/x.js`), cutOff},
+		{"handler cut off", htmlBlock(`<p onclick="alert(1)"`), cutOff},
+		{"text then a cut-off tag", htmlBlock(`<p>hello</p><b`), cutOff},
+		{"unterminated comment", htmlBlock(`<!-- unterminated`), comments},
+		{"comment", htmlBlock(`<!-- a &lt; b -->`), comments},
+		{"conditional comment", htmlBlock(`<!--[if mso]><v:rect/><![endif]-->`), comments},
+		{"stray cell end", htmlBlock(`</td>`), unbalanced},
+		{"closing the renderer's cell", htmlBlock(`</td></tr></table><p>after</p>`), unbalanced},
+		{"left open", htmlBlock(`<p>one`), unbalanced},
+		{"closed out of order", htmlBlock(`<p><b>x</p></b>`), unbalanced},
+		{"bare cell", htmlBlock(`<td>x</td>`), `block "x": html blocks can use <td> only inside a <table> the block opens`},
+		{"bare row", htmlBlock(`<tr><td>x</td></tr>`), `block "x": html blocks can use <tr> only inside a <table> the block opens`},
+		{"entity-encoded tab in a scheme", htmlBlock(`<a href="java&#x09;script:x">x</a>`), `block "x": a link cannot contain spaces or control characters`},
+		{"space before a scheme", htmlBlock(`<a href=" javascript:x">x</a>`), `block "x": a link cannot contain spaces or control characters`},
+		{"entity-encoded letter in a scheme", htmlBlock(`<a href="jav&#x61;script:x">x</a>`), `block "x": a link must be`},
+		{"nested too deeply", htmlBlock(strings.Repeat("<div>", 600) + strings.Repeat("</div>", 600)), `block "x": html blocks are nested too deeply`},
+	})
+	for _, ok := range []string{
+		`<table><tr><td>x</td></tr></table>`,
+		`<p>one</p><p>two</p>`,
+		`<a href="https://example.com">x</a>`,
+	} {
+		if _, err := Parse([]byte(htmlBlock(ok))); err != nil {
+			t.Errorf("%q: %v", ok, err)
 		}
 	}
 }

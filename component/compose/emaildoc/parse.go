@@ -46,7 +46,7 @@ func wordSet(words string) map[string]bool {
 
 // The keys each object of the format accepts. Anything else is refused: the
 // check is on the exact key, because encoding/json would otherwise match
-// "Text" and "ſize" to the fields text and size.
+// "Text" to the field text and a long s ("ſize") to the field size.
 var (
 	layoutKeys     = wordSet("subject preheader layout theme blocks")
 	customKeys     = wordSet("subject preheader textBody htmlBody")
@@ -113,12 +113,25 @@ func isColourToken(v string) bool {
 var hrefHint = "a link must be a web address, an email address, a phone number or one of " +
 	TagUnsubscribeURL + ", " + TagPreferencesURL + ", " + TagViewURL + " or " + TagConfirmURL
 
+const (
+	hostTagHint = "a web address cannot take a merge tag in its host, user name or port; put merge tags in the path or query"
+	mailTagHint = "email and phone links cannot hold a merge tag"
+	// A valid address percent-encodes these, so one in a link is a mistake or
+	// an attempt to leave the attribute the link is written in.
+	encodedCharsHint = "a link cannot contain quotes, angle brackets, backticks or backslashes; percent-encode them"
+)
+
 // hrefProblem says what is wrong with a link, or "" when it is allowed. A link
 // is empty (when allowEmpty), a web address (http:// or https://), an email
 // address (mailto:), a phone number (tel:) or exactly one of the four link
-// merge tags. It holds no space or control character and is at most 2000 bytes.
-// No other merge tag may stand in for an address: a value a recipient supplied
-// must never become the place a link goes.
+// merge tags. It is at most 2000 bytes and holds no space, control character,
+// quote, angle bracket, backtick or backslash.
+//
+// A merge tag is replaced with a value a recipient supplied, and that value
+// must never choose where a link goes. So no other merge tag may stand where
+// the site is chosen: a web address takes merge tags in its path, query and
+// fragment ("https://example.com/?e={{email}}") but not in its host, user name
+// or port, and an email or phone link takes none.
 func hrefProblem(href string, allowEmpty bool) string {
 	if href == "" {
 		if allowEmpty {
@@ -137,12 +150,43 @@ func hrefProblem(href string, allowEmpty bool) string {
 	if strings.IndexFunc(href, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
 		return "a link cannot contain spaces or control characters"
 	}
-	for _, scheme := range []string{"http://", "https://", "mailto:", "tel:"} {
-		if len(href) > len(scheme) && strings.EqualFold(href[:len(scheme)], scheme) {
+	if strings.ContainsAny(href, "\"<>`\\") {
+		return encodedCharsHint
+	}
+	for _, scheme := range []string{"http://", "https://"} {
+		if hasScheme(href, scheme) {
+			if strings.Contains(authority(href[len(scheme):]), "{{") {
+				return hostTagHint
+			}
+			return ""
+		}
+	}
+	for _, scheme := range []string{"mailto:", "tel:"} {
+		if hasScheme(href, scheme) {
+			if strings.Contains(href, "{{") {
+				return mailTagHint
+			}
 			return ""
 		}
 	}
 	return hrefHint
+}
+
+// hasScheme reports whether href starts with the scheme, in any case, and has
+// something after it.
+func hasScheme(href, scheme string) bool {
+	return len(href) > len(scheme) && strings.EqualFold(href[:len(scheme)], scheme)
+}
+
+// authority is the part of a web address, after "http://", that names the site:
+// the user name, host and port, up to the first "/", "?" or "#". A browser skips
+// any further slashes after the two, so "https:////host/" is the site "host".
+func authority(afterScheme string) string {
+	rest := strings.TrimLeft(afterScheme, "/")
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		return rest[:end]
+	}
+	return rest
 }
 
 const pictureHint = "a picture must be a Library file (artifact:) or an embedded PNG, JPEG or GIF"
@@ -170,6 +214,9 @@ func pictureProblem(src string) string {
 	format, payload, ok := strings.Cut(rest, ";base64,")
 	if !ok || (format != "png" && format != "jpeg" && format != "gif") {
 		return pictureHint
+	}
+	if payload == "" {
+		return "the embedded picture is empty"
 	}
 	if len(payload) > base64.StdEncoding.EncodedLen(MaxImageBytes) {
 		return "email image exceeds 1 MiB"
@@ -732,7 +779,9 @@ func blockProblem(b *Block) string {
 		if len(b.HTML) > maxHTMLBytes {
 			return "an html block can be at most 64 KiB"
 		}
-		if err := validateMarkup(b.HTML); err != nil {
+		// The Document keeps the author's markup as written; what the renderer
+		// puts in the email is safeMarkup of it.
+		if _, err := safeMarkup(b.HTML); err != nil {
 			return err.Error()
 		}
 	case typeFooter:
