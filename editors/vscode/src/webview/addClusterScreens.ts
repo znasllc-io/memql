@@ -887,7 +887,10 @@ export function doneScreen(input: DoneInput): RegionParts {
       state: "done",
       ...(input.now === undefined ? {} : { now: input.now }),
     }) +
-    `<div class="ac-column">${facts(rows)}${recoveryKeyBlock(input.recoveryKey)}${!input.signedIn && (input.canEnrol || input.claim) && input.notListed !== true ? "<p>Register your owner passkey to finish setup. Use the email entered during installation.</p>" : ""}</div>` +
+    // What the act does comes before what follows it: the status already says
+    // a passkey is required, so the line names the consequence (a browser
+    // page) and the one thing to check there.
+    `<div class="ac-column">${facts(rows)}${!input.signedIn && (input.canEnrol || input.claim) && input.notListed !== true ? "<p>Your browser opens to create the passkey. Confirm the email you entered during installation.</p>" : ""}${recoveryKeyBlock(input.recoveryKey)}</div>` +
     (input.startedAt === undefined ? "" : logsDisclosure(input.logsOpen === true, input.logLines ?? []));
 
   // BACK, as a quiet text act: to the landing, which looks at this computer
