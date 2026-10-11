@@ -56,6 +56,43 @@ func TestRunnerRequiresMatchingVerifiedArtifactReceipt(t *testing.T) {
 	}
 }
 
+// The Library keys a receipt by the BARE owner and work run (the app's
+// streamIdentity), while the driver hands the runner the owner as the
+// pipeline row stores it: canonical. Run b304c28a's npm report was stored,
+// verified and ready, and its step still failed artifact_unavailable on the
+// spelling alone. The receipt must match the request's identity, not its
+// spelling -- and still refuse a different owner however it is spelled.
+func TestRunnerMatchesAReceiptKeyedByBareIds(t *testing.T) {
+	bare := func(f *StoredFile) {
+		f.Receipt.OwnerUserID = strings.TrimPrefix(f.Receipt.OwnerUserID, "v1:identity:user:")
+		f.Receipt.WorkRunID = strings.TrimPrefix(f.Receipt.WorkRunID, "v1:work:run:")
+	}
+	for name, c := range map[string]struct {
+		alter func(*StoredFile)
+		ok    bool
+	}{
+		"the same ids, bare":       {bare, true},
+		"another owner, bare":      {func(f *StoredFile) { bare(f); f.Receipt.OwnerUserID = "another-owner" }, false},
+		"another owner, canonical": {func(f *StoredFile) { f.Receipt.OwnerUserID = "v1:identity:user:another-owner" }, false},
+		"another work run, bare":   {func(f *StoredFile) { bare(f); f.Receipt.WorkRunID = "another-run" }, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newRunnerHarness(t)
+			h.r.library = alteredArtifactLibrary{h.lib, c.alter}
+			run := rtRun()
+			run.OwnerUserID = "v1:identity:user:" + run.OwnerUserID
+			run.WorkRunID = "v1:work:run:" + run.WorkRunID
+			run.Artifacts = []string{"proof.txt"}
+			rtArtifactStream(t, h, extractTestTgz(t, []extractTestEntry{{name: "proof.txt", body: "verified"}}))
+			h.c.script(testJobName, rtFinishingScript(testJobName, 0, captureKubeLine(rtAt(1100), "ok")))
+			res := h.run(t, run)
+			if accepted := res.Status != pl.OutcomeFailed && len(res.ArtifactIntentIDs) == 1; accepted != c.ok {
+				t.Fatalf("accepted = %v, want %v: %+v", accepted, c.ok, res)
+			}
+		})
+	}
+}
+
 func TestRunnerDoesNotBufferArtifactsForAByteOnlyLibrary(t *testing.T) {
 	h := newRunnerHarness(t)
 	h.r.library = struct{ LibraryStore }{h.lib}
