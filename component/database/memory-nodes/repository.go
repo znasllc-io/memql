@@ -149,7 +149,7 @@ func (db *MemoryNodesDatabase) ListRecentMemoryNodes(ctx context.Context, create
 		query = query.Where(`"createdBy" = ?`, createdBy)
 	}
 	if limit > 0 {
-		query = query.Limit(limit)
+		query = query.Limit(int64(limit)) // bun 1.3 takes int64
 	}
 
 	if err := query.Scan(ctx); err != nil {
@@ -225,7 +225,7 @@ func (db *MemoryNodesDatabase) FindMemoryNodes(ctx context.Context, params Query
 	}
 
 	if params.Limit > 0 {
-		query = query.Limit(params.Limit)
+		query = query.Limit(int64(params.Limit))
 	}
 
 	if err := query.Scan(ctx); err != nil {

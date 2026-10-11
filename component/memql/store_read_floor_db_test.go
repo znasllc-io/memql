@@ -171,5 +171,5 @@ func storeVersions(t *testing.T, db *bun.DB, bareId string) int {
 	if err != nil {
 		t.Fatalf("count store versions %s: %v", bareId, err)
 	}
-	return n
+	return int(n) // bun 1.3's Count is int64; a test's row count fits
 }

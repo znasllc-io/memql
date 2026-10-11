@@ -269,7 +269,7 @@ func eachRow(ctx context.Context, db bun.IDB, table string, fn func(Row) error) 
 			// was the one statement nothing executed. staged_data_db_test.go now
 			// runs it for real.
 			OrderExpr(`mn."createdAt" ASC, mn.id ASC`).
-			Limit(page).Offset(offset)
+			Limit(page).Offset(int64(offset))
 		if err := q.Scan(ctx); err != nil {
 			return fmt.Errorf("backup: read %s at offset %d: %w", table, offset, err)
 		}
@@ -408,8 +408,8 @@ func Restore(ctx context.Context, db bun.IDB, r io.Reader, masterKey string) (Re
 // are staged report ZERO; restore then concludes the target is empty and
 // proceeds to overwrite exactly those rows. One change, causing the loss and
 // disabling the check that catches it. Pinned by TestCountRowsIsUnfiltered.
-func CountRows(ctx context.Context, db bun.IDB) (int, error) {
-	total := 0
+func CountRows(ctx context.Context, db bun.IDB) (int64, error) {
+	var total int64 // bun's Count is int64; kept wide rather than narrowed
 	for _, table := range []string{TableMemoryNodes, TableSecretMemoryNodes} {
 		n, err := db.NewSelect().
 			ModelTableExpr("? AS mn", bun.Ident(table)).

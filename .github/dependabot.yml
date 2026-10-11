@@ -79,6 +79,15 @@ updates:
     labels:
       - "dependencies"
       - "docker"
+    ignore:
+      # deploy/toolchain-image's kubectl is held at the MINOR of
+      # scripts/k3d/up.sh's K3S_VERSION -- the Kubernetes the local deploy
+      # target runs, kept at 1.32 for ArgoCD's schema -- and scripts/ci holds
+      # the two equal, so a minor bump alone can only go red (#5903 proposed
+      # 1.37.1). Moving Kubernetes is a platform change that moves both lines
+      # together, never a Dependabot PR. Patch releases are still proposed.
+      - dependency-name: "registry.k8s.io/kubectl"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

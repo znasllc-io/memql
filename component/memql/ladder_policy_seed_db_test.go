@@ -91,7 +91,7 @@ func countLadderPolicyVersions(t *testing.T, ctx context.Context, eng *MemQLEngi
 		Where("id = ?", ladderPolicyRowID).
 		Count(ctx)
 	require.NoError(t, err)
-	return n
+	return int(n) // bun 1.3's Count is int64; a test's row count fits
 }
 
 // TestLadderPolicySeedMaterializesAtItsLiteralIdAndIsReassertedOnBoot drives

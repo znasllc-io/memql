@@ -7,15 +7,15 @@ go 1.26.1
 toolchain go1.27.2
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.75.0
+	github.com/anthropics/anthropic-sdk-go v1.78.0
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/lib/pq v1.12.3
-	github.com/openai/openai-go/v3 v3.66.0
+	github.com/openai/openai-go/v3 v3.71.1
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/stretchr/testify v1.12.1
-	github.com/uptrace/bun v1.2.18
-	github.com/uptrace/bun/dialect/pgdialect v1.2.18
-	github.com/uptrace/bun/driver/pgdriver v1.2.18
+	github.com/uptrace/bun v1.3.0
+	github.com/uptrace/bun/dialect/pgdialect v1.3.0
+	github.com/uptrace/bun/driver/pgdriver v1.3.0
 	github.com/znasllc-io/memql/component/actions v0.0.0
 	github.com/znasllc-io/memql/component/auth v0.0.0
 	github.com/znasllc-io/memql/component/bus v0.0.0

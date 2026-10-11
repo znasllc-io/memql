@@ -135,7 +135,7 @@ func searchQuery(db *bun.DB, q Query, rows *[]Row) *bun.SelectQuery {
 	if !q.BeforeAt.IsZero() && strings.TrimSpace(q.BeforeId) != "" {
 		sel = sel.Where("(occurred_at, id) < (?, ?)", q.BeforeAt.UTC(), strings.TrimSpace(q.BeforeId))
 	}
-	return sel.OrderExpr("occurred_at DESC, id DESC").Limit(normalizeLimit(q.Limit))
+	return sel.OrderExpr("occurred_at DESC, id DESC").Limit(int64(normalizeLimit(q.Limit)))
 }
 
 // staged-data: INDIFFERENT -- this reads the log_line hypertable, never MemoryNodes; no staged-data row can exist in it, so the gate has nothing to withhold.
@@ -148,9 +148,9 @@ func tailQuery(db *bun.DB, q Query, rows *[]Row) (*bun.SelectQuery, bool) {
 	limit := normalizeLimit(q.Limit)
 	if !q.AfterAt.IsZero() && strings.TrimSpace(q.AfterId) != "" {
 		sel = sel.Where("(occurred_at, id) > (?, ?)", q.AfterAt.UTC(), strings.TrimSpace(q.AfterId))
-		return sel.OrderExpr("occurred_at ASC, id ASC").Limit(limit), false
+		return sel.OrderExpr("occurred_at ASC, id ASC").Limit(int64(limit)), false
 	}
-	return sel.OrderExpr("occurred_at DESC, id DESC").Limit(limit), true
+	return sel.OrderExpr("occurred_at DESC, id DESC").Limit(int64(limit)), true
 }
 
 // Search answers logsSearch.

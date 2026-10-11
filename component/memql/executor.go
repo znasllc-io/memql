@@ -168,7 +168,7 @@ func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.Quer
 	}
 
 	if params.Limit > 0 {
-		query = query.Limit(params.Limit)
+		query = query.Limit(int64(params.Limit))
 	}
 
 	if err := query.Scan(ctx); err != nil {
