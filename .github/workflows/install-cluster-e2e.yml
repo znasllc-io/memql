@@ -661,6 +661,37 @@ jobs:
           done
 
       # ====================================================================
+      # LEG: from-source -- the owner claims the cluster, the editor signs in
+      # ====================================================================
+      #
+      # Every check above stops at the front door, which is how a claim that
+      # locked every local owner out -- a blank organization name, refused
+      # AFTER the passkey was saved -- shipped green. Only this leg runs the
+      # revision's own identity and OS (it builds them), so only here can a
+      # claim test the pull request. editors/vscode/test-host/ownerClaim.ts
+      # drives the editor's own sign-in code with a Chromium virtual
+      # authenticator standing in for the owner: Register owner passkey,
+      # connect, Sign Out, then Sign In with the passkey alone.
+      #
+      # UNDER SUDO, like the install: mkcert trusted the CA as root in this
+      # HOME's NSS database and left rootCA-key.pem root-owned. Playwright's
+      # Chromium runs unsandboxed as root by default.
+      - name: The owner claims the cluster with a passkey, and the editor signs in
+        if: matrix.leg == 'from-source'
+        timeout-minutes: 15
+        working-directory: editors/vscode
+        run: |
+          set -euo pipefail
+          scripts_retry="$GITHUB_WORKSPACE/scripts/ci/retry.sh"
+          "$scripts_retry" -- npx playwright install --with-deps chromium
+          node_modules/.bin/esbuild test-host/ownerClaim.ts --bundle --platform=node \
+            --format=cjs --target=node20 --external:playwright \
+            --outfile="$RUNNER_TEMP/owner-claim.js"
+          sudo -E env "HOME=$HOME" "PATH=$PATH" "NODE_PATH=$PWD/node_modules" \
+            "OWNER_EMAIL=ci@example.com" "DOMAIN=$DOMAIN" "OUT=$RUNNER_TEMP/owner-claim" \
+            node "$RUNNER_TEMP/owner-claim.js"
+
+      # ====================================================================
       # LEG: pipelines
       # ====================================================================
       #
@@ -1211,5 +1242,6 @@ jobs:
             ${{ runner.temp }}/upgrade-report.json
             ${{ runner.temp }}/uninstall-report.json
             ${{ runner.temp }}/pipelines-e2e.txt
+            ${{ runner.temp }}/owner-claim/
             ${{ runner.temp }}/diagnostics.txt
           if-no-files-found: warn
