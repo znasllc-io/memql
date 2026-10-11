@@ -425,6 +425,7 @@ automation reviseLibraryDocument {
    response: {edits: captured.amendment.edits, summary: "Previous proposed changes"}, sourceRunId: preparedImages.sourceRunId, allowIncomplete: true)
   amendmentAssessmentRaw := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
    references: references.references, evidence: combinedEvidence,
+   edits: previousCandidate.proposal.edits,
    imageUsage: previousCandidate.imageUsage, document: previousCandidate.proposal.revisedContent, passages: captured.passages,
    instruction: captured.amendment.instruction, explanation: "Assess the previous proposal against the new direction."
   })
@@ -432,6 +433,7 @@ automation reviseLibraryDocument {
   if !amendmentAssessmentCheck.valid || amendmentAssessmentCheck.verdict != "satisfied" {
    amendmentAssessmentRetry := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
     references: references.references, evidence: combinedEvidence,
+    edits: previousCandidate.proposal.edits,
     imageUsage: previousCandidate.imageUsage, document: previousCandidate.proposal.revisedContent, passages: captured.passages,
     instruction: captured.amendment.instruction, explanation: "Assess the previous proposal against the new direction.",
     previousFindings: amendmentAssessmentRaw.structured.findings,
@@ -471,6 +473,7 @@ automation reviseLibraryDocument {
   } else {
    completionRaw := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
     references: references.references, evidence: combinedEvidence,
+    edits: candidate.proposal.edits,
     imageUsage: candidate.imageUsage, document: candidate.proposal.revisedContent, passages: captured.passages,
     instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary
    })
@@ -478,6 +481,7 @@ automation reviseLibraryDocument {
    if !completionCheck.valid || completionCheck.verdict != "satisfied" {
     completionRetry := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
      references: references.references, evidence: combinedEvidence,
+     edits: candidate.proposal.edits,
      imageUsage: candidate.imageUsage, document: candidate.proposal.revisedContent, passages: captured.passages,
      instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary,
      previousFindings: completionRaw.structured.findings,
@@ -514,6 +518,7 @@ automation reviseLibraryDocument {
   repairedCandidate := builtin libraryRevisionProposal(requestId: args.requestId, response: repaired.reply, sourceRunId: preparedImages.sourceRunId, requireChanges: true)
   finalAssessmentRaw := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
    references: references.references, evidence: combinedEvidence,
+   edits: repairedCandidate.proposal.edits,
    imageUsage: repairedCandidate.imageUsage, document: repairedCandidate.proposal.revisedContent, passages: captured.passages,
    instruction: captured.amendment.instruction ?? captured.instruction, explanation: repairedCandidate.summary
   })
@@ -521,6 +526,7 @@ automation reviseLibraryDocument {
   if !finalAssessmentCheck.valid || finalAssessmentCheck.verdict != "satisfied" {
    finalAssessmentRetry := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
     references: references.references, evidence: combinedEvidence,
+    edits: repairedCandidate.proposal.edits,
     imageUsage: repairedCandidate.imageUsage, document: repairedCandidate.proposal.revisedContent, passages: captured.passages,
     instruction: captured.amendment.instruction ?? captured.instruction, explanation: repairedCandidate.summary,
     previousFindings: finalAssessmentRaw.structured.findings,
