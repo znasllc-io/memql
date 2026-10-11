@@ -192,7 +192,7 @@
     {
       "id": "clusterUp",
       "script": "k3d.up",
-      "timeoutSeconds": 3600,
+      "timeoutSeconds": 5400,
       "label": "Creating the cluster",
       "description": "Creating the cluster and preparing it for the MemQL images that are about to be built here.",
       "dependsOn": [

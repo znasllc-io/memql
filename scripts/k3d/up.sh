@@ -172,14 +172,15 @@ ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-300}"
 # repair hours later, after main had moved, needed a fresh fetch, and a full one
 # takes about five minutes on a home connection -- so the wait gave up while
 # ArgoCD was still downloading.
-APP_COMPARE_TIMEOUT="${MEMQL_K3D_APP_COMPARE_TIMEOUT:-1200}"
+APP_COMPARE_TIMEOUT="${MEMQL_K3D_APP_COMPARE_TIMEOUT:-1800}"
 
 # One ceiling for both operators, including ArgoCD's cold repository fetch.
-# A fetch itself can take up to the repo-server's 1200s ceiling; ending setup at
+# A fetch itself can take up to the repo-server's 1800s ceiling; ending setup at
 # the same instant prevents even one recovery attempt. This shared budget covers
-# one full fetch plus a retry without granting a fresh long wait to each
-# operator or each Deployment, and stays inside the install's one-hour step.
-OPERATOR_STACK_TIMEOUT="${MEMQL_K3D_OPERATOR_STACK_TIMEOUT:-1800}"
+# that fetch and the operators starting without granting a fresh long wait to
+# each operator or each Deployment; the install graph's clusterUp ceiling
+# (timeoutSeconds) is sized to hold it.
+OPERATOR_STACK_TIMEOUT="${MEMQL_K3D_OPERATOR_STACK_TIMEOUT:-2400}"
 
 # Outcome tracking (result envelope + idempotency reporting).
 ARGOCD_READY=false

@@ -15,8 +15,9 @@
 # next attempt starts from zero. Measured inside a k3d cluster on a home
 # connection (1.5-3.9 MiB/s), that fetch took about five minutes, so every
 # attempt died just short of finishing and "Continue setup" could never get
-# past the cluster step. 1200s completes the same fetch down to roughly
-# 200 KiB/s and still bounds a genuinely hung one. Applies in every environment
+# past the cluster step. 1800s completes the same fetch down to roughly
+# 130 KiB/s -- this machine's WiFi has measured as low as 265 KiB/s -- and
+# still bounds a genuinely hung one. Applies in every environment
 # (same repo), so it lives in the shared bootstrap rather than a local overlay;
 # a fast cloud link never comes near it.
 apiVersion: apps/v1
@@ -30,4 +31,4 @@ spec:
         - name: argocd-repo-server
           env:
             - name: ARGOCD_EXEC_TIMEOUT
-              value: "1200s"
+              value: "1800s"
