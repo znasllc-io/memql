@@ -93,6 +93,12 @@ model assessments guide recovery; they do not replace human factual review.
 The assessment uses the prose judgment level and treats the proposed document
 as the source of truth for its contents. Original selections and quoted feedback
 are context, not proof that rejected wording remains in the candidate.
+Every assessment also receives the validated patch count, original line ranges
+and feedback IDs. The full preview must retain unaffected sections; those
+sections are not additional edits. Patch metadata establishes the proposed
+scope, while the model still checks the requested content and evidence. Old
+replacement text and the editor's reasons are not repeated in this scope
+summary, and execution provenance is not inferred from document front matter.
 
 Before an assessment's objections trigger an edit or block a repaired proposal,
 the DSL requests one independent reassessment of those objections against the

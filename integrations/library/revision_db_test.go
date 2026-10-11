@@ -38,6 +38,7 @@ type revisionAI struct {
 	completionDocuments   []string
 	completionSchema      any
 	completionImageUsage  []string
+	completionEditScopes  []any
 	completionAnswers     []map[string]any
 	completionQuotes      []string
 	completionRecoveries  []string
@@ -112,6 +113,11 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
 			if args["templateId"] == "libraryRevisionCompletion" {
+				editScope, ok := data["edits"].([]any)
+				if !ok {
+					return nil, fmt.Errorf("completion assessment lacks native edit scope")
+				}
+				a.completionEditScopes = append(a.completionEditScopes, editScope)
 				imageUsage, ok := data["imageUsage"].(string)
 				if !ok || !json.Valid([]byte(imageUsage)) {
 					return nil, fmt.Errorf("completion assessment lacks measured image usage")

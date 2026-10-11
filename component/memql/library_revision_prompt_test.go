@@ -46,6 +46,7 @@ func TestDocumentRevisionCompletionOmitsObsoleteSource(t *testing.T) {
 		t.Fatal("missing completion prompt")
 	}
 	data := map[string]any{
+		"edits":       []any{},
 		"document":    "### Corrected profile\nVerified current prose.",
 		"instruction": "Change only this profile.", "explanation": "Corrected the profile.",
 		"passages": []any{map[string]any{
@@ -89,5 +90,51 @@ func TestDocumentRevisionCompletionOmitsObsoleteSource(t *testing.T) {
 	data["previousFindings"] = "not a findings array"
 	if err := prompt.ValidateData(data); err == nil {
 		t.Fatal("invalid prior findings admitted")
+	}
+}
+
+// The preview contains untouched sections; edit scope comes from native patches,
+// not from counting profiles in that preview. Old prose and model reasons must
+// not become competing candidates in the reviewer prompt.
+func TestDocumentRevisionCompletionCarriesMeasuredEditScope(t *testing.T) {
+	prompts, _ := loadCorpusPrompts(t)
+	prompt, ok := prompts.Get("libraryRevisionCompletion")
+	if !ok {
+		t.Fatal("missing completion prompt")
+	}
+	data := map[string]any{
+		"document":    "# Report\n\nUntouched introduction.\n\n### First\nNew first.\n\n### Second\nNew second.\n\nUntouched conclusion.",
+		"instruction": "Replace exactly two profiles; keep everything else.",
+		"explanation": "Two replacements.", "passages": []any{},
+		"edits": []any{
+			map[string]any{"startLine": 5, "endLine": 7, "commentIds": []any{"request-first"}, "before": "Obsolete first prose.", "after": "New first.", "reason": "Untrusted editor claim."},
+			map[string]any{"startLine": 9, "endLine": 11, "commentIds": []any{"request-second"}, "before": "Obsolete second prose.", "after": "New second."},
+		},
+	}
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := prompt.Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Validated edit count: 2", "Original lines 5–7", "Original lines 9–11", "request-first", "request-second", "Untouched introduction.", "Untouched conclusion."} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("missing measured scope or preview context %q", want)
+		}
+	}
+	for _, obsolete := range []string{"Obsolete first prose.", "Obsolete second prose.", "Untrusted editor claim."} {
+		if strings.Contains(rendered, obsolete) {
+			t.Fatalf("obsolete/editor text leaked into measured scope: %q", obsolete)
+		}
+	}
+	data["edits"] = []any{}
+	rendered, err = prompt.Render(data)
+	if err != nil || !strings.Contains(rendered, "Validated edit count: 0") {
+		t.Fatalf("lost no-op scope: %v", err)
+	}
+	data["edits"] = "not an edit list"
+	if err := prompt.ValidateData(data); err == nil {
+		t.Fatal("invalid edit scope admitted")
 	}
 }

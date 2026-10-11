@@ -83,6 +83,19 @@ func testRevisionReconsidersContradictoryReview(t *testing.T, shared *revisionDB
 			if !errors.As(err, &wait) || f.ai.calls.Load() != expectedEdits || f.ai.completionCalls.Load() != expectedChecks || f.ai.repairCalls.Load() != expectedEdits-1 {
 				t.Fatalf("false finding rewrote correct prose or escaped the bounded review: edit=%d assess=%d repair=%d err=%v", f.ai.calls.Load(), f.ai.completionCalls.Load(), f.ai.repairCalls.Load(), err)
 			}
+			for i, scope := range f.ai.completionEditScopes {
+				edits := scope.([]any)
+				want := 1
+				if afterRepair && i < 2 {
+					want = 0
+				}
+				if len(edits) != want {
+					t.Fatalf("assessment %d received %d edits, want %d", i, len(edits), want)
+				}
+				if want == 1 && (revisionMap(edits[0])["after"] != "### Profile" || revisionMap(edits[0])["startLine"] == nil) {
+					t.Fatalf("assessment %d lost native patch metadata: %v", i, edits)
+				}
+			}
 			if !reflect.DeepEqual(f.ai.completionFindings[expectedChecks-1], falseFinding["findings"]) {
 				t.Fatal("reassessment lost the objection being challenged")
 			}
