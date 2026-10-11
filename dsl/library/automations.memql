@@ -362,9 +362,31 @@ automation reviseLibraryDocument {
     passages: captured.passagesJSON, instruction: captured.amendment.instruction ?? captured.instruction,
     references: references.references, evidence: combinedEvidence, previous: imagePlan.reply
    })
-   imageSpecs := builtin libraryRevisionImagePlan(response: repairedImagePlan.reply)
+   initialImageSpecs := builtin libraryRevisionImagePlan(response: repairedImagePlan.reply)
+   initialImagePlan := repairedImagePlan.reply
   } else {
-   imageSpecs := validatedImageSpecs
+   initialImageSpecs := validatedImageSpecs
+   initialImagePlan := imagePlan.reply
+  }
+  if trim(initialImageSpecs.limitations) != "" {
+   // A valid plan may still omit requested assets. Recover the missing source
+   // evidence once, before acquiring a partial batch or asking a prose model
+   // to repair an omission it cannot resolve without image tools.
+   missingImageEvidence := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
+    document: "", passages: captured.passagesJSON, references: references.references, priorEvidence: [combinedEvidence],
+    instruction: captured.amendment.instruction ?? captured.instruction,
+    gaps: "Research ONLY these missing image requirements: " + initialImageSpecs.limitations + ". Retrieve the exact direct raster URL, its associated source record, subject, attribution and reuse terms. Follow actual links; do not guess paths or bypass access restrictions. Preserve completed research and sources for other images. Return the missing source evidence, not a document draft."
+   })
+   completedImagePlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: imageSchema, data: {
+    passages: captured.passagesJSON, references: references.references, instruction: captured.amendment.instruction ?? captured.instruction,
+    evidence: combinedEvidence + "\nMissing image source research:\n" + missingImageEvidence.reply, previous: initialImagePlan, gaps: initialImageSpecs.limitations
+   })
+   imageSpecs := builtin libraryRevisionImagePlan(response: completedImagePlan.reply)
+   if trim(imageSpecs.limitations) != "" {
+    return error("image evidence incomplete: " + imageSpecs.limitations)
+   }
+  } else {
+   imageSpecs := initialImageSpecs
   }
   for imageSpec in imageSpecs.images {
    acquired := builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: imageSpec, level: "fast", width: 512, height: 512, reportSourceFailure: true)

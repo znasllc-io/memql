@@ -81,6 +81,15 @@ plan recovery; it cannot silently disappear from the document. Successful
 assets and research receipts survive a resume on another replica. This does
 not authorize bypassing a source's access restrictions.
 
+Image planning can also expose missing evidence before any download: a catalog
+record without its associated raster URL is not a usable acquisition. Even if
+prose research was sufficient, the document DSL performs one targeted research
+pass for the plan's specific missing assets and one plan completion. Existing
+verified entries and research are retained. The completed plan passes the same
+native validation. Unresolved evidence stops before image effects or prose
+editing, rather than sending a missing-asset problem to a text-only repair.
+This bounded recovery uses the existing run budget and durable step receipts.
+
 A saved image is not a completed document edit. Revision proposals check actual
 Markdown image nodes against the prepared asset manifest; prose links and code
 examples do not count as embedded images. The DSL makes one corrective edit

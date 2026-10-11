@@ -708,3 +708,71 @@ func TestAmendedPreparedImagesRetainsOnlyEmbeddedAssets(t *testing.T) {
 		t.Fatalf("image duplicated: %v %v", images, err)
 	}
 }
+
+// A sufficient prose report can still lack the raster association for one or
+// every requested image. Recover that evidence before any acquisition or edit.
+func testRevisionDSLResearchesMissingImageEvidence(t *testing.T, f *revisionDB) {
+	for _, scenario := range []string{"partial", "empty", "unresolved"} {
+		t.Run(scenario, func(t *testing.T) {
+			f := f.isolatedCase(t)
+			artifact, doc := f.document("# Document\n\nKeep this paragraph.\n")
+			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Add the requested archival portraits.", imagePlanReference(f))
+			request := asString(args["requestId"])
+			first := revisionImageSpec{Mode: "import", Name: "first.png", Alt: "First historic subject", URL: "https://museum.example/first.png", SourceURL: "https://museum.example/first", Attribution: "Artist", License: "Public domain"}
+			missing := first
+			missing.Name, missing.Alt, missing.URL, missing.SourceURL = "second.png", "Second historic subject", "https://museum.example/second.png", "https://museum.example/second"
+			f.ai.imagePlan = []revisionImageSpec{first}
+			f.ai.replacementImagePlan = []revisionImageSpec{first, missing}
+			if scenario == "empty" {
+				f.ai.imagePlan = []revisionImageSpec{}
+				f.ai.replacementImagePlan = []revisionImageSpec{missing}
+			}
+			f.ai.imagePlanLimitations = "Second historic subject has only a catalog record; no associated raster URL."
+			if scenario == "unresolved" {
+				f.ai.replacementImagePlan = []revisionImageSpec{first}
+				f.ai.replacementImageLimitations = f.ai.imagePlanLimitations
+			}
+			f.ai.assessmentReply = "sufficient"
+			f.ai.needsResearch = true
+			f.ai.answer = revisionAnswer{Summary: "Requested portraits", Edits: []revisionReplacement{{Before: "Keep this paragraph.", After: "Keep this paragraph.", Reason: "Requested portraits", CommentIDs: []string{note}}}}
+			store := &preparedImageStore{f: f, appendProposal: true}
+			f.second.SetImageAssets(store)
+			f.second.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			fetches := []string{}
+			f.second.imageFetch = func(ctx context.Context, source string) ([]byte, error) {
+				fetches = append(fetches, source)
+				if f.ai.researchCalls.Load() != 1 || f.ai.imagePlanCalls.Load() != 2 {
+					return nil, fmt.Errorf("acquisition preceded missing-evidence recovery")
+				}
+				return attachmentPNG(), nil
+			}
+			err := f.execute(f.other, request, false)
+			if f.ai.researchCalls.Load() != 1 || f.ai.imagePlanCalls.Load() != 2 || f.ai.appCalls.Load() != 1 {
+				t.Fatalf("missing or repeated recovery: research=%d plan=%d app=%d err=%v", f.ai.researchCalls.Load(), f.ai.imagePlanCalls.Load(), f.ai.appCalls.Load(), err)
+			}
+			if !strings.Contains(f.ai.headlessScope, f.ai.imagePlanLimitations) || f.ai.researchDocument != "" || f.ai.retainedEvidenceCalls.Load() != 1 || !strings.Contains(f.ai.imagePlanPrevious, "limitations") || f.ai.imagePlanGaps != f.ai.imagePlanLimitations || !strings.Contains(f.ai.imagePlanEvidence, "Evidence report for the selected feedback.") {
+				t.Fatalf("repair lost exact gap, prior plan or retained research: scope=%s previous=%s gaps=%s", f.ai.headlessScope, f.ai.imagePlanPrevious, f.ai.imagePlanGaps)
+			}
+			if scenario == "unresolved" {
+				if err == nil || !strings.Contains(err.Error(), "image evidence incomplete:") || len(fetches) != 0 || store.writes != 0 || f.ai.calls.Load() != 0 {
+					t.Fatalf("unresolved image evidence reached effects/prose: %v fetches=%v writes=%d edits=%d", err, fetches, store.writes, f.ai.calls.Load())
+				}
+				return
+			}
+			var wait *workstate.HumanWait
+			if !errors.As(err, &wait) || len(fetches) != len(f.ai.replacementImagePlan) || store.writes != len(fetches) {
+				t.Fatalf("completed batch did not reach approval: %v fetches=%v writes=%d", err, fetches, store.writes)
+			}
+			for n, spec := range f.ai.replacementImagePlan {
+				if fetches[n] != spec.URL {
+					t.Fatalf("changed or repeated acquisition: %v", fetches)
+				}
+			}
+			f.first.SetBlobFetcher(&attachmentStore{data: attachmentPNG()})
+			f.query(f.engine, f.ctx, "query", "decideApproval", map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": f.accepted(request)})
+			if err = f.execute(f.engine, request, true); err != nil || len(fetches) != len(f.ai.replacementImagePlan) || store.writes != len(fetches) || f.ai.researchCalls.Load() != 1 || f.ai.imagePlanCalls.Load() != 2 {
+				t.Fatalf("cross-replica apply repeated completed recovery: %v", err)
+			}
+		})
+	}
+}
