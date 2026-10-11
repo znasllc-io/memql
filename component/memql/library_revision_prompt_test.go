@@ -217,3 +217,48 @@ func TestDocumentImageIntentUsesOnlyHumanRequests(t *testing.T) {
 		t.Fatal("unstructured routing input accepted")
 	}
 }
+
+// Image recovery must leave enough active context for source metadata and tools,
+// and must not inherit prose-writing or pixel-inspection tasks from the full brief.
+func TestDocumentRevisionImageSourceResearchIsScoped(t *testing.T) {
+	prompts, _ := loadCorpusPrompts(t)
+	prompt, ok := prompts.Get("libraryRevisionResearch")
+	if !ok {
+		t.Fatal("missing research prompt")
+	}
+	data := map[string]any{
+		"imageSourceOnly": true, "document": "Obsolete document prose.",
+		"passages": "Unrelated editing brief.", "references": "Unapproved reference draft.",
+		"instruction": "Rewrite two biographies.", "previous": []any{map[string]any{"after": "Prior proposed prose."}},
+		"gaps":          "Missing subject's catalog-to-raster link.",
+		"priorEvidence": []any{"Retrieved catalog https://museum.example/record and its rights."},
+	}
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := prompt.Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Missing subject's catalog-to-raster link.", "https://museum.example/record", "return the ledger immediately", "pixels have not yet been inspected", "Do not fetch binary images"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("missing source handoff contract %q", want)
+		}
+	}
+	for _, unwanted := range []string{"Obsolete document prose.", "Unrelated editing brief.", "Unapproved reference draft.", "Rewrite two biographies.", "Prior proposed prose.", "When visual inspection is available"} {
+		if strings.Contains(rendered, unwanted) {
+			t.Fatalf("unrelated work leaked into image lookup: %q", unwanted)
+		}
+	}
+	if len(rendered) > 4000 {
+		t.Fatalf("source lookup prompt grew beyond its compact brief: %d bytes", len(rendered))
+	}
+	delete(data, "imageSourceOnly")
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err = prompt.Render(data)
+	if err != nil || !strings.Contains(rendered, "Obsolete document prose.") || strings.Contains(rendered, "return the ledger immediately") {
+		t.Fatalf("ordinary research contract changed: %v", err)
+	}
+}

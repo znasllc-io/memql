@@ -95,6 +95,12 @@ verified entries and research are retained. The completed plan passes the same
 native validation. Unresolved evidence stops before image effects or prose
 editing, rather than sending a missing-asset problem to a text-only repair.
 This bounded recovery uses the existing run budget and durable step receipts.
+Source recovery receives only the selected image gaps and prior evidence, without
+repeating document passages or reference drafts. It returns as soon as the source
+record establishes the subject, exact raster link and reuse terms. Binary
+acquisition and visual review belong to the subsequent stages; source research
+must not spend its remaining context and calls probing images through text tools.
+A source ledger does not claim that pixels have already been inspected.
 
 A saved image is not a completed document edit. Revision proposals check actual
 Markdown image nodes against the prepared asset manifest; prose links and code
