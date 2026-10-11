@@ -216,4 +216,10 @@ func TestEngineSecurityScansDoNotTurnFindingsIntoSuccess(t *testing.T) {
 	if !strings.Contains(vuln.Run, "@v1.7.0") || !strings.Contains(vuln.Run, "govulncheck github.com/znasllc-io/memql/...") || strings.Contains(vuln.Run, "-format") || !strings.Contains(vuln.Run, `test "$status" -eq 0`) {
 		t.Fatal("Go vulnerability findings can disappear behind formatting or incomplete module coverage")
 	}
+	// govulncheck over every module holds the whole program in memory: at the
+	// namespace default (4 GiB) the kernel killed it at 4.2 GB resident (run
+	// 45f5502f, 2026-10-11), so the budget is declared, not inherited.
+	if vuln.MemoryMiB < 8192 {
+		t.Fatalf("Go vulnerability check reserves %d MiB; it was OOM-killed at the 4 GiB default", vuln.MemoryMiB)
+	}
 }

@@ -231,6 +231,10 @@ pipeline:
         - name: go-vulnerabilities
           placement: cluster
           timeout: 30m
+          # govulncheck over every module holds the whole program in memory:
+          # at the namespace default (4 GiB) the kernel killed it at 4.2 GB
+          # resident (run 45f5502f, 2026-10-11).
+          memoryMiB: 8192
           artifacts: [.memql-security/go]
           run: |
             set -eu
@@ -239,6 +243,7 @@ pipeline:
             mkdir -p .memql-security/go
             go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
             govulncheck -version > .memql-security/go/scanner.txt
+            export GOMEMLIMIT=7GiB GOGC=100
             status=0
             govulncheck github.com/znasllc-io/memql/... > .memql-security/go/findings.txt 2> .memql-security/go/errors.txt || status=$?
             cat .memql-security/go/findings.txt .memql-security/go/errors.txt
