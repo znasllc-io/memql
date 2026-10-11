@@ -37,9 +37,9 @@ what the query matched: fifteen allocation-size alerts, an OCI unpacker's
 path guard stated where the path is built, a cookie helper's literal `false`,
 and nine regexes and sanitizers in the VS Code extension's tests.
 **Twenty-two are dismissed**, sixteen of them one source family. **Eight**
-(`js/remote-property-injection`) were hardened and are dismissed if the next
-scan still reports them, since the query reads the dynamic property name
-rather than the prototype.
+(`js/remote-property-injection`) were hardened rather than dismissed. The scan
+of the merge (9d34964d5) closed every alert the code changes addressed --
+thirty-seven, the eight included -- as `fixed`, and left nothing open.
 
 This file deliberately does NOT record a count of what is open now. That is a
 live fact with a one-line query (see [Re-triaging](#re-triaging)), and a
@@ -520,13 +520,14 @@ probably not the computed value. Sites in `component/identity/http`
 have never been flagged; the flagged helpers both had a nil-receiver branch
 returning the constant `false`. Both `cookieSecure` helpers (`web/server.go`,
 `http/oidc_start.go`) are now one boolean expression with identical behavior.
-If #1213 is still open after the next scan, this paragraph is wrong.
+The next scan closed #1213 as `fixed`, which confirms the diagnosis.
 
 ### Productivity webviews x14 (high and medium)
 
 `editors/productivity/src/*`, round four, besides the three real origin
 checks above: `js/xss` x5, `js/client-side-unvalidated-url-redirection` x1 --
-dismissed -- and `js/remote-property-injection` x8, hardened.
+dismissed -- and `js/remote-property-injection` x8, hardened and closed as
+`fixed` by the next scan.
 
 - **The HTML is the host's, rendered with HTML disabled.** `renderMarkdown`
   is markdown-it with `html: false`; links become `#` anchors or an
