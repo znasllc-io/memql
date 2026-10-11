@@ -1,8 +1,8 @@
 import { UserInputError } from "./problems.js";
 import * as vscode from "vscode";
 import {
-  buildClientAccountsAll, buildLibraryFilesForOwner, buildComposeMaterialize, buildCompositionById,
-  buildComposeCancel, buildLibraryArtifactForFile, buildCreateComposeRecipe,
+  buildClientAccountsAll, buildLibraryFilesForOwner, buildCreateComposeRecipe,
+  followComposition, startMaterialize, MaterializeCancelled, type MaterializeExecute,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
@@ -61,7 +61,9 @@ export class TemplateExamples {
       if (!assets) return;
       for (const asset of assets) asset.source.includeImages = true;
     }
-    const name = await vscode.window.showInputBox({ title: "Create email · Name", prompt: "What should we call this template?", placeHolder: "Autumn welcome", ignoreFocusOut: true, validateInput: text => text.trim() ? undefined : "Give the template a name." });
+    const name = await vscode.window.showInputBox({ title: "Create email · Name", prompt: "What should we call this template?", placeHolder: "Autumn welcome", ignoreFocusOut: true,
+      // The name is also the draft's file name, and a name is not a place to file into: a folder path is refused.
+      validateInput: text => !text.trim() ? "Give the template a name." : /[\\/]/.test(text) ? "Use a name without slashes." : undefined });
     if (!name) return;
     const brief = await vscode.window.showInputBox({ title: "Create email · Brief", prompt: "What should the email say, and what should it borrow from the examples? Include any approved links.", placeHolder: "Use the layout in example.png, our green brand color, and the welcome copy in brief.md.", ignoreFocusOut: true, validateInput: text => text.trim() ? undefined : "Describe the email you want." });
     if (!brief) return;
@@ -74,10 +76,9 @@ export class TemplateExamples {
       await this.api.execute(lease, "createComposeRecipe", buildCreateComposeRecipe({ recipeId, name, description: brief, outputKind: "email_template", format: "json", accountIds: [organization.id],
         sourceSelectors: sources.map(source => ({ kind: "library_file", selector: source.ref, label: source.label, content: true, includeImages: source.includeImages === true })) }));
     }
-    const result = (await this.api.execute(lease, "composeMaterialize", buildComposeMaterialize({ name, statement: brief,
-      outputKind: "email_template", format: "json", accountIds: [organization.id], sources: sources.map(source => ({ ...source })), ...(recipeId ? { recipeId } : {}) })))[0];
-    const compositionId = result && value(result, "compositionId");
-    if (!compositionId) throw new Error("Materializer did not confirm a composition. Check its history before retrying.");
+    // A new request id for each draft asked for: the cluster uses it to recognise a repeat of this one ask.
+    const compositionId = await startMaterialize(this.executeAs(lease), { name, statement: brief, outputKind: "email_template", format: "json",
+      accountIds: [organization.id], sources, recipeId, requestId: globalThis.crypto.randomUUID() });
     await this.context.workspaceState.update("memql.lastEmailComposition", { domain: lease.domain, compositionId });
     await this.follow(lease, compositionId);
   }
@@ -86,33 +87,26 @@ export class TemplateExamples {
     if (!saved) throw new UserInputError("No email composition has been started in this workspace.");
     await this.follow(await this.api.connect(saved.domain), saved.compositionId);
   }
+  private executeAs(lease: ConnectionLease): MaterializeExecute {
+    return (name, call) => this.api.execute(lease, name, call);
+  }
   private async follow(lease: ConnectionLease, compositionId: string): Promise<void> {
-    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Materializer · Creating email", cancellable: true }, async (progress, cancel) => {
-      for (;;) {
-        if (cancel.isCancellationRequested) {
-          await this.api.execute(lease, "composeCancel", buildComposeCancel({ compositionId, reason: "Stopped from Productivity Tools" }));
-          return;
-        }
-        const row = (await this.api.execute(lease, "compositionById", buildCompositionById({ compositionId })))[0];
-        if (!row) throw new UserInputError("The composition is no longer readable. Your work remains in Materializer and Nexus.");
-        const status = value(row, "status");
-        progress.report({ message: status === "composing" ? "Studying references and composing the draft" : status });
-        if (status === "failed") throw new Error(value(row, "failureReason") || "Materializer could not finish this draft.");
-        if (status === "cancelled") return;
-        if (status === "ready") {
-          const artifacts = await this.api.execute(lease, "libraryArtifactForFile", buildLibraryArtifactForFile({ fileId: value(row, "outputFileId") }));
-          const artifact = artifacts[0];
-          if (artifact && value(artifact, "id")) {
-            const name = value(artifact, "title") || value(row, "name") || "template";
-            const filename = name.endsWith(".email.json") ? name : `${name}.email.json`;
-            const uri = vscode.Uri.from({ scheme: "memql-file", authority: lease.domain, path: `/artifacts/${value(artifact, "id")}/${filename.replace(/[\\/]/g, "_")}` });
-            await vscode.commands.executeCommand("vscode.openWith", uri, "memql.productivity.email", { preview: false });
-            return;
-          }
-          // The artifact index is populated asynchronously after the output file.
-          progress.report({ message: "Draft saved; waiting for its Files entry" });
-        }
-        await new Promise(resolve => setTimeout(resolve, 2000));
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: "Creating email", cancellable: true }, async (progress, cancel) => {
+      const stop = new AbortController();
+      const subscription = cancel.onCancellationRequested(() => stop.abort());
+      if (cancel.isCancellationRequested) stop.abort();
+      try {
+        const draft = await followComposition({ execute: this.executeAs(lease), signal: stop.signal,
+          onStatus: status => progress.report({ message: status === "composing" ? "Studying references and composing the draft" : status }) }, compositionId);
+        const name = draft.name || "template";
+        const filename = name.endsWith(".email.json") ? name : `${name}.email.json`;
+        const uri = vscode.Uri.from({ scheme: "memql-file", authority: lease.domain, path: `/artifacts/${draft.artifactId}/${filename.replace(/[\\/]/g, "_")}` });
+        await vscode.commands.executeCommand("vscode.openWith", uri, "memql.productivity.email", { preview: false });
+      } catch (error) {
+        // Stopping the draft, from here or from elsewhere, is not a failure.
+        if (!(error instanceof MaterializeCancelled)) throw error;
+      } finally {
+        subscription.dispose();
       }
     });
   }
