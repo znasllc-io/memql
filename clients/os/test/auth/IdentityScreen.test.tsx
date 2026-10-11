@@ -110,6 +110,17 @@ it.each([true, false])("recovers a skipped passkey with the original owner email
   expect(Object.fromEntries(posts[0]?.[1]?.body as URLSearchParams)).toMatchObject({ email: "ada@example.test", client_id: "editor", code_challenge: "challenge", code_challenge_method: "S256" });
 });
 
+it("opens a local installation's first owner step under the editor's act, with the recorded email filled in", async () => {
+  // The editor sends the email its install recorded as login_hint, and identity
+  // echoes a plain address back as PrefillEmail; the person confirms, not types.
+  vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_resume", csrf: "resume-csrf", data: { Local: true, HasProof: false, PrefillEmail: "ada@example.test" } })));
+  render(<IdentityScreen initialPath="/setup" />);
+  await screen.findByRole("heading", { name: "Register owner passkey" });
+  expect((screen.getByLabelText("Owner email") as HTMLInputElement).value).toBe("ada@example.test");
+  expect(screen.queryByText("Ownership setup has started but is not complete.")).toBeNull();
+  expect(screen.getByRole("button", { name: "Continue to passkey" })).toBeTruthy();
+});
+
 it("keeps a local claim with attestation on its existing passkey", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_resume", data: { Local: true, HasProof: true } })));
   render(<IdentityScreen initialPath="/setup" />);

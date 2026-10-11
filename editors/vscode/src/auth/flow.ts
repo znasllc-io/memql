@@ -119,6 +119,12 @@ export interface AuthFlowDeps {
   openExternal: ExternalOpener;
   /** Finish first ownership before any session is issued. */
   ownerSetup?: boolean;
+  /**
+   * The owner email the local install recorded, carried to the ownership page
+   * as `login_hint` so the person confirms it rather than retyping it. A hint
+   * only: identity still compares it with the installer's contact email.
+   */
+  loginHint?: string;
   /** Defaults to the real network. */
   fetch?: FetchLike;
   /** Defaults to startLoopbackListener. */
@@ -299,7 +305,11 @@ export async function runAuthorizationFlow(
     }
 
     const browserUrl = deps.ownerSetup ? new URL(`${resolvedIssuer}/setup`) : new URL(authorizeUrl);
-    if (deps.ownerSetup) browserUrl.search = new URL(authorizeUrl).search;
+    if (deps.ownerSetup) {
+      browserUrl.search = new URL(authorizeUrl).search;
+      const hint = deps.loginHint?.trim() ?? "";
+      if (hint !== "") browserUrl.searchParams.set("login_hint", hint);
+    }
     await openInBrowser(browserUrl.toString(), deps);
     deps.onPhase?.("waiting");
 

@@ -299,3 +299,37 @@ func TestLocalClaimFrozenWithNoOrganizationNameFinishesOnRetry(t *testing.T) {
 	require.Equal(t, "Ada Owner", engine.organization)
 	require.NotEmpty(t, engine.settings["bootstrappedAt"])
 }
+
+// The VS Code extension carries the email its local install recorded as
+// login_hint, so the owner confirms it instead of retyping it. Only a plain
+// address the caller sent comes back, and only into the field it fills; with
+// no hint the page still names nobody.
+func TestSetupResumePrefillsOnlyTheCallersOwnHint(t *testing.T) {
+	server, _, engine := bootstrapServers(t, "docker-local")
+	recoverySettings(engine, false)
+	web, err := identityweb.NewServer(server.Cfg, server.Logger, nil)
+	require.NoError(t, err)
+	web.Store = server.Store
+	mux := http.NewServeMux()
+	web.Mount(mux)
+	page := func(query string) string {
+		get := httptest.NewRequest("GET", "https://identity.test/setup?"+query, nil)
+		get.Header.Set("Accept", identityweb.NativeMediaType)
+		get.Header.Set("Origin", "https://os.test")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, get)
+		require.Equal(t, 200, response.Code, response.Body.String())
+		var body struct {
+			Page string
+			Data map[string]any
+		}
+		require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+		require.Equal(t, "setup_resume", body.Page)
+		hint, _ := body.Data["PrefillEmail"].(string)
+		return hint
+	}
+	require.Equal(t, "owner@example.test", page("client_id=memql-vscode&login_hint=owner%40example.test"))
+	require.Equal(t, "", page("login_hint=Owner+%3Cowner%40example.test%3E"), "a display-name form is not one plain address")
+	require.Equal(t, "", page("login_hint=not-an-email"))
+	require.Equal(t, "", page("client_id=memql-vscode"), "no hint, no email on the page")
+}
