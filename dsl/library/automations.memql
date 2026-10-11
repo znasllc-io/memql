@@ -398,16 +398,23 @@ automation reviseLibraryDocument {
    properties: {before: {type: "string"}, after: {type: "string"}, reason: {type: "string", maxLength: 400}, commentIds: {type: "array", items: {type: "string"}}}
   }}, summary: {type: "string", maxLength: 300}}
  }
+ // Assessments control repair and approval. Bound the answer at the model
+ // seam rather than relying on a prose instruction to keep it short.
+ completionSchema := {
+  type: "object", additionalProperties: false, required: ["verdict", "details"],
+  properties: {verdict: {type: "string", enum: ["satisfied", "incomplete"]}, details: {type: "string", maxLength: 1200}}
+ }
  if captured.amendment != nil {
   previousCandidate := builtin libraryRevisionProposal(requestId: args.requestId,
    response: {edits: captured.amendment.edits, summary: "Previous proposed changes"}, sourceRunId: preparedImages.sourceRunId, allowIncomplete: true)
-  amendmentAssessment := builtin ai(templateId: "libraryRevisionCompletion", data: {
+  amendmentAssessment := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
    references: references.references, evidence: combinedEvidence,
    document: previousCandidate.proposal.revisedContent, passages: captured.passagesJSON,
    instruction: captured.amendment.instruction, explanation: "Assess the previous proposal against the new direction."
   })
+  amendmentVerdict := amendmentAssessment.structured
   analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
-   reviewNotes: amendmentAssessment.reply, preparedImages: preparedImages.references,
+   reviewNotes: amendmentVerdict.details, preparedImages: preparedImages.references,
    document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.amendment.instruction,
    previous: captured.amendment.edits, evidence: combinedEvidence + "\nImage acquisition limitations: " + imageLimitations
   })
@@ -430,20 +437,21 @@ automation reviseLibraryDocument {
   if captured.amendment != nil && !candidate.requestChanged {
    completion := amendmentAssessment
   } else {
-   completion := builtin ai(templateId: "libraryRevisionCompletion", data: {
+   completion := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
     references: references.references, evidence: combinedEvidence,
     document: candidate.proposal.revisedContent, passages: captured.passagesJSON,
     instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary
    })
   }
-  repairFeedback := completion.reply
-  repairNeeded := lower(trim(completion.reply)) != "satisfied"
+  completionVerdict := completion.structured
+  repairFeedback := completionVerdict.details
+  repairNeeded := completionVerdict.verdict != "satisfied"
  }
  if repairNeeded {
   repairDirection := "The previous response did not complete the request. Required corrections: " + repairFeedback + "\nProduce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
   if captured.amendment != nil {
    repaired := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
-    recovery: repairDirection + "\nCorrect this latest incomplete response while preserving its valid corrections:\n" + analysis.reply, reviewNotes: amendmentAssessment.reply, preparedImages: preparedImages.references,
+    recovery: repairDirection + "\nCorrect this latest incomplete response while preserving its valid corrections:\n" + analysis.reply, reviewNotes: amendmentVerdict.details, preparedImages: preparedImages.references,
     document: captured.content, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction, previous: captured.amendment.edits, evidence: combinedEvidence
    })
@@ -456,13 +464,14 @@ automation reviseLibraryDocument {
   }
   // One repair, then the existing bounded run recovery; never silently succeed.
   repairedCandidate := builtin libraryRevisionProposal(requestId: args.requestId, response: repaired.reply, sourceRunId: preparedImages.sourceRunId, requireChanges: true)
-  finalAssessment := builtin ai(templateId: "libraryRevisionCompletion", data: {
+  finalAssessment := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
    references: references.references, evidence: combinedEvidence,
    document: repairedCandidate.proposal.revisedContent, passages: captured.passagesJSON,
    instruction: captured.amendment.instruction ?? captured.instruction, explanation: repairedCandidate.summary
   })
-  if lower(trim(finalAssessment.reply)) != "satisfied" {
-   return error("document edits incomplete: " + finalAssessment.reply)
+  finalVerdict := finalAssessment.structured
+  if finalVerdict.verdict != "satisfied" {
+   return error("document edits incomplete: " + finalVerdict.details)
   }
   finalResponse := repaired.reply
  } else {

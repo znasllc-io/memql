@@ -223,6 +223,7 @@ type structuredPromptEngine struct {
 	schema   json.RawMessage
 	strict   bool
 	progress bool
+	answer   string
 }
 
 func (e *structuredPromptEngine) InvokeAIStructured(_ context.Context, name string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
@@ -230,6 +231,9 @@ func (e *structuredPromptEngine) InvokeAIStructured(_ context.Context, name stri
 	e.gotTemplate, e.gotData, e.schema, e.strict = name, data, schema, strict
 	if schemaName != "prompt_output" {
 		return "", fmt.Errorf("unexpected schema name")
+	}
+	if e.answer != "" {
+		return e.answer, e.err
 	}
 	return `{"edits":[]}`, e.err
 }
@@ -246,6 +250,10 @@ func TestTheAiBuiltinUsesStructuredContractWithoutUnconstrainedFallback(t *testi
 		if err != nil || out["reply"] != `{"edits":[]}` || engine.calls != 1 || !engine.strict || engine.progress != progress || engine.gotData["content"] != "source" {
 			t.Fatalf("out=%v engine=%+v error=%v", out, engine, err)
 		}
+		structured, ok := out["structured"].(map[string]any)
+		if !ok || structured["edits"] == nil {
+			t.Fatalf("decoded structured result unavailable to DSL: %v", out)
+		}
 		engine.err = errors.New("structured provider unavailable")
 		_, err = callAi(t, engine, args)
 		if err == nil || engine.calls != 2 {
@@ -257,6 +265,16 @@ func TestTheAiBuiltinUsesStructuredContractWithoutUnconstrainedFallback(t *testi
 		_, err := callAi(t, engine, map[string]any{"templateId": "review", "data": map[string]any{}, "responseSchema": raw})
 		if err == nil || engine.calls != 0 {
 			t.Fatalf("invalid schema reached model: %v", err)
+		}
+	}
+}
+
+func TestStructuredPromptRejectsUndecodableObject(t *testing.T) {
+	for _, answer := range []string{"not JSON", "null", "[]", `{"verdict":"satisfied"} trailing`} {
+		engine := &structuredPromptEngine{answer: answer}
+		_, err := callAi(t, engine, map[string]any{"templateId": "review", "data": map[string]any{}, "responseSchema": map[string]any{"type": "object"}})
+		if err == nil || engine.calls != 1 {
+			t.Fatalf("invalid structured result accepted or retried: %q, calls=%d, err=%v", answer, engine.calls, err)
 		}
 	}
 }

@@ -495,6 +495,26 @@ func testRevisionPartialFeedbackRepair(t *testing.T, shared *revisionDB) {
 			if f.ai.calls.Load() != 2 || f.ai.completionCalls.Load() != 2 || f.ai.repairCalls.Load() != 1 {
 				t.Fatalf("partial feedback was not assessed and repaired once: %v", err)
 			}
+			schemaJSON, _ := json.Marshal(f.ai.completionSchema)
+			schema, compileErr := jsonschema.CompileString("completion.json", string(schemaJSON))
+			if compileErr != nil {
+				t.Fatal(compileErr)
+			}
+			for _, tc := range []struct {
+				value map[string]any
+				valid bool
+			}{
+				{map[string]any{"verdict": "satisfied", "details": ""}, true},
+				{map[string]any{"verdict": "incomplete", "details": "Second claim remains."}, true},
+				{map[string]any{"verdict": "probably", "details": "Looks fine."}, false},
+				{map[string]any{"verdict": "incomplete", "details": strings.Repeat("x", 1201)}, false},
+				{map[string]any{"verdict": "satisfied"}, false},
+				{map[string]any{"verdict": "satisfied", "details": "", "document": "Replacement"}, false},
+			} {
+				if valid := schema.Validate(tc.value) == nil; valid != tc.valid {
+					t.Fatalf("invalid assessment contract: %v, accepted=%v", tc.value, valid)
+				}
+			}
 			if unresolved {
 				_, _, _, approval, _ := f.first.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
 				if err == nil || !strings.Contains(err.Error(), "document edits incomplete:") || approval != nil {
