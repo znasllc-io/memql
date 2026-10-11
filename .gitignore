@@ -17,6 +17,12 @@ coverage.*
 *.coverprofile
 profile.cov
 
+# Python bytecode, left by the scripts/ci tests. Untracked, it marks every
+# engine image built from the checkout "-dirty" (scripts/lib/engine_build_args.sh
+# counts untracked files), and a dirty engine refuses to resume a pipeline run
+# on another replica (component/pipelinerun/definition.go).
+__pycache__/
+
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
