@@ -69,6 +69,11 @@ type revisionAI struct {
 	expectedReference     string
 	appError              error
 	answer                revisionAnswer
+
+	imagePlanLimitations        string
+	replacementImageLimitations string
+	imagePlanEvidence           string
+	imagePlanGaps               string
 }
 
 func (*revisionAI) IntegrationName() string { return "agents" }
@@ -185,7 +190,7 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return reviewResult(map[string]any{"reply": intent})
 			}
 			if args["templateId"] == "libraryRevisionImageIntent" {
-				if len(a.imagePlan) > 0 {
+				if len(a.imagePlan) > 0 || a.imagePlanLimitations != "" {
 					return reviewResult(map[string]any{"reply": "acquire"})
 				}
 				return reviewResult(map[string]any{"reply": "none"})
@@ -193,11 +198,15 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 			if args["templateId"] == "libraryRevisionImagePlan" {
 				a.imagePlanPrevious = asString(data["previous"])
 				a.imagePlanSchema = args["responseSchema"]
+				a.imagePlanEvidence = asString(data["evidence"])
+				a.imagePlanGaps = asString(data["gaps"])
 				plan := a.imagePlan
+				limitations := a.imagePlanLimitations
 				if a.imagePlanCalls.Add(1) > 1 && a.replacementImagePlan != nil {
 					plan = a.replacementImagePlan
+					limitations = a.replacementImageLimitations
 				}
-				raw, _ := json.Marshal(map[string]any{"images": plan, "limitations": ""})
+				raw, _ := json.Marshal(map[string]any{"images": plan, "limitations": limitations})
 				return reviewResult(map[string]any{"reply": string(raw)})
 			}
 			if args["templateId"] == "libraryRevisionAppResearch" {
@@ -484,6 +493,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 			{"RevisionDSLPlansAcquiresAndProposesAnImage", testRevisionDSLPlansAcquiresAndProposesAnImage},
 			{"RevisionDSLRepairsImagePlanBeforeEffects", testRevisionDSLRepairsImagePlanBeforeEffects},
 			{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
+			{"RevisionDSLResearchesMissingImageEvidence", testRevisionDSLResearchesMissingImageEvidence},
 			{"DocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure", testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure},
 			{"DocumentResearchRouting", testDocumentResearchRouting},
 			{"DocumentResearchScopesContext", testDocumentResearchScopesContext},

@@ -138,3 +138,46 @@ func TestDocumentRevisionCompletionCarriesMeasuredEditScope(t *testing.T) {
 		t.Fatal("invalid edit scope admitted")
 	}
 }
+
+func TestDocumentRevisionImagePlanCarriesMissingEvidence(t *testing.T) {
+	prompts, _ := loadCorpusPrompts(t)
+	prompt, ok := prompts.Get("libraryRevisionImagePlan")
+	if !ok {
+		t.Fatal("missing image planning prompt")
+	}
+	data := map[string]any{
+		"passages": "Requested portraits", "references": "Attached references",
+		"evidence": "Exact raster and its catalog association", "previous": `{"images":[],"limitations":"Missing raster"}`,
+		"gaps": "Missing raster",
+	}
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := prompt.Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Missing raster", "Exact raster and its catalog association", "structurally valid but incomplete", "retaining its already verified entries unchanged"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("missing recovery context %q: %s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "previous plan failed validation") {
+		t.Fatal("missing evidence misrepresented as invalid JSON")
+	}
+	delete(data, "gaps")
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err = prompt.Render(data)
+	if err != nil || !strings.Contains(rendered, "previous plan failed validation") {
+		t.Fatalf("contract repair lost: %s %v", rendered, err)
+	}
+	delete(data, "previous")
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prompt.Render(data); err != nil {
+		t.Fatal(err)
+	}
+}
