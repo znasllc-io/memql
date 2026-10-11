@@ -286,6 +286,30 @@ func TestNssToolsWithNoPackageManagerIsExitFour(t *testing.T) {
 	}
 }
 
+// A Mac needs certutil only for Firefox: Safari and Chrome trust the local CA
+// through the keychain, and mkcert-setup.sh continues without it. A Mac with no
+// Homebrew used to stop the whole install here, so it is ready, not refused --
+// and says what Firefox needs, without installing or elevating anything.
+func TestNssToolsOnAMacWithoutHomebrewIsReady(t *testing.T) {
+	w := newNssWorld(t)
+	w.stub(t, "uname", "printf 'Darwin\\n'")
+	w.stub(t, "sudo", sudoThatWorks)
+
+	env, code, out := w.run(t, "--confirm="+nssConfirm)
+	if code != 0 || !env.OK {
+		t.Fatalf("exit %d, want 0 -- a Mac without Homebrew can still trust the CA in Safari and Chrome: %s", code, out)
+	}
+	if env.Result["ready"] != true || env.Result["installed"] != false {
+		t.Errorf("want ready=true installed=false, got ready=%v installed=%v: %s", env.Result["ready"], env.Result["installed"], out)
+	}
+	if !strings.Contains(out, "brew install nss") {
+		t.Errorf("the note should say what Firefox needs: %s", out)
+	}
+	if strings.Contains(w.calls(t), "sudo") {
+		t.Errorf("nothing needed root, but sudo ran:\n%s", w.calls(t))
+	}
+}
+
 // No way to reach root: the install cannot proceed, and the operator gets the
 // exact command rather than a dead end.
 func TestNssToolsWithNoWayToElevateOffersTheCommand(t *testing.T) {

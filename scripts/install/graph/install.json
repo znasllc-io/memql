@@ -133,7 +133,7 @@
       "retainedReason": "certutil is a general system tool other software uses. MemQL installs it because without it Firefox and Chrome cannot trust the local CA and the front door is unreachable in a browser -- but an application uninstaller that removes distribution packages is how installers earn their reputation, so this one is never taken back.",
       "verify": {
         "kind": "resultTrue",
-        "field": "result.installed"
+        "field": "result.ready"
       }
     },
     {
