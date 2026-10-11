@@ -350,8 +350,8 @@ func testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch(t *testing.T,
 			if len(fetches) != 2 || fetches[0] != original.URL || fetches[1] != replacement.URL || f.ai.researchCalls.Load() != 1 || f.ai.imagePlanCalls.Load() != 2 {
 				t.Fatalf("unbounded or missing repair: fetches=%v research=%d plan=%d err=%v", fetches, f.ai.researchCalls.Load(), f.ai.imagePlanCalls.Load(), err)
 			}
-			if !strings.Contains(f.ai.headlessScope, "403") || f.ai.researchDocument != "" {
-				t.Fatal("repair lost actual failure or loaded unrelated document")
+			if !strings.Contains(f.ai.headlessScope, "403") || !strings.Contains(f.ai.headlessScope, original.Alt) || !strings.Contains(f.ai.headlessScope, original.URL) || !f.ai.imageSourceOnly || f.ai.researchDocument != "" || f.ai.researchPassages != "[]" || f.ai.researchReferences != "" || f.ai.researchInstruction != "" {
+				t.Fatal("source repair lost the failure/subject or loaded an unrelated editing task")
 			}
 			if secondFailure {
 				if err == nil || !strings.Contains(err.Error(), "image source unusable:") || generator.calls != 0 || store.writes != 0 {
@@ -752,6 +752,9 @@ func testRevisionDSLResearchesMissingImageEvidence(t *testing.T, f *revisionDB) 
 			}
 			if !strings.Contains(f.ai.headlessScope, f.ai.imagePlanLimitations) || f.ai.researchDocument != "" || f.ai.retainedEvidenceCalls.Load() != 1 || !strings.Contains(f.ai.imagePlanPrevious, "limitations") || f.ai.imagePlanGaps != f.ai.imagePlanLimitations || !strings.Contains(f.ai.imagePlanEvidence, "Evidence report for the selected feedback.") {
 				t.Fatalf("repair lost exact gap, prior plan or retained research: scope=%s previous=%s gaps=%s", f.ai.headlessScope, f.ai.imagePlanPrevious, f.ai.imagePlanGaps)
+			}
+			if !f.ai.imageSourceOnly || f.ai.researchPassages != "[]" || f.ai.researchReferences != "" || f.ai.researchInstruction != "" {
+				t.Fatalf("source lookup received a second document-editing task: sourceOnly=%v passages=%s references=%s instruction=%s", f.ai.imageSourceOnly, f.ai.researchPassages, f.ai.researchReferences, f.ai.researchInstruction)
 			}
 			if scenario == "unresolved" {
 				if err == nil || !strings.Contains(err.Error(), "image evidence incomplete:") || len(fetches) != 0 || store.writes != 0 || f.ai.calls.Load() != 0 {

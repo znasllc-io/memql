@@ -60,6 +60,9 @@ type revisionAI struct {
 	assessmentReply       string
 	assessmentError       error
 	assessmentCalls       atomic.Int32
+	imageSourceOnly       bool
+	researchReferences    string
+	researchInstruction   string
 	headlessScope         string
 	researchDocument      string
 	researchPassages      string
@@ -84,7 +87,7 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		}},
 		{Name: "runAgentTurn", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
-			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
+			if data["imageSourceOnly"] != true && a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
 				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
 			}
 			if args["templateId"] != "libraryRevisionResearch" || data["document"] == nil || data["passages"] == nil {
@@ -94,6 +97,9 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 			if !a.parallelResearch && a.appCalls.Load() == 0 {
 				return nil, fmt.Errorf("local research started before the app attempt")
 			}
+			a.imageSourceOnly, _ = data["imageSourceOnly"].(bool)
+			a.researchReferences = asString(data["references"])
+			a.researchInstruction = asString(data["instruction"])
 			a.headlessScope = asString(data["gaps"])
 			a.researchDocument = asString(data["document"])
 			a.researchPassages = asString(data["passages"])
