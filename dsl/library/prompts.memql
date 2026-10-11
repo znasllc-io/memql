@@ -92,6 +92,7 @@ prompt libraryRevisionEvidence {
 @level("strong")
 @templateFile("prompts/libraryRevisionImagePlan.tmpl")
 prompt libraryRevisionImagePlan {
+ references string
  passages string!
  instruction string
  evidence string!

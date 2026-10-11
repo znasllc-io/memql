@@ -44,6 +44,16 @@ test("input validation stays actionable; arbitrary server strings never pass thr
   assert.match(userMessage(new Error("model_call_timeout: deadline exceeded"),"prepare changes"),/AI couldn’t finish/);
 });
 
+test("an AI work limit keeps its cause when wrapped by a context checkpoint failure",()=>{
+  const direct="run review-run-test reached its modelCalls ceiling at step research (limit 16 calls, 16 made): the run reached its model-call cap";
+  const wrapped=`function "runAgentTurn" execution failed: context checkpoint failed; history retained: ${direct}`;
+  const message=userMessage(new Error(wrapped),"prepare changes");
+  assert.equal(message,userMessage(new Error(direct),"prepare changes"));
+  assert.match(message,/AI work limit/);
+  assert.doesNotMatch(message,/room|context|16|runAgentTurn/);
+  assert.match(userMessage(new Error("context checkpoint cannot fit the active request; history retained"),"prepare changes"),/room/);
+});
+
 test("offline and refused diagnostics preserve a local reference without retries or recursion",async()=>{
   const output:string[]=[];let sends=0;
   const api={current:()=>undefined,execute:async()=>{sends++;throw new Error("log transport failed");}} as unknown as EditorConnectionAPI;
