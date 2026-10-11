@@ -1188,6 +1188,28 @@ func AudienceRosterSizeBuild(args AudienceRosterSizeArgs) string {
 	return b.String()
 }
 
+// AudienceSubscriberCount -- How many people in one audience can be mailed now, as a {count: N} aggregate. Pending and unsubscribed members are on the list but are not counted. The Email app's audience rows, the campaign wizard and the send confirmation name this number.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceSubscriberCount"] in generated_concepts.go).
+type AudienceSubscriberCountArgs struct {
+	AudienceId string
+}
+
+// AudienceSubscriberCount calls the engine query audienceSubscriberCount.
+func (qc *QueryClient) AudienceSubscriberCount(ctx context.Context, args AudienceSubscriberCountArgs) (*Result, error) {
+	call := AudienceSubscriberCountBuild(args)
+	return qc.executeNamed(ctx, "audienceSubscriberCount", call)
+}
+
+func AudienceSubscriberCountBuild(args AudienceSubscriberCountArgs) string {
+	var b strings.Builder
+	b.WriteString("query audienceSubscriberCount(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // Audiences -- The caller's audiences, newest first. Backs the audience list and the campaign editor's audience picker. Owned.
 //
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audiences"] in generated_concepts.go).

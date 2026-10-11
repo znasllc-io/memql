@@ -277,6 +277,20 @@ query recipient audienceRosterSize {
   count
 }
 
+/// How many people in one audience can be mailed now, as a {count: N} aggregate. Pending and
+/// unsubscribed members are on the list but are not counted. The Email app's audience rows, the
+/// campaign wizard and the send confirmation name this number.
+@actor
+query recipient audienceSubscriberCount {
+  args {
+    audienceId  string!
+  }
+  filter  row => true
+              && row.audienceId == args.audienceId
+              && isSendableRecipient(row)
+  count
+}
+
 /// ENGINE (owner-scoped): the delivery ledger for ONE PAGE OF RECIPIENTS, in the slim projection --
 /// recipient, outcome, attempts, retry due-time and nothing else. THE read that makes a resumed send
 /// safe: the worker diffs it against the roster page it just read and mails only what is missing or

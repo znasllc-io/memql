@@ -69,6 +69,21 @@ mutation audience archiveAudience {
   }
 }
 
+/// Restore an archived audience: it returns to the campaign and automation pickers. Authorized
+/// organization peers may restore it; the engine preserves its original owner and records the
+/// current writer on the new version.
+@actor
+mutation audience restoreAudience {
+  args {
+    audienceId  string!
+  }
+  update {
+    id: args.audienceId
+    ownerUserId: actor.userId
+    status: "active"
+  }
+}
+
 /// Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the
 /// concept's @default, which is never applied on insert.
 @actor

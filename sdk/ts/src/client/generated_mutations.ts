@@ -5798,6 +5798,28 @@ QueryClient.prototype.restoreArtifact = function (this: QueryClient, args: Resto
   return this.executeNamed("restoreArtifact", buildRestoreArtifact(args), opts);
 };
 
+/** Restore an archived audience: it returns to the campaign and automation pickers. Authorized organization peers may restore it; the engine preserves its original owner and records the current writer on the new version. */
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["restoreAudience"] in generated_concepts.ts).
+export interface RestoreAudienceArgs {
+  audienceId: string;
+}
+
+export function buildRestoreAudience(args: RestoreAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "mutation restoreAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreAudience(args: RestoreAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreAudience = function (this: QueryClient, args: RestoreAudienceArgs = {} as RestoreAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreAudience", buildRestoreAudience(args), opts);
+};
+
 /** Restore an archived recipe. Owned. */
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["restoreComposeRecipe"] in generated_concepts.ts).
 export interface RestoreComposeRecipeArgs {

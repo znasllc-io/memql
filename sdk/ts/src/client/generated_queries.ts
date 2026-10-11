@@ -1229,6 +1229,28 @@ QueryClient.prototype.audienceRosterSize = function (this: QueryClient, args: Au
   return this.executeNamed("audienceRosterSize", buildAudienceRosterSize(args), opts);
 };
 
+/** How many people in one audience can be mailed now, as a {count: N} aggregate. Pending and unsubscribed members are on the list but are not counted. The Email app's audience rows, the campaign wizard and the send confirmation name this number. */
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceSubscriberCount"] in generated_concepts.ts).
+export interface AudienceSubscriberCountArgs {
+  audienceId: string;
+}
+
+export function buildAudienceSubscriberCount(args: AudienceSubscriberCountArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "query audienceSubscriberCount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    audienceSubscriberCount(args: AudienceSubscriberCountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.audienceSubscriberCount = function (this: QueryClient, args: AudienceSubscriberCountArgs = {} as AudienceSubscriberCountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("audienceSubscriberCount", buildAudienceSubscriberCount(args), opts);
+};
+
 /** The caller's audiences, newest first. Backs the audience list and the campaign editor's audience picker. Owned. */
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audiences"] in generated_concepts.ts).
 export interface AudiencesArgs {

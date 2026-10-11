@@ -10611,6 +10611,28 @@ func RestoreArtifactBuild(args RestoreArtifactArgs) string {
 	return b.String()
 }
 
+// RestoreAudience -- Restore an archived audience: it returns to the campaign and automation pickers. Authorized organization peers may restore it; the engine preserves its original owner and records the current writer on the new version.
+//
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["restoreAudience"] in generated_concepts.go).
+type RestoreAudienceArgs struct {
+	AudienceId string
+}
+
+// RestoreAudience calls the engine mutation restoreAudience.
+func (qc *QueryClient) RestoreAudience(ctx context.Context, args RestoreAudienceArgs) (*Result, error) {
+	call := RestoreAudienceBuild(args)
+	return qc.executeNamed(ctx, "restoreAudience", call)
+}
+
+func RestoreAudienceBuild(args RestoreAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation restoreAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RestoreComposeRecipe -- Restore an archived recipe. Owned.
 //
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["restoreComposeRecipe"] in generated_concepts.go).
