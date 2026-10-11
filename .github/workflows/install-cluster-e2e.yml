@@ -687,8 +687,11 @@ jobs:
           node_modules/.bin/esbuild test-host/ownerClaim.ts --bundle --platform=node \
             --format=cjs --target=node20 --external:playwright \
             --outfile="$RUNNER_TEMP/owner-claim.js"
+          # Its one line per step in this log is the evidence; screenshots
+          # (OUT=) are for a person at a desk, and the bounded ownership
+          # handoff below transfers files, not a root-owned directory of them.
           sudo -E env "HOME=$HOME" "PATH=$PATH" "NODE_PATH=$PWD/node_modules" \
-            "OWNER_EMAIL=ci@example.com" "DOMAIN=$DOMAIN" "OUT=$RUNNER_TEMP/owner-claim" \
+            "OWNER_EMAIL=ci@example.com" "DOMAIN=$DOMAIN" \
             node "$RUNNER_TEMP/owner-claim.js"
 
       # ====================================================================
@@ -1242,6 +1245,5 @@ jobs:
             ${{ runner.temp }}/upgrade-report.json
             ${{ runner.temp }}/uninstall-report.json
             ${{ runner.temp }}/pipelines-e2e.txt
-            ${{ runner.temp }}/owner-claim/
             ${{ runner.temp }}/diagnostics.txt
           if-no-files-found: warn
