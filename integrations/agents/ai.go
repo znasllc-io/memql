@@ -225,10 +225,19 @@ func (i *Integration) handleInvokePrompt(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("ai(%q): %w", templateId, err)
 	}
 
-	payload, err := json.Marshal(map[string]any{
-		"prompt": templateId,
-		"reply":  reply,
-	})
+	envelope := map[string]any{"prompt": templateId, "reply": reply}
+	if args["responseSchema"] != nil {
+		// Keep the raw reply for existing consumers and expose the decoded
+		// object for authored workflow decisions. Do not make each workflow
+		// add a native parser for the same structured model response.
+		text, ok := reply.(string)
+		var structured map[string]any
+		if !ok || json.Unmarshal([]byte(text), &structured) != nil || structured == nil {
+			return nil, fmt.Errorf("ai(%q): structured response must be a JSON object", templateId)
+		}
+		envelope["structured"] = structured
+	}
+	payload, err := json.Marshal(envelope)
 	if err != nil {
 		return nil, fmt.Errorf("ai(%q): marshal envelope: %w", templateId, err)
 	}

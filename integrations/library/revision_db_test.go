@@ -36,6 +36,7 @@ type revisionAI struct {
 	completionReply       string
 	completionAfterRepair string
 	completionDocuments   []string
+	completionSchema      any
 	onCompletion          func(context.Context, int32) error
 	completionCalls       atomic.Int32
 	repairCalls           atomic.Int32
@@ -106,6 +107,12 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		{Name: "invokePrompt", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
 			if args["templateId"] == "libraryRevisionCompletion" {
+				a.completionSchema = args["responseSchema"]
+				schema := revisionMap(a.completionSchema)
+				properties := revisionMap(schema["properties"])
+				if schema["type"] != "object" || schema["additionalProperties"] != false || revisionMap(properties["details"])["maxLength"] == nil || revisionMap(properties["verdict"])["enum"] == nil {
+					return nil, fmt.Errorf("completion assessment lacks a bounded structured verdict")
+				}
 				n := a.completionCalls.Add(1)
 				if len(a.completionDocuments) > 0 && (int(n) > len(a.completionDocuments) || data["document"] != a.completionDocuments[n-1]) {
 					return nil, fmt.Errorf("completion check did not assess the actual proposed document: %v", data["document"])
@@ -122,7 +129,13 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				if reply == "" {
 					reply = "satisfied"
 				}
-				return reviewResult(map[string]any{"reply": reply})
+				verdict := "incomplete"
+				if reply == "satisfied" {
+					verdict, reply = "satisfied", ""
+				}
+				structured := map[string]any{"verdict": verdict, "details": reply}
+				body, _ := json.Marshal(structured)
+				return reviewResult(map[string]any{"reply": string(body), "structured": structured})
 			}
 			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
 				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
@@ -215,8 +228,8 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				}
 			}
 			expectedReview := a.completionReply
-			if expectedReview == "" {
-				expectedReview = "satisfied"
+			if expectedReview == "satisfied" {
+				expectedReview = ""
 			}
 			if args["templateId"] == "libraryRevisionItem" && (a.completionCalls.Load() == 0 || data["reviewNotes"] != expectedReview) {
 				return nil, fmt.Errorf("amendment did not receive its independent preflight assessment")
