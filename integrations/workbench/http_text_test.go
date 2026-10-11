@@ -2,12 +2,54 @@ package workbench
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
+
+func TestHTTPFetchRefusesBinaryBeforeTextExtractionOrTruncation(t *testing.T) {
+	for _, test := range []struct{ name, contentType, body string }{
+		{"jpeg", "image/jpeg", "\xff\xd8\xff\xe0\x00\x10JFIF\x00"},
+		{"declared-image", "image/png", "binary payload"},
+		{"pdf", "application/pdf", "%PDF-1.7"},
+		{"mislabelled", "text/html", "prefix\x00binary"},
+		{"invalid-utf8", "text/plain", "prefix\xffbinary"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", test.contentType)
+				if r.URL.Path == "/missing" {
+					w.WriteHeader(http.StatusNotFound)
+				}
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+			for _, status := range []int{http.StatusOK, http.StatusNotFound} {
+				url := server.URL
+				if status == http.StatusNotFound {
+					url += "/missing"
+				}
+				for _, extract := range []bool{false, true} {
+					result := (&Integration{}).handleHTTPFetch(context.Background(), nil, map[string]any{"url": url, "extractText": extract, "maxBytes": 1})
+					if result.OK || result.ErrorCode != "unsupported_content" {
+						t.Fatalf("binary response passed to model: %#v", result)
+					}
+					payload := result.Payload.(map[string]any)
+					if payload["status"] != status || payload["url"] != url || payload["body"] != "" {
+						t.Fatalf("refusal must preserve source status without binary data: %#v", payload)
+					}
+					raw, err := json.Marshal(result)
+					if err != nil || strings.Contains(string(raw), `\u0000`) || len(raw) > 1500 {
+						t.Fatalf("refusal is not safe bounded text: %q, %v", raw, err)
+					}
+				}
+			}
+		})
+	}
+}
 
 func TestHTTPFetchReadableExcerpt(t *testing.T) {
 	html := "<html><head><script>" + strings.Repeat("irrelevant script;", 10000) + "</script><style>.hidden{display:none}</style></head><body><h1>Official guide</h1><p>Winter temperatures &amp; plant selection.</p></body></html>"
@@ -39,19 +81,37 @@ func TestHTTPFetchTextBoundsPreserveUnicodeAndSignalOmittedContent(t *testing.T)
 	defer server.Close()
 	integration := &Integration{}
 	for _, limit := range []int{5, defaultHTTPTextBytes} {
-		args := map[string]any{"url": server.URL, "extractText": true}
-		if limit == 5 {
-			args["maxBytes"] = limit
-		}
-		result := integration.handleHTTPFetch(context.Background(), nil, args)
-		body, _ := result.Payload.(map[string]any)["body"].(string)
-		if !result.OK || len(body) > limit || !utf8.ValidString(body) || result.Payload.(map[string]any)["truncated"] != true {
-			t.Fatalf("limit %d: %#v", limit, result)
+		for _, extract := range []bool{false, true} {
+			args := map[string]any{"url": server.URL, "extractText": extract, "maxBytes": limit}
+			result := integration.handleHTTPFetch(context.Background(), nil, args)
+			body, _ := result.Payload.(map[string]any)["body"].(string)
+			if !result.OK || len(body) > limit || !utf8.ValidString(body) || result.Payload.(map[string]any)["truncated"] != true {
+				t.Fatalf("limit %d: %#v", limit, result)
+			}
 		}
 	}
 	invalid := integration.handleHTTPFetch(context.Background(), nil, map[string]any{"url": server.URL, "extractText": "yes"})
 	if invalid.OK {
 		t.Fatal("unsupported extraction values must not silently return raw HTML")
+	}
+}
+
+func TestHTTPFetchHardCapDoesNotMisclassifySplitUTF8(t *testing.T) {
+	for _, suffix := range []string{"🌿ending", strings.Repeat("\x80", 8)} {
+		body := strings.Repeat("a", maxHTTPRespBytes-1) + suffix
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(body))
+		}))
+		result := (&Integration{}).handleHTTPFetch(context.Background(), nil, map[string]any{"url": server.URL})
+		server.Close()
+		if utf8.ValidString(body) {
+			if !result.OK || result.Payload.(map[string]any)["body"] != body[:maxHTTPRespBytes-1] || result.Payload.(map[string]any)["truncated"] != true {
+				t.Fatal("hard cap corrupted a valid UTF-8 response")
+			}
+		} else if result.OK || result.ErrorCode != "unsupported_content" {
+			t.Fatal("hard cap hid an invalid UTF-8 response")
+		}
 	}
 }
 

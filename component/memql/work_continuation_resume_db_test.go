@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -39,7 +40,21 @@ func TestWorkContinuationRequiresTheExactOwnedAnsweredCheckpoint(t *testing.T) {
 	write("updateWorkRun", map[string]any{"runId": runID, "status": "running", "humanResumeId": approvalID})
 	_, err = b.PrepareWorkContinuation(runCtx, request)
 	require.Error(t, err, "an answered question without a checkpoint cannot repeat a turn")
-	messages := []common.ChatMessage{{Role: "user", Content: "Perform work"}, {Role: "assistant", ToolCalls: []common.ToolCall{{ID: "saved", Name: "writeFile", Arguments: "{}"}}}, {Role: "tool", ToolCallId: "saved", Name: "writeFile", Content: "Written once"}}
+	// Receipts already stored as JSON arrays must remain resumable after a
+	// deployment; they cannot be rewritten without changing their identity.
+	legacy := []common.ChatMessage{{Role: "user", Content: "Existing saved request"}}
+	legacyRaw, err := json.Marshal(legacy)
+	require.NoError(t, err)
+	write("createWorkObservation", map[string]any{
+		"observationId": continuationID(run, legacyRaw), "runId": runID, "stepKey": run.StepKey,
+		"kind": "note", "content": "Saved execution progress", "data": map[string]any{"continuation": true, "messages": legacy},
+	})
+	legacyCtx, err := b.PrepareWorkContinuation(runCtx, request)
+	require.NoError(t, err)
+	legacyRestored, err := b.RestoreWorkContinuation(legacyCtx, nil)
+	require.NoError(t, err)
+	require.Equal(t, legacy, legacyRestored)
+	messages := []common.ChatMessage{{Role: "user", Content: "Perform work"}, {Role: "assistant", ToolCalls: []common.ToolCall{{ID: "saved", Name: "writeFile", Arguments: "{}"}}}, {Role: "tool", ToolCallId: "saved", Name: "writeFile", Content: "Written once; literal \u0000; escaped \\u0000; UTF-8 🌿"}}
 	require.NoError(t, a.SaveWorkContinuation(runCtx, messages))
 	prepared, err := b.PrepareWorkContinuation(runCtx, request)
 	require.NoError(t, err)
