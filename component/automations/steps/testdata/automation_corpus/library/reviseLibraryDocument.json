@@ -237,6 +237,27 @@
                 "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n",
                 "instruction": null
               },
+              "responseSchema": {
+                "additionalProperties": false,
+                "properties": {
+                  "details": {
+                    "maxLength": 1200,
+                    "type": "string"
+                  },
+                  "verdict": {
+                    "enum": [
+                      "satisfied",
+                      "incomplete"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "verdict",
+                  "details"
+                ],
+                "type": "object"
+              },
               "templateId": "libraryRevisionCompletion"
             },
             "kind": "builtin",
@@ -486,6 +507,27 @@
               "data": {
                 "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n",
                 "instruction": null
+              },
+              "responseSchema": {
+                "additionalProperties": false,
+                "properties": {
+                  "details": {
+                    "maxLength": 1200,
+                    "type": "string"
+                  },
+                  "verdict": {
+                    "enum": [
+                      "satisfied",
+                      "incomplete"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "verdict",
+                  "details"
+                ],
+                "type": "object"
               },
               "templateId": "libraryRevisionCompletion"
             },
