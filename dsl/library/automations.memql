@@ -400,6 +400,8 @@ automation reviseLibraryDocument {
  }
  // Review the human requests and their anchors, not a second copy of the old
  // section. The complete candidate below is authoritative for current prose.
+ // Reassess objections once before allowing them to drive a content repair.
+ // A quote may exist even when the claim about its meaning or formatting is false.
  // Findings are the sole model answer: an empty list means satisfied. Do not
  // ask for a redundant verdict that can contradict the findings.
  completionSchema := {
@@ -424,12 +426,13 @@ automation reviseLibraryDocument {
    instruction: captured.amendment.instruction, explanation: "Assess the previous proposal against the new direction."
   })
   amendmentAssessmentCheck := logic libraryRevisionReviewGrounding(document: previousCandidate.proposal.revisedContent, assessment: amendmentAssessmentRaw.structured)
-  if !amendmentAssessmentCheck.valid {
+  if !amendmentAssessmentCheck.valid || amendmentAssessmentCheck.verdict != "satisfied" {
    amendmentAssessmentRetry := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
     references: references.references, evidence: combinedEvidence,
     imageUsage: previousCandidate.imageUsage, document: previousCandidate.proposal.revisedContent, passages: captured.passages,
     instruction: captured.amendment.instruction, explanation: "Assess the previous proposal against the new direction.",
-    recovery: amendmentAssessmentCheck.problem
+    previousFindings: amendmentAssessmentRaw.structured.findings,
+    recovery: amendmentAssessmentCheck.valid ? "Reconsider the previous objections independently before requesting another edit. A matching quote alone does not prove that its explanation is correct." : amendmentAssessmentCheck.problem
    })
    amendmentAssessment := logic libraryRevisionReviewGrounding(document: previousCandidate.proposal.revisedContent, assessment: amendmentAssessmentRetry.structured)
   } else {
@@ -469,12 +472,13 @@ automation reviseLibraryDocument {
     instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary
    })
    completionCheck := logic libraryRevisionReviewGrounding(document: candidate.proposal.revisedContent, assessment: completionRaw.structured)
-   if !completionCheck.valid {
+   if !completionCheck.valid || completionCheck.verdict != "satisfied" {
     completionRetry := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
      references: references.references, evidence: combinedEvidence,
      imageUsage: candidate.imageUsage, document: candidate.proposal.revisedContent, passages: captured.passages,
      instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary,
-     recovery: completionCheck.problem
+     previousFindings: completionRaw.structured.findings,
+     recovery: completionCheck.valid ? "Reconsider the previous objections independently before requesting another edit. A matching quote alone does not prove that its explanation is correct." : completionCheck.problem
     })
     completion := logic libraryRevisionReviewGrounding(document: candidate.proposal.revisedContent, assessment: completionRetry.structured)
    } else {
@@ -511,12 +515,13 @@ automation reviseLibraryDocument {
    instruction: captured.amendment.instruction ?? captured.instruction, explanation: repairedCandidate.summary
   })
   finalAssessmentCheck := logic libraryRevisionReviewGrounding(document: repairedCandidate.proposal.revisedContent, assessment: finalAssessmentRaw.structured)
-  if !finalAssessmentCheck.valid {
+  if !finalAssessmentCheck.valid || finalAssessmentCheck.verdict != "satisfied" {
    finalAssessmentRetry := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
     references: references.references, evidence: combinedEvidence,
     imageUsage: repairedCandidate.imageUsage, document: repairedCandidate.proposal.revisedContent, passages: captured.passages,
     instruction: captured.amendment.instruction ?? captured.instruction, explanation: repairedCandidate.summary,
-    recovery: finalAssessmentCheck.problem
+    previousFindings: finalAssessmentRaw.structured.findings,
+    recovery: finalAssessmentCheck.valid ? "Reconsider the previous objections independently before requesting another edit. A matching quote alone does not prove that its explanation is correct." : finalAssessmentCheck.problem
    })
    finalAssessment := logic libraryRevisionReviewGrounding(document: repairedCandidate.proposal.revisedContent, assessment: finalAssessmentRetry.structured)
   } else {

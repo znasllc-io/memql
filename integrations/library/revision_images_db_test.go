@@ -458,7 +458,7 @@ func testRevisionNoopAssessmentAndBoundedRepair(t *testing.T, f *revisionDB) {
 			} else if !errors.As(err, &wait) || f.ai.calls.Load() != 2 || f.ai.repairCalls.Load() != 1 {
 				t.Fatalf("unfinished no-op not repaired: %v", err)
 			}
-			expectedChecks := int32(2)
+			expectedChecks := int32(3)
 			if satisfied {
 				expectedChecks = 1
 			}
@@ -485,15 +485,18 @@ func testRevisionPartialFeedbackRepair(t *testing.T, shared *revisionDB) {
 			f.ai.firstAnswer = &revisionAnswer{Summary: "Both corrected", Edits: []revisionReplacement{{Before: "First claim. Second claim.", After: "First corrected. Second claim.", Reason: "Correction", CommentIDs: []string{note}}}}
 			f.ai.answer = revisionAnswer{Summary: "Both corrected", Edits: []revisionReplacement{{Before: "First claim. Second claim.", After: "First corrected. Second corrected.", Reason: "Both requested corrections", CommentIDs: []string{note}}}}
 			f.ai.completionReply = "incomplete: Second claim remains unchanged."
-			f.ai.completionQuotes = []string{"Second claim.", "Second claim."}
-			f.ai.completionDocuments = []string{"# Guide\n\nFirst corrected. Second claim.\n", "# Guide\n\nFirst corrected. Second corrected.\n"}
+			f.ai.completionQuotes = []string{"Second claim.", "Second claim.", "Second claim.", "Second claim."}
+			partial, complete := "# Guide\n\nFirst corrected. Second claim.\n", "# Guide\n\nFirst corrected. Second corrected.\n"
+			f.ai.completionDocuments = []string{partial, partial, complete}
+			expectedChecks := int32(3)
 			if unresolved {
 				f.ai.answer = *f.ai.firstAnswer
 				f.ai.completionAfterRepair = f.ai.completionReply
-				f.ai.completionDocuments[1] = f.ai.completionDocuments[0]
+				f.ai.completionDocuments = []string{partial, partial, partial, partial}
+				expectedChecks = 4
 			}
 			err := f.execute(f.other, request, false)
-			if f.ai.calls.Load() != 2 || f.ai.completionCalls.Load() != 2 || f.ai.repairCalls.Load() != 1 {
+			if f.ai.calls.Load() != 2 || f.ai.completionCalls.Load() != expectedChecks || f.ai.repairCalls.Load() != 1 {
 				t.Fatalf("partial feedback was not assessed and repaired once: %v", err)
 			}
 			schemaJSON, _ := json.Marshal(f.ai.completionSchema)
@@ -536,7 +539,7 @@ func testRevisionPartialFeedbackRepair(t *testing.T, shared *revisionDB) {
 				t.Fatal(err)
 			}
 			changed, err := f.second.reviewDocument(memql.ContextWithFreshRead(f.ctx), artifact)
-			if err != nil || asString(changed.backing["body"]) != f.ai.completionDocuments[1] {
+			if err != nil || asString(changed.backing["body"]) != complete {
 				t.Fatalf("did not save the assessed repair: %v %v", changed, err)
 			}
 		})
@@ -656,7 +659,7 @@ func testRevisionAmendmentPreservesImagePinsAcrossReplicas(t *testing.T, f *revi
 	if err != nil || !strings.Contains(asString(changed.backing["body"]), images[0].Reference.URI) || !strings.Contains(asString(changed.backing["body"]), "clarified paragraph") {
 		t.Fatalf("saved amendment lost content/image: %v %v", changed, err)
 	}
-	if f.ai.completionCalls.Load() != 2 || f.ai.repairCalls.Load() != 1 || f.ai.calls.Load() != 2 {
+	if f.ai.completionCalls.Load() != 3 || f.ai.repairCalls.Load() != 1 || f.ai.calls.Load() != 2 {
 		t.Fatal("unchanged amendment did not receive exactly one bounded correction")
 	}
 	if generator.calls != 1 || store.writes != 1 {

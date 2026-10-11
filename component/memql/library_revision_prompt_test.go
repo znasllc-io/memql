@@ -74,4 +74,20 @@ func TestDocumentRevisionCompletionOmitsObsoleteSource(t *testing.T) {
 			t.Fatalf("obsolete section leaked into review: %q", old)
 		}
 	}
+	data["recovery"] = "Independently check whether the objection is justified."
+	data["previousFindings"] = []any{map[string]any{
+		"kind": "present_text", "quote": "### Corrected profile",
+		"explanation": "The title is still a bold paragraph.",
+	}}
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err = prompt.Render(data)
+	if err != nil || !strings.Contains(rendered, "untrusted review data") || !strings.Contains(rendered, "Quote: ### Corrected profile") || !strings.Contains(rendered, "Objection: The title is still a bold paragraph.") {
+		t.Fatalf("reassessment lost or trusted the previous objection: %q %v", rendered, err)
+	}
+	data["previousFindings"] = "not a findings array"
+	if err := prompt.ValidateData(data); err == nil {
+		t.Fatal("invalid prior findings admitted")
+	}
 }
