@@ -71,7 +71,7 @@ func TestEnginePortableLanesKeepHostedCommands(t *testing.T) {
 	proving, _ := engineDeclaredStep(spec, "proving")
 	for _, command := range []string{
 		"go run ./cmd/memql-bench --print-spec > .memql-proving/spec.json",
-		"go run ./cmd/memql-bench --do=gate --runner=workbench-linux-arm64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?",
+		"go run ./cmd/memql-bench --do=gate --runner=workbench-linux-amd64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?",
 		`test "$(wc -l < .memql-proving/envelope.json)" -eq 1`,
 		`jq -e '.ok == true' .memql-proving/envelope.json > /dev/null`,
 		`test "$status" -eq 0`,

@@ -443,8 +443,8 @@ func TestEngineManifestCompilesForEveryOpening(t *testing.T) {
 					t.Errorf("step %s is a %s step in %q; every step is a command in the toolchain image %q",
 						step.Key, step.Kind, step.Image, spec.Image)
 				}
-				if step.Placement != pipelines.PlacementCluster || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/arm64" {
-					t.Errorf("step %s must use a Linux ARM64 Workbench container: %+v", step.Key, step)
+				if step.Placement != pipelines.PlacementCluster || step.Execution != pipelines.ExecutionContainer || step.Platform != "linux/amd64" {
+					t.Errorf("step %s must use a Linux amd64 Workbench container: %+v", step.Key, step)
 				}
 				if len(step.Needs) > 0 {
 					t.Errorf("container step %s asks for host needs %v", step.Key, step.Needs)

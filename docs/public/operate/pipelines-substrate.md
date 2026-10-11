@@ -1079,25 +1079,35 @@ the closed set (`pipeline_need_unknown`) and a need on a `cluster` pipeline
 This repository is a source like any other: its `memql-package.yaml` declares a
 pipeline and no apps, and an owner connects it the way any source's is connected
 ([Connecting a pipeline](pipelines.md#connecting-a-pipeline)); nothing connects
-it by itself. Its steps are lanes of `.github/workflows/ci.yml` copied with
-their commands, and the file's header names the lanes it leaves to `ci.yml`: the
-ones that need Docker or a display, the node-tag, cluster-e2e and per-module
-passes, and a few not carried here yet.
+it by itself. Its steps are lanes of `.github/workflows/ci.yml` and of the scan
+workflows, copied with their commands; the file's header names what is not
+carried here yet (image builds, the installed-cluster lifecycle tests, the
+editor host matrices, SARIF and release publication). Every step is a
+`linux/amd64` container on the cluster, the architecture of the local build
+node and of AKS.
 
 | Stage | Steps | Runs on |
 |---|---|---|
-| `checks` | `go-checks` (30 min: build, vet, the env registry, the DSL lint and engine load, and the SDK, concept-snapshot, authoring-surface and proto drift gates) and `path-routing` | every run |
-| `tests` | `go-tests` (affected packages outside the db-gated trees, 4 shards, 30 min), `db-tests` (the affected db-gated packages, 5 shards, 40 min, each beside its own Postgres sidecar), `fuzz`, and `os-checks` when the change touches the OS bucket | every run |
-| `gates` | `gate-inputs`, when the change is not all Go source | pull requests |
+| `checks` | `go-checks` (30 min: build, vet, the env registry, the DSL lint and engine load, and the SDK, concept-snapshot, authoring-surface and proto drift gates), `path-routing`, the five `build-<tag>` passes, `build-clustere2e`, `module-boundaries` and `bash32-smoke` | every run |
+| `vulnerabilities` | `go-vulnerabilities` (govulncheck) and `npm-vulnerabilities` | every event, after a failure too |
+| `secrets-current` | `gitleaks` over the working tree | pull requests and manual runs, after a failure too |
+| `secrets-history` | `gitleaks` over full reachable history (6 hours, 4 CPUs) | push, merge group, release and manual runs, after a failure too |
+| `tests` | `go-tests` (affected packages outside the db-gated trees, 4 shards), `db-tests` (the affected db-gated packages, 5 shards, each beside its own Postgres sidecar), `fuzz`, `os-checks` when the change touches the OS bucket, `sdk-ts-typecheck`, `viewkit-checks`, `mcp-conformance`, `proving` and the seven `test-<tag>` passes | every run |
+| `gates` | `gate-inputs` | pull requests and manual runs |
+| `analysis` | `codeql-go` (3 hours), `codeql-javascript`, `codeql-python` and `sbom` | push, release, scheduled and manual runs, after a failure too |
 
 No step names a need, so the pipeline runs on the cluster alone and connects
-with `compute: cluster`. `memql_package_manifest_test.go` holds three of its
-copies to their originals -- `select.dbGated` to
-`scripts/ci/db-gated-packages.sh`, the gate packages to `ci.yml`'s
-`GATE_PACKAGES`, the Postgres service to `ci.yml`'s db-tests service -- and
-nothing holds the rest: the step commands, the bucket globs, the shard counts
-and the fuzz targets are hand copies of `ci.yml`, and a change there is made
-here too.
+with `compute: cluster`. Its longest steps outlast the default 2-hour run
+ceiling, so a cluster that runs this package composes
+`components/pipelines-long-runs` (8 hours); the local overlay does.
+`memql_package_manifest_test.go` holds three of its copies to their originals
+-- `select.dbGated` to `scripts/ci/db-gated-packages.sh`, the gate packages to
+`ci.yml`'s `GATE_PACKAGES`, the Postgres service to `ci.yml`'s db-tests service
+-- and `memql_pipeline_portable_coverage_test.go` holds the commands of the
+portable lanes (the SDK, view-kit, conformance and proving lanes, the tag builds
+and tests, the cluster-e2e build and the Bash image). Nothing holds the rest:
+the bucket globs, the shard counts and the fuzz targets are hand copies of
+`ci.yml`, and a change there is made here too.
 
 What a run of it costs, and where it falls short of `ci.yml`: every step clones
 the commit on its own (10 to 76 seconds a step for this repository, measured on
@@ -1113,7 +1123,8 @@ too, and says so: `ci.yml`'s lane stays the gate for it.
 `ghcr.io/znasllc-io/memql-toolchain` is what the engine's pipeline runs in,
 built from `deploy/toolchain-image/Dockerfile` by `build-toolchain-image.yml`:
 dispatched on main only, smoke-tested before it is pushed, a published tag
-never replaced unless the dispatch says so, `linux/amd64` only. It carries:
+never replaced unless the dispatch says so, one native platform per dispatch
+(`linux/amd64` or `linux/arm64`, each its own version). It carries:
 
 - Go 1.27.2 (`go.work`'s toolchain line), Node 22, protoc 33.4 and kubectl
   1.32.13 (the minor of the local cluster's k3s); a test holds Go, protoc and
@@ -1125,8 +1136,10 @@ never replaced unless the dispatch says so, `linux/amd64` only. It carries:
 - uid 1000 (`memql`), never root, with git trusting `/workspace`.
 
 `memql-package.yaml` names the image by the digest its run's summary printed
-(version `1.0.0`). A rebuild takes a new version and a new pin: the manifest's
-test fails on any reference that is not a digest of this repository.
+(version `1.2.0-amd64`). A rebuild takes a new version and a new pin: the
+manifest's test fails on any reference that is not a digest of this
+repository. When `go.work`'s toolchain line moves, the image is rebuilt and
+re-pinned; an image whose Go lags it makes every step download a toolchain.
 
 ---
 

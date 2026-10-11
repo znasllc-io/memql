@@ -5,7 +5,9 @@
 # record D12). A run reads this file at its own commit; the seam
 # (component/pipelines, component/pipelinerun) compiles the pipeline: block into
 # steps. Portable steps use isolated Workbench Jobs; native host work is declared
-# explicitly in separate steps. Local ARM64 pins do not prove amd64 releases.
+# explicitly in separate steps. The package targets linux/amd64, the
+# architecture of the local build node and of AKS (design record
+# 2026-10-11-pipelines-local-green-and-fast, D9).
 #
 # The command parity gates compare the retained GitHub lanes with this package.
 # Working legacy workflows remain until equivalent local and production evidence
@@ -17,15 +19,15 @@ formatVersion: 1
 name: memql
 pipeline:
   schedule: daily
-  platform: linux/arm64
+  platform: linux/amd64
   # deploy/toolchain-image: Go 1.27.2, Node 22, protoc 33.4, kubectl 1.32.13, the
   # Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client,
   # as uid 1000. Pinned by the digest build-toolchain-image.yml's run on main
-  # printed for version 1.1.0-arm64 (run 37416894805); a rebuild takes a new version
+  # printed for version 1.2.0-amd64 (run 38146575497); a rebuild takes a new version
   # and a new pin, and the manifest's test fails on any reference that is not a
   # digest of this repository. These rehearsal images are public; private
   # image access must use the Workbench registry credential contract.
-  image: ghcr.io/znasllc-io/memql-toolchain@sha256:7a457e4d96d2e7f03032a686a65d5447c3b6a78987c19d5622bdbfdc917e11fc
+  image: ghcr.io/znasllc-io/memql-toolchain@sha256:ae195dcff54b4f67eac2c5669612ba1a886f789fae1e6325adcfaab9679a7bf9
   services:
     # TimescaleDB + pgvector: the mirror ci.yml's db-tests lane runs, at the same
     # digest and with the same user, password and database (the test holds all
@@ -416,7 +418,7 @@ pipeline:
             test "$(wc -l < .memql-proving/spec.json)" -eq 1
             jq -e '.capability == "bench.run" and (.params | length) > 0' .memql-proving/spec.json > /dev/null
             status=0
-            go run ./cmd/memql-bench --do=gate --runner=workbench-linux-arm64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?
+            go run ./cmd/memql-bench --do=gate --runner=workbench-linux-amd64 > .memql-proving/envelope.json 2> .memql-proving/gate.txt || status=$?
             cat .memql-proving/gate.txt
             test "$(wc -l < .memql-proving/envelope.json)" -eq 1
             jq -e '.ok == true' .memql-proving/envelope.json > /dev/null
