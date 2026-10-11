@@ -15,14 +15,14 @@ module github.com/znasllc-io/memql/component/compose
 
 go 1.26.1
 
-toolchain go1.27.1
+toolchain go1.27.2
 
 require (
 	github.com/go-pdf/fpdf v0.9.0
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/yuin/goldmark v1.8.6
 	github.com/znasllc-io/memql/core v0.0.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 )
 
 require (

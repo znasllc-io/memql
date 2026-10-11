@@ -17,6 +17,10 @@ import (
 // functionValidator validates and resolves function references in MemQL expressions.
 type functionValidator struct {
 	functions map[string]*Function
+	// lookup, when set, answers in place of functions: plan expansion resolves
+	// names against the registry one at a time (FunctionRegistry.lazyLookup)
+	// rather than cloning all of it up front. See function().
+	lookup    func(name string) (*Function, bool)
 	specs     *SpecRegistry
 	resolved  map[string]ExpressionNode
 	resolving map[string]struct{}
@@ -453,6 +457,16 @@ func actualArgType(value any) string {
 	}
 }
 
+// function returns the named construct from the registry view when there is
+// one, and from the map otherwise.
+func (v *functionValidator) function(key string) (*Function, bool) {
+	if v.lookup != nil {
+		return v.lookup(key)
+	}
+	fn, ok := v.functions[key]
+	return fn, ok
+}
+
 // expandFunctionCall resolves a function call with its arguments.
 // This validates the arguments against the schema, then expands the function expression
 // with the arguments substituted into arg() references and conditional filters processed.
@@ -462,7 +476,7 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 		return nil, fmt.Errorf("function name is required")
 	}
 
-	fn, ok := v.functions[key]
+	fn, ok := v.function(key)
 	if !ok || fn == nil {
 		// A @disabled spec keeps its name reserved -- say so rather than
 		// "not found" (#2607).
@@ -1490,11 +1504,10 @@ func resolvePlanFunctionsWithAmbient(plan *QueryPlan, functions *FunctionRegistr
 		return nil
 	}
 
-	var snapshot map[string]*Function
+	validator := newFunctionValidatorWithAmbient(nil, specs, origin, ambient)
 	if functions != nil {
-		snapshot = functions.LookupIndex()
+		validator.lookup = functions.lazyLookup()
 	}
-	validator := newFunctionValidatorWithAmbient(snapshot, specs, origin, ambient)
 	defer func() {
 		// Carry the collected floors onto the plan. Done in a defer so an
 		// expansion that fails part-way still reports what it had already

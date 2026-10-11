@@ -10,4 +10,4 @@ module github.com/znasllc-io/memql/component/frontdoor
 
 go 1.26.1
 
-toolchain go1.27.1
+toolchain go1.27.2
