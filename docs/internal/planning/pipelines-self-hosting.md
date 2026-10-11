@@ -71,9 +71,9 @@ Use deletion of idle nodes and temporary disks rather than assuming a stopped
 VM has no storage cost. Basic network-policy enforcement does not require the
 optional paid Advanced Container Networking Services bundle. The existing
 single database replica makes node reimaging a maintenance decision.
-Issue #5844 retains the earlier two-week Cockpit evaluation; reconcile that
-record when the subsequent capacity/networking plan is approved, and preserve
-the independent CI/release observation gates in #5506 through #5509.
+#5844 was closed on 2026-10-11 as superseded; the deferral of Azure capacity
+and Cilium stands. Preserve the independent CI/release observation gates in
+#5506 through #5509.
 
 ### Local Cilium and certificate regression evidence (October 6)
 

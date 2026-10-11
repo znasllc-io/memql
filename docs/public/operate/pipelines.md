@@ -184,13 +184,21 @@ A pipeline lives in **Deployables**, on its source -- not in an app of its own
   **Latest upstream** says what that commit's checks said -- *checks passed,
   not yet deployed* among them. The bar reads *checks on* and carries **Pipeline
   settings**, or **Connect pipeline** for a source that has none. A source with a
-  disconnected pipeline can use its settings to start **Run latest**. MemQL
-  reads the GitHub default branch through that source's installation grant and
-  pins the returned commit SHA. Automatic delivery must be disconnected first,
-  so a webhook or poll cannot race the rehearsal. Only stages with no `on`
-  selector or with `on: [manual]` run; publication stages should name their
-  intended events explicitly. Repeating the request for the same head returns
-  the same run; use **Re-run** after it finishes to create another attempt. A
+  disconnected pipeline can use its settings to start **Run latest**, which
+  runs the default branch, or **Other branch**, which asks for the branch under
+  the facts: a list of the repository's other branches when the source's grant
+  can read them, a text field when it cannot. Either is `pipelinesRunLatest`,
+  whose optional `branch` names the branch (empty is the default branch); a
+  name GitHub would not accept is refused `pipeline_branch_invalid` before any
+  request leaves the cluster. MemQL reads the branch through that source's
+  installation grant and pins the returned commit SHA. Automatic delivery must
+  be disconnected first, so a webhook or poll cannot race the rehearsal. Only
+  stages with no `on` selector or with `on: [manual]` run; publication stages
+  should name their intended events explicitly. A manual run writes the
+  pipeline's check run on its commit like any other run, so a branch's run
+  shows on that commit and on the pull request whose head it is. Repeating the
+  request for the same head returns the same run, whichever branch reached it;
+  use **Re-run** after it finishes to create another attempt. A
   source that produces no apps and runs a pipeline -- the engine repository is
   one -- reads *pipeline* where its app count goes in the Sources list, and the
   Overview map draws a **Checks** node beside the deployables a checked source
