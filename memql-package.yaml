@@ -94,6 +94,7 @@ pipeline:
       - packs
       - test/inboundhop
       - test/pipelinehop
+      - test/clustere2e
     buckets:
       # Filesystem gates read Go source as well as manifests and docs. The
       # import graph cannot discover these dependencies, so every PR runs them,

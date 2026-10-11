@@ -91,11 +91,31 @@ type ActivationResult struct {
 // This is the authority gate at the bundle grain (the per-call capability gate
 // for the automation's RUNTIME actions lands in increment 2).
 func (e *MemQLEngine) ActivateApprovedBundle(ctx context.Context, owner, bundleId string, deps AuthoredRuntimeDeps) (ActivationResult, error) {
-	return ActivateApprovedBundleWithStore(ctx, &engineActivationStore{engine: e}, owner, bundleId, deps)
+	return e.activateApprovedBundleWithStore(ctx, &engineActivationStore{engine: e}, owner, bundleId, deps)
 }
 
-// activateApprovedBundle is the store-driven core, split out so it is unit
-// testable with a fake ActivationStore (no live DB).
+// activateApprovedBundleWithStore is ActivateApprovedBundle over an injected
+// store: the store-driven core below, and then -- only once the activation has
+// succeeded -- the authoring.arm broadcast that arms the bundle on every OTHER
+// replica (memql#6022, F1). The core arms only the deps it is handed, which are
+// this node's; without the broadcast every other replica learned of the bundle
+// at its next boot. Split from the exported method so the cross-node test can
+// drive two engines over one fake store.
+func (e *MemQLEngine) activateApprovedBundleWithStore(ctx context.Context, store ActivationStore, owner, bundleId string, deps AuthoredRuntimeDeps) (ActivationResult, error) {
+	res, err := ActivateApprovedBundleWithStore(ctx, store, owner, bundleId, deps)
+	if err != nil {
+		return res, err
+	}
+	// The plan's owner is the bundle row's ownerUserId: the spelling every
+	// replica registers under, and the envelope it reads the bundle with.
+	e.publishAuthoringArm(bundleId, res.Plan.OwnerUserId)
+	return res, nil
+}
+
+// ActivateApprovedBundleWithStore is the store-driven core of an activation,
+// split out so it is unit testable with a fake ActivationStore (no live DB). It
+// arms the bundle in the deps it is given and broadcasts nothing; the engine's
+// activateApprovedBundleWithStore adds the broadcast.
 func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore, owner, bundleId string, deps AuthoredRuntimeDeps) (ActivationResult, error) {
 	if deps.Registry == nil {
 		return ActivationResult{}, fmt.Errorf("authoring: activation requires an authored runtime registry")
@@ -169,9 +189,12 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 
 	// 5. Retire the superseded prior version (edit/version path). Its constructs
 	// are unregistered so the old behavior stops firing the instant the new one
-	// goes live.
+	// goes live -- except the ones this version registers under the same kind
+	// and name. Those were replaced in place by step 3, and the registry and the
+	// scheduler key by name, so tearing the old one down would tear the new one
+	// down with it.
 	if plan.SupersedesBundleId != "" {
-		if err := retireBundleRuntime(ctx, store, plan.SupersedesBundleId, owner, deps); err != nil {
+		if err := retireBundleRuntime(ctx, store, plan.SupersedesBundleId, owner, deps, plan.registeredKeys()); err != nil {
 			if deps.Logger != nil {
 				deps.Logger.Warn("authored superseded-bundle retirement failed (new version is live)",
 					"bundleId", bundleId, "supersedes", plan.SupersedesBundleId, "error", err)
@@ -197,9 +220,11 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 
 // retireBundleRuntime tears down an active bundle: flip status -> retired,
 // unregister its constructs from the runtime (+ scheduler), and emit the
-// retirement audit. Used both for an explicit retire and for retiring a
-// superseded prior version during a version bump.
-func retireBundleRuntime(ctx context.Context, store ActivationStore, bundleId, owner string, deps AuthoredRuntimeDeps) error {
+// retirement audit. Used both for an explicit retire (keep nil) and for
+// retiring a superseded prior version during a version bump, where keep holds
+// the constructKey of everything the superseding version registers: those rows
+// are still retired, but their runtime entries are the NEW version's and stay.
+func retireBundleRuntime(ctx context.Context, store ActivationStore, bundleId, owner string, deps AuthoredRuntimeDeps, keep map[string]bool) error {
 	constructs, err := store.LoadConstructs(ctx, bundleId)
 	if err != nil {
 		return fmt.Errorf("authoring: load constructs to retire %q: %w", bundleId, err)
@@ -209,12 +234,15 @@ func retireBundleRuntime(ctx context.Context, store ActivationStore, bundleId, o
 	}
 	for _, c := range constructs {
 		_ = store.SetConstructStatus(ctx, c.Id, "retired")
+		if keep[constructKey(c.Kind, c.Name)] {
+			continue
+		}
 		if c.Kind == "automation" && deps.DeregisterHook != nil {
 			deps.DeregisterHook(c.OwnerUserId, c.Name)
 		}
 		if deps.Registry != nil {
-			// Retire from the registry. A construct already gone (e.g. superseded
-			// in place by a newer version's Register) is a no-op for our purposes.
+			// Retire from the registry. A construct already gone is a no-op for
+			// our purposes.
 			_ = deps.Registry.Retire(c.OwnerUserId, c.Kind, c.Name)
 		}
 	}
@@ -228,11 +256,36 @@ func retireBundleRuntime(ctx context.Context, store ActivationStore, bundleId, o
 	return nil
 }
 
+// constructKey is a construct's runtime identity within one owner -- kind and
+// name, the key the authored registry stores it under. Version is data on the
+// entry, not part of the key, which is why two versions of a bundle collide.
+func constructKey(kind, name string) string {
+	return kind + "\x00" + name
+}
+
+// registeredKeys is the constructKey of every construct the plan registers:
+// what a superseded version's retirement must leave in place.
+func (p BundleActivationPlan) registeredKeys() map[string]bool {
+	keys := make(map[string]bool, len(p.Register))
+	for _, c := range p.Register {
+		keys[constructKey(c.Kind, c.Name)] = true
+	}
+	return keys
+}
+
 // RetireActiveBundle is the explicit retirement entry point (a user removing a
 // capability). It flips the bundle to retired, unregisters its constructs, and
 // audits. owner must be the bundle owner.
 func (e *MemQLEngine) RetireActiveBundle(ctx context.Context, owner, bundleId string, deps AuthoredRuntimeDeps) error {
-	store := &engineActivationStore{engine: e}
+	return e.retireActiveBundleWithStore(ctx, &engineActivationStore{engine: e}, owner, bundleId, deps)
+}
+
+// retireActiveBundleWithStore is RetireActiveBundle over an injected store. Once
+// the retire has succeeded it broadcasts authoring.disarm, so every OTHER
+// replica takes the bundle out of its own authored runtime (memql#6022, F1):
+// a retire used to stop the bundle on this node only, and every replica that
+// had armed it at boot kept firing it.
+func (e *MemQLEngine) retireActiveBundleWithStore(ctx context.Context, store ActivationStore, owner, bundleId string, deps AuthoredRuntimeDeps) error {
 	bundle, err := store.LoadBundle(ctx, bundleId)
 	if err != nil {
 		return fmt.Errorf("authoring: load bundle %q: %w", bundleId, err)
@@ -243,7 +296,11 @@ func (e *MemQLEngine) RetireActiveBundle(ctx context.Context, owner, bundleId st
 	if bundle.OwnerUserId != strings.TrimSpace(owner) {
 		return fmt.Errorf("authoring: actor %q cannot retire bundle owned by %q", owner, bundle.OwnerUserId)
 	}
-	return retireBundleRuntime(ctx, store, bundleId, bundle.OwnerUserId, deps)
+	if err := retireBundleRuntime(ctx, store, bundleId, bundle.OwnerUserId, deps, nil); err != nil {
+		return err
+	}
+	e.publishAuthoringDisarm(bundleId, bundle.OwnerUserId)
+	return nil
 }
 
 // emitAuthoredAudit sends an audit event to the sink when one is wired.

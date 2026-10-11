@@ -116,6 +116,15 @@ func (a *App) wireAuthoredRuntime() {
 	// bundle finds the seam already wired.
 	emailrules.Bind(emailrules.EngineAdapter{Engine: a.engine}, a.AuthoredRuntimeDeps)
 
+	// And the engine gets the same deps, for the OTHER direction (memql#6022,
+	// F1): an activation arms only the runtime it is handed -- this node's --
+	// and broadcasts authoring.arm so every other replica arms the bundle too;
+	// a retire broadcasts authoring.disarm. The engine's subscriber arms a
+	// peer's bundle into these deps. Before the re-arm below, like Bind, so a
+	// broadcast that lands during boot finds the runtime it arms into; one that
+	// landed before this line was skipped, and the re-arm reads its bundle.
+	a.engine.SetAuthoredRuntimeDeps(a.AuthoredRuntimeDeps)
+
 	// Routing rules (epic memql#5127, design D7) bind through the same seam and
 	// for the same reason: a rule an owner adds is a `rule` construct, the
 	// authored runtime is what compiles and arms one, and both halves of the
