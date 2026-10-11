@@ -121,6 +121,17 @@ it("opens a local installation's first owner step under the editor's act, with t
   expect(screen.getByRole("button", { name: "Continue to passkey" })).toBeTruthy();
 });
 
+it("offers the forward act only once there is an owner email to confirm", async () => {
+  // An act that is not legal is absent, never disabled (DESIGN.md rule 12).
+  vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_resume", csrf: "resume-csrf", data: { Local: true, HasProof: false } })));
+  render(<IdentityScreen initialPath="/setup" />);
+  const input = await screen.findByLabelText("Owner email");
+  expect(screen.queryByRole("button", { name: "Continue to passkey" })).toBeNull();
+  expect(screen.getByText("Enter the owner email")).toBeTruthy();
+  fireEvent.change(input, { target: { value: "ada@example.test" } });
+  expect(screen.getByRole("button", { name: "Continue to passkey" })).toBeTruthy();
+});
+
 it("keeps a local claim with attestation on its existing passkey", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_resume", data: { Local: true, HasProof: true } })));
   render(<IdentityScreen initialPath="/setup" />);

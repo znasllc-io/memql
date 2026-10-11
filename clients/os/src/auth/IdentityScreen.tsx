@@ -109,6 +109,23 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
 
   if (page?.page === "setup_wizard") return <EntryLayout><OwnershipWizard data={data} busy={busy} error={error} submit={submit} /></EntryLayout>;
 
+  // A LOCAL installation names its owner at install time, so its first owner
+  // step is the last stop of the ownership wizard, not a separate card: the
+  // email is confirmed in the same surface that then creates the passkey.
+  if (page?.page === "setup_resume" && data.Local === true && data.HasProof !== true) {
+    const steps = ["Organization and owner", "Your installation", "Joining the cluster", "Register passkey"];
+    const valid = /^[^\s@]+@[^\s@]+$/.test((fields.email || "").trim());
+    const proceed = () => { if (valid) submit("/auth/setup/resume", { ...oauthFields(data), ...fields }); };
+    return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Register owner passkey"
+      lead="Confirm the owner email used during installation. The passkey you create next is how the owner signs in; no email is sent."
+      label="Ownership setup" open="passkey" onOpen={() => {}}
+      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done",
+        body: i === steps.length - 1 ? <form className="os-identity-fields" onSubmit={event => { event.preventDefault(); if (!busy) proceed(); }}>{field("email", "Owner email", "email")}</form> : undefined }))}
+      notices={error ? <p role="alert">{error}</p> : undefined}
+      status={{ word: busy ? "Checking the owner email" : valid ? "Your turn" : "Enter the owner email", tone: busy ? "busy" : "none" }}
+      acts={busy || !valid ? [] : [{ label: "Continue to passkey", tone: "primary", onAct: proceed }]} /></EntryLayout>;
+  }
+
   if (page?.page === "setup_passkey") {
     const steps = ["Organization and owner", "Your installation", "Joining the cluster", ...(data.Local === true ? [] : ["Verify email"]), "Register passkey"];
     const complete = () => void run(async () => {
@@ -116,8 +133,8 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
       if (!destination) throw new Error("Setup is still incomplete. Retry this step.");
       window.location.assign(destination);
     });
-    return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title="Finish ownership setup"
-      lead={data.Local === true ? "Your passkey is required. No email verification is used on this local installation." : "Email verified. Register a passkey before you can enter MemQL OS."}
+    return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title={data.Local === true ? "Register owner passkey" : "Finish ownership setup"}
+      lead={data.Local === true ? "Create the passkey your browser offers. It is how the owner signs in; no email is used on this local installation." : "Email verified. Register a passkey before you can enter MemQL OS."}
       label="Ownership setup" open="passkey" onOpen={() => {}}
       steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <><p>Create a passkey with your device or security key. Your browser will ask you to confirm.</p><p>Canceling leaves setup incomplete. You can retry this step.</p></> }))}
       notices={error ? <p role="alert">{error}</p> : undefined}
@@ -143,14 +160,11 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   let body: ReactNode;
   switch (page?.page) {
     case "setup_resume":
-      // A local installation names its owner at install time, so on a fresh
-      // cluster this is the FIRST owner step, not a resumed one: it carries the
-      // name of the editor act that opened it.
-      title = data.Local === true && data.HasProof !== true ? "Register owner passkey" : "Resume ownership setup";
-      body = <>{!(data.Local === true && data.HasProof !== true) && <p>Ownership setup has started but is not complete.</p>}
+      title = "Resume ownership setup";
+      body = <><p>Ownership setup has started but is not complete.</p>
         {data.HasProof === true && act("Resume with your passkey", () => void run(async () => window.location.assign(await loginWithPasskey(config, oauthFields(data)))))}
         {(data.Local !== true || data.HasProof !== true) && <form className="os-signin-form" onSubmit={event => { event.preventDefault(); if (!busy) submit("/auth/setup/resume", { ...oauthFields(data), ...fields }); }}>
-          <p>{data.Local === true ? "Confirm the owner email used during installation. The passkey you create next is how the owner signs in; no email is sent." : "Enter the owner email used during installation. Open the verification link in your email before registering a passkey."}</p>
+          <p>{data.Local === true ? "Enter the owner email used during installation to register your first passkey. No email will be sent." : "Enter the owner email used during installation. Open the verification link in your email before registering a passkey."}</p>
           {field("email", "Owner email", "email")}
           <Button type="submit" tone="primary" disabled={busy} busy={busy}>{data.Local === true ? "Continue to passkey" : "Send verification link"}</Button>
         </form>}
