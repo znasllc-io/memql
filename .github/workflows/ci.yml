@@ -1543,7 +1543,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '20'
           # npm's download cache, keyed on the lockfiles this lane installs
@@ -1572,7 +1572,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '20'
           # npm's download cache, keyed on the lockfiles this lane installs
@@ -1610,7 +1610,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           # npm's download cache, keyed on the lockfiles this lane installs
@@ -2036,7 +2036,7 @@ jobs:
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
       - uses: ./.github/actions/identity-css
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '20'
           # npm's download cache, keyed on the lockfiles this lane installs
@@ -2142,7 +2142,7 @@ jobs:
           go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '20'
           # npm's download cache, keyed on the lockfiles this lane installs
@@ -2212,7 +2212,7 @@ jobs:
       MEMQL_VSCODE_VERSION: ${{ matrix.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           cache: npm
