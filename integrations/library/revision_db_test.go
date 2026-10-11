@@ -337,7 +337,11 @@ func (f *revisionDB) document(source string) (string, reviewDocument) {
 }
 func (f *revisionDB) submit(artifact string, doc reviewDocument, anchor map[string]any, body string, attachments ...reviewAttachment) (map[string]any, string) {
 	f.t.Helper()
-	rows, err := f.first.handleAddDocumentComment(f.ctx, map[string]any{"artifactId": artifact, "expectedVersion": doc.version, "expectedRevision": doc.revision, "anchor": anchor, "body": body, "attachments": attachments, "requestId": "note-" + fmt.Sprint(time.Now().UnixNano())}, 0)
+	commentArgs := map[string]any{"artifactId": artifact, "expectedVersion": doc.version, "expectedRevision": doc.revision, "anchor": anchor, "body": body, "requestId": "note-" + fmt.Sprint(time.Now().UnixNano())}
+	if len(attachments) > 0 {
+		commentArgs["attachments"] = attachments
+	}
+	rows, err := f.first.handleAddDocumentComment(f.ctx, commentArgs, 0)
 	if err != nil {
 		f.t.Fatal(err)
 	}
