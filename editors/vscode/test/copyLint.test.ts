@@ -209,7 +209,7 @@ function decode(text: string): string {
 function visibleText(html: string): string[] {
   const body = html
     .replace(/<head[\s\S]*?<\/head>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script[^>]*>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ");
   return body

@@ -94,7 +94,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
       return uri ? panel.webview.asWebviewUri(vscode.Uri.parse(uri)).toString() : undefined;
     } });
     const script = panel.webview.asWebviewUri(vscode.Uri.joinPath(root, "markdownView.js"));
-    const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    const nonce = globalThis.crypto.randomUUID().replace(/-/g, "");
     const draftKey = `memql.markdownReviewDraft:${document.uri.toString()}`;
     let disposed = false;
     let commentPending: { fingerprint: string; requestId: string } | undefined;

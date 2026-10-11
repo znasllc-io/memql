@@ -29,6 +29,18 @@ ONE defect: a test helper that built a regex from a shop hostname, reached
 from twenty-one sites and flagged by two rules at each -- so the count is a
 fact about how the queries report, not about how much was wrong.
 
+**Round four (2026-10-10) -- fifty-nine alerts** (#1213-#1291). **Three were
+real and are fixed in code**: the productivity extension's document webviews
+acted on a `message` from any origin. **Twenty-six were false positives that
+are fixed in code anyway**, because a change with identical behavior removed
+what the query matched: fifteen allocation-size alerts, an OCI unpacker's
+path guard stated where the path is built, a cookie helper's literal `false`,
+and nine regexes and sanitizers in the VS Code extension's tests.
+**Twenty-two are dismissed**, sixteen of them one source family. **Eight**
+(`js/remote-property-injection`) were hardened and are dismissed if the next
+scan still reports them, since the query reads the dynamic property name
+rather than the prototype.
+
 This file deliberately does NOT record a count of what is open now. That is a
 live fact with a one-line query (see [Re-triaging](#re-triaging)), and a
 sentence here saying `main` is clean goes quietly false the next time the suite
@@ -248,6 +260,83 @@ every site now goes through. There is no regex left for either query to read,
 which is the honest way for a finding to close: not by escaping enough of it
 to satisfy the pattern the query looks for.
 
+### `js/missing-origin-check` x3 (medium)
+
+`editors/productivity/src/{markdownView,templateView,pdfView}.ts`, round four.
+These three were real. The Markdown, template and PDF webviews acted on any
+`message` event, and VS Code relays host messages from the webview's OWN
+origin, so anything else is a frame holding a handle to the window. On the
+desktop that is a page shown in another webview; in the cluster-hosted browser
+editor it is a cross-site page that `window.open`-ed a document URL, since no
+Cross-Origin-Opener-Policy is set. The extension is not on a marketplace, but
+the edge image bundles it into MemQL OS's default editor, where it renders
+every Markdown file and PDF a person opens.
+
+What a forged message could do was bounded by the CSP (nonce-only
+`script-src`, so injected markup cannot run script), and not by much else: a
+forged `document` or `revision` replaced the page or the proposal under review,
+and a forged `dictation` rewrote feedback the person then submits to an AI
+revision. Each listener now returns unless `event.origin === window.origin`,
+and the Markdown view's own re-dispatch of the latest document carries that
+origin. A test sends a document from another origin and expects the page
+unchanged, then the same message from the host's origin and expects it
+rendered; with the check removed it fails.
+
+Two hardenings went in beside it: the Markdown view's nonce came from
+`Date.now()` and `Math.random()` and is now `crypto.randomUUID()`, as the
+template editor's already was; and review state keyed by item id has no
+prototype.
+
+**The property:** a webview listener reads only its own origin. A new webview
+in this repo needs the same first line. The core extension's listener in
+`editors/vscode/src/webview/ui/runtime.ts` has the same gap and was not
+flagged; it is a known follow-up, not a dismissal.
+
+### `go/zipslip` x1 (high)
+
+`integrations/ociregistry/verify.go`, round four. A false positive, fixed so
+the safety is visible. The unpacker admits only regular files named exactly
+`index.json`, `oci-layout` or `blobs/sha256/<64 hex>` (an anchored match)
+before it joins a path, refuses every other directory, and `checkHeaders`
+refuses PAX and GNU long names. CodeQL did not see it because the blob test is
+held in a bool and OR-ed with comparisons against constants, and the query
+counts neither as a guard. `filepath.IsLocal(name)` is now checked where the
+path is built; no name the allowlist admits can fail it.
+
+**The allowlist is load-bearing, measured.** The existing `traversal` case
+asserted only that verification failed, which an unrelated earlier check could
+satisfy. `TestVerifyRefusesArchiveNamesThatLeaveTheLayout` asserts the name
+check's own refusal for `../escape`, `../../escape`, `/abs` and
+`blobs/sha256/../../escape`. With both name checks disabled, every one of those
+archives VERIFIED, and `../../escape` wrote a file two levels above the
+layout directory, outside the temporary directory verification cleans up.
+
+**The property:** every archive name is checked against the exact allowlist
+before any filesystem path is built from it.
+
+### Test-file regexes and sanitizers x9 (high)
+
+`editors/vscode/test/*`, round four: `js/redos` x2, `js/bad-tag-filter` x2,
+`js/incomplete-multi-character-sanitization` x2, `js/incomplete-sanitization`
+x2, `js/regex/missing-regexp-anchor` x1. Tests that never ship and never see
+untrusted input, fixed rather than dismissed because each fix is the better
+test:
+
+- the `when`-clause tokenizer's `(?:\\.|[^/])*` let a backslash fit both
+  branches (exponential on an unterminated literal); the branches are now
+  disjoint, with identical tokens over every clause in `package.json`;
+- two visible-text helpers drop scripts case-insensitively and accept a
+  `</script ...>` end tag, and replace with a space as the next step already
+  did for every other tag;
+- the CSP test removes the brand stylesheet by its value instead of a regex;
+- a fixed sentence is checked with `includes()`, and a version is escaped with
+  the repo's complete escape before it becomes a RegExp;
+- the endpoint assertion is anchored on its `Address` row. `includes()` would
+  NOT have fixed that one: a substring test whose needle looks like a host
+  trips `js/incomplete-url-substring-sanitization` instead (see the comment
+  in `authDeviceCode.test.ts`). Compare the whole string, or anchor the regex
+  on markup a host cannot contain.
+
 ### `go/allocation-size-overflow` x1 (high)
 
 `integrations/work/fork.go`, `mergedVariables`:
@@ -260,6 +349,16 @@ arithmetic out of the allocation as a side effect. Fixed rather than dismissed
 because the fix is the better code. `TestMergedVariablesLayersOverridesPerKey`
 pins the merge on its own, including the property the handler test could not
 see: the result is a NEW map, never a write into the source row's own.
+
+**Round four: fifteen more, the same shape, fixed the same way.** Every
+operand is `len()` of a map, slice or string already in memory -- CodeQL
+treats anything that passed through `json.Marshal` or a reader as possibly
+huge -- and no size comes from a header or a length read off the wire. Map
+hints became `len(x)` or `max(len(a), len(b))`, a slice capacity `len(x)`, and
+one throwaway slice lost its hint. A hint never changes contents. Not
+`maps.Clone`, which returns nil for a nil map and would panic the writes after
+it. **The property:** an allocation is never sized from a length an outside
+party wrote.
 
 ---
 
@@ -379,6 +478,24 @@ buys nothing, because there is no guessable input to iterate over. The
 distinction to preserve is **entropy of the input**, not the algorithm: a
 user-CHOSEN secret reaching SHA-256 would be a real finding.
 
+**Round four: sixteen more (#1240-#1291), one source family.** The analysis
+names only two "password" sources for this rule, and every alert traces to
+them 122 to 355 steps away: the `Refuse` message in
+`component/pipelines/validate.go` that says a link URL "carries a user name or
+password", and the SMTP password slot's environment-variable NAME in
+`integrations/email/emailconfig.go`. The sinks are deterministic identifiers
+again: workflow snapshot and checkpoint digests, content-addressed revision
+and attachment blobs, evidence and acknowledgement row ids, per-owner search
+domains, an embedding model's vector-table name, a loop-breaker key, an
+outgoing mail body pinned to its send receipt, and a suppression row id.
+
+One honest qualification, outside this rule: the suppression id's input is
+`component/campaigns/digest.go`'s unsalted SHA-256 of a normalized email
+address. An email is not a secret, but it is guessable, so anyone holding a
+candidate address can test whether it is suppressed, and that file's claim
+that "who unsubscribed" is answerable by nobody is too strong. A per-cluster
+HMAC would make it true, and would change every suppression row's id.
+
 ### `go/cookie-secure-not-set` x7 (medium)
 
 Every site sets `Secure: s.cookieSecure()`, which is
@@ -396,6 +513,40 @@ control; the attribute follows the transport.
 `BaseURL`, which is derived from `MEMQL_DOMAIN`. A cloud install is https, so
 the attribute is `true` there. Change `cookieSecure` to return a constant, or
 introduce a cookie that sets `Secure` from anything else, and re-triage.
+
+**Round four (#1213) points at what the query actually matched**, and it is
+probably not the computed value. Sites in `component/identity/http`
+(`complete.go`, `magic_link.go`, `logout.go`) compute `Secure` the same way and
+have never been flagged; the flagged helpers both had a nil-receiver branch
+returning the constant `false`. Both `cookieSecure` helpers (`web/server.go`,
+`http/oidc_start.go`) are now one boolean expression with identical behavior.
+If #1213 is still open after the next scan, this paragraph is wrong.
+
+### Productivity webviews x14 (high and medium)
+
+`editors/productivity/src/*`, round four, besides the three real origin
+checks above: `js/xss` x5, `js/client-side-unvalidated-url-redirection` x1 --
+dismissed -- and `js/remote-property-injection` x8, hardened.
+
+- **The HTML is the host's, rendered with HTML disabled.** `renderMarkdown`
+  is markdown-it with `html: false`; links become `#` anchors or an
+  `http(s)` `data-external` value (anything else becomes a `<span>`), images
+  host-resolved webview URIs, and text is escaped. The webview CSP is
+  nonce-only `script-src`, so markup could not run script even if it got in.
+- **The email preview cannot run anything.** `DOMParser` output is inert, an
+  allow-list strips script, form, iframe, svg, `href` and `src`, and the result
+  is the `srcdoc` of an `<iframe sandbox>` without `allow-scripts`, under
+  `default-src 'none'`.
+- **`img.src` never navigates.** It is the host's `asWebviewUri` of a raster
+  file beside the document, and CSP `img-src` allows only the webview's own
+  resource origin.
+- **The property writes are single-level plain values** (`tabScroll`,
+  `decisions`, `modifications`); the keyed objects now have no prototype and
+  the restored tab is checked against the three tabs.
+
+**The properties:** the renderer keeps `html: false`, the CSP stays
+nonce-only, and the preview iframe stays sandboxed without scripts. Change any
+of the three and these alerts are real.
 
 ### `go/unvalidated-url-redirection` x1 (medium)
 

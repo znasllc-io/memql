@@ -22,6 +22,8 @@ const renderPreview = () => {
 };
 for (const mode of ["source", "split", "examples", "publish"]) document.getElementById(mode)!.addEventListener("click", () => api.postMessage({ type: mode }));
 window.addEventListener("message", event => {
+  // VS Code relays host messages from this webview's own origin; a message from any other origin is a frame posting into this window.
+  if (event.origin !== window.origin) return;
   const message = event.data;
   if (message?.type === "error") { renderProblem(status,message,value=>api.postMessage(value)); return; }
   if (message?.type !== "document") return;

@@ -312,7 +312,7 @@ func (r *ReactiveLoop) appendDirective(ctx context.Context, row map[string]any, 
 	goals = append(goals, directive)
 	// Partial-update only the lineage.extensionGoals path. updateAgent
 	// merges the payload object onto the prior row.
-	updatedLineage := make(map[string]any, len(lineage)+1)
+	updatedLineage := make(map[string]any, len(lineage))
 	for key, value := range lineage {
 		updatedLineage[key] = value
 	}

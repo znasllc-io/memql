@@ -111,7 +111,7 @@ func automationsPass(b *builder) error {
 		return fmt.Errorf("the static automation graph is empty")
 	}
 	for _, a := range autos {
-		attrs := make(map[string]string, len(a.Attrs)+1)
+		attrs := make(map[string]string, len(a.Attrs))
 		for k, v := range a.Attrs {
 			attrs[k] = v
 		}

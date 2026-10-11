@@ -211,8 +211,5 @@ var _ = identity.ComponentName
 // service is served over https. Stated from the CONFIGURED base URL rather than
 // from the request, for the reason oidcRedirectURI gives.
 func (s *Server) cookieSecure() bool {
-	if s == nil {
-		return false
-	}
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.Cfg.BaseURL)), "https://")
+	return s != nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.Cfg.BaseURL)), "https://")
 }

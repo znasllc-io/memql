@@ -193,6 +193,24 @@ func TestVerifyRefusesInvalidImageBeforeNetwork(t *testing.T) {
 	}
 }
 
+// A name that could leave the layout root is refused BY THE NAME CHECKS, asserted
+// by message: the "traversal" case above only asserts a failure, so a fixture that
+// some unrelated check rejected first would keep it green with the name check broken.
+func TestVerifyRefusesArchiveNamesThatLeaveTheLayout(t *testing.T) {
+	for _, name := range []string{"../escape", "../../escape", "/abs", "blobs/sha256/../../escape"} {
+		t.Run(name, func(t *testing.T) {
+			raw, want := fixture(t, fixtureOptions{mutateFiles: func(m map[string][]byte) { m[name] = []byte("no") }})
+			v, err := Verify(context.Background(), bytes.NewReader(raw), want, Limits{})
+			if v != nil {
+				v.Close()
+			}
+			if err == nil || err.Error() != "unsupported OCI archive entry" {
+				t.Fatalf("Verify with entry %q = %v, want the name check's refusal", name, err)
+			}
+		})
+	}
+}
+
 func TestVerifyReceiptBoundsAndCancellation(t *testing.T) {
 	raw, want := fixture(t, fixtureOptions{gzip: true})
 	for _, mutate := range []func(*Expected){func(w *Expected) { w.ArchiveSize-- }, func(w *Expected) { w.ArchiveSize++ }, func(w *Expected) { w.ArchiveSHA256 = sha(nil) }, func(w *Expected) { w.ImageDigest = sha(nil) }, func(w *Expected) { w.Platform = "" }} {
