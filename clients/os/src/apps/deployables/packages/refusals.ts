@@ -644,6 +644,12 @@ const COPY: Record<string, RefusalCopy> = {
     title: "Automatic checks are still connected",
     next: "Disconnect automatic delivery, then retry the manual rehearsal.",
   },
+  pipeline_branch_invalid: {
+    // A mistyped branch is caught before GitHub is asked, so the answer
+    // names the rule and the way to write it.
+    title: "That is not a branch name GitHub accepts",
+    next: "Use the name as GitHub shows it, such as main or feature/login.",
+  },
   pipeline_already_connected: {
     // One pipeline per repository. A second would write a second check run
     // with the same name on every commit, so connect refuses it and names the
