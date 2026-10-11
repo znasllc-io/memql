@@ -325,14 +325,25 @@ COPY editors/productivity ./editors/productivity
 COPY editors/browser ./editors/browser
 COPY examples/research-desk ./examples/research-desk
 
+# The local installer builds this stage on the operator's own connection, so
+# its network surface is kept to what the bundles need. @vscode/test-web (an
+# editors/vscode devDependency) pulls @playwright/browser-chromium, whose
+# install script downloads Chromium, its headless shell and ffmpeg -- some
+# 270 MB that no step here runs. The npm cache mount keeps every tarball a
+# previous or interrupted build fetched, so a retried install resumes instead
+# of downloading the registry again; the scripts retry `npm ci` themselves.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 # The SAME commands `make os-build` and `make vscode-site-build` run, so the
 # image bundles and locally built ones cannot diverge in how they were
 # produced. Each is moved to a fixed path (/os-dist, /vscode-site-dist) so
 # both alternatives of the SPA_DIST_STAGE selector expose the bundles at one
 # path each -- the runtime's COPY cannot branch on which stage it resolved to.
-RUN bash scripts/os/build.sh build && mv clients/os/dist /os-dist
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    bash scripts/os/build.sh build && mv clients/os/dist /os-dist
 RUN node editors/vscode/site/build.mjs && mv editors/vscode/site/dist /vscode-site-dist
-RUN node editors/browser/build.mjs && mv editors/browser/dist /vscode-site-dist/editor
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    node editors/browser/build.mjs && mv editors/browser/dist /vscode-site-dist/editor
 
 # spa-skip is the empty alternative the SPA_DIST_STAGE selector resolves to by
 # default. Derived FROM builder purely because that stage is already built --
