@@ -144,15 +144,34 @@ func TestRevisionImageUsage(t *testing.T) {
 			content := tc.content + "\n\n![Figure](" + prepared.URI + ")"
 			raw, err := revisionImageUsage(captured, content, []preparedRevisionImage{{Reference: prepared}})
 			var usage []map[string]any
-			if err != nil || json.Unmarshal([]byte(raw), &usage) != nil || len(usage) != 2 {
+			wantCount := 2
+			if tc.name == "different artifact same name" {
+				wantCount = 3
+			}
+			if err != nil || json.Unmarshal([]byte(raw), &usage) != nil || len(usage) != wantCount {
 				t.Fatalf("image-only usage facts: %s (%v)", raw, err)
 			}
 			if usage[0]["embedded"] != tc.want || usage[0]["uri"] != image.URI || usage[0]["source"] != "attachment" || usage[1]["embedded"] != true || usage[1]["source"] != "prepared" {
 				t.Fatalf("wrong reference comparison: %s", raw)
 			}
+			if wantCount == 3 && (usage[2]["uri"] != "../portrait-9/Portrait%20%281%29.jpg" || usage[2]["source"] != "candidate" || usage[2]["embedded"] != true) {
+				t.Fatalf("saved replacement omitted or confused with old attachment: %s", raw)
+			}
 		})
 	}
 	if raw, err := revisionImageUsage(nil, "No images.", nil); err != nil || raw != "[]" {
 		t.Fatalf("empty facts must be a JSON array: %s (%v)", raw, err)
+	}
+}
+
+func TestRevisionImageUsageIncludesOnlyActualUnattachedImages(t *testing.T) {
+	content := "![One][saved]\n\n[saved]: ../saved/portrait.jpg\n\n![Again](../saved/portrait.jpg)\n\n![Two](https://example.com/image.png)\n\n" +
+		"[Link](../linked/portrait.jpg)\n\n`![Code](../code/portrait.jpg)`\n\n```md\n![Example](../example/portrait.jpg)\n```"
+	want := `[{"embedded":true,"source":"candidate","uri":"../saved/portrait.jpg"},{"embedded":true,"source":"candidate","uri":"https://example.com/image.png"}]`
+	for range 10 {
+		got, err := revisionImageUsage(nil, content, nil)
+		if err != nil || got != want {
+			t.Fatalf("non-deterministic or incomplete parsed inventory: %s (%v)", got, err)
+		}
 	}
 }
