@@ -11,7 +11,7 @@
 # run prints, pinned in a follow-up after the epic merges -- so it carries what
 # this repository's CI steps reach for:
 #
-#   Go        1.27.1   go.work's `toolchain` line, which overrides every go.mod
+#   Go        1.27.2   go.work's `toolchain` line, which overrides every go.mod
 #   Node      22 LTS   node:22-bookworm-slim
 #   protoc    33.4     scripts/dev/proto-gen.sh's PROTOC_VERSION
 #   kubectl   1.32.13  the minor of scripts/k3d/up.sh's K3S_VERSION, the deploy
@@ -62,10 +62,10 @@
 # operator machine (CLAUDE.md, "Image builds"); the local build proves the
 # Dockerfile and goes nowhere.
 
-# Go: the official 1.27.1 distribution. Only /usr/local/go is taken; its
+# Go: the official 1.27.2 distribution. Only /usr/local/go is taken; its
 # binaries are statically linked, so they run on the bookworm base below
 # whatever Debian release the golang image itself is built on.
-FROM golang:1.27.1@sha256:512690a5660563b57d37ecc31129e7f136e831db2aed24a1dbeb8ad7380dc0fa AS go-dist
+FROM golang:1.27.2@sha256:5bc7f572bbaa98885a3a1fd9c0aa76b59e3e14e8628bfc316bbfd0c701e4818c AS go-dist
 
 # Node 22 on bookworm, like the base below, so the copied binaries run against
 # the C library they were built against.

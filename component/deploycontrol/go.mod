@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/deploycontrol
 
 go 1.26.1
 
-toolchain go1.27.1
+toolchain go1.27.2
 
 require (
 	github.com/coder/websocket v1.8.15
@@ -75,7 +75,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect

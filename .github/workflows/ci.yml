@@ -850,7 +850,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
@@ -909,7 +909,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       # THIS job is the shared Go cache's one writer: see the save step at the
       # end, and .github/actions/go-cache for why there is exactly one.
@@ -1286,7 +1286,7 @@ jobs:
           fetch-depth: 2
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       # `go list` resolves every dependency to build the graph, so it needs
       # the module cache the shared cache carries.
@@ -1372,7 +1372,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
@@ -1441,7 +1441,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
@@ -1474,7 +1474,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
@@ -1515,7 +1515,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
@@ -1722,7 +1722,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
@@ -1852,7 +1852,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
@@ -1971,7 +1971,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
@@ -2031,7 +2031,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.
@@ -2139,7 +2139,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
@@ -2293,7 +2293,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.27.1'
+          go-version: '1.27.2'
           cache: false # the shared cache below replaces it (memql#5482)
       - uses: ./.github/actions/go-cache
       # component/identity/web embeds static/app.css by name; generate it.

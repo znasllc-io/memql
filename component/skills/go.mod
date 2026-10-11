@@ -11,7 +11,7 @@ module github.com/znasllc-io/memql/component/skills
 
 go 1.26.1
 
-toolchain go1.27.1
+toolchain go1.27.2
 
 require (
 	github.com/znasllc-io/memql/component/auth v0.0.0

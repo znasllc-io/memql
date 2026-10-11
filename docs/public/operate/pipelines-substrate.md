@@ -1115,7 +1115,7 @@ built from `deploy/toolchain-image/Dockerfile` by `build-toolchain-image.yml`:
 dispatched on main only, smoke-tested before it is pushed, a published tag
 never replaced unless the dispatch says so, `linux/amd64` only. It carries:
 
-- Go 1.27.1 (`go.work`'s toolchain line), Node 22, protoc 33.4 and kubectl
+- Go 1.27.2 (`go.work`'s toolchain line), Node 22, protoc 33.4 and kubectl
   1.32.13 (the minor of the local cluster's k3s); a test holds Go, protoc and
   kubectl's minor to the repository's own pins;
 - the Docker client 29.8.2, and no daemon -- here or anywhere in a step's pod --

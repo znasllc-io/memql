@@ -102,7 +102,7 @@ func BuildSourcePackage(recipe RenderRecipe, outputName string, output Result, e
 const rebuildModule = `module memql-rebuild
 
 go 1.26.1
-toolchain go1.27.1
+toolchain go1.27.2
 
 require github.com/znasllc-io/memql/component/compose v0.0.0
 replace github.com/znasllc-io/memql/component/compose => ./renderer

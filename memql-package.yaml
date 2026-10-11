@@ -18,7 +18,7 @@ name: memql
 pipeline:
   schedule: daily
   platform: linux/arm64
-  # deploy/toolchain-image: Go 1.27.1, Node 22, protoc 33.4, kubectl 1.32.13, the
+  # deploy/toolchain-image: Go 1.27.2, Node 22, protoc 33.4, kubectl 1.32.13, the
   # Docker client (no daemon), git, make, jq, python3 and the PostgreSQL client,
   # as uid 1000. Pinned by the digest build-toolchain-image.yml's run on main
   # printed for version 1.1.0-arm64 (run 37416894805); a rebuild takes a new version
