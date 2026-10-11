@@ -109,7 +109,10 @@ preserves the original source/model attribution. Changed feedback does not
 inherit that authority. Research and generation are not repeated on approval.
 
 When a person modifies one proposed item, the new request captures the prior
-proposal’s verified image receipts. Images retained in the revised Markdown
+proposal’s verified image receipts. Earlier research may still be reused, but
+its image acquisition batch is not treated as a new acquisition for changed
+feedback. This also applies when the parent proposal itself reused images from
+a stopped attempt. Images retained in the revised Markdown
 keep their exact bytes and provenance; removed images need not remain in the
 manifest. Approval and application revalidate those retained assets on the
 receiving replica. Supplying another request’s image identifiers or claiming
