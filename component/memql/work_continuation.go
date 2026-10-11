@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -29,7 +30,10 @@ func (e *MemQLEngine) SaveWorkContinuation(ctx context.Context, messages []commo
 	call, err := parser.RenderCall("createWorkObservation", map[string]any{
 		"observationId": continuationID(run, raw),
 		"runId":         run.RunId, "stepKey": run.StepKey, "kind": "note", "content": "Saved execution progress",
-		"data": map[string]any{"continuation": true, "messages": messages},
+		// Tool output may contain NUL, which JSON allows but PostgreSQL JSONB
+		// cannot represent in a string. Encode the complete exchange rather than
+		// strip bytes or change tool arguments/results (and their receipt hash).
+		"data": map[string]any{"continuation": true, "messagesEncoding": "json-base64-v1", "messages": base64.StdEncoding.EncodeToString(raw)},
 	})
 	if err != nil {
 		return err
@@ -77,12 +81,8 @@ func (e *MemQLEngine) RestoreWorkContinuation(ctx context.Context, messages []co
 		return nil, fmt.Errorf("the required work checkpoint changed")
 	}
 	saved, _ := checkpoints[0]["data"].(map[string]any)
-	raw, err := json.Marshal(saved["messages"])
+	prior, err := decodeWorkContinuation(saved)
 	if err != nil {
-		return nil, err
-	}
-	var prior []common.ChatMessage
-	if err = json.Unmarshal(raw, &prior); err != nil {
 		return nil, err
 	}
 	if len(prior) == 0 {
@@ -123,6 +123,33 @@ func (e *MemQLEngine) RestoreWorkContinuation(ctx context.Context, messages []co
 
 func continuationID(run common.RunContext, raw []byte) string {
 	return fmt.Sprintf("continuation-%s-%x", BareShortId(run.RunId), sha256.Sum256(append([]byte(run.StepKey), raw...)))
+}
+
+func decodeWorkContinuation(saved map[string]any) ([]common.ChatMessage, error) {
+	var raw []byte
+	var err error
+	switch saved["messagesEncoding"] {
+	case nil:
+		// Existing immutable receipts contain the array directly. Keep them
+		// resumable without rewriting their content-addressed identity.
+		raw, err = json.Marshal(saved["messages"])
+	case "json-base64-v1":
+		encoded, ok := saved["messages"].(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid encoded work checkpoint")
+		}
+		raw, err = base64.StdEncoding.DecodeString(encoded)
+	default:
+		return nil, fmt.Errorf("unsupported work checkpoint encoding")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("invalid work checkpoint encoding")
+	}
+	var messages []common.ChatMessage
+	if err := json.Unmarshal(raw, &messages); err != nil {
+		return nil, fmt.Errorf("invalid work checkpoint messages")
+	}
+	return messages, nil
 }
 
 // PrepareWorkContinuation proves an answered suspension belongs to this owner,
@@ -178,12 +205,8 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 		return nil, fmt.Errorf("the saved work checkpoint is unavailable")
 	}
 	saved, _ := checkpoints[0]["data"].(map[string]any)
-	raw, err := json.Marshal(saved["messages"])
-	if err != nil {
-		return nil, err
-	}
-	var messages []common.ChatMessage
-	if err := json.Unmarshal(raw, &messages); err != nil || len(messages) == 0 {
+	messages, err := decodeWorkContinuation(saved)
+	if err != nil || len(messages) == 0 {
 		return nil, fmt.Errorf("the saved work checkpoint is invalid")
 	}
 	run.StepKey = request.StepKey

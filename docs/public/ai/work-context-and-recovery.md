@@ -271,6 +271,14 @@ the run owner's authority. Retrieval from another replica must not depend on
 the first replica's memory. A reference grants no access to another owner's
 data or another run's archive.
 
+Execution continuations preserve complete tool exchanges in an encoded JSON
+receipt, including control characters that the storage layer cannot accept
+as plain text. Restoration verifies the original content hash; existing
+receipts remain readable. The workbench's `http_fetch` is a UTF-8 text surface:
+binary responses return `unsupported_content` with source metadata, rather
+than putting image or file bytes into model context. Workflows acquire binary
+assets through their image or file capabilities.
+
 Active context and retrieval pages are bounded. The durable journal grows
 with actual work; that is retained evidence, not an in-process cache. Retention
 and storage capacity remain operational concerns. Individual calls and
