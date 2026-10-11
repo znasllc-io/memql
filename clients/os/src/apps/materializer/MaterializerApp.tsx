@@ -1,8 +1,9 @@
 import { useAccountOptions } from "../accounts/tie";
 import { recipeFacts } from "./actions";
-import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
+import { rowNumber, rowString, sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 import { useAuthSource } from "../../auth/context";
 import { useOsConnection } from "../../live/connection";
+import { MATERIALIZER_COMPOSE_SECTION, readComposeIntent, type ComposeSetup } from "../../items/materialize";
 import { openCheckedArtifact } from "../../items/openFile";
 import { browserHandoffPorts, VSCODE_NO_ANSWER_MESSAGE, type HandoffPorts } from "../../items/vscode";
 import { downloadArtifact } from "../files/actions/download";
@@ -12,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Caption, Check, Head, Panel, Select, SetupGroup } from "../../kit";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import { useOsIfPresent } from "../../chrome/state";
-import type { OsAppProps } from "../../system/registry";
+import { appById, canOpen, type OsAppProps } from "../../system/registry";
 import { ComposerSection } from "./ComposerSection";
 import { MaterializedSection } from "./MaterializedSection";
 import { TemplatesSection } from "./TemplatesSection";
@@ -30,6 +31,7 @@ import {
   useRecipeActs,
   useTemplateActs,
 } from "./actions";
+import { useDescriptionHandOff } from "./descriptionHandOff";
 import {
   compositionFromRow,
   modelsOf,
@@ -91,6 +93,9 @@ export function MaterializerApp({
   const accounts = useAccountOptions();
 
   const materialize = useMaterialize();
+  // A Markdown file asked for by describing it is filed empty; once its file is
+  // ready this window hands the description to the Library, as the person.
+  const descriptions = useDescriptionHandOff(materialize.described, compositions.snapshot.rows);
   const compositionActs = useCompositionActs();
   const templateActs = useTemplateActs();
   const recipeActs = useRecipeActs();
@@ -132,6 +137,16 @@ export function MaterializerApp({
 
   const [openCompositionId, setOpenCompositionId] = useState("");
 
+  // THE STARTING SETUP ANOTHER APP OPENED THE COMPOSER WITH, until the file it
+  // was for has been asked for. It is for ONE file: its folder is filed into
+  // once, and the next composition in this window starts from the person's own
+  // choices. Held here, not in the composer, because the composer is mounted and
+  // unmounted as the person moves between sections.
+  const [setup, setSetup] = useState<ComposeSetup | null>(null);
+  // WHERE THE PERSON GOES BACK TO, for the file that setup made. It belongs to
+  // that composition and no other, and ends when they start another file.
+  const [returnFor, setReturnFor] = useState<{ compositionId: string; appId: string; sectionId: string } | null>(null);
+
   const compositionRows = useMemo(
     () => compositions.snapshot.rows.filter((r) => compositionFromRow(r).id !== ""),
     [compositions.snapshot],
@@ -156,6 +171,16 @@ export function MaterializerApp({
   const openSources: SourceRow[] = openRaw ? sourcesOf(openRaw) : [];
   const openModels: ModelRow[] = openRaw ? modelsOf(openRaw) : [];
 
+  // THE WAY BACK, only where it goes somewhere: for the file made from that
+  // setup, in a shell that holds the app, which this person can open. `openApp`
+  // does nothing for an app the registry lacks or the person may not open, and
+  // a control that does nothing is worse than one that is not there.
+  const backTo =
+    returnFor !== null && open !== null && sameEntityId(open.id, returnFor.compositionId) && os !== null && canOpen(os.registry, returnFor.appId)
+      ? appById(os.registry, returnFor.appId)?.name
+      : undefined;
+  const description = open !== null ? descriptions.find((outcome) => sameEntityId(outcome.compositionId, open.id)) : undefined;
+
   function openComposition(id: string) {
     if (id.trim() === "") return;
     setOpenCompositionId(id);
@@ -164,16 +189,28 @@ export function MaterializerApp({
   }
 
   // A STANDING OPEN INSTRUCTION, id-matched on consumption so acting on a
-  // stale render can never eat a newer one. The payload names the one
-  // thing this app can open; anything else is left alone rather than
-  // guessed at, which keeps an unrelated opener from moving somebody's
-  // window.
+  // stale render can never eat a newer one. The payload names one of the two
+  // things this app can open -- a composition, or a setup to compose from;
+  // anything else is left alone rather than guessed at, which keeps an
+  // unrelated opener from moving somebody's window.
   const handled = useRef("");
   useEffect(() => {
     if (intent === undefined || intent.id === handled.current) return;
     const raw = intent.payload["compositionId"];
     const compositionId = typeof raw === "string" ? raw : "";
-    if (compositionId === "") return;
+    if (compositionId === "") {
+      const start = readComposeIntent(intent.payload);
+      if (start === null) return;
+      handled.current = intent.id;
+      // A new file, from a form with nothing open on it -- and not the trip
+      // that began with an earlier one.
+      setOpenCompositionId("");
+      setReturnFor(null);
+      setSetup(start);
+      navigate(MATERIALIZER_COMPOSE_SECTION);
+      consumeIntent?.(intent.id);
+      return;
+    }
     handled.current = intent.id;
     setOpenCompositionId(compositionId);
     // The section the opener asked for is respected: a Files row's "open
@@ -269,12 +306,24 @@ export function MaterializerApp({
       defaultFormat={settings.defaultFormat}
       busy={materialize.busy || compositionActs.busy}
       error={openError || materialize.error || compositionActs.error}
-      onNewComposition={() => setOpenCompositionId("")}
+      initial={setup ?? undefined}
+      backTo={backTo}
+      description={description}
+      onNewComposition={() => {
+        setOpenCompositionId("");
+        setReturnFor(null);
+      }}
       onMaterialize={(facts) => {
+        const from = setup;
         void materialize
-          .materialize({ ...facts, folderId: "" })
+          .materialize({ ...facts, folderId: from?.folderId ?? "" })
           .then((id) => {
-            if (id) setOpenCompositionId(id);
+            if (!id) return;
+            setOpenCompositionId(id);
+            // The setup was for this file. Its return trip is kept for it,
+            // and nothing else of it outlives the file.
+            setSetup(null);
+            setReturnFor(from?.returnTo ? { compositionId: id, ...from.returnTo } : null);
           });
       }}
       onAct={(act) => {
@@ -309,6 +358,10 @@ export function MaterializerApp({
             break;
           case "startOver":
             setOpenCompositionId("");
+            setReturnFor(null);
+            break;
+          case "returnToApp":
+            if (returnFor !== null) os?.actions.openApp(returnFor.appId, returnFor.sectionId);
             break;
           case "saveRecipe":
             void compositionActs.saveRecipe(recipeFacts(open, openSources));

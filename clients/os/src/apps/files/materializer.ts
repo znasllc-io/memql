@@ -13,6 +13,12 @@
 // FILE IS, one row per output file, an ordinary Library artifact that opens,
 // downloads, moves and archives like every other one.
 
+import { MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION } from "../../items/materialize";
+
+// BOTH NAMES ARE THE MATERIALIZER'S, written once in items/materialize.ts where
+// every app that opens it finds them. They are re-named here only because this
+// file's callers already say MATERIALIZER_APP and MATERIALIZER_COMPOSER.
+
 /**
  * The Materializer's app id.
  *
@@ -22,7 +28,7 @@
  * kept the name a person knows -- `v1:work:goal.requestedVia` was already
  * carrying this string before either epic.
  */
-export const MATERIALIZER_APP = "materializer";
+export const MATERIALIZER_APP = MATERIALIZER_APP_ID;
 
 /** The section that opens the composer on one composition. */
-export const MATERIALIZER_COMPOSER = "composer";
+export const MATERIALIZER_COMPOSER = MATERIALIZER_COMPOSE_SECTION;

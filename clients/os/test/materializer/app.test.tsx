@@ -70,6 +70,10 @@ describe("the composer", () => {
     expect(args).toMatchObject({ name: "Inventory", [field]: value, accountIds: ["client-a"] });
     expect(args).not.toHaveProperty("sources");
     expect(args).not.toHaveProperty("draft");
+    // Every ask carries a request id (a repeat of it finds this composition
+    // rather than starting a second); startingSetup.test.tsx pins when it is
+    // reused and when it is renewed.
+    expect(args["requestId"]).toEqual(expect.stringMatching(/^[A-Za-z0-9_-]{8,111}$/));
     expect(screen.queryByLabelText("Draft")).toBeNull();
   });
 

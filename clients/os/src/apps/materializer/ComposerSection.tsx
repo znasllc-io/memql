@@ -1,10 +1,11 @@
 import { AccountPicker } from "../accounts/AccountPicker";
 import { accountIsArchived, type AccountRow } from "../accounts/rows";
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button, Chip, Fact, Facts, Field, FormRow, Head, Input, Notice, RecordList, RecordRow, Select, Subhead } from "../../kit";
 import { ActionBar } from "../../kit/ActionBar";
+import type { ComposeSetup, ComposeSource } from "../../items/materialize";
 import { actsFor, stateLine, type ActId } from "./acts";
 import { ProvenanceChain } from "./Provenance";
 import type { CompositionRow, ModelRow, SourceRow, TemplateRow } from "./rows";
@@ -16,10 +17,13 @@ import {
 } from "./useCompose";
 import {
   DEPLOYABLE_KINDS,
+  DESCRIPTION_NOT_SENT,
+  DESCRIPTION_NOT_SENT_NEXT,
   FORMATS,
   UNOFFERED_FORMATS,
   deployableWord,
   formatWord,
+  notAttachedSentence,
 } from "./words";
 
 // Materializer collects the brief, sources, and output settings. File content
@@ -37,14 +41,33 @@ export interface ComposerSectionProps {
   defaultFormat: string;
   busy: boolean;
   error: string;
+  /**
+   * A starting setup another app opened the composer with. Applied ONCE, when
+   * it arrives, over a fresh form; the person's own edits after that are theirs.
+   * The folder it may name is not applied here -- the composer has no folder
+   * control, and the app checks the folder is readable when the file is made.
+   */
+  initial?: ComposeSetup;
+  /**
+   * The name of the app that sent the person here to make the open file, when
+   * they can go back to it. Absent where there is nowhere to go back to.
+   */
+  backTo?: string;
+  /**
+   * What became of the open file's description, once it has been handed to the
+   * Library. Absent for a file that was not asked for by describing it, and
+   * while the hand-off is still on its way.
+   */
+  description?: { failure: string; unattached: string[] };
   onMaterialize: (facts: {
     accountIds: string[];
     name: string;
     statement: string;
     format: string;
-    sources: { kind: string; ref: string; label: string }[];
+    sources: ComposeSource[];
     templateId: string;
     deployableKind: string;
+    outputKind: string;
   }) => void;
   onAct: (act: ActId) => void;
   /** Clears the open composition and returns to a blank form. */
@@ -55,6 +78,24 @@ interface PickedSource {
   kind: string;
   ref: string;
   label: string;
+}
+
+// The setups this window has already applied. A setup is a standing
+// instruction the app holds until it is replaced, and the composer is mounted
+// and unmounted as the person moves between sections: remembering by the
+// setup ITSELF, rather than in this component, is what stops coming back to
+// Compose from putting the form back the way another app left it.
+const appliedSetups = new WeakSet<ComposeSetup>();
+
+/** The sources once each: the same file listed twice is one source, as it is when a person picks it twice. */
+function distinct(sources: ComposeSource[]): ComposeSource[] {
+  const seen = new Set<string>();
+  return sources.filter((source) => {
+    const key = `${source.kind} ${source.ref}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function ComposerSection({
@@ -68,6 +109,9 @@ export function ComposerSection({
   defaultFormat,
   busy,
   error,
+  initial,
+  backTo,
+  description,
   onMaterialize,
   onAct,
   onNewComposition,
@@ -78,7 +122,24 @@ export function ComposerSection({
   const [format, setFormat] = useState(defaultFormat);
   const [templateId, setTemplateId] = useState("");
   const [deployableKind, setDeployableKind] = useState("");
-  const [picked, setPicked] = useState<PickedSource[]>([]);
+  // An email template is the one output kind, and no control sets it: it comes
+  // from a sender's setup, needs the JSON format, and goes if that is changed.
+  const [outputKind, setOutputKind] = useState("");
+  const [picked, setPicked] = useState<ComposeSource[]>([]);
+
+  useEffect(() => {
+    if (initial === undefined || appliedSetups.has(initial)) return;
+    appliedSetups.add(initial);
+    // A new setup is a new file. What the person typed for the last one is not
+    // part of it; the organization they chose is, as it always is, theirs.
+    setName("");
+    setStatement("");
+    setTemplateId("");
+    setDeployableKind("");
+    setFormat(initial.format ?? (initial.outputKind ? "json" : defaultFormat));
+    setOutputKind(initial.outputKind ?? "");
+    setPicked(distinct(initial.sources ?? []));
+  }, [initial]);
 
   const composables = useComposableConcepts(showUnmarkedConcepts);
   const resolved = useResolvedSources(picked);
@@ -91,7 +152,7 @@ export function ComposerSection({
     hasOrganization: accounts.some(account => account.id === accountId && !accountIsArchived(account)),
     submitting: busy,
   };
-  const acts = actsFor(open, draftState);
+  const acts = actsFor(open, draftState, backTo);
 
   // The chain reads the OPEN composition once there is one, and the form
   // otherwise -- so the same device says "here is what you are about to
@@ -102,7 +163,7 @@ export function ComposerSection({
   const chainTemplate =
     templates.find((t) => t.id === (open ? open.templateId : templateId))?.name ?? "";
 
-  function addSource(next: PickedSource) {
+  function addSource(next: ComposeSource) {
     setPicked((prev) =>
       prev.some((p) => p.kind === next.kind && p.ref === next.ref) ? prev : [...prev, next],
     );
@@ -165,7 +226,12 @@ export function ComposerSection({
         <TargetColumn
           templates={templates}
           format={open ? open.format : format}
-          onFormat={setFormat}
+          onFormat={(next) => {
+            setFormat(next);
+            // An email template is JSON; a person who chose another kind of
+            // file is not making one.
+            if (next !== "json") setOutputKind("");
+          }}
           templateId={open ? open.templateId : templateId}
           onTemplate={setTemplateId}
           deployableKind={open ? open.deployableKind : deployableKind}
@@ -187,12 +253,22 @@ export function ComposerSection({
       />
 
       {error ? <Notice tone="error" sentence={error} /> : null}
+      {/* WHAT BECAME OF THE DESCRIPTION, in place. The file is there either
+          way, so neither is an error: the first says what to do about it, the
+          second only names what the Library could not take. */}
+      {open && description?.failure ? (
+        <Notice tone="warn" sentence={DESCRIPTION_NOT_SENT} next={DESCRIPTION_NOT_SENT_NEXT} detail={description.failure} />
+      ) : null}
+      {open && description && description.unattached.length > 0 ? (
+        <Notice tone="info" sentence={notAttachedSentence(description.unattached)} />
+      ) : null}
 
       <ActionBar
         state={stateLine(open, draftState)}
         acts={acts.map((a) => ({
           label: a.label,
           tone: a.tone === "primary" ? "primary" : a.tone === "danger" ? "danger" : "quiet",
+          text: a.text,
           ariaLabel: a.id === "openFile" ? `Open ${open?.name ?? "the file"}` : undefined,
           busy: busy && a.id === "materialize",
           onAct: () => {
@@ -205,6 +281,7 @@ export function ComposerSection({
                 sources: picked,
                 templateId,
                 deployableKind,
+                outputKind,
               });
               return;
             }
@@ -243,7 +320,7 @@ function SourcesColumn({
   /** True once a composition exists: the sources are a RECORD, not a choice. */
   settled: boolean;
   recordsAvailable: boolean;
-  onAdd: (s: PickedSource) => void;
+  onAdd: (s: ComposeSource) => void;
   onRemove: (ref: string) => void;
 }) {
   const [query, setQuery] = useState("");

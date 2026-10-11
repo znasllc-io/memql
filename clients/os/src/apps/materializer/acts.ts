@@ -19,6 +19,12 @@ export interface ActSpec {
   id: ActId;
   label: string;
   tone?: "default" | "primary" | "quiet" | "danger";
+  /**
+   * Drawn as a label rather than a button. Two buttons side by side ask to be
+   * weighed against each other, and the way back to another app is not an
+   * alternative to anything done here: it is a way out of the page.
+   */
+  text?: boolean;
 }
 
 export type ActId =
@@ -30,7 +36,8 @@ export type ActId =
   | "saveRecipe"
   | "archive"
   | "restore"
-  | "startOver";
+  | "startOver"
+  | "returnToApp";
 
 /** The composer's own state, before anything has been written. */
 export interface DraftState {
@@ -52,8 +59,14 @@ export interface DraftState {
  * stating: re-materializing would open a second composition against the
  * same sources and produce a second file, and nothing on the page would
  * say which one was the deliverable.
+ *
+ * `backTo` is the name of the app that sent the person here to make this
+ * file, and is given only when they can go back to it. The way back is an
+ * act of a FINISHED file, offered beside the one that opens it: before there
+ * is a file there is nothing to come back from, and a composition that failed
+ * or was stopped is not the errand the other app sent them on.
  */
-export function actsFor(c: CompositionRow | null, draft: DraftState): ActSpec[] {
+export function actsFor(c: CompositionRow | null, draft: DraftState, backTo?: string): ActSpec[] {
   // No composition yet: this is the compose form, and the only act is to
   // run it. It is ABSENT rather than disabled while there is nothing to
   // compose from, so the bar's state line is what explains the wait.
@@ -117,6 +130,15 @@ export function actsFor(c: CompositionRow | null, draft: DraftState): ActSpec[] 
     default:
       acts.push({ id: "archive", label: "Archive", tone: "quiet" });
       break;
+  }
+  if (backTo !== undefined && c.status === "ready") {
+    // In front of the primary act, which stays last.
+    acts.splice(Math.max(acts.length - 1, 0), 0, { id: "returnToApp", label: `Back to ${backTo}`, tone: "quiet", text: true });
+    // THE BAR HOLDS THREE, and the one that gives way is Archive: housekeeping
+    // the Materialized list still offers on this same composition, and the act
+    // somebody who has just made a file reaches for least.
+    const archive = acts.findIndex((a) => a.id === "archive");
+    if (acts.length > 3 && archive >= 0) acts.splice(archive, 1);
   }
   return acts.slice(0, 3);
 }
