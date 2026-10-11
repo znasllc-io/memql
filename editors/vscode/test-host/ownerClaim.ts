@@ -58,7 +58,10 @@ async function playTheOwner(page: Page, url: string, done: { settled: boolean })
     await page.waitForTimeout(500);
     if (page.url().startsWith("http://127.0.0.1")) return;
     const text = (await page.locator("body").innerText().catch(() => "")).replace(/\s+/g, " ");
-    const key = `${page.url().replace(/#.*/, "")}|${text.slice(0, 160)}`;
+    // The whole text, not a prefix: the owner-email and passkey steps open with
+    // the same heading and lead, and the OS follows identity's redirect without
+    // changing the URL, so a prefix reads the passkey step as already answered.
+    const key = `${page.url().replace(/#.*/, "")}|${text}`;
     if (answered.has(key)) continue;
     const press = async (name: RegExp, label: string): Promise<boolean> => {
       const button = page.getByRole("button", { name });

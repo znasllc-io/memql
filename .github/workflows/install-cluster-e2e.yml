@@ -684,6 +684,10 @@ jobs:
           set -euo pipefail
           scripts_retry="$GITHUB_WORKSPACE/scripts/ci/retry.sh"
           "$scripts_retry" -- npx playwright install --with-deps chromium
+          # The harness drives the editor's own connection code, which imports
+          # the file: SDK packages; "Build the install CLI" bundles nothing
+          # that needs them, so nothing on this runner has built them yet.
+          "$scripts_retry" -- bash "$GITHUB_WORKSPACE/scripts/vscode/deps.sh"
           node_modules/.bin/esbuild test-host/ownerClaim.ts --bundle --platform=node \
             --format=cjs --target=node20 --external:playwright \
             --outfile="$RUNNER_TEMP/owner-claim.js"
