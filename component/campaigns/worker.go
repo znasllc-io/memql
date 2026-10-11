@@ -541,8 +541,9 @@ func (w *Worker) sendBatch(
 	identity, refusal := w.resolveSendIdentity(ownerCtx, campaign)
 	if refusal.refused() {
 		if refusal.Terminal {
+			// failJob also marks the campaign `failed` with this reason, which is
+			// where the operator who picked the mailbox looks.
 			w.failJob(systemCtx, *job, refusal.Reason)
-			w.stampCampaignError(ownerCtx, campaign.ID, refusal.Reason)
 			return errors.New(refusal.Reason)
 		}
 		w.stampCampaignError(ownerCtx, campaign.ID, refusal.Reason)
@@ -928,6 +929,21 @@ func (w *Worker) completeJob(systemCtx, ownerCtx context.Context, job SendJob, c
 		"sent", job.SentCount, "skipped", job.SkippedCount, "failed", job.FailedCount)
 }
 
+// failJob ends a send job terminally and carries the failure to its campaign.
+//
+// The job row is clusterOwner-tier and the operator never reads it; the
+// campaign is the row they do read. Failing only the job left the campaign
+// reading `sending` behind a job nothing would ever drain again -- a send that
+// looks in flight and is not (memql#6022) -- so the failure and its reason are
+// written to both.
+//
+// The campaign write is the OWNED-tier one, made under the campaign owner's
+// borrowed identity exactly like completeJob's. A job that names no owner fails
+// without it: ownerActorContext hands a blank owner back the engine's own
+// context, and the campaign must not be written as the cluster.
+//
+// Both writes are best-effort and independent -- a failed one is logged, never
+// returned, and the job's failure does not wait on the campaign's.
 func (w *Worker) failJob(systemCtx context.Context, job SendJob, reason string) {
 	now := w.now().UTC()
 	status := "failed"
@@ -936,6 +952,15 @@ func (w *Worker) failJob(systemCtx context.Context, job SendJob, reason string) 
 		Status: &status, LastError: &detail, CompletedAt: &now,
 	}); err != nil {
 		w.logger.Warn("campaigns worker: could not fail send job", "error", err)
+	}
+	if job.CampaignOwnerUserID != "" {
+		ownerCtx := w.ownerActorContext(systemCtx, job.CampaignOwnerUserID)
+		if err := w.store.UpdateCampaignProgress(ownerCtx, job.CampaignID, CampaignProgress{
+			Status: &status, LastError: &detail, CompletedAt: &now,
+		}); err != nil {
+			w.logger.Warn("campaigns worker: could not mark the campaign of a failed send job as failed",
+				"job", job.ID, "campaign", job.CampaignID, "error", err)
+		}
 	}
 	w.logger.Warn("campaigns worker: send job failed", "job", job.ID, "reason", reason)
 }
