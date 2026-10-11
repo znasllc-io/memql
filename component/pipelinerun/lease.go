@@ -306,14 +306,39 @@ func (dr *runDriver) owns(r *Run) bool {
 	return r != nil && dr.claimID != "" && r.DriverNodeID == dr.d.NodeID && r.DriverLeaseID == dr.claimID
 }
 
+// journalFenceAttempts bounds how often one journal write decides again after
+// the run row moved under it while this replica still held the run.
+const journalFenceAttempts = 3
+
 // guardJournal puts each individual receipt, intent and heartbeat under the
 // same gate as a claim. No external call or heartbeat shutdown holds the gate.
+//
+// A WITNESS THAT MOVED IS NOT YET ANOTHER HOLDER. The fence refuses a write
+// whose run row changed after the read that authorized it, and two things
+// change it: another process's claim, and this replica's own write whose
+// reply was lost -- a heartbeat the client gave up on and the server committed
+// anyway, which the next write waits for on the run's advisory lock. Treating
+// every refusal as another holder stopped a healthy drive during a database
+// stall (run 9892b7ef, 2026-10-11). Only a fresh read tells the two apart:
+// another claim loses the lease; this replica's own claim decides again on
+// the row as it stands, a bounded number of times; a row that cannot be read
+// proves neither, and the write simply did not land.
 func (dr *runDriver) guardJournal() {
 	dr.d.Journal = dr.d.Journal.WithWriteGuard(func(ctx context.Context, write func(context.Context) error) error {
-		err := dr.underLease(ctx, func(gctx context.Context, _ Run) error { return write(gctx) })
-		if errors.Is(err, memql.ErrRowVersionChanged) {
-			dr.loseLease(nil)
-			return errLeaseLost
+		var err error
+		for range journalFenceAttempts {
+			err = dr.underLease(ctx, func(gctx context.Context, _ Run) error { return write(gctx) })
+			if !errors.Is(err, memql.ErrRowVersionChanged) {
+				return err
+			}
+			r, readErr := dr.d.Store.RunByID(memql.ContextWithFreshRead(ctx), dr.runID)
+			if readErr != nil {
+				return err
+			}
+			if !dr.owns(r) {
+				dr.loseLease(r)
+				return errLeaseLost
+			}
 		}
 		return err
 	})
