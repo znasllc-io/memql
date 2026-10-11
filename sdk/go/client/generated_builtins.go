@@ -1005,6 +1005,8 @@ type ComposeMaterializeArgs struct {
 	RecipeId string
 	// {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.
 	Ceilings map[string]any
+	// Caller-chosen id for this request. Repeating it returns the same composition instead of starting another, so a double click makes one file.
+	RequestId string
 }
 
 // ComposeMaterialize calls the engine builtin composeMaterialize.
@@ -1099,6 +1101,13 @@ func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
 		}
 		b.WriteString("ceilings: ")
 		b.WriteString(renderMemQLValue(args.Ceilings))
+	}
+	if args.RequestId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requestId: ")
+		b.WriteString(quoteMemQL(args.RequestId))
 	}
 	b.WriteString(")")
 	return b.String()

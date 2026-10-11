@@ -256,7 +256,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "execute", Description: "Execute the persisted materialization belonging to the current work run.", Handler: i.handleExecute, ArgsSchema: map[string]string{"compositionId": "string (required) -- the composition this run owns"}},
 		{
 			Name:        "materialize",
-			Description: "Compose the named sources into a file of the chosen format and file it in the Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia=\"materializer\" and that goal's first run, then dispatches the known materializeFile template. Returns {compositionId, goalId, runId, format}; the composition reports progress and its outputFileId.",
+			Description: "Compose the named sources into a file of the chosen format and file it in the Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia=\"materializer\" and that goal's first run, then dispatches the known materializeFile template. A request with nothing to compose from (no statement, draft, sections, sources, template or recipe) files an empty Markdown, text, HTML, CSV or JSON document without a model call. Returns {compositionId, goalId, runId, format}; the composition reports progress and its outputFileId.",
 			Handler:     i.handleMaterialize,
 			ArgsSchema: map[string]string{
 				"name":           "string (required) -- what to call it, and the filename stem",
@@ -270,6 +270,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"deployableKind": "string -- spa | static | shopify_storefront to produce a package source zip instead of a document",
 				"recipeId":       "string -- the recipe this run came from, when it came from one",
 				"ceilings":       "object -- the goal's ceilings; a zero is 'unset', never 'nothing allowed'",
+				"requestId":      "string -- the caller's own id for this request; repeating it returns the same composition instead of starting another",
 			},
 		},
 		{
@@ -306,7 +307,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"sources": "[]object (required) -- the same {kind, ref, label} list materialize takes",
 			},
 		},
-	}, workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{"composeRecoverOutput": nil, "composeReadTemplate": nil, "composeWorkflowFacts": nil, "composeRestoreDraft": nil, "composeGenerateDraft": nil, "composeRequireDraft": nil, "composeUseSourceRows": nil, "composeRenderOutput": nil, "composeFileSource": nil, "composeFileOutput": nil, "composeCompleteOutput": nil, "composeRecordRecipeUse": nil})...)
+	}, workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{"composeRecoverOutput": nil, "composeReadTemplate": nil, "composeWorkflowFacts": nil, "composeRestoreDraft": nil, "composeGenerateDraft": nil, "composeRequireDraft": nil, "composeBlankDraft": nil, "composeUseSourceRows": nil, "composeRenderOutput": nil, "composeFileSource": nil, "composeFileOutput": nil, "composeCompleteOutput": nil, "composeRecordRecipeUse": nil})...)
 }
 
 // ---------------------------------------------------------------------------

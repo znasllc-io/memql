@@ -54,6 +54,18 @@ type materializeArgs struct {
 	DeployableKind string
 	RecipeId       string
 	Ceilings       map[string]any
+	// RequestId is the caller's own name for this request. omitempty is
+	// load-bearing: an in-run composition's id is derived from these arguments'
+	// JSON, so a field that serialised as "" would re-key every step already in
+	// flight.
+	RequestId string `json:",omitempty"`
+}
+
+// blank is a request with nothing to compose from: no words, no draft, no
+// sections, no sources, no template, recipe or special output.
+func (a materializeArgs) blank() bool {
+	return a.Statement == "" && strings.TrimSpace(a.Draft) == "" && len(a.SectionKeys) == 0 &&
+		len(a.Sources) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == ""
 }
 
 func (i *Integration) handleMaterialize(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -83,6 +95,7 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 		RecipeId:       strings.TrimSpace(stringOf(args["recipeId"])),
 		OutputKind:     strings.TrimSpace(stringOf(args["outputKind"])),
 		AccountIds:     stringList(args["accountIds"]),
+		RequestId:      strings.TrimSpace(stringOf(args["requestId"])),
 	}
 	if raw, exists := args["sectionKeys"]; exists && raw != nil {
 		encoded, err := json.Marshal(raw)
@@ -101,6 +114,9 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 		return out, err
 	}
 	out.Format = format
+	if out.Name, err = cleanFileName(out.Name, format); err != nil {
+		return out, err
+	}
 	if out.OutputKind != "" && out.OutputKind != "email_template" {
 		return out, errors.New("compose: unsupported outputKind")
 	}
@@ -121,6 +137,39 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 		out.Ceilings = m
 	}
 	return out, nil
+}
+
+// cleanFileName turns what a person typed into the stem a file is named from.
+//
+// A FOLDER PATH IS REFUSED rather than flattened: a name is not a place to file
+// into (folderId is), and silently rewriting "reports/Q3" to "reports-Q3" files
+// something the person did not ask for. ONE trailing extension that already
+// names the format is dropped, because the extension is added once, on filing:
+// "Plan.md" stays Plan.md and is never Plan.md.md.
+func cleanFileName(name string, format pure.Format) (string, error) {
+	if strings.ContainsAny(name, "/\\") {
+		return "", errors.New("compose: enter a file name without a folder path")
+	}
+	for _, ext := range formatNameExtensions(format) {
+		suffix := "." + ext
+		if len(name) >= len(suffix) && strings.EqualFold(name[len(name)-len(suffix):], suffix) {
+			name = strings.TrimSpace(name[:len(name)-len(suffix)])
+			break
+		}
+	}
+	if name == "" {
+		return "", errors.New("compose: a materialization needs a name")
+	}
+	return name, nil
+}
+
+// formatNameExtensions are the suffixes that say a name is already in a format:
+// its file extension and, where that differs, its own name (md and markdown).
+func formatNameExtensions(format pure.Format) []string {
+	if ext := format.Extension(); ext != string(format) {
+		return []string{ext, string(format)}
+	}
+	return []string{string(format)}
 }
 
 // executionRequest is captured once under the requesting actor. Retrying on
@@ -157,6 +206,15 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 			return nil, errors.New("compose: this organization is not active or accessible to you")
 		}
 	}
+	if a.blank() {
+		// REFUSED BEFORE ANYTHING IS WRITTEN. RenderBlank is the one place that
+		// knows which formats have an empty document, so the request asks it
+		// rather than repeating the list: a docx or pdf with nothing to put in it
+		// would be a file that opens as an error, and no row is worth that.
+		if _, err := pure.RenderBlank(a.Format, a.Name); err != nil {
+			return nil, err
+		}
+	}
 	rc, nested := common.RunFromContext(ctx)
 	nested = nested && rc.RunId != "" && rc.GoalId != ""
 	if err := validateSectionAssembly(a, rc, nested, userId); err != nil {
@@ -187,6 +245,31 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 		}
 		if rc.Mode == common.RunModeReplay {
 			return nil, errors.New("compose: replay has no completed composition to serve")
+		}
+	} else if a.RequestId != "" {
+		// A REPEAT OF THE SAME REQUEST IS THE SAME COMPOSITION. The id is derived
+		// from the caller and the request id the way an in-run composition's is
+		// derived from its run and step, so a double click (or a retry after a
+		// dropped reply) finds the row the first call wrote instead of starting a
+		// second file. The caller is part of the derivation: a request id is only
+		// ever one person's, and another person's identical text must not find,
+		// or collide with, their composition.
+		//
+		// THIS IS READ-THEN-WRITE, not a claim on the id: two identical requests
+		// that arrive at the same moment on different replicas can both miss the
+		// lookup and each open a goal. Clients dedupe in flight (they do not send
+		// a second start while one is pending), and that is what keeps the window
+		// shut in practice.
+		compositionId = stableMaterializeID("request", memql.BareShortId(userId), a.RequestId)
+		existing, err := i.store().compositionById(ctx, compositionId)
+		if err != nil {
+			return nil, err
+		}
+		if existing != nil {
+			return map[string]any{
+				"compositionId": compositionId, "goalId": stringOf(existing["goalId"]), "runId": stringOf(existing["runId"]),
+				"format": stringOf(existing["format"]), "status": stringOf(existing["status"]),
+			}, nil
 		}
 	}
 	resolved, err := i.resolve(ctx, a.Sources)
@@ -425,6 +508,10 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 
 	var sourceFileId, fileId, fileName, mimeType string
 	var needsSource, sourceComplete bool
+	// blankDraft is set by composeBlankDraft and read by composeRenderOutput,
+	// which stamps it on the recipe it saves: a blank request has no draft to
+	// render, only its format's empty document.
+	var blankDraft bool
 	var templateName, templateBody string
 	draft := pure.Draft{Title: a.Name, Body: a.Draft}
 	var models []pure.ModelContribution
@@ -444,7 +531,8 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 				return fail("checking an earlier output failed", err)
 			}
 			sourceFileId = ""
-			needsSource = a.Format != pure.FormatText && a.Format != pure.FormatMarkdown || a.DeployableKind != "" || a.OutputKind != ""
+			// A blank file has no recipe worth rebuilding, so it files no source package.
+			needsSource = !a.blank() && ((a.Format != pure.FormatText && a.Format != pure.FormatMarkdown) || a.DeployableKind != "" || a.OutputKind != "")
 			if needsSource {
 				sourceFileId = stableMaterializeID("materialized-source", compositionId)
 			}
@@ -506,7 +594,11 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 			return nil, nil
 		},
 		"composeWorkflowFacts": func(context.Context, map[string]any) (any, error) {
-			return map[string]any{"savedRecipe": request.Recipe != nil, "hasSections": request.Sections != nil, "hasComposer": i.composerRef() != nil, "hasDraft": strings.TrimSpace(draft.Body) != "", "hasRows": len(draft.Rows) > 0, "format": string(a.Format), "outputKind": a.OutputKind, "needsSource": needsSource, "sourceComplete": sourceComplete, "hasRecipeId": a.RecipeId != ""}, nil
+			// isBlank is false once a recipe snapshot exists, and that is safe: the
+			// snapshot a blank request saves is marked Blank (see composeRenderOutput),
+			// so a resumed run takes the restore branch and still renders the empty
+			// document rather than the draft it restored.
+			return map[string]any{"savedRecipe": request.Recipe != nil, "hasSections": request.Sections != nil, "hasComposer": i.composerRef() != nil, "hasDraft": strings.TrimSpace(draft.Body) != "", "hasRows": len(draft.Rows) > 0, "format": string(a.Format), "outputKind": a.OutputKind, "needsSource": needsSource, "sourceComplete": sourceComplete, "hasRecipeId": a.RecipeId != "", "isBlank": a.blank() && request.Recipe == nil}, nil
 		},
 		"composeRestoreDraft": func(context.Context, map[string]any) (any, error) {
 			if request.Recipe == nil {
@@ -550,6 +642,10 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 			}
 			return nil, nil
 		},
+		"composeBlankDraft": func(context.Context, map[string]any) (any, error) {
+			blankDraft = true
+			return nil, nil
+		},
 		"composeUseSourceRows": func(context.Context, map[string]any) (any, error) {
 			draft.Header, draft.Rows = tabularRows(resolved)
 			return nil, nil
@@ -589,7 +685,10 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 					return fail("embedding email assets failed", err)
 				}
 			}
-			recipe = pure.RenderRecipe{Name: a.Name, Format: a.Format, OutputKind: a.OutputKind, DeployableKind: a.DeployableKind, Draft: draft, Provenance: prov}
+			// Blank is stamped on the recipe, not kept in blankDraft alone: the saved
+			// snapshot is all a resumed run on another replica restores, and it must
+			// come back rendering the empty document rather than an ordinary one.
+			recipe = pure.RenderRecipe{Name: a.Name, Format: a.Format, OutputKind: a.OutputKind, DeployableKind: a.DeployableKind, Draft: draft, Provenance: prov, Blank: blankDraft}
 			if request.Recipe != nil {
 				recipe = *request.Recipe
 			} else {

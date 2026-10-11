@@ -39,6 +39,7 @@ builtin composeMaterialize {
   deployableKind string    @description("Set to spa, static or shopify_storefront to produce a PACKAGE SOURCE ZIP the Deployables pipeline deploys unchanged at sourceKind='artifact' (design D8), rather than a document. Empty for every ordinary composition.")
   recipeId       string    @description("v1:compose:recipe this run came from, when it came from one. Stamps the composition and bumps the recipe's run count.")
   ceilings       object    @description("{tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.")
+  requestId      string    @description("Caller-chosen id for this request. Repeating it returns the same composition instead of starting another, so a double click makes one file.")
 }
 
 /// Run one of your recipes again: resolve its selectors NOW, compose, render and file. Returns
@@ -117,6 +118,10 @@ builtin composeGenerateDraft { }
 /// Bounded operation in the current owner and composition run.
 @executor("integration.compose.composeRequireDraft")
 builtin composeRequireDraft { }
+
+/// Bounded operation in the current owner and composition run.
+@executor("integration.compose.composeBlankDraft")
+builtin composeBlankDraft { }
 
 /// Bounded operation in the current owner and composition run.
 @executor("integration.compose.composeUseSourceRows")

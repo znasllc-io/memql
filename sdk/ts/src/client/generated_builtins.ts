@@ -786,6 +786,8 @@ export interface ComposeMaterializeArgs {
   recipeId?: string;
   /** {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'. */
   ceilings?: Record<string, unknown>;
+  /** Caller-chosen id for this request. Repeating it returns the same composition instead of starting another, so a double click makes one file. */
+  requestId?: string;
 }
 
 export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
@@ -803,6 +805,7 @@ export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
   if (args.deployableKind !== undefined) parts.push("deployableKind: " + renderMemQLValue(args.deployableKind));
   if (args.recipeId !== undefined) parts.push("recipeId: " + renderMemQLValue(args.recipeId));
   if (args.ceilings !== undefined) parts.push("ceilings: " + renderMemQLValue(args.ceilings));
+  if (args.requestId !== undefined) parts.push("requestId: " + renderMemQLValue(args.requestId));
   return "builtin composeMaterialize(" + parts.join(", ") + ")";
 }
 
