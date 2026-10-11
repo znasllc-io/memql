@@ -181,3 +181,39 @@ func TestDocumentRevisionImagePlanCarriesMissingEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDocumentImageIntentUsesOnlyHumanRequests(t *testing.T) {
+	prompts, _ := loadCorpusPrompts(t)
+	prompt, ok := prompts.Get("libraryRevisionImageIntent")
+	if !ok {
+		t.Fatal("missing image intent prompt")
+	}
+	data := map[string]any{
+		"passages": []any{map[string]any{
+			"source":   "OBSOLETE_SOURCE_SENTINEL",
+			"comments": []any{map[string]any{"feedback": "Reuse the supplied portrait of A and find an archival portrait of B.", "quote": "QUOTED_SOURCE_SENTINEL"}},
+		}},
+		"instruction": "Acquire only B; preserve A.",
+	}
+	if err := prompt.ValidateData(data); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := prompt.Render(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Reuse the supplied portrait of A and find an archival portrait of B.", "Acquire only B; preserve A."} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("lost human direction %q", want)
+		}
+	}
+	for _, absent := range []string{"OBSOLETE_SOURCE_SENTINEL", "QUOTED_SOURCE_SENTINEL"} {
+		if strings.Contains(rendered, absent) {
+			t.Fatalf("image routing includes irrelevant source: %s", absent)
+		}
+	}
+	data["passages"] = "unstructured source and feedback"
+	if err := prompt.ValidateData(data); err == nil {
+		t.Fatal("unstructured routing input accepted")
+	}
+}

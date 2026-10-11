@@ -262,8 +262,10 @@ automation reviseLibraryDocument {
  })
  // Research and image acquisition are independent: factual corrections can
  // also request new portraits. Neither decision may suppress the other.
+ // Acquisition intent needs human direction, not the old document or lengthy
+ // reference drafts. Supplied images may satisfy only part of a mixed request.
  imageIntent := builtin ai(templateId: "libraryRevisionImageIntent", data: {
-  passages: captured.passagesJSON, references: references.references,
+  passages: captured.passages.select(p => {comments: p.comments}),
   instruction: captured.amendment.instruction ?? captured.instruction
  })
  // Keep the app receipt at evidence.app/report so retries across replicas
