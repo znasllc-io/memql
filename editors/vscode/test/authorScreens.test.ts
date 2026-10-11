@@ -344,7 +344,7 @@ test("each missing session is one sentence and its act -- not three banners", ()
   ];
   for (const [connection, line, act] of cases) {
     const html = concept({ connection });
-    assert.match(words(html), new RegExp(line.replace(/[.?]/g, "\\$&")), connection);
+    assert.ok(words(html).includes(line), connection);
     assert.match(html, new RegExp(`data-act="${act}"`), connection);
     assert.doesNotMatch(words(html), /ERROR|WARNING|live updates/, connection);
   }

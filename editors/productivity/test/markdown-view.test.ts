@@ -12,13 +12,27 @@ function fixture(initial: any = {}) {
   Object.assign(dom.window,{acquireVsCodeApi:()=>({postMessage:(message:any)=>messages.push(message),getState:()=>state,setState:(value:any)=>{state=value;}})});
   dom.window.eval(readFileSync("dist-test/markdown-view.js","utf8"));
   const doc=dom.window.document,el=(id:string)=>doc.getElementById(id)!;
-  const send=(data:any)=>{if(data.type==="revision" && data.status?.proposal?.edits && !data.status.items)data={...data,status:{...data.status,proposalHash:"test-hash",items:data.status.proposal.edits.map((edit:any,index:number)=>({id:`item-${index}-${edit.after}`,edits:[edit],commentIds:edit.commentIds??[]}))}};return dom.window.dispatchEvent(new dom.window.MessageEvent("message",{data}));};
+  const send=(data:any)=>{if(data.type==="revision" && data.status?.proposal?.edits && !data.status.items)data={...data,status:{...data.status,proposalHash:"test-hash",items:data.status.proposal.edits.map((edit:any,index:number)=>({id:`item-${index}-${edit.after}`,edits:[edit],commentIds:edit.commentIds??[]}))}};return dom.window.dispatchEvent(new dom.window.MessageEvent("message",{data,origin:dom.window.origin}));};
   send({type:"viewMode",mode:"review"});
   const document=(source="# Title\n\nKeep **this selection** and the rest.\n",version=17,connected=true)=>send({type:"document",html:renderMarkdown(source),version,sourceIdentity:source,connected,status:"Save first"});
   const select=(selector="strong")=>{const range=doc.createRange();range.selectNodeContents(doc.querySelector(selector)!);dom.window.getSelection()!.removeAllRanges();dom.window.getSelection()!.addRange(range);doc.dispatchEvent(new dom.window.Event("selectionchange"));};
   const input=(id:string,value:string)=>{(el(id) as HTMLTextAreaElement).value=value;el(id).dispatchEvent(new dom.window.Event("input"));};
   return {dom,doc,el,send,document,select,input,messages,highlights,state:()=>state};
 }
+test("a message from another origin is ignored; the host's own origin still renders", () => {
+  // VS Code relays host messages from the webview's own origin. Anything else is a frame
+  // that found this window, and must not replace the page or the review it holds.
+  const f = fixture();
+  f.document("# Real\n\nThe document.\n");
+  const forged = {type:"document",html:renderMarkdown("# Forged\n"),version:99,sourceIdentity:"# Forged\n",connected:true,status:""};
+  f.dom.window.dispatchEvent(new f.dom.window.MessageEvent("message",{data:forged,origin:"https://attacker.example"}));
+  assert.match(f.el("content").textContent ?? "", /Real/);
+  assert.doesNotMatch(f.el("content").textContent ?? "", /Forged/);
+  f.send(forged);
+  assert.match(f.el("content").textContent ?? "", /Forged/);
+  f.dom.window.close();
+});
+
 test("section and footnote links focus and highlight their destination without closing review", () => {
   const f = fixture();
   f.document("# Paper\n\n[Methods](#methods) and evidence.[^e]\n\n## Methods\n\nA procedure.\n\n[^e]: A source.\n");

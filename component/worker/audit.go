@@ -32,7 +32,7 @@ func (a *IdentityAuditor) Emit(ctx context.Context, ev AuditEvent) {
 	}
 	detail := ev.Detail
 	if ev.ActorLabel != "" {
-		detail = make(map[string]any, len(ev.Detail)+1)
+		detail = make(map[string]any, len(ev.Detail))
 		for k, v := range ev.Detail {
 			detail[k] = v
 		}

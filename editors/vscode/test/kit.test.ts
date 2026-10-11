@@ -441,7 +441,7 @@ test("pageDocument is one CSP'd document with the brand block and the one runtim
   assert.ok(html.includes(brandStyleBlock()), "the brand block, which carries the kit");
   assert.equal(html.split("<script").length - 1, 1, "exactly one script");
   assert.ok(html.includes(`<script nonce="n0nce">${PAGE_RUNTIME}</script>`), "the page runtime under the nonce");
-  assert.doesNotMatch(html.replace(/<style[\s\S]*<\/style>/, ""), /\sstyle=/);
+  assert.doesNotMatch(html.replace(brandStyleBlock(), ""), /\sstyle=/);
 });
 
 test("the kit is the only producer of a page heading in src/webview", () => {

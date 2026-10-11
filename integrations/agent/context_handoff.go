@@ -151,7 +151,7 @@ func handOffToNextContextWindow(messages []common.ChatMessage) ([]common.ChatMes
 	if plan.DropCount == 0 {
 		return messages, "", false
 	}
-	out := make([]common.ChatMessage, 0, len(messages)-plan.DropCount+1)
+	out := make([]common.ChatMessage, 0, len(messages))
 	out = append(out, messages[:contextHandoffPinnedHead]...)
 	out = append(out, common.ChatMessage{Role: "system", Content: plan.Summary})
 	out = append(out, messages[contextHandoffPinnedHead+plan.DropCount:]...)

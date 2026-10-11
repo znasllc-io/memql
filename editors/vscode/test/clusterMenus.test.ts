@@ -180,7 +180,7 @@ class WhenParser {
   private at = 0;
 
   constructor(clause: string) {
-    this.tokens = clause.match(/\/(?:\\.|[^/])*\/[a-z]*|\(|\)|&&|\|\||==|!=|=~|!|[A-Za-z0-9_.:-]+/g) ?? [];
+    this.tokens = clause.match(/\/(?:\\.|[^/\\])*\/[a-z]*|\(|\)|&&|\|\||==|!=|=~|!|[A-Za-z0-9_.:-]+/g) ?? [];
     if (this.tokens.length === 0) {
       throw new Error(`when clause tokenized to nothing: ${JSON.stringify(clause)}`);
     }
@@ -236,7 +236,7 @@ class WhenParser {
     if (operator === "=~") {
       this.at += 1;
       const literal = this.tokens[this.at] ?? "";
-      const parsed = /^\/((?:\\.|[^/])*)\/([a-z]*)$/.exec(literal);
+      const parsed = /^\/((?:\\.|[^/\\])*)\/([a-z]*)$/.exec(literal);
       if (parsed === null) throw new Error(`expected a /regex/ after =~, found ${literal}`);
       this.at += 1;
       return new RegExp(parsed[1], parsed[2]).test(this.lookup(left, context) ?? "");

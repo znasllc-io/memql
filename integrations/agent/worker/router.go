@@ -462,7 +462,7 @@ func unionLabels(a, b map[string]string) (merged map[string]string, conflicts []
 	if len(a) == 0 && len(b) == 0 {
 		return nil, nil
 	}
-	out := make(map[string]string, len(a)+len(b))
+	out := make(map[string]string, max(len(a), len(b)))
 	for k, v := range a {
 		out[k] = v
 	}

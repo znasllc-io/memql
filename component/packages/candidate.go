@@ -60,7 +60,7 @@ func withRecordedCandidates(placements map[string]Placement, recorded []string) 
 	if len(recorded) == 0 {
 		return placements
 	}
-	out := make(map[string]Placement, len(placements)+len(recorded))
+	out := make(map[string]Placement, max(len(placements), len(recorded)))
 	for name, p := range placements {
 		out[name] = p
 	}

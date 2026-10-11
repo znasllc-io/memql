@@ -90,7 +90,9 @@ let previewVersion: number|undefined;
 let historyRetry: Record<string,unknown>={type:"history"};
 let historyLoaded=false, historyStale=false, historyProblem: {message:string;reference?:string}|undefined;
 type ReviewTab = "requests"|"changes"|"history";
-let reviewTab: ReviewTab = state.reviewTab ?? "requests";
+// Restored state is this webview's own, but read it as data: an unknown tab is the first one.
+const asReviewTab = (value: unknown): ReviewTab => value === "changes" || value === "history" ? value : "requests";
+let reviewTab: ReviewTab = asReviewTab(state.reviewTab);
 let historySelection: number|undefined = state.historySelection;
 const tabScroll = {requests:0,changes:0,history:0};
 let completedReview: Record<string,any>|undefined;
@@ -297,9 +299,10 @@ let dictationPhase="idle", dictatedBase="", dictationTarget="feedback", dictatio
 let dictationAvailable=false;
 let reviewRequested = state.reviewOpen ?? false;
 let activeAnchor: Anchor | undefined;
-const decisions = state.decisions ?? {};
-const modifications = state.modifications ?? {};
-const expanded = state.expanded ?? {};
+// Keyed by review item id, so no prototype: an id such as "__proto__" is an ordinary key here.
+const decisions: Record<string, "accepted" | "declined"> = Object.assign(Object.create(null), state.decisions);
+const modifications: Record<string, string> = Object.assign(Object.create(null), state.modifications);
+const expanded: Record<string, boolean> = Object.assign(Object.create(null), state.expanded);
 let modifying = "";
 let reviewSource = state.reviewSource ?? "";
 let selection: Anchor | undefined;
@@ -907,6 +910,8 @@ function renderProposal(status:Record<string,any>,panel:HTMLElement,actions:HTML
   else if (!terminal && !status.decision) actions.append(action("Stop preparing", "cancelRevision"));
 }
 window.addEventListener("message",event=>{
+  // VS Code relays host messages from this webview's own origin; a message from any other origin is a frame posting into this window.
+  if(event.origin!==window.origin)return;
   const message=event.data;
   if(message.type==="annotationRemoveError"){removingAnnotation="";annotationProblem=message;renderNotes();renderRevision();controls();}
   if(message.type==="annotationRemoved"){
@@ -950,7 +955,7 @@ window.addEventListener("message",event=>{
   }
   if(message.type==="restoreDraft") {
     if(message.state && !restored) {
-      Object.assign(state,message.state); reviewTab=state.reviewTab??"requests";historySelection=state.historySelection; attachments=state.attachments??[]; renderAttachments(); Object.assign(decisions,state.decisions??{});Object.assign(modifications,state.modifications??{});Object.assign(expanded,state.expanded??{});reviewSource=state.reviewSource??""; draftAnchor=state.anchor; composerPurpose=state.purpose??"feedback"; feedback.value=state.draft??""; instruction.value=state.instruction??"";
+      Object.assign(state,message.state); reviewTab=asReviewTab(state.reviewTab);historySelection=state.historySelection; attachments=state.attachments??[]; renderAttachments(); Object.assign(decisions,state.decisions??{});Object.assign(modifications,state.modifications??{});Object.assign(expanded,state.expanded??{});reviewSource=state.reviewSource??""; draftAnchor=state.anchor; composerPurpose=state.purpose??"feedback"; feedback.value=state.draft??""; instruction.value=state.instruction??"";
       selected.clear(); seen.clear(); for(const id of state.included??[])selected.add(id); for(const id of state.seen??[])seen.add(id);
       showReview(state.reviewOpen??false); controls();
     }
@@ -975,7 +980,7 @@ window.addEventListener("message",event=>{
   }
   if(message.type==="historyCurrent"){
     historyPreview=false;previewVersion=undefined;document.body.classList.remove("history-preview");byId("history-banner").hidden=true;byId("history-branch").hidden=true;
-    if(latestDocument)window.dispatchEvent(new MessageEvent("message",{data:latestDocument}));if(historyFromReview){historyFromReview=false;showHistory(false);}renderHistory();showReview(reviewRequested);
+    if(latestDocument)window.dispatchEvent(new MessageEvent("message",{data:latestDocument,origin:window.origin}));if(historyFromReview){historyFromReview=false;showHistory(false);}renderHistory();showReview(reviewRequested);
   }
   if(message.type==="historyIdle"){historyBusy=false;historyControls();renderReviewHistory();}
   if(message.type==="historyError"){historyProblem=message;renderReviewHistory();renderProblem(byId("history-status"),message,value=>api.postMessage(value));byId("history-retry").hidden=false;}

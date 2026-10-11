@@ -485,7 +485,7 @@ type runRetryBudget struct {
 
 // spending is the run's spend with one more retry counted.
 func (b runRetryBudget) spending() map[string]any {
-	out := make(map[string]any, len(b.stored)+1)
+	out := make(map[string]any, len(b.stored))
 	for k, v := range b.stored {
 		out[k] = v
 	}
