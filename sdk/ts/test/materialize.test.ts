@@ -27,6 +27,7 @@ import {
   MaterializeFailed,
   type MaterializeExecute,
   type MaterializeRequest,
+  type MaterializeSource,
 } from "../src/client/materialize.js";
 import {
   buildComposeMaterialize,
@@ -337,48 +338,6 @@ test("a retried hand-off reuses its request ids, so the Library returns the firs
   assert.deepEqual(f.calls.map(c => requestIdIn(c.call)), ["req-0001-comment", "req-0001-revision", "req-0001-comment", "req-0001-revision"]);
 });
 
-test("handOffDescription attaches each library file source once, at the version the Library holds", async () => {
-  const artifacts: Record<string, Rows> = {
-    "f-notes": [{ id: "att-notes" }],
-    "f-logo": [{ id: "att-logo" }],
-    "f-nofile": [{ id: "att-nofile" }],
-    "f-archived": [{ id: "att-archived", archived: true }],
-  };
-  const files: Record<string, Rows> = {
-    "f-notes": [{ name: "notes.md", versionNumber: 3 }],
-    "f-logo": [{ name: "logo.png" }],
-    "f-archived": [{ name: "old.md", versionNumber: 2 }],
-  };
-  const f = fake(handOffScript({
-    libraryArtifactForFile: call => artifacts[fileIdIn(call)] ?? [],
-    libraryFileById: call => files[fileIdIn(call)] ?? [],
-  }));
-  const out = await handOffDescription(f.execute, {
-    artifactId: "a1", statement: "Summarise these", requestId: "req-0002",
-    sources: [
-      { kind: "library_file", ref: "f-notes", label: "Notes" },
-      { kind: "concept_row", ref: "v1:crm:contact#c1", label: "A contact" },
-      { kind: "query", ref: "contacts()", label: "All contacts" },
-      { kind: "library_file", ref: "f-logo", label: "Logo" },
-      { kind: "library_file", ref: "f-notes", label: "Notes, listed twice" },
-      { kind: "library_file", ref: "f-gone", label: "Nothing resolves" },
-      { kind: "library_file", ref: "f-nofile", label: "No file row" },
-      { kind: "library_file", ref: "f-archived", label: "Archived" },
-    ],
-  });
-  assert.deepEqual(out, { revisionId: "req-0002-revision" });
-  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, buildLibraryAddDocumentComment({
-    artifactId: "a1", expectedVersion: 1, expectedRevision: "file:1",
-    anchor: { kind: "document", quote: "Entire document" }, body: "Summarise these", requestId: "req-0002-comment",
-    attachments: [
-      { artifactId: "att-notes", version: 3, revision: "file:3" },
-      { artifactId: "att-logo", version: 1, revision: "file:1" },
-    ],
-  }));
-  // Sources that are not files are not attachments and are never looked up.
-  assert.equal(f.calls.some(c => /contact/.test(c.call)), false, "a source that is not a file was looked up");
-});
-
 const FAILURE_PREFIX = "The description could not be sent for writing: ";
 
 const failures: { label: string; script: Record<string, Answer>; request?: Partial<Parameters<typeof handOffDescription>[1]>; message: RegExp; calls: string[] }[] = [
@@ -436,6 +395,245 @@ for (const { label, script, request, message, calls } of failures) {
 }
 
 // ---------------------------------------------------------------------------
+// References: attach what the Library accepts, report the rest
+// ---------------------------------------------------------------------------
+//
+// The Library takes Markdown (.md, up to 32 KiB) and images (PNG, JPEG, GIF,
+// WebP, up to 8 MiB) as review attachments, eight at most, and refuses the
+// WHOLE comment when one reference is anything else
+// (integrations/library/review_attachments.go). A hand-off must not fail for a
+// reference it could have left off, and must not leave one off without saying
+// so: what is not attached comes back by label in `unattached`.
+
+const KiB = 1024;
+const MiB = 1024 * KiB;
+
+type Stored = { artifact?: Record<string, unknown>; file?: Record<string, unknown> };
+
+// A Library holding these files, answering the two reads by file id as the real reads do.
+function library(files: Record<string, Stored>): Record<string, Answer> {
+  return {
+    libraryArtifactForFile: call => { const artifact = files[fileIdIn(call)]?.artifact; return artifact ? [artifact] : []; },
+    libraryFileById: call => { const file = files[fileIdIn(call)]?.file; return file ? [file] : []; },
+  };
+}
+
+// An ordinary stored file: its Files entry and its file row. A size of undefined is a row that does not say.
+const stored = (artifactId: string, name: string, size?: number, row: Record<string, unknown> = {}): Stored =>
+  ({ artifact: { id: artifactId }, file: { name, ...(size === undefined ? {} : { size }), ...row } });
+const reference = (ref: string, label: string): MaterializeSource => ({ kind: "library_file", ref, label });
+const attachmentOf = (n: number | string, version = 1) => ({ artifactId: `att-${n}`, version, revision: `file:${version}` });
+
+async function handOffWith(files: Record<string, Stored>, sources: MaterializeSource[], extra: Record<string, Answer> = {}) {
+  const f = fake(handOffScript({ ...library(files), ...extra }));
+  const out = await handOffDescription(f.execute, { artifactId: "a1", statement: "Summarise these", requestId: "req-0010", sources });
+  return { f, out };
+}
+
+const commentWith = (attachments: { artifactId: string; version: number; revision: string }[]) => buildLibraryAddDocumentComment({
+  artifactId: "a1", expectedVersion: 1, expectedRevision: "file:1",
+  anchor: { kind: "document", quote: "Entire document" }, body: "Summarise these", requestId: "req-0010-comment", attachments,
+});
+
+test("handOffDescription attaches every reference the Library accepts, and reports nothing", async () => {
+  const { f, out } = await handOffWith(
+    { "f-notes": stored("att-notes", "notes.md", 2 * KiB, { versionNumber: 3 }), "f-logo": stored("att-logo", "logo.png", 40 * KiB) },
+    [reference("f-notes", "Notes"), reference("f-logo", "Logo")]);
+  assert.deepEqual(out, { revisionId: "req-0010-revision" });
+  assert.equal("unattached" in out, false, "nothing left over is an absent field, not an empty list");
+  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith([
+    { artifactId: "att-notes", version: 3, revision: "file:3" }, { artifactId: "att-logo", version: 1, revision: "file:1" },
+  ]));
+});
+
+test("a PDF is reported rather than attached, and the image still goes with the revision", async () => {
+  const { f, out } = await handOffWith(
+    { "f-spec": stored("att-spec", "spec.pdf", 200 * KiB), "f-shot": stored("att-shot", "shot.jpg", 300 * KiB, { versionNumber: 2 }) },
+    [reference("f-spec", "Spec"), reference("f-shot", "Screenshot")]);
+  assert.deepEqual(out, { revisionId: "req-0010-revision", unattached: ["Spec"] });
+  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith([{ artifactId: "att-shot", version: 2, revision: "file:2" }]));
+  assert.deepEqual(f.calls.map(c => c.name).filter(n => /^library(Add|Request)/.test(n)), ["libraryAddDocumentComment", "libraryRequestDocumentRevision"]);
+});
+
+test("with only unsupported references the comment goes without attachments and the revision still opens", async () => {
+  const { f, out } = await handOffWith(
+    { "f-spec": stored("att-spec", "spec.pdf", 200 * KiB), "f-numbers": stored("att-numbers", "numbers.csv", 4 * KiB) },
+    [reference("f-spec", "Spec"), reference("f-numbers", "Numbers")]);
+  assert.deepEqual(out, { revisionId: "req-0010-revision", unattached: ["Spec", "Numbers"] });
+  assert.deepEqual(f.named("libraryAddDocumentComment").map(c => c.call), [commentWith([])]);
+  assert.equal(f.named("libraryRequestDocumentRevision").length, 1);
+});
+
+// What review_attachments.go accepts, as far as a file's name and size can show.
+const ACCEPTED: [string, number | undefined][] = [
+  ["notes.md", 1], ["notes.md", 32 * KiB], ["NOTES.MD", 10], ["draft.v2.md", 10],
+  ["shot.png", 1], ["SHOT.PNG", 10], ["shot.jpg", 10], ["shot.jpeg", 10], ["anim.gif", 10], ["pic.webp", 10], ["pic.png", 8 * MiB],
+  ["notes.md", undefined], // the row does not say how big it is: the Library decides
+];
+const NOT_ACCEPTED: [string, number | undefined][] = [
+  ["notes.md", 32 * KiB + 1], ["notes.md", 0],            // Markdown is non-empty and up to 32 KiB
+  ["notes.markdown", 10], ["notes.txt", 10],              // only ".md" is Markdown
+  ["report.pdf", 10], ["table.csv", 10], ["page.html", 10],
+  ["logo.svg", 10], ["scan.tiff", 10], ["pic.bmp", 10],   // only PNG, JPEG, GIF and WebP are images
+  ["pic.png", 8 * MiB + 1], ["pic.png", 0],               // an image is non-empty and up to 8 MiB
+  ["README", 10], ["bundle.png.zip", 10], ["", 10],       // the LAST extension counts, and there must be one
+];
+
+test("the Library's own type and size rules decide what is attached", async () => {
+  for (const [name, size] of ACCEPTED) {
+    const { f, out } = await handOffWith({ "f-1": stored("att-1", name, size) }, [reference("f-1", "Ref")]);
+    assert.equal(out.unattached, undefined, `${name} (${size}) should be attached`);
+    assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith([attachmentOf(1)]), `${name} (${size})`);
+  }
+});
+
+test("a reference of a type or size the Library refuses is reported by label", async () => {
+  for (const [name, size] of NOT_ACCEPTED) {
+    const { f, out } = await handOffWith({ "f-1": stored("att-1", name, size) }, [reference("f-1", "Ref")]);
+    assert.deepEqual(out, { revisionId: "req-0010-revision", unattached: ["Ref"] }, `${name} (${size}) should not be attached`);
+    assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith([]), `${name} (${size})`);
+  }
+});
+
+test("no more than eight references are attached, and the rest are reported", async () => {
+  const files: Record<string, Stored> = {};
+  const sources: MaterializeSource[] = [];
+  for (let n = 1; n <= 10; n++) {
+    files[`f-${n}`] = stored(`att-${n}`, `img${n}.png`, 10);
+    sources.push(reference(`f-${n}`, `Image ${n}`));
+  }
+  const { f, out } = await handOffWith(files, sources);
+  assert.deepEqual(out.unattached, ["Image 9", "Image 10"]);
+  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith(Array.from({ length: 8 }, (_, n) => attachmentOf(n + 1))));
+});
+
+test("attachments may total exactly 16 MiB and no more", async () => {
+  const { f, out } = await handOffWith(
+    { "f-1": stored("att-1", "one.png", 8 * MiB), "f-2": stored("att-2", "two.png", 8 * MiB), "f-3": stored("att-3", "dot.png", 1) },
+    [reference("f-1", "One"), reference("f-2", "Two"), reference("f-3", "One byte over")]);
+  assert.deepEqual(out.unattached, ["One byte over"]);
+  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith([attachmentOf(1), attachmentOf(2)]));
+});
+
+test("a reference that would pass 16 MiB is reported, and later ones that still fit are attached", async () => {
+  const { f, out } = await handOffWith({
+    "f-1": stored("att-1", "one.png", 8 * MiB), "f-2": stored("att-2", "two.png", 7 * MiB + 512 * KiB),
+    "f-3": stored("att-3", "three.png", MiB), "f-4": stored("att-4", "four.png", 256 * KiB),
+  }, [reference("f-1", "One"), reference("f-2", "Two"), reference("f-3", "Three"), reference("f-4", "Four")]);
+  // 8 + 7.5 = 15.5 MiB. Three (1 MiB) would make 16.5; Four (0.25 MiB) makes 15.75.
+  assert.deepEqual(out.unattached, ["Three"]);
+  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith([attachmentOf(1), attachmentOf(2), attachmentOf(4)]));
+});
+
+test("Markdown attachments may total exactly 64 KiB and no more", async () => {
+  const { f, out } = await handOffWith(
+    { "f-1": stored("att-1", "one.md", 32 * KiB), "f-2": stored("att-2", "two.md", 32 * KiB), "f-3": stored("att-3", "three.md", 1) },
+    [reference("f-1", "One"), reference("f-2", "Two"), reference("f-3", "Three")]);
+  assert.deepEqual(out.unattached, ["Three"]);
+  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith([attachmentOf(1), attachmentOf(2)]));
+});
+
+test("Markdown over 64 KiB in all is reported, while a small one and an image after it still go", async () => {
+  const { f, out } = await handOffWith({
+    "f-1": stored("att-1", "one.md", 30 * KiB), "f-2": stored("att-2", "two.md", 30 * KiB), "f-3": stored("att-3", "three.md", 30 * KiB),
+    "f-4": stored("att-4", "four.md", KiB), "f-5": stored("att-5", "chart.png", 100 * KiB),
+  }, [reference("f-1", "One"), reference("f-2", "Two"), reference("f-3", "Three"), reference("f-4", "Four"), reference("f-5", "Chart")]);
+  // 30 + 30 = 60 KiB of Markdown. Three would make 90; Four makes 61; an image is not counted as Markdown.
+  assert.deepEqual(out.unattached, ["Three"]);
+  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith([attachmentOf(1), attachmentOf(2), attachmentOf(4), attachmentOf(5)]));
+});
+
+test("references that are not files, or do not resolve, are reported; a repeated one is attached once", async () => {
+  const f = fake(handOffScript(library({
+    "f-notes": stored("att-notes", "notes.md", KiB, { versionNumber: 3 }),
+    "f-logo": stored("att-logo", "logo.png", 5 * KiB),
+    "f-nofile": { artifact: { id: "att-nofile" } },
+    "f-archived": { artifact: { id: "att-archived", archived: true }, file: { name: "old.md", size: 10, versionNumber: 2 } },
+  })));
+  const out = await handOffDescription(f.execute, {
+    artifactId: "a1", statement: "Summarise these", requestId: "req-0010",
+    sources: [
+      reference("f-notes", "Notes"),
+      { kind: "concept_row", ref: "v1:crm:contact#c1", label: "A contact" },
+      { kind: "query", ref: "contacts()", label: "All contacts" },
+      reference("f-logo", "Logo"),
+      reference("f-notes", "Notes, listed twice"),
+      reference("f-gone", "Nothing resolves"),
+      reference("f-nofile", "No file row"),
+      reference("f-archived", "Archived"),
+    ],
+  });
+  assert.deepEqual(out, { revisionId: "req-0010-revision", unattached: ["A contact", "All contacts", "Nothing resolves", "No file row", "Archived"] });
+  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith([
+    { artifactId: "att-notes", version: 3, revision: "file:3" }, { artifactId: "att-logo", version: 1, revision: "file:1" },
+  ]));
+  // Sources that are not files cannot be attached and are never looked up.
+  assert.equal(f.calls.some(c => /contact/.test(c.call)), false, "a source that is not a file was looked up");
+});
+
+test("a reference listed twice is attached once, or reported once, and the same file under two ids counts once", async () => {
+  const notes = stored("att-notes", "notes.md", KiB);
+  const { f, out } = await handOffWith(
+    { "f-notes": notes, "v1:library:file:f-notes": notes, "f-spec": stored("att-spec", "spec.pdf", KiB) },
+    [reference("f-notes", "Notes"), reference("f-notes", "Notes again"), reference("v1:library:file:f-notes", "Notes by its full id"),
+      reference("f-spec", "Spec"), reference("f-spec", "Spec again")]);
+  assert.deepEqual(out, { revisionId: "req-0010-revision", unattached: ["Spec"] });
+  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, commentWith([attachmentOf("notes")]));
+});
+
+test("a reference with no label is reported by what it points at", async () => {
+  const { out } = await handOffWith({ "f-spec": stored("att-spec", "spec.pdf", KiB) }, [
+    reference("f-spec", "  "), { kind: "concept_row", ref: "v1:crm:contact#c1", label: "" },
+  ]);
+  assert.deepEqual(out.unattached, ["f-spec", "v1:crm:contact#c1"]);
+});
+
+// A refusal the Library words about attachments (integrations/library/review_attachments.go).
+const ATTACHMENT_REFUSAL = "attach a nonempty UTF-8 Markdown file up to 32 KiB";
+const DOCUMENT_REFUSAL = "the document changed; reopen its current revision before adding feedback";
+
+test("when the Library refuses an attachment the comment is sent once more without them, and they are reported", async () => {
+  // Only the bytes show that a .md file is not UTF-8, or that a .png will not decode,
+  // and the refusal does not say which attachment it meant: so none go the second time.
+  const { f, out } = await handOffWith(
+    { "f-notes": stored("att-notes", "notes.md", 2 * KiB), "f-spec": stored("att-spec", "spec.pdf", KiB), "f-shot": stored("att-shot", "shot.png", 40 * KiB) },
+    [reference("f-notes", "Notes"), reference("f-spec", "Spec"), reference("f-shot", "Screenshot")],
+    { libraryAddDocumentComment: call => {
+      if (/attachments: \[\{/.test(call)) throw new Error(ATTACHMENT_REFUSAL);
+      return [{ saved: true, commentId: "cm1" }];
+    } });
+  assert.deepEqual(out, { revisionId: "req-0010-revision", unattached: ["Notes", "Spec", "Screenshot"] });
+  assert.deepEqual(f.named("libraryAddDocumentComment").map(c => c.call), [commentWith([attachmentOf("notes"), attachmentOf("shot")]), commentWith([])]);
+  assert.equal(f.named("libraryRequestDocumentRevision")[0]?.call, buildLibraryRequestDocumentRevision({
+    artifactId: "a1", expectedVersion: 1, expectedRevision: "file:1", commentIds: ["cm1"], instruction: "", requestId: "req-0010-revision",
+  }));
+});
+
+test("a refusal that is not about an attachment is not retried without them", async () => {
+  const { f, out } = await handOffWith({ "f-notes": stored("att-notes", "notes.md", KiB) }, [reference("f-notes", "Notes")],
+    { libraryAddDocumentComment: () => { throw new Error(DOCUMENT_REFUSAL); } });
+  assert.deepEqual(out, { revisionFailure: FAILURE_PREFIX + DOCUMENT_REFUSAL });
+  assert.equal(f.named("libraryAddDocumentComment").length, 1);
+  assert.equal(f.named("libraryRequestDocumentRevision").length, 0);
+});
+
+test("with no attachment to take off there is nothing to retry", async () => {
+  const { f, out } = await handOffWith({ "f-spec": stored("att-spec", "spec.pdf", KiB) }, [reference("f-spec", "Spec")],
+    { libraryAddDocumentComment: () => { throw new Error(ATTACHMENT_REFUSAL); } });
+  assert.equal(out.revisionFailure, FAILURE_PREFIX + ATTACHMENT_REFUSAL);
+  assert.equal(f.named("libraryAddDocumentComment").length, 1);
+});
+
+test("if the comment fails again without its attachments, that failure is the one reported", async () => {
+  let attempts = 0;
+  const { f, out } = await handOffWith({ "f-notes": stored("att-notes", "notes.md", KiB) }, [reference("f-notes", "Notes")],
+    { libraryAddDocumentComment: () => { throw new Error(++attempts === 1 ? ATTACHMENT_REFUSAL : DOCUMENT_REFUSAL); } });
+  assert.deepEqual(out, { revisionFailure: FAILURE_PREFIX + DOCUMENT_REFUSAL });
+  assert.equal(f.named("libraryAddDocumentComment").length, 2);
+  assert.equal(f.named("libraryRequestDocumentRevision").length, 0);
+});
+
+// ---------------------------------------------------------------------------
 // materialize: the hand-off for a described Markdown request
 // ---------------------------------------------------------------------------
 
@@ -443,11 +641,11 @@ function describedScript(extra: Record<string, Answer> = {}): Record<string, Ans
   return handOffScript({
     composeMaterialize: [[{ compositionId: "c1" }]],
     compositionById: [[{ status: "ready", outputFileId: "f1", name: "Brief" }]],
-    libraryArtifactForFile: call => {
-      const id = fileIdIn(call);
-      return id === "f1" ? [{ id: "a1", title: "Brief.md" }] : id === "f-notes" ? [{ id: "att-notes" }] : [];
-    },
-    libraryFileById: call => fileIdIn(call) === "f-notes" ? [{ name: "notes.md", versionNumber: 2 }] : [],
+    ...library({
+      f1: { artifact: { id: "a1", title: "Brief.md" } },
+      "f-notes": stored("att-notes", "notes.md", 1200, { versionNumber: 2 }),
+      "f-spec": stored("att-spec", "spec.pdf", 5000),
+    }),
     ...extra,
   });
 }
@@ -471,6 +669,13 @@ test("materialize on a described Markdown request returns the revision once the 
   }));
   // The request the server sees is the person's own words, filed blank there.
   assert.match(f.calls[0]?.call ?? "", /statement:\s*"A one page brief for the launch"/);
+});
+
+test("materialize puts the references the Library could not take on its result", async () => {
+  const f = fake(describedScript());
+  const sources: MaterializeSource[] = [reference("f-notes", "Notes"), reference("f-spec", "Spec")];
+  const out = await materialize({ execute: f.execute, intervalMs: 1 }, { ...described, sources });
+  assert.deepEqual(out, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md", revisionId: "req-0004-revision", unattached: ["Spec"] });
 });
 
 test("materialize waits for the Files entry before it hands the description over", async () => {

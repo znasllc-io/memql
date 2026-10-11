@@ -36,6 +36,14 @@
 // alone never does: the OS follows on its own live feed and calls
 // handOffDescription itself.
 //
+// REFERENCES THE LIBRARY CANNOT ATTACH ARE REPORTED, NOT FATAL. The Library
+// takes only Markdown (up to 32 KiB) and images as review attachments, and
+// refuses a comment that carries anything else. So the hand-off attaches the
+// library_file sources the Library accepts, opens the revision with them, and
+// returns every other reference (a PDF, a query, a file it cannot find) by label
+// in `unattached` for the caller to show: "2 references were not attached: only
+// Markdown and images can be".
+//
 // handOffDescription derives its two Library request ids from the request id
 // (`<id>-comment`, `<id>-revision`), so a retry returns the first receipts. The
 // Library accepts only letters, digits, "-" and "_" (8 to 120 characters) as a
@@ -70,9 +78,11 @@ export interface MaterializePorts { execute: MaterializeExecute; signal?: AbortS
 /**
  * The file that was made. `revisionId` (the Library request that is writing the
  * document) or `revisionFailure` (why its description could not be sent) is set
- * only by materialize, and only for a described Markdown request.
+ * only by materialize, and only for a described Markdown request. So is
+ * `unattached`, the labels of the references that went without being attached;
+ * it is absent when there are none.
  */
-export interface MaterializeResult { compositionId: string; fileId: string; artifactId: string; name: string; revisionId?: string; revisionFailure?: string }
+export interface MaterializeResult { compositionId: string; fileId: string; artifactId: string; name: string; revisionId?: string; revisionFailure?: string; unattached?: string[] }
 /** The person (or something else) stopped the composition. Callers can ignore it. */
 export class MaterializeCancelled extends Error {}
 /** The composition failed, or its run stopped before finishing it. The message is for the person. */
@@ -94,6 +104,24 @@ const FIRST_REVISION = "file:1";
 const WHOLE_DOCUMENT = { kind: "document", quote: "Entire document" };
 const HAND_OFF_ID = /^[A-Za-z0-9_-]{1,111}$/;
 const HAND_OFF_FAILED = "The description could not be sent for writing: ";
+
+// What the Library takes as a review attachment (integrations/library/
+// review_attachments.go). A comment carrying anything else is refused whole, so
+// the hand-off applies the rules that need only a file's name and size. The
+// Library still decides what only the bytes can show: Markdown that is UTF-8, a
+// picture it can decode within 24 million pixels.
+const MAX_ATTACHMENTS = 8; // reviewAttachmentCount
+const MAX_ATTACHMENT_BYTES = 16 << 20; // reviewAttachmentBytes: all the attachments together
+const MAX_MARKDOWN_BYTES = 32 << 10; // reviewMarkdownBytes: one Markdown file
+const MAX_MARKDOWN_TOTAL_BYTES = 64 << 10; // all the Markdown together
+const MAX_IMAGE_BYTES = 8 << 20; // one image
+const IMAGE_EXTENSIONS = new Set([".png", ".jpeg", ".gif", ".webp"]); // ".jpg" is read as ".jpeg"
+// Every refusal the Library words about an attachment says so ("attach a ...",
+// "an attachment changed ...", "attachments exceed ..."). One about the document
+// or the comment does not, and sending that again without attachments would only
+// repeat it.
+const ATTACHMENT_REFUSAL = /attach/i;
+const UNNAMED = "Unnamed reference";
 
 const first = (rows: Row[]): Row | null => rows[0] ?? null;
 // The server trims these, so a value of only spaces is no value at all.
@@ -220,51 +248,128 @@ export async function followComposition(ports: MaterializePorts, compositionId: 
 }
 
 export interface HandOffRequest { artifactId: string; statement: string; sources?: MaterializeSource[]; requestId: string }
-export interface HandOffResult { revisionId?: string; revisionFailure?: string }
+/**
+ * `revisionId` when the revision was opened, `revisionFailure` when it could not
+ * be; with `revisionId`, `unattached` lists (by label) the references that went
+ * without being attached, and is absent when there are none.
+ */
+export interface HandOffResult { revisionId?: string; revisionFailure?: string; unattached?: string[] }
 
 // The shape a review comment's attachment takes (editors/productivity
 // markdownEditor.ts): the artifact, and the version and revision the Library
 // holds for it right now. A type alias rather than an interface so it is
 // assignable to the builder's open `Record<string, unknown>[]`.
 type ReviewAttachment = { artifactId: string; version: number; revision: string };
+// What a reference would be as an attachment, and what it adds to the Library's totals.
+type Candidate = { attachment: ReviewAttachment; markdown: boolean; bytes: number };
+// A reference as the person listed it, and the attachment it became, if any.
+type Reference = { label: string; attachment: ReviewAttachment | null };
 
-// One attachment per library_file source whose Files entry and file resolve, in
-// the order given, each file once (the Library refuses a repeat). Sources that
-// are not files are not attachments. One that does not resolve is left out; the
-// Library decides whether what remains can be attached.
-async function reviewAttachments(execute: MaterializeExecute, sources: MaterializeSource[]): Promise<ReviewAttachment[]> {
-  const files = sources.filter(source => source.kind === "library_file" && has(source.ref));
-  const resolved = await Promise.all(files.map(async (source): Promise<ReviewAttachment | null> => {
-    const fileId = source.ref.trim();
-    const [artifactRows, fileRows] = await Promise.all([
-      execute("libraryArtifactForFile", buildLibraryArtifactForFile({ fileId })),
-      execute("libraryFileById", buildLibraryFileById({ fileId })),
-    ]);
-    const artifact = first(artifactRows);
-    const file = first(fileRows);
-    const artifactId = rowString(artifact, "id");
-    if (!artifactId || !file || artifact?.["archived"] === true || file["archived"] === true) return null;
-    // As Documents.read does: a file with no version number is on its first.
-    const version = rowNumber(file, "versionNumber") > 0 ? rowNumber(file, "versionNumber") : FIRST_VERSION;
-    return { artifactId, version, revision: `file:${version}` };
-  }));
-  const attachments: ReviewAttachment[] = [];
-  for (const attachment of resolved) {
-    if (attachment && !attachments.some(kept => kept.artifactId === attachment.artifactId)) attachments.push(attachment);
-  }
-  return attachments;
+// Go's path.Ext, which the Library applies to a file's name: the suffix from the
+// last "." of the last path element, or "" when there is none.
+function extension(name: string): string {
+  const element = name.slice(name.lastIndexOf("/") + 1);
+  const dot = element.lastIndexOf(".");
+  return dot < 0 ? "" : element.slice(dot);
 }
+
+// What the Library will take a file of this name and size for, or "" when it
+// will take it for nothing. A size the row does not give is not held against it.
+function attachmentKind(name: string, size: number | null): "markdown" | "image" | "" {
+  const ext = extension(name).toLowerCase();
+  const fits = (limit: number) => size === null || (size > 0 && size <= limit);
+  if (ext === ".md") return fits(MAX_MARKDOWN_BYTES) ? "markdown" : "";
+  if (IMAGE_EXTENSIONS.has(ext === ".jpg" ? ".jpeg" : ext)) return fits(MAX_IMAGE_BYTES) ? "image" : "";
+  return "";
+}
+
+// The source as an attachment, or null when it cannot be one: not a file, a file
+// that does not resolve or is archived, or a type or size the Library refuses.
+async function lookUp(execute: MaterializeExecute, source: MaterializeSource): Promise<Candidate | null> {
+  if (source.kind !== "library_file" || !has(source.ref)) return null;
+  const fileId = source.ref.trim();
+  const [artifactRows, fileRows] = await Promise.all([
+    execute("libraryArtifactForFile", buildLibraryArtifactForFile({ fileId })),
+    execute("libraryFileById", buildLibraryFileById({ fileId })),
+  ]);
+  const artifact = first(artifactRows);
+  const file = first(fileRows);
+  const artifactId = rowString(artifact, "id");
+  if (!artifactId || !file || artifact?.["archived"] === true || file["archived"] === true) return null;
+  const stored = file["size"];
+  const size = typeof stored === "number" && Number.isFinite(stored) ? stored : null;
+  const kind = attachmentKind(rowString(file, "name"), size);
+  if (!kind) return null;
+  // As Documents.read does: a file with no version number is on its first.
+  const version = rowNumber(file, "versionNumber") > 0 ? rowNumber(file, "versionNumber") : FIRST_VERSION;
+  return { attachment: { artifactId, version, revision: `file:${version}` }, markdown: kind === "markdown", bytes: size ?? 0 };
+}
+
+const labelOf = (source: MaterializeSource): string => (source.label ?? "").trim() || (source.ref ?? "").trim() || UNNAMED;
+
+// Every reference in the order given, each with the attachment it becomes or
+// none. A reference listed twice counts once, and so does one file reached
+// through two ids, because the Library refuses a repeat and nothing is lost by
+// sending it once. Attachments are taken in order while they stay inside the
+// Library's limits; one that would pass a limit is left off and reported, and a
+// later, smaller one may still fit.
+async function chooseReferences(execute: MaterializeExecute, sources: MaterializeSource[]): Promise<Reference[]> {
+  const seen = new Set<string>();
+  const distinct = sources.filter(source => {
+    if (!has(source.ref)) return true;
+    const key = `${source.kind} ${source.ref.trim()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const found = await Promise.all(distinct.map(source => lookUp(execute, source)));
+  const references: Reference[] = [];
+  const taken = new Set<string>();
+  let count = 0;
+  let bytes = 0;
+  let markdownBytes = 0;
+  for (const [index, source] of distinct.entries()) {
+    const candidate = found[index] ?? null;
+    let attachment: ReviewAttachment | null = null;
+    if (candidate) {
+      if (taken.has(candidate.attachment.artifactId)) continue;
+      if (count < MAX_ATTACHMENTS && bytes + candidate.bytes <= MAX_ATTACHMENT_BYTES &&
+          (!candidate.markdown || markdownBytes + candidate.bytes <= MAX_MARKDOWN_TOTAL_BYTES)) {
+        taken.add(candidate.attachment.artifactId);
+        count++;
+        bytes += candidate.bytes;
+        if (candidate.markdown) markdownBytes += candidate.bytes;
+        attachment = candidate.attachment;
+      }
+    }
+    references.push({ label: labelOf(source), attachment });
+  }
+  return references;
+}
+
+const attachmentsOf = (references: Reference[]): ReviewAttachment[] =>
+  references.flatMap(reference => (reference.attachment ? [reference.attachment] : []));
+const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /**
  * Gives a described file's description to the Library's revision workflow, as
  * the person: a document-level comment carrying the statement (the library_file
- * sources attached), then a request to write the document from it. The same
- * calls VS Code's "Describe document" makes (editors/productivity documents.ts
- * comment() and requestRevision()).
+ * sources the Library accepts attached), then a request to write the document
+ * from it. The same calls VS Code's "Describe document" makes
+ * (editors/productivity documents.ts comment() and requestRevision()).
  *
  * Returns `{ revisionId }`, the Library request id that follows the revision, or
  * `{ revisionFailure }` with the reason. NEVER THROWS: the file exists and is
  * good, and is never removed because a later step failed.
+ *
+ * A reference the Library cannot attach does not stop the hand-off: the
+ * revision opens with the ones it can, and the labels of the rest come back in
+ * `unattached` (absent when there are none) for the caller to show. That is
+ * every reference that is not a file, that does not resolve, or whose name or
+ * size the Library refuses (it takes Markdown up to 32 KiB and images, eight at
+ * most, within its totals). What only the bytes can show is the Library's to
+ * judge: if it refuses the attachments, the comment is sent once more without
+ * them, under the same request id, and all of them are reported.
  *
  * The comment's id comes from the comment's own receipt. The review listing
  * cannot stand in for it: it withholds each comment's request id.
@@ -274,11 +379,19 @@ export async function handOffDescription(execute: MaterializeExecute, request: H
     const { artifactId, requestId } = request;
     if (!has(request.statement)) throw new Error("there is no description to send.");
     if (!HAND_OFF_ID.test(requestId)) throw new Error("request ids for a description use letters, digits, - and _ (at most 111 characters).");
-    const attachments = await reviewAttachments(execute, request.sources ?? []);
-    const comment = first(await execute("libraryAddDocumentComment", buildLibraryAddDocumentComment({
+    let references = await chooseReferences(execute, request.sources ?? []);
+    const postComment = async (): Promise<Row | null> => first(await execute("libraryAddDocumentComment", buildLibraryAddDocumentComment({
       artifactId, expectedVersion: FIRST_VERSION, expectedRevision: FIRST_REVISION,
-      anchor: WHOLE_DOCUMENT, body: request.statement, requestId: `${requestId}-comment`, attachments,
+      anchor: WHOLE_DOCUMENT, body: request.statement, requestId: `${requestId}-comment`, attachments: attachmentsOf(references),
     })));
+    let comment: Row | null;
+    try {
+      comment = await postComment();
+    } catch (error) {
+      if (attachmentsOf(references).length === 0 || !ATTACHMENT_REFUSAL.test(errorText(error))) throw error;
+      references = references.map(({ label }) => ({ label, attachment: null }));
+      comment = await postComment();
+    }
     const commentId = rowString(comment, "commentId");
     if (!comment?.["saved"] || !commentId) throw new Error("the cluster did not confirm the description. Retry to recover it.");
     const revisionId = `${requestId}-revision`;
@@ -287,9 +400,10 @@ export async function handOffDescription(execute: MaterializeExecute, request: H
       commentIds: [commentId], instruction: "", requestId: revisionId,
     })));
     if (!revision?.["runId"] || !revision["proposal"]) throw new Error("the cluster did not confirm the writing request. Retry to recover it.");
-    return { revisionId };
+    const unattached = references.filter(reference => reference.attachment === null).map(reference => reference.label);
+    return unattached.length > 0 ? { revisionId, unattached } : { revisionId };
   } catch (error) {
-    return { revisionFailure: HAND_OFF_FAILED + (error instanceof Error ? error.message : String(error)) };
+    return { revisionFailure: HAND_OFF_FAILED + errorText(error) };
   }
 }
 
@@ -297,8 +411,9 @@ export async function handOffDescription(execute: MaterializeExecute, request: H
  * Creates a file: starts the composition, follows it to its Files entry, and,
  * for a described Markdown request, hands the description to the Library's
  * revision workflow, returning its `revisionId` or `revisionFailure` on the
- * result. Resolves once the FILE exists even when the hand-off failed. See the
- * header for the request id rules.
+ * result, with the references it could not attach in `unattached`. Resolves once
+ * the FILE exists even when the hand-off failed. See the header for the request
+ * id rules.
  */
 export async function materialize(ports: MaterializePorts, request: MaterializeRequest): Promise<MaterializeResult> {
   if (ports.signal?.aborted) throw new MaterializeCancelled(STOPPED);
