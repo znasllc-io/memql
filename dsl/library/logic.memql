@@ -1,7 +1,10 @@
 /// Validate review evidence against the candidate, never an attached older draft.
 /// Presence is mechanical; correctness and missing requirements remain model judgments.
 logic libraryRevisionReviewGrounding {
- args { document string! assessment object! }
+ args {
+  document string!
+  assessment object!
+ }
  if args.assessment.verdict == "satisfied" && args.assessment.findings.count() == 0 {
   return {valid: true, verdict: "satisfied", details: ""}
  }

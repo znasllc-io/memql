@@ -407,6 +407,32 @@ func KnowledgeRefreshEligibleBuild(args KnowledgeRefreshEligibleArgs) string {
 	return "logic knowledgeRefreshEligible()"
 }
 
+// LibraryRevisionReviewGrounding -- Validate review evidence against the candidate, never an attached older draft. Presence is mechanical; correctness and missing requirements remain model judgments.
+type LibraryRevisionReviewGroundingArgs struct {
+	Document   string
+	Assessment map[string]any
+}
+
+// LibraryRevisionReviewGrounding calls the engine logic libraryRevisionReviewGrounding.
+func (qc *QueryClient) LibraryRevisionReviewGrounding(ctx context.Context, args LibraryRevisionReviewGroundingArgs) (*Result, error) {
+	call := LibraryRevisionReviewGroundingBuild(args)
+	return qc.executeNamed(ctx, "libraryRevisionReviewGrounding", call)
+}
+
+func LibraryRevisionReviewGroundingBuild(args LibraryRevisionReviewGroundingArgs) string {
+	var b strings.Builder
+	b.WriteString("logic libraryRevisionReviewGrounding(")
+	b.WriteString("document: ")
+	b.WriteString(quoteMemQL(args.Document))
+	if b.Len() > 37 {
+		b.WriteString(", ")
+	}
+	b.WriteString("assessment: ")
+	b.WriteString(renderMemQLValue(args.Assessment))
+	b.WriteString(")")
+	return b.String()
+}
+
 // MagicLinkExpirySweep -- Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any subsequent click is idempotently rejected by the consume handler's own expiresAt guard.
 type MagicLinkExpirySweepArgs struct {
 	Event map[string]any
