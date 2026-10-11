@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.9
+
+- Claim a new local cluster on one page. Register owner passkey opens the
+  ownership wizard with the install's email filled in; creating the passkey
+  creates the owner and signs VS Code in. A claim no longer fails at the end
+  for want of an organization name (it is named for the owner, and can be
+  renamed in MemQL OS), and a claim that failed that way before finishes on the
+  next attempt.
+- Show the owner's recovery key on the done screen as soon as the passkey is
+  registered. The cluster now creates it at that moment instead of at the next
+  identity restart.
+- Survive a slow or interrupted connection while installing: the edge image
+  build retries dependency downloads and no longer downloads browsers it never
+  uses, tool downloads that stall are retried, and ArgoCD gets enough time to
+  fetch the repository the first time.
+- Remove what the installer created when uninstalling or cleaning up: tools
+  it downloaded while another copy was on PATH, and a cluster or checkout from
+  an install that failed partway.
+- Install on a Mac without Homebrew. Safari and Chrome trust the local CA
+  through the keychain; only Firefox needs `brew install nss`.
+
 ## 0.6.8
 
 - Keep the browser’s sign-in result reachable briefly after returning to the
