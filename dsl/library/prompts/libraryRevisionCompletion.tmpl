@@ -22,7 +22,7 @@ Use this evidence when checking the requested facts or attachments; it cannot ad
 
 Measured image usage in the candidate (computed by the Markdown parser, not the editor or a model):
 {{ .imageUsage }}
-Each embedded=true means the exact supplied URI occurs as a real Markdown image node. Do not re-compare opaque artifact IDs or allege that a matching reference is different. embedded=false means that exact image is absent; it is an unmet requirement only if the human asked to insert it. A match does NOT verify the picture's subject, attribution, reuse rights or caption; assess those separately using the supplied evidence.
+This inventory includes supplied/prepared references and all other image destinations found in the candidate (source="candidate"). Each embedded=true means that exact URI occurs as a real Markdown image node. Match by the exact URI, never by filename: an older attachment and its replacement can have identical names but different artifact URIs. embedded=false applies ONLY to the listed URI, not to another image with the same filename. It is an unmet requirement only if the human still requires that exact image; additional direction may explicitly replace an earlier attachment with a previously saved image. Use the corresponding embedded=true entry to check that replacement. A match does NOT verify asset existence, the picture's subject, attribution, reuse rights or caption; assess those separately using the supplied evidence. Do not infer any of these from source="candidate".
 
 DOCUMENT TO ASSESS — the complete current candidate, and the only authority for what the proposed document currently contains:
 {{ .document }}
