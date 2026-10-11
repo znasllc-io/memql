@@ -124,6 +124,7 @@ func (s *Server) handleBootstrapRegister(w http.ResponseWriter, r *http.Request,
 		s.bootstrapError(w, err)
 		return
 	}
+	s.ownerClaimed(ctx)
 	if err := s.StartBrowserSessionFor(w, r, row.UserID, row.Settings.BootstrapEmail, "owner_passkey_setup_completed"); err != nil {
 		s.bootstrapError(w, err)
 		return
@@ -282,5 +283,15 @@ func (s *Server) resumeBootstrapAfterAssertion(ctx context.Context, userID strin
 		return err
 	}
 	defer release()
-	return s.finishBootstrapLocked(ctx, row)
+	if err := s.finishBootstrapLocked(ctx, row); err != nil {
+		return err
+	}
+	s.ownerClaimed(ctx)
+	return nil
+}
+
+func (s *Server) ownerClaimed(ctx context.Context) {
+	if s.OnOwnerClaimed != nil {
+		s.OnOwnerClaimed(context.WithoutCancel(ctx))
+	}
 }

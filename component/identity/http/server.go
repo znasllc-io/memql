@@ -69,6 +69,16 @@ type Server struct {
 	// returns nothing: it must never fail a sign-in that has succeeded.
 	OnUserProvisioned func(ctx context.Context, userId, email string, emailVerified bool)
 
+	// OnOwnerClaimed fires after an ownership claim completes -- the first owner
+	// passkey is registered and the cluster is stamped claimed. The app wires
+	// the recovery-key invariant here (memql#3965): it otherwise ran only when
+	// the identity node STARTED, so a cluster claimed by passkey had no
+	// break-glass key, and `memql recovery-key claim` answered "restart the
+	// identity node", until the next restart. Idempotent, called on every
+	// completed finish; nil on a harness with nothing to mint, and it must
+	// never fail a claim that has succeeded.
+	OnOwnerClaimed func(ctx context.Context)
+
 	// SignInNotifier delivers the new-sign-in email (memql#4305), fired
 	// from createSessionRow -- the one place a v1:identity:authSession row
 	// is created, so every factor is covered by one hook. Nil disables the

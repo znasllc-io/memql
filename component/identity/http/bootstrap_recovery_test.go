@@ -244,12 +244,15 @@ func TestLocalInstallerClaimWithNoOrganizationNameCompletes(t *testing.T) {
 		}
 	}
 	require.NotEmpty(t, token)
+	claimed := 0
+	first.OnOwnerClaimed = func(context.Context) { claimed++ }
 	begin := bootstrapRegister(t, second, token, false, map[string]string{})
 	require.Equal(t, 200, begin.Code, begin.Body.String())
 	challenge := decodeBegin(t, begin)
 	a := newHTTPSoftwareAuthenticator(t)
 	done := bootstrapRegister(t, first, token, true, WebAuthnRegisterFinishRequest{ChallengeId: challenge.ChallengeId, Credential: a.create(challenge.CreationOptions.Response.Challenge.String())})
 	require.Equal(t, 200, done.Code, done.Body.String())
+	require.Equal(t, 1, claimed, "a completed claim evaluates the recovery-key invariant at once")
 	require.Equal(t, "Ada Owner", engine.organization, "a claim with no organization name is named for its owner")
 	require.Equal(t, "Ada Owner", engine.settings["brandName"])
 	require.NotEmpty(t, engine.settings["bootstrappedAt"])
@@ -279,15 +282,20 @@ func TestLocalClaimFrozenWithNoOrganizationNameFinishesOnRetry(t *testing.T) {
 	require.Equal(t, 200, begin.Code, begin.Body.String())
 	challenge := decodeBegin(t, begin)
 	a := newHTTPSoftwareAuthenticator(t)
+	claimed := 0
+	first.OnOwnerClaimed = func(context.Context) { claimed++ }
+	second.OnOwnerClaimed = first.OnOwnerClaimed
 	engine.fail = "configureSelfAccount"
 	failed := bootstrapRegister(t, first, token, true, WebAuthnRegisterFinishRequest{ChallengeId: challenge.ChallengeId, Credential: a.create(challenge.CreationOptions.Response.Challenge.String())})
 	require.NotEqual(t, 200, failed.Code)
+	require.Zero(t, claimed, "an unfinished claim has no owner to mint a recovery key for")
 	// What the earlier code left behind: proof saved, organization name blank.
 	_, err := first.Store.DirectDB().Exec(`UPDATE identity_bootstrap_enrollment SET payload = jsonb_set(payload, '{Settings,BrandName}', '""'::jsonb)`)
 	require.NoError(t, err)
 	engine.fail = ""
 	resumed := bootstrapRegister(t, second, token, true, map[string]string{})
 	require.Equal(t, 200, resumed.Code, resumed.Body.String())
+	require.Equal(t, 1, claimed)
 	require.Equal(t, "Ada Owner", engine.organization)
 	require.NotEmpty(t, engine.settings["bootstrappedAt"])
 }
