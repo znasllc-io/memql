@@ -271,7 +271,7 @@ test("the page reads the version preview and offers a cut per bump, naming each 
     assert.equal(h.dispatcher.calls("suggestNextVersion").length, 1, "previewNextVersion was never called");
     // "Prepare" is the page's word for a cut; the bump is the quiet note beside it.
     for (const [bump, version] of [["patch", "1.4.3"], ["minor", "1.5.0"], ["major", "2.0.0"]]) {
-      const v = version.replace(/\./g, "\\.");
+      const v = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       assert.match(
         h.page.html,
         new RegExp(`data-act="deploy" data-value="cutVersion:${bump}:${v}"[^>]*><span class="dp-row-label">Prepare ${v}</span><span class="dp-row-desc">${bump}<`),

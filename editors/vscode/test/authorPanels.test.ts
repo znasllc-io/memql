@@ -53,7 +53,7 @@ function lastPanel(): StubWebviewPanel {
 function visible(html: string): string {
   const body = html.slice(html.indexOf("<body"));
   return body
-    .replace(/<script[\s\S]*?<\/script>/g, "")
+    .replace(/<script[\s\S]*?<\/script[^>]*>/gi, " ")
     .replace(/<span class="mq-sr">[^<]*<\/span>/g, "")
     .replace(/<[^>]+>/g, " ")
     .replace(/&#39;/g, "'")

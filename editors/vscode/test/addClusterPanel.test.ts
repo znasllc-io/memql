@@ -1665,7 +1665,7 @@ test("a connected cluster stays on the page with Sign in, not a toast", async ()
     type(h, "connectDomain", "staging.example.com");
     h.post({ type: "connect" });
     await until(() => /data-act="signIn"/.test(h.html()), "the added screen");
-    assert.match(h.html(), /api\.staging\.example\.com:443/);
+    assert.match(h.html(), /<dt>Address<\/dt><dd class="mq-mono">api\.staging\.example\.com:443<\/dd>/);
     assert.deepEqual(recorded.infos, [], "no toast: the page carries the next act");
     assert.match(fs.readFileSync(h.clustersPath, "utf8"), /name: staging/);
     h.post({ type: "signIn" });
