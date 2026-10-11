@@ -140,7 +140,29 @@ var pipelinesSizing = map[string]struct {
 }{
 	"cloud":       {ceiling: "2", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "8Gi", requestDisk: "1Gi"},
 	"cloud-entry": {ceiling: "1", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "8Gi", requestDisk: "1Gi"},
-	"local":       {ceiling: "1", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "20Gi", requestDisk: "1Gi"},
+	"local":       {ceiling: "6", limitCPU: "2", limitMemory: "4Gi", requestCPU: "250m", requestMemory: "512Mi", limitDisk: "20Gi", requestDisk: "1Gi"},
+}
+
+// The local overlay pins every step to the build node `make up` creates
+// (scripts/k3d/up.sh, ensure_build_node). The cloud overlays name no pool, so
+// their steps keep unconstrained Linux placement until a cloud build pool is
+// approved (design record 2026-10-11-pipelines-local-green-and-fast, D7).
+func TestOnlyTheLocalOverlaySelectsTheBuildPool(t *testing.T) {
+	for _, overlay := range pipelinesOverlays {
+		t.Run(overlay, func(t *testing.T) {
+			var cm struct {
+				Data map[string]string `yaml:"data"`
+			}
+			theOne(t, renderedObjects(t, overlay), "ConfigMap", pipelinesConfigMap).decode(t, &cm)
+			want := ""
+			if overlay == "local" {
+				want = "builds"
+			}
+			if got := cm.Data["MEMQL_PIPELINES_NODE_POOL"]; got != want {
+				t.Errorf("MEMQL_PIPELINES_NODE_POOL is %q, want %q", got, want)
+			}
+		})
+	}
 }
 
 // wantRunnerGrants is the runner's whole grant, as group/resource -> verbs:
