@@ -32,6 +32,8 @@ async function render() {
   }
 }
 window.addEventListener("message", async event => {
+  // VS Code relays host messages from this webview's own origin; a message from any other origin is a frame posting into this window.
+  if (event.origin !== window.origin) return;
   if(event.data?.type === "problem") { renderProblem(error,event.data,value=>vscode.postMessage(value)); return; }
   if (event.data?.type !== "document" || !Array.isArray(event.data.bytes)) return;
   const currentDocument = ++documentRevision;
