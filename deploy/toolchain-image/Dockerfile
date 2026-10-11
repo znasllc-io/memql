@@ -104,7 +104,7 @@ FROM docker:29.8.2-cli@sha256:b1805116a6a86cc591b5d5f60a910a0715cdcc9d18d866ad68
 # measured from the downloaded assets and matching the digests GitHub's
 # release API reports for them. Bumping PROTOC_VERSION means both: a stale
 # checksum fails `sha256sum -c` below, loudly.
-FROM --platform=$BUILDPLATFORM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS protoc-dist
+FROM --platform=$BUILDPLATFORM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS protoc-dist
 
 ARG PROTOC_VERSION=33.4
 ARG PROTOC_SHA256_AMD64=c0040ea9aef08fdeb2c74ca609b18d5fdbfc44ea0042fcfbfb38860d35f7dd66
@@ -129,7 +129,7 @@ RUN set -eux; \
 # ------------------------------------------------------------------------------
 # The image.
 # ------------------------------------------------------------------------------
-FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 
 # bash, coreutils and tar are already in the base; they are named because the
 # step contract depends on them (the step wrapper frames artifacts with
