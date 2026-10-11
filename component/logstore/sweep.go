@@ -631,7 +631,7 @@ func (p *pgSource) page(ctx context.Context, day time.Time, nodeType string, aft
 	if !afterAt.IsZero() {
 		sel = sel.Where("(occurred_at, id) > (?, ?)", afterAt.UTC(), afterId)
 	}
-	if err := sel.OrderExpr("occurred_at ASC, id ASC").Limit(limit).Scan(ctx); err != nil {
+	if err := sel.OrderExpr("occurred_at ASC, id ASC").Limit(int64(limit)).Scan(ctx); err != nil {
 		return nil, fmt.Errorf("logstore: page %s/%s: %w", day.Format("2006-01-02"), nodeType, err)
 	}
 	return rows, nil

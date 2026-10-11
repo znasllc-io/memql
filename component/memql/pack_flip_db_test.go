@@ -43,7 +43,7 @@ func packStateVersions(t *testing.T, eng *MemQLEngine, domain string) int {
 	if err != nil {
 		t.Fatalf("count packState %s: %v", domain, err)
 	}
-	return n
+	return int(n) // bun 1.3's Count is int64; a test's row count fits
 }
 
 func TestADeveloperFlipsAStorefrontPackThatHasNoRow(t *testing.T) {

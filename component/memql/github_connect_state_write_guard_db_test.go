@@ -41,7 +41,7 @@ func connectStateRowCount(t *testing.T, db *bun.DB, id string) int {
 	if err != nil {
 		t.Fatalf("count %s rows at %s: %v", connectStateConcept, id, err)
 	}
-	return n
+	return int(n) // bun 1.3's Count is int64; a test's row count fits
 }
 
 func uniqueConnectStateId(name string) string {

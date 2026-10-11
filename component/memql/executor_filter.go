@@ -562,7 +562,7 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 			q = q.OrderExpr(expr)
 		}
 
-		return q.Limit(limit)
+		return q.Limit(int64(limit))
 	}
 
 	fetchTarget := target
@@ -3041,7 +3041,7 @@ func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExp
 		fetchTarget = e.config.MaxResults
 	}
 
-	query = query.Limit(fetchTarget)
+	query = query.Limit(int64(fetchTarget))
 
 	if err := query.Scan(ctx); err != nil {
 		return nil, err

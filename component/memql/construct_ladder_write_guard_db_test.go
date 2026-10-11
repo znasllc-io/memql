@@ -127,7 +127,7 @@ func constructVersionCount(t *testing.T, db *bun.DB, id string) int {
 		Where("id = ?", id).
 		Count(context.Background())
 	require.NoError(t, err)
-	return n
+	return int(n) // bun 1.3's Count is int64; a test's row count fits
 }
 
 // seedLearnedProcedure writes a construct the way the lift does -- created by

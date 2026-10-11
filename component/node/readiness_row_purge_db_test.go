@@ -109,7 +109,7 @@ func (f *purgeFixture) versions(t *testing.T, nodeId string) int {
 		Where("concept = ?", memqlengine.ModuleReadinessConcept).
 		Where("payload->>'nodeId' = ?", nodeId).Count(f.ctx)
 	require.NoError(t, err)
-	return n
+	return int(n) // bun 1.3's Count is int64; a test's row count fits
 }
 
 func TestPurgingANodeRemovesEveryVersionAndOnlyThatNodes(t *testing.T) {

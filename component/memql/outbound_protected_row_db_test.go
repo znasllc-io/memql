@@ -63,7 +63,7 @@ func outboundRowCount(t *testing.T, db *bun.DB, reqId string) int {
 		Where("id IN (?)", bun.In([]string{reqId, outboundRequestConcept + ":" + reqId})).
 		Count(context.Background())
 	require.NoError(t, err)
-	return n
+	return int(n) // bun 1.3's Count is int64; a test's row count fits
 }
 
 // TestStageOutboundRequestToSecretStagesTheDescriptor: the server-side stage
