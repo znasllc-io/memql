@@ -136,10 +136,13 @@ Both systems are timed on the same clock (section 7).
 
 ### D3 -- Manual runs until green, then shadow checks
 
-Phase 2 starts every run from **Run latest** on a disconnected pipeline, so
-nothing is posted to GitHub while the package is red. Once green, the pipeline
-reconnects with `poll` delivery and reports a non-required `MemQL / memql` check
-on every pull request and main push. No ruleset change is made in this phase.
+Phase 2 starts every run from **Run latest** on a disconnected pipeline. A
+manual run may name a branch of the same repository (section 8, engine change
+4), so the epic's own branch is run and fixed before it merges. A manual run
+writes its check run on the commit it tests, so during phase 2 `MemQL / memql`
+appears only on the epic's own commits. Once green, the pipeline reconnects
+with `poll` delivery and reports a non-required `MemQL / memql` check on every
+pull request and main push. No ruleset change is made in this phase.
 
 ### D4 -- Green covers everything in the package
 
@@ -172,14 +175,15 @@ enforcement and an amd64 build pool, both owner approvals), making
 pipeline runs under a released engine, never the tree under test (program
 record D16).
 
-### D8 -- Tune the runner and reshape the package; three small engine changes
+### D8 -- Tune the runner and reshape the package; four small engine changes
 
 Chosen over teaching the default workflow dependency scheduling (more general,
 but it touches the compiler, recovery fingerprints, the check summary and the OS
 run page before a first green run) and over collapsing a run into a few large
 steps (it breaks the per-lane mapping to `ci.yml`, coarsens failures and does
 not spread across nodes). The engine changes are a git mirror on the build node,
-SARIF publication, and a `trees:` step filter (section 8). Stopping later work
+SARIF publication, a `trees:` step filter, and a branch argument for manual runs
+(section 8). Stopping later work
 after a failed build is given up; GitHub Actions already behaves that way.
 
 ### D9 -- The package targets linux/amd64
@@ -202,7 +206,7 @@ required check on a released engine.
 |---|---|---|
 | 0. Baseline | #5697 as specified: a week of Go-touching pull requests on Actions, per lane, recorded in `docs/internal/ops/ci-design.md` D6 | The target number T is recorded |
 | 1. Bring-up | The local cluster with a build node, the amd64 toolchain, the 8-hour profile, the Job count, this cluster's GitHub App and the engine repository as a source (section 4) | A **Run latest** run reaches a terminal state with at least one step executed on the build node |
-| 2. Green | Manual full runs of main's head; every failure fixed at its cause (section 5) | Three consecutive full runs pass every stage, on three different main commits, with no engine rollout during any of them |
+| 2. Green | Manual full runs of the epic branch's head; every failure fixed at its cause (section 5) | Three consecutive full runs pass every stage, on three different commits of the epic branch, with no engine rollout during any of them; after the merge, one more on main's head |
 | 3. Shadow and scans | Reconnect with polling; the scan cadence changes; SARIF upload; the four scan workflows retire (section 6) | Seven consecutive scheduled deep-scan runs pass with their CodeQL results visible in code scanning, and the four workflows are deleted |
 | 4. Fast | Measured tuning on shadow pull-request runs (section 7) | Over the last 20 Go-touching pull-request heads both systems completed, MemQL's median is at most T, and there is no false green (section 7) |
 
@@ -242,7 +246,7 @@ agent is cheap), and its size follows that machine's Docker host.
 Dockerfile for `linux/amd64` under a new immutable version on a native amd64
 runner, with Go taken from `go.work` (1.27.2). The workflow builds only from
 main, so a Dockerfile change and its digest pin cannot share a PR; the Tailwind
-change (#5816) therefore waits for phase 3's first PR (section 10). The package
+change (#5816) is therefore made without a toolchain rebuild (section 10). The package
 pins the new digest, and `memql_package_manifest_test.go`, which asserts
 linux/arm64 today, moves with it. The database and bash images the package pins
 already serve `ci.yml`'s amd64 runners. Image builds stay on Actions until M4.
@@ -256,13 +260,15 @@ repository becomes a source in Deployables through that connection. The pipeline
 is connected once (connect reads and validates the manifest) and then
 disconnected, so phase 2's runs start only from **Run latest**.
 
-**What merges before the first run.** A run reads `memql-package.yaml` at the
-commit it tests, and **Run latest** tests main's head, so the manifest and
-overlay changes merge to main before phase 2 starts.
+**Nothing merges before the first run.** A run reads `memql-package.yaml` at
+the commit it tests. A manual run names the epic branch, whose head carries the
+amd64 manifest and the overlay values, and `make up` points Argo CD at the
+current branch, so the cluster runs the epic's own overlay.
 
 ## 5. Phase 2: green
 
-**Runs.** Each is **Run latest**: a full run of main's head. With today's stage
+**Runs.** Each is **Run latest** naming the epic branch: a full run of its
+head. With today's stage
 order (checks, vulnerabilities, secrets-current, secrets-history, tests, gates,
 analysis) the full-history scan (3h 53m measured) and CodeQL (up to two hours)
 sit inside the sequence, so a run should take about 7 hours, inside the 8-hour
@@ -292,9 +298,10 @@ time or memory on the deep scans; first-run image pulls; the isolation probe on
 k3s's built-in network-policy enforcement; and a toolchain whose Go version
 lags `go.work`, which would make every step download a toolchain or fail.
 
-**Exit.** Three consecutive full runs pass every stage, on three different main
-commits, with no engine rollout during any of them. Their per-step timings are
-phase 4's starting profile.
+**Exit.** Three consecutive full runs pass every stage, on three different
+commits of the epic branch, with no engine rollout during any of them. After
+the merge, one more full run on main's head confirms it there. Their per-step
+timings are phase 4's starting profile.
 
 ## 6. Phase 3: shadow checks, scan cadence and retiring the scan workflows
 
@@ -362,8 +369,8 @@ tool under `scripts/ci` reports, per commit, both systems' times and verdicts:
    steps sized from measurements. Daily and release runs put the deep scans in
    the same parallel stage, within their declared reservations.
 3. **Per-step overhead.** The git mirror (engine change 1, section 8) replaces
-   the per-step fetch from GitHub; the Tailwind CLI comes from the toolchain
-   image (#5816); the Cockpit-era `-p=1` and 512 MiB settings are lifted
+   the per-step fetch from GitHub; the Tailwind CLI comes from a declared
+   cache directory (#5816); the Cockpit-era `-p=1` and 512 MiB settings are lifted
    wherever measured memory allows.
 4. **Shards.** `db-tests` splits along `ci.yml`'s budget classes
    (`component/memql` serial at 600s on two shards; `component/packages` at
@@ -375,7 +382,7 @@ tool under `scripts/ci` reports, per commit, both systems' times and verdicts:
 predicts: splitting the heaviest packages (`component/memql`,
 `cmd/memqllint`) by concern. That is its own work and is not planned here.
 
-## 8. The three engine changes
+## 8. The engine changes
 
 Each keeps the boundary record's split: the manifest and the sealed DSL decide,
 native code performs one bounded operation and enforces its safety.
@@ -398,6 +405,12 @@ native code performs one bounded operation and enforces its safety.
    applies the filter mechanically. That every db-gated package lands in exactly
    one class is held by the engine repository's own manifest test, not by the
    compiler.
+4. **A manual run names a branch.** `pipelinesRunLatest` takes an optional
+   `branch`; empty keeps the default branch. A name GitHub would not accept is
+   refused `pipeline_branch_invalid` before any request leaves the cluster.
+   MemQL OS offers it as **Other branch** beside **Run latest**, listing the
+   repository's branches through the source's own connection. Epic A needs it
+   to prove its own branch before the single merge.
 
 ## 9. Testing
 
@@ -419,33 +432,35 @@ native code performs one bounded operation and enforces its safety.
   `CLASSES` table, which closes today's shard drift.
 - **The overlay and `make up`:** the existing render tests cover the new local
   values; the build-node option gets a script test.
+- **Branch runs:** leaf tests for `ValidBranchName`, `RunLatest` tests for a
+  named branch, a malformed name refused before GitHub, and one commit through
+  two branches being one attempt; OS tests for **Other branch**.
 - **Live evidence:** the three green runs, the scheduled scans and the shadow
   pull-request runs, with run ids recorded in the issues.
 
 ## 10. Tracking
 
 Two epics under #5480, each labelled `epic`, `epic:<name>` and `claude`, with
-`claude`-labelled tasks, and each shipping in at most two PRs. Each epic gets
-its own implementation plan: epic A's from this record, epic B's once phase 2
-exits, because its tuning starts from phase 2's measurements.
+`claude`-labelled tasks, tracked with ccpm. The owner asked on 2026-10-11 for
+one PR per epic covering all its issues, so each epic ships as a single PR.
+Each epic gets its own implementation plan: epic A's from this record, epic
+B's once phase 2 exits, because its tuning starts from phase 2's measurements.
 
-- **Epic A, local green (phases 0 to 2).** Before PR 1, the amd64 toolchain
-  dispatch (section 4).
-  - PR 1, bring-up: the build-node option for `make up`, the local overlay
-    values, the amd64 manifest and its tests, and #5697's baseline recorded in
-    `ci-design.md`.
-  - PR 2: the fixes found in the green loop, verified locally before merging.
-  - #5835's local-demonstration evidence comes from these runs.
-- **Epic B, shadow, scans and fast (phases 3 and 4).**
-  - PR 1: the scan cadence, SARIF publication (engine change 2) and its app
-    permission, and the Tailwind CLI in the toolchain image with
-    `build-css.sh` using it (#5816). After it merges, one more toolchain
-    dispatch from main.
-  - PR 2: the git mirror and the `trees:` filter (engine changes 1 and 3), the
-    reshaped package with the new toolchain digest and the lifted Cockpit-era
-    settings, and the deletion of the four scan workflows once their exit is
-    met. If the speed work and the seventh green scan do not line up, the
-    deletion becomes its own PR.
+- **Epic A, local green (phases 0 to 2).** One owner-approved dispatch of the
+  amd64 toolchain (section 4) precedes it. Its single PR carries the
+  build-node option for `make up`, the local overlay values, the amd64
+  manifest and its tests, #5697's baseline recorded in `ci-design.md`, the
+  branch argument and **Other branch** (engine change 4), and the fixes found
+  in the green loop, each verified locally on the epic branch before the
+  merge. #5835's local-demonstration evidence comes from these runs.
+- **Epic B, shadow, scans and fast (phases 3 and 4).** Its single PR carries
+  the scan cadence, SARIF publication (engine change 2) and its app
+  permission, the git mirror and the `trees:` filter (engine changes 1 and 3),
+  the reshaped package with the lifted Cockpit-era settings, and the deletion
+  of the four scan workflows once their exit is met. One PR rules out a
+  toolchain rebuild inside the epic, because the toolchain workflow builds
+  only from main, so its Tailwind change takes #5816's second proposal: the
+  tools directory comes from the environment and points at a declared cache.
 - **Existing issues:** #5697 joins epic A; #5816 joins epic B; #5813 stays with
   the cloud phase; #5504 to #5509 stay open under #5480.
 
