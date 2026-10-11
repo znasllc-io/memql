@@ -221,3 +221,73 @@ func TestOwnerRecoveryUsesInstallerConfigurationBeforeSettingsExist(t *testing.T
 	begin := bootstrapRegister(t, second, token, false, map[string]string{})
 	require.Equal(t, 200, begin.Code, begin.Body.String())
 }
+
+// THE LOCAL INSTALLER'S CLAIM, as it actually arrives: the installer seeds the
+// owner's name and email and no organization, and nothing configures a brand
+// name. configureSelfAccount refuses a blank name, and that refusal landed at
+// the END of the passkey ceremony -- after the passkey and the owner row were
+// written -- so every retry, and every later passkey sign-in, failed the same
+// way. The owner of a fresh local cluster could never get in.
+func TestLocalInstallerClaimWithNoOrganizationNameCompletes(t *testing.T) {
+	first, second, engine := bootstrapServers(t, "docker-local")
+	first.Cfg.Bootstrap = identity.BootstrapConfig{Domain: "test", OwnerEmail: "owner@example.test", OwnerFirstName: "Ada", OwnerLastName: "Owner", RegistrationMode: "invite_only"}
+	// The local deploy sets no MEMQL_IDENTITY_BRAND_NAME; the test server's
+	// "MemQL Test" brand is what hid this.
+	first.Cfg.BrandName, second.Cfg.BrandName = "", ""
+	engine.settings = nil
+	response := recoveryPage(t, first, "owner@example.test", nil)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	var token string
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == identity.BootstrapCookie {
+			token = cookie.Value
+		}
+	}
+	require.NotEmpty(t, token)
+	begin := bootstrapRegister(t, second, token, false, map[string]string{})
+	require.Equal(t, 200, begin.Code, begin.Body.String())
+	challenge := decodeBegin(t, begin)
+	a := newHTTPSoftwareAuthenticator(t)
+	done := bootstrapRegister(t, first, token, true, WebAuthnRegisterFinishRequest{ChallengeId: challenge.ChallengeId, Credential: a.create(challenge.CreationOptions.Response.Challenge.String())})
+	require.Equal(t, 200, done.Code, done.Body.String())
+	require.Equal(t, "Ada Owner", engine.organization, "a claim with no organization name is named for its owner")
+	require.Equal(t, "Ada Owner", engine.settings["brandName"])
+	require.NotEmpty(t, engine.settings["bootstrappedAt"])
+	require.NotEmpty(t, done.Result().Cookies())
+}
+
+// A claim the earlier code froze with a blank organization name -- the passkey
+// saved as proof, the organization refused -- must finish on the next attempt
+// rather than refuse forever: once proof exists the reserved settings cannot be
+// re-entered, so the finish itself supplies the owner-named default.
+func TestLocalClaimFrozenWithNoOrganizationNameFinishesOnRetry(t *testing.T) {
+	first, second, engine := bootstrapServers(t, "docker-local")
+	first.Cfg.Bootstrap = identity.BootstrapConfig{Domain: "test", OwnerEmail: "owner@example.test", OwnerFirstName: "Ada", OwnerLastName: "Owner", RegistrationMode: "invite_only"}
+	// The local deploy sets no MEMQL_IDENTITY_BRAND_NAME; the test server's
+	// "MemQL Test" brand is what hid this.
+	first.Cfg.BrandName, second.Cfg.BrandName = "", ""
+	engine.settings = nil
+	response := recoveryPage(t, first, "owner@example.test", nil)
+	require.Equal(t, 200, response.Code, response.Body.String())
+	var token string
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == identity.BootstrapCookie {
+			token = cookie.Value
+		}
+	}
+	begin := bootstrapRegister(t, first, token, false, map[string]string{})
+	require.Equal(t, 200, begin.Code, begin.Body.String())
+	challenge := decodeBegin(t, begin)
+	a := newHTTPSoftwareAuthenticator(t)
+	engine.fail = "configureSelfAccount"
+	failed := bootstrapRegister(t, first, token, true, WebAuthnRegisterFinishRequest{ChallengeId: challenge.ChallengeId, Credential: a.create(challenge.CreationOptions.Response.Challenge.String())})
+	require.NotEqual(t, 200, failed.Code)
+	// What the earlier code left behind: proof saved, organization name blank.
+	_, err := first.Store.DirectDB().Exec(`UPDATE identity_bootstrap_enrollment SET payload = jsonb_set(payload, '{Settings,BrandName}', '""'::jsonb)`)
+	require.NoError(t, err)
+	engine.fail = ""
+	resumed := bootstrapRegister(t, second, token, true, map[string]string{})
+	require.Equal(t, 200, resumed.Code, resumed.Body.String())
+	require.Equal(t, "Ada Owner", engine.organization)
+	require.NotEmpty(t, engine.settings["bootstrappedAt"])
+}

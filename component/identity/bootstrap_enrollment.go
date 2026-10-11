@@ -41,6 +41,26 @@ type BootstrapEnrollment struct {
 	Recovery      bool // Resumes the installer-named owner, including older unclaimed owner rows.
 }
 
+// OrganizationNameFor is the organization a claim creates: the name the owner
+// gave, else the owner's own name. The local installer collects a name and an
+// email, not an organization, and no local deploy sets a brand name -- while
+// configureSelfAccount refuses a blank one. That refusal came at the end of the
+// passkey ceremony, after the passkey and the owner were written, so the owner
+// of a fresh local cluster was locked out of it on every retry. A cluster one
+// person set up is honestly theirs; MemQL OS > Accounts renames it.
+func OrganizationNameFor(settings ClusterSettingsRow) string {
+	if name := strings.TrimSpace(settings.BrandName); name != "" {
+		return name
+	}
+	if name := strings.TrimSpace(strings.TrimSpace(settings.BootstrapFirstName) + " " + strings.TrimSpace(settings.BootstrapLastName)); name != "" {
+		return name
+	}
+	if local, _, found := strings.Cut(strings.TrimSpace(settings.BootstrapEmail), "@"); found && local != "" {
+		return local
+	}
+	return "MemQL"
+}
+
 func bootstrapHash(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])

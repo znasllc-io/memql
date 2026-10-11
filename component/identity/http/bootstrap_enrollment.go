@@ -184,6 +184,11 @@ func (s *Server) finishBootstrapLocked(ctx context.Context, row *identity.Bootst
 			return err
 		}
 	}
+	// A claim reserved before PendingOwnerSetup named an unnamed organization
+	// carries a blank name, and its settings are frozen once proof exists; the
+	// default is supplied here so that claim finishes instead of refusing on
+	// every retry. SaveBootstrapEnrollmentLocked below records it.
+	row.Settings.BrandName = identity.OrganizationNameFor(row.Settings)
 	if err := s.Store.PersistClusterSettings(ctx, row.Settings); err != nil {
 		return err
 	}
