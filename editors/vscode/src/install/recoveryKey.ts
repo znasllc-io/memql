@@ -39,6 +39,7 @@
 // Refs: #4079 #3969 #3970 #3908 #3958
 
 import type { ExecutionReport, StepOutcome } from "./executor.js";
+import type { CapabilityEnvelope } from "./runner.js";
 
 /** The graph step this module pairs with. */
 export const RECOVERY_STEP_ID = "recoveryKey";
@@ -92,6 +93,22 @@ function recoveryOutcome(report: ExecutionReport): StepOutcome | undefined {
   return report.outcomes.find((o: StepOutcome) => o.id === RECOVERY_STEP_ID);
 }
 
+/** The step's outcome as the two readers below need it: whether it succeeded, and its envelope. */
+type RecoveryRun = Pick<StepOutcome, "status" | "envelope">;
+
+/**
+ * The same reading, for one direct run of the step's capability rather than a
+ * graph report. A LOCAL cluster gets its owner when the first owner passkey is
+ * registered -- after the install's own recoveryKey step has already answered
+ * `awaitingOwner` -- so the done screen claims the key itself once that
+ * happens, and holds the result to exactly these rules.
+ */
+export function recoveryKeyFromRun(ok: boolean, envelope: CapabilityEnvelope | null): { state: RecoveryKeyState; value: string } {
+  const run: RecoveryRun = { status: ok ? "ok" : "failed", envelope };
+  const state = stateOf(run);
+  return { state, value: state === "claimed" ? valueOf(run) : "" };
+}
+
 /**
  * What the claim reported, for the done screen's no-key renderings.
  *
@@ -113,10 +130,14 @@ function recoveryOutcome(report: ExecutionReport): StepOutcome | undefined {
  */
 export function recoveryKeyStateFrom(report: ExecutionReport): RecoveryKeyState {
   const outcome = recoveryOutcome(report);
-  if (outcome === undefined || outcome.envelope === null) return "none";
-  const state = outcome.envelope.result[RECOVERY_STATE_FIELD];
+  return outcome === undefined ? "none" : stateOf(outcome);
+}
+
+function stateOf(run: RecoveryRun): RecoveryKeyState {
+  if (run.envelope === null) return "none";
+  const state = run.envelope.result[RECOVERY_STATE_FIELD];
   if (state === "revealLost") return "revealLost";
-  if (outcome.status !== "ok") return "none";
+  if (run.status !== "ok") return "none";
   if (state === "claimed" || state === "awaitingOwner" || state === "alreadyClaimed") return state;
   return "none";
 }
@@ -134,7 +155,11 @@ export function recoveryKeyStateFrom(report: ExecutionReport): RecoveryKeyState 
 export function revealedRecoveryKeyFrom(report: ExecutionReport): string {
   if (recoveryKeyStateFrom(report) !== "claimed") return "";
   const outcome = recoveryOutcome(report);
-  const value = outcome?.envelope?.result[RECOVERY_RESULT_FIELD];
+  return outcome === undefined ? "" : valueOf(outcome);
+}
+
+function valueOf(run: RecoveryRun): string {
+  const value = run.envelope?.result[RECOVERY_RESULT_FIELD];
   if (typeof value !== "string" || !isRecoveryKey(value)) return "";
   return value;
 }

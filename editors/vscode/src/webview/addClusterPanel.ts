@@ -66,9 +66,9 @@ import {
   recordedOwner,
   recordedStackTag,
 } from "../install/receipt.js";
-import { recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
+import { RECOVERY_STEP_ID, recoveryKeyFromRun, recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
 import { removalRows, sharedToolRows } from "../install/removalPreview.js";
-import type { RunScript } from "../install/runner.js";
+import { capabilityScriptPath, runCapabilityScript, type RunScript } from "../install/runner.js";
 import { redactForDisplay } from "../install/secrets.js";
 import {
   installSessionOptions,
@@ -328,6 +328,8 @@ export class AddClusterPanel {
   private readonly uninstall = new UninstallRunState();
   private readonly disposables: vscode.Disposable[] = [];
   private disposed = false;
+  /** The post-claim recovery-key claim has been asked for on this page. */
+  private recoveryClaimAttempted = false;
 
   // ---- detection ----
   /** Undefined while detection runs: the landing draws a skeleton, never a guess. */
@@ -1560,6 +1562,34 @@ export class AddClusterPanel {
     await this.refreshOwnerSetup();
   }
 
+  /**
+   * Claims the owner's recovery key once the cluster has an owner.
+   *
+   * The install's own recoveryKey step runs before a local cluster has one --
+   * the owner is created when the first owner passkey is registered -- so it
+   * answers `awaitingOwner`. Identity mints the key the moment the claim
+   * completes; this reveals it here, once, through the same display the
+   * install uses. A failure leaves the line as it was and goes to the output.
+   */
+  private async claimRecoveryKey(): Promise<void> {
+    const run = this.deps.runScript ?? runCapabilityScript;
+    try {
+      const outcome = await run({
+        scriptPath: capabilityScriptPath("install.recoveryKey", this.deps.installRoot),
+        params: { local: "1" },
+        capability: "install.recoveryKey",
+        timeoutMs: 120_000,
+        onLog: (line) => this.deps.diagnostics.appendLine(`[${RECOVERY_STEP_ID}] ${redactForDisplay(line, os.homedir())}`),
+      });
+      const claimed = recoveryKeyFromRun(outcome.exitCode === 0 && outcome.envelope?.ok === true, outcome.envelope);
+      if (this.disposed || claimed.state === "none") return;
+      this.state.setRecoveryKey(claimed.value, claimed.state);
+      this.render();
+    } catch (err) {
+      this.deps.diagnostics.appendLine(`[${RECOVERY_STEP_ID}] the recovery key could not be claimed: ${errorText(err)}`);
+    }
+  }
+
   private async refreshOwnerSetup(): Promise<void> {
     const cluster = this.currentCluster();
     if (!cluster || !this.deps.ownerSetupPending) return;
@@ -1567,6 +1597,12 @@ export class AddClusterPanel {
     if (this.disposed) return;
     this.state.setOwnerAccountExists(pending);
     this.render();
+    // The cluster has its owner now -- registered here or anywhere else -- while
+    // the install's key step answered before there was one. Asked once a page.
+    if (!pending && this.state.recoveryKeyState === "awaitingOwner" && !this.recoveryClaimAttempted) {
+      this.recoveryClaimAttempted = true;
+      await this.claimRecoveryKey();
+    }
   }
 
   /**

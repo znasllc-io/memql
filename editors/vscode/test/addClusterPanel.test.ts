@@ -1448,8 +1448,35 @@ test("a key claimed on an earlier run renders the fact, and points nowhere retir
 test("a cluster with no owner yet says when the key will exist", async () => {
   const h = await runToDoneWithRecovery("awaitingOwner", "");
   try {
-    assert.match(h.html(), /created after you first sign in/);
+    assert.match(h.html(), /appears here once you register the owner passkey/);
     assert.ok(!h.html().includes('data-act="copyRecoveryKey"'));
+  } finally {
+    h.close();
+  }
+});
+
+test("once the owner passkey is registered, the done screen claims the recovery key and shows it once", async () => {
+  // A local cluster gets its owner at the claim, after the install's own key
+  // step answered awaitingOwner; identity mints the key then, and this page is
+  // where the person is to be handed it.
+  let pending = true;
+  const results: Record<string, Record<string, unknown>> = {
+    "install.recoveryKey": { recoveryKey: "", recoveryKeyState: "awaitingOwner" },
+  };
+  const runner = await fakeRunner({}, results);
+  const h = await open({ runner, ownerSetupPending: async () => pending });
+  try {
+    beginInstall(h);
+    await until(() => recorded.executed.includes("memql.clusters.takeOwnership"), "automatic owner registration");
+    assert.match(h.html(), /appears here once you register the owner passkey/);
+    results["install.recoveryKey"] = { recoveryKey: RECOVERY_KEY, recoveryKeyState: "claimed" };
+    pending = false;
+    h.post({ type: "enrolPasskey" });
+    await until(() => /data-act="revealRecoveryKey"/.test(h.html()), "the claimed key");
+    assert.ok(!h.html().includes(RECOVERY_KEY), "still behind Show");
+    assert.equal(runner.calls.filter((c) => c.capability === "install.recoveryKey").length, 2, "claimed once, after the owner existed");
+    h.post({ type: "revealRecoveryKey" });
+    assert.ok(h.html().includes(RECOVERY_KEY));
   } finally {
     h.close();
   }
