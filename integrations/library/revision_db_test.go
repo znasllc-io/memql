@@ -41,6 +41,7 @@ type revisionAI struct {
 	completionAnswers     []map[string]any
 	completionQuotes      []string
 	completionRecoveries  []string
+	completionFindings    []any
 	onCompletion          func(context.Context, int32) error
 	completionCalls       atomic.Int32
 	repairCalls           atomic.Int32
@@ -124,6 +125,7 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				}
 				n := a.completionCalls.Add(1)
 				a.completionRecoveries = append(a.completionRecoveries, asString(data["recovery"]))
+				a.completionFindings = append(a.completionFindings, data["previousFindings"])
 				if len(a.completionDocuments) > 0 && (int(n) > len(a.completionDocuments) || data["document"] != a.completionDocuments[n-1]) {
 					return nil, fmt.Errorf("completion check did not assess the actual proposed document: %v", data["document"])
 				}
@@ -488,6 +490,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 			{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},
 			{"RevisionPartialFeedbackRepair", testRevisionPartialFeedbackRepair},
 			{"RevisionRejectsUngroundedReview", testRevisionRejectsUngroundedReview},
+			{"RevisionReconsidersContradictoryReview", testRevisionReconsidersContradictoryReview},
 			{"RevisionAmendmentPreservesImagePinsAcrossReplicas", testRevisionAmendmentPreservesImagePinsAcrossReplicas},
 		}},
 	}

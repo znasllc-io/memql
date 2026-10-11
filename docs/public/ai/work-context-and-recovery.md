@@ -94,6 +94,14 @@ The assessment uses the prose judgment level and treats the proposed document
 as the source of truth for its contents. Original selections and quoted feedback
 are context, not proof that rejected wording remains in the candidate.
 
+Before an assessment's objections trigger an edit or block a repaired proposal,
+the DSL requests one independent reassessment of those objections against the
+same candidate. An exact quote proves that text exists, not that the objection
+about it is correct. The prior findings remain untrusted review data. The new
+assessment must still pass quote grounding; genuine unmet requirements still
+require repair or stop before approval. A satisfied first assessment adds no
+extra call. Reassessment is bounded and uses the run's existing model-call budget.
+
 An unchanged request can reuse a completed image batch from an earlier finished
 or stopped attempt. The native gate compares the captured source, feedback,
 attachments and direction, rechecks owner access and immutable image bytes, and

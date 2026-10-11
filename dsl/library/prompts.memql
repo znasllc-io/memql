@@ -103,6 +103,7 @@ prompt libraryRevisionImagePlan {
 @level("strong")
 @templateFile("prompts/libraryRevisionCompletion.tmpl")
 prompt libraryRevisionCompletion {
+ previousFindings []object
  recovery string
  imageUsage string
  references string
