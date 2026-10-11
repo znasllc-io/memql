@@ -73,7 +73,7 @@ func testReviewAttachmentsAcrossReplicas(t *testing.T, f *revisionDB) {
 	fileID := fmt.Sprintf("attachment-%d", time.Now().UnixNano())
 	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "createLibraryFile", map[string]any{"fileId": fileID, "name": "Figure.png", "mimeType": "image/png", "size": len(attachmentPNG()), "blobUrl": "https://storage.invalid/verified.png", "source": "uploaded", "format": "image"})
 	artifact := f.query(f.engine, f.ctx, "mutation", "createArtifact", map[string]any{"sourceConceptRef": fileID, "ownerUserId": f.owner, "lens": "artifact", "kind": "file", "source": "uploaded", "title": "Figure.png", "format": "image"})[0]
-	imageID := asString(artifact["id"])
+	imageID := memql.BareShortId(asString(artifact["id"]))
 	store := &attachmentStore{data: attachmentPNG()}
 	f.first.blobFetcher = store
 	f.second.blobFetcher = store
@@ -116,6 +116,13 @@ func testReviewAttachmentsAcrossReplicas(t *testing.T, f *revisionDB) {
 	}
 	if vision.calls != 1 {
 		t.Fatalf("vision calls: %d", vision.calls)
+	}
+	if len(f.ai.completionImageUsage) != 1 {
+		t.Fatalf("expected one measured completion input, got %v", f.ai.completionImageUsage)
+	}
+	var usage []map[string]any
+	if err = json.Unmarshal([]byte(f.ai.completionImageUsage[0]), &usage); err != nil || len(usage) != 1 || usage[0]["artifactId"] != imageID || usage[0]["embedded"] != true {
+		t.Fatalf("completion did not receive actual image-node evidence across replicas: %s (%v)", f.ai.completionImageUsage[0], err)
 	}
 	_, captured, _, approval, err := f.second.revisionRequest(memql.ContextWithFreshRead(f.ctx), request)
 	if err != nil {
