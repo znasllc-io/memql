@@ -4,6 +4,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -167,6 +169,8 @@ func TestWaitForWorkloadsReportsAllZeroReplicasAsNotReady(t *testing.T) {
 	}
 }
 
+var elapsedRE = regexp.MustCompile(`READY=(\w+) ELAPSED=(\d+)`)
+
 // Source comparison can finish before the controller's first sync creates any
 // Deployments. Exercise that gap without a real cluster or wall-clock sleeps,
 // and make sure creation does not grant readiness a fresh timeout budget.
@@ -212,8 +216,19 @@ printf 'READY=%s ELAPSED=%s REASON=%s\n' "$WORKLOADS_READY" "$SECONDS" "${WORKLO
 			if err != nil {
 				t.Fatalf("wait: %v\n%s", err, out)
 			}
-			if !strings.Contains(string(out), "READY="+tt.wantReady+" ELAPSED="+tt.wantElapsed) {
-				t.Fatalf("wrong verdict or shared deadline:\n%s", out)
+			// The fake sleep advances SECONDS by the simulated budget, but real
+			// wall-clock time still ticks it too, so a loaded runner can land
+			// one second past the deadline. Accept wantElapsed..wantElapsed+1:
+			// a fresh budget on creation would land near 2x the timeout, far
+			// outside that window.
+			m := elapsedRE.FindStringSubmatch(string(out))
+			if m == nil || m[1] != tt.wantReady {
+				t.Fatalf("wrong verdict, want READY=%s:\n%s", tt.wantReady, out)
+			}
+			got, _ := strconv.Atoi(m[2])
+			want, _ := strconv.Atoi(tt.wantElapsed)
+			if got < want || got > want+1 {
+				t.Fatalf("ELAPSED=%d, want %d (or %d on a slow runner) -- deadline not shared:\n%s", got, want, want+1, out)
 			}
 			if tt.appearAt == "100" && !strings.Contains(string(out), "no Deployments") {
 				t.Fatalf("empty timeout lost its diagnosis:\n%s", out)
