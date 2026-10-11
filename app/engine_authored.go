@@ -119,10 +119,12 @@ func (a *App) wireAuthoredRuntime() {
 	// And the engine gets the same deps, for the OTHER direction (memql#6022,
 	// F1): an activation arms only the runtime it is handed -- this node's --
 	// and broadcasts authoring.arm so every other replica arms the bundle too;
-	// a retire broadcasts authoring.disarm. The engine's subscriber arms a
-	// peer's bundle into these deps. Before the re-arm below, like Bind, so a
-	// broadcast that lands during boot finds the runtime it arms into; one that
-	// landed before this line was skipped, and the re-arm reads its bundle.
+	// a retire broadcasts authoring.disarm. The engine arms a peer's bundle
+	// into these deps. Its subscriber starts later, with the engine
+	// (StartAuthoringArmSubscriber in engine.run), so no broadcast is handled
+	// before this line; what is activated or retired between the boot re-arm
+	// below and that subscription is picked up by the reconcile pass the
+	// subscriber runs as soon as it starts, and again every few minutes after.
 	a.engine.SetAuthoredRuntimeDeps(a.AuthoredRuntimeDeps)
 
 	// Routing rules (epic memql#5127, design D7) bind through the same seam and

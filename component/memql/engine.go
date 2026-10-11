@@ -2079,8 +2079,11 @@ func (e *MemQLEngine) run(ctx context.Context, markStarted func()) error {
 	// broadcasts authoring.disarm.<bundleId>; this subscriber reads the bundle
 	// from the shared DB and arms or disarms it in this node's authored
 	// registry and scheduler, so an email rule activated on node A fires
-	// wherever the owner gate puts it. Inert until app/ hands the engine the
-	// authored runtime (SetAuthoredRuntimeDeps).
+	// wherever the owner gate puts it. Broadcasts are best effort, so it also
+	// reconciles against the database -- now, and every few minutes -- which
+	// covers a dropped broadcast and anything sent before this subscription.
+	// Inert until app/ hands the engine the authored runtime
+	// (SetAuthoredRuntimeDeps).
 	e.StartAuthoringArmSubscriber(ctx)
 
 	markStarted()

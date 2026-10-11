@@ -213,6 +213,13 @@ func (s *engineRearmStore) LoadSystemActiveBundles(ctx context.Context) ([]Autho
 	if err != nil {
 		return nil, err
 	}
+	return activeBundleRows(res)
+}
+
+// activeBundleRows parses one page of systemActiveAuthoringBundles into bundle
+// rows. Shared by the boot re-arm and the arming reconcile pass
+// (authoring_arm_propagate.go), so both arm exactly the same set.
+func activeBundleRows(res *ExecuteResult) ([]AuthoringBundleRow, error) {
 	if res == nil || res.Bundle == nil {
 		return nil, nil
 	}

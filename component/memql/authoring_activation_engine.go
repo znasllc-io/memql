@@ -102,6 +102,10 @@ func (e *MemQLEngine) ActivateApprovedBundle(ctx context.Context, owner, bundleI
 // at its next boot. Split from the exported method so the cross-node test can
 // drive two engines over one fake store.
 func (e *MemQLEngine) activateApprovedBundleWithStore(ctx context.Context, store ActivationStore, owner, bundleId string, deps AuthoredRuntimeDeps) (ActivationResult, error) {
+	// The lock a peer's broadcast and a reconcile pass are applied under: this
+	// node's own change rewrites the same runtime, so they take turns.
+	e.arming.applying.Lock()
+	defer e.arming.applying.Unlock()
 	res, err := ActivateApprovedBundleWithStore(ctx, store, owner, bundleId, deps)
 	if err != nil {
 		return res, err
@@ -163,10 +167,28 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 	// 3. Register the closure into the owner-scoped authored runtime. The
 	// registry registration makes every construct resolvable; the automation
 	// constructs additionally go to the scheduler so their triggers fire. The
-	// boot re-arm (authoring_rearm.go) reuses this same step so a restart
+	// boot re-arm (authoring_rearm.go) registers the same plan, so a restart
 	// restores identical runtime state.
-	if err := registerBundleConstructs(plan.Register, deps); err != nil {
-		return ActivationResult{}, err
+	//
+	// An entry already under one of these names is replaced unless it is this
+	// very construct, or belongs to another bundle that still reads active at
+	// the same or a newer version (armConstruct). Comparing versions alone
+	// refused a resume outright: a paused email rule comes back at version 1
+	// under the same bundle id, and a node that missed the pause's disarm still
+	// holds version 1.
+	live := newBundleLiveness(func(ctx context.Context, _, id string) (AuthoringBundleRow, error) {
+		return store.LoadBundle(ContextWithFreshRead(ctx), id)
+	})
+	live.note(plan.BundleId, true)
+	for _, c := range plan.Register {
+		verdict, other, err := armConstruct(ctx, c, deps, live)
+		if err != nil {
+			return ActivationResult{}, err
+		}
+		if verdict == armConflict {
+			return ActivationResult{}, fmt.Errorf("authoring: %s %q is already armed for this owner by bundle %q, which is still active; retire that bundle before activating another that defines the same name",
+				c.Kind, c.Name, other.BundleId)
+		}
 	}
 
 	// 4. Promote net-new deps into the owner's reusable catalog. Best-effort per
@@ -224,6 +246,13 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 // retiring a superseded prior version during a version bump, where keep holds
 // the constructKey of everything the superseding version registers: those rows
 // are still retired, but their runtime entries are the NEW version's and stay.
+//
+// The runtime teardown is not by name. The registry and the scheduler key by
+// kind and name, and the name may by now be held for another bundle that is
+// live -- the resumed version of a paused rule -- so an entry comes out only
+// when its OWN bundle no longer reads active (disarmStaleEntries). The read is
+// fresh: this node's result cache hears of the retire just written only by a
+// broadcast of its own.
 func retireBundleRuntime(ctx context.Context, store ActivationStore, bundleId, owner string, deps AuthoredRuntimeDeps, keep map[string]bool) error {
 	constructs, err := store.LoadConstructs(ctx, bundleId)
 	if err != nil {
@@ -234,16 +263,16 @@ func retireBundleRuntime(ctx context.Context, store ActivationStore, bundleId, o
 	}
 	for _, c := range constructs {
 		_ = store.SetConstructStatus(ctx, c.Id, "retired")
-		if keep[constructKey(c.Kind, c.Name)] {
-			continue
-		}
-		if c.Kind == "automation" && deps.DeregisterHook != nil {
-			deps.DeregisterHook(c.OwnerUserId, c.Name)
-		}
-		if deps.Registry != nil {
-			// Retire from the registry. A construct already gone is a no-op for
-			// our purposes.
-			_ = deps.Registry.Retire(c.OwnerUserId, c.Kind, c.Name)
+	}
+	if deps.Registry != nil {
+		live := newBundleLiveness(func(ctx context.Context, _, id string) (AuthoringBundleRow, error) {
+			return store.LoadBundle(ContextWithFreshRead(ctx), id)
+		})
+		if _, err := disarmStaleEntries(ctx, constructs, keep, deps, live); err != nil && deps.Logger != nil {
+			// The rows are retired; what could not be checked here comes out at
+			// this node's next reconcile pass.
+			deps.Logger.Warn("authored bundle retired, but its runtime entries could not all be checked",
+				"bundleId", bundleId, "error", err)
 		}
 	}
 	emitAuthoredAudit(ctx, deps, AuthoredAuditEvent{
@@ -286,6 +315,9 @@ func (e *MemQLEngine) RetireActiveBundle(ctx context.Context, owner, bundleId st
 // a retire used to stop the bundle on this node only, and every replica that
 // had armed it at boot kept firing it.
 func (e *MemQLEngine) retireActiveBundleWithStore(ctx context.Context, store ActivationStore, owner, bundleId string, deps AuthoredRuntimeDeps) error {
+	// The same lock as activation and every peer broadcast.
+	e.arming.applying.Lock()
+	defer e.arming.applying.Unlock()
 	bundle, err := store.LoadBundle(ctx, bundleId)
 	if err != nil {
 		return fmt.Errorf("authoring: load bundle %q: %w", bundleId, err)
