@@ -161,7 +161,9 @@ func TestEnrolmentLinkReportsAnUnclaimedClusterRatherThanFailing(t *testing.T) {
 	}
 }
 
-// The operator has to be told what to do next, and it is not "retry".
+// The operator has to be told what to do next, and it is not "retry" -- nor
+// the magic link this used to name: a local cluster signs in with passkeys only
+// and refuses magic links, and registering the owner passkey IS the claim.
 func TestEnrolmentLinkOnAnUnclaimedClusterSaysWhatToDoNext(t *testing.T) {
 	env := []string{
 		"FAKE_EXIT=1",
@@ -170,10 +172,13 @@ func TestEnrolmentLinkOnAnUnclaimedClusterSaysWhatToDoNext(t *testing.T) {
 	stdout, _ := elRun(t, env, elArgs()...)
 	envelope, _ := elParse(t, stdout)
 	// The reason rides the envelope, where the wizard reads it.
-	blob := string(envelope.Result)
-	if !strings.Contains(strings.ToLower(blob), "sign in") && !strings.Contains(strings.ToLower(blob), "magic link") {
-		t.Errorf("the result does not name the next step (sign in with the magic link, then enrol a\n"+
-			"passkey). Without it this reads as a broken mint: %s", blob)
+	blob := strings.ToLower(string(envelope.Result))
+	if !strings.Contains(blob, "register the owner passkey") {
+		t.Errorf("the result does not name the next step (register the owner passkey to claim\n"+
+			"the cluster). Without it this reads as a broken mint: %s", blob)
+	}
+	if strings.Contains(blob, "magic link") {
+		t.Errorf("the next step names a magic link, which a local cluster refuses: %s", blob)
 	}
 }
 
