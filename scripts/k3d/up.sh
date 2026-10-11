@@ -165,13 +165,21 @@ ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-300}"
 # at the source at all". A repo it cannot fetch, a path that is not there and
 # an AppProject that refuses the source all answer within seconds; this is the
 # budget for the fetch itself. See wait_for_app_comparison (memql#5029).
-APP_COMPARE_TIMEOUT="${MEMQL_K3D_APP_COMPARE_TIMEOUT:-180}"
+#
+# It matches the repo-server's own fetch ceiling (ARGOCD_EXEC_TIMEOUT in
+# deploy/argocd/bootstrap/repo-server-exec-timeout.yaml). It was 180s, which
+# held only while the operator stack had just warmed the repository cache: a
+# repair hours later, after main had moved, needed a fresh fetch, and a full one
+# takes about five minutes on a home connection -- so the wait gave up while
+# ArgoCD was still downloading.
+APP_COMPARE_TIMEOUT="${MEMQL_K3D_APP_COMPARE_TIMEOUT:-1200}"
 
 # One ceiling for both operators, including ArgoCD's cold repository fetch.
-# A fetch itself can take 300s; ending setup at the same instant prevents even
-# one recovery attempt. This shared budget covers retries without granting a
-# fresh long wait to each operator or each Deployment.
-OPERATOR_STACK_TIMEOUT="${MEMQL_K3D_OPERATOR_STACK_TIMEOUT:-1200}"
+# A fetch itself can take up to the repo-server's 1200s ceiling; ending setup at
+# the same instant prevents even one recovery attempt. This shared budget covers
+# one full fetch plus a retry without granting a fresh long wait to each
+# operator or each Deployment, and stays inside the install's one-hour step.
+OPERATOR_STACK_TIMEOUT="${MEMQL_K3D_OPERATOR_STACK_TIMEOUT:-1800}"
 
 # Outcome tracking (result envelope + idempotency reporting).
 ARGOCD_READY=false
