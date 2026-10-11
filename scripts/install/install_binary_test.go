@@ -305,6 +305,35 @@ func TestInstallVerifiesAndPlaces(t *testing.T) {
 	}
 }
 
+// TestDownloadAbandonsAStalledTransfer: a transfer that stops partway is given
+// up quickly and retried, rather than held open until the ten-minute ceiling.
+// A stub curl records how it was asked and serves the artifact.
+func TestDownloadAbandonsAStalledTransfer(t *testing.T) {
+	home := t.TempDir()
+	body := strings.Repeat("k3d-release-bytes\n", 64)
+	pins := writePins(t, map[string][3]string{"k3d": {"v5.9.0", "https://example.invalid/k3d", sha256Hex([]byte(body))}})
+	src := filepath.Join(t.TempDir(), "artifact")
+	if err := os.WriteFile(src, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pathDir := installPATH(t)
+	argv := filepath.Join(t.TempDir(), "curl-argv")
+	writeStub(t, pathDir, "curl", `printf '%s\n' "$*" > "`+argv+`"
+out=""; while [ $# -gt 0 ]; do [ "$1" = "-o" ] && out="$2"; shift; done
+cp "`+src+`" "$out"`)
+	dest := filepath.Join(t.TempDir(), "bin")
+	mustInstall(t, pathDir, home, "--tool=k3d", "--pins="+pins, "--dest="+dest)
+	raw, err := os.ReadFile(argv)
+	if err != nil {
+		t.Fatalf("curl was never asked: %v", err)
+	}
+	for _, flag := range []string{"--speed-limit 1024", "--speed-time 30", "--retry-all-errors", "--max-time 600"} {
+		if !strings.Contains(string(raw), flag) {
+			t.Errorf("curl was not given %s: %s", flag, raw)
+		}
+	}
+}
+
 // TestDigestMismatchIsRefusedAndLeavesNothing is the reason the pins exist. When
 // the bytes do not match the reviewed digest the artifact is discarded, not
 // installed-with-a-warning, and dest is left exactly as it was.

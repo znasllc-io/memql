@@ -146,10 +146,18 @@ function fetch() {
             [[ -f "$src" ]] || return 1
             cp "$src" "$out" ;;
         http://*|https://*)
+            # A STALLED DOWNLOAD IS ABANDONED AND RETRIED, not waited out. On a
+            # home connection a transfer can stop dead partway (seen: kubectl
+            # frozen at 11 of 60 MB), and with only --max-time curl sat on it for
+            # ten minutes before trying again. Under 1 KB/s for 30 seconds now
+            # counts as failed, and --retry-all-errors retries that like any
+            # other transport error; the digest check below still judges the
+            # bytes.
             if command -v curl &>/dev/null; then
-                curl -fsSL --retry 3 --retry-delay 2 --max-time 600 -o "$out" "$url"
+                curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+                    --speed-limit 1024 --speed-time 30 --max-time 600 -o "$out" "$url"
             elif command -v wget &>/dev/null; then
-                wget -q -O "$out" "$url"
+                wget -q --tries=5 --timeout=30 -O "$out" "$url"
             else
                 cap_fail 4 "neither curl nor wget is available to download ${url}"
             fi ;;
