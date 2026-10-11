@@ -564,7 +564,7 @@ const email: OsAppManifest = {
   name: "Email",
   icon: Send,
   requires: "app:email",
-  sections: [{ id: "inbox", name: "Inbox" }, { id: "logs", name: "Logs", requires: "app:email/logs" }, { id: "settings", name: "Settings" }],
+  sections: [{ id: "inbox", name: "Inbox", requires: "app:email/inbox" }, { id: "logs", name: "Logs", requires: "app:email/logs" }, { id: "settings", name: "Settings" }],
   settingsSection: "settings",
   logsSection: "logs",
   component: EmailApp,

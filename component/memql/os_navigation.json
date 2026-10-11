@@ -101,7 +101,8 @@
     "sections": [
       {
         "id": "inbox",
-        "name": "Inbox"
+        "name": "Inbox",
+        "requires": "app:email/inbox"
       },
       {
         "id": "logs",
