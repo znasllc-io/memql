@@ -376,12 +376,14 @@ jobs:
       - name: Refresh the package index the install will use
         run: scripts/ci/retry.sh -- timeout 120 sudo apt-get update -qq
 
-      # Identical reasoning to install-e2e.yml, and it matters MORE here:
-      # install.binary's pre-existence flag is PATH-WIDE, so the runner's
-      # preinstalled kubectl would make the receipt say our copy pre-existed,
-      # remove-artifact.sh would refuse to delete it, and the memqlHome surface
-      # would legitimately fail to come back -- a red lane about the runner
-      # image rather than about MemQL.
+      # Written when install.binary's pre-existence flag was PATH-WIDE: the
+      # runner's preinstalled kubectl made the receipt say our copy pre-existed,
+      # remove-artifact.sh refused to delete it, and the memqlHome surface
+      # failed to come back. The flag is decided by the target file and its
+      # provenance marker now (TestPreExistingIsAboutTheTargetFile), so a copy
+      # elsewhere on PATH no longer changes the receipt; the step stays so every
+      # `command -v` in the snapshots and the install sees the machine an
+      # operator without these tools has.
       - name: Take preinstalled pinned tools out of the way
         run: |
           set -euo pipefail
@@ -398,6 +400,23 @@ jobs:
         run: |
           npm ci
           npm run build:install-cli
+
+      # A DESKTOP HAS A BROWSER PROFILE AND THIS RUNNER DOES NOT. mkcert puts the
+      # local CA into every NSS database it finds -- on Linux, Chrome's is
+      # ~/.pki/nssdb -- and on a machine that has never opened a browser it
+      # finds none ("no Firefox and/or Chrome/Chromium security databases
+      # found"), so the CA reaches only the system store, which Chromium on
+      # Linux does not read, and the owner claim below met
+      # ERR_CERT_AUTHORITY_INVALID. An empty database is what Chrome creates on
+      # its first start, so the claim's browser trusts the CA through the
+      # installer's own browser-trust path rather than around it. Before the
+      # BEFORE snapshot, so the baseline includes it.
+      - name: Give the runner the browser profile a desktop has
+        if: matrix.leg == 'from-source'
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.pki/nssdb"
+          certutil -d "sql:$HOME/.pki/nssdb" -N --empty-password
 
       # ALL THREE SNAPSHOTS RUN THE SAME WAY, and neither half of that is
       # cosmetic.
