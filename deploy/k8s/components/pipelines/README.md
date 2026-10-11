@@ -141,8 +141,11 @@ can run.
   an already-bound local-path cache stays on its original node. Preserve its
   data or explicitly provision a replacement; changing a selector does not
   move a volume. The unset setting retains unconstrained Linux placement.
-  The local overlay permits one Job at a time. All k3d nodes share the Docker
-  VM's resources; adding nodes does not add physical capacity. This setting
+  Locally, `make up` creates the pool's node (`k3d-<cluster>-build-0`, capped
+  at two thirds of the Docker host by default) and the local overlay permits
+  six Jobs at once on it. All k3d nodes share the Docker host's resources;
+  adding nodes does not add physical capacity, which is why the build node is
+  capped rather than trusted. This setting
   neither provisions a node pool nor proves every node's network enforcement.
 - **The limits are a `LimitRange` default**, so the runner sets no resources on
   a step and this is the one place a step's size is decided. It covers every

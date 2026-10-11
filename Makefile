@@ -229,6 +229,7 @@ db:
 ##   make up                       # current branch as targetRevision
 ##   make up REVISION=main         # pin to main
 ##   make up SERVERS=2 AGENTS=1   # multi-node (see E0.5 / #2067)
+##   make up BUILD_NODE_CPUS=16 BUILD_NODE_MEMORY=40g   # size the pipeline build node (default: two thirds of the Docker host)
 up:
 	@bash scripts/k3d/bringup.sh \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
@@ -236,6 +237,9 @@ up:
 		$${REVISION:+--revision=$${REVISION}} \
 		$${SERVERS:+--servers=$${SERVERS}} \
 		$${AGENTS:+--agents=$${AGENTS}} \
+		$${NO_BUILD_NODE:+--no-build-node} \
+		$${BUILD_NODE_CPUS:+--build-node-cpus=$${BUILD_NODE_CPUS}} \
+		$${BUILD_NODE_MEMORY:+--build-node-memory=$${BUILD_NODE_MEMORY}} \
 		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"} \
 		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
@@ -261,6 +265,9 @@ up-refresh:
 		$${REVISION:+--revision=$${REVISION}} \
 		$${SERVERS:+--servers=$${SERVERS}} \
 		$${AGENTS:+--agents=$${AGENTS}} \
+		$${NO_BUILD_NODE:+--no-build-node} \
+		$${BUILD_NODE_CPUS:+--build-node-cpus=$${BUILD_NODE_CPUS}} \
+		$${BUILD_NODE_MEMORY:+--build-node-memory=$${BUILD_NODE_MEMORY}} \
 		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"} \
 		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \

@@ -203,6 +203,27 @@ following in order:
 environment repaves from scratch. It is idempotent and honors the same
 `SERVERS`/`AGENTS`/`REVISION` overrides as `make up`.
 
+### The pipeline build node
+
+`make up` also creates one more k3d agent, `k3d-<cluster>-build-0`, for
+pipeline steps only: it is labelled and tainted
+`memql.io/pipeline-pool=builds`, so no serving pod lands on it, and the local
+overlay pins every step Job and isolation probe to that pool. Its container is
+capped, so a burst of steps cannot reach the serving node or the rest of the
+machine: two thirds of the Docker host's CPUs and memory by default (at least
+2 CPUs and 4g), or what you pass.
+
+```bash
+make up BUILD_NODE_CPUS=16 BUILD_NODE_MEMORY=40g   # explicit caps
+make up NO_BUILD_NODE=1                             # no build node; steps then wait
+```
+
+An existing cluster gains the node on its next `make up`. A value larger than
+the Docker host is refused before anything is created. If the pipelines cache
+was bound to another node before the build node existed, `make up` says so and
+prints the repair: delete the `memql-pipelines-cache` claim, which holds only
+caches, and Argo CD recreates it on the build node.
+
 ## Choosing a domain
 
 The cluster is served at `memql.localhost` by default -- an RFC 6761 loopback

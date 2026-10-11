@@ -73,6 +73,9 @@ cap_spec_param "namespace"      "k8s namespace for the MemQL stack"
 cap_spec_param "repo-url"       "git repo URL for the ArgoCD Application"
 cap_spec_param "servers"        "number of k3d server nodes"
 cap_spec_param "agents"         "number of k3d agent nodes"
+cap_spec_param "no-build-node"     "do not create the dedicated pipeline build node, a k3d agent labelled and tainted memql.io/pipeline-pool=builds (flag)"
+cap_spec_param "build-node-cpus"   "CPUs the build node may use (default: two thirds of the Docker host's, at least 2)"
+cap_spec_param "build-node-memory" "memory the build node may use, in whole gigabytes such as 40g (default: two thirds of the Docker host's, at least 4g)"
 cap_spec_param "argocd-timeout" "ArgoCD readiness timeout (seconds)"
 cap_spec_param "workload-timeout" "workload Available timeout (seconds). The default suits make-dev, where images are already imported; a FRESH install pulls everything and should pass a larger budget (the plugin passes 900)"
 cap_spec_param "app-name"       "ArgoCD Application name"
@@ -133,6 +136,13 @@ APP_NAME="${MEMQL_K3D_APP_NAME:-memql-local}"
 EXTRA_PORTS="${MEMQL_K3D_EXTRA_PORTS:-}"
 APP_PROJECT="${MEMQL_K3D_APP_PROJECT:-memql}"
 PROJECT_MANIFEST="${MEMQL_K3D_PROJECT_MANIFEST:-}"
+
+# The dedicated pipeline build node, resolved in main() (resolve_build_node
+# fills the sizes from the Docker host when they are not given). Created
+# unless --no-build-node says otherwise.
+SKIP_BUILD_NODE=""
+BUILD_NODE_CPUS=""
+BUILD_NODE_MEMORY=""
 
 # The overlay's COMMITTED Ingress hostname (memql#3593). Patches are emitted
 # only when the operator's domain differs, so the common case carries no
@@ -407,6 +417,153 @@ function create_cluster() {
     k3d kubeconfig merge "${CLUSTER_NAME}" --kubeconfig-merge-default &>/dev/null
     kubectl config use-context "k3d-${CLUSTER_NAME}" &>/dev/null
     info "kubectl context set to k3d-${CLUSTER_NAME}."
+}
+
+#=============================================================================
+# BUILD NODE
+#=============================================================================
+
+# The dedicated pipeline build node (design record
+# docs/superpowers/specs/2026-10-11-pipelines-local-green-and-fast-design.md,
+# section 4). The workbench pins every pipeline step to the pool
+# MEMQL_PIPELINES_NODE_POOL names, which the local overlay sets to `builds`;
+# this is the node that pool means locally. Labelled and tainted, so serving
+# pods never land on it; capped, so a burst of steps cannot reach the serving
+# node or the rest of the machine.
+readonly BUILD_POOL_LABEL="memql.io/pipeline-pool"
+readonly BUILD_POOL_VALUE="builds"
+
+# docker_host_cpus -- the Docker host's CPU count, or 0 when Docker cannot say.
+function docker_host_cpus() {
+    local n
+    n="$(docker info --format '{{.NCPU}}' 2>/dev/null || true)"
+    if [[ "$n" =~ ^[0-9]+$ ]]; then
+        echo "$n"
+    else
+        echo 0
+    fi
+}
+
+# docker_host_memory_bytes -- the Docker host's memory in bytes, or 0.
+function docker_host_memory_bytes() {
+    local b
+    b="$(docker info --format '{{.MemTotal}}' 2>/dev/null || true)"
+    if [[ "$b" =~ ^[0-9]+$ ]]; then
+        echo "$b"
+    else
+        echo 0
+    fi
+}
+
+# default_build_node_cpus <host cpus> -- two thirds of the host, at least 2.
+function default_build_node_cpus() {
+    local cpus=$(( $1 * 2 / 3 ))
+    if (( cpus < 2 )); then
+        cpus=2
+    fi
+    echo "$cpus"
+}
+
+# default_build_node_memory <host bytes> -- two thirds of the host in whole
+# gigabytes, at least 4g.
+function default_build_node_memory() {
+    local gib=$(( $1 * 2 / 3 / 1073741824 ))
+    if (( gib < 4 )); then
+        gib=4
+    fi
+    echo "${gib}g"
+}
+
+# resolve_build_node -- fills the defaults and refuses, before anything is
+# created, a value the host cannot honour.
+function resolve_build_node() {
+    if [[ -n "${SKIP_BUILD_NODE}" ]]; then
+        return 0
+    fi
+    local host_cpus host_bytes
+    host_cpus="$(docker_host_cpus)"
+    host_bytes="$(docker_host_memory_bytes)"
+    if [[ -z "${BUILD_NODE_CPUS}" ]]; then
+        BUILD_NODE_CPUS="$(default_build_node_cpus "${host_cpus}")"
+    fi
+    if [[ -z "${BUILD_NODE_MEMORY}" ]]; then
+        BUILD_NODE_MEMORY="$(default_build_node_memory "${host_bytes}")"
+    fi
+    if ! [[ "${BUILD_NODE_CPUS}" =~ ^[1-9][0-9]*$ ]]; then
+        cap_fail 2 "--build-node-cpus must be a whole number of CPUs, got '${BUILD_NODE_CPUS}'"
+    fi
+    if ! [[ "${BUILD_NODE_MEMORY}" =~ ^[1-9][0-9]*g$ ]]; then
+        cap_fail 2 "--build-node-memory must be whole gigabytes such as 40g, got '${BUILD_NODE_MEMORY}'"
+    fi
+    if (( host_cpus > 0 && BUILD_NODE_CPUS > host_cpus )); then
+        cap_fail 2 "--build-node-cpus=${BUILD_NODE_CPUS} is more than the Docker host's ${host_cpus} CPUs"
+    fi
+    if (( host_bytes > 0 && ${BUILD_NODE_MEMORY%g} * 1073741824 > host_bytes )); then
+        cap_fail 2 "--build-node-memory=${BUILD_NODE_MEMORY} is more than the Docker host's $(( host_bytes / 1073741824 ))g"
+    fi
+}
+
+# warn_cache_bound_elsewhere <node> <context> -- a local-path claim stays on
+# the node it first bound to, so a cache bound before the build node existed
+# cannot be mounted by a step pinned to the pool. It holds only caches; say
+# how to let it re-bind rather than leave every step waiting.
+function warn_cache_bound_elsewhere() {
+    local node="$1" context="$2" volume bound
+    volume="$(kubectl -n memql-pipelines get pvc memql-pipelines-cache -o jsonpath='{.spec.volumeName}' --context "${context}" 2>/dev/null || true)"
+    if [[ -z "${volume}" ]]; then
+        return 0
+    fi
+    bound="$(kubectl get pv "${volume}" -o jsonpath='{.spec.nodeAffinity.required.nodeSelectorTerms[0].matchExpressions[0].values[0]}' --context "${context}" 2>/dev/null || true)"
+    if [[ -n "${bound}" && "${bound}" != "${node}" ]]; then
+        warn "The pipelines cache is bound to ${bound}, not the build node ${node}; steps pinned to the build pool cannot mount it."
+        warn "Repair: kubectl --context ${context} -n memql-pipelines delete pvc memql-pipelines-cache (Argo CD recreates it, and it binds on ${node} at the next step)."
+    fi
+}
+
+# ensure_build_node -- create the node if it is missing, re-apply its CPU cap,
+# label and taint, and prove them. An existing cluster gains the node on its
+# next `make up`. Every kubectl call names this cluster's context: on an
+# existing cluster nothing above switched to it, and the current context can
+# be any cluster at all.
+function ensure_build_node() {
+    if [[ -n "${SKIP_BUILD_NODE}" ]]; then
+        info "Build node: skipped (--no-build-node)."
+        cap_result_set_raw buildNode false
+        return 0
+    fi
+    local name="${CLUSTER_NAME}-build"
+    local node="k3d-${name}-0"
+    local context="k3d-${CLUSTER_NAME}"
+    if ! k3d node list 2>/dev/null | grep -q "^${node}[[:space:]]"; then
+        info "Creating build node ${node} (${BUILD_NODE_CPUS} CPUs, ${BUILD_NODE_MEMORY})..."
+        k3d node create "${name}" \
+            --cluster "${CLUSTER_NAME}" \
+            --role agent \
+            --memory "${BUILD_NODE_MEMORY}" \
+            --k3s-node-label "${BUILD_POOL_LABEL}=${BUILD_POOL_VALUE}" \
+            --k3s-arg "--node-taint=${BUILD_POOL_LABEL}=${BUILD_POOL_VALUE}:NoSchedule" \
+            --wait \
+            --timeout "120s" >&2 || cap_fail 5 "could not create the build node ${node}"
+        cap_changed
+    fi
+    docker update --cpus "${BUILD_NODE_CPUS}" "${node}" >/dev/null \
+        || cap_fail 5 "could not cap the build node ${node} at ${BUILD_NODE_CPUS} CPUs"
+    kubectl label node "${node}" "${BUILD_POOL_LABEL}=${BUILD_POOL_VALUE}" --overwrite --context "${context}" >/dev/null \
+        || cap_fail 5 "could not label the build node ${node}"
+    kubectl taint node "${node}" "${BUILD_POOL_LABEL}=${BUILD_POOL_VALUE}:NoSchedule" --overwrite --context "${context}" >/dev/null \
+        || cap_fail 5 "could not taint the build node ${node}"
+    local pool effect
+    pool="$(kubectl get node "${node}" -o jsonpath='{.metadata.labels.memql\.io/pipeline-pool}' --context "${context}" 2>/dev/null || true)"
+    effect="$(kubectl get node "${node}" -o jsonpath='{.spec.taints[?(@.key=="memql.io/pipeline-pool")].effect}' --context "${context}" 2>/dev/null || true)"
+    if [[ "${pool}" != "${BUILD_POOL_VALUE}" || "${effect}" != "NoSchedule" ]]; then
+        cap_fail 5 "build node ${node} is not labelled and tainted ${BUILD_POOL_LABEL}=${BUILD_POOL_VALUE}:NoSchedule (label: ${pool:-none}, taint: ${effect:-none})"
+    fi
+    warn_cache_bound_elsewhere "${node}" "${context}"
+    info "Build node ${node}: ${BUILD_NODE_CPUS} CPUs, ${BUILD_NODE_MEMORY}, pool ${BUILD_POOL_VALUE}."
+    cap_result_set_raw buildNode true
+    cap_result_set     buildNodeName "${node}"
+    cap_result_set_raw buildNodeCpus "${BUILD_NODE_CPUS}"
+    cap_result_set     buildNodeMemory "${BUILD_NODE_MEMORY}"
 }
 
 #=============================================================================
@@ -1521,6 +1678,9 @@ function main() {
     REPO_URL="$(cap_param repo-url "${MEMQL_K3D_REPO_URL:-https://github.com/znasllc-io/memql.git}")"
     K3D_SERVERS="$(cap_param servers "${MEMQL_K3D_SERVERS:-1}")"
     K3D_AGENTS="$(cap_param agents "${MEMQL_K3D_AGENTS:-0}")"
+    SKIP_BUILD_NODE="$(cap_flag no-build-node)"
+    BUILD_NODE_CPUS="$(cap_param build-node-cpus "")"
+    BUILD_NODE_MEMORY="$(cap_param build-node-memory "")"
     ARGOCD_TIMEOUT="$(cap_param argocd-timeout "${MEMQL_K3D_ARGOCD_TIMEOUT:-300}")"
     WORKLOAD_TIMEOUT="$(cap_param workload-timeout "${MEMQL_K3D_WORKLOAD_TIMEOUT:-300}")"
     WORKLOAD_TIMEOUT="${WORKLOAD_TIMEOUT%s}"
@@ -1599,10 +1759,16 @@ function main() {
     info "Namespace: ${NAMESPACE}"
 
     check_prerequisites
+    # Before anything exists: a build-node size the host cannot honour is
+    # refused here, not after the cluster is half made.
+    resolve_build_node
     create_cluster
     # Outside create_cluster: an existing installation needs the same repair.
     info "Reconciling local ingress for long-lived streams."
     ensure_local_traefik "$CLUSTER_NAME" || cap_fail 5 "could not configure local ingress for streaming requests"
+    # Outside create_cluster for the same reason: an existing cluster needs
+    # the pipeline build node too.
+    ensure_build_node
     install_argocd
 
     if [[ -z "$skip_secrets" ]]; then
