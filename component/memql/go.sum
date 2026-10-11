@@ -1,5 +1,5 @@
-github.com/anthropics/anthropic-sdk-go v1.78.0 h1:8uluL7g84HtSSm347tMGtrUuCEBLmme7vOcFCMn7bnk=
-github.com/anthropics/anthropic-sdk-go v1.78.0/go.mod h1:x+lPk/cCl48uRegeP0hlYYBN1b7bEBTveInIMgLicnY=
+github.com/anthropics/anthropic-sdk-go v1.79.1 h1:R+DGl2fpI8mIg7OGjEEHpr1WN7HOja76sz89Z2DMcqk=
+github.com/anthropics/anthropic-sdk-go v1.79.1/go.mod h1:x+lPk/cCl48uRegeP0hlYYBN1b7bEBTveInIMgLicnY=
 github.com/bahlo/generic-list-go v0.2.0 h1:5sz/EEAK+ls5wF+NeqDpk5+iNdMDXrh3z3nPnH1Wvgk=
 github.com/bahlo/generic-list-go v0.2.0/go.mod h1:2KvAjgMlE5NNynlg/5iLrrCCZ2+5xWbdbCW3pNTGyYg=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
