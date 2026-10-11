@@ -119,8 +119,8 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				a.completionSchema = args["responseSchema"]
 				schema := revisionMap(a.completionSchema)
 				properties := revisionMap(schema["properties"])
-				if schema["type"] != "object" || schema["additionalProperties"] != false || revisionMap(properties["findings"])["maxItems"] == nil || revisionMap(properties["verdict"])["enum"] == nil {
-					return nil, fmt.Errorf("completion assessment lacks a bounded structured verdict")
+				if schema["type"] != "object" || schema["additionalProperties"] != false || revisionMap(properties["findings"])["maxItems"] == nil || properties["verdict"] != nil {
+					return nil, fmt.Errorf("completion assessment lacks bounded findings or requests a contradictory verdict")
 				}
 				n := a.completionCalls.Add(1)
 				a.completionRecoveries = append(a.completionRecoveries, asString(data["recovery"]))
@@ -159,7 +159,7 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 					}
 					findings = append(findings, map[string]any{"kind": kind, "quote": quote, "explanation": reply})
 				}
-				structured := map[string]any{"verdict": verdict, "findings": findings}
+				structured := map[string]any{"findings": findings}
 				body, _ := json.Marshal(structured)
 				return reviewResult(map[string]any{"reply": string(body), "structured": structured})
 			}
@@ -448,43 +448,64 @@ func (f *revisionDB) execute(engine *memql.MemQLEngine, request string, resume b
 // Bootstrap them once under this parent; each case owns fresh document/run IDs
 // and model state. Do not use a package-global fixture or parallel subtests.
 func TestDocumentRevisionWorkflow(t *testing.T) {
-	shared := newRevisionDB(t)
-	cases := []struct {
+	type revisionCase struct {
 		name string
 		run  func(*testing.T, *revisionDB)
-	}{
-		{"HistoryBranchesAcrossReplicas", testHistoryBranchesAcrossReplicas},
-		{"HistoryForkReadsOwnedFileBytes", testHistoryForkReadsOwnedFileBytes},
-		{"PersonalDocumentNotesNeverEnterAIRevision", testPersonalDocumentNotesNeverEnterAIRevision},
-		{"ArtifactForFileResolvesBareReceiptAcrossEngines", testArtifactForFileResolvesBareReceiptAcrossEngines},
-		{"ReviewAttachmentsAcrossReplicas", testReviewAttachmentsAcrossReplicas},
-		{"PreparedRevisionImagesRecoverAndPinAcrossReplicas", testPreparedRevisionImagesRecoverAndPinAcrossReplicas},
-		{"RevisionDSLPlansAcquiresAndProposesAnImage", testRevisionDSLPlansAcquiresAndProposesAnImage},
-		{"RevisionDSLRepairsImagePlanBeforeEffects", testRevisionDSLRepairsImagePlanBeforeEffects},
-		{"RevisionDSLRepairsOverlappingImageEdits", testRevisionDSLRepairsOverlappingImageEdits},
-		{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
-		{"RevisionCompletionRepairsNoopAndReusesSavedImages", testRevisionCompletionRepairsNoopAndReusesSavedImages},
-		{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},
-		{"RevisionPartialFeedbackRepair", testRevisionPartialFeedbackRepair},
-		{"RevisionRejectsUngroundedReview", testRevisionRejectsUngroundedReview},
-		{"RevisionAmendmentPreservesImagePinsAcrossReplicas", testRevisionAmendmentPreservesImagePinsAcrossReplicas},
-		{"AppliedFeedbackCannotBeDeletedAcrossReplicas", testAppliedFeedbackCannotBeDeletedAcrossReplicas},
-		{"DeleteDocumentAnnotationsAcrossReplicas", testDeleteDocumentAnnotationsAcrossReplicas},
-		{"DeleteProposedFeedbackInvalidatesStaleReview", testDeleteProposedFeedbackInvalidatesStaleReview},
-		{"DocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
-		{"DocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure", testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure},
-		{"DocumentResearchRouting", testDocumentResearchRouting},
-		{"DocumentResearchScopesContext", testDocumentResearchScopesContext},
-		{"DocumentRetryReusesCompletedAppEvidence", testDocumentRetryReusesCompletedAppEvidence},
-		{"DocumentRevisionRecoveryOrdersByRequestAndRechecksAccess", testDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess},
-		{"DocumentRevisionRefusesStaleApprovalAndAllowsDecline", testDocumentRevisionRefusesStaleApprovalAndAllowsDecline},
-		{"DocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove", testDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove},
-		{"DocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas", testDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas},
-		{"DocumentRevisionStatusCarriesRetryAcrossReplicas", testDocumentRevisionStatusCarriesRetryAcrossReplicas},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.run(t, shared.isolatedCase(t))
+	groups := []struct {
+		name  string
+		cases []revisionCase
+	}{
+		{name: "HistoryAndApproval", cases: []revisionCase{
+			{"HistoryBranchesAcrossReplicas", testHistoryBranchesAcrossReplicas},
+			{"HistoryForkReadsOwnedFileBytes", testHistoryForkReadsOwnedFileBytes},
+			{"PersonalDocumentNotesNeverEnterAIRevision", testPersonalDocumentNotesNeverEnterAIRevision},
+			{"ArtifactForFileResolvesBareReceiptAcrossEngines", testArtifactForFileResolvesBareReceiptAcrossEngines},
+			{"ReviewAttachmentsAcrossReplicas", testReviewAttachmentsAcrossReplicas},
+			{"AppliedFeedbackCannotBeDeletedAcrossReplicas", testAppliedFeedbackCannotBeDeletedAcrossReplicas},
+			{"DeleteDocumentAnnotationsAcrossReplicas", testDeleteDocumentAnnotationsAcrossReplicas},
+			{"DeleteProposedFeedbackInvalidatesStaleReview", testDeleteProposedFeedbackInvalidatesStaleReview},
+			{"DocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas", testDocumentRevisionAnalyzesThenApprovesAndAppliesAcrossReplicas},
+			{"DocumentRevisionRefusesStaleApprovalAndAllowsDecline", testDocumentRevisionRefusesStaleApprovalAndAllowsDecline},
+			{"DocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove", testDocumentRevisionRecoversAfterHistoryWriteBeforeHeadMove},
+			{"DocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas", testDocumentRevisionItemsModifyAndAcceptSubsetAcrossReplicas},
+			{"DocumentRevisionStatusCarriesRetryAcrossReplicas", testDocumentRevisionStatusCarriesRetryAcrossReplicas},
+		}},
+		{name: "ImagesAndEvidence", cases: []revisionCase{
+			{"PreparedRevisionImagesRecoverAndPinAcrossReplicas", testPreparedRevisionImagesRecoverAndPinAcrossReplicas},
+			{"RevisionDSLPlansAcquiresAndProposesAnImage", testRevisionDSLPlansAcquiresAndProposesAnImage},
+			{"RevisionDSLRepairsImagePlanBeforeEffects", testRevisionDSLRepairsImagePlanBeforeEffects},
+			{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
+			{"DocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure", testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure},
+			{"DocumentResearchRouting", testDocumentResearchRouting},
+			{"DocumentResearchScopesContext", testDocumentResearchScopesContext},
+			{"DocumentRetryReusesCompletedAppEvidence", testDocumentRetryReusesCompletedAppEvidence},
+			{"DocumentRevisionRecoveryOrdersByRequestAndRechecksAccess", testDocumentRevisionRecoveryOrdersByRequestAndRechecksAccess},
+		}},
+		{name: "ProposalValidation", cases: []revisionCase{
+			{"RevisionDSLRepairsOverlappingImageEdits", testRevisionDSLRepairsOverlappingImageEdits},
+			{"RevisionCompletionRepairsNoopAndReusesSavedImages", testRevisionCompletionRepairsNoopAndReusesSavedImages},
+			{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},
+			{"RevisionPartialFeedbackRepair", testRevisionPartialFeedbackRepair},
+			{"RevisionRejectsUngroundedReview", testRevisionRejectsUngroundedReview},
+			{"RevisionAmendmentPreservesImagePinsAcrossReplicas", testRevisionAmendmentPreservesImagePinsAcrossReplicas},
+		}},
+	}
+	// Each concern owns a separate pair of engines and mutable adapter/model
+	// state. Initialize them serially before parallel children can run because
+	// engine setup loads the shared concept registry. The cases within a group
+	// remain sequential; no fixture state is shared between groups.
+	// This overlaps independent work without skipping coverage or raising CI's
+	// package timeout. Each case still crosses the two real engine instances.
+	for _, group := range groups {
+		shared := newRevisionDB(t)
+		t.Run(group.name, func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range group.cases {
+				t.Run(tc.name, func(t *testing.T) {
+					tc.run(t, shared.isolatedCase(t))
+				})
+			}
 		})
 	}
 }

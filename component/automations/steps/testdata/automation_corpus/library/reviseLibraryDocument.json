@@ -302,17 +302,9 @@
                     },
                     "maxItems": 8,
                     "type": "array"
-                  },
-                  "verdict": {
-                    "enum": [
-                      "satisfied",
-                      "incomplete"
-                    ],
-                    "type": "string"
                   }
                 },
                 "required": [
-                  "verdict",
                   "findings"
                 ],
                 "type": "object"
@@ -632,17 +624,9 @@
                     },
                     "maxItems": 8,
                     "type": "array"
-                  },
-                  "verdict": {
-                    "enum": [
-                      "satisfied",
-                      "incomplete"
-                    ],
-                    "type": "string"
                   }
                 },
                 "required": [
-                  "verdict",
                   "findings"
                 ],
                 "type": "object"

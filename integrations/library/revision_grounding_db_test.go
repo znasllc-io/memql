@@ -17,8 +17,8 @@ func testRevisionRejectsUngroundedReview(t *testing.T, shared *revisionDB) {
 			args, note := f.submit(artifact, doc, map[string]any{"kind": "document"}, "Remove the unsupported old claim, preserving the rest.")
 			request := asString(args["requestId"])
 			f.ai.answer = revisionAnswer{Summary: "Removed", Edits: []revisionReplacement{{Before: "Keep this. Unsupported old claim.", After: "Keep this.", Reason: "Remove unsupported claim", CommentIDs: []string{note}}}}
-			bad := map[string]any{"verdict": "incomplete", "findings": []any{map[string]any{"kind": "present_text", "quote": "Unsupported old claim.", "explanation": "The old claim still appears."}}}
-			f.ai.completionAnswers = []map[string]any{bad, {"verdict": "satisfied", "findings": []any{}}}
+			bad := map[string]any{"findings": []any{map[string]any{"kind": "present_text", "quote": "Unsupported old claim.", "explanation": "The old claim still appears."}}}
+			f.ai.completionAnswers = []map[string]any{bad, {"findings": []any{}}}
 			if persistent {
 				f.ai.completionAnswers[1] = bad
 			}

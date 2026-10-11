@@ -5,11 +5,11 @@ logic libraryRevisionReviewGrounding {
   document string!
   assessment object!
  }
- if args.assessment.verdict == "satisfied" && args.assessment.findings.count() == 0 {
-  return {valid: true, verdict: "satisfied", details: ""}
+ if args.assessment.findings == nil {
+  return {valid: false, problem: "Return a findings array, empty only when every requested change is satisfied."}
  }
- if args.assessment.verdict != "incomplete" || args.assessment.findings.count() == 0 {
-  return {valid: false, problem: "A satisfied review must have no findings; an incomplete review must identify an unmet requirement."}
+ if args.assessment.findings.count() == 0 {
+  return {valid: true, verdict: "satisfied", details: ""}
  }
  for finding in args.assessment.findings {
   if trim(finding.explanation) == "" {

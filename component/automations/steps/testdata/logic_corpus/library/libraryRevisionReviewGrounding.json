@@ -13,7 +13,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -30,7 +30,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -47,7 +47,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -64,7 +64,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -81,7 +81,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -98,7 +98,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -115,7 +115,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -132,7 +132,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -149,7 +149,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -166,7 +166,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -183,7 +183,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -200,7 +200,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -217,7 +217,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -234,7 +234,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -251,7 +251,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -268,7 +268,7 @@
       "outcome": {
         "calls": null,
         "result": {
-          "problem": "A satisfied review must have no findings; an incomplete review must identify an unmet requirement.",
+          "problem": "Return a findings array, empty only when every requested change is satisfied.",
           "valid": false
         }
       }
@@ -278,8 +278,7 @@
         "actor": "admin",
         "args": {
           "assessment": {
-            "findings": [],
-            "verdict": "satisfied"
+            "findings": []
           },
           "document": "Current draft."
         },
@@ -299,8 +298,7 @@
         "actor": "admin",
         "args": {
           "assessment": {
-            "findings": [],
-            "verdict": "satisfied"
+            "findings": []
           },
           "document": "Current draft."
         },
@@ -320,8 +318,7 @@
         "actor": "developer",
         "args": {
           "assessment": {
-            "findings": [],
-            "verdict": "satisfied"
+            "findings": []
           },
           "document": "Current draft."
         },
@@ -341,8 +338,7 @@
         "actor": "developer",
         "args": {
           "assessment": {
-            "findings": [],
-            "verdict": "satisfied"
+            "findings": []
           },
           "document": "Current draft."
         },
@@ -362,8 +358,7 @@
         "actor": "owner",
         "args": {
           "assessment": {
-            "findings": [],
-            "verdict": "satisfied"
+            "findings": []
           },
           "document": "Current draft."
         },
@@ -383,8 +378,7 @@
         "actor": "owner",
         "args": {
           "assessment": {
-            "findings": [],
-            "verdict": "satisfied"
+            "findings": []
           },
           "document": "Current draft."
         },
@@ -404,8 +398,7 @@
         "actor": "user",
         "args": {
           "assessment": {
-            "findings": [],
-            "verdict": "satisfied"
+            "findings": []
           },
           "document": "Current draft."
         },
@@ -425,8 +418,7 @@
         "actor": "user",
         "args": {
           "assessment": {
-            "findings": [],
-            "verdict": "satisfied"
+            "findings": []
           },
           "document": "Current draft."
         },
@@ -452,8 +444,7 @@
                 "kind": "present_text",
                 "quote": "Old draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -478,8 +469,7 @@
                 "kind": "present_text",
                 "quote": "Old draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -504,8 +494,7 @@
                 "kind": "present_text",
                 "quote": "Old draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -530,8 +519,7 @@
                 "kind": "present_text",
                 "quote": "Old draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -556,8 +544,7 @@
                 "kind": "present_text",
                 "quote": "Old draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -582,8 +569,7 @@
                 "kind": "present_text",
                 "quote": "Old draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -608,8 +594,7 @@
                 "kind": "present_text",
                 "quote": "Old draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -634,8 +619,7 @@
                 "kind": "present_text",
                 "quote": "Old draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -660,8 +644,7 @@
                 "kind": "present_text",
                 "quote": "Current draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -687,8 +670,7 @@
                 "kind": "present_text",
                 "quote": "Current draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -714,8 +696,7 @@
                 "kind": "present_text",
                 "quote": "Current draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -741,8 +722,7 @@
                 "kind": "present_text",
                 "quote": "Current draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -768,8 +748,7 @@
                 "kind": "present_text",
                 "quote": "Current draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -795,8 +774,7 @@
                 "kind": "present_text",
                 "quote": "Current draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -822,8 +800,7 @@
                 "kind": "present_text",
                 "quote": "Current draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -849,8 +826,7 @@
                 "kind": "present_text",
                 "quote": "Current draft."
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -876,8 +852,7 @@
                 "kind": "missing_requirement",
                 "quote": ""
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -903,8 +878,7 @@
                 "kind": "missing_requirement",
                 "quote": ""
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -930,8 +904,7 @@
                 "kind": "missing_requirement",
                 "quote": ""
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -957,8 +930,7 @@
                 "kind": "missing_requirement",
                 "quote": ""
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -984,8 +956,7 @@
                 "kind": "missing_requirement",
                 "quote": ""
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -1011,8 +982,7 @@
                 "kind": "missing_requirement",
                 "quote": ""
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -1038,8 +1008,7 @@
                 "kind": "missing_requirement",
                 "quote": ""
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },
@@ -1065,8 +1034,7 @@
                 "kind": "missing_requirement",
                 "quote": ""
               }
-            ],
-            "verdict": "incomplete"
+            ]
           },
           "document": "Current draft."
         },

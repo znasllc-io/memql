@@ -108,7 +108,7 @@ prompt libraryRevisionCompletion {
  references string
  evidence string
  document string!
- passages string!
+ passages []object!
  instruction string!
  explanation string!
 }

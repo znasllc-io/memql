@@ -398,10 +398,12 @@ automation reviseLibraryDocument {
    properties: {before: {type: "string"}, after: {type: "string"}, reason: {type: "string", maxLength: 400}, commentIds: {type: "array", items: {type: "string"}}}
   }}, summary: {type: "string", maxLength: 300}}
  }
- // Ground the reviewer before its findings can drive an edit repair.
+ // Review the human requests and their anchors, not a second copy of the old
+ // section. The complete candidate below is authoritative for current prose.
+ // Findings are the sole model answer: an empty list means satisfied. Do not
+ // ask for a redundant verdict that can contradict the findings.
  completionSchema := {
-  type: "object", additionalProperties: false, required: ["verdict", "findings"], properties: {
-   verdict: {type: "string", enum: ["satisfied", "incomplete"]},
+  type: "object", additionalProperties: false, required: ["findings"], properties: {
    findings: {type: "array", maxItems: 8, items: {anyOf: [{
     type: "object", additionalProperties: false, required: ["kind", "quote", "explanation"], properties: {
      kind: {type: "string", enum: ["present_text"]}, quote: {type: "string", minLength: 1, maxLength: 600}, explanation: {type: "string", minLength: 1, maxLength: 400}
@@ -418,14 +420,14 @@ automation reviseLibraryDocument {
    response: {edits: captured.amendment.edits, summary: "Previous proposed changes"}, sourceRunId: preparedImages.sourceRunId, allowIncomplete: true)
   amendmentAssessmentRaw := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
    references: references.references, evidence: combinedEvidence,
-   imageUsage: previousCandidate.imageUsage, document: previousCandidate.proposal.revisedContent, passages: captured.passagesJSON,
+   imageUsage: previousCandidate.imageUsage, document: previousCandidate.proposal.revisedContent, passages: captured.passages,
    instruction: captured.amendment.instruction, explanation: "Assess the previous proposal against the new direction."
   })
   amendmentAssessmentCheck := logic libraryRevisionReviewGrounding(document: previousCandidate.proposal.revisedContent, assessment: amendmentAssessmentRaw.structured)
   if !amendmentAssessmentCheck.valid {
    amendmentAssessmentRetry := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
     references: references.references, evidence: combinedEvidence,
-    imageUsage: previousCandidate.imageUsage, document: previousCandidate.proposal.revisedContent, passages: captured.passagesJSON,
+    imageUsage: previousCandidate.imageUsage, document: previousCandidate.proposal.revisedContent, passages: captured.passages,
     instruction: captured.amendment.instruction, explanation: "Assess the previous proposal against the new direction.",
     recovery: amendmentAssessmentCheck.problem
    })
@@ -463,14 +465,14 @@ automation reviseLibraryDocument {
   } else {
    completionRaw := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
     references: references.references, evidence: combinedEvidence,
-    imageUsage: candidate.imageUsage, document: candidate.proposal.revisedContent, passages: captured.passagesJSON,
+    imageUsage: candidate.imageUsage, document: candidate.proposal.revisedContent, passages: captured.passages,
     instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary
    })
    completionCheck := logic libraryRevisionReviewGrounding(document: candidate.proposal.revisedContent, assessment: completionRaw.structured)
    if !completionCheck.valid {
     completionRetry := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
      references: references.references, evidence: combinedEvidence,
-     imageUsage: candidate.imageUsage, document: candidate.proposal.revisedContent, passages: captured.passagesJSON,
+     imageUsage: candidate.imageUsage, document: candidate.proposal.revisedContent, passages: captured.passages,
      instruction: captured.amendment.instruction ?? captured.instruction, explanation: candidate.summary,
      recovery: completionCheck.problem
     })
@@ -505,14 +507,14 @@ automation reviseLibraryDocument {
   repairedCandidate := builtin libraryRevisionProposal(requestId: args.requestId, response: repaired.reply, sourceRunId: preparedImages.sourceRunId, requireChanges: true)
   finalAssessmentRaw := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
    references: references.references, evidence: combinedEvidence,
-   imageUsage: repairedCandidate.imageUsage, document: repairedCandidate.proposal.revisedContent, passages: captured.passagesJSON,
+   imageUsage: repairedCandidate.imageUsage, document: repairedCandidate.proposal.revisedContent, passages: captured.passages,
    instruction: captured.amendment.instruction ?? captured.instruction, explanation: repairedCandidate.summary
   })
   finalAssessmentCheck := logic libraryRevisionReviewGrounding(document: repairedCandidate.proposal.revisedContent, assessment: finalAssessmentRaw.structured)
   if !finalAssessmentCheck.valid {
    finalAssessmentRetry := builtin ai(templateId: "libraryRevisionCompletion", responseSchema: completionSchema, data: {
     references: references.references, evidence: combinedEvidence,
-    imageUsage: repairedCandidate.imageUsage, document: repairedCandidate.proposal.revisedContent, passages: captured.passagesJSON,
+    imageUsage: repairedCandidate.imageUsage, document: repairedCandidate.proposal.revisedContent, passages: captured.passages,
     instruction: captured.amendment.instruction ?? captured.instruction, explanation: repairedCandidate.summary,
     recovery: finalAssessmentCheck.problem
    })
