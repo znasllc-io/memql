@@ -249,6 +249,12 @@ func withBodies(t *testing.T, out []*corpusSource) []*corpusSource {
 // the schema's own (logicSchemaArgs): the inputs that take each branch of a
 // decision.
 var logicArgVariants = map[string][]map[string]any{
+	"libraryRevisionReviewGrounding": {
+		{"document": "Current draft.", "assessment": map[string]any{"verdict": "satisfied", "findings": []any{}}},
+		{"document": "Current draft.", "assessment": map[string]any{"verdict": "incomplete", "findings": []any{map[string]any{"kind": "present_text", "quote": "Old draft.", "explanation": "Remove old wording."}}}},
+		{"document": "Current draft.", "assessment": map[string]any{"verdict": "incomplete", "findings": []any{map[string]any{"kind": "present_text", "quote": "Current draft.", "explanation": "Apply requested wording."}}}},
+		{"document": "Current draft.", "assessment": map[string]any{"verdict": "incomplete", "findings": []any{map[string]any{"kind": "missing_requirement", "quote": "", "explanation": "Add the requested image."}}}},
+	},
 	"runIsTerminal":            {{"status": "succeeded"}, {"status": "abandoned"}, {"status": "running"}, {}},
 	"requestRouteStatus":       {{"submitterRole": "owner"}, {"submitterRole": "admin"}, {"submitterRole": "writer"}, {"submitterRole": "reader"}, {}},
 	"transitionEventKind":      {{"status": "needs_approval", "oldStatus": "draft"}, {"status": "queued", "oldStatus": "needs_approval"}, {"status": "rejected", "oldStatus": "queued"}, {"status": "changes_requested", "oldStatus": "queued"}, {"status": "queued", "oldStatus": "queued"}, {}},

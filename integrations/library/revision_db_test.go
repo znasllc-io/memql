@@ -38,6 +38,9 @@ type revisionAI struct {
 	completionDocuments   []string
 	completionSchema      any
 	completionImageUsage  []string
+	completionAnswers     []map[string]any
+	completionQuotes      []string
+	completionRecoveries  []string
 	onCompletion          func(context.Context, int32) error
 	completionCalls       atomic.Int32
 	repairCalls           atomic.Int32
@@ -116,10 +119,11 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				a.completionSchema = args["responseSchema"]
 				schema := revisionMap(a.completionSchema)
 				properties := revisionMap(schema["properties"])
-				if schema["type"] != "object" || schema["additionalProperties"] != false || revisionMap(properties["details"])["maxLength"] == nil || revisionMap(properties["verdict"])["enum"] == nil {
+				if schema["type"] != "object" || schema["additionalProperties"] != false || revisionMap(properties["findings"])["maxItems"] == nil || revisionMap(properties["verdict"])["enum"] == nil {
 					return nil, fmt.Errorf("completion assessment lacks a bounded structured verdict")
 				}
 				n := a.completionCalls.Add(1)
+				a.completionRecoveries = append(a.completionRecoveries, asString(data["recovery"]))
 				if len(a.completionDocuments) > 0 && (int(n) > len(a.completionDocuments) || data["document"] != a.completionDocuments[n-1]) {
 					return nil, fmt.Errorf("completion check did not assess the actual proposed document: %v", data["document"])
 				}
@@ -127,6 +131,14 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 					if err := a.onCompletion(ctx, n); err != nil {
 						return nil, err
 					}
+				}
+				if len(a.completionAnswers) > 0 {
+					if int(n) > len(a.completionAnswers) {
+						return nil, fmt.Errorf("unexpected repeated assessment")
+					}
+					structured := a.completionAnswers[n-1]
+					body, _ := json.Marshal(structured)
+					return reviewResult(map[string]any{"reply": string(body), "structured": structured})
 				}
 				reply := a.completionReply
 				if a.repairCalls.Load() > 0 {
@@ -139,7 +151,15 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				if reply == "satisfied" {
 					verdict, reply = "satisfied", ""
 				}
-				structured := map[string]any{"verdict": verdict, "details": reply}
+				findings := []any{}
+				if verdict == "incomplete" {
+					kind, quote := "missing_requirement", ""
+					if int(n) <= len(a.completionQuotes) && a.completionQuotes[n-1] != "" {
+						kind, quote = "present_text", a.completionQuotes[n-1]
+					}
+					findings = append(findings, map[string]any{"kind": kind, "quote": quote, "explanation": reply})
+				}
+				structured := map[string]any{"verdict": verdict, "findings": findings}
 				body, _ := json.Marshal(structured)
 				return reviewResult(map[string]any{"reply": string(body), "structured": structured})
 			}
@@ -282,6 +302,7 @@ func newRevisionDB(t *testing.T) *revisionDB {
 		if err = e.Init(memorynodes.DefaultRegistry()); err != nil {
 			t.Fatal(err)
 		}
+		e.SetLogicRunner(automations.NewLogicRunner(e, steps.NewRegistry(), e.Logger))
 		lib := NewIntegration(e, func() *sql.DB { return db.DB })
 		w := work.New(e, e.Logger, func() *bun.DB { return db })
 		lib.SetReviewGoals(w)
@@ -445,6 +466,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 		{"RevisionCompletionRepairsNoopAndReusesSavedImages", testRevisionCompletionRepairsNoopAndReusesSavedImages},
 		{"RevisionNoopAssessmentAndBoundedRepair", testRevisionNoopAssessmentAndBoundedRepair},
 		{"RevisionPartialFeedbackRepair", testRevisionPartialFeedbackRepair},
+		{"RevisionRejectsUngroundedReview", testRevisionRejectsUngroundedReview},
 		{"RevisionAmendmentPreservesImagePinsAcrossReplicas", testRevisionAmendmentPreservesImagePinsAcrossReplicas},
 		{"AppliedFeedbackCannotBeDeletedAcrossReplicas", testAppliedFeedbackCannotBeDeletedAcrossReplicas},
 		{"DeleteDocumentAnnotationsAcrossReplicas", testDeleteDocumentAnnotationsAcrossReplicas},
