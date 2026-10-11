@@ -54,7 +54,7 @@ func (p *fleetProvider) rebound() *fleetProvider {
 // runtime's window. Use the common estimate plus completion headroom, never the
 // model's advertised maximum (which can reserve far more memory than needed).
 func fleetWorkingContext(req FleetCallRequest) (int, error) {
-	parts := make([]string, 0, len(req.Messages)*4+len(req.Tools)*3+3)
+	var parts []string
 	for _, m := range req.Messages {
 		parts = append(parts, m.Role, m.Content, m.Name, m.ToolCallId)
 		for _, tc := range m.ToolCalls {

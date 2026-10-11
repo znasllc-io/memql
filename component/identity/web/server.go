@@ -608,10 +608,7 @@ func (s *Server) Mount(mux *http.ServeMux) {
 // https:// turns on the flag. Tests pass BaseURL=http://localhost
 // and get Secure=false so the cookie still sticks.
 func (s *Server) cookieSecure() bool {
-	if s == nil {
-		return false
-	}
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.Cfg.BaseURL)), "https://")
+	return s != nil && strings.HasPrefix(strings.ToLower(strings.TrimSpace(s.Cfg.BaseURL)), "https://")
 }
 
 // LayoutData builds the brand-aware base layout payload for a request.

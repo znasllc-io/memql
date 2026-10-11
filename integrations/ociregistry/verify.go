@@ -167,6 +167,9 @@ func Verify(ctx context.Context, source io.Reader, want Expected, limits Limits)
 		if h.Typeflag != tar.TypeReg || (name != "index.json" && name != "oci-layout" && !isBlob) || h.Size < 0 || h.Size > limits.ArchiveBytes {
 			return nil, errors.New("unsupported OCI archive entry")
 		}
+		if !filepath.IsLocal(name) { // implied by the allowlist above; stated where the path is built
+			return nil, errors.New("unsupported OCI archive entry")
+		}
 		f, createErr := os.OpenFile(filepath.Join(root, name), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if createErr != nil {
 			return nil, createErr

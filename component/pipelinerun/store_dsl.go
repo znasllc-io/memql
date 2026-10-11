@@ -888,7 +888,7 @@ func flattenRows(rows []map[string]any) []map[string]any {
 		if !ok {
 			continue
 		}
-		flat := make(map[string]any, len(row)+len(payload))
+		flat := make(map[string]any, max(len(row), len(payload)))
 		for k, v := range payload {
 			flat[k] = v
 		}

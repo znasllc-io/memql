@@ -42,7 +42,7 @@ func (e *MemQLEngine) validateSourceConnectionWrite(ctx context.Context, concept
 			return fmt.Errorf("only the repository owner can remove or restore its source entry")
 		}
 	}
-	merged := make(map[string]any, len(prior)+len(delta))
+	merged := make(map[string]any, max(len(prior), len(delta)))
 	for k, v := range prior {
 		merged[k] = v
 	}

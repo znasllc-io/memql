@@ -228,7 +228,7 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 	if result.Len() > revisionContentLimit {
 		return nil, fmt.Errorf("the proposed document exceeds 128 KiB")
 	}
-	proposal := make(map[string]any, len(captured)+3)
+	proposal := make(map[string]any, len(captured))
 	for k, v := range captured {
 		proposal[k] = v
 	}
@@ -262,7 +262,7 @@ func revisionChangeBounds(before, after string) (prefix, beforeEnd, afterEnd int
 // line endings outside the replacements remain byte-for-byte unchanged.
 func normalizedRevisionSource(source string) (string, []int) {
 	var text strings.Builder
-	offsets := make([]int, 0, len(source)+1)
+	offsets := make([]int, 0, len(source))
 	for n := 0; n < len(source); n++ {
 		offsets = append(offsets, n)
 		if source[n] == '\r' && n+1 < len(source) && source[n+1] == '\n' {

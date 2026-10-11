@@ -48,7 +48,7 @@ func appendAutomationGraph(m *model.Model, g *automations.LoopGraph) error {
 	}
 	autos, triggers := automations.FlattenLoopGraph(g)
 	for _, a := range autos {
-		attrs := make(map[string]string, len(a.Attrs)+1)
+		attrs := make(map[string]string, len(a.Attrs))
 		for k, v := range a.Attrs {
 			attrs[k] = v
 		}

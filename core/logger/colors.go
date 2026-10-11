@@ -169,7 +169,7 @@ func componentColorEnvVars(component common.ComponentName) []string {
 
 	var (
 		vars []string
-		seen = make(map[string]struct{}, len(prefixes)*2)
+		seen = make(map[string]struct{}, len(prefixes))
 	)
 
 	add := func(key string) {
