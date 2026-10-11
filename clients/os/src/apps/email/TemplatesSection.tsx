@@ -13,9 +13,9 @@ import { editorTemplateURL, readEditorPreference } from "../../items/editorPrefe
 import { browserHandoffPorts, openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import type { CampaignWrites } from "./actions";
 import { templateFingerprint, templateFromRow, templateIsArchived, templateName, type TemplateRow } from "./rows";
-import type { CampaignFeeds } from "./useCampaigns";
+import type { CampaignFeeds } from "./useEmail";
 
-// Campaigns organizes reusable templates. File content is edited and previewed
+// Email organizes reusable templates. File content is edited and previewed
 // by Productivity Tools, using the same revision-checked backend on both hosts.
 export function TemplatesSection({ feeds, writes, showFiled }: { feeds: CampaignFeeds; writes: CampaignWrites; showFiled: boolean }) {
   const { config } = useSession();

@@ -1,7 +1,7 @@
 import { ContentSkeleton, InlineSkeleton } from "../../kit/ContentSkeleton";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { RecordList, listCount } from "../../kit/RecordRow";
-import { useSendingReadiness } from "./useCampaigns";
+import { useSendingReadiness } from "./useEmail";
 import { useSession } from "../../chrome/access";
 import { editorTemplateURL } from "../../items/editorPreference";
 import { openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
@@ -57,7 +57,7 @@ import {
   type SenderIdentityRow,
   type TemplateRow,
 } from "./rows";
-import { useCampaignDeliveries, useCampaignStats, type CampaignFeeds } from "./useCampaigns";
+import { useCampaignDeliveries, useCampaignStats, type CampaignFeeds } from "./useEmail";
 
 // The campaigns list and one campaign in full.
 //

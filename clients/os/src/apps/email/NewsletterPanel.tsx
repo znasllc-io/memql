@@ -7,7 +7,7 @@ import { flatten } from "../../kit/rows";
 import { useLiveCollection, feedIsBehind } from "../../live/useLiveCollection";
 import { useSites } from "../deployables/useSites";
 import { useConfigureNewsletter, useRetryNewsletterWelcome } from "./actions";
-import { useNewsletterWelcomes, type CampaignFeeds } from "./useCampaigns";
+import { useNewsletterWelcomes, type CampaignFeeds } from "./useEmail";
 
 const text = (row: Record<string, unknown>, key: string) => typeof row[key] === "string" ? row[key] as string : "";
 const escapeHTML = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");

@@ -126,8 +126,14 @@ export function WindowFrame({
   const settingsStatePhrase = settingsTone === "needsSetup" ? "not set up" : "partly set up";
   // A module the SECTION alone asked for names the section in the headline
   // ("Workbenches is not set up yet"); an app-level one names the app.
-  const appRequires = manifest.requires ?? [];
-  const unmetIsSectionOnly = gate.unmet.some((id) => !appRequires.includes(id));
+  //
+  // THE APP'S MODULE LIST IS `needs`. `requires` is the app's capability
+  // RESOURCE ("app:email"), a string, and `string.includes` is a substring
+  // test: read as a module list it answered true for any module whose name is
+  // spelled inside the app's resource, so Email's own `email` module would have
+  // named the app for a gate only the Rules section asked for.
+  const appNeeds = manifest.needs ?? [];
+  const unmetIsSectionOnly = gate.unmet.some((id) => !appNeeds.includes(id));
   const Icon = manifest.icon;
   const Body = manifest.component;
   const contextTag = `app:${manifest.id}${current ? ` section:${current.id}` : ""}`;

@@ -4,7 +4,7 @@ import { Overview, OverviewBreakdown } from "../../kit/Overview";
 import { InfoDetail } from "../../kit/InfoDetail";
 import { absent, figureOf } from "../../kit/measure";
 import { campaignFromRow, audienceFromRow, templateFromRow } from "./rows";
-import type { CampaignFeeds } from "./useCampaigns";
+import type { CampaignFeeds } from "./useEmail";
 
 export function CampaignsOverview({
   feeds,

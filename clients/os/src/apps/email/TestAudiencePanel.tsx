@@ -8,7 +8,7 @@ import { AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
 import { useDefaultOrganization } from "../accounts/organization";
 import { audienceFromRow, campaignFromRow, deliveryFromRow, type AudienceRow, type CampaignRow } from "./rows";
-import { CAMPAIGN_REFRESH_MS, useCampaignDeliveries, useReading, useSendingReadiness } from "./useCampaigns";
+import { CAMPAIGN_REFRESH_MS, useCampaignDeliveries, useReading, useSendingReadiness } from "./useEmail";
 import { useTestSend } from "./actions";
 import { SendBar } from "./SendBar";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";

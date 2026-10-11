@@ -83,7 +83,7 @@ func workCapabilityApp(fn *Function) string {
 	case "accounts":
 		return "accounts"
 	case "campaigns":
-		return "campaigns"
+		return "email"
 	case "platform":
 		return "deployables"
 	case "agents", "node", "cluster", "automations":

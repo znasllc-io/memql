@@ -1,7 +1,7 @@
 import { AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
 import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
-import { useSendingReadiness } from "./useCampaigns";
+import { useSendingReadiness } from "./useEmail";
 import { useCallback, useState } from "react";
 import { Mail, Users, FileText } from "lucide-react";
 import { useSession } from "../../chrome/access";
@@ -33,7 +33,7 @@ import { NewTemplate } from "./TemplatesSection";
 import { editorTemplateURL } from "../../items/editorPreference";
 import { openHandoff } from "../../items/vscode";
 import type { CampaignWrites } from "./actions";
-import type { CampaignFeeds } from "./useCampaigns";
+import type { CampaignFeeds } from "./useEmail";
 
 const STEPS = ["Sending setup", "Sender", "Audience", "Content", "Review"];
 
@@ -167,7 +167,7 @@ export function CampaignJourney({
                       ? "Email sending needs setup."
                       : "Sending readiness is not confirmed."
                   }
-                  next="Check the organization’s sending domain in Campaigns settings. You can continue preparing a draft."
+                  next="Check the organization’s sending domain in Email settings. You can continue preparing a draft."
                   detail={sending.reason}
                 />
               )}
@@ -183,7 +183,7 @@ export function CampaignJourney({
               </Button>
             </Panel>
             <SetupGroup
-              app="Campaigns"
+              app="Email"
               requires={["campaigns"]}
               wants={[]}
               readiness={readiness}
@@ -192,7 +192,7 @@ export function CampaignJourney({
               <Subhead>Provider and domain</Subhead>
               <Caption>
                 An owner or developer can connect the organization’s Azure email domain in
-                Campaigns → Settings. Complete the DNS verification there,
+                Email → Settings. Complete the DNS verification there,
                 then choose the verified sender here.
               </Caption>
               <Caption>

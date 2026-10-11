@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { chooseOption, openSelect } from "../selectControl";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
-import { NewsletterPanel, newsletterFormHTML } from "../../src/apps/campaigns/NewsletterPanel";
+import { NewsletterPanel, newsletterFormHTML } from "../../src/apps/email/NewsletterPanel";
 import { fakeConnection, withSession } from "./harness";
 import type { LiveCollectionHandle } from "../../src/live/useLiveCollection";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";

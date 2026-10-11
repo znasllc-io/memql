@@ -4,7 +4,7 @@ import {
   campaignFromRow,
   sendBreakdown,
   sendBreakdownLabel,
-} from "../../src/apps/campaigns/rows";
+} from "../../src/apps/email/rows";
 import { campaignRow } from "./harness";
 
 // The send bar's model, tested as arithmetic.

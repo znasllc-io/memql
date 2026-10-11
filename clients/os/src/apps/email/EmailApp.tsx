@@ -1,11 +1,184 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Mail } from "lucide-react";
+import { Concepts } from "@znasllc-io/memql-sdk-core/client";
+
+import { useAuthSource } from "../../auth/context";
+import { EdgeUploadProvider } from "../../items/edgeUpload";
+import type { UploadProvider } from "../../items/upload";
 import { Button, EmptyState, Fact, Facts, Head, AutoRefresh, Input, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, formatMoment } from "../../kit";
 import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import type { OsAppProps } from "../../system/registry";
+import { AudiencesSection } from "./AudiencesSection";
+import { CampaignsOverview } from "./CampaignsOverview";
+import { CampaignsSection } from "./CampaignsSection";
+import { CampaignsSettingsSection } from "./CampaignsSettingsSection";
+import { RulesSection } from "./RulesSection";
+import { SendersSection } from "./SendersSection";
+import { TemplatesSection } from "./TemplatesSection";
+import { useCampaignWrites } from "./actions";
 import { emailPreview } from "./preview";
+import {
+  EMAIL_SECTIONS,
+  LocalEmailSettingsStore,
+  type EmailSettings,
+  type EmailSettingsStore } from "./settings";
+import { useCampaignFeeds } from "./useEmail";
+
+// Email: writing mail, sending it, and knowing what happened (epic memql#4827 /
+// #4828 / #4830), and the capture inbox that shows what a test cluster did
+// with it instead of delivering it. ONE APP, ONE RESOURCE FAMILY (`app:email`,
+// `app:email/inbox`, `app:email/logs`) and ONE preferences store (memql#6033):
+// a second app for the same mail would be a second set of grants, a second
+// window and a second place to look for what happened to a message.
+//
+// ===========================================================================
+// FIVE FEEDS AT THE ROOT, ONE PER CONCEPT
+// ===========================================================================
+// The one-feed rule is per CONCEPT, not per app (the Packages rule): what must
+// never happen is two subscriptions over the SAME concept, free to disagree
+// about what the cluster holds. Five concepts cannot disagree with each other.
+//
+// They are retained HERE rather than per section because every one of them is
+// needed in more than one place -- the campaign editor picks an audience, a
+// template and a mailbox; the rules builder picks the same three; the template
+// editor lists the campaigns that use it. A per-section feed would open a
+// second subscription over one concept the moment somebody opened two
+// sections, which is exactly the failure the rule names.
+//
+// NO MANIFEST ROLE, and the reason is the concepts' tier rather than a
+// judgment made here: every operator-facing campaigns concept is
+// organization-tier, so every signed-in person has mail of their own to read
+// and the engine decides how far each list reaches. Gating the app would be
+// presentation pretending to be authorization. Two sections ARE gated, each on
+// its own resource: the capture inbox, because what it holds (sign-in links
+// for any test recipient) is not an organization's to read, and Logs, which
+// carries the log store's floor.
+
+/** The concepts this app owns, for its Logs section: everything a send is
+ *  made of, plus the engine-owned job that carries it out, plus the messages
+ *  a capture cluster keeps instead of delivering. */
+const EMAIL_LOG_CONCEPTS = [
+  Concepts.CAMPAIGNS_CAMPAIGN,
+  Concepts.CAMPAIGNS_AUDIENCE,
+  Concepts.CAMPAIGNS_TEMPLATE,
+  Concepts.CAMPAIGNS_SENDER_IDENTITY,
+  Concepts.CAMPAIGNS_EMAIL_RULE,
+  Concepts.CAMPAIGNS_SEND_JOB,
+  Concepts.CAMPAIGNS_DELIVERY,
+  Concepts.EMAIL_CAPTURED_MESSAGE,
+] as const;
+
+export function EmailApp({
+  sectionId,
+  navigate,
+  intent,
+  consumeIntent,
+  store,
+  uploads,
+}: OsAppProps & { store?: EmailSettingsStore; uploads?: UploadProvider }) {
+  // Injectable for tests, which is the whole reason these parameters exist --
+  // nothing in the shell passes either.
+  const settingsStore = useMemo(() => store ?? new LocalEmailSettingsStore(), [store]);
+  const [settings, setSettings] = useState<EmailSettings>(() => settingsStore.load());
+  const authSource = useAuthSource();
+
+  // THE SHELL'S ONE UPLOAD PATH. `items/edgeUpload.ts` is the only place in
+  // clients/os that speaks the artifact upload wire (test/files/onePath.test.ts
+  // fails the build on a second speaker), so the CSV import inherits chunking,
+  // resume, retry, progress and verbatim refusals without learning any of them.
+  const uploadProvider = useMemo(
+    () => uploads ?? new EdgeUploadProvider(() => authSource.bearer()),
+    [uploads, authSource],
+  );
+
+  const feeds = useCampaignFeeds();
+  const writes = useCampaignWrites();
+
+  function updateSettings(patch: Partial<EmailSettings>) {
+    const next = { ...settings, ...patch, version: 1 as const };
+    setSettings(next);
+    settingsStore.save(next);
+  }
+
+  // THE DEFAULT-SECTION PREFERENCE, APPLIED ONCE PER WINDOW -- the pattern
+  // every app since Fleet has used. The shell opens an app on its manifest's
+  // FIRST section, so an app-level "open me here" can only be the app
+  // navigating itself on first render.
+  const applied = useRef(false);
+  useEffect(() => {
+    if (applied.current) return;
+    applied.current = true;
+    // ONLY when the window opened on the SHELL's default. A window opened on a
+    // named section was opened by somebody who said where they wanted to be,
+    // and a preference that overrode that would make a deep link silently not
+    // work.
+    const shellDefault = EMAIL_SECTIONS[0]?.id ?? "";
+    if (sectionId !== shellDefault) return;
+    if (settings.defaultSection && settings.defaultSection !== sectionId) {
+      navigate(settings.defaultSection);
+    }
+    // ONCE PER MOUNT, WHICH IS ONCE PER WINDOW.
+  }, []);
+
+  if (sectionId === "overview") return <CampaignsOverview feeds={feeds} navigate={navigate} />;
+
+  if (sectionId === "inbox") return <EmailInbox />;
+
+  if (sectionId === "settings") {
+    return <CampaignsSettingsSection feeds={feeds} settings={settings} update={updateSettings} />;
+  }
+  if (sectionId === "logs") {
+    return (
+      <AppLogsSection
+        app="email"
+        subjectConcepts={EMAIL_LOG_CONCEPTS}
+        intent={intent}
+        consumeIntent={consumeIntent}
+      />
+    );
+  }
+
+  return (
+    <>
+      {sectionId === "audiences" ? (
+        <AudiencesSection
+          feeds={feeds}
+          writes={writes}
+          uploads={uploadProvider}
+          showFiled={settings.showFiled}
+        />
+      ) : sectionId === "templates" ? (
+        <TemplatesSection
+          feeds={feeds}
+          writes={writes}
+          showFiled={settings.showFiled}
+        />
+      ) : sectionId === "senders" ? (
+        <SendersSection
+          feeds={feeds}
+          writes={writes}
+          showFiled={settings.showFiled}
+        />
+      ) : sectionId === "rules" ? (
+        <RulesSection
+          feeds={feeds}
+          writes={writes}
+          showFiled={settings.showFiled}
+        />
+      ) : (
+        <CampaignsSection
+          feeds={feeds}
+          writes={writes}
+          showFiled={settings.showFiled}
+          trackByDefault={settings.trackByDefault}
+          uploads={uploadProvider}
+          />
+      )}
+    </>
+  );
+}
 
 export interface CapturedEmail {
   id: string; createdAt: string; accountId?: string;
@@ -15,13 +188,6 @@ export interface CapturedEmail {
 
 /** A bounded, explicitly refreshed test inbox. Encrypted messages are not
  * broadcast over the mesh; focus and Refresh re-read shared storage. */
-export function EmailApp({ sectionId, intent, consumeIntent }: OsAppProps) {
-  if (sectionId === "logs") return <AppLogsSection app="email" subjectConcepts={["v1:email:capturedMessage"]} intent={intent} consumeIntent={consumeIntent} />;
-  if (sectionId === "settings") return <div className="os-settings"><Head title="Email settings" /><Panel label="Email delivery"><p>Delivery is managed in Settings, under Integrations. A capture transport keeps test messages in this installation. Connecting an incoming mail server will be available in a future update.</p></Panel></div>;
-  if (sectionId === "inbox") return <EmailInbox />;
-  return null;
-}
-
 export function EmailInbox() {
   const connection = useOsConnection();
   const [messages, setMessages] = useState<CapturedEmail[]>([]);

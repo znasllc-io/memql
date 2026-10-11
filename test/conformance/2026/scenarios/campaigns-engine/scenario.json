@@ -10,7 +10,7 @@
         {"mutation": "createClientAccount", "args": {"accountId": {"$id": "organization"}, "name": "Scenario Organization"}},
         {"mutation": "writeGroup", "args": {"groupId": {"$id": "organization-group"}, "name": "Scenario Organization Members", "kind": "account", "accountId": {"$id": "organization"}, "status": "active"}},
         {"mutation": "writeGroupMembership", "args": {"membershipId": {"$id": "author-membership"}, "groupId": {"$id": "organization-group"}, "accountId": {"$id": "organization"}, "userId": {"$id": "author"}, "origin": "added", "status": "active"}},
-        {"mutation": "writeGrant", "args": {"grantId": {"$id": "grant-read-app-campaigns"}, "subjectKind": "group", "subjectId": {"$id": "organization-group"}, "verb": "read", "resourceType": "app:campaigns", "effect": "allow"}},
+        {"mutation": "writeGrant", "args": {"grantId": {"$id": "grant-read-app-email"}, "subjectKind": "group", "subjectId": {"$id": "organization-group"}, "verb": "read", "resourceType": "app:email", "effect": "allow"}},
         {"mutation": "writeGrant", "args": {"grantId": {"$id": "grant-read-data"}, "subjectKind": "group", "subjectId": {"$id": "organization-group"}, "verb": "read", "resourceType": "data", "effect": "allow"}},
         {"mutation": "writeGrant", "args": {"grantId": {"$id": "grant-create-data"}, "subjectKind": "group", "subjectId": {"$id": "organization-group"}, "verb": "create", "resourceType": "data", "effect": "allow"}},
         {"mutation": "writeGrant", "args": {"grantId": {"$id": "grant-update-data"}, "subjectKind": "group", "subjectId": {"$id": "organization-group"}, "verb": "update", "resourceType": "data", "effect": "allow"}},

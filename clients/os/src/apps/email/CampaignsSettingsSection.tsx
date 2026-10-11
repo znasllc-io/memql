@@ -1,15 +1,15 @@
 import { TestAudienceSettings } from "./TestAudiencePanel";
-import type { CampaignFeeds } from "./useCampaigns";
+import type { CampaignFeeds } from "./useEmail";
 import { useId } from "react";
 import { Check, Field, Head, Panel, Select, Subhead } from "../../kit";
 import { AzureEmailConnections } from "../../modules/connections/AzureEmailConnections";
-import { CAMPAIGNS_SECTIONS, type CampaignsSettings } from "./settings";
+import { EMAIL_SECTIONS, type EmailSettings } from "./settings";
 import "./settings.css";
 
 export function CampaignsSettingsSection({ settings, update, feeds }: {
   feeds: CampaignFeeds;
-  settings: CampaignsSettings;
-  update: (patch: Partial<CampaignsSettings>) => void;
+  settings: EmailSettings;
+  update: (patch: Partial<EmailSettings>) => void;
 }) {
   const id = useId();
   return <div className="os-settings os-settings-wide campaigns-settings">
@@ -20,9 +20,9 @@ export function CampaignsSettingsSection({ settings, update, feeds }: {
         <fieldset className="os-field-group campaigns-preferences">
           <legend className="os-sr-only">Campaign preferences</legend>
           <div className="campaigns-preference">
-            <div><span className="campaigns-preference-name">Opening page</span><p className="os-caption">When you open a new Campaigns window.</p></div>
+            <div><span className="campaigns-preference-name">Opening page</span><p className="os-caption">When you open a new Email window.</p></div>
             <Field label="Opening page"><Select id={`${id}-opening-page`} label="Opening page" value={settings.defaultSection} onChange={defaultSection => update({ defaultSection })}>
-              {CAMPAIGNS_SECTIONS.map(section => <option key={section.id} value={section.id}>{section.name}</option>)}
+              {EMAIL_SECTIONS.map(section => <option key={section.id} value={section.id}>{section.name}</option>)}
             </Select></Field>
           </div>
           <div className="campaigns-preference">

@@ -356,7 +356,7 @@ export function useTriggerConcepts(): Reading<Concept[]> {
  * rule for the other direction -- a tie surface belongs to the domain that
  * owns the concept -- and this is the same rule read the other way round: the
  * Accounts detail renders the band, and the read that fills it is the
- * campaigns app's to own. Nothing in this module imports from `apps/accounts`,
+ * Email app's to own. Nothing in this module imports from `apps/accounts`,
  * so the two apps do not form a cycle.
  *
  * The shape is the Accounts ledger's own `Rollup`, deliberately: five bands

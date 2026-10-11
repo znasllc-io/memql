@@ -51,7 +51,7 @@ import {
   type RecipientMode,
   type SentencePart,
 } from "./rows";
-import { useAuthoredAutomations, useTriggerConcepts, type CampaignFeeds } from "./useCampaigns";
+import { useAuthoredAutomations, useTriggerConcepts, type CampaignFeeds } from "./useEmail";
 
 // Rules: "when this happens, email that to those people."
 //
@@ -213,7 +213,7 @@ export function RulesSection({
  * "your rules are halted" from any of them would be inventing a cluster fact
  * out of a missing one -- a scare on a cluster where nothing is wrong. That
  * asymmetry is the whole design of `authoredAutomationsFrom`, and
- * test/campaigns/app.test.tsx pins all three silences.
+ * test/email/app.test.tsx pins all three silences.
  *
  * A REFUSED READ SAYS SO QUIETLY rather than claiming the switch is on. It is
  * a caption and not a warning, because "we could not check" is a fact about
@@ -617,7 +617,7 @@ const CONDITION_EXAMPLE = 'row.status in ["active", "trial"] && row.plan != "fre
  * hardcoded list would make the newest half of a cluster's schema untriggerable
  * with no way to tell. The read is `listConcepts` -- the SDK's own accessor for
  * `ConceptsListMsg`, riding the same stream as every other read here (see
- * useCampaigns.ts; the OS had no accessor for it before this surface).
+ * useEmail.ts; the OS had no accessor for it before this surface).
  */
 function RuleBuilder({
   rule,

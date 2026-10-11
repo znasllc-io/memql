@@ -29,7 +29,7 @@ import {
   statsFromPayload,
   templateFingerprint,
   templateFromRow,
-} from "../../src/apps/campaigns/rows";
+} from "../../src/apps/email/rows";
 import {
   campaignRow,
   audienceRow,
@@ -41,7 +41,7 @@ import {
 } from "./harness";
 
 // The projections and the fingerprints, tested with no React, no browser and
-// no cluster -- the reason apps/campaigns/rows.ts is pure.
+// no cluster -- the reason apps/email/rows.ts is pure.
 
 describe("projecting a campaign", () => {
   it("reads every field campaignFull projects", () => {
@@ -554,7 +554,7 @@ describe("what row is in a condition", () => {
 
 describe("the engine's reply shapes", () => {
   it("reads the import report the engine actually sends", async () => {
-    const { importReportFrom } = await import("../../src/apps/campaigns/actions");
+    const { importReportFrom } = await import("../../src/apps/email/actions");
     // component/campaigns/import.go: resultNode("campaignImport", {...})
     const report = importReportFrom({
       audienceId: "v1:campaigns:audience:a1",
@@ -583,7 +583,7 @@ describe("the engine's reply shapes", () => {
   });
 
   it("reads the unresolved merge tags the engine actually sends", async () => {
-    const { unresolvedTagsFrom } = await import("../../src/apps/campaigns/actions");
+    const { unresolvedTagsFrom } = await import("../../src/apps/email/actions");
     // component/campaigns/test_send.go: "unresolvedTags"
     expect(unresolvedTagsFrom({ unresolvedTags: ["{{fields.compnay}}"] } as never)).toEqual([
       "{{fields.compnay}}",

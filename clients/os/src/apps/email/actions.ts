@@ -5,7 +5,7 @@ import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
 import { engineSentence, type AudienceRow, type RecipientMode } from "./rows";
 
-// Every write the Campaigns app makes, and the busy/error pair each one owns.
+// Every write the Email app makes, and the busy/error pair each one owns.
 //
 // ===========================================================================
 // NOTHING HERE CHECKS A ROLE, AND NOTHING HERE IS THE AUTHORIZATION

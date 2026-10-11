@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { chooseOption } from "../selectControl";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
-import { RecurrencePanel } from "../../src/apps/campaigns/RecurrencePanel";
+import { RecurrencePanel } from "../../src/apps/email/RecurrencePanel";
 import { fakeConnection, withSession } from "./harness";
 
 const series = { id: "series", sourceCampaignId: "c1", status: "active", intervalWeeks: 2, timeZone: "America/Phoenix", anchorAt: "2028-01-02T16:00:00Z", nextAt: "2028-01-16T16:00:00Z", createdAt: "2027-10-01T12:00:00.000001Z", lastError: "" };

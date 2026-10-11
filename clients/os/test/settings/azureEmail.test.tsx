@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chooseOption } from "../selectControl";
-import { rowsResult, withSession } from "../campaigns/harness";
+import { rowsResult, withSession } from "../email/harness";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 vi.mock("../../src/apps/accounts/tie", () => ({ useAccountOptions: () => [
@@ -46,7 +46,7 @@ describe("one Azure configuration per cluster", () => {
     expect(call.mock.calls.find(([args]) => args.action === "saveCluster")?.[0]).toMatchObject({ accountId: "self", sessionId: "session", options: { subscriptionId: "subscription", resourceGroup: "mail" } });
     expect(call.mock.calls.some(([args]) => args.action === "provision")).toBe(false);
   });
-  it("keeps cluster connection controls out of Campaigns", async () => {
+  it("keeps cluster connection controls out of Email", async () => {
     const call = query(args => args.action === "clusterStatus" ? { status: "unconfigured", capture: true } : { status: "unconfigured" });
     render(withSession(<AzureEmailConnections manageCluster={false}/>));
     expect(await screen.findByText(/Configure Azure once in Settings/)).toBeTruthy();

@@ -1,4 +1,4 @@
-// The Campaigns app's own settings, and the store that keeps them.
+// The Email app's own settings, and the store that keeps them.
 //
 // Same discipline as the Accounts app's (apps/accounts/settings.ts) and a
 // separate key for the same reason: the SHELL's DesktopDocument rejects a
@@ -19,24 +19,29 @@ import type { OsAppSection } from "../../system/registry";
  * Overview opens with the current state and setup direction. Resource
  * lists and guided authoring keep their own destinations.
  */
-export const CAMPAIGNS_SECTIONS: OsAppSection[] = [
+export const EMAIL_SECTIONS: OsAppSection[] = [
   { id: "overview", name: "Overview" },
   { id: "campaigns", name: "Campaigns" },
   { id: "audiences", name: "Audiences" },
   { id: "templates", name: "Templates" },
   { id: "senders", name: "Senders" },
   { id: "rules", name: "Rules", needs: ["email", "campaigns"] },
+  // The capture inbox: what a test cluster kept instead of delivering. Owner
+  // and developer only, because a captured message can hold a sign-in link
+  // for any test recipient -- the same two roles the seeds admit to
+  // `app:email/inbox`.
+  { id: "inbox", name: "Inbox", requires: "app:email/inbox" },
   // The app's slice of the cluster's logs (epic memql#4895): the lines it
   // tagged and the lines about the things it owns. Admin-floored because
   // every read on the log store is (spec L3), and this is the ONE section
   // whose floor is not this app's to choose.
-  { id: "logs", name: "Logs", requires: "app:campaigns/logs" },
+  { id: "logs", name: "Logs", requires: "app:email/logs" },
   { id: "settings", name: "Settings" },
 ];
 
-export const CAMPAIGNS_SECTION_IDS = CAMPAIGNS_SECTIONS.map((s) => s.id);
+export const EMAIL_SECTION_IDS = EMAIL_SECTIONS.map((s) => s.id);
 
-export interface CampaignsSettings {
+export interface EmailSettings {
   version: 1;
   /** The section the app navigates to when its window opens. */
   defaultSection: string;
@@ -69,9 +74,9 @@ export interface CampaignsSettings {
   trackByDefault: boolean;
 }
 
-export const CAMPAIGNS_SETTINGS_KEY = "memql-os-campaigns-v1";
+export const EMAIL_SETTINGS_KEY = "memql-os-email-v1";
 
-export const DEFAULT_CAMPAIGNS_SETTINGS: CampaignsSettings = {
+export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
   version: 1,
   // Named here as well as in the section list, because this value is what a
   // corrupt or absent document falls back to -- and falling back to "whatever
@@ -89,36 +94,36 @@ export const DEFAULT_CAMPAIGNS_SETTINGS: CampaignsSettings = {
  * somebody their tracking choice. A wrong `version` IS wholesale, because then
  * the field names cannot be trusted at all.
  */
-export function sanitizeCampaignsSettings(raw: unknown): CampaignsSettings {
+export function sanitizeEmailSettings(raw: unknown): EmailSettings {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
-    return { ...DEFAULT_CAMPAIGNS_SETTINGS };
+    return { ...DEFAULT_EMAIL_SETTINGS };
   }
-  const doc = raw as Partial<CampaignsSettings>;
-  if (doc.version !== 1) return { ...DEFAULT_CAMPAIGNS_SETTINGS };
+  const doc = raw as Partial<EmailSettings>;
+  if (doc.version !== 1) return { ...DEFAULT_EMAIL_SETTINGS };
 
   const defaultSection =
-    typeof doc.defaultSection === "string" && CAMPAIGNS_SECTION_IDS.includes(doc.defaultSection)
+    typeof doc.defaultSection === "string" && EMAIL_SECTION_IDS.includes(doc.defaultSection)
       ? doc.defaultSection
-      : DEFAULT_CAMPAIGNS_SETTINGS.defaultSection;
+      : DEFAULT_EMAIL_SETTINGS.defaultSection;
 
   return {
     version: 1,
     defaultSection,
     showFiled:
-      typeof doc.showFiled === "boolean" ? doc.showFiled : DEFAULT_CAMPAIGNS_SETTINGS.showFiled,
+      typeof doc.showFiled === "boolean" ? doc.showFiled : DEFAULT_EMAIL_SETTINGS.showFiled,
     trackByDefault:
       typeof doc.trackByDefault === "boolean"
         ? doc.trackByDefault
-        : DEFAULT_CAMPAIGNS_SETTINGS.trackByDefault,
+        : DEFAULT_EMAIL_SETTINGS.trackByDefault,
   };
 }
 
-export interface CampaignsSettingsStore {
-  load(): CampaignsSettings;
-  save(settings: CampaignsSettings): void;
+export interface EmailSettingsStore {
+  load(): EmailSettings;
+  save(settings: EmailSettings): void;
 }
 
-export class LocalCampaignsSettingsStore implements CampaignsSettingsStore {
+export class LocalEmailSettingsStore implements EmailSettingsStore {
   /** `null` is "no storage" -- a private window and a full quota are normal
    *  cases, not failures. The default only replaces `undefined`. */
   constructor(
@@ -126,22 +131,22 @@ export class LocalCampaignsSettingsStore implements CampaignsSettingsStore {
       | Pick<Storage, "getItem" | "setItem">
       | null
       | undefined = globalThis.localStorage,
-    private readonly key: string = CAMPAIGNS_SETTINGS_KEY,
+    private readonly key: string = EMAIL_SETTINGS_KEY,
   ) {}
 
-  load(): CampaignsSettings {
+  load(): EmailSettings {
     try {
       const raw = this.storage?.getItem(this.key);
-      if (!raw) return { ...DEFAULT_CAMPAIGNS_SETTINGS };
-      return sanitizeCampaignsSettings(JSON.parse(raw));
+      if (!raw) return { ...DEFAULT_EMAIL_SETTINGS };
+      return sanitizeEmailSettings(JSON.parse(raw));
     } catch {
       // Unparseable JSON is the corrupt case sanitize exists for; it just
       // never gets that far, so the fallback is repeated here.
-      return { ...DEFAULT_CAMPAIGNS_SETTINGS };
+      return { ...DEFAULT_EMAIL_SETTINGS };
     }
   }
 
-  save(settings: CampaignsSettings): void {
+  save(settings: EmailSettings): void {
     try {
       this.storage?.setItem(this.key, JSON.stringify(settings));
     } catch {
@@ -152,5 +157,5 @@ export class LocalCampaignsSettingsStore implements CampaignsSettingsStore {
 
 /** Draft preparation and setup remain available before email is configured.
  * Actual send controls separately require fresh affirmative readiness. */
-export const CAMPAIGNS_REQUIRES: readonly ModuleId[] = [];
-export const CAMPAIGNS_WANTS: readonly ModuleId[] = ["email", "campaigns"];
+export const EMAIL_REQUIRES: readonly ModuleId[] = [];
+export const EMAIL_WANTS: readonly ModuleId[] = ["email", "campaigns"];

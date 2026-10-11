@@ -2,7 +2,7 @@ import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { boolOr, flatten, stringsOf } from "../../kit/rows";
 
-// The wire rows the Campaigns app renders, projected into the shapes its
+// The wire rows the Email app renders, projected into the shapes its
 // surfaces read.
 //
 // PURE, and separate from every component, for the reason apps/accounts/rows.ts

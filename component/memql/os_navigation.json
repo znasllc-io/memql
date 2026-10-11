@@ -54,9 +54,9 @@
     "records": []
   },
   {
-    "id": "campaigns",
-    "name": "Campaigns",
-    "requires": "app:campaigns",
+    "id": "email",
+    "name": "Email",
+    "requires": "app:email",
     "sections": [
       {
         "id": "overview",
@@ -82,23 +82,6 @@
         "id": "rules",
         "name": "Rules"
       },
-      {
-        "id": "logs",
-        "name": "Logs",
-        "requires": "app:campaigns/logs"
-      },
-      {
-        "id": "settings",
-        "name": "Settings"
-      }
-    ],
-    "records": []
-  },
-  {
-    "id": "email",
-    "name": "Email",
-    "requires": "app:email",
-    "sections": [
       {
         "id": "inbox",
         "name": "Inbox",

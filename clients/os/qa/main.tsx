@@ -1,13 +1,13 @@
 import { FilesApp } from "../src/apps/files/FilesApp";
 import { LocalFilesSettingsStore } from "../src/apps/files/settings";
 import { fakeConnection as filesConnection, artifactRow as filesArtifact, folderRow as filesFolder, fileRow as filesFile, versionRow as filesVersion, watchedFolderRow, withSession as filesSession } from "../test/files/harness";
-import { CampaignsSettingsSection } from "../src/apps/campaigns/CampaignsSettingsSection";
+import { CampaignsSettingsSection } from "../src/apps/email/CampaignsSettingsSection";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
-import { DEFAULT_CAMPAIGNS_SETTINGS } from "../src/apps/campaigns/settings";
-import { fakeConnection as campaignConnection, rowsResult, withSession as campaignSession } from "../test/campaigns/harness";
-import { NewsletterPanel } from "../src/apps/campaigns/NewsletterPanel";
-import { useCampaignFeeds } from "../src/apps/campaigns/useCampaigns";
-import { RecurrencePanel } from "../src/apps/campaigns/RecurrencePanel";
+import { DEFAULT_EMAIL_SETTINGS } from "../src/apps/email/settings";
+import { fakeConnection as campaignConnection, rowsResult, withSession as campaignSession } from "../test/email/harness";
+import { NewsletterPanel } from "../src/apps/email/NewsletterPanel";
+import { useCampaignFeeds } from "../src/apps/email/useEmail";
+import { RecurrencePanel } from "../src/apps/email/RecurrencePanel";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
 import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
@@ -1192,7 +1192,7 @@ function azureEmailView(status: string) {
       return conn;
     },
     wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
-    render: () => <WindowBody fallback="Campaigns" width={new URLSearchParams(window.location.search).get("width") === "narrow" ? 390 : undefined}><AzureEmailConnections manageCluster={false}/></WindowBody>,
+    render: () => <WindowBody fallback="Email" width={new URLSearchParams(window.location.search).get("width") === "narrow" ? 390 : undefined}><AzureEmailConnections manageCluster={false}/></WindowBody>,
   };
 }
 
@@ -1211,8 +1211,8 @@ function campaignSettingsView(connected: boolean) {
   };
 }
 function CampaignSettingsPane() {
-  const [settings, setSettings] = useState(DEFAULT_CAMPAIGNS_SETTINGS);
-  return <WindowBody fallback="Campaigns"><CampaignsSettingsSection settings={settings} update={patch => setSettings(old => ({ ...old, ...patch }))}/></WindowBody>;
+  const [settings, setSettings] = useState(DEFAULT_EMAIL_SETTINGS);
+  return <WindowBody fallback="Email"><CampaignsSettingsSection settings={settings} update={patch => setSettings(old => ({ ...old, ...patch }))}/></WindowBody>;
 }
 
 function AccountsPane() {

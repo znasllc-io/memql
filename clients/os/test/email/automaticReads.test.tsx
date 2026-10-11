@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CAMPAIGN_REFRESH_MS, useReading } from "../../src/apps/campaigns/useCampaigns";
+import { CAMPAIGN_REFRESH_MS, useReading } from "../../src/apps/email/useEmail";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });

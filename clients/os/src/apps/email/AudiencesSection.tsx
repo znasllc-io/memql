@@ -43,7 +43,7 @@ import {
   type AudienceRow,
   type RecipientRow,
 } from "./rows";
-import { useAudienceRecipients, type CampaignFeeds } from "./useCampaigns";
+import { useAudienceRecipients, type CampaignFeeds } from "./useEmail";
 
 // Audiences: who a campaign goes to, and how they got there.
 //

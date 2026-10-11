@@ -16,8 +16,8 @@ vi.mock("../../src/auth/context", () => ({
   useAuthSource: () => ({ bearer: async () => "test-token", refresh: async () => {} }),
 }));
 
-const { CampaignsApp } = await import("../../src/apps/campaigns/CampaignsApp");
-const { LocalCampaignsSettingsStore } = await import("../../src/apps/campaigns/settings");
+const { EmailApp } = await import("../../src/apps/email/EmailApp");
+const { LocalEmailSettingsStore } = await import("../../src/apps/email/settings");
 const {
   audienceRow,
   campaignRow,
@@ -37,7 +37,7 @@ const CAMPAIGN_CONCEPT = "v1:campaigns:campaign";
 
 function memoryStore(over: Record<string, unknown> = {}) {
   const bag = new Map<string, string>();
-  const store = new LocalCampaignsSettingsStore({
+  const store = new LocalEmailSettingsStore({
     getItem: (k: string) => bag.get(k) ?? null,
     setItem: (k: string, v: string) => void bag.set(k, v),
   });
@@ -71,7 +71,7 @@ function mount(
   const navigate = vi.fn();
   const view = render(
     withSession(
-      <CampaignsApp
+      <EmailApp
         sectionId={sectionId}
         navigate={navigate}
         askContext={() => {}}
@@ -436,7 +436,7 @@ describe("one campaign", () => {
     });
     conn.query.campaignTestAudienceSend.mockRejectedValueOnce(new Error("Connection lost"));
     h.connection = conn;
-    render(withSession(<CampaignsApp sectionId="campaigns" navigate={() => {}} askContext={() => {}} store={memoryStore({ showFiled: true })} uploads={fakeUploads()} />));
+    render(withSession(<EmailApp sectionId="campaigns" navigate={() => {}} askContext={() => {}} store={memoryStore({ showFiled: true })} uploads={fakeUploads()} />));
     fireEvent.click(await screen.findByText("August update"));
     await waitFor(() => expect((screen.getByRole("button", { name: "Send test" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByText("Send test"));
@@ -1232,7 +1232,7 @@ describe("guided campaign preparation", () => {
 it("keeps test, send and scheduling unavailable until organization setup is confirmed", async () => {
   const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1" })], sendingReadiness: [{ ready: false, reason: "Connect this organization’s domain." }] });
   h.connection = conn;
-  render(withSession(<CampaignsApp sectionId="campaigns" navigate={() => {}} askContext={() => {}} store={memoryStore()} uploads={fakeUploads()} />, { readiness: readiness(true, [verdict("email", "partial"), verdict("campaigns", "configured")]) }));
+  render(withSession(<EmailApp sectionId="campaigns" navigate={() => {}} askContext={() => {}} store={memoryStore()} uploads={fakeUploads()} />, { readiness: readiness(true, [verdict("email", "partial"), verdict("campaigns", "configured")]) }));
   fireEvent.click(await screen.findByText("August update"));
   expect(screen.queryByRole("button", { name: "Send now" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Schedule" })).toBeNull();

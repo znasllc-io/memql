@@ -5,19 +5,19 @@ import { clearEffectiveCapabilities, effectiveCapabilities, holds, holdsForOrgan
 import { NO_PARTS, partsForOrganization } from "../../src/apps/deployables/parts";
 
 const scoped: OrganizationCapability[] = ["acme", "beta"].flatMap(accountId => [
-  ["read", "app:campaigns"], ["read", "app:deployables"], ["read", "data"], ["create", "data"], ["update", "data"], ["execute", "app:deployables/deploy"],
+  ["read", "app:email"], ["read", "app:deployables"], ["read", "data"], ["create", "data"], ["update", "data"], ["execute", "app:deployables/deploy"],
 ].map(([verb, resource]) => ({ accountId, verb: verb!, resource: resource!, effect: accountId === "acme" ? "allow" : "deny" })));
 
 beforeEach(() => clearEffectiveCapabilities());
 
 describe("organization capability discovery", () => {
   it("opens an app allowed in Acme despite Beta's flattened deny without changing global actions or the self-view", () => {
-    const row = { ok: true, entries: [{ verb: "read", resource: "app:campaigns", effect: "deny", source: "group" }], organizationEntries: scoped };
+    const row = { ok: true, entries: [{ verb: "read", resource: "app:email", effect: "deny", source: "group" }], organizationEntries: scoped };
     const entries = entriesFrom(row)!;
     setEffectiveCapabilities(entries, organizationEntriesFrom(row));
-    expect(accessAdmits("app:campaigns")).toBe(true);
+    expect(accessAdmits("app:email")).toBe(true);
     expect(accessAdmits("app:deployables")).toBe(true);
-    expect(holds("read", "app:campaigns")).toBe(false);
+    expect(holds("read", "app:email")).toBe(false);
     expect(holds("execute", "app:deployables/deploy")).toBe(false);
     expect(effectiveCapabilities()).toEqual(entries);
     expect(accessAdmits("app:settings")).toBe(false);
@@ -30,7 +30,7 @@ describe("organization capability discovery", () => {
     setEffectiveCapabilities([{ verb: "read", resource: "app:deployables", effect: "allow", source: "role" }], mismatched);
     expect(holds("read", "app:deployables")).toBe(true);
     expect(accessAdmits("app:deployables")).toBe(false);
-    expect(accessAdmits("app:campaigns")).toBe(false);
+    expect(accessAdmits("app:email")).toBe(false);
     expect(partsForOrganization("acme", NO_PARTS).deploy).toBe(false);
     expect(partsForOrganization("beta", NO_PARTS).deploy).toBe(false);
   });
@@ -48,7 +48,7 @@ describe("organization capability discovery", () => {
   it("replaces scoped permissions on refresh and clears them on sign out", () => {
     setEffectiveCapabilities([], scoped);
     setEffectiveCapabilities([], scoped.filter(entry => entry.accountId === "beta"));
-    expect(accessAdmits("app:campaigns")).toBe(false);
+    expect(accessAdmits("app:email")).toBe(false);
     expect(holdsForOrganization("acme", "update", "data")).toBe(false);
     clearEffectiveCapabilities();
     expect(accessAdmits("app:deployables")).toBe(false);
@@ -61,6 +61,6 @@ describe("organization capability discovery", () => {
 
   it("drops malformed scopes and treats unknown effects as refusals", () => {
     expect(organizationEntriesFrom({ ok: false, organizationEntries: scoped })).toEqual([]);
-    expect(organizationEntriesFrom({ ok: true, organizationEntries: [{ accountId: "", verb: "read", resource: "app:campaigns", effect: "allow" }, { accountId: "acme", verb: "read", resource: "app:campaigns", effect: "unknown" }] })).toEqual([{ accountId: "acme", verb: "read", resource: "app:campaigns", effect: "deny" }]);
+    expect(organizationEntriesFrom({ ok: true, organizationEntries: [{ accountId: "", verb: "read", resource: "app:email", effect: "allow" }, { accountId: "acme", verb: "read", resource: "app:email", effect: "unknown" }] })).toEqual([{ accountId: "acme", verb: "read", resource: "app:email", effect: "deny" }]);
   });
 });
