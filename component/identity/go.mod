@@ -8,7 +8,7 @@ toolchain go1.27.2
 
 require (
 	github.com/a-h/templ v0.3.1070
-	github.com/fxamacker/cbor/v2 v2.9.4
+	github.com/fxamacker/cbor/v2 v2.9.6
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
