@@ -66,9 +66,10 @@ in -- a local cluster sends no email -- and VS Code is signed in when the page
 finishes. The recovery key then appears on the same screen, behind **Show**:
 save it somewhere outside this computer, because it is shown only once.
 
-Passkeys need a browser that can create one here: Chrome, Edge or Safari, with
-a passkey store (on Linux, Chrome with Google Password Manager, a phone, or a
-security key).
+The passkey is created in your default browser. On Linux, Chrome can save it
+to your Google account or your phone, while Firefox can use only a security
+key, and the page says so. On macOS, current browsers can save it to iCloud
+Keychain.
 
 **MemQL: Repair Local Cluster** runs the install again and fixes only what is
 missing. An interrupted first install is marked **Setup incomplete**, with

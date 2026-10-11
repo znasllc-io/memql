@@ -153,3 +153,24 @@ it("reaches unfinished owner setup from sign-in without losing the editor reques
   expect(request?.searchParams.get("state")).toBe("pending-state");
   expect(request?.searchParams.get("code_challenge")).toBe("challenge");
 });
+
+const SECURITY_KEY_ONLY = "This browser can save a passkey only to a security key. Without one, use Chrome, which can save it to your Google account or your phone.";
+const ANY_AUTHENTICATOR = "Create a passkey with your device or security key. Your browser will ask you to confirm.";
+
+it.each([
+  // What Firefox on Linux reports: a local owner with no security key had no way forward.
+  ["only a security key", { passkeyPlatformAuthenticator: false, hybridTransport: false }, SECURITY_KEY_ONLY],
+  ["a passkey store and a phone", { passkeyPlatformAuthenticator: true, hybridTransport: true }, ANY_AUTHENTICATOR],
+  ["a phone but no passkey store", { passkeyPlatformAuthenticator: false, hybridTransport: true }, ANY_AUTHENTICATOR],
+  ["nothing it can describe", undefined, ANY_AUTHENTICATOR],
+])("says where the owner passkey can go when the browser offers %s", async (_offer, capabilities, sentence) => {
+  const probe = vi.fn(async () => capabilities);
+  if (capabilities) vi.stubGlobal("PublicKeyCredential", { getClientCapabilities: probe });
+  vi.stubGlobal("fetch", vi.fn(async () => json({ page: "setup_passkey", data: { Local: true, EnrollmentToken: "enrollment" } })));
+  render(<IdentityScreen initialPath="/auth/setup/passkey" />);
+  await screen.findByRole("button", { name: "Create passkey and finish" });
+  if (capabilities) await waitFor(() => expect(probe).toHaveBeenCalled());
+  expect(await screen.findByText(sentence)).toBeTruthy();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(screen.queryByText(sentence === SECURITY_KEY_ONLY ? ANY_AUTHENTICATOR : SECURITY_KEY_ONLY)).toBeNull();
+});

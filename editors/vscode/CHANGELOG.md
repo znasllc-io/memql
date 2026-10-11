@@ -7,7 +7,8 @@
   creates the owner and signs VS Code in. A claim no longer fails at the end
   for want of an organization name (it is named for the owner, and can be
   renamed in MemQL OS), and a claim that failed that way before finishes on the
-  next attempt.
+  next attempt. In a browser that can save a passkey only to a security key
+  (Firefox on Linux), the page says so and names one that can do more.
 - Show the owner's recovery key on the done screen as soon as the passkey is
   registered. The cluster now creates it at that moment instead of at the next
   identity restart.

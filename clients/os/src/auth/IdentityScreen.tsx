@@ -7,7 +7,7 @@ import { Wizard } from "../kit/Wizard";
 import { OwnershipWizard } from "./OwnershipWizard";
 import { EntryLayout } from "../kit/EntryLayout";
 import { EntryPending } from "../kit/EntryPending";
-import { loginWithPasskey, registerPasskey } from "./passkeys";
+import { loginWithPasskey, onlySecurityKeys, registerPasskey } from "./passkeys";
 import { Field, Button, Head } from "../kit/controls";
 import { IdentityAccount } from "../apps/identity/IdentityAccount";
 import { SignInPage, signInProblem, type SignInProblem } from "./SignInPage";
@@ -68,6 +68,15 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
   }, [config, authSource, status, completeSignIn]);
 
   useEffect(() => { void load(initialPath); return () => { generation.current++; }; }, [initialPath, load]);
+  // Asked only where a passkey is created. A browser that can keep it only on
+  // a security key leaves someone without one stuck at its prompt otherwise.
+  const [securityKeyOnly, setSecurityKeyOnly] = useState(false);
+  useEffect(() => {
+    if (page?.page !== "setup_passkey") return;
+    let live = true;
+    void onlySecurityKeys().then(only => { if (live) setSecurityKeyOnly(only); });
+    return () => { live = false; };
+  }, [page?.page]);
   const data = page?.data || {};
   const submit = (next: string, form: Record<string, string>) => { if (!busy) void load(next, form); };
   const run = async (action: () => Promise<void>, signingIn = false) => {
@@ -140,7 +149,11 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     return <EntryLayout><Wizard leadingIcon={<Mark />} icon={<Fingerprint />} title={data.Local === true ? "Register owner passkey" : "Finish ownership setup"}
       lead={data.Local === true ? LOCAL_OWNER_LEAD : "Email verified. Register a passkey before you can enter MemQL OS."}
       label="Ownership setup" open="passkey" onOpen={() => {}}
-      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <><p>Create a passkey with your device or security key. Your browser will ask you to confirm.</p><p>Canceling leaves setup incomplete. You can retry this step.</p></> }))}
+      steps={steps.map((name, i) => ({ id: i === steps.length - 1 ? "passkey" : String(i), name, state: i === steps.length - 1 ? "open" : "done", body: <>
+        <p>{securityKeyOnly
+          ? "This browser can save a passkey only to a security key. Without one, use Chrome, which can save it to your Google account or your phone."
+          : "Create a passkey with your device or security key. Your browser will ask you to confirm."}</p>
+        <p>Canceling leaves setup incomplete. You can retry this step.</p></> }))}
       notices={error ? <p role="alert">{error}</p> : undefined}
       status={{ word: busy ? "Waiting for passkey" : "Passkey required", tone: busy ? "busy" : "none" }}
       acts={busy ? [] : [{ label: data.HasProof ? "Finish setup" : "Create passkey and finish", tone: "primary", onAct: complete }, ...(error ? [{ label: "Reload setup", text: true, onAct: () => window.location.assign("/") }] : [])]} /></EntryLayout>;
