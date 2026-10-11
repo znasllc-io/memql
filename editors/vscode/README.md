@@ -60,8 +60,15 @@ the current step, and **Resume** picks up from there. When a step fails, the
 screen names it and says why, gives the fix as a command you can **Run in
 terminal**, and offers **Retry**.
 
-When it is done, save the recovery key it shows you (it is shown only once),
-then press **Sign in**, or **Set up a passkey** for the owner account.
+When it is done, **Register owner passkey** opens your browser: confirm the
+email you entered and create the passkey. That passkey is how the owner signs
+in -- a local cluster sends no email -- and VS Code is signed in when the page
+finishes. The recovery key then appears on the same screen, behind **Show**:
+save it somewhere outside this computer, because it is shown only once.
+
+Passkeys need a browser that can create one here: Chrome, Edge or Safari, with
+a passkey store (on Linux, Chrome with Google Password Manager, a phone, or a
+security key).
 
 **MemQL: Repair Local Cluster** runs the install again and fixes only what is
 missing. An interrupted first install is marked **Setup incomplete**, with

@@ -394,10 +394,13 @@ without pressing Enter), and the log opens at the failed step. Once every other
 step has finished, the bar offers **Retry** when retrying can help. There is no
 guided mode: the remedy command is the manual path.
 
-**The done screen** reads **MemQL is installed**, with the address and MemQL OS,
-and the recovery key masked behind **Show** and **Copy**. It is shown once, and
-leaving the screen without copying it asks first. **Sign in** is the button,
-with **Set up a passkey** beside it while the owner has no passkey.
+**The done screen** reads **MemQL is installed**, with the address and MemQL OS.
+On a new local cluster the owner does not exist yet: **Register owner passkey**
+is the button, and it opens the browser on the ownership page with the install's
+email filled in. Creating the passkey creates the owner and signs VS Code in;
+the screen then claims the owner's recovery key and shows it masked behind
+**Show** and **Copy**. It is shown once, and leaving the screen without copying
+it asks first. Once the cluster has its owner, **Sign in** is the button.
 
 ### Connect to a cluster
 
