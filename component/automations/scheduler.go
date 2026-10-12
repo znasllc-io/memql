@@ -653,7 +653,8 @@ func (s *Scheduler) subscribeToEventTrigger(automation *Automation) error {
 			}
 		}
 
-		s.logInfo("event trigger fired",
+		// 2026-10-11 idle-instance log volume (71,105 duplicate-prevented warnings in six hours, about a million log lines a day in total): a per-event fire is Debug.
+		s.logDebug("event trigger fired",
 			"automation", a.Name,
 			"topic", event.Topic,
 		)
@@ -753,7 +754,12 @@ func (s *Scheduler) executeAutomation(automation *Automation, triggeredBy string
 	if execution.ChainHead != "" {
 		logArgs = append(logArgs, "chainHead", execution.ChainHead[:16]+"...")
 	}
-	s.logInfo("automation execution completed", logArgs...)
+	// 2026-10-11 idle-instance log volume (71,105 duplicate-prevented warnings in six hours, about a million log lines a day in total): a completed run is Debug; failed and skipped runs stay Info.
+	if execution.Status == "completed" {
+		s.logDebug("automation execution completed", logArgs...)
+	} else {
+		s.logInfo("automation execution completed", logArgs...)
+	}
 }
 
 // Logging helpers - component is already set by common.NewLogger

@@ -246,7 +246,8 @@ func (m *SeedMaterializer) Start(ctx context.Context) error {
 			continue
 		}
 		if logger != nil {
-			logger.Info("seed materializer: global row written",
+			// 2026-10-11 idle-instance log volume (71,105 duplicate-prevented warnings in six hours, about a million log lines a day in total): a once-per-boot sweep line, so Debug.
+			logger.Debug("seed materializer: global row written",
 				"seed", def.Name, "concept", def.UseConcept)
 		}
 	}
