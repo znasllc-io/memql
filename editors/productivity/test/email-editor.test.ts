@@ -25,7 +25,6 @@ const welcome = { subject: "Welcome", theme, blocks: [
   { id: "foot", type: "footer", links: [{ label: "Unsubscribe", href: "{{unsubscribeUrl}}" }], lines: ["Acme"] },
 ] } as unknown as EmailDocument;
 const welcomeText = writeEmail(welcome);
-const custom = { subject: "Thanks for subscribing", textBody: "Thanks for joining us.", htmlBody: "<p>Thanks for joining us.</p>" } as EmailDocument;
 const rendered = '<html><body><p data-block="headline">Hi</p></body></html>';
 const ENGINE = "MemQL engine failed to execute query. Details: ";
 const PNG = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0]);
