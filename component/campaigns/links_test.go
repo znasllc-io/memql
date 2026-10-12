@@ -263,3 +263,40 @@ func TestLinkURLBuildersRefuseWhatMintingRefuses(t *testing.T) {
 		}
 	}
 }
+
+// TestLinkURLBuildersRefuseABlankOrigin -- with no origin a link would be a
+// relative path like /email/confirm?token=..., which no mail client can open. It
+// is an error, not a link. An origin that is only slashes is no origin either.
+func TestLinkURLBuildersRefuseABlankOrigin(t *testing.T) {
+	unsubscribe := UnsubscribePayload{OwnerUserID: "owner-1", RecipientID: "recipient-1", EmailDigest: linkTestDigest}
+	builders := map[string]func(Config) (string, error){
+		"confirm":     func(cfg Config) (string, error) { return ConfirmURL(cfg, fullLinkPayload()) },
+		"preferences": func(cfg Config) (string, error) { return PreferencesURL(cfg, fullLinkPayload()) },
+		"view":        func(cfg Config) (string, error) { return ViewURL(cfg, fullLinkPayload()) },
+		"unsubscribe": func(cfg Config) (string, error) { return UnsubscribeURL(cfg, unsubscribe) },
+	}
+
+	// Control: with an origin each builder builds, so the refusals below are
+	// about the origin and nothing else in the fixtures.
+	for name, build := range builders {
+		if got, err := build(linkTestConfig("https://api.example.test")); err != nil || got == "" {
+			t.Fatalf("control: %s with an origin: %q, %v", name, got, err)
+		}
+	}
+
+	for _, base := range []string{"", "   ", "\t\n", "/", "///", "  /  "} {
+		for name, build := range builders {
+			got, err := build(linkTestConfig(base))
+			if err == nil {
+				t.Errorf("%s with the origin %q: built %q", name, base, got)
+				continue
+			}
+			if got != "" {
+				t.Errorf("%s with the origin %q: returned a URL alongside the error: %q", name, base, got)
+			}
+			if !strings.Contains(err.Error(), "base URL") {
+				t.Errorf("%s with the origin %q: the error does not name the base URL: %v", name, base, err)
+			}
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package campaigns
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -558,7 +559,8 @@ func TestOnlyConfirmLinksExpire(t *testing.T) {
 }
 
 // TestAnExpiredLinkIsNotReportedForAForgery -- the MAC is checked before the
-// expiry, so a caller without the secret cannot tell "expired" from "forged".
+// expiry, so a forged token never reaches the expiry check: only a token this
+// code signed can be reported as expired.
 func TestAnExpiredLinkIsNotReportedForAForgery(t *testing.T) {
 	keys := []string{linkSecretA}
 	good := mustMintLink(t, linkSecretA, LinkConfirm, fullLinkPayload())
@@ -737,5 +739,192 @@ func TestParseLinkNeedsAKeyAndAKnownPage(t *testing.T) {
 	}
 	if _, err := ParseLinkToken([]string{linkSecretA}, LinkKind(""), good, linkTestNow); err == nil {
 		t.Error("no page at all verified a token")
+	}
+}
+
+// --- fix round 1: the exported verifier fails closed ---------------------------
+
+// TestABlankKeyInTheLinkRingVerifiesNothing -- HMAC accepts an empty key, so a
+// ring that held one would verify any token its forger signed under that key.
+// Config.UnsubscribeKeys never yields a blank, but ParseLinkToken is exported
+// and the ring is its argument, so it fails closed on its own.
+func TestABlankKeyInTheLinkRingVerifiesNothing(t *testing.T) {
+	for _, blank := range []string{"", "   ", "\t\n"} {
+		rings := map[string][]string{
+			"only the blank key":            {blank},
+			"two blank keys":                {blank, blank},
+			"the blank key then a real one": {blank, linkSecretA},
+			"a real key then the blank one": {linkSecretA, blank},
+		}
+		for _, kind := range linkKinds {
+			// Signed under the blank key by hand: MintLinkToken refuses to sign with one.
+			forged := signPayloadByHand(t, blank, kind, fullLinkPayload())
+			for name, ring := range rings {
+				got, err := ParseLinkToken(ring, kind, forged, linkTestNow)
+				if err == nil {
+					t.Errorf("%s link signed under the blank key %q verified against %s", kind, blank, name)
+				}
+				if got != (LinkPayload{}) {
+					t.Errorf("%s link signed under the blank key %q, %s: returned payload %+v", kind, blank, name, got)
+				}
+			}
+		}
+	}
+
+	genuine := mustMintLink(t, linkSecretA, LinkView, fullLinkPayload())
+
+	// A ring with nothing usable in it refuses every token, genuine ones included,
+	// and reads as a missing secret: nothing was rotated, so it is not an unknown key.
+	for _, ring := range [][]string{{""}, {"  "}, {"", ""}} {
+		_, err := ParseLinkToken(ring, LinkView, genuine, linkTestNow)
+		if err == nil {
+			t.Errorf("ring %q verified a genuine token", ring)
+			continue
+		}
+		if errors.Is(err, errUnknownLinkKey) || errors.Is(err, errBadLinkToken) {
+			t.Errorf("ring %q: err = %v. An empty ring is a missing secret, not a rotation problem or a bad link", ring, err)
+		}
+	}
+
+	// And a blank entry beside a real key does not disturb it.
+	for _, ring := range [][]string{{"", linkSecretA}, {linkSecretA, ""}, {"  ", linkSecretA}} {
+		if _, err := ParseLinkToken(ring, LinkView, genuine, linkTestNow); err != nil {
+			t.Errorf("ring %q refused a genuine token: %v", ring, err)
+		}
+	}
+}
+
+// TestAConfirmLinkIsRefusedWithoutAClock -- the zero time sits before every
+// expiry, so a caller that forgot to pass the time would see every confirm link
+// as live, expired ones included. ParseLinkToken refuses to guess.
+func TestAConfirmLinkIsRefusedWithoutAClock(t *testing.T) {
+	keys := []string{linkSecretA}
+	expired := fullLinkPayload()
+	expired.ExpiresAt = 1 // long past
+	live := fullLinkPayload()
+
+	for name, p := range map[string]LinkPayload{"expired": expired, "live": live} {
+		token := mustMintLink(t, linkSecretA, LinkConfirm, p)
+		got, err := ParseLinkToken(keys, LinkConfirm, token, time.Time{})
+		if !errors.Is(err, errNoLinkClock) {
+			t.Errorf("%s confirm link, zero clock: err = %v, want errNoLinkClock", name, err)
+		}
+		// A caller bug, not something the recipient did: it must not be one of the
+		// two errors a page turns into "this link is not valid" or "has expired".
+		if errors.Is(err, errBadLinkToken) || errors.Is(err, errExpiredLinkToken) || errors.Is(err, errUnknownLinkKey) {
+			t.Errorf("%s confirm link, zero clock: %v reads as a link problem", name, err)
+		}
+		if got != (LinkPayload{}) {
+			t.Errorf("%s confirm link, zero clock: returned payload %+v", name, got)
+		}
+	}
+
+	// With a clock the same expired token takes the normal path.
+	if _, err := ParseLinkToken(keys, LinkConfirm, mustMintLink(t, linkSecretA, LinkConfirm, expired), linkTestNow); !errors.Is(err, errExpiredLinkToken) {
+		t.Errorf("control: with a clock the expired link gave err = %v, want errExpiredLinkToken", err)
+	}
+}
+
+// TestPreferencesAndViewLinksNeedNoClock -- the clock is only consulted for a
+// confirm link's expiry, so the other two pages take no position on it.
+func TestPreferencesAndViewLinksNeedNoClock(t *testing.T) {
+	keys := []string{linkSecretA}
+	for _, kind := range []LinkKind{LinkPreferences, LinkView} {
+		token := mustMintLink(t, linkSecretA, kind, fullLinkPayload())
+		if _, err := ParseLinkToken(keys, kind, token, time.Time{}); err != nil {
+			t.Errorf("%s link with a zero clock: %v", kind, err)
+		}
+	}
+}
+
+// TestARespelledLinkTagIsRefused -- the tag is compared as decoded bytes, and
+// Go's base64 decoder is lenient: it ignores CR and LF anywhere in its input and
+// does not insist that the unused bits of the last character are zero. Without
+// a check on the spelling, several different strings carry the same tag. Exactly
+// one spelling of a token verifies.
+func TestARespelledLinkTagIsRefused(t *testing.T) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	keys := []string{linkSecretA}
+	for _, kind := range linkKinds {
+		good := mustMintLink(t, linkSecretA, kind, fullLinkPayload())
+		parts := splitLinkToken(t, good)
+		tag := parts[3]
+		goodTagBytes := decodeLinkSegment(t, tag)
+		if len(tag) != 22 {
+			t.Fatalf("precondition: tag %q is %d characters, want 22", tag, len(tag))
+		}
+		// 16 bytes are 128 bits: 21 full characters and a 22nd carrying 2 bits and
+		// 4 bits of padding, which a minted tag leaves zero.
+		last := strings.IndexByte(alphabet, tag[21])
+		if last < 0 || last&0x0f != 0 {
+			t.Fatalf("precondition: the last character of %q does not have zero padding bits", tag)
+		}
+
+		respellings := map[string]string{
+			"one padding bit set":                    tag[:21] + string(alphabet[last|0x01]),
+			"every padding bit set":                  tag[:21] + string(alphabet[last|0x0f]),
+			"a line feed inside the tag":             tag[:10] + "\n" + tag[10:],
+			"a carriage return and line feed inside": tag[:10] + "\r\n" + tag[10:],
+			"padding characters added":               tag + "==",
+		}
+		for name, respelled := range respellings {
+			// The point of the test: Go's decoder reads these as the very same tag.
+			// (The padded one it already rejects.)
+			if name != "padding characters added" {
+				decoded, err := base64.RawURLEncoding.DecodeString(respelled)
+				if err != nil || !bytes.Equal(decoded, goodTagBytes) {
+					t.Fatalf("precondition: %s no longer decodes to the same tag (err %v)", name, err)
+				}
+			}
+			token := strings.Join([]string{parts[0], parts[1], parts[2], respelled}, ".")
+			got, err := ParseLinkToken(keys, kind, token, linkTestNow)
+			if !errors.Is(err, errBadLinkToken) {
+				t.Errorf("%s link with %s: err = %v, want errBadLinkToken", kind, name, err)
+			}
+			if got != (LinkPayload{}) {
+				t.Errorf("%s link with %s: returned payload %+v", kind, name, got)
+			}
+		}
+
+		// A line feed inside the PAYLOAD was never accepted: the MAC covers its text.
+		payload := parts[2]
+		inPayload := strings.Join([]string{parts[0], parts[1], payload[:10] + "\n" + payload[10:], parts[3]}, ".")
+		if _, err := ParseLinkToken(keys, kind, inPayload, linkTestNow); !errors.Is(err, errBadLinkToken) {
+			t.Errorf("%s link with a line feed inside the payload: err = %v, want errBadLinkToken", kind, err)
+		}
+
+		// Control: the spelling we mint still verifies.
+		if _, err := ParseLinkToken(keys, kind, good, linkTestNow); err != nil {
+			t.Errorf("%s link in its canonical spelling was refused: %v", kind, err)
+		}
+	}
+}
+
+// TestALinkCarriesTheBareOrganizationId -- as the u3 unsubscribe token does,
+// the organization id is signed in its bare form. What ParseLinkToken returns is
+// then the id the pages compare against, and a canonical id never lengthens the URL.
+func TestALinkCarriesTheBareOrganizationId(t *testing.T) {
+	keys := []string{linkSecretA}
+	const canonical = "v1:common:account:acct-42"
+	for _, kind := range linkKinds {
+		p := fullLinkPayload()
+		p.AccountID = canonical
+		token := mustMintLink(t, linkSecretA, kind, p)
+
+		got, err := ParseLinkToken(keys, kind, token, linkTestNow)
+		if err != nil {
+			t.Fatalf("%s: %v", kind, err)
+		}
+		want := p
+		want.AccountID = "acct-42"
+		if got != want {
+			t.Errorf("%s: payload = %+v, want the organization as %q", kind, got, "acct-42")
+		}
+		if raw := string(decodeLinkSegment(t, splitLinkToken(t, token)[2])); strings.Contains(raw, "v1:common") {
+			t.Errorf("%s: the token carries the canonical id: %s", kind, raw)
+		}
+		if p.AccountID != canonical {
+			t.Errorf("%s: minting changed the caller's payload to %q", kind, p.AccountID)
+		}
 	}
 }

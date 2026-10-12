@@ -1,6 +1,7 @@
 package campaigns
 
 import (
+	"errors"
 	"net/url"
 	"strings"
 )
@@ -14,9 +15,10 @@ import (
 // mints the token for ITS page and nothing else, so a URL built by ConfirmURL
 // opens the confirm page and no other.
 //
-// The builders do not re-check the origin. A missing or unusable origin or
-// secret is refused ahead of a send by Config.RequireUnsubscribe, as it is for
-// the unsubscribe link.
+// A blank origin is refused here (see requireLinkOrigin): a link without one is
+// a bare path no mail client can open. Beyond that the builders do not judge the
+// origin; a missing or unusable one is refused ahead of a send by
+// Config.RequireUnsubscribe, as it is for the unsubscribe link.
 
 const (
 	// ConfirmPath, PreferencesPath and ViewPath are the routes the three
@@ -30,6 +32,9 @@ const (
 // UnsubscribeURL is the one-click unsubscribe link for a recipient: the u3
 // token at UnsubscribePath.
 func UnsubscribeURL(cfg Config, p UnsubscribePayload) (string, error) {
+	if err := requireLinkOrigin(cfg); err != nil {
+		return "", err
+	}
 	token, err := MintUnsubscribeToken(cfg.UnsubscribeSecret, p)
 	if err != nil {
 		return "", err
@@ -55,11 +60,25 @@ func ViewURL(cfg Config, p LinkPayload) (string, error) {
 }
 
 func pageURL(cfg Config, kind LinkKind, path string, p LinkPayload) (string, error) {
+	if err := requireLinkOrigin(cfg); err != nil {
+		return "", err
+	}
 	token, err := MintLinkToken(cfg.UnsubscribeSecret, kind, p)
 	if err != nil {
 		return "", err
 	}
 	return linkURL(cfg.UnsubscribeBaseURL, path, token), nil
+}
+
+// requireLinkOrigin refuses a blank origin. Without one a link would be a bare
+// path (/email/confirm?token=...) that no mail client can open, and nothing
+// would say so: the token would sign and the URL would build. An origin of only
+// slashes is blank for the same reason.
+func requireLinkOrigin(cfg Config) error {
+	if strings.TrimRight(strings.TrimSpace(cfg.UnsubscribeBaseURL), "/") == "" {
+		return errors.New("campaigns: no unsubscribe base URL configured, so no email link can be built")
+	}
+	return nil
 }
 
 // linkURL joins origin, path and token: <origin><path>?token=<escaped token>.

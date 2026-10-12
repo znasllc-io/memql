@@ -48,7 +48,8 @@ import (
 // token and from nothing a request says; no query parameter selects a row. That
 // is the rule unsubscribe.go follows, for the same reason: the token is the
 // only source of WHOSE row to read that the server itself vouched for. The
-// payload holds ids and a digest, never an address.
+// payload holds ids and a digest, never an address, and the organization id is
+// signed in its bare form, as the u3 token signs it.
 //
 // # Only a confirm link expires
 //
@@ -60,10 +61,21 @@ import (
 // there would be the stale-unsubscribe failure token.go refuses to build. They
 // carry no expiry, and an ExpiresAt on one is ignored.
 //
-// The expiry is checked AFTER the MAC, so a caller without the secret cannot
-// tell "expired" from "forged". The verified payload is returned with
-// errExpiredLinkToken, so the page that says the link has expired can still
-// name the organization the unconfirmed subscription was for.
+// The expiry is checked AFTER the MAC, so a forged token never reaches the
+// expiry check: only a token this code signed can be reported as expired. The
+// verified payload is returned with errExpiredLinkToken, so the page that says
+// the link has expired can still name the organization the unconfirmed
+// subscription was for. It is for that and nothing else; see errExpiredLinkToken.
+//
+// # The verifier fails closed
+//
+// ParseLinkToken is exported and takes its ring and its clock as arguments, so
+// it trusts neither. A blank key is never part of the ring (HMAC accepts an
+// empty one, so a token signed under it would verify). A confirm link is not
+// checked against a zero clock (the zero time is before every expiry). And the
+// tag has exactly one spelling: Go's base64 decoder also accepts CR and LF
+// anywhere and non-zero padding bits in the last character, and each such
+// respelling would decode to the same MAC.
 //
 // # Size
 //
@@ -133,14 +145,27 @@ var (
 	errUnknownLinkKey = errors.New("campaigns: email link token names a signing key this node does not hold")
 
 	// errExpiredLinkToken is a genuine confirm link used after its expiry.
+	//
+	// ParseLinkToken returns the VERIFIED payload with it, and only so that a
+	// page can name the organization the unconfirmed subscription was for. The
+	// payload must not be acted on: an expired link authorizes no write, no
+	// consent and no state change.
 	errExpiredLinkToken = errors.New("campaigns: email link token has expired")
+
+	// errNoLinkClock is a caller bug and not something a recipient did, which is
+	// why it is neither errBadLinkToken nor errExpiredLinkToken (the two a page
+	// shows): a confirm link can only be checked against the current time, and a
+	// zero time would call every confirm link live.
+	errNoLinkClock = errors.New("campaigns: a confirm link cannot be checked without the current time")
 )
 
 // LinkPayload is signed whole; nothing a request says can change it.
 //
 // OwnerUserID, RecipientID and EmailDigest are required on every page. The
 // rest is optional, except that a view link needs TemplateID and
-// TemplateRevision and a confirm link needs ExpiresAt.
+// TemplateRevision and a confirm link needs ExpiresAt. MintLinkToken signs
+// AccountID in its bare form (as the u3 token does), so ParseLinkToken returns a
+// bare organization id whichever form the caller passed.
 type LinkPayload struct {
 	OwnerUserID      string `json:"o"`
 	RecipientID      string `json:"r"`
@@ -194,6 +219,10 @@ func MintLinkToken(secret string, kind LinkKind, p LinkPayload) (string, error) 
 	if err := validateLinkPayload(kind, p); err != nil {
 		return "", err
 	}
+	// Signed in its bare form, as MintUnsubscribeToken signs it: a canonical id
+	// off a row would lengthen every URL, and the pages compare organizations
+	// bare. p is a copy, so the caller's payload is unchanged.
+	p.AccountID = bare(p.AccountID)
 	raw, err := json.Marshal(p)
 	if err != nil {
 		return "", fmt.Errorf("campaigns: cannot encode the %s link: %w", kind, err)
@@ -207,19 +236,40 @@ func MintLinkToken(secret string, kind LinkKind, p LinkPayload) (string, error) 
 }
 
 // ParseLinkToken verifies a token for one page against the key ring and returns
-// what it carries. keys is Config.UnsubscribeKeys(): current first, then
-// previous. now is only consulted for a confirm link's expiry.
+// what it carries.
+//
+// keys is Config.UnsubscribeKeys(): current first, then previous. Blank entries
+// are ignored, and a ring with nothing else in it refuses every token.
+//
+// now is the current time. It is only consulted for a confirm link's expiry, and
+// for one it must not be the zero time: ParseLinkToken returns errNoLinkClock (a
+// caller bug, deliberately neither errBadLinkToken nor errExpiredLinkToken, which
+// are what a page shows the recipient) rather than guess that an expired link is
+// live. The other pages ignore it.
 //
 // On any error the payload is the zero value, with one exception:
-// errExpiredLinkToken comes with the verified payload (see the file comment).
+// errExpiredLinkToken comes with the verified payload (see the file comment),
+// and that payload must not be acted on.
 func ParseLinkToken(keys []string, kind LinkKind, token string, now time.Time) (LinkPayload, error) {
 	empty := LinkPayload{}
 	macContext, ok := linkContext(kind)
 	if !ok {
 		return empty, fmt.Errorf("campaigns: %q is not an email link page", kind)
 	}
-	if len(keys) == 0 {
+	// A blank key is not a key. HMAC accepts an empty one, so a token signed under
+	// it would verify; Config.UnsubscribeKeys never yields one, and this keeps a
+	// caller that builds its own ring from opening that hole.
+	ring := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if strings.TrimSpace(key) != "" {
+			ring = append(ring, key)
+		}
+	}
+	if len(ring) == 0 {
 		return empty, errors.New("campaigns: no unsubscribe secret configured, so no email link can be verified")
+	}
+	if kind == LinkConfirm && now.IsZero() {
+		return empty, errNoLinkClock
 	}
 	// Before anything is split or decoded: the size of what a request sent is
 	// not something to spend work on.
@@ -234,13 +284,20 @@ func ParseLinkToken(keys []string, kind LinkKind, token string, now time.Time) (
 	if err != nil || len(presented) != linkTagBytes {
 		return empty, errBadLinkToken
 	}
+	// The tag is compared as decoded bytes, and Go's decoder ignores CR and LF
+	// anywhere in its input and does not require the unused bits of the last
+	// character to be zero. Re-encoding and comparing leaves exactly one spelling
+	// of the tag that verifies.
+	if base64.RawURLEncoding.EncodeToString(presented) != parts[3] {
+		return empty, errBadLinkToken
+	}
 
 	// Narrow to the key the token names, as the unsubscribe parser does: without
 	// it every probe costs a MAC per held key, and "a rotation dropped a key"
 	// could not be told from "somebody is guessing".
 	body := strings.Join(parts[:linkTokenParts-1], ".")
 	named, verified := false, false
-	for _, key := range keys {
+	for _, key := range ring {
 		if !hmac.Equal([]byte(LinkKeyID(key)), []byte(parts[1])) {
 			continue
 		}
@@ -278,6 +335,10 @@ func ParseLinkToken(keys []string, kind LinkKind, token string, now time.Time) (
 
 // validateLinkPayload is the one statement of what each page requires, applied
 // when minting and again when parsing.
+//
+// Links already sent are re-validated by these rules, so they are not free to
+// change: tighten them only behind a new version prefix (l2), or preferences
+// links, which never expire and are the opt-out path, stop working.
 func validateLinkPayload(kind LinkKind, p LinkPayload) error {
 	if p.OwnerUserID == "" || p.RecipientID == "" {
 		return errors.New("campaigns: an email link needs both an owner and a recipient")
