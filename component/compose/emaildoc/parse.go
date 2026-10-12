@@ -31,14 +31,22 @@ const (
 )
 
 // maxHrefBytes bounds a link; maxHTMLBytes bounds an html block;
-// maxTextLines bounds a text block. Reading Markdown costs memory in
-// proportion to its paragraphs and list items, and a list item is one line,
-// so a bound on lines bounds both.
+// maxTextLines bounds a text block.
+//
+// Reading Markdown costs memory in proportion to its lines (a paragraph line
+// or a list item each) and its inline marks, so the text blocks of a document
+// together may have at most maxFormattedLines lines and maxInlineMarks marks.
+// They are counted as the blocks are read and the Markdown is read last, so a
+// document over the budget is refused before any of its Markdown is read.
 const (
-	maxHrefBytes = 2000
-	maxHTMLBytes = 64 << 10
-	maxTextLines = 2000
+	maxHrefBytes      = 2000
+	maxHTMLBytes      = 64 << 10
+	maxTextLines      = 2000
+	maxFormattedLines = 5000
+	maxInlineMarks    = 10000
 )
+
+var errTooMuchFormatting = errors.New("This email has too much formatted text. Shorten it or split it into more emails.")
 
 func wordSet(words string) map[string]bool {
 	set := map[string]bool{}
@@ -335,13 +343,16 @@ func unknownKey(fields map[string]json.RawMessage, allowed map[string]bool) stri
 }
 
 // decodeFields decodes members whose keys have already been checked, exactly,
-// into a struct.
+// into a struct. The members are written out without HTML escaping: escaped,
+// each "<", ">" and "&" of a value would take six bytes for the one it is.
 func decodeFields(fields map[string]json.RawMessage, dst any) error {
-	data, err := json.Marshal(fields)
-	if err != nil {
+	var data bytes.Buffer
+	encoder := json.NewEncoder(&data)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(fields); err != nil {
 		return err
 	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder := json.NewDecoder(&data)
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(dst)
 }
@@ -391,8 +402,11 @@ func textOf(raw json.RawMessage) (string, error) {
 // The document is exactly one of two modes: a layout (blocks) or custom HTML
 // (textBody and htmlBody). Every key, value, link, picture and piece of markup
 // is checked, and the first thing wrong is returned as a sentence that names
-// it, with the block's id when it is in a block. Parse never repairs a
-// document and never returns a partly valid one.
+// it, with the block's id when it is in a block. The Markdown of text blocks
+// is read last, once the rest of the document is known to be right and
+// within the budget for formatted text, and its first problem in document
+// order is returned then. Parse never repairs a document and never returns a
+// partly valid one.
 func Parse(data []byte) (Document, error) {
 	if len(data) > MaxBytes {
 		return Document{}, errors.New("email document exceeds 2 MiB")
@@ -489,6 +503,11 @@ func parseDocument(fields map[string]json.RawMessage) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
+	for _, b := range p.texts {
+		if problem := markdownProblem(b.Text); problem != "" {
+			return Document{}, fmt.Errorf("block %s: %s", quote(b.ID), problem)
+		}
+	}
 	d.Blocks = blocks
 	return d, nil
 }
@@ -558,6 +577,10 @@ func misplaced(in container, typ string) string {
 type parser struct {
 	seen  map[string]bool
 	count int
+	// The text blocks read so far, in document order, whose Markdown is read
+	// once all the blocks are, and their lines and inline marks together.
+	texts        []Block
+	lines, marks int
 }
 
 // children reads a list of blocks. where names the owner of the list for the
@@ -657,6 +680,13 @@ func (p *parser) block(raw json.RawMessage, in container) (Block, error) {
 	}
 
 	switch b.Type {
+	case typeText:
+		p.lines += lineCount(b.Text)
+		p.marks += inlineMarks(b.Text)
+		if p.lines > maxFormattedLines || p.marks > maxInlineMarks {
+			return Block{}, errTooMuchFormatting
+		}
+		p.texts = append(p.texts, b)
 	case typeSection:
 		if b.Blocks, err = p.children(fields["blocks"], inSection, where); err != nil {
 			return Block{}, err
@@ -778,11 +808,10 @@ func blockProblem(b *Block) string {
 		}
 		return hrefProblem(b.Href, true)
 	case typeText:
-		// Counted before the Markdown is read, so a long block costs nothing.
+		// Counted without reading the Markdown, which Parse reads last.
 		if lineCount(b.Text) > maxTextLines {
 			return "This text block is too long. Split it into smaller blocks."
 		}
-		return markdownProblem(b.Text)
 	case typeHTML:
 		if len(b.HTML) > maxHTMLBytes {
 			return "an html block can be at most 64 KiB"
@@ -829,6 +858,27 @@ func lineCount(s string) int {
 	}
 	if last := s[len(s)-1]; last != '\n' && last != '\r' {
 		n++
+	}
+	return n
+}
+
+// inlineMarks counts the inline marks of a text block's Markdown, which make
+// the runs it is read into: each run of "*", of "_" and of backticks, and each
+// "[". A mark written with a backslash escape is text and not counted.
+func inlineMarks(s string) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '\\' && i+1 < len(s) && escapable(s[i+1]):
+			i++
+		case c == '[':
+			n++
+		case c == '*' || c == '_' || c == '`':
+			n++
+			for i+1 < len(s) && s[i+1] == c {
+				i++
+			}
+		}
 	}
 	return n
 }

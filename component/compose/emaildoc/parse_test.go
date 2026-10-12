@@ -551,6 +551,118 @@ func TestParseBoundsTextBlocks(t *testing.T) {
 	}
 }
 
+const tooMuchFormatting = "This email has too much formatted text. Shorten it or split it into more emails."
+
+// textBlocks is a layout of one text block per text, with ids t0, t1, ...
+func textBlocks(texts ...string) string {
+	var blocks []string
+	for n, text := range texts {
+		blocks = append(blocks, fmt.Sprintf(`{"id":"t%d","type":"text","text":%s}`, n, jsonString(text)))
+	}
+	return layoutJSON(strings.Join(blocks, ","))
+}
+
+func TestParseBoundsFormattedTextPerEmail(t *testing.T) {
+	// Reading Markdown costs memory in proportion to its lines and its
+	// inline marks, so an email may have at most 5,000 lines of text blocks
+	// and 10,000 inline marks (runs of "*", "_" or backticks, and "["), all
+	// its text blocks together, wherever they sit.
+	items := func(n int) string { return strings.Repeat("- a\n", n) }
+	runs := func(n int) string { return strings.Repeat("*a* ", n) } // two marks each
+	inSection := func(text string) string {
+		return `{"id":"s","type":"section","blocks":[{"id":"u","type":"text","text":` + jsonString(text) + `}]}`
+	}
+	inColumn := func(text string) string {
+		return `{"id":"c","type":"columns","columns":[{"width":100,"blocks":[{"id":"v","type":"text","text":` + jsonString(text) + `}]}]}`
+	}
+	for _, c := range []struct {
+		name string
+		doc  string
+		ok   bool
+	}{
+		{"5,000 lines", textBlocks(items(2000), items(2000), items(1000)), true},
+		{"5,001 lines", textBlocks(items(2000), items(2000), items(1001)), false},
+		{"5,001 lines, some in a section and a column", layoutJSON(strings.Join([]string{`{"id":"t","type":"text","text":` + jsonString(items(2000)) + `}`, inSection(items(2000)), inColumn(items(1001))}, ",")), false},
+		{"10,000 marks", textBlocks(runs(5000)), true},
+		{"10,001 marks", textBlocks(runs(5000) + "["), false},
+		{"10,001 marks over blocks", textBlocks(runs(2000), runs(2000), runs(1000)+"_"), false},
+		{"10,001 marks, some in a section and a column", layoutJSON(strings.Join([]string{`{"id":"t","type":"text","text":` + jsonString(runs(4000)) + `}`, inSection(runs(500)), inColumn(runs(500) + "`")}, ",")), false},
+		// A run of marks counts once, however long; an escaped mark is text.
+		{"long runs count once", textBlocks(strings.Repeat("***a*** ", 5000)), true},
+		{"runs of every kind", textBlocks(strings.Repeat("_a_ ", 1000) + strings.Repeat("``a`` ", 1000) + strings.Repeat("[a] ", 1000) + strings.Repeat("**a** ", 2500)), true},
+		{"runs of every kind and one more", textBlocks(strings.Repeat("_a_ ", 1000) + strings.Repeat("``a`` ", 1000) + strings.Repeat("[a] ", 1000) + strings.Repeat("**a** ", 2500) + "_"), false},
+		{"escaped marks are text", textBlocks(strings.Repeat(`\*a\* \[`, 5000) + runs(5000)), true},
+		// Other blocks' words are not Markdown.
+		{"headings are not counted", layoutJSON(`{"id":"h","type":"heading","text":` + jsonString(runs(6000)+items(6000)) + `}`), true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Parse([]byte(c.doc))
+			if c.ok && err != nil {
+				t.Fatalf("want it accepted, got %v", err)
+			}
+			if !c.ok && (err == nil || err.Error() != tooMuchFormatting) {
+				t.Fatalf("want %q, got %v", tooMuchFormatting, err)
+			}
+		})
+	}
+	// The Markdown of an email over the budget is never read (this cost
+	// 742 MiB to read before the budget; the refusals measure 14 to 33 MiB,
+	// all of it decoding the JSON, and the bound is about 2x that), and the
+	// Markdown of one within it is still checked, its problems named by block
+	// in document order.
+	for _, c := range []struct {
+		name string
+		doc  []byte
+	}{
+		{"one paragraph of 500,000 emphasis runs", []byte(textBlocks(runs(500_000)))},
+		{"200 blocks of 2,000 list items", []byte(textBlocks(func() []string {
+			var texts []string
+			for n := 0; n < 200; n++ {
+				texts = append(texts, items(2000))
+			}
+			return texts
+		}()...))},
+		{"50 blocks of one line of 10,000 emphasis runs", []byte(textBlocks(func() []string {
+			var texts []string
+			for n := 0; n < 50; n++ {
+				texts = append(texts, runs(10_000))
+			}
+			return texts
+		}()...))},
+	} {
+		var err error
+		if allocated := allocatedBy(func() { _, err = Parse(c.doc) }); err == nil || err.Error() != tooMuchFormatting || allocated > 64<<20 {
+			t.Errorf("%s: want %q without reading the Markdown, got %v after %d bytes", c.name, tooMuchFormatting, err, allocated)
+		}
+	}
+	if _, err := Parse([]byte(textBlocks("fine", "[x](javascript:1)", "[](https://example.com)"))); err == nil || !strings.HasPrefix(err.Error(), `block "t1": a link must be`) {
+		t.Fatalf("want the first Markdown problem, of t1, got %v", err)
+	}
+}
+
+func TestParseCostDoesNotDependOnHTMLCharacters(t *testing.T) {
+	// Reading a block writes its values out again as JSON once; written with
+	// HTML escaping, each "<", ">" and "&" would take six bytes for one, and
+	// a document of them would cost three times as much to read (160 MiB
+	// against 50 for 2 MiB of text, measured).
+	whole := func(letter string) []byte {
+		room := MaxBytes - len(layoutJSON(`{"id":"t","type":"text","text":""}`))
+		return []byte(layoutJSON(`{"id":"t","type":"text","text":"` + strings.Repeat(letter, room) + `"}`))
+	}
+	plain, html := whole("a"), whole("&")
+	var err error
+	costs := map[string]uint64{}
+	for name, doc := range map[string][]byte{"plain": plain, "html": html} {
+		costs[name] = allocatedBy(func() { _, err = Parse(doc) })
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if costs["html"] > costs["plain"]*3/2 {
+		t.Fatalf("2 MiB of & cost %d bytes to read, 2 MiB of letters %d", costs["html"], costs["plain"])
+	}
+}
+
 func TestParseKeepsRolesAndZeroValuesAsWritten(t *testing.T) {
 	d, err := Parse([]byte(layoutJSON(`{"id":"a","type":"heading","role":"content","text":"x"},{"id":"b","type":"heading","text":"y"},{"id":"c","type":"footer","separator":"","gap":0}`)))
 	if err != nil {

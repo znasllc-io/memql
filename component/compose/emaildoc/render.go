@@ -46,12 +46,16 @@ const (
 	IssueEmailTooLarge      = "email_too_large"     // more HTML than sending takes, its pictures embedded
 )
 
-// MaxRenderBytes is the most a render writes of each part: the subject, the
-// HTML and the text. A render that would write more stops with ErrTooLarge,
-// so no document, picture or sample value can make it write much more than
-// this. It bounds what is written, not what is read to write it: the
-// pictures a render reads and keeps, the Markdown it reads and its list of
-// issues are outside it.
+// MaxRenderBytes is the most a render returns of each part: the subject, the
+// HTML and the text. A render checks the part it is writing after each piece
+// of it (a line of a text block or of a highlight, a link or a line of a
+// footer, a link of a social block, a block) and stops with ErrTooLarge once
+// the part is past MaxRenderBytes. So the part being written holds at most
+// MaxRenderBytes and one piece more, and a piece is at most its markup and
+// its words escaped, five bytes for each byte of the document at most. The
+// ceiling bounds what is written, not what is read to write it: the pictures
+// a render reads and keeps, the Markdown it reads (bounded by Parse's budget
+// for formatted text) and its list of issues are outside it.
 const MaxRenderBytes = 8 << 20
 
 // ErrTooLarge is the error of a render that would write more than
@@ -459,8 +463,13 @@ func pictureAlts(markup string) map[string]string {
 	}
 }
 
+// strippedFromURL is what a browser strips from both ends of an address: C0
+// controls and the space. Any other space, such as a no-break space, stays in
+// the address and breaks it.
+func strippedFromURL(r rune) bool { return r <= ' ' }
+
 // literalLinks adds to linked the address of every a tag of markup, as it is
-// written in the markup (less the spaces around it, which a browser ignores).
+// written in the markup (less what a browser strips from its ends).
 // Sending fills a link tag by replacing its text where it is written, so an
 // address that spells the tag with character references, such as
 // "&#123;&#123;confirmUrl&#125;&#125;", is never filled and links nowhere: it
@@ -481,7 +490,7 @@ func literalLinks(markup string, linked map[string]bool) {
 			}
 			for _, a := range token.Attr {
 				if a.Key == "href" {
-					linked[strings.TrimSpace(a.Val)] = true
+					linked[strings.TrimFunc(a.Val, strippedFromURL)] = true
 				}
 			}
 		}

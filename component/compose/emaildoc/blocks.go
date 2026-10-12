@@ -206,7 +206,8 @@ func (r *renderer) heading(b Block, pad [4]float64, mark string) {
 // text writes a text block: one inner row per paragraph or list item. A
 // paragraph is followed by the gap, list items by nothing, the last item of a
 // list by the gap, and the block's last element by nothing. A row is far
-// longer than its Markdown, so the ceiling is checked row by row.
+// longer than its Markdown, so the ceiling is checked line by line: after each
+// line of a paragraph and after each list item.
 func (r *renderer) text(b Block, pad [4]float64) error {
 	size := textSize(b)
 	lineHeight := orNumber(b.LineHeight, 24)
@@ -230,7 +231,11 @@ func (r *renderer) text(b Block, pad [4]float64) error {
 		}
 		if element.Kind == mdParagraph {
 			out.WriteString(`<tr><td dir="ltr"` + efs + ` style="color:` + colour + `;font-size:` + s + `px;` + style + `white-space:pre-wrap;text-align:` + align +
-				`;padding:0px 0px ` + number(after) + `px;line-height:` + lh + `px;mso-line-height-alt:` + lh + `px">` + r.inline(element.Inline, linkColour) + `</td></tr>`)
+				`;padding:0px 0px ` + number(after) + `px;line-height:` + lh + `px;mso-line-height-alt:` + lh + `px">`)
+			if err := r.inline(element.Inline, linkColour); err != nil {
+				return err
+			}
+			out.WriteString(`</td></tr>`)
 			if err := r.grown(); err != nil {
 				return err
 			}
@@ -248,8 +253,11 @@ func (r *renderer) text(b Block, pad [4]float64) error {
 			out.WriteString(`<tr><td dir="ltr" style="text-align:` + align + `;padding:0px 0px ` + number(below) + `px;line-height:` + llh + `px;mso-line-height-alt:` + llh + `px;font-size:0">` +
 				`<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Arial, Helvetica, sans-serif"><tbody><tr>` +
 				`<td style="width:24px;vertical-align:top;padding-right:8px;text-align:right;white-space:nowrap"><span style="font-size:` + s + `px;color:` + colour + `;display:inline-block">` + marker + `</span></td>` +
-				`<td` + efs + ` style="font-size:` + s + `px;color:` + colour + `;` + style + `white-space:pre-wrap;vertical-align:top">` + r.inline(item.Inline, linkColour) + `</td>` +
-				`</tr></tbody></table></td></tr>`)
+				`<td` + efs + ` style="font-size:` + s + `px;color:` + colour + `;` + style + `white-space:pre-wrap;vertical-align:top">`)
+			if err := r.inline(item.Inline, linkColour); err != nil {
+				return err
+			}
+			out.WriteString(`</td></tr></tbody></table></td></tr>`)
 			if err := r.grown(); err != nil {
 				return err
 			}
@@ -269,32 +277,47 @@ func markdownOf(text string) []mdElement {
 	return elements
 }
 
-// inline writes the runs of a paragraph or a list item. A link whose address
-// breaks the link rule is written as its words.
-func (r *renderer) inline(runs []mdInline, linkColour string) string {
-	var b strings.Builder
+// inline writes the runs of a paragraph or a list item into the email,
+// their words escaped as they are written, and checks the ceiling after each
+// line. A link whose address breaks the link rule is written as its words.
+func (r *renderer) inline(runs []mdInline, linkColour string) error {
+	out := &r.out
+	words := func(text string) {
+		_, _ = textEscaper.WriteString(out, text) // a strings.Builder takes every write
+	}
 	for _, run := range runs {
 		switch run.Kind {
 		case mdBold:
-			b.WriteString(`<span style="font-weight:700">` + escapeText(run.Text) + `</span>`)
+			out.WriteString(`<span style="font-weight:700">`)
+			words(run.Text)
+			out.WriteString(`</span>`)
 		case mdItalic:
-			b.WriteString(`<span style="font-style:italic">` + escapeText(run.Text) + `</span>`)
+			out.WriteString(`<span style="font-style:italic">`)
+			words(run.Text)
+			out.WriteString(`</span>`)
 		case mdBoldItalic:
-			b.WriteString(`<span style="font-weight:700;font-style:italic">` + escapeText(run.Text) + `</span>`)
+			out.WriteString(`<span style="font-weight:700;font-style:italic">`)
+			words(run.Text)
+			out.WriteString(`</span>`)
 		case mdLink:
 			href := r.link(run.URL)
 			if href == "" {
-				b.WriteString(escapeText(run.Text))
+				words(run.Text)
 				continue
 			}
-			b.WriteString(`<a href="` + attr(href) + `" target="_blank" rel="noopener" style="color:` + linkColour + `;text-decoration:underline">` + escapeText(run.Text) + `</a>`)
+			out.WriteString(`<a href="` + attr(href) + `" target="_blank" rel="noopener" style="color:` + linkColour + `;text-decoration:underline">`)
+			words(run.Text)
+			out.WriteString(`</a>`)
 		case mdBreak:
-			b.WriteString(`<br>`)
+			out.WriteString(`<br>`)
+			if err := r.grown(); err != nil {
+				return err
+			}
 		default:
-			b.WriteString(escapeText(run.Text))
+			words(run.Text)
 		}
 	}
-	return b.String()
+	return nil
 }
 
 // highlight writes a highlighted statement: one inner row per line, the
@@ -765,7 +788,11 @@ func stackRule(n, columns int, below float64) string {
 
 // shrinkSize is the size, in tenths of a pixel, of the text a block marks to
 // shrink on phones, if it marks any: a heading's, a highlight's, a text
-// block's when it has words to write, and a social block's title.
+// block's when it has words to write, and a social block's title. A text
+// block has words to write exactly when it has more than white space: the
+// Markdown reader makes a paragraph or an item of every line that is not
+// blank, and falls back to the whole text, as one paragraph, only for text
+// that is not blank. So the Markdown is not read here.
 func shrinkSize(b Block) (int, bool) {
 	switch b.Type {
 	case typeHeading:
@@ -774,7 +801,7 @@ func shrinkSize(b Block) (int, bool) {
 		return phoneTenths(highlightSize(b))
 	case typeText:
 		tenths, ok := phoneTenths(textSize(b))
-		return tenths, ok && len(markdownOf(b.Text)) > 0
+		return tenths, ok && strings.TrimSpace(b.Text) != ""
 	case typeSocial:
 		if b.Title != "" {
 			return phoneTenths(socialTitleSize)

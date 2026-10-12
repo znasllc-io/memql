@@ -1429,34 +1429,37 @@ func TestRenderStopsAtItsCeiling(t *testing.T) {
 	// lines, but a Document built without it can ask for hundreds of
 	// mebibytes of HTML, and a highlight of many lines can through Parse.
 	// Render stops at MaxRenderBytes, as it writes.
-	items := strings.Repeat("- a\n", 300_000)
-	d := oneBlock(Block{ID: "t", Type: "text", Text: items})
-	// Reading the Markdown costs what the input costs; writing may cost a few
-	// times the ceiling (a growing buffer and the rows it is made of), never
-	// what the input asks for, which is over a gigabyte here.
-	parsing := allocatedBy(func() { _, _ = parseMarkdown(items) })
+	//
+	// Reading the Markdown costs what the input costs, once: text over 16
+	// pixels, which the head marks to shrink, is not read for that. Writing
+	// may cost a few times the ceiling (a growing buffer and the rows it is
+	// made of), never what the input asks for, which is over a gigabyte here.
+	// One paragraph of many lines stops at the ceiling too, line by line.
+	items, paragraphs := strings.Repeat("- a\n", 300_000), strings.Repeat("a\n\n", 300_000)
+	paragraph := strings.Repeat(strings.Repeat("&", 50)+"\n", 200_000)
 	var renderErr error
-	rendering := allocatedBy(func() { _, renderErr = Render(ctx, d, nil, RenderOptions{}) })
-	if !errors.Is(renderErr, ErrTooLarge) || rendering > parsing+8*MaxRenderBytes {
-		t.Fatalf("list: want ErrTooLarge within the ceiling, got %v after %d bytes (%d of them reading the Markdown)", renderErr, rendering, parsing)
+	for _, size := range []float64{0, 18} {
+		for _, c := range []struct{ name, text string }{{"list", items}, {"paragraphs", paragraphs}, {"one paragraph of many lines", paragraph}} {
+			d := oneBlock(Block{ID: "t", Type: "text", Text: c.text, Size: size})
+			parsing := allocatedBy(func() { _, _ = parseMarkdown(c.text) })
+			rendering := allocatedBy(func() { _, renderErr = Render(ctx, d, nil, RenderOptions{}) })
+			if !errors.Is(renderErr, ErrTooLarge) || rendering > parsing+8*MaxRenderBytes {
+				t.Errorf("%s, size %v: want ErrTooLarge within the ceiling, got %v after %d bytes (%d of them reading the Markdown once)", c.name, size, renderErr, rendering, parsing)
+			}
+		}
 	}
-	// Paragraphs and highlight lines grow the same way.
-	paragraphs, lines := strings.Repeat("a\n\n", 300_000), strings.Repeat("a\n", 450_000)
+	// Highlight lines grow the same way.
+	lines := strings.Repeat("a\n", 450_000)
 	for _, c := range []struct {
 		name  string
 		block Block
 		read  func()
 	}{
-		{"paragraphs", Block{ID: "t", Type: "text", Text: paragraphs}, func() { _, _ = parseMarkdown(paragraphs) }},
 		{"highlight lines", Block{ID: "l", Type: "highlight", Text: lines}, func() { _ = strings.Split(oneNewline(lines), "\n") }},
 	} {
-		d := oneBlock(c.block)
-		if c.block.Type == typeHighlight {
-			parsed, err := Parse([]byte(layoutJSON(`{"id":"l","type":"highlight","text":` + jsonString(lines) + `}`)))
-			if err != nil {
-				t.Fatal(err)
-			}
-			d = parsed
+		d, err := Parse([]byte(layoutJSON(`{"id":"l","type":"highlight","text":` + jsonString(lines) + `}`)))
+		if err != nil {
+			t.Fatal(err)
 		}
 		reading := allocatedBy(c.read)
 		rendering := allocatedBy(func() { _, renderErr = Render(ctx, d, nil, RenderOptions{}) })
@@ -1480,7 +1483,7 @@ func TestRenderStopsAtItsCeiling(t *testing.T) {
 		t.Fatalf("want ErrTooLarge before the picture is read, got %v and %d reads", err, reads)
 	}
 	// A sample value used many times.
-	d = oneBlock(Block{ID: "t", Type: "text", Text: strings.Repeat("{{displayName}} ", 20)})
+	d := oneBlock(Block{ID: "t", Type: "text", Text: strings.Repeat("{{displayName}} ", 20)})
 	if _, err := Render(ctx, d, nil, RenderOptions{Sample: map[string]string{"displayName": strings.Repeat("x", 1<<20)}}); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("sample: want ErrTooLarge, got %v", err)
 	}
@@ -2482,4 +2485,98 @@ func TestLinkLabelsInTheTextPartHaveOneKindOfLineBreak(t *testing.T) {
 	if want := "Two\nlines: https://example.com/b\n\nNet\nwork: https://example.com/s\n\nFoot\nnote\n"; r.Text != want {
 		t.Fatalf("got %q, want %q", r.Text, want)
 	}
+}
+
+func TestLinkTagsAroundOtherSpacesAreNotLinks(t *testing.T) {
+	// A browser strips only C0 controls and the space from the ends of an
+	// address. Any other space stays in it, so the address is broken once
+	// sending fills the tag, and it is not the link.
+	for _, c := range []struct {
+		href   string
+		linked bool
+	}{
+		{" {{confirmUrl}}", false},
+		{"　{{confirmUrl}}　", false},
+		{"{{confirmUrl}} ", false},
+		{"\u0085{{confirmUrl}}", false},
+		{" \t\n{{confirmUrl}}\r\f ", true},
+		{"\x01{{confirmUrl}}\x1f", true},
+	} {
+		body := `<a href="` + c.href + `">Confirm</a>`
+		r := mustRender(t, Document{Subject: "x", TextBody: "x", HTMLBody: body}, nil, RenderOptions{RequireConfirm: true})
+		if hasIssue(r.Issues, IssueConfirmMissing) == c.linked {
+			t.Errorf("%q: linked %v, issues %+v", c.href, c.linked, r.Issues)
+		}
+	}
+}
+
+// formattedTextCost is the most Parse and Render together may allocate for
+// one of the worst documents Parse accepts under its budget for formatted
+// text (see TestFormattedTextCostIsBounded). Measured at 116 MiB, the worst
+// of them (a paragraph of 2 MiB of "&", which escapes to five times its
+// size), and about 2x that: 2026-10-11, go1.27.2, darwin/arm64.
+const formattedTextCost = 240 << 20
+
+func TestFormattedTextCostIsBounded(t *testing.T) {
+	// The worst documents Parse accepts under the budget for formatted text,
+	// read and written: whatever a member writes in an email, reading it and
+	// writing it out stays within a bound.
+	items := func(n int, item string) string { return strings.Repeat("- "+item+"\n", n) }
+	runs := func(n int) string { return strings.Repeat("*a* ", n) }
+	var fifty []string
+	for n := 0; n < 50; n++ {
+		fifty = append(fifty, runs(100))
+	}
+	footer := `{"id":"f","type":"footer","links":[{"label":"u","href":"{{unsubscribeUrl}}"}]}`
+	// raw writes a JSON string as it is: & and < need no escape in JSON.
+	raw := func(s string) string { return `"` + s + `"` }
+	document := func(size string, texts ...string) []byte {
+		var blocks []string
+		for n, text := range texts {
+			blocks = append(blocks, fmt.Sprintf(`{"id":"t%d","type":"text"%s,"text":%s}`, n, size, text))
+		}
+		return []byte(layoutJSON(strings.Join(append(blocks, footer), ",")))
+	}
+	quoted := func(texts ...string) []string {
+		for n := range texts {
+			texts[n] = jsonString(texts[n])
+		}
+		return texts
+	}
+	// A paragraph as long as a document can hold.
+	whole := func(size, letter string) []byte {
+		room := MaxBytes - len(document(size, raw("")))
+		return document(size, raw(strings.Repeat(letter, room)))
+	}
+	worst := 0
+	for _, size := range []string{"", `,"size":18`} {
+		for _, c := range []struct {
+			name string
+			doc  []byte
+		}{
+			{"one paragraph of 5,000 emphasis runs", document(size, quoted(runs(5000))...)},
+			{"5,000 list items", document(size, quoted(items(2000, "a"), items(2000, "a"), items(1000, "a"))...)},
+			{"5,000 list items and 10,000 marks", document(size, quoted(items(2000, "*a*"), items(2000, "*a*"), items(1000, "*a*"))...)},
+			{"50 blocks of 100 emphasis runs on one line", document(size, quoted(fifty...)...)},
+			{"a plain paragraph of 2 MiB", whole(size, "a")},
+			{"a paragraph of 2 MiB that escapes to five times its size", whole(size, "&")},
+		} {
+			var parseErr, renderErr error
+			allocated := allocatedBy(func() {
+				var d Document
+				if d, parseErr = Parse(c.doc); parseErr == nil {
+					_, renderErr = Render(context.Background(), d, nil, RenderOptions{Preview: true})
+				}
+			})
+			if parseErr != nil || (renderErr != nil && !errors.Is(renderErr, ErrTooLarge)) {
+				t.Fatalf("%s%s: want it accepted and rendered, got %v and %v", c.name, size, parseErr, renderErr)
+			}
+			t.Logf("%s%s: %d bytes, %d MiB allocated, render error %v", c.name, size, len(c.doc), allocated>>20, renderErr)
+			worst = max(worst, int(allocated))
+			if allocated > formattedTextCost {
+				t.Errorf("%s%s: %d bytes allocated, the bound is %d", c.name, size, allocated, formattedTextCost)
+			}
+		}
+	}
+	t.Logf("worst: %d MiB", worst>>20)
 }
