@@ -2,7 +2,7 @@ import { UserInputError } from "./problems.js";
 import * as vscode from "vscode";
 import {
   buildClientAccountsAll, buildLibraryFilesForOwner, buildCreateComposeRecipe,
-  followComposition, startMaterialize, MaterializeCancelled, type MaterializeExecute,
+  fileNameProblem, followComposition, startMaterialize, MaterializeCancelled, type MaterializeExecute,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
@@ -62,8 +62,9 @@ export class TemplateExamples {
       for (const asset of assets) asset.source.includeImages = true;
     }
     const name = await vscode.window.showInputBox({ title: "Create email · Name", prompt: "What should we call this template?", placeHolder: "Autumn welcome", ignoreFocusOut: true,
-      // The name is also the draft's file name, and a name is not a place to file into: a folder path is refused.
-      validateInput: text => !text.trim() ? "Give the template a name." : /[\\/]/.test(text) ? "Use a name without slashes." : undefined });
+      // The name is also the draft's file name (a JSON file), so it is checked with the rule and the words every
+      // creation flow uses: the SDK's fileNameProblem, which New Markdown and the MemQL OS composer use too.
+      validateInput: text => fileNameProblem(text, "json") });
     if (!name) return;
     const brief = await vscode.window.showInputBox({ title: "Create email · Brief", prompt: "What should the email say, and what should it borrow from the examples? Include any approved links.", placeHolder: "Use the layout in example.png, our green brand color, and the welcome copy in brief.md.", ignoreFocusOut: true, validateInput: text => text.trim() ? undefined : "Describe the email you want." });
     if (!brief) return;

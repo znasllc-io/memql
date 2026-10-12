@@ -128,9 +128,13 @@ not change, the design.
     query. Details: " around it. The SDK's `refusalSentence`, beside `executeNamed`,
     takes both off, and a leading Go package name; `startMaterialize` throws and
     `handOffDescription` reports in those words, and the OS shows every refusal
-    through it. The OS composer checks a name as it is typed with the SDK's
-    `fileNameProblem`, the rule and words of VS Code's New Markdown, which now uses it
-    too. The OS renders a composition's `provenanceNote` (only the stamp step knows
+    through it, reads included. The OS composer checks a name as it is typed with the
+    SDK's `fileNameProblem`, the rule and words of VS Code's New Markdown, which VS
+    Code's New Markdown and Create Email from Examples now use too; each problem has
+    its own sentence ("Enter a file name.", "Enter a file name, without a folder
+    path.", "Use a name up to 150 characters.", "Enter a name before the
+    extension."), and VS Code's diagnostics keep a refusal's frames through the
+    error's cause. The OS renders a composition's `provenanceNote` (only the stamp step knows
     why a file carries no provenance) and says what a finished file is: "This file was
     created blank."; for a described one, "Your description was sent to be written.
     Open the file to review and approve the draft." once the window has sent it, the

@@ -103,9 +103,13 @@ test("a name is checked while it is typed, an extension on its own included", ()
   for (const name of ["Untitled.md", "Plan", "Q3.report.md", "notes.markdown", "a", "Plan .md", "  Plan  "]) {
     assert.equal(markdownNameProblem(name), undefined, `"${name}" should be accepted`);
   }
-  for (const name of ["", "   ", "a/b.md", "a\\b.md", "tab\there.md", "x".repeat(151)]) {
-    assert.equal(markdownNameProblem(name), "Enter a file name, without a folder path.", `"${name}" should be refused as a path or an empty name`);
+  for (const name of ["", "   "]) {
+    assert.equal(markdownNameProblem(name), "Enter a file name.", `"${name}" has no name in it`);
   }
+  for (const name of ["a/b.md", "a\\b.md", "tab\there.md"]) {
+    assert.equal(markdownNameProblem(name), "Enter a file name, without a folder path.", `"${name}" should be refused as a path`);
+  }
+  assert.equal(markdownNameProblem("x".repeat(151)), "Use a name up to 150 characters.");
   // Nothing before the extension: the cluster adds ".md" itself, so this would file a document with no name.
   for (const name of [".md", ".markdown", " .MD ", ".Markdown"]) {
     assert.equal(markdownNameProblem(name), "Enter a name before the extension.", `"${name}" should be refused inline`);

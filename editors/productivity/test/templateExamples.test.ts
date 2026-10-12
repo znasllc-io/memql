@@ -64,9 +64,15 @@ test("example-led creation distinguishes inspiration from included images and ke
   assert.match(opened[0],/^memql-file:\/\/client.example\/artifacts\/artifact\//);
   assert.ok(!calls.some(call => /send|publish|campaignSaveTemplate/i.test(call.name)),"creation must leave review and publication to the human");
   assert.match(materialize,/requestId:\s*"[0-9a-f-]{36}"/,"a repeat of this request must be recognisable to the cluster");
-  // The name becomes the draft's file name, and a name is not a place to file into: the cluster refuses a folder path.
+  // The name becomes the draft's file name, so it is checked with the rule and words every creation flow uses
+  // (the SDK's fileNameProblem): a name is not a place to file into, and the draft is a JSON file.
   assert.equal(checkName?.("Autumn welcome"),undefined);
-  for (const text of ["", "  ", "Autumn/Winter welcome", "Autumn\\Winter welcome"]) assert.equal(typeof checkName?.(text),"string",`"${text}" was accepted as a name`);
+  assert.equal(checkName?.("Autumn welcome.json"),undefined);
+  for (const [text, problem] of [
+    ["", "Enter a file name."], ["  ", "Enter a file name."],
+    ["Autumn/Winter welcome", "Enter a file name, without a folder path."], ["Autumn\\Winter welcome", "Enter a file name, without a folder path."],
+    ["x".repeat(151), "Use a name up to 150 characters."], [".json", "Enter a name before the extension."],
+  ]) assert.equal(checkName?.(text),problem,`"${text}"`);
   assert.equal(token.listening,0,"nothing keeps listening for a stop once the draft is open");
   // Asking for another draft is another request, not a repeat of the first.
   await flow.start();

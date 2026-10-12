@@ -190,7 +190,8 @@ The current comment list shows the newest 500 records and reports when more are
 stored. Applying feedback automatically is not enabled by adding a comment.
 
 **Create Email from Examples** asks for an organization, reference files, a name,
-and a brief. Select a PNG, JPEG, GIF, text/HTML/CSS/Markdown/JSON/CSV/SVG file,
+and a brief. The name is checked as you type it with the same rule as New
+Markdown. Select a PNG, JPEG, GIF, text/HTML/CSS/Markdown/JSON/CSV/SVG file,
 or ZIP bundle from the device or recent MemQL Files. The cluster captures the
 permitted source bytes before dispatch, analyzes image references through its
 own model router, and creates an editable `*.email.json` draft. The work appears

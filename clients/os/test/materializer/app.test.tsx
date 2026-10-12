@@ -13,7 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 
 const { MaterializerApp } = await import("../../src/apps/materializer/MaterializerApp");
 const { LocalMaterializerSettingsStore } = await import("../../src/apps/materializer/settings");
-const { compositionRow, fakeConnection, recipeRow, templateRow, withSession } = await import("./harness");
+const { compositionRow, fakeConnection, recipeRow, refused, templateRow, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -179,7 +179,7 @@ describe("the composer", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
 
     // The rule and the words are the editor's (the SDK's fileNameProblem), shown where the name is typed.
-    expect(await screen.findByText("Enter a file name, without a folder path.")).toBeTruthy();
+    expect(await screen.findByText("Enter a file name.")).toBeTruthy();
     expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
   });
 
@@ -675,6 +675,46 @@ describe("record list count and action boundaries", () => {
   });
 });
 
+
+// A READ THAT FAILS SAYS THE CLUSTER'S SENTENCE ALONE, as a refused write does. A refusal arrives with
+// the call's name in front and inside the engine's frame (`refused` gives the real wording), and the
+// person reads only the sentence: what the composer can offer, what a source finds, and opening a file.
+describe("a read that fails", () => {
+  const FRAMES = /composableConcepts|composeResolveSources|libraryArtifactForFile|MemQL engine|Details:|compose:|library:/;
+  const line = (text: string) => screen.findByText(text, { selector: ".os-notice-line" });
+
+  it("says why the composer has nothing to offer, in the cluster's words alone", async () => {
+    const conn = fakeConnection();
+    conn.query.composableConcepts.mockRejectedValue(refused("composableConcepts", "compose: the concept registry is not readable on this node"));
+    mount(conn);
+    expect(await line("the concept registry is not readable on this node")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(FRAMES);
+  });
+
+  it("says why a source could not be resolved, in the cluster's words alone", async () => {
+    const conn = fakeConnection({
+      composables: { concepts: [{ id: "v1:x:invoice", as: "invoice", fields: [], list: "openInvoices", marked: true }], registryAvailable: true } as unknown as Row,
+    });
+    conn.query.composeResolveSources.mockRejectedValue(refused("composeResolveSources", "compose: the sources could not be read: query openInvoices is not readable by you"));
+    mount(conn);
+    fireEvent.click(await screen.findByRole("button", { name: /invoice/ }));
+    expect(await line("the sources could not be read: query openInvoices is not readable by you")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(FRAMES);
+  });
+
+  it("says why a file could not be opened, in the cluster's words alone", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: "c-output", outputFileId: "f-output" })] });
+    conn.query.libraryArtifactForFile.mockRejectedValue(refused("libraryArtifactForFile", "library: the artifact index is not reachable"));
+    h.connection = conn;
+    const tab = { navigate: vi.fn(), close: vi.fn() };
+    render(withSession(<MaterializerApp sectionId="composer" navigate={() => {}} askContext={() => {}}
+      intent={{ id: "open", payload: { compositionId: "c-output" } }} store={memoryStore()}
+      handoffPorts={{ reserve: () => tab, navigate: vi.fn(), schedule: () => () => {} }} />));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Q3 report" }));
+    expect(await line("the artifact index is not reachable")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(FRAMES);
+  });
+});
 
 describe("organization and reference metadata", () => {
   it("saves an email recipe without dropping its reference bundle or client", async () => {

@@ -188,12 +188,14 @@ export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" |
     (request.sources ?? []).every(source => source.kind === "library_file");
 }
 
-// What a person may call a new file, in the words they read where they type it.
-// VS Code's New Markdown and the MemQL OS composer check a name with
-// fileNameProblem as it is typed, so the two say the same thing about the same
-// name. The cluster refuses the names it cannot file in its own words, for a
-// client that sends one anyway.
+// What a person may call a new file, in the words they read where they type it,
+// each saying what is actually wrong. VS Code's New Markdown and Create Email from
+// Examples and the MemQL OS composer check a name with fileNameProblem as it is
+// typed, so they say the same thing about the same name. The cluster refuses the
+// names it cannot file in its own words, for a client that sends one anyway.
+const NO_NAME = "Enter a file name.";
 const NOT_A_FILE_NAME = "Enter a file name, without a folder path.";
+const NAME_TOO_LONG = "Use a name up to 150 characters.";
 const NO_NAME_BEFORE_EXTENSION = "Enter a name before the extension.";
 const MAX_NAME_LENGTH = 150;
 // The suffixes that already name a format: its file extension and, for Markdown,
@@ -218,13 +220,15 @@ export function fileNameStem(name: string, format: MaterializeFormat): string {
 
 /**
  * What is wrong with a name typed for a new file of this format, or undefined
- * when it can be used. A name is a file name and not a place (folderId says
- * where a file goes), so a slash or a control character is refused, as is an
- * empty name or one over 150 characters; and there must be something before the
- * extension, because ".md" on its own would file a document with no name.
+ * when it can be used, in that order: there is no name; it is a place (a slash,
+ * a backslash or a control character -- folderId says where a file goes); it is
+ * over 150 characters; or there is nothing before the extension, because ".md"
+ * on its own would file a document with no name.
  */
 export function fileNameProblem(name: string, format: MaterializeFormat): string | undefined {
-  if (!name.trim() || /[\\/\u0000-\u001f]/.test(name) || name.length > MAX_NAME_LENGTH) return NOT_A_FILE_NAME;
+  if (!name.trim()) return NO_NAME;
+  if (/[\\/\u0000-\u001f]/.test(name)) return NOT_A_FILE_NAME;
+  if (name.length > MAX_NAME_LENGTH) return NAME_TOO_LONG;
   if (!fileNameStem(name, format)) return NO_NAME_BEFORE_EXTENSION;
   return undefined;
 }

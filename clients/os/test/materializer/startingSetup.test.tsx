@@ -536,7 +536,7 @@ describe("a name and a refusal, as a person reads them", () => {
     await chooseOrganization();
     expect(problem()).toBe("");
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
-    expect(problem()).toBe("Enter a file name, without a folder path.");
+    expect(problem()).toBe("Enter a file name.");
     expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
   });
 
@@ -550,7 +550,7 @@ describe("a name and a refusal, as a person reads them", () => {
     typeName(".md");
     expect(problem()).toBe("");
     typeName("x".repeat(151));
-    expect(problem()).toBe("Enter a file name, without a folder path.");
+    expect(problem()).toBe("Use a name up to 150 characters.");
   });
 
   it("shows the cluster's refusal of a file as its sentence alone, not the frames it arrived in", async () => {

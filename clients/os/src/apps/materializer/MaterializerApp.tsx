@@ -1,6 +1,6 @@
 import { useAccountOptions } from "../accounts/tie";
 import { recipeFacts } from "./actions";
-import { rowNumber, rowString, sameEntityId } from "@znasllc-io/memql-sdk-core/client";
+import { refusalSentence, rowNumber, rowString, sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 import { useAuthSource } from "../../auth/context";
 import { useOsConnection } from "../../live/connection";
 import { MATERIALIZER_COMPOSE_SECTION, readComposeIntent, type ComposeSetup } from "../../items/materialize";
@@ -132,7 +132,8 @@ export function MaterializerApp({
       download: file => downloadArtifact({ artifactId: file.artifactId!, name: file.name, fileId,
         readFile: async () => file, bearer: () => authSource.bearer() }),
     }).then(cancel => { cancelHandoff.current = cancel; })
-      .catch((error: unknown) => setOpenError(error instanceof Error ? error.message : "The file could not be opened."));
+      // A refusal of one of the reads is shown as the cluster's sentence alone.
+      .catch((error: unknown) => setOpenError(error instanceof Error ? refusalSentence(error) : "The file could not be opened."));
   };
 
   const [openCompositionId, setOpenCompositionId] = useState("");
