@@ -510,7 +510,7 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
                 {templates.map((t) => (
                   <option key={t.id} value={t.id}>
                     {templateName(t)}
-                    {isPublished(t) ? "" : ` (${templateIsArchived(t) ? WORDS.archived.toLowerCase() : WORDS.templateDraft})`}
+                    {isPublished(t) ? "" : ` (${templateIsArchived(t) ? WORDS.archived.toLowerCase() : WORDS.template.draft})`}
                   </option>
                 ))}
               </Select>

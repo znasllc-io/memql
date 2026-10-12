@@ -48,3 +48,39 @@
 .email-more {
   margin: 0;
 }
+
+/* ---- An email, as it is sent (templates/Preview.tsx) ---------------------- */
+
+/* THE EMAIL'S OWN WIDTH, ON ITS OWN BACKGROUND. The frame takes the pane and the
+ * email lays itself out inside it: a 600px canvas centres on its page colour,
+ * and below 600px its own mobile rule takes over. White is what a mail client
+ * shows behind an email that paints no background of its own. The frame cannot
+ * be measured from outside (it has no origin of its own), so it is a window onto
+ * the email with its own scroll. */
+.email-preview-frame {
+  display: block;
+  width: 100%;
+  height: min(72vh, 900px);
+  min-height: 360px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: #ffffff;
+}
+
+/* The text part a send carries, line for line. */
+.email-preview-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-sm);
+}
+
+/* The engine's issues, one to a line, inside the notice that names them. */
+.email-issues {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+.email-issues > li + li {
+  margin-top: 2px;
+}

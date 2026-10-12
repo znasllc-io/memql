@@ -694,7 +694,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
                   voice="prose"
                   value={draft.templateId}
                   options={templates.map(
-                    (t): ChoiceOption => ({ value: t.id, label: templateName(t), description: isPublished(t) ? undefined : WORDS.templateDraft }),
+                    (t): ChoiceOption => ({ value: t.id, label: templateName(t), description: isPublished(t) ? undefined : WORDS.template.draft }),
                   )}
                   onChange={(templateId) => {
                     // Choosing one that is already here is an answer too: stop waiting for another.

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { boolOr, flatten, stringsOf } from "../../kit/rows";
 
@@ -701,6 +701,34 @@ export function isPublished(template: TemplateRow): boolean {
   return template.status === "ready";
 }
 
+/**
+ * A template read WHOLE, by id (`templateById`, the templateFull shape): the
+ * summary a list holds, and what it holds -- its email document and the bodies a
+ * send uses. This is the only place an OS surface gets a template's content
+ * from; a list row has none to give (the light list, memql#6032).
+ */
+export interface TemplateRecord extends TemplateRow {
+  /**
+   * The email document the template was saved from (layout or custom mode), or
+   * null for a template saved before documents existed.
+   */
+  document: Record<string, unknown> | null;
+  textBody: string;
+  htmlBody: string;
+}
+
+export function templateRecordFromRow(row: Row): TemplateRecord {
+  const flat = flatten(row);
+  const document = rowObject(flat, "document");
+  return {
+    ...templateFromRow(row),
+    // An empty object is no document: a document always says at least its subject.
+    document: document !== null && Object.keys(document).length > 0 ? document : null,
+    textBody: rowString(flat, "textBody"),
+    htmlBody: rowString(flat, "htmlBody"),
+  };
+}
+
 /** A COPY EDIT IS IN. Somebody else fixing a typo in a template a campaign is
  *  about to send is precisely the news the cue is for, and no body field moves
  *  on a timer. The list carries no body, so the edit is told by the revision:
@@ -715,6 +743,201 @@ export function templateFingerprint(template: TemplateRow): string {
     template.accountId,
     template.createdAt,
   ].join("|");
+}
+
+// ---------------------------------------------------------------------------
+// Layouts
+// ---------------------------------------------------------------------------
+//
+// A LAYOUT IS A ROW OF THE `emailLayouts` BUILTIN (layouts plan Ruling 16), not
+// a concept row: the four built-ins are Go data that ships with the renderer,
+// and an organization's own layouts follow them. One reading per organization
+// lists both, so a list of every organization's layouts sees each built-in once
+// per organization -- `layoutsInView` says each once.
+//
+// THE ID IS OPAQUE. "builtin:<name>" and "org:<id>" are the server's, the same
+// string a template carries as its `layoutId`; the OS matches them whole,
+// displays them only through the name the reading gives, and never builds or
+// splits one. `layoutId` is the bare row id the server hands beside it for an
+// organization's layout, which is what `campaignSaveLayout` and
+// `emailLayoutById` take.
+
+/** One row of an organization's `emailLayouts` reading. */
+export interface LayoutRow {
+  /** Opaque: "builtin:<name>" or "org:<id>". Displayed through `name`, never built or split. */
+  id: string;
+  kind: "builtin" | "organization";
+  name: string;
+  description: string;
+  /** The layout's email document; {} when the listing left it out (`documentOmitted`). */
+  document: Record<string, unknown>;
+  /**
+   * The listing left this layout's document out to stay under its size; the
+   * layout is read by id (`emailLayoutById`) before it is previewed.
+   */
+  documentOmitted: boolean;
+  status: "active" | "archived";
+  /** The organization whose reading returned it; "" for a built-in once `layoutsInView` has said it once. */
+  accountId: string;
+  /** Organization layouts only: the bare row id, for the calls that take one. */
+  layoutId?: string;
+  /** Organization layouts only: the revision, which moves on every save. */
+  revision?: string;
+  /** Organization layouts only: the Library file it was saved from, or "". */
+  sourceArtifactId?: string;
+}
+
+export function layoutFromRow(row: Row, accountId: string): LayoutRow {
+  const flat = flatten(row);
+  const kind = rowString(flat, "kind") === "builtin" ? "builtin" : "organization";
+  const layout: LayoutRow = {
+    id: rowString(flat, "id"),
+    kind,
+    name: rowString(flat, "name"),
+    description: rowString(flat, "description"),
+    document: rowObject(flat, "document") ?? {},
+    documentOmitted: flat["documentOmitted"] === true,
+    status: rowString(flat, "status") === "archived" ? "archived" : "active",
+    accountId,
+  };
+  if (kind === "organization") {
+    layout.layoutId = rowString(flat, "layoutId");
+    layout.revision = rowString(flat, "revision");
+    layout.sourceArtifactId = rowString(flat, "sourceArtifactId");
+  }
+  return layout;
+}
+
+/** A layout's name as a person reads it. Never its id. */
+export function layoutTitle(layout: LayoutRow): string {
+  return layout.name.trim() || "Untitled layout";
+}
+
+export function layoutIsArchived(layout: LayoutRow): boolean {
+  return layout.status === "archived";
+}
+
+/**
+ * What the Layouts view lists: each built-in once, then every organization's
+ * own layouts in the order their readings came, archived ones only when asked.
+ *
+ * A built-in is every organization's, so once said it belongs to none of them
+ * (`accountId` ""). The copy kept is the first that carries its document, so a
+ * reading that had to leave it out does not stand for one that did not.
+ */
+export function layoutsInView(readings: ReadonlyMap<string, readonly LayoutRow[]>, includeArchived: boolean): LayoutRow[] {
+  const builtIns = new Map<string, LayoutRow>();
+  const own: LayoutRow[] = [];
+  for (const rows of readings.values()) {
+    for (const layout of rows) {
+      if (layout.id === "") continue;
+      if (layout.kind === "builtin") {
+        const held = builtIns.get(layout.id);
+        if (held === undefined || (held.documentOmitted && !layout.documentOmitted)) builtIns.set(layout.id, { ...layout, accountId: "" });
+      } else if (includeArchived || !layoutIsArchived(layout)) {
+        own.push(layout);
+      }
+    }
+  }
+  return [...builtIns.values(), ...own];
+}
+
+/**
+ * The name of the layout a template was made from, by the opaque id the
+ * template carries. "" when no reading knows it -- and for a template made
+ * without one, whose word ("Custom") is the caller's to say.
+ */
+export function layoutName(readings: ReadonlyMap<string, readonly LayoutRow[]>, layoutId: string): string {
+  if (layoutId === "") return "";
+  for (const rows of readings.values()) {
+    const found = rows.find((layout) => layout.id === layoutId);
+    if (found !== undefined) return layoutTitle(found);
+  }
+  return "";
+}
+
+/**
+ * The same layout, read again: nothing a person sees and nothing a preview
+ * renders has moved. An organization's layout says so by its revision; a
+ * built-in, which has none, by its document.
+ */
+export function sameLayout(a: LayoutRow, b: LayoutRow): boolean {
+  if (
+    a.id !== b.id || a.kind !== b.kind || a.name !== b.name || a.description !== b.description || a.status !== b.status ||
+    a.documentOmitted !== b.documentOmitted || a.accountId !== b.accountId || a.layoutId !== b.layoutId ||
+    a.revision !== b.revision || a.sourceArtifactId !== b.sourceArtifactId
+  ) {
+    return false;
+  }
+  return a.kind === "organization" ? true : JSON.stringify(a.document) === JSON.stringify(b.document);
+}
+
+/**
+ * An organization layout read whole, by id (`emailLayoutById`, the
+ * emailLayoutFull shape): who saved it, and the revision a change of its
+ * state is checked against.
+ */
+export interface LayoutRecord {
+  /** The bare row id. */
+  layoutId: string;
+  ownerUserId: string;
+  accountId: string;
+  name: string;
+  description: string;
+  document: Record<string, unknown> | null;
+  sourceArtifactId: string;
+  status: string;
+  /** The revision: it moves on every save, archive and restore. */
+  createdAt: string;
+}
+
+export function layoutRecordFromRow(row: Row): LayoutRecord {
+  const flat = flatten(row);
+  return {
+    layoutId: rowString(flat, "id"),
+    ownerUserId: rowString(flat, "ownerUserId"),
+    accountId: rowString(flat, "accountId"),
+    name: rowString(flat, "name"),
+    description: rowString(flat, "description"),
+    document: rowObject(flat, "document"),
+    sourceArtifactId: rowString(flat, "sourceArtifactId"),
+    status: rowString(flat, "status"),
+    createdAt: rowString(flat, "createdAt"),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// A preview, as the engine's one renderer wrote it
+// ---------------------------------------------------------------------------
+
+/** Something that keeps an email from being sent as it is, in the engine's words. */
+export interface RenderIssue {
+  code: string;
+  /** The block it is about, when it is about one. */
+  block: string;
+  message: string;
+}
+
+/** What `emailRender` answers: the email as it would be sent. */
+export interface EmailRender {
+  subject: string;
+  html: string;
+  text: string;
+  issues: RenderIssue[];
+}
+
+export function renderFromRow(row: Row): EmailRender {
+  const flat = flatten(row);
+  const issues = Array.isArray(flat["issues"]) ? (flat["issues"] as unknown[]) : [];
+  return {
+    subject: rowString(flat, "subject"),
+    html: rowString(flat, "html"),
+    text: rowString(flat, "text"),
+    issues: issues
+      .filter((issue): issue is Row => issue !== null && typeof issue === "object" && !Array.isArray(issue))
+      .map((issue) => ({ code: rowString(issue, "code"), block: rowString(issue, "block"), message: rowString(issue, "message") }))
+      .filter((issue) => issue.message !== ""),
+  };
 }
 
 // ---------------------------------------------------------------------------

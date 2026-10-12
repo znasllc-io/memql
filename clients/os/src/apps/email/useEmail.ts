@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getRowByConceptAndId,
+  refusalSentence,
+  rowString,
   type Concept,
   type Connection,
   type Result,
@@ -21,9 +23,18 @@ import {
   audienceFromRow,
   authoredAutomationsFrom,
   campaignFromRow,
+  layoutFromRow,
+  layoutRecordFromRow,
+  renderFromRow,
+  sameLayout,
   statsFromPayload,
+  templateRecordFromRow,
   type AuthoredAutomationsState,
   type CampaignStats,
+  type EmailRender,
+  type LayoutRecord,
+  type LayoutRow,
+  type TemplateRecord,
 } from "./rows";
 
 // Operator records use graph subscriptions. High-volume delivery, engagement
@@ -1086,3 +1097,197 @@ export function useSubscriberCounts(audienceIds: readonly string[]): {
   }, [wanted, reading.value, held]);
   return { counts, refusals, reload: reading.reload };
 }
+
+// ---------------------------------------------------------------------------
+// Templates and layouts: read whole, and previewed
+// ---------------------------------------------------------------------------
+
+/**
+ * A reading that keeps showing its last answer while the next is on its way.
+ * `useReading` starts over when what it reads changes (a template saved again
+ * is a new revision to read), and a page that had the email on screen must not
+ * trade it for a skeleton while it reads the new one.
+ */
+function useLastAnswer<T>(reading: Reading<T | null>): Reading<T | null> {
+  const last = useRef<T | null>(null);
+  if (reading.value !== null) last.current = reading.value;
+  return reading.value !== null || last.current === null ? reading : { ...reading, value: last.current };
+}
+
+/**
+ * One template, WHOLE: the document and the bodies a send uses, which the
+ * templates list never carries (it is a summary; memql#6032). Read by id, and
+ * again when `revision` -- the list row's `createdAt` -- moves, so a page
+ * follows a template saved somewhere else.
+ */
+export function useTemplateRecord(templateId: string, revision = ""): Reading<TemplateRecord | null> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (query === null || templateId === "") return null;
+    return async (signal: AbortSignal) => {
+      const row = (await query.templateById({ templateId }, { signal })).rows()[0];
+      return row === undefined ? null : templateRecordFromRow(row);
+    };
+    // `revision` is the reason to read again: a save writes a new version.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, templateId, revision]);
+  return useLastAnswer(useReading<TemplateRecord | null>(null, read, [read]));
+}
+
+/** One organization's answer to its layout reading: its layouts, or the engine's sentence. */
+interface LayoutAnswer {
+  rows: readonly LayoutRow[];
+  refusal: string;
+}
+
+const NO_LAYOUT_ANSWERS: ReadonlyMap<string, LayoutAnswer> = new Map();
+
+/** What the organizations' layout readings know. */
+export interface EmailLayouts {
+  /** Organization id -> its layouts, built-ins first, as its last answered reading listed them. */
+  readings: ReadonlyMap<string, readonly LayoutRow[]>;
+  /** Organization id -> the engine's sentence, for an organization whose last reading was refused. */
+  refusals: ReadonlyMap<string, string>;
+  /** Every organization asked about has answered, or refused, at least once. */
+  settled: boolean;
+  /** The organizations asked about, in the order given: a built-in is previewed for the first. */
+  accountIds: readonly string[];
+  reload: () => Promise<void>;
+}
+
+/**
+ * The layouts every organization in view can make an email from (Ruling 24):
+ * ONE `emailLayouts({ accountId, includeArchived: true })` reading per
+ * organization, which lists the four built-ins and then the organization's own.
+ * The same reading names the layout a template was made from, so the templates
+ * list asks nothing more.
+ *
+ * Layouts are not a live feed: the surface that shows them mounts `AutoRefresh`
+ * on `reload`, at the kit's pace, and parks with its pane.
+ *
+ * EACH ORGANIZATION IS ITS OWN ANSWER, and WHAT IS KNOWN STAYS KNOWN (the
+ * subscriber counts' rule): a refused organization keeps the layouts it last
+ * listed and says why, and the others list theirs. A layout read again
+ * unchanged is the same object it was, so a page previewing it does not render
+ * it again every time the reading comes round.
+ */
+export function useEmailLayouts(accountIds: readonly string[]): EmailLayouts {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  // The set, in the order given: callers hand a new array every render.
+  const signature = [...new Set(accountIds)].filter((id) => id !== "").join("\n");
+  const wanted = useMemo(() => (signature === "" ? [] : signature.split("\n")), [signature]);
+  const read = useMemo(() => {
+    if (query === null || wanted.length === 0) return null;
+    return async (signal: AbortSignal): Promise<ReadonlyMap<string, LayoutAnswer>> => {
+      const answers = await readEach(wanted, async (accountId): Promise<[string, LayoutAnswer]> => {
+        try {
+          const result = await query.emailLayouts({ accountId, includeArchived: true }, { signal });
+          return [accountId, { rows: result.rows().map((row) => layoutFromRow(row, accountId)).filter((layout) => layout.id !== ""), refusal: "" }];
+        } catch (err) {
+          // An aborted read is somebody leaving, not an answer.
+          if (signal.aborted) throw err;
+          return [accountId, { rows: [], refusal: refusalSentence(err, "emailLayouts") }];
+        }
+      }, signal);
+      return new Map(answers);
+    };
+  }, [query, wanted]);
+  const reading = useReading<ReadonlyMap<string, LayoutAnswer>>(NO_LAYOUT_ANSWERS, read, [query, signature]);
+
+  // What each organization last said, whatever set it was read over.
+  const said = useRef(new Map<string, { rows: readonly LayoutRow[] | null; refusal: string }>());
+  const known = useMemo(() => {
+    const held = said.current;
+    for (const [accountId, answer] of reading.value) {
+      const before = held.get(accountId);
+      held.set(
+        accountId,
+        answer.refusal === "" ? { rows: shareLayouts(before?.rows ?? null, answer.rows), refusal: "" } : { rows: before?.rows ?? null, refusal: answer.refusal },
+      );
+    }
+    // An organization that left the set takes its answer with it.
+    for (const accountId of [...held.keys()]) if (!wanted.includes(accountId)) held.delete(accountId);
+    const readings = new Map<string, readonly LayoutRow[]>();
+    const refusals = new Map<string, string>();
+    for (const accountId of wanted) {
+      const answer = held.get(accountId);
+      if (answer?.rows) readings.set(accountId, answer.rows);
+      if (answer?.refusal) refusals.set(accountId, answer.refusal);
+    }
+    return { readings, refusals, settled: wanted.length > 0 && wanted.every((accountId) => held.has(accountId)) };
+  }, [reading.value, wanted]);
+  return { ...known, accountIds: wanted, reload: reading.reload };
+}
+
+/** A reading's layouts, keeping each one that did not change as the object it was. */
+function shareLayouts(before: readonly LayoutRow[] | null, after: readonly LayoutRow[]): readonly LayoutRow[] {
+  if (before === null) return after;
+  const byId = new Map(before.map((layout) => [layout.id, layout]));
+  const next = after.map((layout) => {
+    const held = byId.get(layout.id);
+    return held !== undefined && sameLayout(held, layout) ? held : layout;
+  });
+  return next.length === before.length && next.every((layout, at) => layout === before[at]) ? before : next;
+}
+
+/**
+ * One organization layout, whole (`emailLayoutById`): who saved it, its document
+ * when the listing had to leave it out, and the revision its page shows. Read
+ * again when `revision` -- the listing's -- moves.
+ */
+export function useLayoutRecord(layoutId: string, revision = ""): Reading<LayoutRecord | null> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (query === null || layoutId === "") return null;
+    return async (signal: AbortSignal) => {
+      const row = (await query.emailLayoutById({ layoutId }, { signal })).rows()[0];
+      return row === undefined ? null : layoutRecordFromRow(row);
+    };
+    // `revision` is the reason to read again: a save writes a new version.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, layoutId, revision]);
+  return useLastAnswer(useReading<LayoutRecord | null>(null, read, [read]));
+}
+
+/**
+ * An email document as the engine's one renderer writes it for a preview
+ * (`emailRender`): the HTML and the text a send would carry, and what keeps it
+ * from being sent as it is. Rendered again when the document does -- the same
+ * document is the same object, so a page that re-renders does not.
+ *
+ * `error` is the call's own text; a surface shows it through `refusalSentence`.
+ */
+export function useEmailRender(document: Record<string, unknown> | null, accountId: string): Reading<EmailRender | null> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (query === null || document === null || accountId === "") return null;
+    return async (signal: AbortSignal) => {
+      const row = (await query.emailRender({ document, accountId }, { signal })).rows()[0];
+      return row === undefined ? null : renderFromRow(row);
+    };
+  }, [query, document, accountId]);
+  return useLastAnswer(useReading<EmailRender | null>(null, read, [read]));
+}
+
+/**
+ * A Library file's title, for a layout saved from it ("Saved from"). The read
+ * is the owner's own (`libraryArtifactById`): a file somebody else owns answers
+ * nothing, and nothing is said.
+ */
+export function useArtifactTitle(artifactId: string): Reading<string> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (query === null || artifactId === "") return null;
+    return async (signal: AbortSignal) => {
+      const row = (await query.libraryArtifactById({ artifactId }, { signal })).rows()[0];
+      return row === undefined ? "" : rowString(flatten(row), "title");
+    };
+  }, [query, artifactId]);
+  return useReading<string>("", read, [read]);
+}
+

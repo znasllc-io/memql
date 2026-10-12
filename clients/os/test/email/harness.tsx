@@ -145,6 +145,62 @@ export interface FakeSeed {
    *  empty one (the engine answers 0). */
   subscriberCounts?: Record<string, number | { atLeast: number } | Error>;
   concepts?: { id: string; domain: string; entity: string }[];
+  /**
+   * Template id -> what `templateById` answers beyond the list row: the
+   * document and the bodies (the engine's templateFull). A template not named
+   * here is read as its list row with an empty custom body and no document; an
+   * Error refuses the read. A template the `templates` seed does not hold is
+   * not found.
+   */
+  templateContent?: Record<string, { document?: Row | null; textBody?: string; htmlBody?: string } | Error>;
+  /**
+   * Organization id -> its OWN layouts, as `emailLayouts` lists them (the
+   * builtin puts the four built-ins first, and so does this double). An Error
+   * refuses that organization's reading; an organization not named here has
+   * the built-ins alone.
+   */
+  layouts?: Record<string, Row[] | Error>;
+  /**
+   * `emailLayoutById`'s rows (emailLayoutFull). Absent: each organization
+   * layout of `layouts` read back by its bare id, owned by the session's
+   * person, its revision its createdAt.
+   */
+  layoutRecords?: Row[] | Error;
+  /** `emailRender`'s answer for a call, or one answer for every call. Absent: the subject, as HTML and as text, and no issues. */
+  render?: Row | Error | ((args: { document?: Record<string, unknown>; accountId?: string }) => Row | Error);
+  /** `searchUsers`: the people this session can name. An Error is a reader below the roster's floor. */
+  people?: Row[] | Error;
+  /** `libraryArtifactById`: Library files the session owns. */
+  artifacts?: Row[];
+}
+
+/** The four layouts every organization starts from, as `emailLayouts` lists them. */
+export const BUILT_IN_LAYOUTS: Row[] = [
+  { id: "builtin:confirmation", kind: "builtin", name: "Confirmation", description: "A welcome on your brand colour with one button that confirms the subscription.", status: "active", document: { subject: "Confirm your subscription", blocks: [] } },
+  { id: "builtin:letter", kind: "builtin", name: "Letter", description: "A personal note with a signature band, a promotion and social links.", status: "active", document: { subject: "A note from us", blocks: [] } },
+  { id: "builtin:article", kind: "builtin", name: "Article", description: "A banner, a tinted article body with a highlighted statement, and a signature.", status: "active", document: { subject: "Three small changes", blocks: [] } },
+  { id: "builtin:spotlight", kind: "builtin", name: "Spotlight", description: "One large picture, a short message and one button.", status: "active", document: { subject: "One thing to see", blocks: [] } },
+];
+
+/** An organization's own layout, as `emailLayouts` lists it: an opaque id, the bare one beside it, and its revision. */
+export function layoutRow(over: Partial<Row> & { layoutId: string }): Row {
+  return {
+    id: `org:${over.layoutId}`,
+    kind: "organization",
+    name: "Acme letter",
+    description: "Our letter, with the logo and the footer.",
+    document: { subject: "From Acme", blocks: [] },
+    status: "active",
+    sourceArtifactId: "",
+    revision: "2026-10-03T09:00:00Z",
+    ...over,
+  };
+}
+
+/** What `emailRender` answers by default: the document's subject, as HTML and as text, and no issues. */
+function plainRender(args: { document?: Record<string, unknown> }): Row {
+  const subject = typeof args.document?.["subject"] === "string" ? (args.document["subject"] as string) : "";
+  return { subject, html: `<p style="color:#2b2b2b">${subject}</p>`, text: subject, issues: [] };
 }
 
 /**
@@ -181,6 +237,15 @@ const CONNECTED_AZURE = (args: { action: string }): Row =>
 const RUNNING_AUTOMATIONS: Row = { id: "cluster", authoredAutomationsEnabled: true };
 
 export function fakeConnection(seed: FakeSeed = {}) {
+  // The cluster as the live feed has told it: a template written while a test
+  // runs (emitted) is read back whole by id, as the engine would answer it.
+  const subscriptions = fakeSubscriptions();
+  const written = new Map<string, Row>();
+  const emit = subscriptions.emit;
+  subscriptions.emit = (concept, payload, kind) => {
+    if (concept === "v1:campaigns:template" && typeof payload.id === "string") written.set(payload.id, payload);
+    emit(concept, payload, kind);
+  };
   return {
     query: {
       sitesAll: reader(seed.sites),
@@ -237,6 +302,54 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // an AccountPicker.
       clientAccountsAll: vi.fn(async () => rowsResult(seed.accounts ?? [{ id: "self", name: "Operator organization", status: "active" }])),
 
+      // Templates and layouts (memql#6033, Task 11). The list row is a summary;
+      // a template is read whole by id.
+      templateById: vi.fn(async (args: { templateId?: string }, _opts?: unknown) => {
+        const id = args.templateId ?? "";
+        const content = seed.templateContent?.[id];
+        if (content instanceof Error) throw content;
+        const listed = written.get(id) ?? (seed.templates ?? []).find((row) => row.id === id);
+        if (listed === undefined) return rowsResult([]);
+        return rowsResult([{ ...listed, textBody: "", htmlBody: "", document: null, ...content }]);
+      }),
+      emailLayouts: vi.fn(async (args: { accountId?: string; includeArchived?: boolean }, _opts?: unknown) => {
+        const own = seed.layouts?.[args.accountId ?? ""] ?? [];
+        if (own instanceof Error) throw own;
+        const listed = [...BUILT_IN_LAYOUTS, ...own];
+        return rowsResult(args.includeArchived === true ? listed : listed.filter((row) => row.status !== "archived"));
+      }),
+      emailLayoutById: vi.fn(async (args: { layoutId?: string }, _opts?: unknown) => {
+        if (seed.layoutRecords instanceof Error) throw seed.layoutRecords;
+        const records =
+          seed.layoutRecords ??
+          Object.entries(seed.layouts ?? {}).flatMap(([accountId, rows]) =>
+            rows instanceof Error
+              ? []
+              : rows.map((row) => ({
+                  id: row.layoutId,
+                  ownerUserId: "v1:identity:user:me",
+                  accountId,
+                  name: row.name,
+                  description: row.description,
+                  document: row.document ?? { subject: "From Acme", blocks: [] },
+                  sourceArtifactId: row.sourceArtifactId ?? "",
+                  status: row.status,
+                  createdAt: row.revision,
+                })),
+          );
+        return rowsResult(records.filter((row) => row.id === args.layoutId));
+      }),
+      emailRender: vi.fn(async (args: { document?: Record<string, unknown>; accountId?: string }, _opts?: unknown) => {
+        const answer = typeof seed.render === "function" ? seed.render(args) : seed.render ?? plainRender(args);
+        if (answer instanceof Error) throw answer;
+        return rowsResult([answer]);
+      }),
+      campaignSaveLayout: vi.fn(async (args: Record<string, unknown>) =>
+        rowsResult([{ layoutId: args.layoutId, revision: "2026-10-12T00:00:00Z", status: args.action === "archive" ? "archived" : "active", saved: true }]),
+      ),
+      libraryArtifactById: reader(seed.artifacts, (row, args) => row.id === args.artifactId),
+      searchUsers: reader(seed.people ?? []),
+
       // TYPED ARGS, so `.mock.calls[0][0]` is a record rather than `never` --
       // a test that asserts WHICH arguments a write received cannot do it
       // through a `vi.fn(async () => ...)` whose parameter list is empty.
@@ -265,7 +378,7 @@ export function fakeConnection(seed: FakeSeed = {}) {
 
       executeNamed: vi.fn(async (_name: string, _filter: string) => bundleResult([])),
     },
-    subscriptions: fakeSubscriptions(),
+    subscriptions,
     dispatcher: { sendAndWait: vi.fn() },
   };
 }

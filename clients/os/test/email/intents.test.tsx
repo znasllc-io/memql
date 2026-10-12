@@ -21,7 +21,7 @@ const { LocalEmailSettingsStore } = await import("../../src/apps/email/settings"
 const { AudiencesSection } = await import("../../src/apps/email/AudiencesSection");
 const { CampaignsSection } = await import("../../src/apps/email/campaigns/CampaignsSection");
 const { RulesSection } = await import("../../src/apps/email/RulesSection");
-const { TemplatesSection } = await import("../../src/apps/email/TemplatesSection");
+const { TemplatesSection } = await import("../../src/apps/email/templates/TemplatesSection");
 const { useCampaignWrites } = await import("../../src/apps/email/actions");
 const { campaignFromRow } = await import("../../src/apps/email/rows");
 const { useEmailFeeds, useEmailRecordFeeds } = await import("../../src/apps/email/useEmail");
@@ -500,7 +500,7 @@ describe("a section given an open request", () => {
       case "audiences":
         return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} includeArchived={false} uploads={uploads} openRequest={request} />;
       case "templates":
-        return <TemplatesSection feeds={feeds} writes={writes} includeArchived={false} openRequest={request} />;
+        return <TemplatesSection feeds={feeds} includeArchived={false} openRequest={request} />;
       case "automations":
         return <RulesSection feeds={feeds} writes={writes} includeArchived={false} openRequest={request} />;
     }
@@ -515,7 +515,7 @@ describe("a section given an open request", () => {
   it.each([
     ["campaigns", "Add a campaign", "Campaigns"],
     ["audiences", "New audience", "Audiences"],
-    ["templates", "New template", "Templates"],
+    ["templates", "Create new template", "Templates"],
     ["automations", "New rule", "Automations"],
   ] as const)("starts the %s Add flow", async (name, adding, list) => {
     const { request } = mountSection(name);

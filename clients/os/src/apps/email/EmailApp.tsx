@@ -15,7 +15,7 @@ import { AudiencesSection } from "./AudiencesSection";
 import { CampaignsSection } from "./campaigns/CampaignsSection";
 import { OverviewSection } from "./overview/OverviewSection";
 import { RulesSection } from "./RulesSection";
-import { TemplatesSection } from "./TemplatesSection";
+import { TemplatesSection } from "./templates/TemplatesSection";
 import { useCampaignWrites } from "./actions";
 import {
   EmailNavigationContext,
@@ -259,7 +259,7 @@ function EmailSections({
       case "audiences":
         return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} uploads={uploadProvider} includeArchived={settings.includeArchived} openRequest={requests.audiences} />;
       case "templates":
-        return <TemplatesSection feeds={feeds} writes={writes} includeArchived={settings.includeArchived} openRequest={requests.templates} />;
+        return <TemplatesSection feeds={feeds} includeArchived={settings.includeArchived} openRequest={requests.templates} />;
       case "automations":
         return <RulesSection feeds={feeds} writes={writes} includeArchived={settings.includeArchived} openRequest={requests.automations} />;
       default:

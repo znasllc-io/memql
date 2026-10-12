@@ -222,56 +222,6 @@ describe("audiences", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Templates and the merge tags
-// ---------------------------------------------------------------------------
-
-describe("the template editor handoff", () => {
-  it("opens content in browser VS Code without an embedded editor", async () => {
-    const opened = vi.spyOn(window,"open").mockReturnValue(null);
-    const conn = fakeConnection({ templates: [templateRow({id:"t1",name:"August copy"})] });
-    mount(conn,"templates");
-    fireEvent.click(await screen.findByText("August copy"));
-    expect(screen.queryByLabelText("Message")).toBeNull();
-    expect(document.querySelector("textarea")).toBeNull();
-    fireEvent.click(screen.getByRole("button",{name:"Open in editor"}));
-    expect(opened).toHaveBeenCalledWith(expect.stringContaining("https://vscode.memql.example.com/editor/?resource="),"_blank","noopener,noreferrer");
-    const url = new URL(String(opened.mock.calls[0]![0]));
-    expect(url.searchParams.get("resource")).toBe("memql-file://memql.example.com/templates/t1/August%20copy.email.json");
-    expect(conn.query.campaignSaveTemplate).not.toHaveBeenCalled();
-    opened.mockRestore();
-  });
-  it("archives only the revision displayed for the owning organization", async () => {
-    const conn = fakeConnection({ templates: [templateRow({id:"t1",name:"August copy"})] });
-    mount(conn,"templates");
-    fireEvent.click(await screen.findByText("August copy"));
-    fireEvent.click(screen.getByRole("button",{name:"Archive"}));
-    await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledWith(expect.objectContaining({templateId:"t1",accountId:"self",expectedRevision:"2026-08-01T00:00:00Z",action:"archive"})));
-  });
-  // The list rows hold no body, so nothing here has one to send back: archiving
-  // and restoring name the revision and the action, and the content is empty. A
-  // restore that saved the row's (absent) body would have written an empty email.
-  it("restores an archived template by its revision alone, sending no content", async () => {
-    const conn = fakeConnection({ templates: [templateRow({id:"t1",name:"August copy",status:"archived"})] });
-    mount(conn,"templates",fakeUploads(),{ includeArchived: true });
-    fireEvent.click(await screen.findByText("August copy"));
-    fireEvent.click(screen.getByRole("button",{name:"Restore draft"}));
-    await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledTimes(1));
-    const sent = vi.mocked(conn.query.campaignSaveTemplate).mock.calls[0]![0] as Record<string, unknown>;
-    expect(sent).toEqual({ templateId:"t1", name:"August copy", accountId:"self", expectedRevision:"2026-08-01T00:00:00Z", content:{}, action:"restore" });
-  });
-  it("archives with no content either", async () => {
-    const conn = fakeConnection({ templates: [templateRow({id:"t1",name:"August copy"})] });
-    mount(conn,"templates");
-    fireEvent.click(await screen.findByText("August copy"));
-    fireEvent.click(screen.getByRole("button",{name:"Archive"}));
-    await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledTimes(1));
-    const sent = vi.mocked(conn.query.campaignSaveTemplate).mock.calls[0]![0] as Record<string, unknown>;
-    expect(sent.content).toEqual({});
-    expect(sent.action).toBe("archive");
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Senders
 // ---------------------------------------------------------------------------
 

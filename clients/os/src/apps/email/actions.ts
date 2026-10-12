@@ -3,7 +3,18 @@ import { newShortId, refusalSentence, type Connection, type Row } from "@znasllc
 
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
-import { campaignName, type AudienceRow, type CampaignRow, type RecipientMode } from "./rows";
+import { lifecycleContent } from "./templates/templateActs";
+import {
+  campaignName,
+  layoutRecordFromRow,
+  templateRecordFromRow,
+  type AudienceRow,
+  type CampaignRow,
+  type LayoutRow,
+  type RecipientMode,
+  type TemplateRow,
+} from "./rows";
+import { WORDS } from "./words";
 
 // Every write the Email app makes, and the busy/error pair each one owns.
 //
@@ -759,60 +770,116 @@ export function useImportRecipients(): ImportState {
 }
 
 // ---------------------------------------------------------------------------
-// Templates
+// Templates and layouts: put away, or brought back -- never written
 // ---------------------------------------------------------------------------
+//
+// THE OS NEVER CREATES A TEMPLATE OR SAVES A LAYOUT (spec 1.6, Rulings 9 and
+// 24). A template is written in the editor and published from there; a layout
+// is saved from a finished email in the editor. What the OS does to either is
+// archive it or restore it, and those are the only two calls to the engine's
+// save builtins in the app -- one hook each, below (pinned by
+// test/email/templates/templateCreation.test.ts).
+//
+// NEITHER IS AN EDIT. The engine takes the exact revision and the action, and
+// ignores the content; what goes back as content is what is STORED, read whole
+// by id for this call -- a list row holds no body, and sending a row's missing
+// body back as an edit is how an email would be written empty.
 
-export interface TemplateFacts {
-  name: string;
-  subject: string;
-  textBody: string;
-  htmlBody: string;
-  status: string;
-  accountId: string;
+/** A template or a layout put away or brought back: the busy/error pair, and whether the answer was lost. */
+export interface LifecycleState extends WriteState, MayBeLost {}
+
+export interface TemplateLifecycle extends LifecycleState {
+  /** Archive the template, at the revision this row was read at. */
+  archive: (template: TemplateRow) => Promise<boolean>;
+  /** Bring an archived template back, as a draft. */
+  restore: (template: TemplateRow) => Promise<boolean>;
 }
 
-export interface CreateTemplateState extends WriteState {
-  create: (facts: TemplateFacts) => Promise<string>;
+/**
+ * Archiving and restoring a template. The revision is the one the page was
+ * showing (the list row's `createdAt`), so a template saved somewhere else
+ * since is refused in the engine's words rather than archived unseen; the
+ * content is the template's own, read by id (`templateById`) for the call.
+ */
+export function useTemplateLifecycle(): TemplateLifecycle {
+  // Which call a refusal came from, so its sentence loses that call's name.
+  const calling = useRef("");
+  const write = useWrite(async (query, template: TemplateRow, action: "archive" | "restore") => {
+    calling.current = "templateById";
+    const stored = (await query.templateById({ templateId: template.id })).rows()[0];
+    if (stored === undefined) throw new Error(WORDS.unavailable.template);
+    const base = {
+      templateId: template.id,
+      name: template.name,
+      accountId: template.accountId,
+      expectedRevision: template.createdAt,
+      content: lifecycleContent(templateRecordFromRow(stored)),
+    };
+    calling.current = "campaignSaveTemplate";
+    const result =
+      action === "archive"
+        ? await query.campaignSaveTemplate({ ...base, action: "archive" })
+        : await query.campaignSaveTemplate({ ...base, action: "restore" });
+    if (!result.rows().map(flatten).some((row) => row.saved === true && typeof row.revision === "string" && row.revision !== "")) {
+      throw new Error("The cluster did not confirm the template change.");
+    }
+    return true;
+  }, false);
+  return {
+    busy: write.busy,
+    error: write.error === "" ? "" : refusalSentence(write.error, calling.current),
+    lost: write.lost,
+    reset: write.reset,
+    archive: (template) => write.call(template, "archive"),
+    restore: (template) => write.call(template, "restore"),
+  };
 }
 
-export function useCreateTemplate(): CreateTemplateState {
-  const { busy, error, reset, call } = useWrite(async (query, facts: TemplateFacts) => {
-    const templateId = newShortId();
-    const result = await query.campaignSaveTemplate({ templateId, name: facts.name.trim(), accountId: facts.accountId.trim(), expectedRevision: "",
-      content: { subject: facts.subject, textBody: facts.textBody, htmlBody: facts.htmlBody }, action: "save" });
-    if (!result.rows().map(flatten).some(row => row.saved === true && typeof row.revision === "string" && row.revision !== "")) throw new Error("The cluster did not confirm the saved template.");
-    return templateId;
-  }, "");
-  return { busy, error, reset, create: call };
+export interface LayoutLifecycle extends LifecycleState {
+  /** Archive an organization's layout: the editor stops offering it. */
+  archive: (layout: LayoutRow) => Promise<boolean>;
+  /** Bring an archived layout back. */
+  restore: (layout: LayoutRow) => Promise<boolean>;
 }
 
-/** Putting a template away, or bringing it back. Neither is an edit: the call
- *  names the revision that was read and the action, and its content is empty (the
- *  engine ignores it and writes the stored content back). A list row has no body
- *  to send, and a save of the row's missing body would write an empty email. */
-export interface TemplateMove {
-  name: string;
-  accountId: string;
-  /** The revision (createdAt) of the row that was read. */
-  expectedRevision: string;
-  action: "archive" | "restore";
-}
-
-export interface UpdateTemplateState extends WriteState {
-  update: (templateId: string, move: TemplateMove) => Promise<boolean>;
-}
-
-export function useUpdateTemplate(): UpdateTemplateState {
-  const { busy, error, reset, call } = useWrite(
-    async (query, templateId: string, move: TemplateMove) => {
-      const result = await query.campaignSaveTemplate({ templateId, name: move.name.trim(), accountId: move.accountId.trim(), expectedRevision: move.expectedRevision,
-        content: {}, action: move.action });
-      if (!result.rows().map(flatten).some(row => row.saved === true && typeof row.revision === "string" && row.revision !== "")) throw new Error("The cluster did not confirm the template change.");
-      return true;
-    },
-    false,
-  );
-  return { busy, error, reset, update: call };
+/**
+ * Archiving and restoring an organization's layout (Ruling 24). The engine
+ * holds the call to the exact revision `emailLayoutById` answers, so the layout
+ * is read by its bare id for the call, and its stored name and document go back
+ * as they are -- the engine ignores both for these two actions. A built-in
+ * layout has no lifecycle and never reaches here.
+ */
+export function useLayoutLifecycle(): LayoutLifecycle {
+  const calling = useRef("");
+  const write = useWrite(async (query, layout: LayoutRow, action: "archive" | "restore") => {
+    const layoutId = layout.layoutId ?? "";
+    calling.current = "emailLayoutById";
+    const stored = layoutId === "" ? undefined : (await query.emailLayoutById({ layoutId })).rows()[0];
+    if (stored === undefined) throw new Error(WORDS.unavailable.layout);
+    const record = layoutRecordFromRow(stored);
+    const base = {
+      layoutId,
+      accountId: record.accountId || layout.accountId,
+      name: record.name,
+      ...(record.document === null ? {} : { document: record.document }),
+      expectedRevision: record.createdAt,
+    };
+    calling.current = "campaignSaveLayout";
+    const result =
+      action === "archive"
+        ? await query.campaignSaveLayout({ ...base, action: "archive" })
+        : await query.campaignSaveLayout({ ...base, action: "restore" });
+    if (!result.rows().map(flatten).some((row) => row.saved === true)) throw new Error("The cluster did not confirm the layout change.");
+    return true;
+  }, false);
+  return {
+    busy: write.busy,
+    error: write.error === "" ? "" : refusalSentence(write.error, calling.current),
+    lost: write.lost,
+    reset: write.reset,
+    archive: (layout) => write.call(layout, "archive"),
+    restore: (layout) => write.call(layout, "restore"),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,7 +1139,7 @@ export function useRuleArming(): RuleArmingState {
 }
 
 /**
- * The writes the audiences, templates, senders and automations sections make,
+ * The writes the audiences, senders and automations sections make,
  * assembled once at the app root.
  *
  * The sections take what they need. Assembling here rather than per section
@@ -1088,8 +1155,6 @@ export function useCampaignWrites() {
   const addRecipient = useAddRecipient();
   const setSubscription = useSetSubscription();
   const importRecipients = useImportRecipients();
-  const createTemplate = useCreateTemplate();
-  const updateTemplate = useUpdateTemplate();
   const createSender = useCreateSender();
   const updateSender = useUpdateSender();
   const senderStatus = useSenderStatus();
@@ -1107,8 +1172,6 @@ export function useCampaignWrites() {
     addRecipient,
     setSubscription,
     importRecipients,
-    createTemplate,
-    updateTemplate,
     createSender,
     updateSender,
     senderStatus,

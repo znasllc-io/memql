@@ -59,6 +59,8 @@ export const WORDS = {
     pause: "Pausing",
     resume: "Resuming",
     repeat: "Starting",
+    archive: "Archiving",
+    restore: "Restoring",
   } as const,
 
   /** What happened to one recipient of a send, by the delivery's status. */
@@ -72,8 +74,26 @@ export const WORDS = {
   /** How often a campaign repeats: "Every week", "Every 2 weeks". */
   every: (weeks: number): string => (weeks === 1 ? "Every week" : `Every ${weeks} weeks`),
 
-  /** A template that is not published yet. */
-  templateDraft: "Draft",
+  /**
+   * A template's state, by the engine's status: `ready` is the engine's word
+   * for Published. Read through `templateState`, which has no word for a
+   * status this build does not know.
+   */
+  template: {
+    draft: "Draft",
+    ready: "Published",
+    archived: "Archived",
+  } as const,
+
+  /** What a template made without a layout is: its own HTML. */
+  customLayout: "Custom",
+
+  /**
+   * Where a layout that ships with the renderer comes from, said where an
+   * organization's own layout names its organization. A built-in layout has no
+   * state of its own.
+   */
+  builtIn: "Built in",
 
   /**
    * What a section says, in place on its list, when search or Ask named a record
@@ -83,6 +103,8 @@ export const WORDS = {
    */
   unavailable: {
     campaign: "That campaign isn't available.",
+    template: "That template isn't available.",
+    layout: "That layout isn't available.",
   } as const,
 
   /**
@@ -103,3 +125,8 @@ export const WORDS = {
     return `${count} ${figure.value === 1 ? "subscriber" : "subscribers"}`;
   },
 } as const;
+
+/** A template's state in a word, or "" for a status this build does not know. */
+export function templateState(status: string): string {
+  return (WORDS.template as Readonly<Record<string, string>>)[status] ?? "";
+}
