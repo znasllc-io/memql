@@ -3,6 +3,7 @@ package email
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/memql"
@@ -114,11 +115,11 @@ func (s *installationScope) account(ctx context.Context, _ map[string]any) (any,
 	if err != nil {
 		return nil, err
 	}
-	release, err := memql.AcquireWriteGate(ctx, db, "email-installation:self-account")
+	hold, err := memql.AcquireGateHold(context.WithoutCancel(ctx), db, 0, "email-installation:self-account")
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	defer hold.Release()
 	result, err := s.a.store.engine.Execute(memql.ContextWithFreshRead(ctx), `query clientAccountById(accountId: "self")`)
 	if err != nil {
 		return nil, err
@@ -126,6 +127,11 @@ func (s *installationScope) account(ctx context.Context, _ map[string]any) (any,
 	if len(memql.MaterializeRows(result)) != 0 {
 		return nil, nil
 	}
-	_, err = s.a.store.engine.Execute(ctx, `mutation createClientAccount(accountId: "self", name: "My company")`)
+	if err := hold.Verify(ctx); err != nil {
+		return nil, err
+	}
+	write, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	_, err = s.a.store.engine.Execute(write, `mutation createClientAccount(accountId: "self", name: "My company")`)
 	return nil, err
 }

@@ -59,7 +59,7 @@ func newAzureFeedbackWorld(t *testing.T) *azureFeedbackWorld {
 			t.Fatal(err)
 		}
 		w.instances[index] = NewIntegration(NewLogSender(nil), nil)
-		w.instances[index].azure = &azureSetup{store: &connectionStore{engine: NewConfigWriter(engine), gateDB: replicaGatePool(t)}, protocol: newAzureProtocol("12345678-1234-1234-1234-123456789012"), now: func() time.Time { return w.now }}
+		w.instances[index].azure = &azureSetup{store: &connectionStore{engine: feedbackTestStore{ConfigWriter: NewConfigWriter(engine), prefix: w.account}, gateDB: replicaGatePool(t)}, protocol: newAzureProtocol("12345678-1234-1234-1234-123456789012"), now: func() time.Time { return w.now }}
 	}
 	config := acsFixture(t).cfg
 	config.AccountID = w.account
@@ -79,7 +79,7 @@ func newAzureFeedbackWorld(t *testing.T) *azureFeedbackWorld {
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE payload->>'accountId' = ?`, w.account)
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE payload->>'accountId' = ? OR id = ? OR id = ?`, w.account, "v1:email:connectionState:"+emailStateID(w.account+azureClusterKey), "v1:platform:clientAccount:"+w.account)
 	})
 	return w
 }
@@ -421,6 +421,21 @@ type pendingInstallationTestStore struct {
 func (s pendingInstallationTestStore) Execute(ctx context.Context, query string) (any, error) {
 	if strings.Contains(query, "query emailConnectionStateById(") && strings.Contains(query, emailStateID(azureClusterKey)) && s.calls.Add(1) == 1 {
 		return nil, fmt.Errorf("installation connection is temporarily unavailable")
+	}
+	return s.ConfigWriter.Execute(ctx, query)
+}
+
+// An installation-wide key must still be isolated between database fixtures.
+// Every replica of this fixture maps it to the same saved row, while all
+// organization and provider-receipt identifiers exercise their ordinary path.
+type feedbackTestStore struct {
+	ConfigWriter
+	prefix string
+}
+
+func (s feedbackTestStore) Execute(ctx context.Context, query string) (any, error) {
+	if strings.Contains(query, "emailConnectionStateById(") || strings.Contains(query, "storeEmailConnectionState(") {
+		query = strings.ReplaceAll(query, emailStateID(azureClusterKey), emailStateID(s.prefix+azureClusterKey))
 	}
 	return s.ConfigWriter.Execute(ctx, query)
 }
