@@ -50,7 +50,8 @@ VS Code text editor, including Find/Replace, selection, Cut/Copy/Paste and undo.
 
 **New Markdown Document** in the command palette asks for a name and creates a
 blank file in the connected cluster through the Materializer, then opens Review.
-The progress notification can be stopped. Stopping never deletes a file that was
+The progress notification says where the creation is ("Saved; waiting for its
+Files entry" while the Library catches up) and can be stopped. Stopping never deletes a file that was
 already made: it stays in Files, and the editor opens it when it is already in
 Files at the moment you stop. A name is a file name, not a path: a name with a
 slash is refused, one that is only an extension (`.md`) is refused as you type,

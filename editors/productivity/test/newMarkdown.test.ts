@@ -132,6 +132,7 @@ function command(options: { typed?: string | undefined; token?: ReturnType<typeo
   const token = options.token ?? progressToken();
   const calls: { name: string; query: string }[] = [];
   const notifications: Record<string, unknown>[] = [];
+  const reports: (string | undefined)[] = [];
   const prompts: Record<string, unknown>[] = [];
   const opened: string[] = [];
   const api = {
@@ -154,10 +155,10 @@ function command(options: { typed?: string | undefined; token?: ReturnType<typeo
   vscode.window.showInputBox = (async (prompt?: Record<string, unknown>) => { prompts.push(prompt ?? {}); return "typed" in options ? options.typed : "Untitled.md"; }) as typeof vscode.window.showInputBox;
   vscode.window.withProgress = (async (settings: Record<string, unknown>, action: (progress: unknown, cancel: unknown) => Promise<unknown>) => {
     notifications.push(settings);
-    return action({ report() {} }, token);
+    return action({ report(value: { message?: string }) { reports.push(value.message); } }, token);
   }) as typeof vscode.window.withProgress;
   const run = () => newMarkdown(api as never, async uri => { opened.push(String(uri)); });
-  return { run, token, calls, notifications, prompts, opened, named: (name: string) => calls.filter(call => call.name === name) };
+  return { run, token, calls, notifications, reports, prompts, opened, named: (name: string) => calls.filter(call => call.name === name) };
 }
 
 test("New Markdown asks for a name, creates the document in a notification the person can stop, and opens it", async () => {
@@ -171,6 +172,21 @@ test("New Markdown asks for a name, creates the document in a notification the p
   assert.equal(named("composeMaterialize").length, 1);
   assert.deepEqual(opened, ["memql-file://client.example/artifacts/a1/Untitled.md"]);
   assert.equal(token.listening, 0, "nothing keeps listening for a stop once the document is open");
+});
+
+test("the notification says where the document is while the cluster makes it", { timeout: 20000 }, async () => {
+  // The composition is still being made at the first look, and once it is ready its Files entry
+  // trails it: both are said in the notification the person is watching.
+  const { run, reports, opened } = command({
+    answer: (name, _query, looks) => {
+      if (name === "compositionById") return looks === 1 ? [{ status: "composing" }] : undefined;
+      if (name === "libraryArtifactForFile") return looks === 1 ? [] : undefined;
+      return undefined;
+    },
+  });
+  await run();
+  assert.deepEqual(reports, ["composing", "Saved; waiting for its Files entry"]);
+  assert.deepEqual(opened, ["memql-file://client.example/artifacts/a1/Untitled.md"]);
 });
 
 test("the prompt refuses an extension on its own, before anything is created", async () => {

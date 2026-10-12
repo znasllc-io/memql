@@ -112,7 +112,9 @@ Save As preserves a local copy for comparison.
 
 **New Markdown** asks for a name and creates a blank document in the connected
 cluster through the Materializer, so even an empty document has a record of what
-was asked for and which run made it. The progress notification can be stopped.
+was asked for and which run made it. The progress notification says where the
+creation is ("Saved; waiting for its Files entry" while the Library catches up)
+and can be stopped.
 Stopping never deletes a file that was already made: it stays in Files, and the
 editor opens it when it is already in Files at the moment you stop. The document
 opens in Review, where its empty page offers **Describe document**, which sends
