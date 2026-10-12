@@ -1,12 +1,16 @@
 from pathlib import Path
+import hashlib
 import importlib.util
 import io
 import json
+import platform
 import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
+import urllib.error
 
 sys.dont_write_bytecode = True
 
@@ -20,6 +24,86 @@ def sarif(results=None, successful=True):
     return {"version": "2.1.0", "runs": [{
         "results": results or [], "invocations": [{"executionSuccessful": successful}],
     }]}
+
+
+class FakeResponse:
+    """An urlopen answer that hands out chunks, then raises or ends."""
+
+    def __init__(self, chunks, failure=None):
+        self.chunks = list(chunks)
+        self.failure = failure
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, size=-1):
+        if self.chunks:
+            return self.chunks.pop(0)
+        if self.failure:
+            raise self.failure
+        return b""
+
+
+class BundleDownload(unittest.TestCase):
+    """The bundle is several hundred megabytes, fetched three times a run."""
+
+    content = b"codeql-bundle" * 4096
+
+    def install(self, answers):
+        calls, archives = [], []
+
+        def urlopen(url, timeout):
+            calls.append(url)
+            answer = answers[min(len(calls), len(answers)) - 1]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        def extract(archive, destination):
+            archives.append(archive.read_bytes())
+
+        digest = hashlib.sha256(self.content).hexdigest()
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(module.urllib.request, "urlopen", urlopen), \
+                mock.patch.object(module.platform, "system", lambda: "Linux"), \
+                mock.patch.object(module, "BUNDLES", {platform.machine(): ("linux64", digest)}), \
+                mock.patch.object(module, "extract_bundle", extract), \
+                mock.patch("time.sleep"):
+            try:
+                module.install_bundle(Path(directory))
+                return calls, archives, None
+            except Exception as exc:  # the caller judges which failures are right
+                return calls, archives, exc
+
+    # Run 6 of epic #6011: both bundle downloads stalled past the 60-second
+    # read timeout at once, and two analyses failed a 5-hour run.
+    def test_a_stalled_read_is_fetched_again(self):
+        stalled = FakeResponse([self.content[:100]], TimeoutError("The read operation timed out"))
+        calls, archives, failure = self.install([stalled, FakeResponse([self.content])])
+        self.assertIsNone(failure, "a stalled read was not fetched again")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(archives, [self.content])
+
+    def test_a_download_that_keeps_failing_stops_after_three_attempts(self):
+        calls, _, failure = self.install([TimeoutError("The read operation timed out")])
+        self.assertIsInstance(failure, RuntimeError)
+        self.assertIn("3 attempts", str(failure))
+        self.assertEqual(len(calls), 3)
+
+    def test_a_wrong_digest_is_never_fetched_again(self):
+        calls, _, failure = self.install([FakeResponse([b"not the pinned bundle"])])
+        self.assertIsInstance(failure, RuntimeError)
+        self.assertIn("SHA-256", str(failure))
+        self.assertEqual(len(calls), 1)
+
+    def test_a_missing_release_is_never_fetched_again(self):
+        missing = urllib.error.HTTPError("https://github.com/", 404, "Not Found", None, None)
+        calls, _, failure = self.install([missing])
+        self.assertIsInstance(failure, RuntimeError)
+        self.assertEqual(len(calls), 1)
 
 
 class Contract(unittest.TestCase):

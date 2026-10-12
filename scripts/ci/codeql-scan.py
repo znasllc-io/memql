@@ -7,6 +7,7 @@ private repositories need a separate license decision before invoking it.
 """
 import argparse
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,8 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 
 import yaml
@@ -25,6 +28,7 @@ BUNDLES = {
     "x86_64": ("linux64", "1d380f79896ededc654c7b21fafb3360136f1aeb678ad4df4df9af3910c6b815"),
     "aarch64": ("linux-arm64", "5f05cc0793971e48824d00e570afe6144a27a325360b43bd823d755aed919817"),
 }
+DOWNLOAD_ATTEMPTS = 3
 
 
 def install_bundle(destination):
@@ -33,16 +37,39 @@ def install_bundle(destination):
     asset, digest = BUNDLES[platform.machine()]
     url = f"https://github.com/github/codeql-action/releases/download/codeql-bundle-v{VERSION}/codeql-bundle-{asset}.tar.gz"
     archive = destination / "bundle.tar.gz"
-    sha = hashlib.sha256()
-    with urllib.request.urlopen(url, timeout=60) as response, archive.open("xb") as output:
-        while block := response.read(1024 * 1024):
-            sha.update(block)
-            output.write(block)
-    if sha.hexdigest() != digest:
-        raise RuntimeError("CodeQL bundle SHA-256 does not match its pinned release")
+    download(url, archive, digest)
     extract_bundle(archive, destination)
     archive.unlink()
     return destination / "codeql" / "codeql"
+
+
+def download(url, archive, digest):
+    """Fetch url into archive and hold it to its pinned SHA-256.
+
+    The bundle is several hundred megabytes, fetched once per language per
+    run, and a read that stalls past the socket timeout raises. A network
+    fault starts the download again, up to DOWNLOAD_ATTEMPTS times. A missing
+    release (an HTTP 4xx) or a different file never does: neither is transient.
+    """
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        archive.unlink(missing_ok=True)
+        sha = hashlib.sha256()
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response, archive.open("xb") as output:
+                while block := response.read(1024 * 1024):
+                    sha.update(block)
+                    output.write(block)
+        except (OSError, http.client.HTTPException) as exc:
+            if isinstance(exc, urllib.error.HTTPError) and exc.code < 500:
+                raise RuntimeError(f"CodeQL bundle download failed: {exc}") from exc
+            if attempt == DOWNLOAD_ATTEMPTS:
+                raise RuntimeError(f"CodeQL bundle download failed after {attempt} attempts: {exc}") from exc
+            print(f"CodeQL bundle download attempt {attempt} failed: {exc}; trying again", file=sys.stderr)
+            time.sleep(10 * attempt)
+            continue
+        if sha.hexdigest() != digest:
+            raise RuntimeError("CodeQL bundle SHA-256 does not match its pinned release")
+        return
 
 
 def extract_bundle(archive, destination):
