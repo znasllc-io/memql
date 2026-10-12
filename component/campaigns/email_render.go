@@ -324,10 +324,12 @@ func (p *pictureReads) ResolveImage(ctx context.Context, artifactID string) (ema
 	return p.inner.ResolveImage(ctx, artifactID)
 }
 
-// artifactImages reads the Library pictures a document names, as the caller of
-// the render: emaildoc asks it for an artifact id, and it answers with the
-// picture's bytes or says why not (the renderer turns that into an
-// image_unavailable issue for the block).
+// artifactImages reads the Library pictures a document names: emaildoc asks it
+// for an artifact id, and it answers with the picture's bytes or says why not
+// (the renderer turns that into an image_unavailable issue for the block). The
+// artifact and the file row it names are looked up as the caller of the render;
+// the bytes are then fetched with the node's own storage credential at the
+// blobUrl that row records, not as the caller.
 type artifactImages struct{ w *Worker }
 
 // ResolveImage reads one picture. The artifact and its file are read under the

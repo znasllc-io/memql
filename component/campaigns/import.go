@@ -146,7 +146,11 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 		return nil, errors.New("campaigns.importRecipients: no caller identity; an import is always run by somebody")
 	}
 
-	// The bytes, under the CALLER's actor from the first read to the last.
+	// The artifact and the file row it names are read under the CALLER's actor,
+	// so a file the caller cannot see is not found. The bytes are then fetched with
+	// the node's own storage credential (it has no notion of a caller) at the
+	// blobUrl that row records: that trusts a row the caller owns, as the
+	// Library's download route does.
 	ref, refusal, err := w.store.LibraryFileForArtifact(ctx, artifactID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.importRecipients: %w", err)
