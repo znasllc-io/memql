@@ -90,6 +90,38 @@ interface PickedSource {
 
 type ReturnTo = NonNullable<ComposeSetup["returnTo"]>;
 
+/** A notice about what became of the open file's description, in the order it is shown. */
+interface ArrivedNotice {
+  key: string;
+  tone: "warn" | "info";
+  sentence: string;
+  next?: string;
+  detail?: string;
+}
+
+function noticesFor(description: { failure: string; unattached: string[] }): ArrivedNotice[] {
+  const notices: ArrivedNotice[] = [];
+  if (description.failure) {
+    notices.push({ key: "not-sent", tone: "warn", sentence: DESCRIPTION_NOT_SENT, next: DESCRIPTION_NOT_SENT_NEXT, detail: description.failure });
+  }
+  if (description.unattached.length > 0) {
+    notices.push({ key: "not-attached", tone: "info", sentence: notAttachedSentence(description.unattached) });
+  }
+  return notices;
+}
+
+/**
+ * The notices as one thing to hear: each part ends like a sentence (a cluster's
+ * reason does not), so a screen reader pauses between them instead of running
+ * "...exhausted" into "Not attached".
+ */
+function spoken(notices: ArrivedNotice[]): string {
+  return notices
+    .flatMap((notice) => [notice.sentence, notice.next, notice.detail])
+    .flatMap((part) => (part && part.trim() !== "" ? [/[.!?]$/.test(part.trim()) ? part.trim() : `${part.trim()}.`] : []))
+    .join(" ");
+}
+
 /** The sources once each: the same file listed twice is one source, as it is when a person picks it twice. */
 function distinct(sources: ComposeSource[]): ComposeSource[] {
   const seen = new Set<string>();
@@ -192,6 +224,7 @@ export function ComposerSection({
     submitting: busy,
   };
   const acts = actsFor(open, draftState, backTo);
+  const arrived = open !== null && description ? noticesFor(description) : [];
 
   // The chain reads the OPEN composition once there is one, and the form
   // otherwise -- so the same device says "here is what you are about to
@@ -294,19 +327,23 @@ export function ComposerSection({
       {error ? <Notice tone="error" sentence={error} /> : null}
       {/* WHAT BECAME OF THE DESCRIPTION, in place. The file is there either
           way, so neither is an error: the first says what to do about it, the
-          second only names what the Library could not take. It arrives a moment
-          after "Ready" without the person having done anything, so it is
-          announced -- in a status region that is ALREADY here, because one that
-          appears together with its text is not reliably announced. It has no box
-          of its own (`display: contents`), so an empty one costs no grid row. */}
-      <div className="os-mz-status" role="status">
-        {open && description?.failure ? (
-          <Notice tone="warn" sentence={DESCRIPTION_NOT_SENT} next={DESCRIPTION_NOT_SENT_NEXT} detail={description.failure} />
-        ) : null}
-        {open && description && description.unattached.length > 0 ? (
-          <Notice tone="info" sentence={notAttachedSentence(description.unattached)} />
-        ) : null}
-      </div>
+          second only names what the Library could not take. They sit in the
+          grid like any other notice. */}
+      {arrived.map((notice) => (
+        <Notice key={notice.key} tone={notice.tone} sentence={notice.sentence} next={notice.next} detail={notice.detail} />
+      ))}
+      {/* AND THE SAME WORDS, ANNOUNCED. They arrive a moment after "Ready"
+          without the person having done anything, so they are spoken -- by an
+          element of their own that is ALREADY here, visually hidden and polite,
+          because a live region that appears together with its text is not
+          reliably announced. It is not a wrapper around the notices above: a
+          wrapper laid out with `display: contents` (which is how one would keep
+          an empty region out of the grid) loses its role in Safari and
+          VoiceOver, and the announcement with it. Out of flow, this takes no
+          grid row. */}
+      <p className="os-sr-only os-mz-announce" role="status" aria-live="polite" aria-atomic="true">
+        {spoken(arrived)}
+      </p>
 
       <ActionBar
         state={stateLine(open, draftState)}
