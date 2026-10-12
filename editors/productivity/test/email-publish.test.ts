@@ -18,11 +18,12 @@ type Answer = (call: string) => Rows | Promise<Rows>;
  * Fake ports. `answers` is one function per builtin or query name; each call is recorded as
  * {name, call} before it is answered, and a name nobody answers is an error, so a call the code
  * should not make fails the test. `state` is the Map behind the memento, which like VS Code's
- * forgets a key that is updated to undefined.
+ * forgets a key that is updated to undefined, and `writes` is every update it was told of.
  */
 function ports(answers: Record<string, Answer> = {}) {
   const calls: { name: string; call: string }[] = [];
   const state = new Map<string, unknown>();
+  const writes: { key: string; value: unknown }[] = [];
   const port: PublishPorts = {
     async execute(name, call) {
       calls.push({ name, call });
@@ -32,10 +33,10 @@ function ports(answers: Record<string, Answer> = {}) {
     },
     state: {
       get: <T>(key: string) => state.get(key) as T | undefined,
-      update: async (key, value) => { if (value === undefined) state.delete(key); else state.set(key, value); },
+      update: async (key, value) => { writes.push({ key, value }); if (value === undefined) state.delete(key); else state.set(key, value); },
     },
   };
-  return { calls, state, ports: port };
+  return { calls, state, writes, ports: port };
 }
 
 const names = (calls: { name: string }[]) => calls.map(call => call.name);
@@ -138,6 +139,42 @@ test("one label or one organization is enough; otherwise the person chooses", as
   // No organization at all: nothing to resolve and nothing to choose from.
   const none = ports({ clientAccountsAll: () => [], compositionForOutputFile: () => [] });
   assert.deepEqual(await resolveOrganization(file(), none.ports), { organization: undefined, choices: [] });
+});
+
+test("a file's organizations and its composition are asked for together", async () => {
+  // The organizations answer on a later turn. By then the composition must already have been asked for: neither read waits for the other.
+  let asked: string[] = [];
+  const f = ports({
+    clientAccountsAll: async () => { await new Promise(resolve => setImmediate(resolve)); asked = names(f.calls); return ACCOUNTS; },
+    compositionForOutputFile: () => [{ accountIds: ["client-org"] }],
+  });
+  assert.deepEqual(await resolveOrganization(file(), f.ports), { organization: CLIENT, choices: [] });
+  assert.deepEqual(asked, ["clientAccountsAll", "compositionForOutputFile"]);
+  // A template has no composition to ask for.
+  const g = ports({ clientAccountsAll: () => ACCOUNTS });
+  await resolveOrganization(template(), g.ports);
+  assert.deepEqual(names(g.calls), ["clientAccountsAll"]);
+});
+
+test("a read that fails fails the resolution, and the read left over is not an unhandled rejection", async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    for (const [accounts, composition] of [["organizations failed", ""], ["", "composition failed"], ["organizations failed", "composition failed"]] as const) {
+      const f = ports({
+        clientAccountsAll: async () => { await new Promise(resolve => setImmediate(resolve)); if (accounts) throw new Error(accounts); return ACCOUNTS; },
+        compositionForOutputFile: async () => { if (composition) throw new Error(composition); return []; },
+      });
+      await assert.rejects(resolveOrganization(file(), f.ports), new RegExp(`${composition || accounts}`));
+    }
+    // Rejections that nobody handled are reported on a later turn.
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  assert.deepEqual(unhandled, []);
 });
 
 test("choosing labels an unlabelled Library file once", async () => {
@@ -541,6 +578,7 @@ const BUILTINS: Rows = [
   { id: "builtin:article", kind: "builtin", name: "Article", status: "active" },
 ];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const UNRELATED: Record<string, unknown> = { id: "org:colleague", layoutId: "colleague", kind: "organization", name: "Autumn letter", description: "A colleague’s layout", revision: "r0", status: "active" };
 
 test("save as layout creates once with a stable id and updates the layout saved from the same file", async () => {
   // A new layout is created under an id that is kept until the cluster has answered, so a lost answer retries the same layout.
@@ -577,7 +615,8 @@ test("save as layout creates once with a stable id and updates the layout saved 
   assert.deepEqual(names(f.calls), ["emailLayouts", "campaignSaveLayout", "emailLayouts", "campaignSaveLayout"]);
   assert.match(f.calls[0]!.call, /^builtin emailLayouts\(accountId: "client-org"\)$/);
 
-  // The next layout from the same file is a new one, made under a new id.
+  // Another email key is another request. This fake lists no layout from the file, so it creates another, under a new id; a cluster
+  // that had kept the first would list it by its file, and the next test shows that save updating it.
   const again = await publisher.saveLayout({ ...ask, key: "k2" });
   assert.notEqual(again.layoutId, pending);
 
@@ -625,6 +664,106 @@ test("publishing an email and saving it as a layout are separate jobs", async ()
   assert.equal(published.templateId, "t1");
   assert.match(layout.layoutId, UUID);
   assert.equal(layout.revision, "r7");
+});
+
+/**
+ * The cluster as saveLayout meets it. A layout is made under the id it is sent. An update must name the revision it read. Saving
+ * what is already stored answers with the receipt already given. `lose` is how many answers are lost after the layout is stored.
+ */
+function layoutCluster(lose: number) {
+  const stored = new Map<string, { revision: string; content: string }>();
+  let revisions = 0;
+  let lost = lose;
+  const answers: Record<string, Answer> = {
+    // A layout nobody here made, saved by a colleague since (newest first), is listed ahead of the one this email made: it has no file either.
+    emailLayouts: () => [...BUILTINS, UNRELATED, ...[...stored].map(([layoutId, row]) => ({ id: `org:${layoutId}`, layoutId, kind: "organization", name: "Monthly", description: "", revision: row.revision, status: "active" }))],
+    campaignSaveLayout: call => {
+      const layoutId = /layoutId: "([^"]+)"/.exec(call)![1]!;
+      const expected = /expectedRevision: "([^"]*)"/.exec(call)![1]!;
+      const content = call.replace(/expectedRevision: "[^"]*"/, "");
+      const row = stored.get(layoutId);
+      if (row && row.content === content) return [{ layoutId, revision: row.revision, status: "active", saved: true }];
+      if (row && row.revision !== expected) throw new Error("this layout changed; compare the latest revision before saving");
+      if (!row && expected !== "") throw new Error("That layout isn’t available. Choose another layout or save a new one.");
+      const revision = `r${++revisions}`;
+      stored.set(layoutId, { revision, content });
+      if (lost > 0) { lost--; throw new Error("connection lost"); }
+      return [{ layoutId, revision, status: "active", saved: true }];
+    },
+  };
+  return { stored, answers };
+}
+
+test("a lost creation, then an edit, updates the layout the creation made", async () => {
+  // A template opened as a file has no Library file to find its layout by, so the id kept for it is what finds it again.
+  const cluster = layoutCluster(1);
+  const f = ports(cluster.answers);
+  const publisher = new EmailPublisher(f.ports);
+  const ask = { target: template(), organization: CLIENT, email: welcome, name: "Monthly", key: "k1" };
+
+  await assert.rejects(publisher.saveLayout(ask), /connection lost/);
+  assert.deepEqual(names(f.calls), ["campaignSaveLayout"], "a first save makes one call: there is nothing yet to look for");
+  assert.equal(cluster.stored.size, 1, "the creation reached the cluster, and its answer was lost");
+  const kept = String(f.state.get("memql.emailLayoutPending:k1"));
+  assert.match(kept, UUID);
+
+  // The person changes the email and saves it as a layout again.
+  const edited = readEmail(layout([
+    { id: "headline", type: "heading", text: "Welcome back" },
+    { id: "cta", type: "button", label: "Get started", href: "https://example.com/start" },
+  ]));
+  const result = await publisher.saveLayout({ ...ask, email: edited });
+  assert.deepEqual(names(f.calls), ["campaignSaveLayout", "emailLayouts", "campaignSaveLayout"]);
+  const update = f.calls[2]!.call;
+  assert.match(update, new RegExp(`layoutId: "${kept}"`), "the layout the creation made");
+  assert.match(update, /expectedRevision: "r1"/, "at the revision it was listed at");
+  assert.ok(update.includes("Welcome back"), "with the edited email");
+  assert.deepEqual(result, { layoutId: kept, revision: "r2" });
+  assert.equal(cluster.stored.size, 1, "one layout, not two");
+  assert.ok(f.calls.every(call => !call.call.includes("colleague")), "a layout that is not this email's is never touched");
+  assert.equal(f.state.has("memql.emailLayoutPending:k1"), false, "cleared once the cluster has answered");
+  assert.deepEqual(f.writes, [{ key: "memql.emailLayoutPending:k1", value: kept }, { key: "memql.emailLayoutPending:k1", value: undefined }], "kept once, before the first request, and cleared when the cluster answered");
+
+  // The same without an edit finds the layout all the same, and updates it rather than making another.
+  const same = layoutCluster(1);
+  const g = ports(same.answers);
+  await assert.rejects(new EmailPublisher(g.ports).saveLayout(ask), /connection lost/);
+  const again = await new EmailPublisher(g.ports).saveLayout(ask);
+  assert.equal(again.layoutId, String(Array.from(same.stored.keys())[0]));
+  assert.equal(same.stored.size, 1);
+});
+
+test("a creation that never reached the cluster is retried under the same id", async () => {
+  let reached = false;
+  const f = ports({
+    emailLayouts: () => [...BUILTINS, UNRELATED],
+    campaignSaveLayout: call => {
+      if (!reached) { reached = true; throw new Error("connection lost"); }
+      return [{ layoutId: /layoutId: "([^"]+)"/.exec(call)![1], revision: "r1", status: "active", saved: true }];
+    },
+  });
+  const publisher = new EmailPublisher(f.ports);
+  const ask = { target: template(), organization: CLIENT, email: welcome, name: "Monthly", key: "k1" };
+  await assert.rejects(publisher.saveLayout(ask), /connection lost/);
+  const kept = String(f.state.get("memql.emailLayoutPending:k1"));
+  const result = await publisher.saveLayout(ask);
+  assert.deepEqual(names(f.calls), ["campaignSaveLayout", "emailLayouts", "campaignSaveLayout"], "the kept id is looked for, and nothing is there");
+  assert.equal(result.layoutId, kept);
+  assert.match(f.calls[2]!.call, new RegExp(`layoutId: "${kept}"`));
+  assert.match(f.calls[2]!.call, /expectedRevision: ""/, "so it creates, and under the id it already tried");
+  assert.ok(!f.calls[2]!.call.includes("colleague"), "and does not take another email's layout for its own");
+  assert.equal(f.state.size, 0);
+  assert.deepEqual(f.writes, [{ key: "memql.emailLayoutPending:k1", value: kept }, { key: "memql.emailLayoutPending:k1", value: undefined }], "the id is kept once: the retry reuses it without writing it again");
+
+  // Whatever is kept that is not an id is not used: the cluster would refuse it, and there is nothing to look for.
+  for (const notAnId of [{ not: "an id" }, "not an id", "", 7]) {
+    const h = ports({ emailLayouts: () => BUILTINS, campaignSaveLayout: call => [{ layoutId: /layoutId: "([^"]+)"/.exec(call)![1], revision: "r1", status: "active", saved: true }] });
+    h.state.set("memql.emailLayoutPending:k1", notAnId);
+    const fresh = await new EmailPublisher(h.ports).saveLayout(ask);
+    assert.match(fresh.layoutId, UUID, JSON.stringify(notAnId));
+    assert.deepEqual(names(h.calls), ["campaignSaveLayout"], JSON.stringify(notAnId));
+    assert.equal(h.state.size, 0);
+  }
 });
 
 test("a layout saved from a template or a local file is always a new layout", async () => {

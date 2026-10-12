@@ -30,7 +30,7 @@ export interface Organization { id: string; name: string }
 
 /** What the open email is: a Library file, a template opened as a file, or a file on this computer. */
 export type EmailTarget =
-  | { kind: "file"; domain: string; artifactId: string; fileId: string; name: string; labels: string[] }
+  | { kind: "file"; domain: string; artifactId: string; fileId: string; name: string; labels: readonly string[] }
   | { kind: "template"; domain: string; templateId: string; name: string; accountId: string; status: string; revision: string }
   | { kind: "local"; name: string };
 
@@ -64,6 +64,12 @@ export async function organizations(ports: PublishPorts): Promise<Organization[]
     .sort((a, b) => a.name.localeCompare(b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
+/** The composition that wrote a file, if one did (the newest). Only a Library file has one, and it is looked up by the file, not its artifact. */
+async function compositionOf(target: EmailTarget, ports: PublishPorts): Promise<Record<string, unknown> | undefined> {
+  if (target.kind !== "file") return undefined;
+  return (await ports.execute("compositionForOutputFile", buildCompositionForOutputFile({ fileId: target.fileId })))[0];
+}
+
 /**
  * The email's organization, or the choices to make one from. A template says its own; a file has the composition that wrote
  * it (an email composition carries exactly one organization) and its labels; a person with one active organization has no
@@ -71,14 +77,14 @@ export async function organizations(ports: PublishPorts): Promise<Organization[]
  * changed; without one, `organization` is undefined and `choices` are the active organizations by name.
  */
 export async function resolveOrganization(target: EmailTarget, ports: PublishPorts, remembered?: string): Promise<{ organization?: Organization; choices: Organization[] }> {
-  const choices = await organizations(ports);
+  // Neither read waits for the other. Promise.all, not two awaits in a row: when one fails, the other's failure is still handled.
+  const [choices, composition] = await Promise.all([organizations(ports), compositionOf(target, ports)]);
   const named = (id: string | undefined) => id === undefined ? undefined : choices.find(choice => choice.id === id);
   if (target.kind === "template") {
     // Where the person does not list it, the render says why it cannot be shown: the template's word stands.
     return { organization: named(target.accountId) ?? { id: target.accountId, name: target.accountId }, choices: [] };
   }
   if (target.kind === "file") {
-    const composition = (await ports.execute("compositionForOutputFile", buildCompositionForOutputFile({ fileId: target.fileId })))[0];
     const written = [...new Set(stringList(composition?.accountIds))];
     const composed = named(written.length === 1 ? written[0] : undefined);
     if (composed) return { organization: composed, choices: [] };
@@ -290,9 +296,10 @@ export class EmailPublisher {
 
   /**
    * Saves the email as one of the organization's layouts. Only a layout can be one (custom HTML cannot), under a name of one
-   * line and up to 200 characters. A file that a layout was saved from updates that layout, at the revision it was listed at.
-   * Anything else creates a layout under an id that is kept until the cluster has answered, so a response that was lost
-   * retries the same layout and never makes a second one. `key` names the email for that record.
+   * line and up to 200 characters. The layout this email already made is updated, at the revision it was listed at: it is found
+   * by the file it was saved from, or by the id kept for it. A new layout is created under an id that is kept until the cluster
+   * has answered, so a response that was lost retries the same layout and never makes a second one, and an email changed in
+   * the meantime updates the layout the lost creation made instead of being refused for it. `key` names the email for that record.
    */
   async saveLayout(input: SaveLayoutInput): Promise<{ layoutId: string; revision: string }> {
     if (!isLayoutEmail(input.email)) throw new UserInputError(H.noLayoutForHtml);
@@ -306,10 +313,14 @@ export class EmailPublisher {
     const pending = PENDING_LAYOUT + input.key;
     const document = { ...input.email };
     const source = target.kind === "file" ? target.artifactId : undefined;
-    // The layouts listed already say which one this file made; the id in a row is the bare layoutId, never the opaque id.
-    const existing = source === undefined ? undefined
+    const kept = this.ports.state.get<string>(pending);
+    const keptId = typeof kept === "string" && ID.test(kept) ? kept : undefined;
+    // The layout this email already made is found by its file or, for an email that has none (a template opened as a file), by the
+    // id kept for it: a creation whose answer was lost may have reached the cluster, and a save that named no revision could never
+    // update it. The id in a row is the bare layoutId, never the opaque one.
+    const existing = source === undefined && keptId === undefined ? undefined
       : (await this.ports.execute("emailLayouts", buildEmailLayouts({ accountId: organization.id })))
-        .find(row => text(row, "sourceArtifactId") === source && text(row, "layoutId") !== "");
+        .find(row => text(row, "layoutId") !== "" && (text(row, "layoutId") === keptId || (source !== undefined && text(row, "sourceArtifactId") === source)));
     let call: string;
     if (existing) {
       const revision = text(existing, "revision");
@@ -319,8 +330,7 @@ export class EmailPublisher {
         document, sourceArtifactId: source, expectedRevision: revision, action: "save",
       });
     } else {
-      const kept = this.ports.state.get<string>(pending);
-      const layoutId = typeof kept === "string" && ID.test(kept) ? kept : globalThis.crypto.randomUUID();
+      const layoutId = keptId ?? globalThis.crypto.randomUUID();
       if (layoutId !== kept) await this.ports.state.update(pending, layoutId);
       call = buildCampaignSaveLayout({
         layoutId, accountId: organization.id, name, document, ...(source === undefined ? {} : { sourceArtifactId: source }), expectedRevision: "", action: "save",
