@@ -217,8 +217,11 @@ export class LiveCollection<T = Row> {
   // compare a late copy with, and the bus delivers events in no particular
   // order, so without this a late OLDER copy brings back a deleted or archived
   // row. Kept under the default ordering only (a feed's own `supersedes` owns
-  // its rows' history), cleared when a seed starts (its read decides
-  // membership again), and bounded: the oldest is forgotten first.
+  // its rows' history) and ACROSS SEEDS: a read that does not return a removed
+  // row says nothing about how old a late copy of it is, and this still does.
+  // Only a strictly older copy is refused, so a row re-created or re-read at
+  // that version or a newer one is placed. Bounded, and that is the only bound:
+  // the oldest is forgotten first.
   private gone = new Map<string, string>();
   private seedAbort: AbortController | null = null;
   private seedPending = false;
@@ -345,7 +348,6 @@ export class LiveCollection<T = Row> {
   }
 
   private async runSeed(): Promise<void> {
-    this.gone.clear();
     this.seedRunning = true;
     this.seedPending = false;
     this.seedAbort?.abort();

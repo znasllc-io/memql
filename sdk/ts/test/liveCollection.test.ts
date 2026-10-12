@@ -616,6 +616,49 @@ test("a feed's own supersedes keeps no tombstones", async () => {
   store.dispose();
 });
 
+test("what took a row out keeps it out across a reseed; a copy at that version or newer is placed", async () => {
+  // A reseed's read does not return a removed row, so it says nothing about
+  // how old a late copy of it is. The version that took the row out still does.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let reads = 0;
+  let release: () => void = () => {};
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => {
+      reads++;
+      if (reads === 2) await new Promise<void>((resolve) => { release = resolve; });
+      const rows: Row[] = [{ id: "c", v: "read", createdAt: T1 }];
+      if (reads === 1) rows.push({ id: "a", v: "read", createdAt: T1 }, { id: "b", v: "read", createdAt: T1 });
+      return { rows, nextCursor: "" };
+    },
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T3 } }));
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "b", createdAt: T3 } }));
+  handle.value.reseed();
+  await settle();
+  assert.equal(reads, 2, "the reseed is reading");
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "late, during", createdAt: T2 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"], undefined, "an older copy during the reseed stays out");
+  release();
+  await settle();
+  assert.deepEqual(Object.keys(byId(handle.value.snapshot.rows)), ["c"], "and the reseed's answer does not bring it back");
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "late, after", createdAt: T2 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"], undefined, "nor after it");
+
+  // A refusal needs a STRICTLY older version: the same one, or a newer one, is placed.
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "at the removal's version", createdAt: T3 } }));
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "b", v: "re-created", createdAt: T4 } }));
+  const rows = byId(handle.value.snapshot.rows);
+  assert.equal(rows["a"]?.["v"], "at the removal's version");
+  assert.equal(rows["b"]?.["v"], "re-created");
+  store.dispose();
+});
+
 test("the tombstones are bounded: the oldest is forgotten first", async () => {
   const subs = new FakeSubscriptions();
   const store = new LiveStore(hostWith(subs).host);
