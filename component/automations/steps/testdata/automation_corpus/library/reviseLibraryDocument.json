@@ -101,6 +101,7 @@
           {
             "args": {
               "data": {
+                "blankDestination": true,
                 "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n\nImage acquisition limitations: "
               },
               "progress": true,
@@ -115,6 +116,9 @@
                           "type": "string"
                         },
                         "before": {
+                          "enum": [
+                            ""
+                          ],
                           "type": "string"
                         },
                         "commentIds": {
@@ -136,7 +140,7 @@
                       ],
                       "type": "object"
                     },
-                    "maxItems": 100,
+                    "maxItems": 1,
                     "minItems": 1,
                     "type": "array"
                   },
@@ -168,6 +172,7 @@
           {
             "args": {
               "data": {
+                "blankDestination": true,
                 "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n",
                 "recovery": "The previous response did not complete the request. Required corrections: Requested prepared images are missing from the proposed Markdown.\nProduce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed.\nCorrect this latest incomplete response while preserving its valid corrections:\n"
               },
@@ -183,6 +188,9 @@
                           "type": "string"
                         },
                         "before": {
+                          "enum": [
+                            ""
+                          ],
                           "type": "string"
                         },
                         "commentIds": {
@@ -204,7 +212,7 @@
                       ],
                       "type": "object"
                     },
-                    "maxItems": 100,
+                    "maxItems": 1,
                     "minItems": 1,
                     "type": "array"
                   },
@@ -424,6 +432,7 @@
           {
             "args": {
               "data": {
+                "blankDestination": true,
                 "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n\nImage acquisition limitations: "
               },
               "progress": true,
@@ -438,6 +447,9 @@
                           "type": "string"
                         },
                         "before": {
+                          "enum": [
+                            ""
+                          ],
                           "type": "string"
                         },
                         "commentIds": {
@@ -459,7 +471,7 @@
                       ],
                       "type": "object"
                     },
-                    "maxItems": 100,
+                    "maxItems": 1,
                     "minItems": 1,
                     "type": "array"
                   },
@@ -491,6 +503,7 @@
           {
             "args": {
               "data": {
+                "blankDestination": true,
                 "evidence": "App research report:\nApp research was unavailable; no app findings were obtained.\nIndependent local report:\n\nEvidence assessment:\nApp research was unavailable. Collect the evidence needed for the human request using local research and disclose inaccessible sources.\nTargeted local research:\n",
                 "recovery": "The previous response did not complete the request. Required corrections: Requested prepared images are missing from the proposed Markdown.\nProduce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed.\nCorrect this latest incomplete response while preserving its valid corrections:\n"
               },
@@ -506,6 +519,9 @@
                           "type": "string"
                         },
                         "before": {
+                          "enum": [
+                            ""
+                          ],
                           "type": "string"
                         },
                         "commentIds": {
@@ -527,7 +543,7 @@
                       ],
                       "type": "object"
                     },
-                    "maxItems": 100,
+                    "maxItems": 1,
                     "minItems": 1,
                     "type": "array"
                   },
