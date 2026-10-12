@@ -56,6 +56,26 @@ const signupsBusy = visitorMessage("Too many signups at once. Try again in a mom
 // can shorten it.
 var signupLockedPhase = 30 * time.Second
 
+// lockedWriteLimit bounds one write made under a gate's locks. Such a write runs on
+// a context its phase's deadline does not reach (detachedWrite), and this is what
+// keeps it from waiting for ever. It is above the request pool's statement timeout
+// (8 s, component/database): the server ends a slow write before this gives up on
+// it, so its answer is always read and the locks are given back only after it.
+var lockedWriteLimit = 10 * time.Second
+
+// detachedWrite makes one write the locks protect, on a context neither the phase's
+// deadline nor the caller's cancellation reaches, bounded by lockedWriteLimit. A
+// write cut mid-flight is not a write that did not happen: its client stops
+// waiting and the server goes on and commits it -- after the locks were given back,
+// beside a writer that has since taken them. Started, a write is waited for, and it
+// commits while the locks are held; the caller asks before starting it whether the
+// phase, and the locks, are still there.
+func detachedWrite(phase context.Context, write func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(phase), lockedWriteLimit)
+	defer cancel()
+	return write(ctx)
+}
+
 func newsletterSignupID(audience, address string) string {
 	return sha256Hex("newsletter-signup\x00" + bare(audience) + "\x00" + NormalizeEmail(address))
 }
@@ -537,8 +557,12 @@ func (w *Worker) drainNewsletterWelcomes(ctx, systemCtx context.Context) {
 // makes (SendTimeout) and the reads around it, never more than welcomePhaseCeiling.
 // Far inside the gate session's idle limit, like the signup's.
 func (w *Worker) welcomeLockedPhase() time.Duration {
-	return min(w.cfg.SendTimeout+30*time.Second, welcomePhaseCeiling)
+	return min(w.cfg.SendTimeout+welcomePhaseMargin, welcomePhaseCeiling)
 }
+
+// welcomePhaseMargin is the time a welcome's phase allows for its reads, beside the
+// send's own timeout. A variable only so a test can shorten it.
+var welcomePhaseMargin = 30 * time.Second
 
 // welcomePhaseCeiling bounds a welcome's time under its locks however long an
 // operator lets a send take (MEMQL_CAMPAIGNS_SEND_TIMEOUT_SECONDS).
@@ -556,14 +580,27 @@ const welcomePhaseCeiling = 2 * time.Minute
 // these (Azure's send receipt, reserved before the attempt is recorded); it is the
 // last, and nothing is waited for beyond it.
 //
-// A BUSY LOCK ANYWHERE IS "NOTHING ATTEMPTED, TRY LATER": the welcome is not blocked,
-// no verdict is written, and the next pass takes it. Only a send that began can end
-// a welcome.
+// ONLY A SEND THAT BEGAN CAN END A WELCOME. A busy lock anywhere, a phase that runs
+// out (or a pass that is stopped) before the send begins, a read that fails: each
+// is "nothing attempted, try later" -- no verdict is written, the welcome stays
+// pending, and the next pass takes it. A verdict is written for a send that began
+// (its receipt says an attempt was recorded), whatever the time, and for a
+// decision on the merits (the newsletter is off, the snapshot is unreadable, the
+// send was refused) made and written inside the phase. The verdict is written as
+// a signup's writes are (detachedWrite): its start is never cut by the phase, so
+// it commits while the locks are held -- they are given back only after it -- or
+// it does not start.
 func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned map[string]any) error {
 	scannedOwner := bare(str(scanned, "ownerUserId"))
 	requestID := "newsletter-" + bare(str(scanned, "id"))
 	receiptID := singleSendReceiptID(scannedOwner, requestID)
-	hold, err := w.newsletterGate(ctx,
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// The locks live until Release, below, and nothing else: the drain's context
+	// ending mid-write must not end the transaction that holds them while the
+	// write it protects goes on (as a signup's).
+	hold, err := w.newsletterGate(context.WithoutCancel(ctx),
 		newsletterLock("site", bare(str(scanned, "siteId"))),
 		newsletterLock("audience", bare(str(scanned, "audienceId"))),
 		singleSendLock(receiptID))
@@ -571,10 +608,14 @@ func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned m
 		return err
 	}
 	defer hold.Release()
-	ctx, endPhase := context.WithTimeout(ctx, w.welcomeLockedPhase())
+	phase, endPhase := context.WithTimeout(ctx, w.welcomeLockedPhase())
 	defer endPhase()
-	systemCtx = memql.ContextWithFreshRead(auth.ContextWithInternalOrigin(systemCtx))
-	row, err := w.newsletterRow(systemCtx, "newsletterSignupById", "signupId", bare(str(scanned, "id")))
+	// The system context's reads are the phase's too.
+	deadline, _ := phase.Deadline()
+	system, endSystem := context.WithDeadline(systemCtx, deadline)
+	defer endSystem()
+	system = memql.ContextWithFreshRead(auth.ContextWithInternalOrigin(system))
+	row, err := w.newsletterRow(system, "newsletterSignupById", "signupId", bare(str(scanned, "id")))
 	if err != nil || row == nil || str(row, "status") != "pending" {
 		return err
 	}
@@ -583,11 +624,16 @@ func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned m
 		// another now is not the welcome that was scanned; the next pass reads it.
 		return nil
 	}
-	owner := memql.ContextWithFreshRead(w.ownerActorContext(ctx, bare(str(row, "ownerUserId"))))
+	owner := memql.ContextWithFreshRead(w.ownerActorContext(phase, bare(str(row, "ownerUserId"))))
 	status, reason := "blocked", "The newsletter or its deployable is no longer enabled."
 	config, readErr := w.newsletterRow(owner, "newsletterForSite", "siteId", bare(str(row, "siteId")))
 	site, siteErr := w.newsletterRow(owner, "siteById", "siteId", bare(str(row, "siteId")))
-	if readErr == nil && siteErr == nil && config != nil && site != nil && booleanOr(config, "enabled", false) && booleanOr(site, "shopperForms", false) && str(site, "status") != "disabled" && bare(str(site, "ownerUserId")) == callerUserID(owner) && sameOrganization(str(site, "accountId"), str(row, "accountId")) && sameOrganization(str(config, "accountId"), str(row, "accountId")) && bare(str(objectField(site, "binding"), "storeId")) == bare(str(row, "storeId")) {
+	if readErr != nil || siteErr != nil {
+		// A read that failed decided nothing -- the phase may simply have run out.
+		return fmt.Errorf("the welcome's storefront could not be read; it stays pending: %w", errors.Join(readErr, siteErr))
+	}
+	began := false
+	if config != nil && site != nil && booleanOr(config, "enabled", false) && booleanOr(site, "shopperForms", false) && str(site, "status") != "disabled" && bare(str(site, "ownerUserId")) == callerUserID(owner) && sameOrganization(str(site, "accountId"), str(row, "accountId")) && sameOrganization(str(config, "accountId"), str(row, "accountId")) && bare(str(objectField(site, "binding"), "storeId")) == bare(str(row, "storeId")) {
 		var snapshot Template
 		encoded, _ := json.Marshal(objectField(row, "templateSnapshot"))
 		if json.Unmarshal(encoded, &snapshot) != nil || snapshot.ID == "" {
@@ -599,6 +645,8 @@ func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned m
 				return fmt.Errorf("the welcome's send identity changed after it was scanned; it stays pending: %v", receiptErr)
 			}
 			nodes, sendErr := w.sendToRecipientHeld(owner, args, &snapshot, str(row, "emailDigest"), receipt)
+			// The send began when its attempt was recorded (saveSingleSendReceipt).
+			began = !receipt.revision.IsZero()
 			// No provider attempt has begun. Leave the unchanged row pending
 			// for the next drain; a rate ceiling must not lose a welcome.
 			if errors.Is(sendErr, errCampaignRateLimited) {
@@ -609,6 +657,11 @@ func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned m
 			// busy: it stays pending, and the pass ends so the next takes it.
 			if memql.IsWriteGateBusy(sendErr) {
 				return sendErr
+			}
+			// Nor when the phase ran out, or the pass was stopped, before the send
+			// began: the error is the time's, not the welcome's.
+			if sendErr != nil && !began && phase.Err() != nil {
+				return fmt.Errorf("the welcome ran out of its time under its locks before its send began; it stays pending: %w", sendErr)
 			}
 			if sendErr != nil {
 				reason = sendErr.Error()
@@ -627,7 +680,15 @@ func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned m
 			}
 		}
 	}
-	return w.newsletterWrite(systemCtx, "updateNewsletterWelcome", map[string]any{"signupId": bare(str(row, "id")), "status": status, "lastError": truncateError(reason), "versionTime": memql.VersionTimeAfter(templateTime(row["createdAt"]), w.nowUTC()).Format(time.RFC3339Nano)})
+	if !began && phase.Err() != nil {
+		// Decided, but the phase is over before the verdict could be written: a
+		// verdict is only written inside it unless a send began. The next pass
+		// decides again.
+		return fmt.Errorf("the welcome ran out of its time under its locks before its verdict was written; it stays pending: %w", phase.Err())
+	}
+	return detachedWrite(system, func(ctx context.Context) error {
+		return w.newsletterWrite(ctx, "updateNewsletterWelcome", map[string]any{"signupId": bare(str(row, "id")), "status": status, "lastError": truncateError(reason), "versionTime": memql.VersionTimeAfter(templateTime(row["createdAt"]), w.nowUTC()).Format(time.RFC3339Nano)})
+	})
 }
 
 func (w *Worker) handleRetryNewsletterWelcome(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

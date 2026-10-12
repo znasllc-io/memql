@@ -381,7 +381,12 @@ together, in that order, in one transaction on one connection, and spends at mos
 the send's timeout plus thirty seconds under them. A lock that is busy at any point
 before the send begins, including the email provider's own (Azure's send receipt),
 is "nothing attempted, try later": the welcome stays pending, nothing is marked
-blocked, and the next worker pass sends it.
+blocked, and the next worker pass sends it. So is a welcome whose time under its
+locks runs out, or whose worker stops, before its send begins, and one whose
+storefront could not be read: only a send that began ends a welcome, and its
+outcome is recorded even when the send outlasts the welcome's time. A welcome is
+marked blocked only for a reason of its own (the newsletter or its storefront was
+turned off, the reviewed template cannot be read, the send was refused).
 
 **Recent welcomes** shows the latest 50 outcomes, read when the audience opens
 or **Refresh** is selected. A rate limit or a busy lock leaves mail pending for a
