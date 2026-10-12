@@ -12,9 +12,11 @@
 //      of the New email page's and the email editor's words live) and the
 //      static text the two pages are built with.
 //   3. The string literals a source file hands straight to a toast, an input
-//      box's prompt or title, or a progress notification's title, and the
-//      messages of the errors an input raises (a UserInputError is shown as
-//      the toast exactly as it is written).
+//      box's prompt or title, or a progress notification's title; the title,
+//      placeholder and written-out items of a quick pick; the messages of the
+//      errors an input raises (a UserInputError is shown as the toast exactly
+//      as it is written); and the sentences userMessage returns (src/problems.ts),
+//      which the toast shows for every other error.
 //   4. The dialogs: a modal one stops the person's work, so each must say why.
 //
 // WHAT FAILS: everything the MemQL extension's lint rules out (an issue
@@ -191,32 +193,78 @@ function pageCopy(): Copy[] {
 }
 
 // ---------------------------------------------------------------------------
-// 3. toasts: sourceCopy reads the calls; this reads the errors a toast shows as written
+// 3. what a notification, a prompt or a picker says: sourceCopy reads the calls; these read the rest
 // ---------------------------------------------------------------------------
+
+const lineAt = (src: string, index: number): number => src.slice(0, index).split("\n").length;
+
+/** `read` over every .ts file under src, with the file as it sits under the package root. */
+function eachSource(read: (src: string, file: string) => Copy[]): Copy[] {
+  return sourceFiles(SRC).flatMap((file) => read(fs.readFileSync(file, "utf8"), path.relative(PKG, file)));
+}
 
 /**
  * The literals handed straight to `new UserInputError(...)`. The problem toast
  * (problemUI.ts) shows that message as it is written, where any other error
  * gets a safe message of its own.
  */
-function userErrorCopy(): Copy[] {
+function userErrorsIn(src: string, file: string): Copy[] {
   const out: Copy[] = [];
-  for (const file of sourceFiles(SRC)) {
-    const src = fs.readFileSync(file, "utf8");
-    for (const m of src.matchAll(/\bnew UserInputError\s*\(/g)) {
-      const [arg] = callArguments(src, (m.index ?? 0) + m[0].length - 1);
-      const where = `${path.relative(PKG, file)}:${src.slice(0, m.index ?? 0).split("\n").length}`;
-      const text = arg === undefined ? undefined : literalText(arg);
+  for (const m of src.matchAll(/\bnew UserInputError\s*\(/g)) {
+    const [arg] = callArguments(src, (m.index ?? 0) + m[0].length - 1);
+    const where = `${file}:${lineAt(src, m.index ?? 0)}`;
+    const text = arg === undefined ? undefined : literalText(arg);
+    if (text !== undefined) out.push({ where, text, line: true });
+    else for (const fragment of arg === undefined ? [] : literalFragments(arg)) out.push({ where, text: fragment });
+  }
+  return out;
+}
+
+/**
+ * The sentences problems.ts returns: userMessage's safe messages, which the
+ * problem toast shows for an error that is not one of the person's own inputs.
+ */
+function userMessagesIn(src: string, file: string): Copy[] {
+  if (!file.endsWith("problems.ts")) return [];
+  const out: Copy[] = [];
+  for (const m of src.matchAll(/\breturn\s+("(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`)\s*;/g)) {
+    const text = literalText(m[1] ?? "");
+    if (text !== undefined) out.push({ where: `${file}:${lineAt(src, m.index ?? 0)}`, text, line: true });
+  }
+  return out;
+}
+
+/**
+ * The words of the quick picks: each one's title and placeholder, and the items
+ * written out in the call. A list built from data has none of our words in it.
+ */
+function quickPicksIn(src: string, file: string): Copy[] {
+  const out: Copy[] = [];
+  for (const m of src.matchAll(/\bshowQuickPick\s*\(/g)) {
+    const [items, options] = callArguments(src, (m.index ?? 0) + m[0].length - 1);
+    const where = `${file}:${lineAt(src, m.index ?? 0)}`;
+    if (items?.startsWith("[")) {
+      for (const item of callArguments(items, 0)) {
+        const label = literalText(item);
+        if (label !== undefined) out.push({ where, text: label });
+        else
+          for (const key of ["label", "description", "detail"]) {
+            const text = propertyText(item, key);
+            if (text !== undefined) out.push({ where, text });
+          }
+      }
+    }
+    for (const key of ["title", "placeHolder"]) {
+      const text = options === undefined ? undefined : propertyText(options, key);
       if (text !== undefined) out.push({ where, text, line: true });
-      else for (const fragment of arg === undefined ? [] : literalFragments(arg)) out.push({ where, text: fragment });
     }
   }
   return out;
 }
 
-/** What a toast says: the calls that raise one, and the errors one shows as written. */
-function toastCopy(): Copy[] {
-  return [...sourceCopy(SRC, PKG), ...userErrorCopy()];
+/** Everything the source shows a person in a notification, a prompt or a picker. */
+function shownCopy(): Copy[] {
+  return [...sourceCopy(SRC, PKG), ...eachSource(userErrorsIn), ...eachSource(userMessagesIn), ...eachSource(quickPicksIn)];
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +324,7 @@ function assertClean(copy: readonly Copy[], source: string, rules: readonly Rule
 
 /** The copy of all three sources a person reads, stripped to words: the names are held against the words alone. */
 function allWords(): Copy[] {
-  return [...manifestCopy(PKG), ...pageCopy(), ...toastCopy()].map(({ where, text }) => ({ where, text }));
+  return [...manifestCopy(PKG), ...pageCopy(), ...shownCopy()].map(({ where, text }) => ({ where, text }));
 }
 
 test("package.json copy is plain and every command is in the MemQL category", () => {
@@ -289,7 +337,7 @@ test("page copy is plain and status lines are at most six words", () => {
 });
 
 test("toasts, input boxes and progress titles are plain", () => {
-  assertClean(toastCopy(), "src");
+  assertClean(shownCopy(), "src");
 });
 
 test("no user copy names Materializer, Nexus or Campaigns", () => {
@@ -347,13 +395,40 @@ test("the scans read what they exist for", () => {
   );
   assert.ok(sources.some((c) => c.text === "New Markdown document" && c.line === true), "the scan reads an input box's title");
   assert.ok(sources.some((c) => c.text === "Creating X" && c.line === true), "the scan reads a progress title");
-  const errors = userErrorCopy();
+  const errors = eachSource(userErrorsIn);
   assert.ok(errors.length > 20, "the scan found the errors an input raises");
   assert.ok(errors.some((c) => c.text === "Invalid MemQL file link." && c.line === true), "the scan reads a UserInputError");
+  assert.ok([...new Set(errors.map((c) => c.where.split(":")[0]))].filter((file) => file !== "src/extension.ts").length > 3, "the scan reads every source file, not only the extension's");
+  const messages = eachSource(userMessagesIn);
+  assert.ok(messages.length > 10, "the scan found the sentences userMessage returns");
+  assert.ok(
+    messages.some((c) => c.text === "Couldn’t X. Try again. If this continues, choose Show details." && c.line === true),
+    "the scan reads a template sentence, its placeholder as X",
+  );
+  assert.deepEqual(userMessagesIn('return "Not a message.";', "src/other.ts"), [], "only problems.ts is read for returned sentences");
+  assert.deepEqual(userMessagesIn("if (x) return `Couldn’t ${what}.`; return error.message;", "src/problems.ts").map((c) => c.text), ["Couldn’t X."]);
   assert.deepEqual(
-    [...new Set(errors.map((c) => c.where.split(":")[0]))].filter((file) => file !== "src/extension.ts").length > 3,
-    true,
-    "the scan reads every source file, not only the extension's",
+    quickPicksIn(
+      [
+        'await window.showQuickPick(["Open it", "Open it elsewhere"], { title: `Open ${name}`, placeHolder: "Choose where", canPickMany: false });',
+        "await window.showQuickPick(rows.map(row => ({ label: row.name })), { title: 'Pick one', placeHolder: 'Search' });",
+        'await window.showQuickPick([{ label: "A", description: "The first" }, { label: "B", detail: cond ? "x" : "y" }], { placeHolder: "Pick" });',
+      ].join("\n"),
+      "src/x.ts",
+    ).map((c) => [c.text, c.line === true]),
+    [
+      ["Open it", false],
+      ["Open it elsewhere", false],
+      ["Open X", true],
+      ["Choose where", true],
+      ["Pick one", true],
+      ["Search", true],
+      ["A", false],
+      ["The first", false],
+      ["B", false],
+      ["Pick", true],
+    ],
+    "a quick pick's title, placeholder and written-out items are read; a list built from data is not",
   );
   const sample = [
     'void window.showWarningMessage("Couldn\'t reach " + name + ".", "Retry");',
@@ -400,7 +475,7 @@ test("the scans read what they exist for", () => {
 });
 
 test("every exemption still matches", () => {
-  problems([...manifestCopy(PKG), ...pageCopy(), ...toastCopy()], ALLOWED, used);
+  problems([...manifestCopy(PKG), ...pageCopy(), ...shownCopy()], ALLOWED, used);
   problems(allWords(), ALLOWED, used, NAMES);
   const stale = ALLOWED.filter((a) => !used.has(a));
   assert.deepEqual(stale, [], "an exemption matches nothing; delete it");

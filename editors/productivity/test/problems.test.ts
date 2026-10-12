@@ -37,12 +37,12 @@ test("polling one durable failure keeps its reference without logging it every m
 
 test("input validation stays actionable; arbitrary server strings never pass through",()=>{
   assert.equal(userMessage(new UserInputError("Select a passage first."),"save"),"Select a passage first.");
-  assert.equal(userMessage(new Error("Select a passage first. INTERNAL password=abc"),"save"),"Couldn’t save. Try again. If this continues, use the troubleshooting reference.");
+  assert.equal(userMessage(new Error("Select a passage first. INTERNAL password=abc"),"save"),"Couldn’t save. Try again. If this continues, choose Show details.");
   assert.match(userMessage(new Error("expected version mismatch"),"save"),/Compare with the latest/);
   const denied=new Error("Permission denied");denied.name="NotAllowedError";
   assert.match(userMessage(denied,"transcribe your feedback"),/Microphone access/);
   assert.doesNotMatch(userMessage(denied,"copy the reference"),/Microphone/);
-  assert.match(userMessage(new Error("context checkpoint cannot fit the active request, tool contracts and pending exchange; history retained"),"prepare changes"),/Your work is saved/);
+  assert.match(userMessage(new Error("context checkpoint cannot fit the active request, tool contracts and pending exchange; history retained"),"prepare changes"),/Your work is saved\. If retrying doesn’t help, choose Show details\.$/);
   assert.match(userMessage(new Error("model_call_timeout: deadline exceeded"),"prepare changes"),/AI couldn’t finish/);
 });
 
@@ -91,7 +91,7 @@ test("Show details reveals the output instead of a modal", async () => {
   try {
     await showProblem(new Error("PDF parser failed"), "open the PDF");
     assert.equal(toasts.length, 1);
-    assert.match(toasts[0].message, /^Couldn’t open the PDF\./);
+    assert.equal(toasts[0].message, "Couldn’t open the PDF. Try again. If this continues, choose Show details.", "the message sends the person to the button it carries");
     assert.deepEqual(toasts[0].buttons, ["Show details"], "one toast, one button");
     assert.equal(shown.length, 1, "Show details reveals the output channel");
     const reference = /\[(tools-[^\]]+)\]/.exec(lines[0] ?? "")?.[1];
@@ -116,4 +116,20 @@ test("Show details reveals the output instead of a modal", async () => {
     for (const [name, replaced] of Object.entries(original)) { if (replaced === undefined) delete window[name]; else window[name] = replaced; }
     reporter.dispose();
   }
+});
+
+test("a notification VS Code draws itself carries the reference, since it has no Show details button", () => {
+  const generic = userMessage(new Error("PDF parser failed"), "save the PDF");
+  assert.equal(generic, "Couldn’t save the PDF. Try again. If this continues, choose Show details.");
+  assert.equal(new ReportedError({ message: generic, reference: "tools-4f7c2a" }).message,
+    "Couldn’t save the PDF. Try again. Reference: tools-4f7c2a. Search it in MemQL OS Logs.");
+  const room = userMessage(new Error("context checkpoint cannot fit the active request; history retained"), "prepare changes");
+  assert.equal(new ReportedError({ message: room, reference: "tools-1" }).message,
+    "MemQL couldn’t make enough room to continue this request. Your work is saved. Reference: tools-1. Search it in MemQL OS Logs.");
+  // A message that sends the person nowhere is carried whole, and a problem with no reference has nothing to add.
+  assert.equal(new ReportedError({ message: "The AI stopped responding. Try again.", reference: "tools-2" }).message,
+    "The AI stopped responding. Try again. Reference: tools-2. Search it in MemQL OS Logs.");
+  assert.equal(new ReportedError({ message: "Select a passage first." }).message, "Select a passage first.");
+  // The problem itself keeps the whole message: the toast and the panels show it with their own control.
+  assert.equal(new ReportedError({ message: generic, reference: "tools-3" }).problem.message, generic);
 });

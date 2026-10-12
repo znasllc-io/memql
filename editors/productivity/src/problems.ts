@@ -4,9 +4,15 @@ import { UserInputError } from "./userError.js";
 
 export { UserInputError } from "./userError.js";
 export interface Problem { message: string; reference?: string }
+/**
+ * The last sentence of a message the person cannot fix themselves: the problem toast's one button, Show details, reveals the
+ * output that holds the reference. A notification VS Code draws itself (a failed save, an editor that would not open) has no
+ * such button, so a ReportedError leaves the sentence out and carries the reference in the message instead.
+ */
+const SHOW_DETAILS_HINT = / If [^.,]+, choose Show details\.$/;
 export class ReportedError extends Error {
   constructor(readonly problem: Problem) {
-    super(problem.message + (problem.reference ? ` Reference: ${problem.reference}. Search it in MemQL OS Logs.` : ""));
+    super(problem.message.replace(SHOW_DETAILS_HINT, "") + (problem.reference ? ` Reference: ${problem.reference}. Search it in MemQL OS Logs.` : ""));
   }
 }
 
@@ -17,7 +23,7 @@ export function userMessage(error: unknown, operation: string): string {
   if (/feedback in this proposal was deleted/i.test(detail)) return "A request in this review was deleted. Propose changes again with the remaining requests.";
   if (/the review changed/i.test(detail)) return "The review changed in another window. Reopen it before deleting this request.";
   if (/modelCalls ceiling|model-call cap/i.test(detail)) return "This attempt reached its AI work limit. Your feedback is saved. Try a smaller set of changes.";
-  if (/context checkpoint|context.*(?:window|budget).*exceed/i.test(detail)) return "MemQL couldn’t make enough room to continue this request. Your work is saved. Use the troubleshooting reference if retrying doesn’t help.";
+  if (/context checkpoint|context.*(?:window|budget).*exceed/i.test(detail)) return "MemQL couldn’t make enough room to continue this request. Your work is saved. If retrying doesn’t help, choose Show details.";
   if (/idle ceiling|idle.timeout|stopped producing output/i.test(detail)) return "The AI stopped responding. Try again.";
   if (/(?:model|local runtime).*?(?:timeout|timed? out|deadline)|model_call_timeout/i.test(detail)) return "The AI couldn’t finish within the time allowed. Try a smaller request, or choose another model in Fleet.";
   if (/every_door_shut|speech recognition|transcription is not configured/i.test(detail)) return "No suitable AI model is available for this request. Check the models in Fleet, then try again.";
@@ -27,7 +33,7 @@ export function userMessage(error: unknown, operation: string): string {
   if (/unauthenticated|sign.?in|session.*expired|\b401\b/i.test(detail)) return "Your session has ended. Sign in to MemQL, then try again.";
   if (/permission denied|forbidden|not authorized|\b403\b/i.test(detail)) return "You don’t have permission for this action. Ask the file owner for access.";
   if (/disconnected|connection.*closed|network|failed to fetch|ECONN|unavailable|deadline|timed?\s*out/i.test(detail)) return "MemQL couldn’t complete the request. Check your connection and try again.";
-  return `Couldn’t ${operation}. Try again. If this continues, use the troubleshooting reference.`;
+  return `Couldn’t ${operation}. Try again. If this continues, choose Show details.`;
 }
 
 /** Credential material must not reach either the cluster log or local output. */

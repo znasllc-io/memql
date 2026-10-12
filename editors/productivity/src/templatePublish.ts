@@ -47,12 +47,12 @@ export class TemplatePublisher {
         await this.context.workspaceState.update(key, publication);
       }
     }
-    const choice = await vscode.window.showQuickPick(["Save draft in Campaigns", "Publish template for campaigns"], {
+    const choice = await vscode.window.showQuickPick(["Save draft", "Publish template for campaigns"], {
       title: publication.name, placeHolder: "Publishing makes this reviewed copy available to campaigns. It does not send mail.", ignoreFocusOut: true });
     if (!choice) return;
     if (document.version !== version || document.isDirty) throw new UserInputError("The email changed during review. Save and review it again.");
     let revision = publication.revision;
-    if (!source?.template || choice === "Save draft in Campaigns") {
+    if (!source?.template || choice === "Save draft") {
       const result = (await this.api.execute(lease, "campaignSaveTemplate", buildCampaignSaveTemplate({ ...publication, content: { ...content }, expectedRevision: revision, action: "save" })))[0];
       if (!result?.saved || !text(result,"revision")) throw new Error("Campaigns did not confirm the draft. Retry to recover its receipt.");
       revision = text(result,"revision");

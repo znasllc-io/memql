@@ -68,7 +68,7 @@ export class TemplateExamples {
     const brief = await vscode.window.showInputBox({ title: "Create email · Brief", prompt: "What should the email say, and what should it borrow from the examples? Include any approved links.", placeHolder: "Use the layout in example.png, our green brand color, and the welcome copy in brief.md.", ignoreFocusOut: true, validateInput: text => text.trim() ? undefined : "Describe the email you want." });
     if (!brief) return;
     const action = await vscode.window.showQuickPick(["Create draft", "Save as recipe and create draft"], {
-      title: `${name} · ${organization.label}`, placeHolder: `Use ${sources.length} reference(s) with Materializer. ZIP resources are inspected; nothing is published or sent.`, ignoreFocusOut: true });
+      title: `${name} · ${organization.label}`, placeHolder: `Use ${sources.length} reference(s). ZIP resources are inspected; nothing is published or sent.`, ignoreFocusOut: true });
     if (!action) return;
     let recipeId: string | undefined;
     if (action === "Save as recipe and create draft") {
