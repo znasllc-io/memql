@@ -68,8 +68,9 @@ var ErrMailboxUndecidable = errors.New("campaigns: cannot rule out an earlier op
 //     audience nobody has stamped yet holds thousands of them -- so the roster is
 //     read, as the signup always did, and the answer comes from the audience. This
 //     is the cost of the transition and it ends when the sweep has been through:
-//     afterwards the page is nearly empty. The walk stops as soon as it meets a row
-//     that opted out (nothing further can change the answer) and gives up with
+//     afterwards the page is nearly empty. The roster is not read at all when steps
+//     1 and 2 already found a row that opted out, and the walk stops as soon as it
+//     meets one (nothing further can change the answer). It gives up with
 //     ErrMailboxUndecidable after mailboxRosterScanPages pages without having seen
 //     the end of the audience.
 //
@@ -93,6 +94,12 @@ func (s *Store) MailboxMembers(ctx context.Context, audienceID, address string) 
 	members = append(members, holdingMailbox(unstamped, want)...)
 
 	if len(unstamped) >= digestLessWindow {
+		// An opt-out already in hand settles the answer; the roster could not change it.
+		for _, m := range members {
+			if m.optedOut() {
+				return members, nil
+			}
+		}
 		return s.mailboxFromRoster(ctx, audienceID, want)
 	}
 	return members, nil

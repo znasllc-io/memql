@@ -15,7 +15,8 @@ import (
 // replica still running the previous release, or by a raw write -- is found
 // instead by a second, bounded read that compares addresses. The sweep puts the
 // digest on those rows so that second read returns nothing; until it has, a
-// signup is slower, never wrong. The pass itself is
+// signup is slower and, in an audience of more than 5,000 recipients, declined for
+// now (mailbox.go), but never wrong. The pass itself is
 // database.BackfillRecipientEmailDigests: idempotent, one batch per advisory-lock
 // transaction, safe to run on every replica at once. Its header says what it does
 // to the rows and why it is not a migration.

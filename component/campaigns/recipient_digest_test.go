@@ -293,6 +293,40 @@ func rosterOf(n int, at map[int]map[string]any) []map[string]any {
 	return roster
 }
 
+// TestMailboxMembersDoesNotReadTheRosterWhenAnOptOutIsAlreadyInHand: a row that
+// opted out, found by the digest or among the digest-less page, settles the answer.
+// The roster walk costs seconds a page and could not change it.
+func TestMailboxMembersDoesNotReadTheRosterWhenAnOptOutIsAlreadyInHand(t *testing.T) {
+	const mailbox = "member@example.test"
+	for _, tc := range []struct {
+		name    string
+		engine  *mailboxEngine
+		wantIDs []string
+	}{
+		{"found by its digest", &mailboxEngine{
+			byDigest:      []map[string]any{mailboxRow("out", mailbox, "unsubscribed")},
+			withoutDigest: fullPageOfStrangers(),
+		}, []string{"out"}},
+		{"found among the rows without a digest", &mailboxEngine{
+			byDigest:      []map[string]any{mailboxRow("here", mailbox, "subscribed")},
+			withoutDigest: append(fullPageOfStrangers()[1:], mailboxRow("bare", "MEMBER@example.test", "bounced")),
+		}, []string{"here", "bare"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NewStore(tc.engine).MailboxMembers(context.Background(), "aud-1", mailbox)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(ids(got), tc.wantIDs) {
+				t.Errorf("members %v, want %v", ids(got), tc.wantIDs)
+			}
+			if pages := tc.engine.called("query audienceRosterForSend"); pages != 0 {
+				t.Errorf("the roster was read in %d pages although an opt-out was already found", pages)
+			}
+		})
+	}
+}
+
 // TestMailboxMembersWalksTheRosterAPageAtATimeAndStopsAtAnOptOut: the fallback
 // reads the audience as the send does, page by page and holding only the rows that
 // are the mailbox, and stops the moment one of them has opted out -- nothing after
