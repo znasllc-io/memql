@@ -71,14 +71,17 @@ registration.
 
 ## Email campaigns + the sending engine
 
-Campaigns are ordinary graph state (memql#3323) plus a Go sending engine
-(memql#3348). **Thirteen** concepts under `dsl/campaigns/`: nine
-operator-facing on the COMPOSITE tier `@rowAuthz(owner="ownerUserId",
-clusterOwner)` (`audience`, `recipient`, `template`, `senderIdentity`,
-`campaign`, `delivery`, `consentEvent`, `engagementEvent`, `emailRule`), four
-engine-owned and clusterOwner-tier (`sendJob`, `suppression`,
-`reputationWindow`, `warmupState`). Runbook:
-[campaign-sending.md](../../public/operate/campaign-sending.md).
+Campaigns use graph state, DSL workflows and mandatory Go send boundaries.
+The integrated feature has **twenty-one** concepts under `dsl/campaigns/`:
+`audience`, `recipient`, `template`, `emailLayout`, `senderIdentity`, `campaign`,
+`delivery`, `engagementEvent`, `sendJob`, `suppression`, `reputationWindow`,
+`warmupState`, `consentEvent`, `emailRule`, `singleSendReceipt`, `campaignSeries`,
+`newsletterBinding`, `newsletterSignup`, `testSettings`, `journey` and
+`journeyEnrollment`. Internal receipt and worker mutations require internal
+origin; public changes use organization authority and revision-checked
+capabilities. Journey enrollment identity includes the membership's `joinedAt`;
+shared gates, fresh reads and per-step receipts preserve progress across nodes.
+Runbook: [campaign-sending.md](../../public/operate/campaign-sending.md).
 
 **The composite tier is oversight, not sharing.** A cluster owner READS every
 operator's campaigns and drives the builtins on them (their gate is "can the

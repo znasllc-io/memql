@@ -262,8 +262,10 @@ Protocol references: [device authorization flow](https://learn.microsoft.com/en-
 ## Storefront newsletter signups
 
 In **Campaigns → Audiences**, open the client's audience and choose **Storefront
-signups → Connect a signup form**. Select its deployable, a published welcome
-template, and the client's sender. Write the sentence the visitor will agree to,
+signups → Connect a signup form**. Select its deployable.
+A published welcome template is optional for an audience that does not require
+confirmation; leave it empty when an automation sends the welcome. Select the
+client's sender when a welcome template is chosen. Write the sentence the visitor will agree to,
 then enable the connection. All resources must belong to the same organization.
 An audience is a marketing list, not a group granting access to MemQL.
 
@@ -284,10 +286,20 @@ remain selected while turning an existing connection off.
 
 The server derives the organization, audience, sender and live store binding.
 Form fields cannot override them. Storefront previews with a different store
-binding are refused. The current implementation uses **single opt-in**: checking
-the box records consent and enrolls the address; it does not prove control of
-the mailbox with a confirmation link. Previously unsubscribed, bounced,
-complained-about or suppressed addresses are not silently resubscribed.
+binding are refused. An audience chooses **No confirmation** or **Require
+confirmation**. With no confirmation, an affirmative signup records consent
+and enrolls a subscribed recipient. With confirmation required, the recipient
+is `pending`: no consent grant or welcome is sent until the person confirms.
+Connect an active joined automation whose first step asks for confirmation;
+the connection has no separate welcome template. Imports and row-address rules
+also respect the audience's confirmation setting. Ordinary campaign sends and
+email rules never mail a pending member.
+
+Unsubscribed, bounced, complained-about or suppressed addresses are not
+silently resubscribed. After a confirmation run has expired, a new affirmative
+form submission can start a fresh pending membership and confirmation. A retry
+of the original submission cannot do so. Renewed membership changes `joinedAt`;
+its automation enrollment and send receipts are distinct from the earlier run.
 
 Repeated submissions converge on one signup and one intended welcome per
 normalized address and audience, even across deployables and worker replicas.
@@ -383,7 +395,7 @@ write and makes none. A pod whose gate connections are all held (four signups,
 welcomes or other gates at the same moment) makes the next signup wait for one, up
 to the same six seconds, and then give the same answer.
 
-Consent is stored before a new recipient becomes sendable. The accepted record
+For audiences without confirmation, consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and
 published welcome content. Editing the template later does not rewrite that
 welcome. Changing the recipient's mailbox blocks the queued welcome instead of
@@ -431,6 +443,60 @@ rechecking uses `campaignRetryNewsletterWelcome`, both with saved revisions.
 Use the same audience in multiple campaigns, with independent templates and
 schedules. The automatic welcome is separate from those campaigns.
 
+## Email automations
+
+An automation starts when someone joins an audience or confirms their membership.
+Build a sequence of **Send email**, **Wait** and **Ask for confirmation** steps.
+It holds 1–20 steps and at least one email. A wait lasts one hour to 365 days.
+Confirmation waits 1–30 days (seven by default), uses a published template
+containing `{{confirmUrl}}`, and may appear once. A joined automation for an
+audience requiring confirmation starts with that step; a confirmed trigger
+does not ask for confirmation again. Every audience, template and sender must
+belong to the automation's organization.
+
+Save a draft and resolve its card-level issues before turning it on. Changes
+require the saved revision; an active automation is paused before editing.
+**Describe** turns a short description into an editable draft using the
+organization's existing catalog. Missing resources remain explicit issues.
+Describing saves nothing and turns nothing on.
+
+The campaign drain enrolls members joining or confirming after activation, then
+advances due steps. It borrows the recorded owner's current authority, uses
+fresh reads and coordinates across replicas with shared locks. Each membership
+is identified by its recipient and `joinedAt`; each email step has a stable
+receipt, so another replica cannot submit it again. A changed address, renewed
+membership, opt-out or suppression exits an old enrollment. Three conclusive
+preflight failures mark it failed and expose the reason. Busy locks, rate limits
+and uncertain reads wait without consuming those attempts.
+
+Pausing stops advancement and keeps progress. Archiving retires open enrollments.
+A confirmation timeout exits with “not confirmed.” A valid late confirmation
+reopens that same enrollment after its confirmation step while the automation
+is active. A separate renewed opt-in creates a new membership instead.
+
+## Email links
+
+The recipient pages are token-authenticated HTTP exceptions approved on
+2026-10-11. They need no MemQL sign-in and use the configured public API origin:
+
+| Page | Behavior |
+|---|---|
+| `/email/confirm` | GET displays the choice; POST records confirmation and consent, then wakes the matching journey. |
+| `/email/preferences` | GET displays current choices; POST changes the subscription. Unsubscribing applies organization-wide suppression. Resubscribing may lift only an unsubscribe suppression; bounce and complaint suppression remain. |
+| `/email/view` | GET renders the exact sent template revision without tracking. If it is unavailable, the page says so. |
+
+Opening a confirmation or preferences link never changes a subscription.
+Confirm links expire after 30 days; expired links record nothing. Preferences
+and view links have no time expiry, but still validate current organization and
+recipient identity. Tokens are purpose-bound and encrypted with AES-256-GCM,
+using the unsubscribe signing key and its previous-key ring. Key rotation keeps
+links valid while their key remains in that ring. Forwarding a link gives its
+holder that link's authority, so treat recipient links as private.
+
+The one-click unsubscribe endpoint retains its existing RFC 8058 behavior.
+Confirmation, preferences and unsubscribe share mailbox coordination so
+concurrent choices cannot clear an opt-out in another audience accidentally.
+
 ## Repeating campaigns
 
 Open a campaign and choose **Repeat → Set up repeating sends**. Select the first
@@ -470,8 +536,22 @@ occurrence's job and delivery records are never reset.
 ## Retrying event emails
 
 Email rules supply a stable identifier automatically for each event and recipient.
-Their firing reports count suppressed and replayed sends as skipped, and show
-uncertain outcomes as refusals.
+Their firing reports count suppressed and replayed sends as skipped, rate-limited
+sends as deferred, and uncertain outcomes as refusals. Audience rules follow
+every recipient page up to the 200-recipient firing limit. A missing or repeated
+continuation is an error, never a claim that the audience ended.
+
+A rate-limited single send with a request identifier records a pending delivery
+and becomes due after one minute. The campaign drain retries it with the same
+owner and receipt, rechecking authority, subscription, suppression, template
+publication and sender readiness. A busy gate or undecidable read leaves it
+pending. A conclusive pre-send refusal records a failure; a provider outcome
+that is uncertain is never submitted again.
+
+Rules aimed at cluster roles use the operational outbox. They require a
+published template and render its HTML and plain text for the current cluster
+recipient. This lane carries no marketing footer, tracking or recipient links;
+it does not permit an arbitrary external address.
 
 An email rule fires once, on the replica where its triggering write happened, and
 the limits its runs draw on (10 concurrent runs and the automation execution
@@ -499,8 +579,7 @@ Requests that omit `requestId` retain the existing per-invocation behavior.
 recorded on a delivery row keyed by that request and the recipient, and the row
 names the request, the template and the sender (`requestId`, `templateId`,
 `senderIdentityId`) beside the outcome. A welcome, a journey step and a rule's
-send to the same person are three rows; they used to be three versions of one row
-that each replaced the last, so which message a person got could not be answered.
+send to the same person are three independently inspectable rows.
 A retry of the same request writes a new version of its own row. A send made
 without a `requestId` keeps the row it always had, one per rule and recipient (or
 per recipient when no rule is behind it), and still overwrites its earlier record.
@@ -1129,6 +1208,10 @@ campaign body and there is not going to be:
 | `{{campaignName}}` | the campaign's name |
 | `{{accountName}}` | the tied account's name; **empty when untied**, which is the ordinary case |
 | `{{fields.<key>}}` | one key of the recipient's `fields` map, as imported |
+| `{{unsubscribeUrl}}` | the recipient's one-click unsubscribe URL |
+| `{{preferencesUrl}}` | the recipient's subscription choices |
+| `{{confirmUrl}}` | the recipient's confirmation page |
+| `{{viewInBrowserUrl}}` | the sent template revision in a browser |
 
 **The HTML and text parts escape differently, on purpose.** Every substituted
 value is HTML-escaped on the HTML path and not on the text path, because the
@@ -1136,6 +1219,15 @@ text part is not markup and escaping it would show `&amp;` to a reader.
 `displayName` and every `fields.*` value are recipient-supplied — an imported
 CSV is untrusted input — so that split is a security property, not a
 formatting one.
+
+Recipient link tags belong in a complete link destination or as a standalone
+visible URL. They cannot be embedded in an address, a subject, an HTML attribute
+fragment, a hidden field or a link label. Formatting cannot bypass this boundary.
+A template with a usable `{{unsubscribeUrl}}` link in its HTML gets no second
+HTML footer; its text part needs its own standalone URL to omit the text footer.
+The default footer names the sender's display name, then the organization name,
+then “this mailing list.” It includes subscription choices and a browser view
+when available. The List-Unsubscribe headers remain present.
 
 **An unknown tag stays literal in the body.** It is not an error and it is not
 blanked, because blanking it would delete the evidence of the typo. The way to
@@ -1233,7 +1325,7 @@ remember.
 builtin campaignStats(campaignId: "<id>")
 ```
 
-Every bucket that can be an exact count is one, at any audience size:
+The server returns these counts and preserves their completeness:
 
 | Group | Buckets |
 |---|---|
@@ -1246,14 +1338,16 @@ Every bucket that can be an exact count is one, at any audience size:
 
 They are computed server-side from the delivery ledger (status plus
 `skipReason`), the campaign's own consent events, and its engagement events.
-This replaces counting a page of rows in a browser, which under-reported every
-campaign past the page bound and did so silently.
+If a count reaches the engine's source window, the response carries
+`atLeast: {"sent": true}` (or the corresponding dotted field, such as
+`"opens.total"`). That number is a lower bound, displayed with ≥. A missing
+marker means the scan proved exhaustion. Small counts retain their exact path.
+Do not calculate an exact delivered figure or percentage from bounded inputs;
+`skipped.other` is omitted when subtracting bounded counts could invent a total.
+The send preflight walks the full roster when its capacity count is bounded,
+so the frozen `recipientCount` remains exact.
 
-`skippedCount` also now lands on the campaign row itself, where it always
-should have been: the worker has computed it per job since the sending engine
-shipped and had nowhere on the campaign to put it, so the number an operator
-most needs — the gap between the audience and what actually left — was visible
-only on a row a browser cannot read.
+`skippedCount` is also stored on the campaign row.
 `recipientCount - sentCount - skippedCount - failedCount` is what is still
 outstanding.
 
@@ -1263,8 +1357,8 @@ outstanding.
 bounded read of the engagement rows, and a read that comes back *at* its bound
 is a truncation. Reporting the folded number anyway would print a unique count
 that is quietly a floor, on the one campaign large enough that the figure
-mattered. So at the bound the answer is `unmeasured`, and the totals — which
-are exact counts — are still there.
+mattered. At the bound the answer is `unmeasured`; totals remain available
+with their own `atLeast` markers when bounded.
 
 **There is no soft-bounce figure per campaign at all.** Not a zero: the field
 is absent. Soft bounces are recorded and deliberately do not suppress, but
@@ -1671,7 +1765,7 @@ Still perfectly reasonable, and unchanged:
 | Import reports `invalid` for every row | The header is missing or does not carry an `email` column. There is no positional import: the column mapping IS the header. |
 | Import refused and nothing was written | The resulting roster would exceed `MEMQL_CAMPAIGNS_MAX_AUDIENCE`. It refuses whole rather than truncating; split the file or raise the ceiling if you mean it. |
 | A merge tag appears literally in the delivered mail | It is not in the closed set, or `{{fields.<key>}}` names a column the import did not create. Run `campaignTestSend` — it returns every tag it could not resolve. |
-| `campaignStats` says opens are `unmeasured` | The bounded engagement read came back at its bound, so a unique count would be a floor presented as a total. The `total` figures beside it are still exact counts. |
+| `campaignStats` says opens are `unmeasured` | The bounded engagement read came back at its bound, so a unique count would be a floor presented as a total. The `total` figures beside it carry `atLeast` when bounded. |
 | Opens and clicks are all zero | `trackOpens` / `trackClicks` are off on that campaign, or the message went out as text only. Tracking is the HTML part only, by design. Also check `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is externally reachable — it is the origin the pixel and redirects are built from. |
 | Everything `skipped` | The cluster suppression list matched. Browse `v1:campaigns:suppression` as the cluster owner. |
 | Recipient says the unsubscribe link does not work | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is not externally reachable, or the key that signed it has been retired by two rotations. Check the node log for `refused an unsubscribe link signed by a key this node no longer holds`; if the retired value can still be recovered, putting it back in `_PREVIOUS` revives those links. See [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |

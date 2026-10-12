@@ -121,7 +121,7 @@ func TestDoubleOptInAndJourneyRevisionAgainstTheRealEngine(t *testing.T) {
 	if binding == nil {
 		t.Fatal("newsletter binding missing")
 	}
-	args := map[string]any{"siteId": str(binding, "siteId"), "audienceId": n.audience, "senderIdentityId": str(binding, "senderIdentityId"), "consentText": str(binding, "consentText"), "enabled": true, "expectedRevision": templateTime(binding["createdAt"]).Format(time.RFC3339Nano)}
+	args := map[string]any{"siteId": str(binding, "siteId"), "audienceId": n.audience, "consentText": str(binding, "consentText"), "enabled": true, "expectedRevision": templateTime(binding["createdAt"]).Format(time.RFC3339Nano)}
 	saved, err := n.worker.handleConfigureNewsletter(n.owner, args, 0)
 	if err != nil {
 		t.Fatal(err)

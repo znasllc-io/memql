@@ -184,6 +184,7 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "campaigns/queries.memql", Name: "audienceJoinersSince"}:           true,
 		{Path: "campaigns/queries.memql", Name: "audienceConfirmationsSince"}:     true,
 		{Path: "campaigns/queries.memql", Name: "waitingEnrollmentsForRecipient"}: true,
+		{Path: "campaigns/queries.memql", Name: "recipientJourneyEnrollments"}:    true,
 		{Path: "campaigns/mutations.memql", Name: "confirmRecipientSubscription"}: true,
 		{Path: "campaigns/mutations.memql", Name: "restartRecipientMembership"}:   true,
 		{Path: "campaigns/mutations.memql", Name: "createJourney"}:                true,

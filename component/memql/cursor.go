@@ -125,12 +125,9 @@ type keysetPositionKey struct{}
 
 // ContextWithCursor threads an opaque inbound pagination cursor from the
 // request onto the context. The engine lifts it onto plan.After at execution
-// time. Empty cursors are a no-op (offset pagination and unpaginated queries
-// continue to work unchanged).
+// time. An empty cursor clears an inherited continuation so a new traversal
+// starts at its first page.
 func ContextWithCursor(ctx context.Context, cursor string) context.Context {
-	if strings.TrimSpace(cursor) == "" {
-		return ctx
-	}
 	return context.WithValue(ctx, inboundCursorKey{}, strings.TrimSpace(cursor))
 }
 

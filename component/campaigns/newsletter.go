@@ -147,6 +147,9 @@ func (w *Worker) handleConfigureNewsletter(ctx context.Context, args map[string]
 		"consentText": strings.TrimSpace(argString(args, "consentText")),
 		"storeId":     bare(str(objectField(site, "binding"), "storeId")),
 	}
+	if str(values, "templateId") == "" {
+		values["senderIdentityId"] = ""
+	}
 	if len(str(values, "consentText")) < 10 || len(str(values, "consentText")) > 1000 || strings.IndexFunc(str(values, "consentText"), unicode.IsControl) >= 0 {
 		return nil, fmt.Errorf("write a short consent sentence for the signup form (10–1000 characters)")
 	}
@@ -209,9 +212,6 @@ func newsletterReceipt(row map[string]any) ([]memorynodes.MemoryNode, error) {
 // count (see preflightAudienceWith).
 func (w *Worker) newsletterPreflight(ctx context.Context, row map[string]any, sending bool, known *int) (Template, error) {
 	campaign := Campaign{AccountID: bare(str(row, "accountId")), AudienceID: bare(str(row, "audienceId")), TemplateID: bare(str(row, "templateId")), SenderIdentityID: bare(str(row, "senderIdentityId"))}
-	if campaign.SenderIdentityID == "" {
-		return Template{}, fmt.Errorf("select this organization's sender")
-	}
 	audience, found, err := w.store.AudienceByID(ctx, campaign.AudienceID)
 	if err != nil {
 		return Template{}, err
@@ -226,11 +226,10 @@ func (w *Worker) newsletterPreflight(ctx context.Context, row map[string]any, se
 		if err := w.requireSendAuthority(ctx, campaign.AccountID); err != nil {
 			return Template{}, err
 		}
-		_, refusal := w.resolveSendIdentity(ctx, campaign)
-		if refusal.refused() {
-			return Template{}, fmt.Errorf("%s", refusal.Reason)
-		}
 		return Template{}, nil
+	}
+	if campaign.SenderIdentityID == "" {
+		return Template{}, fmt.Errorf("select this organization's sender")
 	}
 	if sending {
 		_, snapshot, err := w.preflightAudienceWith(ctx, "newsletter", campaign, true, known)
@@ -323,7 +322,9 @@ func (w *Worker) signupSettled(ctx context.Context, row map[string]any, signupID
 // the locks are still held; a write, once started, is not cut by the phase's end or the
 // visitor's leaving, and commits while the locks are held (detachedWrite), which is why
 // the locks' transaction does not end with the request either. What runs under them is
-// kept to a handful of reads and the writes, and never a roster walk. For a mailbox
+// normally kept to a handful of reads and the writes. If the capacity count
+// reaches the engine window, a cursor walk proves the exact size within this
+// same phase deadline. For a mailbox
 // about to be added two of those reads are the expensive ones: the engine answers any
 // recipient read, the keyed one and the count alike, from every current recipient in
 // the cluster, so each costs seconds at 200,000 recipients, and a new subscriber holds
@@ -357,6 +358,9 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	if settled, err := w.signupSettled(ctx, row, signupID, address); err != nil {
 		return nil, err
 	} else if settled {
+		if err := w.renewExpiredSignup(ctx, row, args, signupID, address); err != nil {
+			return nil, err
+		}
 		return accepted()
 	}
 	// The rows the mailbox holds are found by the digest of the address and, for
