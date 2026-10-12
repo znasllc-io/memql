@@ -57,6 +57,7 @@ func TestAClientCannotGetAnUngatedBundleArmed(t *testing.T) {
 		if err := serverCreatesBundle(eng, client, bundleId, "An ungated bundle"); err != nil {
 			t.Fatalf("setup: the bundle: %v", err)
 		}
+		retireWhenDone(t, eng, client, bundleId)
 		if err := serverWritesConstruct(eng, client, "v1:authoring:construct:ungated-"+name+"-"+run, bundleId, automation); err != nil {
 			t.Fatalf("setup: the bundle's construct: %v", err)
 		}
@@ -98,6 +99,7 @@ func TestAClientCannotGetAnUngatedBundleArmed(t *testing.T) {
 	t.Run("raw-insert-of-a-new-active-bundle", func(t *testing.T) {
 		bundleId := bundleConceptID + ":ungated-new-" + run
 		ungated = append(ungated, bundleId)
+		retireWhenDone(t, eng, client, bundleId) // only if a regression lets the insert land
 		payload, _ := json.Marshal(map[string]any{"title": "Born active", "status": "active", "version": 1})
 		if _, err := eng.Execute(client, fmt.Sprintf(`insert("%s", id="%s", payload=%s)`, bundleConceptID, bundleId, payload)); err == nil {
 			t.Errorf("a client's raw insert of a new active bundle was accepted")

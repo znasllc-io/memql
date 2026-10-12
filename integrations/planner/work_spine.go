@@ -464,6 +464,12 @@ func (e *spineMeteredEngine) WriteAuthoringBundle(ctx context.Context, b memql.A
 	return writeAuthoringBundle(ctx, e.Engine, b)
 }
 
+// RecordBundleValidation passes a Gate 1 verdict through to the metered engine,
+// for the same reason (memql#6022).
+func (e *spineMeteredEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	return recordBundleValidation(ctx, e.Engine, v)
+}
+
 func (e *spineMeteredEngine) InvokeAI(ctx context.Context, name string, data map[string]any) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

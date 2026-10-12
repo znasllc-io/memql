@@ -718,8 +718,6 @@ export const BoundConcepts = {
   recipientById: "v1:campaigns:recipient",
   recipientsForAudience: "v1:campaigns:recipient",
   recordApprovalDecision: "v1:commerce:approvalChain",
-  recordBundleDryRun: "v1:authoring:bundle",
-  recordBundleValidation: "v1:authoring:bundle",
   recordConsentBounce: "v1:campaigns:consentEvent",
   recordConsentComplaint: "v1:campaigns:consentEvent",
   recordConsentGrant: "v1:campaigns:consentEvent",

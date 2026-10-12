@@ -96,14 +96,32 @@ func (f *fakeEngine) WriteAuthoringBundle(ctx context.Context, b memql.Authoring
 	return err
 }
 
-// Execute refuses the two @serverOnly creates without internal origin, as the
-// engine does (memql#6022) -- and only its writers stamp it. A planner write
-// that bypassed the writer would otherwise pass here and be refused in
-// production.
+// validationCall is the recordBundleValidation call the planner sent through
+// Execute before the write moved onto the engine's recorder (memql#6022),
+// rendered back the same way.
+func validationCall(v memql.BundleValidationInput) string {
+	args := map[string]any{"bundleId": v.BundleId, "status": v.Status, "validationReport": v.Report}
+	if v.FailureReason != "" {
+		args["failureReason"] = v.FailureReason
+	}
+	return "recordBundleValidation(" + encodeArgs(args) + ")"
+}
+
+// RecordBundleValidation records the verdict the way the planner used to send
+// it, stamped as the engine's recorder stamps it.
+func (f *fakeEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := f.Execute(auth.ContextWithInternalOrigin(ctx), validationCall(v))
+	return err
+}
+
+// Execute refuses the @serverOnly authoring writes the planner makes without
+// internal origin, as the engine does (memql#6022) -- and only the engine's
+// writers stamp it. A planner write that bypassed the writer would otherwise
+// pass here and be refused in production.
 func (f *fakeEngine) Execute(ctx context.Context, query string) (any, error) {
-	for _, create := range []string{"createAuthoringBundle(", "createAuthoringConstruct("} {
-		if strings.HasPrefix(query, create) && !auth.OriginFromContext(ctx).IsInternal() {
-			return nil, fmt.Errorf("fakeEngine: %s is @serverOnly; called without internal origin", strings.TrimSuffix(create, "("))
+	for _, write := range []string{"createAuthoringBundle(", "createAuthoringConstruct(", "recordBundleValidation(", "recordBundleDryRun("} {
+		if strings.HasPrefix(query, write) && !auth.OriginFromContext(ctx).IsInternal() {
+			return nil, fmt.Errorf("fakeEngine: %s is @serverOnly; called without internal origin", strings.TrimSuffix(write, "("))
 		}
 	}
 	f.mu.Lock()

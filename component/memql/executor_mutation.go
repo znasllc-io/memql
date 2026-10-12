@@ -1085,8 +1085,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// TO EXIST only as a server pipeline's write: a rule's next bundle id is
 	// known before it is written, and a bundle another person created there
 	// first would block its owner. See authoring_bundle_create_write_guard.go.
+	// And a GATE'S VERDICT is the server's claim that the gate ran: a work
+	// template runs from a validated bundle, and a bundle activates from
+	// dryRunPassed. See authoring_bundle_verdict_write_guard.go.
 	if conceptMeta.Name == conceptAuthoringBundle {
 		if err := validateBundleCreateServerOnly(ctx, organizationPrior); err != nil {
+			return nil, meta, err
+		}
+		if err := validateBundleVerdictServerOnly(ctx, organizationPrior, payload); err != nil {
 			return nil, meta, err
 		}
 		if err := validateBundleActivationServerOnly(ctx, organizationPrior, payload); err != nil {

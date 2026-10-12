@@ -238,13 +238,6 @@ func (l *PlannerAgentLoop) persistWorkDraft(ctx context.Context, req CompileRequ
 		return out, fmt.Errorf("work compile: load validated headline: %w", err)
 	}
 	bundleId := id.NewShortId()
-	write := func(name string, args map[string]any) error {
-		_, err := l.engine.Execute(ownerActorContext(ctx, req.OwnerUserId), name+"("+encodeArgs(args)+")")
-		if err != nil {
-			return &draftPersistenceError{err: err}
-		}
-		return nil
-	}
 	// createAuthoringBundle is @serverOnly (memql#6022): the engine creates the
 	// bundle, as it writes its members below.
 	draft := memql.AuthoringBundleInput{BundleId: bundleId, Title: truncate(req.Statement, 120), SourceRunId: req.RunId}
@@ -268,8 +261,12 @@ func (l *PlannerAgentLoop) persistWorkDraft(ctx context.Context, req CompileRequ
 			out.ConstructId = "v1:authoring:construct:" + constructId
 		}
 	}
-	if err := write("recordBundleValidation", map[string]any{"bundleId": bundleId, "status": "validated", "validationReport": structToObject(report)}); err != nil {
-		return out, fmt.Errorf("work compile: persist Gate 1: %w", err)
+	// recordBundleValidation is @serverOnly (memql#6022): the engine records the
+	// verdict of the Gate 1 run above.
+	if err := recordBundleValidation(ownerActorContext(ctx, req.OwnerUserId), l.engine, memql.BundleValidationInput{
+		BundleId: bundleId, Status: "validated", Report: structToObject(report),
+	}); err != nil {
+		return out, fmt.Errorf("work compile: persist Gate 1: %w", &draftPersistenceError{err: err})
 	}
 	out.AutomationName = bundle.AutomationName
 	out.TemplateFingerprint = auto.DefinitionFingerprint(id.NewUntracked())

@@ -1,15 +1,16 @@
 package app
 
-// planner_construct_writer_db_test.go -- the planner's bundle and
-// member-construct writes reach the database through the App's planner engine
+// planner_construct_writer_db_test.go -- the planner's bundle, member-construct
+// and Gate 1 verdict writes reach the database through the App's planner engine
 // (memql#6022).
 //
-// createAuthoringBundle and createAuthoringConstruct are @serverOnly and
-// integrations/planner may not stamp internal origin, so the planner hands the
-// writes to the engine's writers through CognitionEngineAdapter. A planner
-// build asserts the adapter has the methods (integrations_planner_init.go);
-// this asserts the methods WRITE, against a real Postgres, and that the write
-// guard still holds a member to a draft bundle.
+// createAuthoringBundle, createAuthoringConstruct and recordBundleValidation
+// are @serverOnly and integrations/planner may not stamp internal origin, so
+// the planner hands the writes to the engine's writers through
+// CognitionEngineAdapter. A planner build asserts the adapter has the methods
+// (integrations_planner_init.go); this asserts the methods WRITE, against a
+// real Postgres, and that the write guard still holds a member to a draft
+// bundle.
 
 import (
 	"context"
@@ -47,6 +48,20 @@ func TestCognitionEngineAdapterWritesAuthoringBundlesAndConstructs(t *testing.T)
 	if err := db.QueryRowContext(context.Background(),
 		`SELECT count(*) FROM "MemoryNodes" WHERE concept = 'v1:authoring:construct' AND id = ?`, construct).Scan(&n); err != nil || n == 0 {
 		t.Fatalf("the planner's construct did not land (%d rows, %v)", n, err)
+	}
+
+	// Gate 1's verdict, through the adapter's recorder (recordBundleValidation
+	// is @serverOnly too).
+	if err := adapter.RecordBundleValidation(ctx, memql.BundleValidationInput{
+		BundleId: bundle, Status: "validated", Report: map[string]any{"ok": true},
+	}); err != nil {
+		t.Fatalf("the planner's Gate 1 verdict: %v", err)
+	}
+	var status string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COALESCE(payload->>'status', '') FROM "MemoryNodes" WHERE concept = 'v1:authoring:bundle' AND id = ? ORDER BY "createdAt" DESC LIMIT 1`, bundle).Scan(&status); err != nil ||
+		status != "validated" {
+		t.Fatalf("the planner's Gate 1 verdict left the bundle %q (%v), want validated", status, err)
 	}
 
 	// Once the bundle's gates have run, the same writer is refused.

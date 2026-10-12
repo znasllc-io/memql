@@ -346,6 +346,14 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// minting a fresh id; the create guard holds raw writes to the same
 		// rule (component/memql/authoring_bundle_create_write_guard.go).
 		{Path: "authoring/mutations.memql", Name: "createAuthoringBundle"}: true,
+		// And a GATE'S VERDICT (memql#6022): the claim that a gate ran. A work
+		// template runs from a bundle only once it reads validated, and a bundle
+		// activates only from dryRunPassed, so the server pipelines that run the
+		// gates record them, under internal origin; the verdict guard holds raw
+		// writes to the same rule
+		// (component/memql/authoring_bundle_verdict_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "recordBundleValidation"}: true,
+		{Path: "authoring/mutations.memql", Name: "recordBundleDryRun"}:     true,
 
 		// epic memql#4966. workRunsInFlight is the wait-and-abandon sweep's
 		// read. (A2 briefly carried a closeWorkGoal beside it; epic A3's

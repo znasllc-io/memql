@@ -71,6 +71,13 @@ func (e *sectionCatalogEngine) WriteAuthoringBundle(ctx context.Context, b memql
 	return err
 }
 
+// RecordBundleValidation records the Gate 1 verdict as the call the planner
+// used to send (memql#6022).
+func (e *sectionCatalogEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := e.Execute(ctx, validationCall(v))
+	return err
+}
+
 func (e *sectionCatalogEngine) Execute(ctx context.Context, q string) (any, error) {
 	for _, name := range []string{"cataloguedConstructsForGoalSignature", "cataloguedConstructsForOwner", "authoringConstructsForBundle", "authoringBundleById", "workDescriptionGuidance"} {
 		if !strings.Contains(q, name+"(") {

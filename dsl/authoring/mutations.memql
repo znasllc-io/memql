@@ -80,8 +80,15 @@ mutation construct createAuthoringConstruct {
 /// Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status
 /// is validated on success or failed on a binding error; validationReport carries the structured
 /// diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row
-/// owned + satisfies per-row authz).
+/// owned + satisfies per-row authz). @serverOnly (memql#6022): a gate's verdict is the claim that the
+/// gate ran -- a work template runs from a bundle only once it reads validated, and a bundle
+/// activates only from dryRunPassed -- so it is the server pipelines that run Gate 1 that record it,
+/// under internal origin. SCOPING TO actor.userId IS NOT THE FIX: the bundle is already its owner's,
+/// and the owner is exactly who the gates stand in front of; what must not be caller-writable is the
+/// verdict. A raw insert() or update() never consults this annotation, so the verdict fields are
+/// also held at the write chokepoint: component/memql/authoring_bundle_verdict_write_guard.go.
 @actor
+@serverOnly
 mutation bundle recordBundleValidation {
   args {
     bundleId          string!
@@ -100,8 +107,13 @@ mutation bundle recordBundleValidation {
 
 /// Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status.
 /// status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace +
-/// side-effect manifest + cost estimate (the Gate 3 approval artifact).
+/// side-effect manifest + cost estimate (the Gate 3 approval artifact). @serverOnly (memql#6022), for
+/// recordBundleValidation's reason: dryRunPassed is the claim that the dry run ran, and only a
+/// dryRunPassed bundle activates. SCOPING TO actor.userId IS NOT THE FIX: the bundle is already its
+/// owner's; what must not be caller-writable is the verdict. Raw writes are held at the write
+/// chokepoint too: component/memql/authoring_bundle_verdict_write_guard.go.
 @actor
+@serverOnly
 mutation bundle recordBundleDryRun {
   args {
     bundleId       string!

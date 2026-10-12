@@ -45,6 +45,12 @@ func (e *draftDBCompiler) WriteAuthoringBundle(ctx context.Context, in memql.Aut
 	return e.engine.WriteAuthoringBundle(ctx, in)
 }
 
+// RecordBundleValidation is the engine's own recorder of Gate 1's verdict
+// (memql#6022).
+func (e *draftDBCompiler) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	return e.engine.RecordBundleValidation(ctx, v)
+}
+
 func (e *draftDBCompiler) Execute(ctx context.Context, q string) (any, error) {
 	return e.engine.Execute(ctx, q)
 }

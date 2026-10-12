@@ -63,6 +63,22 @@ func serverCreatesBundle(eng *MemQLEngine, owner context.Context, bundleId, titl
 	return eng.WriteAuthoringBundle(owner, AuthoringBundleInput{BundleId: bundleId, Title: title})
 }
 
+// retireWhenDone retires a bundle when the test ends, however it ends. Every
+// replica's reconcile pass and boot re-arm arm every bundle that reads active
+// in the database, and the test database is shared and never truncated, so a
+// bundle a test leaves active is armed in every run after it (memql#6022).
+// Registered right after the bundle is created -- before anything arms it --
+// so a test that stops midway still cleans up. A bundle that is already
+// retired, or was never created, only logs.
+func retireWhenDone(t *testing.T, eng *MemQLEngine, owner context.Context, bundleId string) {
+	t.Helper()
+	t.Cleanup(func() {
+		if _, err := eng.Execute(owner, fmt.Sprintf(`mutation retireAuthoringBundle(bundleId: %s)`, languageParser.QuoteString(bundleId))); err != nil {
+			t.Logf("retire bundle %s after the test: %v", bundleId, err)
+		}
+	})
+}
+
 // serverWritesConstruct is a gate-running pipeline's write of a member
 // construct: createAuthoringConstruct under internal origin, as the owner.
 func serverWritesConstruct(eng *MemQLEngine, owner context.Context, constructId, bundleId, name string) error {
@@ -86,6 +102,7 @@ func TestASecondUserCannotTouchAnotherUsersBundle(t *testing.T) {
 	if err := serverCreatesBundle(eng, a, bundleId, "The first user's rule"); err != nil {
 		t.Fatalf("the first user's bundle: %v", err)
 	}
+	retireWhenDone(t, eng, a, bundleId)
 	if err := serverWritesConstruct(eng, a, constructId, bundleId, "ownedRule"); err != nil {
 		t.Fatalf("the first user's construct: %v", err)
 	}
@@ -171,6 +188,7 @@ func TestAGatedBundleArmsOnlyWhatItsGateSaw(t *testing.T) {
 	if err := serverCreatesBundle(eng, owner, bundleId, "Gated"); err != nil {
 		t.Fatalf("the pipeline's bundle: %v", err)
 	}
+	retireWhenDone(t, eng, owner, bundleId)
 	// Not even into the owner's own draft from a client, and not from the
 	// pipeline as somebody else.
 	_, err := eng.Execute(owner, fmt.Sprintf(`insert("%s", id="%s", payload={"bundleId":%q,"kind":"automation","name":"clientDraft","targetNamespace":"campaigns","source":"automation clientDraft { }","status":"draft"})`,

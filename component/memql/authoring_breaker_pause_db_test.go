@@ -40,6 +40,7 @@ func TestAPausedBundleTurnedOnAgainCarriesNoFailureReason(t *testing.T) {
 	if err := serverCreatesBundle(eng, ctx, bundleId, "A paused bundle turned on again"); err != nil {
 		t.Fatalf("create the bundle: %v", err)
 	}
+	retireWhenDone(t, eng, ctx, bundleId)
 	activation := &engineActivationStore{engine: eng}
 	if err := activation.SetBundleActive(ctx, bundleId); err != nil {
 		t.Fatalf("activate the bundle: %v", err)
@@ -78,6 +79,7 @@ func TestARetiredBundleTurnedOnAgainCarriesNoRetirement(t *testing.T) {
 	if err := serverCreatesBundle(eng, ctx, bundleId, "A bundle turned off and on"); err != nil {
 		t.Fatalf("create the bundle: %v", err)
 	}
+	retireWhenDone(t, eng, ctx, bundleId)
 	activation := &engineActivationStore{engine: eng}
 	if err := activation.SetBundleActive(ctx, bundleId); err != nil {
 		t.Fatalf("activate the bundle: %v", err)
@@ -133,6 +135,7 @@ func TestAPauseNeverOverwritesARetireWrittenElsewhere(t *testing.T) {
 	if err := serverCreatesBundle(eng, ctx, bundleId, "A bundle retired while it tripped"); err != nil {
 		t.Fatalf("create the bundle: %v", err)
 	}
+	retireWhenDone(t, eng, ctx, bundleId)
 	if err := serverWritesConstruct(eng, ctx, "v1:authoring:construct:fenced-pause-"+run, bundleId, "autoFencedPause"); err != nil {
 		t.Fatalf("setup: the bundle's construct: %v", err)
 	}

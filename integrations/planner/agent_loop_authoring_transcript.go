@@ -377,14 +377,10 @@ func (d *AuthoringCaptureDispatcher) recordTranscriptValidated(ctx context.Conte
 		vr["ok"] = true
 		vr["gate1"] = "unavailable"
 	}
-	args := map[string]any{
-		"bundleId":         bundleId,
-		"status":           "validated",
-		"validationReport": vr,
-	}
-	q := fmt.Sprintf(`recordBundleValidation(%s)`, encodeArgs(args))
-	_, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
-	return err
+	// recordBundleValidation is @serverOnly (memql#6022): the engine records it.
+	return recordBundleValidation(ownerActorContext(ctx, ownerUserId), d.engine, memql.BundleValidationInput{
+		BundleId: bundleId, Status: "validated", Report: vr,
+	})
 }
 
 // --- helpers --------------------------------------------------------------

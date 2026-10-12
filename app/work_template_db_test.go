@@ -91,7 +91,9 @@ func TestWorkTemplateDBResolvesAndRunsOnAnotherEngine(t *testing.T) {
 	if _, err := loadWorkTemplate(ctx, reader, loader, j); err == nil {
 		t.Fatal("unvalidated draft executed")
 	}
-	templateMutation(t, writer, ctx, "recordBundleValidation", map[string]any{"bundleId": bundle, "status": "validated", "validationReport": map[string]any{"ok": true}})
+	// Gate 1's verdict is the work compile's own write too: recordBundleValidation
+	// is @serverOnly (memql#6022).
+	templateMutation(t, writer, auth.ContextWithInternalOrigin(ctx), "recordBundleValidation", map[string]any{"bundleId": bundle, "status": "validated", "validationReport": map[string]any{"ok": true}})
 	reader.InvalidateCacheForConcept("v1:authoring:bundle")
 	tpl, err := loadWorkTemplate(ctx, reader, loader, j)
 	if err != nil {

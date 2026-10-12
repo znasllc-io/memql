@@ -4579,64 +4579,6 @@ QueryClient.prototype.recordApprovalDecision = function (this: QueryClient, args
   return this.executeNamed("recordApprovalDecision", buildRecordApprovalDecision(args), opts);
 };
 
-/** Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact). */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["recordBundleDryRun"] in generated_concepts.ts).
-export interface RecordBundleDryRunArgs {
-  bundleId: string;
-  // Enum: dryRunPassed | failed
-  status: string;
-  dryRunReport: Record<string, unknown>;
-  failureReason?: string;
-}
-
-export function buildRecordBundleDryRun(args: RecordBundleDryRunArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  parts.push("dryRunReport: " + renderMemQLValue(args.dryRunReport));
-  if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
-  return "mutation recordBundleDryRun(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordBundleDryRun(args: RecordBundleDryRunArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordBundleDryRun = function (this: QueryClient, args: RecordBundleDryRunArgs = {} as RecordBundleDryRunArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordBundleDryRun", buildRecordBundleDryRun(args), opts);
-};
-
-/** Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status is validated on success or failed on a binding error; validationReport carries the structured diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row owned + satisfies per-row authz). */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["recordBundleValidation"] in generated_concepts.ts).
-export interface RecordBundleValidationArgs {
-  bundleId: string;
-  // Enum: validated | failed
-  status: string;
-  validationReport: Record<string, unknown>;
-  failureReason?: string;
-}
-
-export function buildRecordBundleValidation(args: RecordBundleValidationArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  parts.push("validationReport: " + renderMemQLValue(args.validationReport));
-  if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
-  return "mutation recordBundleValidation(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordBundleValidation(args: RecordBundleValidationArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordBundleValidation = function (this: QueryClient, args: RecordBundleValidationArgs = {} as RecordBundleValidationArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordBundleValidation", buildRecordBundleValidation(args), opts);
-};
-
 /** Append a provider bounce event. Append-only. */
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["recordConsentBounce"] in generated_concepts.ts).
 export interface RecordConsentBounceArgs {

@@ -55,3 +55,42 @@ func (e *MemQLEngine) WriteAuthoringBundle(ctx context.Context, b AuthoringBundl
 	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
 	return err
 }
+
+// BundleValidationInput is Gate 1's verdict on a bundle, as a server pipeline
+// that ran the gate records it.
+type BundleValidationInput struct {
+	BundleId string
+	// Status is "validated" or "failed".
+	Status string
+	// Report is the structured verdict (validationReport): any JSON-encodable
+	// object.
+	Report any
+	// FailureReason is optional; empty leaves it unset.
+	FailureReason string
+}
+
+// RecordBundleValidation records Gate 1's verdict on a bundle, as the actor ctx
+// carries and under internal origin: recordBundleValidation is @serverOnly
+// (memql#6022), because a verdict is the claim that the gate ran -- a work
+// template runs from a bundle only once it reads validated.
+//
+// It is the one place a pipeline that may not stamp internal origin itself --
+// the planner's capture and work compile, each of which runs Gate 1 before it
+// records the verdict -- hands that write to, as WriteAuthoringBundle is for
+// the bundle itself.
+func (e *MemQLEngine) RecordBundleValidation(ctx context.Context, v BundleValidationInput) error {
+	args := map[string]any{
+		"bundleId":         v.BundleId,
+		"status":           v.Status,
+		"validationReport": v.Report,
+	}
+	if strings.TrimSpace(v.FailureReason) != "" {
+		args["failureReason"] = v.FailureReason
+	}
+	call, err := languageParser.RenderCall("recordBundleValidation", args)
+	if err != nil {
+		return fmt.Errorf("authoring: render the Gate 1 verdict: %w", err)
+	}
+	_, err = e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+	return err
+}

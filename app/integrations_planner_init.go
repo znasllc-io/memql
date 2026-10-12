@@ -21,6 +21,10 @@ var _ planner.AuthoredConstructWriter = (*CognitionEngineAdapter)(nil)
 // memql#6022); without it neither could create one.
 var _ planner.AuthoringBundleWriter = (*CognitionEngineAdapter)(nil)
 
+// And their Gate 1 verdicts (recordBundleValidation is @serverOnly,
+// memql#6022); without it neither could record that the gate ran.
+var _ planner.BundleValidationRecorder = (*CognitionEngineAdapter)(nil)
+
 // setupPlannerIntegration creates and registers the planner
 // integration on a planner-tagged binary. The integration owns
 // Plan / Task lifecycle: subscribes to graph.node.updated events

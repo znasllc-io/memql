@@ -32,6 +32,13 @@ func (e *workDependencyEngine) WriteAuthoringBundle(ctx context.Context, b memql
 	return err
 }
 
+// RecordBundleValidation records the Gate 1 verdict as the call the planner
+// used to send (memql#6022).
+func (e *workDependencyEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := e.Execute(ctx, validationCall(v))
+	return err
+}
+
 func (e *workDependencyEngine) Execute(ctx context.Context, query string) (any, error) {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || ac.UserId != "alice" {

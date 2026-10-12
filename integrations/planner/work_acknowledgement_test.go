@@ -41,6 +41,13 @@ func (e *acknowledgementTestEngine) WriteAuthoringBundle(ctx context.Context, b 
 	return err
 }
 
+// RecordBundleValidation records the Gate 1 verdict as the call the planner
+// used to send (memql#6022).
+func (e *acknowledgementTestEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := e.Execute(ctx, validationCall(v))
+	return err
+}
+
 func (e *acknowledgementTestEngine) Execute(ctx context.Context, q string) (any, error) {
 	if strings.Contains(q, "workAcknowledgementCache") {
 		return []map[string]any{e.candidate}, nil

@@ -27,6 +27,13 @@ func (e *refreshOriginEngine) WriteAuthoringBundle(ctx context.Context, b memql.
 	return err
 }
 
+// RecordBundleValidation records the Gate 1 verdict as the call the planner
+// used to send (memql#6022).
+func (e *refreshOriginEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := e.Execute(ctx, validationCall(v))
+	return err
+}
+
 func (e *refreshOriginEngine) Execute(ctx context.Context, query string) (any, error) {
 	e.origins = append(e.origins, auth.OriginFromContext(ctx).IsInternal())
 	return e.fakeEngine.Execute(ctx, query)

@@ -48,3 +48,24 @@ func writeAuthoringBundle(ctx context.Context, engine any, b memql.AuthoringBund
 	}
 	return w.WriteAuthoringBundle(ctx, b)
 }
+
+// BundleValidationRecorder is the engine's one recorder of Gate 1's verdict for
+// this package (memql#6022). recordBundleValidation is @serverOnly -- a verdict
+// is the claim that the gate ran, and a work template runs from a bundle only
+// once it reads validated -- and this package does not stamp internal origin,
+// so the capture and the work compile, each of which runs Gate 1 first, hand
+// the write to the engine, which stamps it. The App's planner engine implements
+// it (app/adapters.go).
+type BundleValidationRecorder interface {
+	RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error
+}
+
+// recordBundleValidation records v through engine's recorder. An engine without
+// one cannot record a verdict at all.
+func recordBundleValidation(ctx context.Context, engine any, v memql.BundleValidationInput) error {
+	r, ok := engine.(BundleValidationRecorder)
+	if !ok {
+		return fmt.Errorf("planner: this engine cannot record a Gate 1 verdict (recordBundleValidation is server-only, memql#6022)")
+	}
+	return r.RecordBundleValidation(ctx, v)
+}

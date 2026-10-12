@@ -129,7 +129,22 @@ func TestASecondUserCannotTakeOrBlockTheFirstUsersRoutingRule(t *testing.T) {
 		}
 	}
 
+	// Retired however the test ends, once a rule can arm: a bundle left active
+	// is armed by every later reconcile against this shared database. Through
+	// the mutation as the author -- the activator's Retire hands the engine the
+	// bare owner the builtin passes, which the reported defect makes refuse.
+	retireWhenDone := func(who routingRuleAuthor, name string) {
+		t.Cleanup(func() {
+			id := routingrules.BundleIdFor(who.owner, name)
+			if _, err := engine.Execute(who.ctx, fmt.Sprintf(`mutation retireAuthoringBundle(bundleId: %s)`, langparser.QuoteString(id))); err != nil {
+				t.Logf("retire %s after the test: %v", id, err)
+			}
+		})
+	}
+
 	shared := uniqueRuleName("sharedRule")
+	retireWhenDone(second, shared)
+	retireWhenDone(first, shared)
 	res, err := activator.Activate(second.ctx, second.owner, routingRuleForm(shared))
 	written(second, shared, res, err)
 	theirs := res
@@ -143,6 +158,7 @@ func TestASecondUserCannotTakeOrBlockTheFirstUsersRoutingRule(t *testing.T) {
 	// The id the first user's next rule will have is known before it is
 	// written; the second user cannot create a bundle there.
 	next := uniqueRuleName("nextRule")
+	retireWhenDone(first, next)
 	nextId := routingrules.BundleIdFor(first.owner, next)
 	for _, c := range []struct{ how, call string }{
 		{"through createAuthoringBundle", fmt.Sprintf(`mutation createAuthoringBundle(bundleId: %s, title: "Squatting")`, langparser.QuoteString(nextId))},

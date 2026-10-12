@@ -69,6 +69,12 @@ func (b *sectionCatalogBridge) WriteAuthoringBundle(ctx context.Context, in memq
 	return b.engine.WriteAuthoringBundle(ctx, in)
 }
 
+// RecordBundleValidation is the engine's own recorder of Gate 1's verdict
+// (memql#6022).
+func (b *sectionCatalogBridge) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	return b.engine.RecordBundleValidation(ctx, v)
+}
+
 func (b *sectionCatalogBridge) Execute(ctx context.Context, q string) (any, error) {
 	if strings.Contains(q, "assistantAgentForUser(") {
 		return []map[string]any{{"id": sectionCatalogAgent}}, nil

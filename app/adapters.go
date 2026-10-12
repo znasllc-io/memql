@@ -59,6 +59,16 @@ func (a *CognitionEngineAdapter) WriteAuthoringBundle(ctx context.Context, b mem
 	return a.Engine.WriteAuthoringBundle(ctx, b)
 }
 
+// RecordBundleValidation hands the planner's Gate 1 verdicts to the engine's
+// one recorder of them: recordBundleValidation is @serverOnly (memql#6022), and
+// the planner does not stamp internal origin.
+func (a *CognitionEngineAdapter) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	if a == nil || a.Engine == nil {
+		return fmt.Errorf("memql engine not configured")
+	}
+	return a.Engine.RecordBundleValidation(ctx, v)
+}
+
 func (a *CognitionEngineAdapter) RegisterIntegration(provider memql.IntegrationProvider) error {
 	if a == nil || a.Engine == nil {
 		return fmt.Errorf("memql engine not configured")

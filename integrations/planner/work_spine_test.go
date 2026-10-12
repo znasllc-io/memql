@@ -143,6 +143,13 @@ func (e *uncertainDraftEngine) WriteAuthoringBundle(ctx context.Context, b memql
 	return err
 }
 
+// RecordBundleValidation records the Gate 1 verdict as the call the planner
+// used to send (memql#6022).
+func (e *uncertainDraftEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := e.Execute(ctx, validationCall(v))
+	return err
+}
+
 func (e *uncertainDraftEngine) Execute(ctx context.Context, q string) (any, error) {
 	if strings.HasPrefix(q, "createAuthoringBundle(") {
 		e.writes++

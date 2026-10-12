@@ -155,6 +155,13 @@ func (m *mislabelledProcedures) WriteAuthoringBundle(ctx context.Context, b memq
 	return err
 }
 
+// RecordBundleValidation records the Gate 1 verdict as the call the planner
+// used to send (memql#6022).
+func (m *mislabelledProcedures) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := m.Execute(ctx, validationCall(v))
+	return err
+}
+
 func (m *mislabelledProcedures) Execute(ctx context.Context, q string) (any, error) {
 	if strings.Contains(q, "procedureConstructsForGoalSignature") {
 		r := map[string]any{}

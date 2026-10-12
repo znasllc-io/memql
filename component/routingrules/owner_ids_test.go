@@ -56,9 +56,9 @@ func (e *recordingEngine) RetireActiveBundle(context.Context, string, string, me
 	return nil
 }
 
-// TestTheBundleAndItsConstructAreWrittenAsTheServer: both writes are
-// @serverOnly, so each stamps internal origin, and the bundle is written at
-// the id derived for its owner.
+// TestTheBundleAndItsConstructAreWrittenAsTheServer: the bundle, its construct
+// and Gate 1's verdict on it are @serverOnly writes, so each stamps internal
+// origin, and each is written to the id derived for the owner.
 func TestTheBundleAndItsConstructAreWrittenAsTheServer(t *testing.T) {
 	e := &recordingEngine{}
 	a := NewActivator(e, func() memql.AuthoredRuntimeDeps { return memql.AuthoredRuntimeDeps{} }, shipped)
@@ -66,7 +66,7 @@ func TestTheBundleAndItsConstructAreWrittenAsTheServer(t *testing.T) {
 	if want := BundleIdFor("u-1", validForm().Name); res.BundleId != want {
 		t.Fatalf("the rule's bundle is %q, want the id derived for its owner, %q", res.BundleId, want)
 	}
-	for _, write := range []string{"createAuthoringBundle(", "createAuthoringConstruct("} {
+	for _, write := range []string{"createAuthoringBundle(", "createAuthoringConstruct(", "recordBundleValidation("} {
 		found := false
 		for i, q := range e.calls {
 			if !strings.HasPrefix(q, write) {

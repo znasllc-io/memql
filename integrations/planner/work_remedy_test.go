@@ -49,6 +49,13 @@ func (e *replanEngine) WriteAuthoringBundle(ctx context.Context, b memql.Authori
 	return err
 }
 
+// RecordBundleValidation records the Gate 1 verdict as the call the planner
+// used to send (memql#6022).
+func (e *replanEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := e.Execute(ctx, validationCall(v))
+	return err
+}
+
 func (e *replanEngine) Execute(_ context.Context, q string) (any, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
