@@ -1,11 +1,13 @@
 package k3d
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const imageIntegrityHarness = `
@@ -71,6 +73,11 @@ function k3d() {
   echo 'write unix @->/run/docker.sock: use of closed network connection' >&2
   return 1
  fi
+ if [ "${FAKE_HANG_FIRST_IMPORT:-}" = 1 ] && [ "$count" = 1 ]; then
+  touch "${FAKE_IMPORTED}.k3d-memql-server-0"
+  echo 'ERRO Failed to copy read stream. write unix @->/run/docker.sock: use of closed network connection' >&2
+  while :; do sleep 0.1; done
+ fi
  if [ "${FAKE_IMPORT_EXIT:-0}" = 0 ]; then
   for node in k3d-memql-server-0 k3d-memql-server-1 k3d-memql-agent-0; do touch "${FAKE_IMPORTED}.${node}"; done
  fi
@@ -83,7 +90,11 @@ func runImageIntegrity(t *testing.T, body string, vars ...string) (bool, string,
 	t.Helper()
 	tmp := t.TempDir()
 	calls := filepath.Join(tmp, "calls")
-	command := exec.Command("bash", "-c", "source \""+filepath.Join(repoRoot(t), "scripts/k3d/dev.sh")+"\"\n"+imageIntegrityHarness+"\n"+body)
+	// A hung import must fail the test rather than hang it.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, "bash", "-c", "source \""+filepath.Join(repoRoot(t), "scripts/k3d/dev.sh")+"\"\n"+imageIntegrityHarness+"\n"+body)
+	command.WaitDelay = time.Second
 	command.Env = append(os.Environ(), "FAKE_CALLS="+calls, "FAKE_STATE="+filepath.Join(tmp, "changed"), "FAKE_IMPORTED="+filepath.Join(tmp, "imported"), "FAKE_IMPORT_COUNT="+filepath.Join(tmp, "import-count"))
 	command.Env = append(command.Env, vars...)
 	output, err := command.CombinedOutput()
@@ -159,6 +170,22 @@ func TestImageImportReconcilesAndRetriesBoundedly(t *testing.T) {
 		}
 		if !strings.Contains(out, "retrying the verified import once") {
 			t.Fatalf("partial node import was not diagnosed before retry: %s", out)
+		}
+	})
+
+	// k3d's direct import feeds one stream to every node. When one node's ctr
+	// stops reading early, k3d v5.9.0 stops feeding the others and waits on
+	// them forever; the pipeline build node makes a second node the default.
+	t.Run("a hung attempt is stopped and retried once", func(t *testing.T) {
+		ok, out, calls := runImageIntegrity(t, `LOCAL_IMAGE_IMPORT_LIMIT_SECONDS=2 import_image memql-bff:local "$FAKE_IMAGE_A"`, "FAKE_HANG_FIRST_IMPORT=1")
+		if !ok {
+			t.Fatalf("a hung import was not recovered: %s\n%s", out, calls)
+		}
+		if got := strings.Count(calls, "k3d image import"); got != 2 {
+			t.Fatalf("expected the hung attempt and one retry, got %d:\n%s", got, calls)
+		}
+		if !strings.Contains(out, "did not finish within 2s") {
+			t.Fatalf("the hung attempt was not named: %s", out)
 		}
 	})
 
