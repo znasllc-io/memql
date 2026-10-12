@@ -176,7 +176,7 @@ func (i *Integration) historicalContent(ctx context.Context, doc reviewDocument,
 		if i.blobFetcher == nil {
 			return "", "", fmt.Errorf("document storage is unavailable on this node")
 		}
-		stream, err := i.blobFetcher.DownloadStreamURL(ctx, stringField(row, "blobUrl"))
+		stream, err := i.openFileBytes(ctx, doc.owner, stringField(row, "blobUrl"))
 		if err != nil {
 			return "", "", fmt.Errorf("could not read this saved version")
 		}

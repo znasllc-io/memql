@@ -32,11 +32,13 @@ func TestLibraryRevisionFilesUseRealVersionStoreAcrossReplicas(t *testing.T) {
 		stores = append(stores, server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: engine}, func() *sql.DB { return db.DB }))
 	}
 	file := owner + "-document"
-	if err := stores[0].CreateFile(ctx, server.LibraryFileCreateParams{FileId: file, Name: "Imported note.md", MimeType: "text/markdown", Size: 8, BlobUrl: "https://storage/original", Sha256: "original", Source: "uploaded", Format: "markdown"}); err != nil {
+	// The upload route's layout, which CreateFile holds every key to.
+	original := "https://storage.test/library/library/" + owner + "/" + file + "/Imported note.md"
+	if err := stores[0].CreateFile(ctx, server.LibraryFileCreateParams{FileId: file, Name: "Imported note.md", MimeType: "text/markdown", Size: 8, BlobUrl: original, Sha256: "original", Source: "uploaded", Format: "markdown"}); err != nil {
 		t.Fatal(err)
 	}
 	upload := &revisionFileFixture{}
-	write := library.RevisionFileWrite{FileID: "v1:library:file:" + file, Version: 1, BlobURL: "https://storage/original", OperationID: "approved-run", Content: []byte("Approved bytes")}
+	write := library.RevisionFileWrite{FileID: "v1:library:file:" + file, Version: 1, BlobURL: original, OperationID: "approved-run", Content: []byte("Approved bytes")}
 	for _, store := range stores {
 		adapter := &libraryRevisionFiles{store: store, uploader: upload, bucket: "library"}
 		if err := adapter.SaveRevision(ctx, write); err != nil {
@@ -51,7 +53,7 @@ func TestLibraryRevisionFilesUseRealVersionStoreAcrossReplicas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if head.VersionNumber != 2 || prior == nil || prior.BlobUrl != "https://storage/original" || upload.uploads != 1 {
+	if head.VersionNumber != 2 || prior == nil || prior.BlobUrl != original || upload.uploads != 1 {
 		t.Fatalf("bad version chain: head=%+v prior=%+v uploads=%d", head, prior, upload.uploads)
 	}
 }

@@ -655,7 +655,9 @@ func TestTheChannelsAndTheOutboxOverRealRows(t *testing.T) {
 
 	// ---- a Library file's name, read under its owner ----
 	fileID := "pr6c-file-" + suffix
-	if _, err := eng.Execute(signedIn(owner), fmt.Sprintf(
+	// createLibraryFile is @serverOnly: seeded with internal origin, as a
+	// server writer files it.
+	if _, err := eng.Execute(auth.ContextWithInternalOrigin(signedIn(owner)), fmt.Sprintf(
 		`mutation createLibraryFile(fileId: %s, name: "tests.log", mimeType: "text/plain", size: 12, blobUrl: %s, source: "agent_generated")`,
 		langparser.QuoteString(fileID), langparser.QuoteString("https://blob.example.test/"+fileID))); err != nil {
 		t.Fatalf("createLibraryFile: %v", err)

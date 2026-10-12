@@ -14,6 +14,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/component/server/libraryfile"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -46,14 +47,16 @@ import (
 // `libraryFileBySha256` is that read.
 //
 // ===========================================================================
-// NO INTERNAL-ORIGIN STAMP, DELIBERATELY
+// THE OWNER'S ACTOR, AND THE STAMP ONLY WHERE THE WRITE NEEDS IT
 // ===========================================================================
-// `createLibraryFile` and `libraryFileBySha256` are both `@actor`, not
-// `@serverOnly`: a file can only ever be created for the person the call runs
-// as, and the row is theirs to read. So this borrows the OWNER's actor and
-// stamps nothing. Reaching for internal origin here would be the laundering
-// the allowlist exists to prevent, and it would buy nothing -- the owner's
-// authority is exactly the authority these two constructs want.
+// Both calls borrow the OWNER's actor: a file can only ever be created for the
+// person the call runs as, and the row is theirs to read. The dedup read
+// (`libraryFileBySha256`) stamps nothing. The write is `createLibraryFile`,
+// which is @serverOnly because blobUrl is a storage path the node's credential
+// reads back, so it goes through component/server/libraryfile -- the one
+// package that holds that stamp, and that refuses a key outside the owner's
+// own library/{owner}/ prefix before applying it. This file stamps nothing
+// itself.
 //
 // ===========================================================================
 // A FAILURE IS NEVER FATAL TO THE SESSION
@@ -131,7 +134,7 @@ func (s *appSessionContentStore) StoreContent(ctx context.Context, req workerser
 		return workerservice.ContentResult{Sha256: digest, Omitted: "storing the bytes failed: " + err.Error()}, nil
 	}
 
-	// Rendered here rather than through server.LibraryFileCreateParams
+	// Composed here rather than through server.LibraryFileCreateParams
 	// because that struct MAY NOT carry `producedBy` --
 	// TestTheUploadRouteCannotStampProvenance reflects over it and fails the
 	// build on a field by that name, since "absence is the answer" for a
@@ -156,14 +159,18 @@ func (s *appSessionContentStore) StoreContent(ctx context.Context, req workerser
 	if !req.Provenance.Empty() {
 		args["producedBy"] = req.Provenance.AsMap()
 	}
-	query, err := langparser.RenderCall("createLibraryFile", args)
-	if err != nil {
-		return workerservice.ContentResult{Sha256: digest, Omitted: "the file row could not be composed: " + err.Error()}, nil
-	}
-	if _, err := s.engine.Execute(auth.ContextWithUserActor(ctx, owner), "mutation "+query); err != nil {
+	if err := libraryfile.NewStore(contentWriter{s.engine}).Create(auth.ContextWithUserActor(ctx, owner), args); err != nil {
 		return workerservice.ContentResult{Sha256: digest, Omitted: "recording the file failed: " + err.Error()}, nil
 	}
 	return workerservice.ContentResult{FileId: fileId, Sha256: digest}, nil
+}
+
+// contentWriter hands the content engine to component/server/libraryfile,
+// whose executor answers in `any`.
+type contentWriter struct{ engine contentEngine }
+
+func (w contentWriter) Execute(ctx context.Context, query string) (any, error) {
+	return w.engine.Execute(ctx, query)
 }
 
 // existingFile answers the owner's live file at this digest, or "".
