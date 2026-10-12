@@ -228,12 +228,19 @@ func (w *Worker) signupSettled(ctx context.Context, row map[string]any, signupID
 //  2. the locks, site then audience;
 //  3. under them, only what must be exact when the write happens -- the binding
 //     again (the form must still be the one the visitor saw), the signup row and the
-//     suppression list, all single-row reads -- and then the three writes.
+//     suppression list, all single-row reads; for a mailbox about to be added, the
+//     keyed read by its digest and the audience's size again; and then the writes.
 //
 // What the mailbox read decided can go stale before the write, by a row for the
-// same address that some other path adds meanwhile. The signup row is the key for
-// one address on one audience, so two signups for it still make one, and the window
-// is the one a hand unsubscribe has always had: no lock of the newsletter stops it.
+// same address that some other path adds meanwhile, and the audience's room can go
+// to signups that ran beside this one: the two decisions that would be wrong are made
+// again under the audience's lock, immediately before the add. A mailbox that opted
+// out between the read and the write is the window a hand unsubscribe has always
+// had; no lock of the newsletter stops it.
+//
+// The locks are an idle transaction on the request pool, which PostgreSQL ends at
+// idle_in_transaction_session_timeout (60 s by default) and the lock with it, so the
+// part under them is seconds of single-row reads and writes, and never a roster walk.
 func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
 	address := NormalizeEmail(argString(args, "email"))
@@ -323,6 +330,37 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		return nil, err
 	} else if settled {
 		return accepted()
+	}
+	if !found {
+		// Two decisions made before the locks must be made again under the audience's,
+		// because signups that ran side by side all made them on the same state:
+		//
+		//  - that this mailbox is new: another path (a signup of a different form, an
+		//    import, an operator) may have added it since. The keyed read by digest is
+		//    the whole question here -- a row this path adds is always stamped, so the
+		//    page of rows without a digest and the roster fallback stay outside;
+		//  - that the audience has room: N signups can all have counted the same size.
+		//
+		// Both come before the consent is written, so a refused signup leaves nothing.
+		fresh, err := w.store.RecipientsInAudienceByDigest(ctx, audienceID, EmailDigest(address))
+		if err != nil {
+			return nil, err
+		}
+		if held := holdingMailbox(fresh, address); len(held) > 0 {
+			member, found, optedOut = mailboxVerdict(held)
+			if optedOut {
+				return accepted()
+			}
+		}
+		if !found {
+			size, err := w.store.RosterSize(ctx, audienceID)
+			if err != nil {
+				return nil, err
+			}
+			if size >= w.cfg.MaxAudience {
+				return nil, fmt.Errorf("this newsletter cannot accept more subscribers right now")
+			}
+		}
 	}
 	// Consent lands first, by address digest. If enrollment fails afterwards,
 	// no unconsented recipient can become sendable. Its stable event key is
