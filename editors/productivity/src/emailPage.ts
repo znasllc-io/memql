@@ -39,7 +39,8 @@ function fieldRow(field: EditableField): string {
   switch (field) {
     case "text": return labelled(C.words, `<textarea ${described(id)} rows="3" spellcheck="true"></textarea>`);
     case "label": return labelled(C.label, `<input ${described(id)} autocomplete="off">`);
-    case "src": return group(C.picture, `<div id="${id}" class="picture" role="group" aria-labelledby="${id}-label"><span id="picture-none" class="muted">${escape(C.noPicture)}</span><button type="button" id="picture-choose" class="text-act">${escape(C.chooseFromFiles)}</button><button type="button" id="picture-upload" class="text-act">${escape(C.upload)}</button><button type="button" id="picture-remove" class="text-act">${escape(C.removePicture)}</button></div>`);
+    // The block's own title already says Picture: the row's name is for a screen reader alone.
+    case "src": return row(`<span class="sr-only" id="${id}-label">${escape(C.picture)}</span><div id="${id}" class="picture" role="group" aria-labelledby="${id}-label"><span id="picture-none" class="muted">${escape(C.noPicture)}</span><button type="button" id="picture-choose" class="text-act">${escape(C.chooseFromFiles)}</button><button type="button" id="picture-upload" class="text-act">${escape(C.upload)}</button><button type="button" id="picture-remove" class="text-act">${escape(C.removePicture)}</button></div>`);
     case "alt": return labelled(C.description, `<input ${described(id)} autocomplete="off">`);
     case "href": return labelled(C.link, `<input ${described(id)} autocomplete="off" spellcheck="false" inputmode="url">`);
     case "title": return labelled(C.title, `<input ${described(id)} autocomplete="off">`);
@@ -65,11 +66,12 @@ const STYLES = [
   `.skeleton{padding:32px 24px}.plain{max-width:72ch;margin:0 auto;padding:32px 24px;font-family:var(--vscode-editor-font-family,monospace);font-size:var(--vscode-editor-font-size,12px);line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}`,
   `.stage.stale .frames,.stage.stale .skeleton,.stage.stale .plain{opacity:.45}.preview-notice{position:sticky;top:0;left:0;z-index:2;padding:10px 16px;background:var(--vscode-editor-background);border-bottom:1px solid var(--vscode-panel-border)}`,
   // The inspector: groups under subheads, no boxes.
-  `.inspector{flex:none;display:flex;flex-direction:column;gap:28px;width:340px;padding:16px 20px 32px;overflow:auto;overscroll-behavior:contain;border-left:1px solid var(--vscode-panel-border)}`,
+  // A control the keyboard reaches scrolls into view with room for its focus outline.
+  `.inspector{flex:none;display:flex;flex-direction:column;gap:28px;width:340px;padding:16px 20px 32px;overflow:auto;overscroll-behavior:contain;scroll-padding:8px 0;border-left:1px solid var(--vscode-panel-border)}`,
   `.group{display:flex;flex-direction:column;gap:12px;min-width:0}.field{display:flex;flex-direction:column;gap:4px;min-width:0}.field>label,.field>.label{font-size:12px;color:var(--vscode-descriptionForeground)}.notice:empty{display:none}.muted{color:var(--vscode-descriptionForeground)}.mono{font-family:var(--vscode-editor-font-family,monospace);font-size:var(--vscode-editor-font-size,12px)}`,
   // The outline: one row per block, indented by level, a dot on a block with an issue.
   `.outline{display:flex;flex-direction:column;margin:0 -8px}.outline [role=treeitem]{display:flex;align-items:center;gap:8px;min-height:34px;padding-right:8px;border-radius:4px;cursor:pointer}.outline [role=treeitem]:hover{background:var(--vscode-list-hoverBackground,var(--vscode-toolbar-hoverBackground))}`,
-  `.outline [aria-selected=true]{background:var(--vscode-list-inactiveSelectionBackground);box-shadow:inset 2px 0 var(--vscode-focusBorder)}.outline [role=treeitem]:focus-visible{outline-offset:-2px}.row-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dot{flex:none;width:6px;height:6px;margin-left:auto;border-radius:50%;background:var(--vscode-errorForeground)}`,
+  `.outline [aria-selected=true]{background:var(--vscode-list-inactiveSelectionBackground)}.outline [role=treeitem]:focus-visible{outline-offset:-2px}.row-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dot{flex:none;width:6px;height:6px;margin-left:auto;border-radius:50%;background:var(--vscode-errorForeground)}`,
   `.issue-list{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}.issue-list .text-act{justify-content:flex-start;width:100%;padding:6px 0;text-align:left}.issue-line{display:block;padding:6px 0}`,
   // The selected block: its name and acts, then its fields.
   `.block-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.block-acts{position:relative;display:flex;gap:2px}`,

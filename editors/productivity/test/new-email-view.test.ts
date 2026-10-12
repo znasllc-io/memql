@@ -9,8 +9,10 @@ import type { EmailBlock } from "../src/emailDocument.js";
 
 const C = EMAIL_COPY.newEmail;
 
-function fixture(saved?: unknown) {
+/** `globals` adds to the window what the webview has and jsdom lacks (a ResizeObserver, say) before the view runs. */
+function fixture(saved?: unknown, globals: Record<string, unknown> = {}) {
   const dom = new JSDOM(newEmailPage({ script: "", nonce: "test" }), { runScripts: "outside-only" });
+  Object.assign(dom.window, globals);
   // Messages cross a structured clone in the editor; JSON does the same here and brings them into this realm.
   const messages: any[] = [];
   let state = saved;
@@ -693,6 +695,41 @@ test("the page is static: every id the view uses, the policy, and only the email
   for (const element of doc.querySelectorAll("[aria-label],[title],[placeholder]")) for (const name of ["aria-label", "title", "placeholder"]) { const value = element.getAttribute(name); if (value) seen.push(value); }
   assert.ok(seen.length >= 8);
   for (const word of seen) assert.ok(copy.has(word), `"${word}" is not in EMAIL_COPY`);
+});
+
+test("a control the keyboard reaches scrolls into view above the bar, which the page measures as it grows", () => {
+  const observed: { target: Element; callback: () => void }[] = [];
+  class FakeResizeObserver {
+    constructor(private readonly callback: () => void) {}
+    observe(target: Element) { observed.push({ target, callback: this.callback }); }
+    disconnect() {}
+  }
+  const f = fixture(undefined, { ResizeObserver: FakeResizeObserver });
+  assert.equal(observed.length, 1);
+  const dock = observed[0]!.target as HTMLElement;
+  assert.ok(dock.contains(f.el("bar")) && dock.contains(f.el("bar-notice")), "the bar and the problem above it are measured together");
+  assert.equal(f.doc.documentElement.style.getPropertyValue("--dock"), "0px", "measured at once (jsdom lays nothing out), not only on the first resize");
+  (dock as unknown as { getBoundingClientRect: () => { height: number } }).getBoundingClientRect = () => ({ height: 96.4 });
+  observed[0]!.callback();
+  assert.equal(f.doc.documentElement.style.getPropertyValue("--dock"), "97px");
+  // A problem shown above the bar is measured as it is drawn, before any resize is reported.
+  (dock as unknown as { getBoundingClientRect: () => { height: number } }).getBoundingClientRect = () => ({ height: 140 });
+  f.send({ type: "layoutsFailed", problem });
+  assert.equal(f.visible("bar-notice"), true);
+  assert.equal(f.doc.documentElement.style.getPropertyValue("--dock"), "140px");
+  // A text field scrolls only to its caret as it takes the focus: the description asks for all of itself to be in view.
+  const asked: unknown[] = [];
+  Object.assign(f.el("description"), { scrollIntoView: (options: unknown) => asked.push(options) });
+  f.el("description").focus();
+  assert.deepEqual(JSON.parse(JSON.stringify(asked)), [{ block: "nearest" }]);
+  // The page's controls read it: a focused card or field stops 8 pixels above the bar, its outline in view. It is their
+  // own scroll margin, not the window's scroll padding, which would scroll the page each time an act in the bar is focused.
+  const css = f.doc.querySelector("style")!.textContent!;
+  assert.match(css, /\.page :is\(a,button,input,select,textarea,\[tabindex\]\)\{scroll-margin:8px 0 calc\(var\(--dock,48px\) \+ 8px\)\}/);
+  assert.doesNotMatch(css, /scroll-padding/);
+  // Words that say what is optional keep the muted colour's contrast: they are not faded further.
+  assert.doesNotMatch(css, /\.optional\{[^}]*opacity/);
+  f.dom.window.close();
 });
 
 test("no host update takes focus while the window is elsewhere, and the page keeps the focus it holds", () => {

@@ -91,6 +91,13 @@ const dictationStatus = byId("dictation-status"), describeNotice = byId("describ
 const writingBox = byId("writing");
 const barNotice = byId("bar-notice"), barState = byId("bar-state"), barActs = byId("bar-acts");
 
+// The bar and the problem above it stay at the foot of the window: the scroll margin of the page's controls keeps one
+// the keyboard reaches above them, and reads their height from --dock. render() measures it whenever it draws them,
+// and a resize (the problem wrapping in a narrower window) measures it again.
+const dock = barNotice.parentElement!;
+const measureDock = () => document.documentElement.style.setProperty("--dock", `${Math.ceil(dock.getBoundingClientRect().height)}px`);
+if (typeof ResizeObserver !== "undefined") new ResizeObserver(measureDock).observe(dock);
+
 // -- What the page knows -------------------------------------------------------
 
 /** The host's last word on the organizations and their layouts. */
@@ -158,6 +165,7 @@ function render(): void {
   if (now.kind === "writing") drawWriting();
   drawNotice(now.notice);
   drawBar(now);
+  measureDock();
 }
 
 function drawNotice(problem: Problem | undefined): void {
@@ -406,6 +414,8 @@ function setDescription(value: string): void {
 
 nameInput.addEventListener("input", () => { changed(); drawNameNotice(); saveDraft(); render(); });
 descriptionInput.addEventListener("input", () => { changed(); saveDraft(); render(); });
+// Taking the focus scrolls a text field only as far as its caret: the whole description, outline and all, comes above the bar.
+descriptionInput.addEventListener("focus", () => descriptionInput.scrollIntoView?.({ block: "nearest" }));
 // Ctrl or Cmd+Enter writes, from anywhere in the form, when Write it is legal.
 form.addEventListener("keydown", event => {
   if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;

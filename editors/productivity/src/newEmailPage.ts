@@ -36,7 +36,7 @@ const STYLES = /* @__PURE__ */ [
   `body{display:flex;flex-direction:column;min-height:100vh}.page{flex:1 0 auto;width:100%;max-width:960px;padding:40px 40px 48px}`,
   `.head{margin:0 0 28px}.title{margin:0;font-size:24px;line-height:1.3;font-weight:600;letter-spacing:-.025em}.meta{margin:4px 0 0;font-size:13px;color:var(--vscode-descriptionForeground)}.line{font-size:13px}`,
   // The form: groups 24 pixels apart, labels above their fields, no boxes.
-  `.form{display:flex;flex-direction:column;gap:24px}.field{display:flex;flex-direction:column;gap:6px;min-width:0}.field>label,.label{font-size:12px;line-height:1.5;color:var(--vscode-descriptionForeground)}.optional{margin-left:6px;opacity:.75}.narrow{max-width:420px}.notice:empty{display:none}#description{min-height:120px}`,
+  `.form{display:flex;flex-direction:column;gap:24px}.field{display:flex;flex-direction:column;gap:6px;min-width:0}.field>label,.label{font-size:12px;line-height:1.5;color:var(--vscode-descriptionForeground)}.optional{margin-left:6px}.narrow{max-width:420px}.notice:empty{display:none}#description{min-height:120px}`,
   // The layout cards: each layout's render (600 by 780 pixels shown at 0.28, so 168 by 218), its shape until the render comes, its name and a
   // two-line description. The cards keep that size at every width: a row takes as many as fit, from the left.
   `.layouts{display:flex;flex-direction:column;gap:20px}.set{display:flex;flex-direction:column;gap:10px}.set-head{margin:0;font-size:12px;font-weight:600;line-height:1.5}`,
@@ -53,8 +53,10 @@ const STYLES = /* @__PURE__ */ [
   `.spinner{display:inline-block;width:10px;height:10px;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin 1s linear infinite}`,
   // Writing: the chosen layout's shape, centred, sweeping.
   `.writing{padding:8px 0 24px}`,
-  // The action bar and the one problem line above it stay at the foot of the window.
-  `.dock{position:sticky;bottom:0;z-index:4}.bar-notice{padding:8px 16px;border-top:1px solid var(--vscode-panel-border);background:var(--vscode-editor-background)}`,
+  // The action bar and the one problem line above it stay at the foot of the window. A control of the page the keyboard
+  // reaches scrolls into view above them, with room for its focus outline: the view keeps --dock at their height. The
+  // margin is the controls' own, not the window's scroll padding, so focusing an act in the bar itself scrolls nothing.
+  `.page :is(a,button,input,select,textarea,[tabindex]){scroll-margin:8px 0 calc(var(--dock,48px) + 8px)}.dock{position:sticky;bottom:0;z-index:4}.bar-notice{padding:8px 16px;border-top:1px solid var(--vscode-panel-border);background:var(--vscode-editor-background)}`,
   // A narrow window: narrower gutters.
   `@media(max-width:600px){.page{padding:28px 20px 40px}.head{margin-bottom:24px}}`,
 ].join("\n");

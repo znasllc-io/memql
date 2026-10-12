@@ -257,6 +257,60 @@ test("move, add and remove are offered only where legal", () => {
   f.dom.window.close();
 });
 
+test("the Add menu is brought into the inspector's view as it opens, and its first item takes the focus without a jump", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  f.select("cta");
+  const menu = f.el("add-menu");
+  // jsdom cannot scroll; the page asks the menu to come into view, as it shows, the least distance.
+  const scrolled: unknown[] = [];
+  Object.assign(menu, { scrollIntoView: (options: unknown) => scrolled.push({ shown: !menu.hidden, options }) });
+  const first = menu.querySelector<HTMLElement>('[role="menuitem"]')!;
+  const focusedWith: unknown[] = [];
+  const focus = first.focus.bind(first);
+  Object.assign(first, { focus: (options?: FocusOptions) => { focusedWith.push(options); focus(options); } });
+  f.el("add-after").click();
+  // The options come from the page's realm: JSON brings them into this one.
+  assert.deepEqual(clone(scrolled), [{ shown: true, options: { block: "nearest" } }]);
+  assert.deepEqual(clone(focusedWith), [{ preventScroll: true }], "the focus does not scroll the menu back out of view");
+  assert.equal(f.doc.activeElement, first);
+  f.dom.window.close();
+});
+
+test("the selected block's ring shows on any email, and goes around a block too thin to hold it", () => {
+  const f = fixture();
+  f.doc.documentElement.style.setProperty("--vscode-focusBorder", "#0078d4");
+  f.send({ type: "document", version: 1, email: article });
+  f.send({ type: "render", seq: 1, html: rendered, text: "Hi", subject: "Hello", issues: [] });
+  const frame = f.loadPreview();
+  const css = [...frame.contentDocument!.querySelectorAll("style")].map(style => style.textContent).join("\n");
+  // The focus colour with a white line inside it: on white the colour shows, on a brand colour close to it or a dark email the white does.
+  assert.match(css, /\[data-block\]\[data-selected\]\{outline:2px solid #0078d4!important;outline-offset:-2px;box-shadow:inset 0 0 0 4px #fff!important\}/);
+  assert.match(css, /\[data-block\]\[data-selected=around\]\{outline-offset:2px;box-shadow:none!important\}/);
+  const block = (id: string) => frame.contentDocument!.querySelector(`[data-block="${id}"]`)!;
+  const tall = (id: string, height: number) => Object.assign(block(id), { getBoundingClientRect: () => ({ height }) });
+  tall("headline", 40);
+  tall("cta", 23);
+  f.select("headline");
+  assert.equal(block("headline").getAttribute("data-selected"), "", "a block the ring fits in is ringed inside its edge");
+  f.select("cta");
+  assert.equal(block("cta").getAttribute("data-selected"), "around", "one thinner than 24 pixels, a divider say, is ringed around it");
+  assert.equal(block("headline").hasAttribute("data-selected"), false);
+  f.dom.window.close();
+});
+
+test("the inspector is one quiet column: one mark on the selected row, no word said twice, room for the focus outline", () => {
+  const html = emailPage({ title: "Welcome.email.json", script: "view.js", nonce: "abc123" });
+  // The row's background marks it; the ring in the preview says which block it is.
+  assert.equal(/\.outline \[aria-selected=true\]\{([^}]*)\}/.exec(html)?.[1], "background:var(--vscode-list-inactiveSelectionBackground)");
+  // A picture's block title already says Picture: the row's own name is for a screen reader alone.
+  const doc = new JSDOM(html).window.document;
+  assert.equal(doc.getElementById("field-src-label")?.className, "sr-only");
+  assert.equal(doc.getElementById("field-src")?.getAttribute("aria-labelledby"), "field-src-label");
+  // A control the keyboard reaches near the inspector's edge scrolls in with its outline in view.
+  assert.match(html, /\.inspector\{[^}]*scroll-padding:8px 0[;}]/);
+});
+
 test("removing the selected block moves the selection, and the focus, to its neighbour", () => {
   const f = fixture();
   f.send({ type: "document", version: 1, email: article });

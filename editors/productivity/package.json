@@ -283,6 +283,8 @@
     "compile": "tsc --noEmit && node esbuild.js",
     "vscode:prepublish": "npm run compile",
     "test": "node esbuild.test.js && node --test dist-test/*.test.js",
+    "gallery": "node gallery/build.mjs",
+    "gallery:shoot": "node ../vscode/gallery/shoot.mjs --dir=dist-gallery",
     "package": "npm run compile && npx --yes @vscode/vsce@latest package --no-dependencies"
   },
   "dependencies": {

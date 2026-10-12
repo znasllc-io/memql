@@ -162,11 +162,17 @@ const LINE = '<div class="sk sk-line"></div>', LAST_LINE = '<div class="sk sk-li
 
 test("each kind of block has its own shape, sized from the block and clamped", () => {
   const cases: Array<[string, Record<string, unknown>, string]> = [
-    ["a heading is a fifth shorter than its size", { type: "heading", size: 20 }, '<div class="sk sk-heading" style="height:16px"></div>'],
-    ["a heading without a size takes the renderer's 28", { type: "heading" }, '<div class="sk sk-heading" style="height:22.4px"></div>'],
-    ["a large heading stops at 40", { type: "heading", size: 96 }, '<div class="sk sk-heading" style="height:40px"></div>'],
-    ["a small heading stops at 14", { type: "heading", size: 8 }, '<div class="sk sk-heading" style="height:14px"></div>'],
+    ["a heading is a fifth shorter than its size", { type: "heading", size: 20 }, '<div class="sk sk-heading sk-center" style="height:16px"></div>'],
+    ["a heading without a size takes the renderer's 28", { type: "heading" }, '<div class="sk sk-heading sk-center" style="height:22.4px"></div>'],
+    ["a large heading stops at 40", { type: "heading", size: 96 }, '<div class="sk sk-heading sk-center" style="height:40px"></div>'],
+    ["a small heading stops at 14", { type: "heading", size: 8 }, '<div class="sk sk-heading sk-center" style="height:14px"></div>'],
+    ["a heading is centred, as the renderer draws it, unless it says otherwise", { type: "heading", align: "left" }, '<div class="sk sk-heading" style="height:22.4px"></div>'],
+    ["a heading aligned right sits on the right", { type: "heading", align: "right" }, '<div class="sk sk-heading sk-right" style="height:22.4px"></div>'],
+    ["a heading is as long as its longest line, at half its size a character", { type: "heading", size: 20, text: "Twelve chars\nSix ch" }, '<div class="sk sk-heading sk-center" style="width:20.00%;height:16px"></div>'],
+    ["a short heading is at least 15 percent of its row", { type: "heading", size: 20, text: "Hi" }, '<div class="sk sk-heading sk-center" style="width:15.00%;height:16px"></div>'],
+    ["a long heading stops at its row", { type: "heading", size: 40, text: "x".repeat(200) }, '<div class="sk sk-heading sk-center" style="width:100.00%;height:32px"></div>'],
     ["a short text is two lines", { type: "text", text: "x".repeat(70) }, LINE + LAST_LINE],
+    ["a centred text ends on a centred line", { type: "text", text: "x".repeat(70), align: "center" }, LINE + '<div class="sk sk-line sk-center" style="width:60%"></div>'],
     ["a text is a line per 70 characters", { type: "text", text: "x".repeat(141) }, LINE + LINE + LAST_LINE],
     ["a long text stops at eight lines", { type: "text", text: "x".repeat(5000) }, LINE.repeat(7) + LAST_LINE],
     ["an empty text is two lines", { type: "text" }, LINE + LAST_LINE],
@@ -184,6 +190,13 @@ test("each kind of block has its own shape, sized from the block and clamped", (
     ["a section holds its blocks", { type: "section", blocks: [{ id: "c", type: "divider" }] }, '<div class="sk-section"><div class="sk-rule"></div></div>'],
     ["a section without blocks is empty", { type: "section" }, '<div class="sk-section"></div>'],
     ["columns share their row by width", { type: "columns", columns: [{ width: 33.33, blocks: [{ id: "c", type: "divider" }] }, { width: 66.67 }] }, '<div class="sk-columns"><div style="flex:33.33"><div class="sk-rule"></div></div><div style="flex:66.67"></div></div>'],
+    // In a column, a picture or a button takes its share of the column: 150 pixels of a half of 600 is half the column.
+    ["a picture in a column is its share of the column", { type: "columns", columns: [{ width: 50, blocks: [{ id: "c", type: "image", width: 150, height: 100 }] }, { width: 50 }] }, '<div class="sk-columns"><div style="flex:50"><div class="sk sk-picture" style="width:50.00%;aspect-ratio:150/100"></div></div><div style="flex:50"></div></div>'],
+    ["a picture wider than its column fills it", { type: "columns", columns: [{ width: 25, blocks: [{ id: "c", type: "image", width: 600, height: 300 }] }] }, '<div class="sk-columns"><div style="flex:25"><div class="sk sk-picture" style="width:100.00%;aspect-ratio:600/300"></div></div></div>'],
+    ["a button in a column is its share of the column", { type: "columns", columns: [{ width: 50, blocks: [{ id: "c", type: "button", width: 150 }] }] }, '<div class="sk-columns"><div style="flex:50"><div class="sk sk-button" style="width:50.00%"></div></div></div>'],
+    ["a text in a column takes more lines", { type: "columns", columns: [{ width: 50, blocks: [{ id: "c", type: "text", text: "x".repeat(140) }] }] }, `<div class="sk-columns"><div style="flex:50">${LINE.repeat(3)}${LAST_LINE}</div></div>`],
+    ["columns narrower than their row stand centred at their own width", { type: "columns", maxWidth: 300, columns: [{ width: 50, blocks: [{ id: "c", type: "image", width: 150 }] }] }, '<div class="sk-columns sk-center" style="width:50.00%"><div style="flex:50"><div class="sk sk-picture" style="width:100.00%;aspect-ratio:150/75"></div></div></div>'],
+    ["a section narrower than the email is the row of its blocks", { type: "section", maxWidth: 300, blocks: [{ id: "c", type: "image", width: 150, height: 150 }] }, '<div class="sk-section"><div class="sk sk-picture" style="width:50.00%;aspect-ratio:150/150"></div></div>'],
   ];
   for (const [name, block, expected] of cases) assert.equal(shapeOf(block), expected, name);
   assert.equal(skeletonHTML([]), `${SKELETON_OPEN}</div>`);
@@ -204,7 +217,7 @@ test("the skeleton uses only numbers, however odd a block's fields are", () => {
   assert.deepEqual(styles(out), [
     "width:100.00%;aspect-ratio:600/300", "height:40px", "height:4px", "width:50.00%", "flex:50", "flex:100", "width:60%", "width:100.00%;aspect-ratio:600/2000",
   ]);
-  assert.ok(styles(out).every(style => /^[a-z-]+:[0-9./]+(?:%|px)?(?:;[a-z-]+:[0-9./]+)*$/.test(style)), "only numbers, units and ratios");
+  assert.ok(styles(out).every(style => /^[a-z-]+:[0-9./]+(?:%|px)?(?:;[a-z-]+:[0-9./]+(?:%|px)?)*$/.test(style)), "only numbers, units and ratios");
   assert.doesNotMatch(out, /outside|marquee|Not a block|color|nope/);
   // Nesting deeper than any email goes is cut off rather than followed.
   let deep: Record<string, unknown> = { id: "leaf", type: "divider" };

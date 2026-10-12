@@ -65,8 +65,10 @@ export function previewHTML(html: string, options: { blocks: boolean }): string 
 
 /** The deepest nesting the email model accepts; anything deeper is not drawn. */
 const MAX_DEPTH = 16;
-/** The width of an email, in pixels: a block's width over this is its share of the row. */
+/** The width of an email, in pixels. A block takes its share of the row it sits in: the email, or a section or column of it. */
 const EMAIL_WIDTH = 600;
+/** About how wide a heading's character is, as a share of its size: enough to give a heading its length, never its words. */
+const GLYPH = 0.5;
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 /** A number above zero, else nothing: zero is how a block says "the default", and a field may hold anything at all. */
@@ -74,43 +76,66 @@ const positive = (value: unknown): number | undefined => typeof value === "numbe
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
 /** A number as short CSS: at most two decimals and no trailing zeros. */
 const short = (value: number) => String(Math.round(value * 100) / 100);
-/** Pixels of the 600 pixel email as a percentage of the row, to two decimals. */
-const share = (pixels: number) => `${(pixels / (EMAIL_WIDTH / 100)).toFixed(2)}%`;
+/** Pixels of the row (600 for the email itself) as a percentage of it, to two decimals; never more than the row. */
+const share = (pixels: number, row: number) => `${(Math.min(pixels, row) / (row / 100)).toFixed(2)}%`;
+/** The class that places a shape as its block is aligned: none for the left. */
+const aligned = (align: unknown, fallback: "left" | "center") => {
+  const value = align === "left" || align === "center" || align === "right" ? align : fallback;
+  return value === "left" ? "" : ` sk-${value}`;
+};
 
 const LINE = '<div class="sk sk-line"></div>';
-/** `count` lines, the last one shorter. */
-const lines = (count: number) => LINE.repeat(count - 1) + '<div class="sk sk-line" style="width:60%"></div>';
+/** `count` lines, the last one shorter and placed as the text is aligned. */
+const lines = (count: number, align = "") => LINE.repeat(count - 1) + `<div class="sk sk-line${align}" style="width:60%"></div>`;
 
 /**
  * The outline of an email: a grey shape for each block, in order, sized from the
  * block and nothing else. No text from the email enters it, only numbers that have
- * been checked and clamped, so it is safe to put in a page as it is.
+ * been checked and clamped (a text's length becomes its number of lines, a
+ * heading's its width), so it is safe to put in a page as it is.
  */
 export function skeletonHTML(blocks: readonly EmailBlock[]): string {
-  return `<div class="sk-email" aria-hidden="true">${shapes(blocks, 0)}</div>`;
+  return `<div class="sk-email" aria-hidden="true">${shapes(blocks, 0, EMAIL_WIDTH)}</div>`;
 }
 
-function shapes(list: unknown, depth: number): string {
+function shapes(list: unknown, depth: number, row: number): string {
   if (!Array.isArray(list) || depth > MAX_DEPTH) return "";
-  return list.map(block => isRecord(block) ? shape(block as EmailBlock, depth) : "").join("");
+  return list.map(block => isRecord(block) ? shape(block as EmailBlock, depth, row) : "").join("");
 }
 
-function shape(block: EmailBlock, depth: number): string {
+/** One block's shape, in a row `row` pixels of the email wide. */
+function shape(block: EmailBlock, depth: number, row: number): string {
   switch (block.type) {
     case "image": {
-      const width = Math.round(clamp(positive(block.width) ?? EMAIL_WIDTH, 1, EMAIL_WIDTH));
+      const width = Math.round(clamp(positive(block.width) ?? row, 1, EMAIL_WIDTH));
       // Without a height, half the width: the same as the placeholder the renderer draws.
       const height = Math.round(clamp(positive(block.height) ?? width * 0.5, 1, 2000));
-      return `<div class="sk sk-picture" style="width:${share(width)};aspect-ratio:${width}/${height}"></div>`;
+      return `<div class="sk sk-picture" style="width:${share(width, row)};aspect-ratio:${width}/${height}"></div>`;
     }
-    case "heading": return `<div class="sk sk-heading" style="height:${short(clamp((positive(block.size) ?? 28) * 0.8, 14, 40))}px"></div>`;
-    case "text": return lines(clamp(Math.ceil((typeof block.text === "string" ? block.text.length : 0) / 70), 2, 8));
+    case "heading": {
+      // Centred unless it says otherwise, as the renderer draws it, and as long as its longest line.
+      const size = positive(block.size) ?? 28;
+      const text = typeof block.text === "string" ? block.text.slice(0, 2000) : "";
+      const longest = text.split("\n").reduce((most, line) => Math.max(most, line.length), 0);
+      const width = longest > 0 ? `width:${share(Math.max(longest * size * GLYPH, row * 0.15), row)};` : "";
+      return `<div class="sk sk-heading${aligned(block.align, "center")}" style="${width}height:${short(clamp(size * 0.8, 14, 40))}px"></div>`;
+    }
+    case "text": {
+      // A line per 70 characters of a 600 pixel row, fewer to a line in a narrower one.
+      const length = typeof block.text === "string" ? block.text.length : 0;
+      return lines(clamp(Math.ceil(length / Math.max(10, 70 * row / EMAIL_WIDTH)), 2, 8), aligned(block.align, "left"));
+    }
     case "highlight": return '<div class="sk sk-band"></div>';
-    case "button": return `<div class="sk sk-button" style="width:${share(Math.round(clamp(positive(block.width) ?? 300, 1, EMAIL_WIDTH)))}"></div>`;
+    case "button": return `<div class="sk sk-button" style="width:${share(Math.round(clamp(positive(block.width) ?? 300, 1, EMAIL_WIDTH)), row)}"></div>`;
     case "divider": return '<div class="sk-rule"></div>';
     case "spacer": return `<div class="sk-gap" style="height:${short(clamp((positive(block.height) ?? 0) / 2, 4, 60))}px"></div>`;
-    case "section": return `<div class="sk-section">${shapes(block.blocks, depth + 1)}</div>`;
-    case "columns": return `<div class="sk-columns">${columns(block.columns, depth)}</div>`;
+    case "section": return `<div class="sk-section">${shapes(block.blocks, depth + 1, Math.min(row, positive(block.maxWidth) ?? row))}</div>`;
+    case "columns": {
+      // Columns narrower than their row stand centred at their own width, as the renderer draws them.
+      const width = Math.min(row, positive(block.maxWidth) ?? row);
+      const cells = columns(block.columns, depth, width);
+      return width < row ? `<div class="sk-columns sk-center" style="width:${share(width, row)}">${cells}</div>` : `<div class="sk-columns">${cells}</div>`;
+    }
     case "social": return '<div class="sk-social"><i></i><i></i><i></i></div>';
     case "footer": return `<div class="sk-footer">${LINE.repeat(3)}</div>`;
     case "html": return lines(2);
@@ -118,8 +143,11 @@ function shape(block: EmailBlock, depth: number): string {
   }
 }
 
-/** Each column takes its width as its share of the row; one without a usable width takes an equal share. */
-function columns(list: unknown, depth: number): string {
-  const row = Array.isArray(list) ? list.filter(isRecord) : [];
-  return row.map(column => `<div style="flex:${short(clamp(positive(column.width) ?? 100 / row.length, 1, 100))}">${shapes(column.blocks, depth + 1)}</div>`).join("");
+/** Each column takes its width as its share of the row (one without a usable width an equal share), and its blocks theirs of it. */
+function columns(list: unknown, depth: number, row: number): string {
+  const cells = Array.isArray(list) ? list.filter(isRecord) : [];
+  return cells.map(column => {
+    const width = clamp(positive(column.width) ?? 100 / cells.length, 1, 100);
+    return `<div style="flex:${short(width)}">${shapes(column.blocks, depth + 1, row * width / 100)}</div>`;
+  }).join("");
 }

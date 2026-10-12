@@ -503,10 +503,14 @@ function focusColour(): string {
   return /^[#a-zA-Z0-9(),.%\s-]{1,64}$/.test(value) ? value : "Highlight";
 }
 
-/** The frame's own style: a pointer over blocks, a dashed outline on the innermost one hovered, a solid one on the selected. */
+/**
+ * The frame's own style: a pointer over blocks, a dashed outline on the innermost one hovered, and a ring on the
+ * selected one. The ring is the focus colour with a white line inside it, so it shows on any email: white, tinted, a
+ * brand colour near the focus colour, or dark. A block too thin to hold it is ringed around its edge (markFrame).
+ */
 function frameStyle(): string {
   const colour = focusColour();
-  return `<style>[data-block]{cursor:pointer}[data-block]:hover:not(:has([data-block]:hover)){outline:1px dashed ${colour}!important;outline-offset:-1px}[data-block][data-selected]{outline:2px solid ${colour}!important;outline-offset:-2px}</style>`;
+  return `<style>[data-block]{cursor:pointer}[data-block]:hover:not(:has([data-block]:hover)){outline:1px dashed ${colour}!important;outline-offset:-1px}[data-block][data-selected]{outline:2px solid ${colour}!important;outline-offset:-2px;box-shadow:inset 0 0 0 4px #fff!important}[data-block][data-selected=around]{outline-offset:2px;box-shadow:none!important}</style>`;
 }
 
 /** Loads a render into the frame behind the one on screen; they swap once it has loaded. */
@@ -556,9 +560,12 @@ function frameBlocks(): Element[] {
   return Array.from(frames[front]!.contentDocument?.querySelectorAll("[data-block]") ?? []);
 }
 
+/** A block shorter than this would have the ring lie across what it holds (a divider's line, say): it is ringed around instead. */
+const THIN = 24;
+
 function markFrame(): void {
   for (const element of frameBlocks()) {
-    if (element.getAttribute("data-block") === selected) element.setAttribute("data-selected", "");
+    if (element.getAttribute("data-block") === selected) element.setAttribute("data-selected", element.getBoundingClientRect().height < THIN ? "around" : "");
     else element.removeAttribute("data-selected");
   }
 }
@@ -787,7 +794,9 @@ removeBlock.addEventListener("click", () => {
 function openMenu(): void {
   addMenu.hidden = false;
   addAfter.setAttribute("aria-expanded", "true");
-  menuItems[0]?.focus();
+  // The menu hangs below its button, so near the foot of the inspector part of it would be cut off: the inspector scrolls to show it all.
+  addMenu.scrollIntoView?.({ block: "nearest" });
+  menuItems[0]?.focus({ preventScroll: true });
 }
 function closeMenu(focusButton: boolean): void {
   if (addMenu.hidden) return;
