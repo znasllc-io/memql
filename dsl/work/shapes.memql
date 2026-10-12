@@ -91,6 +91,44 @@ shape run workRunFull {
   routing
 }
 
+/// Nexus navigation and run controls. Execution inputs, variables, compiled
+/// spines and outputs stay in workRunFull; a list must not transfer every
+/// captured document and research receipt. Steps and their results are read
+/// separately only while the corresponding run is open.
+@row
+shape run workRunSummary {
+  row.id
+  row.createdAt
+  ownerUserId
+  goalId
+  automationName
+  templateConstructId
+  templateVersion
+  classification.workTitle
+  input.conversation
+  mode
+  replayPolicy
+  forkedFromRunId
+  forkAtStepKey
+  status
+  waitingOn
+  spent
+  nodeId
+  heartbeatAt
+  cancelRequested
+  cancelledBy
+  errorCode
+  errorMessage
+  stepOrder
+  triggeredBy
+  startedAt
+  finishedAt
+  head
+  staleSteps
+  rerun
+  validation
+}
+
 /// What a run the loop protection stopped says about the stop, and nothing else: the fields the
 /// automationLoopStops builtin projects from (outcome holds the loop record), with the input, the
 /// variables and the triggering event deliberately left out.

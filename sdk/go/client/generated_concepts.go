@@ -1111,6 +1111,8 @@ var BoundConcepts = map[string]string{
 	"workObservationsForOwnerRun":                      "v1:work:observation",
 	"workQuestionsForOwnerRun":                         "v1:work:approval",
 	"workRunForOwner":                                  "v1:work:run",
+	"workRunSummariesForOwner":                         "v1:work:run",
+	"workRunSummaryForOwner":                           "v1:work:run",
 	"workRunningRunsForOwner":                          "v1:work:run",
 	"workRunsForGoal":                                  "v1:work:run",
 	"workRunsForOwner":                                 "v1:work:run",

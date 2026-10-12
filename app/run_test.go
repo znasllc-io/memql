@@ -176,7 +176,7 @@ func TestRun_DefaultsAreSane(t *testing.T) {
 func TestDefaultWaitForShutdownSignal_ReturnsTheSentSignal(t *testing.T) {
 	done := make(chan os.Signal, 1)
 	go func() {
-		done <- app.DefaultWaitForShutdownSignal()
+		done <- app.DefaultWaitForShutdownSignal(context.Background())
 	}()
 	// Give the signal handler in DefaultWaitForShutdownSignal a beat
 	// to register before we fire. Without this the SIGINT can land

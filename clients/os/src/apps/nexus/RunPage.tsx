@@ -228,10 +228,10 @@ export function RunPage({
   const terminal = runIsTerminal(run);
   const waiting = runWaitsOnYou(run);
   const pending = approvals[0] ?? null;
-  // The step acts are legal on a finished run with no re-run of its own in
-  // flight. A re-run turns the run back to `running`, so this is mostly the
-  // terminal test -- but a request left on a closed run still hides them.
-  const stepActsLegal = terminal && run.rerun === null;
+  // The lifecycle determines whether execution has stopped. A failed or
+  // interrupted re-run can retain its request; that history must not prevent
+  // another attempt. The server enforces the same finished-run boundary.
+  const stepActsLegal = terminal;
   // A run that has finished once can be judged -- including while a re-run of
   // one of its steps is in flight, when hiding the verdicts would move the
   // whole timeline up under the person watching it.
@@ -449,7 +449,7 @@ export function RunPage({
   })();
 
   const barDetail =
-    run.rerun !== null
+    run.status === "running" && run.rerun !== null
       ? rerunInFlightWords(run.rerun.reason, run.rerun.stepKey, rerunVersion)
       : waiting
         ? waitingWord(run.waitingOnKind).toLowerCase()

@@ -60,6 +60,9 @@ type revisionAI struct {
 	assessmentReply       string
 	assessmentError       error
 	assessmentCalls       atomic.Int32
+	imageSourceOnly       bool
+	researchReferences    string
+	researchInstruction   string
 	headlessScope         string
 	researchDocument      string
 	researchPassages      string
@@ -69,6 +72,11 @@ type revisionAI struct {
 	expectedReference     string
 	appError              error
 	answer                revisionAnswer
+
+	imagePlanLimitations        string
+	replacementImageLimitations string
+	imagePlanEvidence           string
+	imagePlanGaps               string
 }
 
 func (*revisionAI) IntegrationName() string { return "agents" }
@@ -79,7 +87,7 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 		}},
 		{Name: "runAgentTurn", Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 			data := revisionMap(args["data"])
-			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
+			if data["imageSourceOnly"] != true && a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
 				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
 			}
 			if args["templateId"] != "libraryRevisionResearch" || data["document"] == nil || data["passages"] == nil {
@@ -89,6 +97,9 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 			if !a.parallelResearch && a.appCalls.Load() == 0 {
 				return nil, fmt.Errorf("local research started before the app attempt")
 			}
+			a.imageSourceOnly, _ = data["imageSourceOnly"].(bool)
+			a.researchReferences = asString(data["references"])
+			a.researchInstruction = asString(data["instruction"])
 			a.headlessScope = asString(data["gaps"])
 			a.researchDocument = asString(data["document"])
 			a.researchPassages = asString(data["passages"])
@@ -171,7 +182,7 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				body, _ := json.Marshal(structured)
 				return reviewResult(map[string]any{"reply": string(body), "structured": structured})
 			}
-			if a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
+			if args["templateId"] != "libraryRevisionImageIntent" && a.expectedReference != "" && !strings.Contains(asString(data["references"]), a.expectedReference) {
 				return nil, fmt.Errorf("reference contents did not reach the DSL model step")
 			}
 			if args["templateId"] == "libraryRevisionIntent" {
@@ -185,7 +196,17 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return reviewResult(map[string]any{"reply": intent})
 			}
 			if args["templateId"] == "libraryRevisionImageIntent" {
-				if len(a.imagePlan) > 0 {
+				passages, ok := data["passages"].([]any)
+				if !ok || len(passages) == 0 || data["references"] != nil {
+					return nil, fmt.Errorf("image intent did not isolate human feedback from reference contents")
+				}
+				for _, passage := range passages {
+					p := revisionMap(passage)
+					if p["source"] != nil || p["comments"] == nil {
+						return nil, fmt.Errorf("image intent included obsolete source or lost feedback")
+					}
+				}
+				if len(a.imagePlan) > 0 || a.imagePlanLimitations != "" {
 					return reviewResult(map[string]any{"reply": "acquire"})
 				}
 				return reviewResult(map[string]any{"reply": "none"})
@@ -193,11 +214,15 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 			if args["templateId"] == "libraryRevisionImagePlan" {
 				a.imagePlanPrevious = asString(data["previous"])
 				a.imagePlanSchema = args["responseSchema"]
+				a.imagePlanEvidence = asString(data["evidence"])
+				a.imagePlanGaps = asString(data["gaps"])
 				plan := a.imagePlan
+				limitations := a.imagePlanLimitations
 				if a.imagePlanCalls.Add(1) > 1 && a.replacementImagePlan != nil {
 					plan = a.replacementImagePlan
+					limitations = a.replacementImageLimitations
 				}
-				raw, _ := json.Marshal(map[string]any{"images": plan, "limitations": ""})
+				raw, _ := json.Marshal(map[string]any{"images": plan, "limitations": limitations})
 				return reviewResult(map[string]any{"reply": string(raw)})
 			}
 			if args["templateId"] == "libraryRevisionAppResearch" {
@@ -484,6 +509,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 			{"RevisionDSLPlansAcquiresAndProposesAnImage", testRevisionDSLPlansAcquiresAndProposesAnImage},
 			{"RevisionDSLRepairsImagePlanBeforeEffects", testRevisionDSLRepairsImagePlanBeforeEffects},
 			{"RevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch", testRevisionDSLRepairsRemoteImageSourceAndContinuesMixedBatch},
+			{"RevisionDSLResearchesMissingImageEvidence", testRevisionDSLResearchesMissingImageEvidence},
 			{"DocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure", testDocumentResearchCombinesReportsAndContinuesAfterAppQuotaFailure},
 			{"DocumentResearchRouting", testDocumentResearchRouting},
 			{"DocumentResearchScopesContext", testDocumentResearchScopesContext},
