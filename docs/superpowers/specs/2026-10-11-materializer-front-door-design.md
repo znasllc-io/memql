@@ -107,15 +107,19 @@ not change, the design.
    `MaterializeCancelled`, and so does a stop while a ready file's Files entry is
    still missing: there is no artifact to hand back, and the file is in Files a
    moment later. VS Code's New Markdown notification is cancellable on this basis.
-10. **The `composeFile` agent tool requires a statement.** The tool reaches the
-    Materializer through `composeMaterializeWritten`, a builtin that is not an SDK
-    construct and requires one. The engine's call contract already refuses an
-    empty or whitespace-only value for a string field at parse time
-    (`composeMaterialize() statement cannot be empty`), before any handler runs,
-    so an empty statement from the tool is refused either way; the wrapper
-    declares the requirement where the tool is, and its handler refuses with a
-    sentence that names `composeFile`. Its field declarations are copies of
-    `composeMaterialize`'s, and a test holds the copies together.
+10. **The `composeFile` agent tool cannot send an empty statement, and a test holds
+    it.** The tool calls `composeMaterialize`, and a statement that is empty or only
+    spaces never reaches the Materializer: the engine's call contract refuses a
+    blank value for a string field of a builtin when the call is parsed
+    (`composeMaterialize() statement cannot be empty`), and a tool whose handler is
+    a function reaches its builtin by rendering that call and executing it. A
+    tool field cannot say "not empty" itself (the annotation set has only
+    `required`), so the guard is a test that runs the shipped tool through the
+    engine's `ExecuteTool`, as the agent tool loop does, with the Materializer's
+    capability replaced by a recorder: the empty, whitespace-only and missing
+    statements are refused before the recorder runs, and a real statement reaches
+    it as sent. A person's client still leaves the statement out to ask for a
+    blank file.
 
 ## In plain terms
 
@@ -483,6 +487,10 @@ constructs the rules ban.
 - **Go, the Library's limits:** a test holds the SDK's copy of the attachment
   limits, image types and the word "attach" to the Library's own, and every
   attachment refusal the Library words says "attach".
+- **Go, the `composeFile` tool:** the shipped tool is run through the engine's
+  `ExecuteTool` with an agent's role and the Materializer's capability recorded:
+  an empty, whitespace-only or missing statement is refused before the
+  Materializer runs, and a real one reaches it as sent.
 - **VS Code:** `newMarkdown` creates through `materialize`, never
   `createFile`, in a notification that can be stopped, and refuses an
   extension-only name as it is typed; `templateFromExamples` uses the shared

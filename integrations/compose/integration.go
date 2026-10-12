@@ -4,7 +4,6 @@
 // dsl/compose/builtins.memql:
 //
 //	integration.compose.materialize         -- compose, render, stamp, file
-//	integration.compose.materializeWritten  -- materialize for the composeFile agent tool: an empty statement is refused
 //	integration.compose.runRecipe           -- resolve a recipe's selectors and materialize
 //	integration.compose.cancel              -- ask a composition to stop
 //	integration.compose.composableConcepts  -- what is worth composing from
@@ -272,19 +271,6 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"recipeId":       "string -- the recipe this run came from, when it came from one",
 				"ceilings":       "object -- the goal's ceilings; a zero is 'unset', never 'nothing allowed'",
 				"requestId":      "string -- the caller's own id for this request; repeating it returns the same composition instead of starting another",
-			},
-		},
-		{
-			Name:        "materializeWritten",
-			Description: "The composeFile agent tool's entry into the Materializer: materialize for a request that must say what to write. A statement that is empty or only spaces is refused, because a request with nothing to compose from files an empty document, which is what a person's client asks for on purpose and an agent never means. Otherwise it is materialize, with the arguments the tool carries.",
-			Handler:     i.handleMaterializeWritten,
-			ArgsSchema: map[string]string{
-				"name":      "string (required) -- what to call it, and the filename stem",
-				"statement": "string (required) -- what the file should contain; refused when empty",
-				"format":    "string (required) -- markdown | html | txt | csv | json | docx | pdf",
-				"draft":     "string -- a draft to start from; empty means the compose step writes it",
-				"sources":   "[]object -- {kind, ref, label}; kind is concept_row | library_file | query",
-				"folderId":  "string -- v1:library:folder to file the output into",
 			},
 		},
 		{

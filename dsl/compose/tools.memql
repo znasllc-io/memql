@@ -4,7 +4,7 @@
 /// PDF, DOCX and other compound formats automatically include a reproducible source ZIP;
 /// the completed receipt returns outputFileId and sourceFileId. No separate ZIP-building step
 /// or template lookup is needed. With no selected template, use the Materializer default style.
-@handler(type="function", name="composeMaterializeWritten")
+@handler(type="function", name="composeMaterialize")
 @requiresAgentRole("assistant", "specialist")
 @executionTime("slow")
 tool composeFile {
