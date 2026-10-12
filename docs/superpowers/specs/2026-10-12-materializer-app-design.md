@@ -6,7 +6,7 @@
 - **Program:** sub-projects 4 and 5 of 5 in epic memql#6022
 - **Builds on:** `2026-10-11-materializer-front-door-design.md` (sub-project 1). Its section 4 (the starting setup), amendments 5 to 11 and its guard test "one creation path" are binding here, with one change: which Markdown requests are described (its amendment 5) follows D31 below, in the server and the SDK alike.
 - **Supersedes:** for the Materializer, section 6 of the email program spec (`2026-10-11-email-layouts-automations-design.md`, on `epic/email-rework`); see "Relation to the email program spec".
-- **Plan:** `docs/superpowers/plans/2026-10-12-materializer-app.md`
+- **Implementation:** [PR #6063](https://github.com/znasllc-io/memql/pull/6063)
 - **Rulings:** the controller ruled on this record's owner questions on 2026-10-12 (see the last section); the owner can reverse any of them.
 
 ## In plain terms
