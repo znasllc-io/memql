@@ -318,6 +318,9 @@ describe("the provenance chain", () => {
       expect(screen.queryByText(/nowhere to put it/)).toBeNull();
       expect(screen.getByText("This file was created blank.")).toBeTruthy();
       expect(screen.queryByText(/composed text/)).toBeNull();
+      // A recipe of a blank file would have no brief and no sources, which a recipe run refuses.
+      expect(screen.getByRole("button", { name: "Open Notes" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Save as recipe" })).toBeNull();
       cleanup();
     }
   });

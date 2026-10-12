@@ -1,4 +1,4 @@
-import type { CompositionRow } from "./rows";
+import { recipeKeeps, type CompositionRow, type SourceRow } from "./rows";
 import { isRunning, statusWord } from "./words";
 
 // acts.ts -- DESIGN.md rule 12, as a PURE function so the table is what
@@ -65,8 +65,13 @@ export interface DraftState {
  * act of a FINISHED file, offered beside the one that opens it: before there
  * is a file there is nothing to come back from, and a composition that failed
  * or was stopped is not the errand the other app sent them on.
+ *
+ * `sources` are the composition's own (what its record says it was made from).
+ * A recipe keeps the brief and the sources it can select again, and a recipe
+ * run refuses one with neither, so Save as recipe is offered only where there
+ * is one or the other: never on a blank file.
  */
-export function actsFor(c: CompositionRow | null, draft: DraftState, backTo?: string): ActSpec[] {
+export function actsFor(c: CompositionRow | null, draft: DraftState, backTo?: string, sources: SourceRow[] = []): ActSpec[] {
   // No composition yet: this is the compose form, and the only act is to
   // run it. It is ABSENT rather than disabled while there is nothing to
   // compose from, so the bar's state line is what explains the wait.
@@ -112,7 +117,12 @@ export function actsFor(c: CompositionRow | null, draft: DraftState, backTo?: st
         acts.push({ id: "openDeployables", label: "Deploy it", tone: "primary" });
         break;
       }
-      if (!c.recipeId) acts.push({ id: "saveRecipe", label: "Save as recipe", tone: "default" });
+      // ABSENT WHERE THE RECIPE COULD NOT RUN: with no brief and nothing a
+      // recipe selects again (a blank file; rows picked one by one), the saved
+      // recipe would be refused the first time it ran.
+      if (!c.recipeId && (c.statement.trim() !== "" || sources.some(recipeKeeps))) {
+        acts.push({ id: "saveRecipe", label: "Save as recipe", tone: "default" });
+      }
       if (c.outputFileId) acts.push({ id: "openFile", label: "Open the file", tone: "primary" });
       break;
     case "failed":

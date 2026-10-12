@@ -10,7 +10,7 @@ import {
 } from "@znasllc-io/memql-sdk-core/client";
 
 import type { ComposeSource } from "../../items/materialize";
-import type { CompositionRow, SourceRow, SelectorRow } from "./rows";
+import { recipeKeeps, type CompositionRow, type SourceRow, type SelectorRow } from "./rows";
 
 import { useOsConnection } from "../../live/connection";
 import { FORMATS } from "./words";
@@ -281,7 +281,7 @@ export function recipeFacts(composition: CompositionRow, sources: SourceRow[]): 
     name: composition.name, description: composition.statement, format: composition.format,
     templateId: composition.templateId, folderId: composition.folderId,
     accountIds: composition.accountIds, outputKind: composition.outputKind,
-    sourceSelectors: sources.filter(source => source.kind === "query" || source.kind === "library_file").map(source => ({
+    sourceSelectors: sources.filter(recipeKeeps).map(source => ({
       kind: source.kind === "query" ? "concept_query" : source.kind, selector: source.ref, label: source.label,
       ...(source.content !== undefined ? { content: source.content } : {}),
       ...(source.includeImages !== undefined ? { includeImages: source.includeImages } : {}),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { actsFor, type DraftState } from "../../src/apps/materializer/acts";
-import { compositionFromRow, type CompositionRow } from "../../src/apps/materializer/rows";
+import { compositionFromRow, sourcesOf, type CompositionRow } from "../../src/apps/materializer/rows";
 import { compositionRow } from "./harness";
 
 // DESIGN.md rule 12 for the Materializer, as the table `actsFor` computes: the
@@ -57,5 +57,36 @@ describe("the way back to the app that sent the person", () => {
     for (const over of [{}, { recipeId: "r1" }, { deployableKind: "spa" }, { outputFileId: "" }]) {
       expect(actsFor(composition(over), DRAFT, "Files").length).toBeLessThanOrEqual(3);
     }
+  });
+});
+
+// SAVE AS RECIPE IS OFFERED ONLY WHERE THE RECIPE COULD RUN. A recipe keeps the
+// brief and the sources it can select again -- a query, a Library file -- and
+// composeRunRecipe refuses one with neither ("this recipe needs a brief or
+// reference sources"). A blank file has neither, and a recipe saved from it
+// would be refused the first time it ran: an act whose only outcome is a refusal
+// is absent (rule 12).
+describe("Save as recipe", () => {
+  const row = (over: Record<string, unknown> = {}) => compositionRow({ id: "c1", name: "Notes", status: "ready", format: "markdown", ...over });
+  const acts = (over: Record<string, unknown> = {}) => {
+    const r = row(over);
+    return ids(actsFor(compositionFromRow(r), DRAFT, undefined, sourcesOf(r)));
+  };
+  const query = { kind: "query", ref: "query openInvoices()", label: "Open invoices", capturedAt: "" };
+  const file = { kind: "library_file", ref: "f1", label: "notes.md", capturedAt: "" };
+  const picked = { kind: "concept_row", ref: "v1:x:invoice#a", label: "INV-1001", capturedAt: "" };
+
+  it("is absent from a blank file: no brief and no sources", () => {
+    expect(acts({ statement: "", sources: [] })).toEqual(["archive", "openFile"]);
+  });
+
+  it("is absent where the only sources are rows picked one by one, which a recipe does not keep", () => {
+    expect(acts({ statement: "", sources: [picked] })).not.toContain("saveRecipe");
+  });
+
+  it("is offered for a brief, a query or a Library file, each enough for a recipe to run", () => {
+    expect(acts({ statement: "Draft the Q3 report", sources: [] })).toContain("saveRecipe");
+    expect(acts({ statement: "", sources: [query] })).toContain("saveRecipe");
+    expect(acts({ statement: "", sources: [picked, file] })).toContain("saveRecipe");
   });
 });

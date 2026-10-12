@@ -247,7 +247,7 @@ export function ComposerSection({
     hasOrganization: accounts.some(account => account.id === accountId && !accountIsArchived(account)),
     submitting: busy,
   };
-  const acts = actsFor(open, draftState, backTo);
+  const acts = actsFor(open, draftState, backTo, compositionSources);
   const arrived = open !== null && description ? noticesFor(description) : [];
   // What the open file is -- blank, described, or written by a model -- said
   // under what was asked for, from its record and what this window knows.
