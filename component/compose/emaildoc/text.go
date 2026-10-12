@@ -18,7 +18,8 @@ import (
 //   - a button, as "Label: address" (only the label while it has no link);
 //   - an html block, the text a reader sees in it.
 //
-// Pictures, dividers and spacers have no words. The part ends with one
+// Pictures, dividers and spacers have no words. A link whose address breaks
+// the link rule is its words alone, as in the HTML. The part ends with one
 // newline, and is empty when no block has words. Merge tags stay as written,
 // to be filled like the rest of the part.
 func layoutText(blocks []Block) string {
@@ -47,10 +48,10 @@ func appendText(chunks []string, b Block) []string {
 			add(elementText(element))
 		}
 	case typeButton:
-		if b.Href == "" {
+		if href := checkedHref(b.Href); href == "" {
 			add(b.Label)
 		} else {
-			add(b.Label + ": " + b.Href)
+			add(b.Label + ": " + href)
 		}
 	case typeHTML:
 		if normalized, err := safeMarkup(b.HTML); err == nil {
@@ -82,7 +83,11 @@ func inlineText(runs []mdInline) string {
 	for _, run := range runs {
 		switch run.Kind {
 		case mdLink:
-			b.WriteString(run.Text + " (" + run.URL + ")")
+			if href := checkedHref(run.URL); href != "" {
+				b.WriteString(run.Text + " (" + href + ")")
+			} else {
+				b.WriteString(run.Text)
+			}
 		case mdBreak:
 			b.WriteByte('\n')
 		default:

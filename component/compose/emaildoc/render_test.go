@@ -9,6 +9,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -639,8 +640,13 @@ func TestConfirmIssueOnlyWhenRequired(t *testing.T) {
 		want bool
 	}{
 		{"neither part", Document{Subject: "x", TextBody: "Hi", HTMLBody: "<p>Hi</p>"}, true},
-		{"the text part", Document{Subject: "x", TextBody: "Confirm: {{confirmUrl}}", HTMLBody: ""}, false},
+		{"the text part of a text email", Document{Subject: "x", TextBody: "Confirm: {{confirmUrl}}", HTMLBody: ""}, false},
 		{"the HTML part", Document{Subject: "x", TextBody: "Hi", HTMLBody: `<a href="{{confirmUrl}}">Confirm</a>`}, false},
+		// An HTML email is read as HTML: its link has to be there, as a link.
+		{"only the text part of an HTML email", Document{Subject: "x", TextBody: "Confirm: {{confirmUrl}}", HTMLBody: "<p>Hi</p>"}, true},
+		{"HTML text, not a link", Document{Subject: "x", TextBody: "Hi", HTMLBody: "<p>Confirm: {{confirmUrl}}</p>"}, true},
+		{"a picture's alt", Document{Subject: "x", TextBody: "Hi", HTMLBody: `<img src="https://example.com/a.png" alt="{{confirmUrl}}">`}, true},
+		{"the preheader", Document{Subject: "x", Preheader: "{{confirmUrl}}", TextBody: "Hi", HTMLBody: "<p>Hi</p>"}, true},
 	} {
 		r, _ := Render(ctx, c.doc, nil, RenderOptions{RequireConfirm: true})
 		if hasIssue(r.Issues, IssueConfirmMissing) != c.want {
@@ -1004,29 +1010,79 @@ func TestRenderedHTMLHasNoNewlinesOfItsOwn(t *testing.T) {
 }
 
 func TestRenderEscapesAnUncheckedDocument(t *testing.T) {
-	// Parse refuses all of this; Render is still safe with a Document that was
-	// built without it. Every string it writes is escaped, so nothing it was
-	// given can close an attribute or open an element.
+	// Parse refuses all of this. With a Document built without it, every
+	// string Render writes as text or as an attribute value is escaped, so none
+	// can close an attribute or open an element.
 	const hostile = `"><script>x</script>`
-	theme := neutral()
-	theme.Page, theme.Canvas, theme.Primary, theme.Text, theme.HeadingFont, theme.BodyFont, theme.WebFonts = hostile, hostile, hostile, hostile, hostile, hostile, true
-	d := Document{Subject: "x", Preheader: hostile, Theme: theme, Blocks: []Block{
-		{ID: hostile, Type: "heading", Text: "x", Align: hostile, LetterSpacing: hostile},
-		{ID: "t", Type: "text", Text: "[x](" + hostile + ")"},
-		{ID: "b", Type: "button", Label: "x", Href: hostile},
-		{ID: "i", Type: "image", Width: 10, Href: hostile, Align: hostile},
+	d := Document{Subject: "x", Preheader: hostile, Theme: neutral(), Blocks: []Block{
+		{ID: hostile, Type: "heading", Text: hostile},
+		{ID: "t", Type: "text", Text: hostile + "\n\n- " + hostile},
+		{ID: "b", Type: "button", Label: hostile, Href: "https://example.com"},
+		{ID: "i", Type: "image", Width: 10, Src: "artifact:a1", Alt: hostile},
 	}}
-	r, err := Render(context.Background(), d, nil, RenderOptions{Preview: true})
+	r, err := Render(context.Background(), d, fakeImages{"a1": pngImage(t, 2, 2)}, RenderOptions{Preview: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(r.HTML, "<script") {
 		t.Fatalf("a value reached the HTML unescaped:\n%s", r.HTML)
 	}
-	// The values are there, escaped: the id, the preheader, the theme colours,
-	// the fonts, the links, the alignment and the letter spacing.
-	if got := strings.Count(r.HTML, "&#34;&gt;&lt;script&gt;x&lt;/script&gt;"); got < 10 {
+	// The values are there, escaped: the id, the preheader, the heading, the
+	// paragraph and the item, the button's label (twice) and the alt.
+	if got := strings.Count(r.HTML, "&#34;&gt;&lt;script&gt;x&lt;/script&gt;"); got < 8 {
 		t.Fatalf("want the escaped value throughout the email, found it %d times:\n%s", got, r.HTML)
+	}
+}
+
+func TestAnUncheckedDocumentCannotInjectStylesLinksOrSources(t *testing.T) {
+	// Parse refuses each of these too. Render does not write them: a link that
+	// breaks the link rule, a theme colour or font that is not one, an
+	// alignment or letter spacing that is not one, and a picture source that is
+	// not a Library file or an embedded raster are left out.
+	const evil = "https://evil.example/x"
+	theme := neutral()
+	theme.Page = "#fff;background:url(" + evil + ")"
+	theme.Canvas = "#fff\"onmouseover=\"x"
+	theme.Primary = "red;background-image:url(" + evil + ")"
+	theme.HeadingFont = "Georgia;background:url(" + evil + ")"
+	theme.BodyFont = "Arial', url(" + evil + ")"
+	theme.WebFonts = true
+	png := base64.StdEncoding.EncodeToString(tinyPNG(t, 2, 2))
+	d := Document{Subject: "x", Preheader: "p", Theme: theme, Blocks: []Block{
+		{ID: "h", Type: "heading", Text: "x", Align: "left;background:url(" + evil + ")", LetterSpacing: "0;background:url(" + evil + ")"},
+		{ID: "t", Type: "text", Text: "[x](javascript:alert(1)) and [y](" + evil + "?a=\"onmouseover)", Align: "center;x:url(" + evil + ")"},
+		{ID: "b", Type: "button", Label: "Go", Href: "javascript:alert(1)"},
+		{ID: "i", Type: "image", Width: 10, Href: "javascript:alert(1)", Src: "image/png;base64," + png},
+		{ID: "j", Type: "image", Width: 10, Src: "https://evil.example/p.png"},
+	}}
+	r, err := Render(context.Background(), d, nil, RenderOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{r.HTML, r.Text} {
+		for _, banned := range []string{"evil.example", "javascript:", "url(", "onmouseover", "image/png;base64"} {
+			if strings.Contains(part, banned) {
+				t.Errorf("%q reached the email:\n%s", banned, part)
+			}
+		}
+	}
+	for _, want := range []Issue{
+		{Code: IssueLinkMissing, Block: "b", Message: `Add a link to "Go".`},
+		{Code: IssueImageUnavailable, Block: "i", Message: `The picture for "i" could not be read. Choose it again.`},
+		{Code: IssueImageUnavailable, Block: "j", Message: `The picture for "j" could not be read. Choose it again.`},
+	} {
+		found := false
+		for _, issue := range r.Issues {
+			found = found || issue == want
+		}
+		if !found {
+			t.Errorf("want %+v in %+v", want, r.Issues)
+		}
+	}
+	// What is left out is drawn without it: the links as words, the colours
+	// and fonts as the column's own.
+	if !strings.Contains(r.HTML, ">x and y</td>") || !strings.Contains(r.Text, "x and y") {
+		t.Errorf("want the link labels as words:\n%s\n%s", r.HTML, r.Text)
 	}
 }
 
@@ -1149,4 +1205,265 @@ func FuzzRender(f *testing.F) {
 			t.Fatalf("marked cells %v, want %v:\n%s", marked, want, r.HTML)
 		}
 	})
+}
+
+// sendingCap is the most HTML sending takes (compose.RewriteEmailImageSources,
+// which compose.ExtractEmailImages applies to every email it sends).
+const sendingCap = 2 << 20
+
+var emailTooLarge = Issue{Code: IssueEmailTooLarge, Message: "This email is larger than 2 MiB once its pictures are embedded. Use fewer or smaller pictures."}
+
+// allocatedBy is how many bytes f allocates, all of them, short-lived or not.
+func allocatedBy(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// bigPicture is about 0.8 MiB, inside the picture budget on its own, and about
+// 1.07 MiB embedded: two of it are more than sending takes.
+func bigPicture(t *testing.T) Image {
+	t.Helper()
+	img := pngImage(t, 520, 540)
+	if n := len(img.Data); n > MaxImageBytes || 2*base64.StdEncoding.EncodedLen(n) <= sendingCap || base64.StdEncoding.EncodedLen(n) > sendingCap*3/4 {
+		t.Fatalf("fixture is %d bytes, which does not make the case", n)
+	}
+	return img
+}
+
+func TestAPictureUsedTwiceCanMakeTheEmailTooLargeToSend(t *testing.T) {
+	ctx := context.Background()
+	images := fakeImages{"big": bigPicture(t)}
+	once := oneBlock(Block{ID: "one", Type: "image", Src: "artifact:big", Width: 100})
+	r, err := Render(ctx, once, images, RenderOptions{})
+	if err != nil || len(r.Issues) != 0 || strings.Count(r.HTML, `<img src="data:`) != 1 {
+		t.Fatalf("used once: %v %+v", err, r.Issues)
+	}
+	twice := oneBlock(Block{ID: "two", Type: "image", Src: "artifact:big", Width: 100, Alt: "Again"})
+	twice.Blocks = append([]Block{{ID: "one", Type: "image", Src: "artifact:big", Width: 100}}, twice.Blocks...)
+	r, err = Render(ctx, twice, images, RenderOptions{})
+	if err != nil || len(r.Issues) != 1 || r.Issues[0] != emailTooLarge {
+		t.Fatalf("used twice: want only %+v, got %+v %v", emailTooLarge, r.Issues, err)
+	}
+	// The use that does not fit is drawn as the placeholder, so the HTML
+	// stays within what sending takes.
+	if strings.Count(r.HTML, `<img src="data:`) != 1 || !strings.Contains(r.HTML, ">Again</div>") || len(r.HTML) > sendingCap {
+		t.Fatalf("want one picture and one placeholder in %d bytes", len(r.HTML))
+	}
+}
+
+func TestRepeatedPicturesCannotInflateTheEmail(t *testing.T) {
+	ctx := context.Background()
+	images := fakeImages{"big": bigPicture(t)}
+	// A layout of 299 uses of one picture is about 18 KB of document.
+	var blocks []Block
+	for n := 0; n < 299; n++ {
+		blocks = append(blocks, Block{ID: fmt.Sprintf("i%d", n), Type: "image", Src: "artifact:big", Width: 100})
+	}
+	d := oneBlock(blocks[0])
+	d.Blocks = append(blocks, d.Blocks[1:]...)
+	var r Result
+	var err error
+	allocated := allocatedBy(func() { r, err = Render(ctx, d, images, RenderOptions{Preview: true}) })
+	if err != nil || len(r.Issues) != 1 || r.Issues[0] != emailTooLarge {
+		t.Fatalf("layout: want only %+v, got %+v %v", emailTooLarge, r.Issues, err)
+	}
+	if strings.Count(r.HTML, `<img src="data:`) != 1 || len(r.HTML) > sendingCap || allocated > 64<<20 {
+		t.Fatalf("layout: %d pictures embedded, %d bytes of HTML, %d bytes allocated", strings.Count(r.HTML, `<img src="data:`), len(r.HTML), allocated)
+	}
+	// Custom markup with a thousand uses of it is about 24 KB.
+	custom := Document{Subject: "x", TextBody: "x", HTMLBody: strings.Repeat(`<img src="artifact:big">`, 1000)}
+	allocated = allocatedBy(func() { r, err = Render(ctx, custom, images, RenderOptions{}) })
+	if err != nil || len(r.Issues) != 1 || r.Issues[0] != emailTooLarge {
+		t.Fatalf("custom: want only %+v, got %+v %v", emailTooLarge, r.Issues, err)
+	}
+	if strings.Count(r.HTML, `<img src="data:`) != 1 || strings.Count(r.HTML, `<img src="artifact:big">`) != 999 || len(r.HTML) > sendingCap || allocated > 64<<20 {
+		t.Fatalf("custom: %d pictures embedded, %d bytes of HTML, %d bytes allocated", strings.Count(r.HTML, `<img src="data:`), len(r.HTML), allocated)
+	}
+}
+
+func TestMarkupOverTheSendingCapIsAnIssue(t *testing.T) {
+	// No picture at all: about 3,600 list items are more HTML than sending
+	// takes, and the email says so.
+	d := oneBlock(Block{ID: "t", Type: "text", Text: strings.Repeat("- a\n", 3600)})
+	r, err := Render(context.Background(), d, nil, RenderOptions{})
+	if err != nil || len(r.HTML) <= sendingCap || len(r.Issues) != 1 || r.Issues[0] != emailTooLarge {
+		t.Fatalf("%d bytes: want only %+v, got %+v %v", len(r.HTML), emailTooLarge, r.Issues, err)
+	}
+	// And a picture after that point is not embedded.
+	d.Blocks = append(d.Blocks, Block{ID: "i", Type: "image", Src: "artifact:a1", Width: 10, Alt: "Late"})
+	r, _ = Render(context.Background(), d, fakeImages{"a1": pngImage(t, 2, 2)}, RenderOptions{})
+	if strings.Contains(r.HTML, `<img src="data:`) || !strings.Contains(r.HTML, ">Late</div>") || countIssues(r.Issues, IssueEmailTooLarge) != 1 {
+		t.Fatalf("want the late picture as a placeholder and one issue: %+v", r.Issues)
+	}
+}
+
+func TestCustomMarkupOverTheSendingCapIsAnIssue(t *testing.T) {
+	// The largest HTML Parse admits, and the preheader on top of it, is more
+	// than sending takes.
+	src := `{"subject":"x","preheader":"` + strings.Repeat("p", 200) + `","textBody":"x","htmlBody":"` + strings.Repeat("a", 2_096_800) + `"}`
+	d, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Render(context.Background(), d, nil, RenderOptions{})
+	if err != nil || len(r.HTML) <= sendingCap || len(r.Issues) != 1 || r.Issues[0] != emailTooLarge {
+		t.Fatalf("%d bytes: want only %+v, got %+v %v", len(r.HTML), emailTooLarge, r.Issues, err)
+	}
+	// Without the preheader it fits.
+	d.Preheader = ""
+	if r, _ := Render(context.Background(), d, nil, RenderOptions{}); len(r.Issues) != 0 {
+		t.Fatalf("want no issue, got %+v", r.Issues)
+	}
+}
+
+func TestRenderStopsAtItsCeiling(t *testing.T) {
+	ctx := context.Background()
+	// Markup grows faster than its source: a list item of four bytes is a row
+	// of about six hundred, so a document Parse accepts can ask for hundreds of
+	// mebibytes of HTML. Render stops at MaxRenderBytes, as it writes.
+	items := strings.Repeat("- a\n", 300_000)
+	d, err := Parse([]byte(layoutJSON(`{"id":"t","type":"text","text":` + jsonString(items) + `}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reading the Markdown costs what the input costs; writing may cost a few
+	// times the ceiling (a growing buffer and the rows it is made of), never
+	// what the input asks for, which is over a gigabyte here.
+	parsing := allocatedBy(func() { _, _ = parseMarkdown(items) })
+	var renderErr error
+	rendering := allocatedBy(func() { _, renderErr = Render(ctx, d, nil, RenderOptions{}) })
+	if !errors.Is(renderErr, ErrTooLarge) || rendering > parsing+8*MaxRenderBytes {
+		t.Fatalf("list: want ErrTooLarge within the ceiling, got %v after %d bytes (%d of them reading the Markdown)", renderErr, rendering, parsing)
+	}
+	// Paragraphs and highlight lines grow the same way.
+	paragraphs, lines := strings.Repeat("a\n\n", 300_000), strings.Repeat("a\n", 450_000)
+	for _, c := range []struct {
+		name, block string
+		read        func()
+	}{
+		{"paragraphs", `{"id":"t","type":"text","text":` + jsonString(paragraphs) + `}`, func() { _, _ = parseMarkdown(paragraphs) }},
+		{"highlight lines", `{"id":"l","type":"highlight","text":` + jsonString(lines) + `}`, func() { _ = strings.Split(oneNewline(lines), "\n") }},
+	} {
+		d, err := Parse([]byte(layoutJSON(c.block)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		reading := allocatedBy(c.read)
+		rendering := allocatedBy(func() { _, renderErr = Render(ctx, d, nil, RenderOptions{}) })
+		if !errors.Is(renderErr, ErrTooLarge) || rendering > reading+8*MaxRenderBytes {
+			t.Fatalf("%s: want ErrTooLarge within the ceiling, got %v after %d bytes (%d of them reading)", c.name, renderErr, rendering, reading)
+		}
+	}
+	// It stops as soon as it is past the ceiling: the blocks after are never
+	// written, and their pictures never read. (Only a Document built without
+	// Parse can hold a heading this long.)
+	reads := 0
+	counting := resolverFunc(func(context.Context, string) (Image, error) {
+		reads++
+		return pngImage(t, 2, 2), nil
+	})
+	long := Document{Subject: "x", Theme: neutral(), Blocks: []Block{
+		{ID: "h", Type: "heading", Text: strings.Repeat(`"`, MaxRenderBytes/5+1)},
+		{ID: "i", Type: "image", Src: "artifact:a1", Width: 10},
+	}}
+	if _, err := Render(ctx, long, counting, RenderOptions{}); !errors.Is(err, ErrTooLarge) || reads != 0 {
+		t.Fatalf("want ErrTooLarge before the picture is read, got %v and %d reads", err, reads)
+	}
+	// A sample value used many times.
+	d = oneBlock(Block{ID: "t", Type: "text", Text: strings.Repeat("{{displayName}} ", 20)})
+	if _, err := Render(ctx, d, nil, RenderOptions{Sample: map[string]string{"displayName": strings.Repeat("x", 1<<20)}}); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("sample: want ErrTooLarge, got %v", err)
+	}
+	// Custom markup past the ceiling, which only a Document built without
+	// Parse can hold.
+	custom := Document{Subject: "x", TextBody: "x", HTMLBody: strings.Repeat("a", MaxRenderBytes+1)}
+	if _, err := Render(ctx, custom, nil, RenderOptions{}); !errors.Is(err, ErrTooLarge) {
+		t.Fatalf("custom: want ErrTooLarge, got %v", err)
+	}
+}
+
+func TestLinkTagsCountOnlyAsLinks(t *testing.T) {
+	// A link tag is a link only where it is an address: a button, a text
+	// link, a linked picture or an html block's <a href>. In the preheader, an
+	// alt, plain words or the query of another address it links nowhere.
+	images := fakeImages{"a1": pngImage(t, 2, 2)}
+	for _, c := range []struct {
+		name      string
+		preheader string
+		blocks    func(tag string) []Block
+		linked    bool
+	}{
+		{"a button", "", func(tag string) []Block { return []Block{{ID: "b", Type: "button", Label: "Go", Href: tag}} }, true},
+		{"a text link", "", func(tag string) []Block { return []Block{{ID: "t", Type: "text", Text: "[Go](" + tag + ")"}} }, true},
+		{"a linked picture", "", func(tag string) []Block {
+			return []Block{{ID: "i", Type: "image", Src: "artifact:a1", Width: 10, Href: tag}}
+		}, true},
+		{"an html block link", "", func(tag string) []Block {
+			return []Block{{ID: "x", Type: "html", HTML: `<p><a href="` + tag + `">Go</a></p>`}}
+		}, true},
+		{"the preheader", "TAG", func(string) []Block { return []Block{{ID: "h", Type: "heading", Text: "Hi"}} }, false},
+		{"a picture's alt", "", func(tag string) []Block {
+			return []Block{{ID: "i", Type: "image", Src: "artifact:a1", Width: 10, Alt: tag}}
+		}, false},
+		{"plain words", "", func(tag string) []Block { return []Block{{ID: "t", Type: "text", Text: "Go to " + tag}} }, false},
+		{"a heading", "", func(tag string) []Block { return []Block{{ID: "h", Type: "heading", Text: tag}} }, false},
+		{"a highlight", "", func(tag string) []Block { return []Block{{ID: "l", Type: "highlight", Text: tag}} }, false},
+		{"a button's label", "", func(tag string) []Block {
+			return []Block{{ID: "b", Type: "button", Label: tag, Href: "https://example.com"}}
+		}, false},
+		{"html block words", "", func(tag string) []Block { return []Block{{ID: "x", Type: "html", HTML: "<p>" + tag + "</p>"}} }, false},
+		{"the query of another address", "", func(tag string) []Block {
+			return []Block{{ID: "t", Type: "text", Text: "[Go](https://example.com/?next=" + tag + ")"}}
+		}, false},
+	} {
+		for _, link := range []struct {
+			tag, code string
+			opts      RenderOptions
+		}{
+			{TagUnsubscribeURL, IssueUnsubscribeMissing, RenderOptions{}},
+			{TagConfirmURL, IssueConfirmMissing, RenderOptions{RequireConfirm: true}},
+		} {
+			t.Run(c.name+"/"+link.code, func(t *testing.T) {
+				preheader := strings.ReplaceAll(c.preheader, "TAG", link.tag)
+				d := Document{Subject: "x", Preheader: preheader, Theme: neutral(), Blocks: c.blocks(link.tag)}
+				r, err := Render(context.Background(), d, images, link.opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if hasIssue(r.Issues, link.code) == c.linked {
+					t.Fatalf("linked %v, issues %+v", c.linked, r.Issues)
+				}
+			})
+		}
+	}
+}
+
+func TestCustomModePreheaderKeepsTheDoctypeFirst(t *testing.T) {
+	// Before a doctype the preheader would put the page in quirks mode. It
+	// goes after the body tag; without one, after </head>, else after the
+	// html tag, else after the doctype, and only else first.
+	div := `<div style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;mso-hide:all">Soon` +
+		strings.Repeat("&#847;&zwnj;&nbsp;", 60) + `</div>`
+	for _, c := range []struct{ name, before, after string }{
+		{"after the body tag", `<!DOCTYPE html><html><head></head><body class="b">`, `<p>Hi</p></body></html>`},
+		{"after the head", `<!DOCTYPE html><html><head><title>x</title></head>`, `<p>Hi</p></html>`},
+		{"after the html tag", `<!DOCTYPE html><html lang="en">`, `<p>Hi</p></html>`},
+		{"after the doctype", `<!DOCTYPE html>`, "\n<p>Hi</p>"},
+		{"first, with none of them", ``, `<p>Hi</p>`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := Document{Subject: "x", Preheader: "Soon", TextBody: "x", HTMLBody: c.before + c.after}
+			r, err := Render(context.Background(), d, nil, RenderOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := c.before + div + c.after; r.HTML != want {
+				t.Fatalf("\n got %q\nwant %q", r.HTML, want)
+			}
+		})
+	}
 }

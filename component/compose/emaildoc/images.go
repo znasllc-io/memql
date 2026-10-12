@@ -103,8 +103,12 @@ func (p *pictures) read(ctx context.Context, src string) (picture, error) {
 	}
 	// An embedded picture is read the way sending reads it
 	// (compose.ExtractEmailImages), so a picture this accepts is one sending
-	// accepts.
+	// accepts. It is a data: URI of an image, or nothing: without the scheme
+	// "image/png;base64,..." would be written as a web address.
 	src = strings.TrimSpace(src)
+	if !strings.HasPrefix(src, "data:image/") {
+		return unavailable, nil
+	}
 	prefix, encoded, ok := strings.Cut(src, ",")
 	if !ok || !strings.HasSuffix(prefix, ";base64") || strings.ContainsAny(encoded, "\r\n") {
 		return unavailable, nil
