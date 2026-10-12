@@ -35,6 +35,28 @@ package automations
 // checkpoint (memql#2932): nothing resumes a preview, and the write would
 // escape the sandbox.
 //
+// A SCHEDULED FIRING THAT WRITES NOTHING LEAVES NO JOURNAL. On 2026-10-11 an
+// idle production instance held 226,713 work runs, 93% of them maintenance ticks
+// that changed nothing, each a durable v1:work:run of three or more versions
+// plus its v1:work:step rows: about 35% of the rows the instance wrote. A cron
+// tick therefore holds its journal the way a directly called logic does
+// (heldWrites, logic_statements.go): the run row and every step row wait until
+// the engine reports the run's first graph write (common.NotifyWrite), or until
+// the run fails, and are then written in the order they were made. A tick that
+// completes without a write writes nothing at all. holdsScheduledJournal is the
+// rule: a cron tick that is neither adopted (its row exists already and the
+// adoption advances it) nor @journalRequired (it promises confirmed boundaries,
+// and a boundary that waits for a write is not one). Every other trigger is
+// journaled at open, as it always was.
+//
+// THE TRADE-OFF, ACCEPTED: only a write through the engine's mutation path
+// reaches the observer. A builtin that writes through raw SQL -- the retention
+// sweeps and purges, workJournalRetentionSweep and logsRetentionSweep among
+// them -- reports nothing, so a scheduled automation whose only effect is raw
+// SQL leaves no journal unless it fails. Its failure is journaled in full
+// (closeRun opens the run before it classifies or closes it); its success is the
+// one thing it no longer records.
+//
 // AN AUTOMATION THAT REACTS TO WORK ROWS IS NOT JOURNALED. Its own step
 // rows would re-fire its trigger, and a feedback loop through the graph
 // is the one failure the design's event-sourced substrate makes easy.
@@ -89,7 +111,9 @@ type workJournal struct {
 	classifier SymptomClassifier
 
 	// hold, when set, keeps every write until release: a directly called
-	// logic's journal, whose run opens only if the logic writes.
+	// logic's journal, whose run opens only if the logic writes, and a
+	// scheduled firing's (heldUntilWrite), whose run opens at its first write
+	// or its failure.
 	hold *heldWrites
 }
 
@@ -149,6 +173,43 @@ func journalSkipsAutomation(a *Automation) bool {
 		return false
 	}
 	return workTriggerPattern.MatchString(strings.TrimSpace(a.Trigger.Event))
+}
+
+// holdsScheduledJournal reports whether a run's journal is held until the run
+// writes (the file comment): a cron tick that is neither adopted nor
+// @journalRequired. "schedule" is the core scheduler's cron firing alone. An
+// authored automation's firing ("authored"), an operator's run of a scheduled
+// automation ("run:client"), a sub-automation and an http trigger each carry
+// their own triggeredBy, and a scheduler recovery re-adopts the row the tick
+// left (adopt.go) -- the case the adopt check is for, since that row says
+// "schedule" too.
+func holdsScheduledJournal(a *Automation, triggeredBy string, adopt *RunAdoption) bool {
+	return a != nil && triggeredBy == "schedule" && adopt == nil && !a.JournalRequired
+}
+
+// heldUntilWrite returns a copy of j whose run opens at the firing's first
+// graph write instead of now, and ctx with the observer that opens it: the
+// pattern of a directly called logic (logic_statements.go), with the run row
+// openRun would have written.
+//
+// A COPY, because the executor's journal is shared by every run it executes.
+// A hold set on it would leave the next run on that executor -- an event
+// firing, a @journalRequired one -- waiting for a write that opens a run nobody
+// is watching. requireRunJournal copies for the same reason.
+//
+// The row is rendered when it is written, so it carries the firing's own start
+// time and not the write's. It is opened under a context that outlives a
+// cancellation, as every held write is (heldWrites.keep): the write that opens
+// it may land after the firing's context is cancelled (a `restart` mode run
+// that a newer fire superseded, a shutdown), and the rows held behind it hang
+// from this one.
+func (j *workJournal) heldUntilWrite(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, parent events.Cause) (context.Context, *workJournal) {
+	h := *j
+	openCtx := context.WithoutCancel(ctx)
+	h.hold = &heldWrites{open: func() {
+		h.write(openCtx, "createWorkRun", h.openRunArgs(automation, exec, triggeringEvent, parent))
+	}}
+	return common.ContextWithWriteObserver(ctx, func(string, string) { h.release() }), &h
 }
 
 // stepIdUnsafe matches every character a MemQL short id may not carry.
@@ -326,9 +387,10 @@ func (j *workJournal) persistApproval(ctx context.Context, exec *AutomationExecu
 
 // heldWrites keeps a journal's writes until the run they belong to opens: a
 // directly called logic's run, which opens at the logic's first write
-// (logic_statements.go). A journal whose run never opens writes nothing.
-// Held writes are kept unrendered; they cost a render only if they are
-// written.
+// (logic_statements.go), and a scheduled firing's, which opens at the run's
+// first write or when it fails (heldUntilWrite, closeRun). A journal whose run
+// never opens writes nothing. Held writes are kept unrendered; they cost a
+// render only if they are written.
 type heldWrites struct {
 	mu       sync.Mutex
 	released bool
@@ -689,6 +751,15 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 	// nothing to do with the run. Failing it would throw away a compiled
 	// template and a journal because somebody closed a laptop.
 	if status == "failed" {
+		// A HELD RUN OPENS HERE. A scheduled firing that failed without ever
+		// writing (a retention sweep whose raw-SQL builtin timed out) is held, and
+		// its failure is the one record it can leave. Everything below reads or
+		// updates the run's row, so the row has to exist first: release writes it,
+		// then the steps held behind it, in order. It is a no-op on a journal that
+		// is not held, and only a failure opens a hold -- a firing cancelled before
+		// it wrote anything (a shutdown, a superseded `restart` run) stays
+		// unrecorded.
+		j.release()
 		// Integration/mesh errors may retain the message but lose their Go
 		// type. The shared Stop receipt is authoritative on every replica;
 		// do not turn it into a retry, budget request or model-classified

@@ -686,8 +686,11 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 	bindRunAmbient(ctx, e.engine, evaluator)
 
+	// Debug, not Info: a scheduled firing that writes nothing now leaves no run
+	// row (journal.go), so this line promised an execution record that may never
+	// exist, and on an idle instance it was one line per tick per replica.
 	if e.logger != nil {
-		e.logger.Info("starting automation execution",
+		e.logger.Debug("starting automation execution",
 			"component", ComponentName,
 			"automation", automation.Name,
 			"executionId", exec.ID,
@@ -774,6 +777,17 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 	if adopt != nil {
 		journal.adoptRun(ctx, automation, exec)
+	} else if journal != nil && holdsScheduledJournal(automation, triggeredBy, adopt) {
+		// A CRON TICK'S RUN OPENS AT ITS FIRST WRITE, NOT HERE (journal.go, the
+		// header). An idle instance's ticks mostly change nothing, and a durable
+		// run of three or more versions plus its steps for each was about 35% of the
+		// rows an idle production instance wrote (2026-10-11). The journal this run
+		// writes through is a copy that holds every row, and the observer on ctx
+		// opens the run when the engine reports a graph write beneath it; a failure
+		// opens it too (closeRun). The cancel read at the first step boundary still
+		// runs, and still finds no row, which is the answer: nothing can have asked
+		// to cancel a run that is not on file.
+		ctx, journal = journal.heldUntilWrite(ctx, automation, exec, triggeringEvent, parentCause)
 	} else {
 		journal.openRun(ctx, automation, exec, triggeringEvent, parentCause)
 	}
