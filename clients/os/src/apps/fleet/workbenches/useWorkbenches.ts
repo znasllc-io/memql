@@ -50,7 +50,7 @@ export const CLUSTER_NODE_CONCEPT = "v1:cluster:node";
 // folds by id and therefore keeps whichever row it saw LAST -- which, over an
 // unordered read, is an arbitrary one of a replica's lifetime.
 //
-// So latestPerId runs INSIDE the seed, over the whole history, before the
+// So the collapse runs INSIDE the seed, over the whole history, before the
 // collection ever sees it. That makes the collapse a property of the read
 // rather than of the order the read happened to come back in. The newest row
 // is the one with the later `createdAt`, compared as an INSTANT (the SDK's
