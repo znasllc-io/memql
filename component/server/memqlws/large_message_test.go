@@ -41,11 +41,28 @@ import (
 // the server's own message caps, and returns the WebSocket URL of the bridge.
 func startBridge(t *testing.T, opts Options, svc *stubMemqlService) string {
 	t.Helper()
+	return startBridgeWith(t, opts, svc, bridgeSetup{})
+}
+
+// bridgeSetup is how a test's bridge differs from the real one beyond its Options.
+type bridgeSetup struct {
+	// serverCap is the server's message cap, in both directions, and the cap the
+	// bridge measures a request against (default: the real one, 32 MiB). A small
+	// cap tries the measure without building requests of 32 MiB.
+	serverCap int
+}
+
+func startBridgeWith(t *testing.T, opts Options, svc *stubMemqlService, setup bridgeSetup) string {
+	t.Helper()
+	serverCap := setup.serverCap
+	if serverCap == 0 {
+		serverCap = grpclimits.MaxMessageBytes
+	}
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	grpcServer := grpc.NewServer(
-		grpc.MaxSendMsgSize(grpclimits.MaxMessageBytes),
-		grpc.MaxRecvMsgSize(grpclimits.MaxMessageBytes),
+		grpc.MaxSendMsgSize(serverCap),
+		grpc.MaxRecvMsgSize(serverCap),
 	)
 	memqlv1.RegisterMemqlServiceServer(grpcServer, svc)
 	go func() { _ = grpcServer.Serve(lis) }()
@@ -55,6 +72,7 @@ func startBridge(t *testing.T, opts Options, svc *stubMemqlService) string {
 	opts.Endpoint = lis.Addr().String()
 	handler, err := New(opts)
 	require.NoError(t, err)
+	handler.serverMessageBytes = serverCap
 	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims := map[string]any{"role": "admin", "sub": "tester"}
 		handler.ServeHTTP(w, r.WithContext(auth.ContextWithClaims(r.Context(), claims)))

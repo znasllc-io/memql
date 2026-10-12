@@ -97,6 +97,11 @@ type Handler struct {
 	pingInterval          time.Duration
 	pingTimeout           time.Duration
 	originPatterns        []string
+	// serverMessageBytes is the server's message cap, which a request is measured
+	// against before it is forwarded (see withinServerCap). It is always the real
+	// cap; it is a field so that a test can put the bridge in front of a server with
+	// a small one, and try the measure without building requests of 32 MiB.
+	serverMessageBytes int
 }
 
 // New constructs a Handler.
@@ -115,6 +120,7 @@ func New(opts Options) (*Handler, error) {
 		pingInterval:          firstDuration(opts.PingInterval, defaultPingInterval),
 		pingTimeout:           firstDuration(opts.PingTimeout, defaultPingTimeout),
 		originPatterns:        sanitizeOriginPatterns(opts.OriginPatterns),
+		serverMessageBytes:    grpclimits.MaxMessageBytes,
 	}, nil
 }
 
@@ -227,6 +233,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		principal:    identity.Subject,
 		maxActive:    h.maxConcurrentRequests,
 		maxBytes:     h.maxMessageBytes,
+		serverBytes:  h.serverMessageBytes,
 		writeLimit:   h.writeTimeout,
 		pingInterval: h.pingInterval,
 		pingTimeout:  h.pingTimeout,
@@ -321,6 +328,7 @@ type sessionConfig struct {
 	principal    string
 	maxActive    int
 	maxBytes     int64
+	serverBytes  int
 	writeLimit   time.Duration
 	pingInterval time.Duration
 	pingTimeout  time.Duration
@@ -352,6 +360,8 @@ type session struct {
 	turn turnLock
 	// pingTimeout is how long a ping may wait for its pong.
 	pingTimeout time.Duration
+	// serverBytes is the server's message cap (see Handler.serverMessageBytes).
+	serverBytes int
 
 	activeMu sync.Mutex
 	active   map[string]struct{}
@@ -390,6 +400,10 @@ func newSession(cfg sessionConfig) *session {
 	if maxBytes <= 0 {
 		maxBytes = defaultMaxMessageBytes
 	}
+	serverBytes := cfg.serverBytes
+	if serverBytes <= 0 {
+		serverBytes = grpclimits.MaxMessageBytes
+	}
 	writeLimit := cfg.writeLimit
 	if writeLimit <= 0 {
 		writeLimit = defaultWriteTimeout
@@ -407,6 +421,7 @@ func newSession(cfg sessionConfig) *session {
 		principal:    cfg.principal,
 		maxActive:    maxActive,
 		maxBytes:     maxBytes,
+		serverBytes:  serverBytes,
 		writeLimit:   writeLimit,
 		pingInterval: pingInterval,
 		pingTimeout:  cfg.pingTimeout,
@@ -512,9 +527,9 @@ func (s *session) readLoop() error {
 		// Measured as the server will measure it, which is not the size of the text
 		// above (see withinServerCap). A request the server would not take fails by
 		// itself here, as one over the frame limit does.
-		if size, ok := withinServerCap(clientMsg, grpclimits.MaxMessageBytes); !ok {
+		if size, ok := withinServerCap(clientMsg, s.serverBytes); !ok {
 			messageID := clientMsg.GetMessageId()
-			s.refuseRequest(messageID, clientMsg.GetExecuteQuery().GetRequestId(), int64(size), grpclimits.MaxMessageBytes)
+			s.refuseRequest(messageID, clientMsg.GetExecuteQuery().GetRequestId(), int64(size), int64(s.serverBytes))
 			continue
 		}
 
