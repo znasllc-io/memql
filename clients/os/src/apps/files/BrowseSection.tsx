@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { FolderPlus, Upload } from "lucide-react";
+import { FilePlus, FolderPlus, Upload } from "lucide-react";
 import {
   newShortId,
   rowNumber,
@@ -21,7 +21,7 @@ import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
 import { FolderSelect, folderOptions } from "../../items/FolderSelect";
 import { planArchive, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
 
-import { MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION } from "../../items/materialize";
+import { composeIntent, MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, MATERIALIZER_MADE_SECTION } from "../../items/materialize";
 import { kindGlyph } from "./glyphs";
 import { LocalTabs } from "../../kit/LocalTabs";
 import { AddButton } from "../../kit/AddButton";
@@ -450,7 +450,7 @@ export function BrowseSection({
               id: "materializer",
               label: "Open in Materializer",
               onSelect: () =>
-                actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, {
+                actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_MADE_SECTION, {
                   compositionId: composition.id,
                 }),
             },
@@ -775,12 +775,19 @@ export function BrowseSection({
             question -- "put something here" -- and they were answered in two
             places: a primary button up here and a rail ACTION wedged between
             the Library tree and the Desktop place, where it read as a folder
-            you could open. The rail action is gone; both answers live on this
-            button, and both land in the folder currently being looked at. */}
+            you could open. The rail action is gone; the answers live on this
+            button, and each lands in the folder currently being looked at. */}
         <AddMenu
           disabled={connection === null}
           destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
           onUpload={() => pickRef.current?.click()}
+          onNewMarkdown={canOpen(registry, MATERIALIZER_APP_ID) ? () => actions.openApp(
+            MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
+              format: "markdown",
+              ...(destinationFolderId ? { folderId: destinationFolderId } : {}),
+              returnTo: { appId: "files", sectionId: "browse" },
+            }),
+          ) : undefined}
           onNewFolder={() => void newFolderIn(destinationFolderId)}
         />
       </Head>
@@ -1094,11 +1101,13 @@ function AddMenu({
   disabled,
   destinationName,
   onUpload,
+  onNewMarkdown,
   onNewFolder,
 }: {
   disabled: boolean;
   destinationName: string;
   onUpload: () => void;
+  onNewMarkdown?: () => void;
   onNewFolder: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -1122,7 +1131,7 @@ function AddMenu({
 
   return (
     <div className="os-files-add" ref={wrap}>
-      <AddButton label="Add files or folder" aria-expanded={open} onClick={() => setOpen(!open)} />
+      <AddButton label="Add to this folder" aria-expanded={open} onClick={() => setOpen(!open)} />
       {open ? (
         <div
           className="os-menu os-files-add-menu"
@@ -1144,6 +1153,11 @@ function AddMenu({
           >
             <Upload size={13} aria-hidden /> Upload files
           </button>
+          {onNewMarkdown ? (
+            <button type="button" role="menuitem" className="os-menu-item" onClick={() => choose(onNewMarkdown)}>
+              <FilePlus size={13} aria-hidden /> New Markdown file
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"
