@@ -108,6 +108,17 @@ func onlyLibraryFiles(sources []SourceRef) bool {
 //nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
 var errFolderUnavailable = errors.New("That folder isn't available. Choose another folder.")
 
+// The two refusals of a name, sentences a person reads where they typed it, like
+// errFolderUnavailable. A name is refused with a slash in it (folderId says where
+// a file goes, a name never does) and when nothing is left of it once one
+// trailing extension that names the format is dropped.
+//
+//nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
+var (
+	errNameHasSlash = errors.New("Enter a name without slashes.")
+	errNameMissing  = errors.New("Enter a name for the file.")
+)
+
 // requireUsableFolder refuses a folder the caller cannot file a new file into:
 // one they cannot read (somebody else's, deleted, or no such id) or one that has
 // been archived.
@@ -189,13 +200,21 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 		}
 	}
 	if out.Name == "" {
-		return out, fmt.Errorf("compose: a materialization needs a name")
+		return out, errNameMissing
 	}
 	format, err := pure.ParseFormat(stringOf(args["format"]))
 	if err != nil {
 		return out, err
 	}
 	out.Format = format
+	// THE CLEANED NAME IS WHAT AN IN-RUN COMPOSITION IS KEYED BY. A nested
+	// composition's id hashes these arguments (see materialize), so dropping a
+	// matching extension changes the id of a step whose name ends in its format's
+	// extension: a step that was in flight when this cleaning shipped computes a
+	// new id on its next retry, misses the composition it wrote and files once
+	// more. That is transient (only steps in flight across the upgrade) and
+	// accepted pre-release. A name with no extension to drop, which is what the
+	// planner's triage chooses, keys exactly as before.
 	if out.Name, err = cleanFileName(out.Name, format); err != nil {
 		return out, err
 	}
@@ -230,7 +249,7 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 // "Plan.md" stays Plan.md and is never Plan.md.md.
 func cleanFileName(name string, format pure.Format) (string, error) {
 	if strings.ContainsAny(name, "/\\") {
-		return "", errors.New("compose: enter a file name without a folder path")
+		return "", errNameHasSlash
 	}
 	for _, ext := range formatNameExtensions(format) {
 		suffix := "." + ext
@@ -240,7 +259,7 @@ func cleanFileName(name string, format pure.Format) (string, error) {
 		}
 	}
 	if name == "" {
-		return "", errors.New("compose: a materialization needs a name")
+		return "", errNameMissing
 	}
 	return name, nil
 }
@@ -313,6 +332,9 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	if nested {
 		// The step owns a single materialization for this exact request. Including
 		// args also distinguishes multiple file calls within the same agent step.
+		// They are the arguments as parsed, name cleaning included, so a change to
+		// the cleaning re-keys a step whose name it changes (parseMaterializeArgs
+		// says which, and why that is accepted).
 		raw, err := json.Marshal(a)
 		if err != nil {
 			return nil, err

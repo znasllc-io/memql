@@ -864,17 +864,24 @@ func TestParseMaterializeArgsStripsAMatchingExtensionAndRefusesPaths(t *testing.
 		}
 	}
 
-	for _, name := range []string{"a\\b", "/etc/passwd", "folder/Plan.md"} {
-		if _, err := parseMaterializeArgs(map[string]any{"name": name, "format": "markdown"}); err == nil {
-			t.Fatalf("name %q carries a folder path and must be refused", name)
+	// A person reads these refusals where they typed the name (the OS shows the
+	// cluster's sentence beside the control), so each is exactly one sentence that
+	// says what to do, with no package name in front of it.
+	for _, name := range []string{"a\\b", "/etc/passwd", "folder/Plan.md", "Notes 10/11"} {
+		_, err := parseMaterializeArgs(map[string]any{"name": name, "format": "markdown"})
+		if err == nil || err.Error() != "Enter a name without slashes." {
+			t.Fatalf("name %q carries a slash: refusal = %v, want %q", name, err, "Enter a name without slashes.")
 		}
 	}
-	if _, err := parseMaterializeArgs(map[string]any{"name": "a/b", "format": "markdown"}); err == nil || !strings.Contains(err.Error(), "enter a file name without a folder path") {
-		t.Fatalf("the path refusal must say what to do: %v", err)
-	}
-	// Stripping must not turn a name into nothing.
-	if _, err := parseMaterializeArgs(map[string]any{"name": ".md", "format": "markdown"}); err == nil {
-		t.Fatal("a name that is only the extension has no stem and must be refused")
+	// Stripping must not turn a name into nothing, and a name that was nothing to
+	// begin with is the same refusal.
+	for _, tc := range []struct{ name, format string }{
+		{".md", "markdown"}, {".MARKDOWN", "markdown"}, {" .md ", "markdown"}, {".csv", "csv"}, {"", "markdown"}, {"   ", "txt"},
+	} {
+		_, err := parseMaterializeArgs(map[string]any{"name": tc.name, "format": tc.format})
+		if err == nil || err.Error() != "Enter a name for the file." {
+			t.Fatalf("name %q as %s has no stem: refusal = %v, want %q", tc.name, tc.format, err, "Enter a name for the file.")
+		}
 	}
 }
 
@@ -893,7 +900,9 @@ func TestParseMaterializeArgsReadsTheRequestId(t *testing.T) {
 // leave the identity of an in-run materialization exactly as it was: the
 // composition id of a step is derived from its arguments, so a field that
 // serialised as an empty string would give every step already in flight a new
-// id and file its output twice on the next replay.
+// id and file its output twice on the next replay. (A name that DOES end in its
+// format's extension is keyed by its cleaned stem, which re-keys such a step
+// once; parseMaterializeArgs says why that is accepted.)
 func TestMaterializeArgsWithoutARequestIdSerialiseAsBefore(t *testing.T) {
 	raw, err := json.Marshal(materializeDraft())
 	if err != nil {
@@ -1106,8 +1115,11 @@ func TestMaterializeCapabilityCleansTheNameBeforeFiling(t *testing.T) {
 	}
 
 	refused, refusedEngine, _ := materializeFixture(t)
-	if _, err := refused.handleMaterialize(nestedMaterializeContext(), map[string]any{"name": "notes/Plan", "format": "markdown"}, 0); err == nil {
-		t.Fatal("a name with a folder path was accepted")
+	if _, err := refused.handleMaterialize(nestedMaterializeContext(), map[string]any{"name": "notes/Plan", "format": "markdown"}, 0); err == nil || err.Error() != "Enter a name without slashes." {
+		t.Fatalf("a name with a slash: refusal = %v, want %q", err, "Enter a name without slashes.")
+	}
+	if _, err := refused.handleMaterialize(nestedMaterializeContext(), map[string]any{"name": ".md", "format": "markdown"}, 0); err == nil || err.Error() != "Enter a name for the file." {
+		t.Fatalf("a name that is only the extension: refusal = %v, want %q", err, "Enter a name for the file.")
 	}
 	if len(refusedEngine.calls) != 0 {
 		t.Fatalf("the refused name still reached the engine: %v", refusedEngine.calls)
