@@ -41,6 +41,7 @@ func TestLatestScanKeysLookUpOnlyMandatorySetEqualitiesOnALookupField(t *testing
 		want []string
 	}{
 		"a lookup field":                  {and(recipient, digest), []string{`((payload->>'emailDigest') = 'd1')`}},
+		"an Azure provider receipt":       {and(irConceptEq("v1:email:sendOperation"), irPayloadCmp("providerMessageId", OpEq, "message-id")), []string{`((payload->>'providerMessageId') = 'message-id')`}},
 		"beside another equality":         {and(and(recipient, audience), digest), []string{`((payload->>'emailDigest') = 'd1')`, `((payload->>'audienceId') = 'v1:campaigns:audience:a')`}},
 		"a whitespace value is a value":   {and(recipient, irPayloadCmp("emailDigest", OpEq, " ")), []string{`((payload->>'emailDigest') = ' ')`}},
 		"under a disjunction":             {and(recipient, or(digest, audience)), nil},

@@ -315,6 +315,9 @@ func TestAzureFeedbackDiscoversPreviouslySavedOrganization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := w.db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE id=?`, "v1:email:connectionState:"+emailStateID("organization:"+w.account)); err != nil {
+		t.Fatal(err)
+	}
 	_, err = a.store.engine.Execute(emailStateContext(context.Background()), renderConfigCall("storeEmailConnectionState", map[string]string{"id": emailStateID("organization:" + w.account), "encryptedValue": sealed, "versionTime": w.now.Add(time.Second).Format(time.RFC3339Nano)}))
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +333,9 @@ func TestAzureFeedbackDiscoversPreviouslySavedOrganization(t *testing.T) {
 		t.Fatal(err)
 	}
 	if calls.Load() == 0 {
-		t.Fatal("old ready organization was never discovered")
+		var metadata string
+		readErr := w.db.QueryRowContext(context.Background(), `SELECT (payload-'encryptedValue')::text FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, "v1:email:connectionState:"+emailStateID("organization:"+w.account)).Scan(&metadata)
+		t.Fatalf("old ready organization was never discovered: state=%s err=%v", metadata, readErr)
 	}
 	before := calls.Load()
 	if err := w.instances[0].PollFeedbackConnections(context.Background()); err != nil {
@@ -362,6 +367,10 @@ func TestAzureMaintenanceKeepsReceiptsAndFeedbackMovingWhileInstallationIsPendin
 	if _, err = sender.operations.write(context.Background(), sender.operationKey("pending-installation"), stored, prior); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := w.instances[0].azure.store.engine.Execute(emailStateContext(context.Background()), renderConfigCall("createClientAccount", map[string]string{"accountId": w.account, "name": "Synthetic feedback organization"})); err != nil {
+		t.Fatal(err)
+	}
+	w.now = time.Now().UTC().Add(time.Second)
 	a := w.instances[1].azure
 	a.installation = installationFixture()
 	var installationCalls, feedbackCalls, receiptCalls atomic.Int32
@@ -391,7 +400,8 @@ func TestAzureMaintenanceKeepsReceiptsAndFeedbackMovingWhileInstallationIsPendin
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("pending installation starved maintenance: feedback=%d receipts=%d status=%s", feedbackCalls.Load(), receiptCalls.Load(), current.Status)
+			pollErr := w.instances[1].PollOperations(context.Background())
+			t.Fatalf("pending installation starved maintenance: feedback=%d receipts=%d status=%s detail=%s error=%v", feedbackCalls.Load(), receiptCalls.Load(), current.Status, current.Detail, pollErr)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -409,9 +419,8 @@ type pendingInstallationTestStore struct {
 }
 
 func (s pendingInstallationTestStore) Execute(ctx context.Context, query string) (any, error) {
-	if strings.Contains(query, "query clientAccountById(") {
-		s.calls.Add(1)
-		return nil, fmt.Errorf("installation account is temporarily unavailable")
+	if strings.Contains(query, "query emailConnectionStateById(") && strings.Contains(query, emailStateID(azureClusterKey)) && s.calls.Add(1) == 1 {
+		return nil, fmt.Errorf("installation connection is temporarily unavailable")
 	}
 	return s.ConfigWriter.Execute(ctx, query)
 }

@@ -74,6 +74,8 @@ query sendOperation emailSendOperationByProviderId {
     providerMessageId string!
   }
   filter row => actor.isClusterOwner == true && row.accountId == args.accountId && row.providerMessageId == args.providerMessageId
+  sort "row.id", "asc"
+  paginate 2
   shape emailSendOperationStored
 }
 
