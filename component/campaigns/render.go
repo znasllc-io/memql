@@ -1,11 +1,13 @@
 package campaigns
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
 	texttemplate "html/template"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,7 +15,6 @@ import (
 	"unicode/utf8"
 
 	nethtml "golang.org/x/net/html"
-	"golang.org/x/net/html/atom"
 
 	"github.com/znasllc-io/memql/integrations/email"
 )
@@ -86,8 +87,8 @@ import (
 // unsubscribe page, which is what {{unsubscribeUrl}} is for: a layout with a
 // footer of its own puts the tag in it and is not given a second one. The header
 // pair is there either way. Deciding that is a judgement about what a person
-// would SEE, so it is made per part and from the parsed HTML, not from a search
-// of the text (see completeHTML and textCarriesTag).
+// would SEE, so it is made per part and from the tokenized HTML, not from a
+// search of the text (see planHTML and textCarriesTag).
 //
 // The footer names who the person subscribed to: the sending identity's display
 // name, else the organization, else "this mailing list" (footerSender). It never
@@ -95,14 +96,15 @@ import (
 //
 // # Where the footer sits
 //
-// Inside the body. A footer written after the last byte of the template lands
-// after </html> in an ordinary document, and in a template that ends in an open
-// tag, an unterminated comment or a style element it lands INSIDE the unfinished
-// construct, where no client shows it. So the HTML part is parsed, the footer
-// and the open pixel are appended as the last children of <body>, and the
-// document is written back out (appendToBody). That is done only when there is
-// something to place: a template that carries its own link and is not tracked
-// for opens is sent as authored.
+// Inside the body, at the start of the template's last real closing body tag
+// (else its last closing html tag, else the end), and nowhere else is touched:
+// every other byte of the template is sent as written (see completeHTML). A
+// footer written after the last byte of an ordinary document lands after
+// </html>, and one written after a template that ends in an open tag, an
+// unterminated comment or a style element lands INSIDE the unfinished construct,
+// where no client shows it. The second is refused instead, with a sentence for
+// the template's author, because a message with no footer is the one thing this
+// package must not send.
 
 const (
 	headerListUnsubscribe     = "List-Unsubscribe"
@@ -432,10 +434,10 @@ func (tr TrackingRender) trackedURL(path, token string) string {
 // rewrite. The pattern only ever REPLACES the quoted value, so anything it
 // does not match is left exactly as authored.
 //
-// (The footer and the open pixel are the one thing that does parse the body,
-// because where they go is a question about the document and no pattern can
-// answer it; see appendToBody. That happens after this, and only when there is
-// something to place.)
+// (The footer and the open pixel are placed with the HTML tokenizer, after this,
+// because where they go is a question about which "</body>" is a tag and no
+// pattern can answer it; see planHTML. It reads the part and does not rewrite
+// it, so the same goes for it: every byte outside the fragment is the author's.)
 var hrefPattern = regexp.MustCompile(`(?i)(href\s*=\s*)(["'])([^"']*)(["'])`)
 
 // rewriteLinks points every http(s) href at the signed click endpoint.
@@ -605,24 +607,58 @@ func footerSender(opts RenderOptions) string {
 	return "this mailing list"
 }
 
+// templateFault is a refusal whose text is for the person who wrote the
+// template. It is a sentence that says what is wrong and what to do, and the
+// places that show a render failure (a failed campaign, a test send) show it as
+// it is, with no wrapper that would turn it back into a diagnostic.
+type templateFault string
+
+func (f templateFault) Error() string { return string(f) }
+
+const (
+	// errTemplateEndsOpen: the HTML stops inside a comment, a tag or an element
+	// whose content is text (<style>, <script>, <textarea>, <title>, <xmp>,
+	// <iframe>, <noembed>, <noframes>, <noscript>, <plaintext>). Anything
+	// written after the last byte of such a template is part of the unfinished
+	// construct, and no client shows it.
+	errTemplateEndsOpen = templateFault("This template's HTML ends inside a comment or a tag, so its unsubscribe link cannot be placed. Fix the HTML and save it again.")
+
+	// errTemplateFrames: a frameset document has no body, and a message built
+	// from one shows nothing a footer could be part of.
+	errTemplateFrames = templateFault("This template uses frames, which email cannot show.")
+)
+
 // completeHTML adds to a substituted HTML part what every message needs and the
 // template may not carry: the unsubscribe footer, unless the template already
 // links to the unsubscribe page, and the open pixel when opens are tracked.
 //
-// The part is parsed first, because both questions are about the document. The
-// first is whether a client would SHOW a link to the unsubscribe page, which a
-// search of the string cannot say: the URL in a preheader, an alt text, a
-// comment or a longer URL is in the string and on nobody's screen. The second is
-// where the footer goes (appendToBody).
+// # The template's bytes are the template's
 //
-// When there is nothing to add the part is returned as it came, byte for byte.
+// The footer and the pixel are one fragment, put in at one byte offset
+// (planHTML); every other byte of the part is the byte the author wrote. The
+// part is not parsed into a tree and written back out. That would change what a
+// client renders: a downlevel-revealed conditional comment (<![if !mso]>) is
+// read as an ordinary comment and written as one, so Outlook shows what the
+// author hid from it; a table gains a tbody; a fragment gains an html, a head
+// and a body; entities and attributes are respelled. Layouts are held to a
+// pixel budget against the emails they reproduce, and conditional comments
+// around buttons, columns and media queries are how they get there.
+//
+// # A fault is refused, not repaired
+//
+// The same pass finds the templates a fragment cannot be put in. Those return a
+// templateFault whether or not this message would have anything placed in it:
+// whether a message needs a footer depends on the template and whether it needs
+// a pixel depends on the campaign, and a template that passed a test send, which
+// tracks nothing, only to fail the campaign, which tracks opens, would teach the
+// author nothing.
 func completeHTML(body string, opts RenderOptions) (string, error) {
-	doc, err := nethtml.Parse(strings.NewReader(body))
+	plan, err := planHTML(body, opts.Links.Unsubscribe)
 	if err != nil {
-		return "", fmt.Errorf("campaigns: reading the HTML part: %w", err)
+		return "", err
 	}
-	var fragments []string
-	if !carriesLink(doc, opts.Links.Unsubscribe) {
+	var fragment strings.Builder
+	if !plan.linksToUnsubscribe {
 		// The footer goes through html/template rather than Sprintf + a manual
 		// escaper. Not scanner appeasement: `{{.URL}}` sits in an href, and
 		// html/template is CONTEXT-aware -- it applies URL escaping there and
@@ -637,42 +673,208 @@ func completeHTML(body string, opts RenderOptions) (string, error) {
 			// one thing RFC 8058 compliance cannot go out without.
 			return "", err
 		}
-		fragments = append(fragments, footer)
+		fragment.WriteString(footer)
 	}
-	if pixel := opts.Tracking.openPixel(); pixel != "" {
-		fragments = append(fragments, pixel)
-	}
-	if len(fragments) == 0 {
+	fragment.WriteString(opts.Tracking.openPixel())
+	if fragment.Len() == 0 {
 		return body, nil
 	}
-	return appendToBody(doc, fragments...)
+	return body[:plan.insertAt] + fragment.String() + body[plan.insertAt:], nil
 }
 
-// carriesLink reports whether the document has a link a client would show to
-// href: an <a> whose href is exactly that URL. The space and control characters
-// around the value are dropped, as a browser drops them before it reads a URL.
+// htmlPlan is what one pass over a template's HTML finds.
+type htmlPlan struct {
+	// insertAt is the byte offset the footer and the pixel go at: the start of
+	// the last real closing body tag, else of the last real closing html tag,
+	// else the end of the part.
+	insertAt int
+
+	// linksToUnsubscribe is whether the template has a link a client would show
+	// to the unsubscribe URL: a real <a> whose href is exactly that URL (the
+	// space and control characters around the value are dropped, as a browser
+	// drops them before it reads a URL).
+	//
+	// It is how a template that links to {{unsubscribeUrl}} itself is
+	// recognised, and it counts nothing else. The tag in a hidden preheader, an
+	// alt or title attribute, a comment, a script, the text of a link to
+	// somewhere else or the middle of a longer URL shows nobody an opt-out, so
+	// none of them stops the footer. Neither does a link inside a <template>,
+	// whose content a client does not render, or inside <svg> or <math>, whose
+	// <a> is not an HTML link. When an <a> repeats href, the first is the one a
+	// browser uses, and the tokenizer keeps only that one.
+	linksToUnsubscribe bool
+}
+
+// rawTextElements are the elements the HTML tokenizer reads the content of as
+// text, up to their own end tag; <plaintext> has none and runs to the end of
+// the input. Markup inside them is not markup: a closing body tag in a script is
+// a few characters of script. This is the tokenizer's own list.
+var rawTextElements = map[string]bool{
+	"iframe": true, "noembed": true, "noframes": true, "noscript": true,
+	"plaintext": true, "script": true, "style": true, "textarea": true,
+	"title": true, "xmp": true,
+}
+
+// planHTML reads a template's HTML once, with the HTML tokenizer, and says where
+// the footer goes and whether the template has its own link. It returns a
+// templateFault for a template the footer cannot be put in.
 //
-// It is how a template that links to {{unsubscribeUrl}} itself is recognised,
-// and it counts nothing else. The tag in a hidden preheader, an alt or title
-// attribute, a comment, the text of a link to somewhere else or the middle of a
-// longer URL shows nobody an opt-out, so none of them stops the footer. Content
-// of a <template> element is not rendered by a client and is not looked at.
-func carriesLink(n *nethtml.Node, href string) bool {
-	if n.Type == nethtml.ElementNode && n.Namespace == "" {
-		switch n.DataAtom {
-		case atom.Template:
-			return false
-		case atom.A:
-			for _, a := range n.Attr {
-				if a.Key == "href" && strings.TrimFunc(a.Val, isURLPadding) == href {
-					return true
+// # Why the tokenizer
+//
+// The tokenizer's tokens partition the bytes (x/net/html documents it): there is
+// no gap and no overlap, so the offset of a token is the sum of the lengths of
+// the tokens before it. It also knows what is a tag and what is not -- a
+// comment, a bogus comment (<![if !mso]>, <?xml ?>), the content of a script or
+// a style, an attribute value -- which no search of the string for "</body>"
+// can know. It does not build a tree, which is the point.
+//
+// # What it cannot know, and what it does about it
+//
+// It does not know which elements are still open when the document ends, so the
+// fragment lands inside whatever is. A table cell or a division left open is
+// where the footer is shown, and that is fine; an anchor left open nests the
+// footer in a link, which a client sorts out. An element whose content a client
+// does not show as HTML (<template>, <svg>, <math>, <select>) or that the
+// author hid (a division with display:none) left open would hide it, and the
+// tokenizer cannot see that. Those are not refused, and a message built from one
+// is a template the author has to have noticed. What is refused is the end of
+// the input falling inside something that swallows what follows it:
+//
+//   - a comment, a bogus comment or a doctype with no closing ">" (a comment
+//     needs "-->" or "--!>", or to be "<!-->" or "<!--->");
+//   - a start or end tag cut short, which the tokenizer reports as an error with
+//     the partial tag still in its raw bytes, or a "<" or "</" with nothing
+//     after it (a lone "<" would not swallow a tag written after it, but it is
+//     the start of a tag the template did not finish, and the template is
+//     refused for it all the same);
+//   - a raw-text element with no end tag, <plaintext> always.
+//
+// A frameset is refused for a different reason: it has no body to show a footer
+// in. The pass also checks that the tokens added up to the whole part, because
+// an offset that is off by one is a footer in the middle of a tag.
+func planHTML(source, unsubscribeURL string) (htmlPlan, error) {
+	z := nethtml.NewTokenizer(strings.NewReader(source))
+	plan := htmlPlan{insertAt: len(source)}
+	closingHTML := -1
+	var (
+		offset     int
+		rawText    string // the raw-text element the tokenizer is inside, if any
+		inTemplate int
+		inForeign  int
+		cutShort   bool
+		frames     bool
+		bracket    bool // the token just read is text ending in "<" or "</"
+	)
+	for {
+		kind := z.Next()
+		raw := z.Raw()
+		start := offset
+		offset += len(raw)
+
+		if kind == nethtml.ErrorToken {
+			if err := z.Err(); err != io.EOF {
+				return htmlPlan{}, fmt.Errorf("campaigns: reading the HTML part: %w", err)
+			}
+			// The end of the input. Whatever the last token left in its raw
+			// bytes is a tag the end cut short, and a "<" or "</" that ended the
+			// last text is the start of one.
+			cutShort = cutShort || len(raw) > 0 || bracket
+			break
+		}
+
+		// Only the last token can be cut short by the end of the input, so a
+		// bracket is judged when nothing follows it. "a<" is also a whole text
+		// token when another "<" starts a tag right after it, as in
+		// <<First Name>>, a merge tag some other tools write.
+		bracket = false
+		switch kind {
+		case nethtml.TextToken:
+			bracket = rawText == "" && (bytes.HasSuffix(raw, []byte("<")) || bytes.HasSuffix(raw, []byte("</")))
+		case nethtml.CommentToken:
+			cutShort = cutShort || !commentTerminated(raw)
+		case nethtml.DoctypeToken:
+			cutShort = cutShort || !bytes.HasSuffix(raw, []byte(">"))
+		case nethtml.StartTagToken, nethtml.SelfClosingTagToken:
+			name, hasAttr := z.TagName()
+			tag := string(name)
+			// The tokenizer reads what follows these as text, a self-closing
+			// slash notwithstanding (a start tag is a start tag).
+			if rawTextElements[tag] {
+				rawText = tag
+			}
+			frames = frames || tag == "frameset"
+			if kind == nethtml.StartTagToken {
+				switch tag {
+				case "template":
+					inTemplate++
+				case "svg", "math":
+					inForeign++
+				}
+			}
+			if tag == "a" && inTemplate == 0 && inForeign == 0 && !plan.linksToUnsubscribe {
+				plan.linksToUnsubscribe = hrefIs(z, hasAttr, unsubscribeURL)
+			}
+		case nethtml.EndTagToken:
+			name, _ := z.TagName()
+			tag := string(name)
+			if tag == rawText {
+				rawText = ""
+			}
+			switch tag {
+			case "body":
+				plan.insertAt = start
+			case "html":
+				closingHTML = start
+			case "template":
+				if inTemplate > 0 {
+					inTemplate--
+				}
+			case "svg", "math":
+				if inForeign > 0 {
+					inForeign--
 				}
 			}
 		}
 	}
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		if carriesLink(c, href) {
-			return true
+
+	switch {
+	case offset != len(source):
+		return htmlPlan{}, fmt.Errorf("campaigns: reading the HTML part: the tokens cover %d of its %d bytes", offset, len(source))
+	case frames:
+		return htmlPlan{}, errTemplateFrames
+	case cutShort || rawText != "":
+		return htmlPlan{}, errTemplateEndsOpen
+	}
+	// No closing body tag: before the closing html tag if there is one, so the
+	// footer is not written after the document, else at the end.
+	if plan.insertAt == len(source) && closingHTML >= 0 {
+		plan.insertAt = closingHTML
+	}
+	return plan, nil
+}
+
+// commentTerminated reports whether the raw bytes of a comment token, as the
+// tokenizer read them, end the comment. A comment ends with "-->" or "--!>" after
+// its "<!--", or is "<!-->" or "<!--->"; a bogus comment (<!x ...>, <?x ...>,
+// </ ...>, and "<![if ...]>") ends at the first ">". Bytes that merely end in
+// "-->" because the opening's own dashes are part of them ("<!--!>") do not.
+func commentTerminated(raw []byte) bool {
+	const opening = "<!--"
+	if !bytes.HasPrefix(raw, []byte(opening)) {
+		return bytes.HasSuffix(raw, []byte(">"))
+	}
+	body := raw[len(opening):]
+	return string(body) == ">" || string(body) == "->" ||
+		bytes.HasSuffix(body, []byte("-->")) || bytes.HasSuffix(body, []byte("--!>"))
+}
+
+// hrefIs reports whether the tag the tokenizer is at has an href equal to want.
+func hrefIs(z *nethtml.Tokenizer, more bool, want string) bool {
+	for more {
+		var key, val []byte
+		key, val, more = z.TagAttr()
+		if string(key) == "href" {
+			return strings.TrimFunc(string(val), isURLPadding) == want
 		}
 	}
 	return false
@@ -681,73 +883,6 @@ func carriesLink(n *nethtml.Node, href string) bool {
 // isURLPadding is what a browser strips from both ends of a URL attribute: the
 // C0 controls and the space.
 func isURLPadding(r rune) bool { return r <= ' ' }
-
-// appendToBody appends the fragments as the last children of the document's
-// <body> and writes the document out.
-//
-// The parser is what makes "the last thing in the body" mean something for
-// whatever a template ends in. A fragment has its html, head and body created for
-// it. A template that stops inside a tag, a comment or a style element has that
-// construct closed by the parser (or, for a tag cut off at the end of the input,
-// dropped), so the footer is a sibling of the unfinished thing and never part of
-// it. A footer written after the last byte would be read AS PART OF the
-// unfinished construct, and nobody would see it.
-//
-// A document with no <body> is a frameset; there is nowhere in it for a footer,
-// and that is refused.
-func appendToBody(doc *nethtml.Node, fragments ...string) (string, error) {
-	body := findBody(doc)
-	if body == nil {
-		return "", errors.New("campaigns: the HTML part has no body to hold the unsubscribe footer (a frameset has none)")
-	}
-	plaintextToPre(doc)
-	context := &nethtml.Node{Type: nethtml.ElementNode, DataAtom: atom.Body, Data: "body"}
-	for _, fragment := range fragments {
-		nodes, err := nethtml.ParseFragment(strings.NewReader(fragment), context)
-		if err != nil {
-			return "", fmt.Errorf("campaigns: reading the unsubscribe footer: %w", err)
-		}
-		for _, node := range nodes {
-			body.AppendChild(node)
-		}
-	}
-	var out strings.Builder
-	if err := nethtml.Render(&out, doc); err != nil {
-		return "", fmt.Errorf("campaigns: writing the HTML part: %w", err)
-	}
-	return out.String(), nil
-}
-
-// findBody is the document's <body>, or nil for a document that has none.
-func findBody(doc *nethtml.Node) *nethtml.Node {
-	for n := doc.FirstChild; n != nil; n = n.NextSibling {
-		if n.Type != nethtml.ElementNode || n.DataAtom != atom.Html {
-			continue
-		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			if c.Type == nethtml.ElementNode && c.DataAtom == atom.Body {
-				return c
-			}
-		}
-	}
-	return nil
-}
-
-// plaintextToPre turns every <plaintext> element into a <pre>.
-//
-// <plaintext> is the one element the HTML serializer cannot follow with
-// anything: it holds the rest of the document as text, never closes, and
-// html.Render stops writing at it. A footer appended after one would be left out
-// of the message without an error. As a <pre> the text it held is shown the same
-// way, in a monospace block, and the document goes on after it.
-func plaintextToPre(n *nethtml.Node) {
-	if n.Type == nethtml.ElementNode && n.Namespace == "" && n.DataAtom == atom.Plaintext {
-		n.DataAtom, n.Data = atom.Pre, "pre"
-	}
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		plaintextToPre(c)
-	}
-}
 
 // textCarriesTag reports whether the template's plain-text part shows tag as a
 // URL on its own: between whitespace or the ends of the text, or alone inside a

@@ -1013,6 +1013,49 @@ func TestCampaignSendsCarryPreferencesAndViewLinks(t *testing.T) {
 	}
 }
 
+// TestACampaignWhoseTemplateCannotCarryItsFooterFailsWithAPlainReason -- a
+// template whose HTML ends inside a comment or a tag, or is a frameset, cannot
+// be sent: no message goes out, the job fails, and the reason the author reads
+// on the campaign is the sentence that says what to fix, not a wrapper around it.
+func TestACampaignWhoseTemplateCannotCarryItsFooterFailsWithAPlainReason(t *testing.T) {
+	for name, tc := range map[string]struct{ html, want string }{
+		"a comment that never ends": {"<p>Hi</p><!--", wantEndsOpen},
+		"a frameset":                {"<frameset><frame src=x></frameset>", wantFrames},
+	} {
+		template := templateRow()
+		template["htmlBody"] = tc.html
+		engine := &fakeEngine{
+			jobs: []map[string]any{jobRow()}, campaign: campaignRow(), template: template,
+			roster: []map[string]any{recipientRow("r-1", "reader@example.test", "subscribed")},
+		}
+		sender := &recordingSender{}
+		w := newTestWorker(t, engine, sender)
+
+		w.DrainOnce(context.Background())
+
+		if sender.count() != 0 {
+			t.Errorf("%s: a message went out", name)
+		}
+		failed := false
+		for _, c := range engine.mutations("updateSendJob") {
+			if argOf(c.query, "status") == "failed" {
+				failed = true
+				if got := argOf(c.query, "lastError"); got != tc.want {
+					t.Errorf("%s: the job's reason is %q, want the sentence %q", name, got, tc.want)
+				}
+			}
+		}
+		if !failed {
+			t.Errorf("%s: the job was not failed, so nobody learns why the campaign sent nothing", name)
+		}
+		for _, c := range engine.mutations("updateCampaignProgress") {
+			if got := argOf(c.query, "lastError"); got != "" && got != tc.want {
+				t.Errorf("%s: the campaign's reason is %q, want the sentence %q", name, got, tc.want)
+			}
+		}
+	}
+}
+
 // TestSendIsRefusedWithoutUnsubscribeConfig -- fail closed on the
 // precondition. Sending without a working opt-out is not a degraded send.
 func TestSendIsRefusedWithoutUnsubscribeConfig(t *testing.T) {

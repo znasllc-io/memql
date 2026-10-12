@@ -758,7 +758,14 @@ func (w *Worker) processRecipient(
 	if err != nil {
 		// Mirrors the mint failure above: a message we cannot render is a job
 		// that cannot proceed, not a recipient to skip silently.
-		w.failJob(systemCtx, *job, "cannot render the message: "+err.Error())
+		reason := "cannot render the message: " + err.Error()
+		var fault templateFault
+		if errors.As(err, &fault) {
+			// The template's author reads this on the campaign. It is already a
+			// sentence that says what to fix; a wrapper would only bury it.
+			reason = fault.Error()
+		}
+		w.failJob(systemCtx, *job, reason)
 		return true, err
 	}
 

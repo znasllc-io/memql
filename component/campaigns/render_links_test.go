@@ -66,14 +66,16 @@ func parseRendered(t *testing.T, body string) *html.Node {
 	return doc
 }
 
-// elementsNamed returns every element with the given tag name, in document
-// order. Comments and text are never elements, which is the point, and nothing
-// inside a <template> is returned: a client does not render its content.
+// elementsNamed returns every HTML element with the given tag name, in document
+// order. Comments and text are never elements, which is the point; an element
+// of SVG or MathML is not an HTML one (an SVG <a> is not a link a mail client
+// follows); and nothing inside a <template> is returned: a client does not
+// render its content.
 func elementsNamed(doc *html.Node, name string) []*html.Node {
 	var out []*html.Node
 	var walk func(*html.Node)
 	walk = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == name {
+		if n.Type == html.ElementNode && n.Data == name && n.Namespace == "" {
 			out = append(out, n)
 		}
 		if n.Type == html.ElementNode && n.Data == "template" {
@@ -116,15 +118,6 @@ func countOf(values []string, want string) int {
 		}
 	}
 	return n
-}
-
-func hasAncestor(n *html.Node, name string) bool {
-	for p := n.Parent; p != nil; p = p.Parent {
-		if p.Type == html.ElementNode && p.Data == name {
-			return true
-		}
-	}
-	return false
 }
 
 const footerSentence = "You are receiving this because"
@@ -258,92 +251,6 @@ func TestFooterAndPixelGoInsideTheBody(t *testing.T) {
 	}
 }
 
-// TestAFragmentTemplateGetsItsFooterInsideABody: a template that is a fragment
-// has no body of its own, so the document gets one and the footer lands in it.
-func TestAFragmentTemplateGetsItsFooterInsideABody(t *testing.T) {
-	msg := renderLinks(t, Template{ID: "t1", Subject: "s", TextBody: "t", HTMLBody: "<p>Hi</p>"}, RenderOptions{})
-
-	doc := parseRendered(t, msg.HTMLBody)
-	anchors := elementsNamed(doc, "a")
-	if len(anchors) != 1 || attrOf(anchors[0], "href") != messageTestLinks().Unsubscribe {
-		t.Fatalf("want one unsubscribe anchor, got %d.\n%s", len(anchors), msg.HTMLBody)
-	}
-	if !hasAncestor(anchors[0], "body") {
-		t.Errorf("the footer link is not inside a body.\n%s", msg.HTMLBody)
-	}
-	if !strings.HasSuffix(msg.HTMLBody, "</body></html>") {
-		t.Errorf("nothing may follow the body.\n%s", msg.HTMLBody)
-	}
-}
-
-// TestAnUnterminatedTemplateCannotSwallowTheFooter: whatever a custom template
-// ends in, the unsubscribe link and the open pixel are elements a client shows.
-//
-// A footer written after the last byte of such a template would be read as part
-// of the unfinished construct: an open tag takes it for attributes, a comment
-// for comment text, a style element for CSS. Placing it in the parsed document
-// is what makes that impossible. <plaintext> is the one construct the HTML
-// serializer cannot follow with anything, so it has a case of its own.
-func TestAnUnterminatedTemplateCannotSwallowTheFooter(t *testing.T) {
-	links := messageTestLinks()
-	c := trackingCampaign(true, false)
-	r := Recipient{ID: "r-1", Email: "someone@example.test", DisplayName: "Ada"}
-
-	for name, source := range map[string]string{
-		"an unterminated comment":             "<p>Hi</p><!--",
-		"an unterminated comment with text":   "<p>Hi</p><!-- draft footer ",
-		"an unterminated conditional comment": "<p>Hi</p><!--[if mso]><table><tr><td>",
-		"an open start tag":                   "<p>Hi<a title=x",
-		"an open start tag inside a quote":    `<p>Hi</p><a title="x`,
-		"an open anchor":                      `<p>Hi</p><a href="https://acme.test/x">read more`,
-		"an open table":                       "<table><tr><td>Hi",
-		"an unterminated style":               "<p>Hi</p><style>p{color:red",
-		"an unterminated script":              "<p>Hi</p><script>var x = 1;",
-		"an unterminated textarea":            "<p>Hi</p><textarea>draft",
-		"an unterminated title":               "<p>Hi</p><title>draft",
-		"an unterminated xmp":                 "<p>Hi</p><xmp>draft",
-		"an unterminated noscript":            "<p>Hi</p><noscript>draft",
-		"an unterminated iframe":              "<p>Hi</p><iframe>draft",
-		"an open svg":                         "<p>Hi</p><svg><desc>",
-		"a plaintext element":                 "<p>Hi</p><plaintext>everything after this is text <b>bold",
-		"a plaintext element in the middle":   "<p>Hi</p><plaintext>stuff</plaintext><p>more</p>",
-		"nothing but a plaintext element":     "<plaintext>",
-		"a body closed early":                 "<html><body><p>Hi</p></body></html><p>after</p>",
-	} {
-		t.Run(name, func(t *testing.T) {
-			tmpl := Template{ID: "t1", Subject: "s", TextBody: "t", HTMLBody: source}
-			opts := RenderOptions{Links: links, Tracking: trackingConfig().trackingRenderFor(c, deliveryRowID(c.ID, r.ID))}
-			msg, err := renderMessage(c, tmpl, r, opts)
-			if err != nil {
-				t.Fatalf("renderMessage: %v", err)
-			}
-
-			doc := parseRendered(t, msg.HTMLBody)
-			var unsubscribe []*html.Node
-			for _, a := range elementsNamed(doc, "a") {
-				if attrOf(a, "href") == links.Unsubscribe {
-					unsubscribe = append(unsubscribe, a)
-				}
-			}
-			if len(unsubscribe) != 1 {
-				t.Fatalf("a client would show %d unsubscribe links, want 1.\ngot: %s", len(unsubscribe), msg.HTMLBody)
-			}
-			if !hasAncestor(unsubscribe[0], "body") {
-				t.Errorf("the unsubscribe link is not inside the body.\ngot: %s", msg.HTMLBody)
-			}
-			pixels := 0
-			for _, img := range elementsNamed(doc, "img") {
-				if strings.Contains(attrOf(img, "src"), TrackingOpenPath) {
-					pixels++
-				}
-			}
-			if pixels != 1 {
-				t.Errorf("a client would load %d open pixels, want 1.\ngot: %s", pixels, msg.HTMLBody)
-			}
-		})
-	}
-}
-
 // TestAnUntouchedPartIsLeftAsAuthored: when there is nothing to place (the
 // template carries its own link and nothing is tracked) the HTML part is the
 // substituted template and nothing else. Re-serializing it would add a document
@@ -438,6 +345,15 @@ func TestOnlyALinkHrefCountsAsTheHTMLPartsOwnUnsubscribeLink(t *testing.T) {
 		{"a longer URL", `<a href="https://acme.test/?u={{unsubscribeUrl}}">Leave</a>`, true},
 		{"a URL with something after it", `<a href="{{unsubscribeUrl}}&x=1">Leave</a>`, true},
 		{"a link inside a template element", `<template><a href="{{unsubscribeUrl}}">Leave</a></template>`, true},
+		{"a link inside an svg element", `<svg><a href="{{unsubscribeUrl}}"><text>Leave</text></a></svg>`, true},
+		{"a link inside a script", `<script>var a = '<a href="{{unsubscribeUrl}}">';</script>`, true},
+		{"a link inside a textarea", `<textarea><a href="{{unsubscribeUrl}}">Leave</a></textarea>`, true},
+		{"a link inside a noscript", `<noscript><a href="{{unsubscribeUrl}}">Leave</a></noscript>`, true},
+		{"a second href that a browser ignores", `<a href="https://acme.test" href="{{unsubscribeUrl}}">Leave</a>`, true},
+		{"the first of two hrefs", `<a href="{{unsubscribeUrl}}" href="https://acme.test">Leave</a>`, false},
+		{"a link after a template element", `<template><p>x</p></template><a href="{{unsubscribeUrl}}">Leave</a>`, false},
+		{"a link after an svg element", `<svg><circle/></svg><a href="{{unsubscribeUrl}}">Leave</a>`, false},
+		{"a link after a script", `<script>var a = 1;</script><a href="{{unsubscribeUrl}}">Leave</a>`, false},
 		{"the other link tags", `<a href="{{preferencesUrl}}">Preferences</a>`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

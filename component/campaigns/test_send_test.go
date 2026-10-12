@@ -181,6 +181,33 @@ func TestTestSendLinksAreInert(t *testing.T) {
 	}
 }
 
+// TestTestSendRefusesATemplateWhoseFooterCannotBePlaced: the test send is where
+// the author learns that a template's HTML ends inside a comment or a tag, or is
+// a frameset, before a campaign built on it finds out. It says the same sentence
+// the campaign would, and sends nothing.
+func TestTestSendRefusesATemplateWhoseFooterCannotBePlaced(t *testing.T) {
+	for name, tc := range map[string]struct{ html, want string }{
+		"a comment that never ends": {"<p>Hi</p><!--", wantEndsOpen},
+		"a tag that is cut off":     {"<p>Hi<a title=x", wantEndsOpen},
+		"a style that never ends":   {"<p>Hi</p><style>p{", wantEndsOpen},
+		"a frameset":                {"<frameset><frame src=x></frameset>", wantFrames},
+	} {
+		engine := testSendFixture()
+		engine.template["htmlBody"] = tc.html
+		w, sender := testSendWorker(t, engine)
+
+		_, err := w.handleTestSend(importCtx(), map[string]any{
+			"campaignId": testCampaign, "to": "operator@example.test",
+		}, 0)
+		if err == nil || err.Error() != "campaigns.testSend: "+tc.want {
+			t.Errorf("%s: err = %v, want the sentence %q", name, err, tc.want)
+		}
+		if sender.count() != 0 {
+			t.Errorf("%s: a message went out", name)
+		}
+	}
+}
+
 // TestTestSendWorksOnAnAlreadySentCampaign is the sendableStatus exemption.
 // The commonest moment to want a test send is while duplicating last month's
 // campaign or diagnosing a complaint about one that already went out.

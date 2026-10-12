@@ -169,6 +169,27 @@ func TestASingleSendCarriesTheLinksButNoCampaign(t *testing.T) {
 	}
 }
 
+// TestSendToRecipientRefusesATemplateWhoseFooterCannotBePlaced: a message whose
+// unsubscribe link cannot be placed is not sent, and nothing is ledgered as an
+// attempt: the refusal comes before the transport is contacted.
+func TestSendToRecipientRefusesATemplateWhoseFooterCannotBePlaced(t *testing.T) {
+	engine := recipientSendEngine()
+	engine.template["htmlBody"] = "<p>Hi</p><!--"
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	_, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0)
+	if err == nil || err.Error() != "campaigns.sendToRecipient: "+wantEndsOpen {
+		t.Fatalf("err = %v, want the sentence %q", err, wantEndsOpen)
+	}
+	if sender.count() != 0 {
+		t.Error("a message went out")
+	}
+	if written := callsWithPrefix(engine, "mutation recordCampaignDelivery"); len(written) != 0 {
+		t.Errorf("a refused message was ledgered: %v", written)
+	}
+}
+
 // TestSendToRecipientHonoursTheClusterSuppressionList is the point-of-send
 // check. An address re-imported after a bounce has a recipient row saying
 // `subscribed`, and the cluster list is what still refuses it.
