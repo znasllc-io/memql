@@ -227,8 +227,9 @@ function describable(request: Pick<MaterializeRequest, "format" | "statement" | 
 /**
  * Whether the server will file this request EMPTY and keep its statement, for the
  * person's client to hand to the Library's revision workflow. Mirrors
- * `describedMarkdown()` in integrations/compose/materialize.go: the shape test, and
- * every source a library_file whose facts are known, not archived, and taken by
+ * `describedMarkdown(resolved)` in integrations/compose/materialize.go (the shape test)
+ * and `attachableSource` in integrations/compose/described.go (the per-file rule): every
+ * source a library_file whose facts are known, not archived, and taken by
  * attachmentKind (the hand-off's own rule for what the Library attaches). `files`
  * answers for each source by its ref as given; a file it does not know, or says
  * cannot be read, is not one the Library attaches. A request that names no file is

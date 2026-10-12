@@ -301,9 +301,9 @@ func waitComposition(t *testing.T, i *Integration, ctx context.Context, composit
 	}
 }
 
-// blankOutcome is what a request left behind once its run finished -- the empty file a
+// requestOutcome is what a request left behind once its run finished -- the empty file a
 // blank or described request is filed as, or the one the composer wrote.
-type blankOutcome struct {
+type requestOutcome struct {
 	row     map[string]any
 	file    map[string]any
 	upload  *materializeUploader
@@ -312,7 +312,7 @@ type blankOutcome struct {
 
 // materializeBlankDB drives one blank request of the given format through the
 // real engine (see materializeRequestDB).
-func materializeBlankDB(t *testing.T, format pure.Format) blankOutcome {
+func materializeBlankDB(t *testing.T, format pure.Format) requestOutcome {
 	t.Helper()
 	return materializeRequestDB(t, materializeArgs{Name: "Blank", Format: format})
 }
@@ -364,7 +364,7 @@ func withComposer(composer Composer) requestOption {
 // filed blank must never need a model, and a stray call would fail the run loudly. A test
 // of a request the composer writes gives it one with withComposer, and the files such a
 // request reads are seeded with withLibraryFiles and read through withSourceDownloader.
-func materializeRequestDB(t *testing.T, args materializeArgs, options ...requestOption) blankOutcome {
+func materializeRequestDB(t *testing.T, args materializeArgs, options ...requestOption) requestOutcome {
 	t.Helper()
 	var setup requestSetup
 	for _, option := range options {
@@ -456,7 +456,7 @@ func materializeRequestDB(t *testing.T, args materializeArgs, options ...request
 	if err != nil {
 		t.Fatal(err)
 	}
-	return blankOutcome{row: row, file: file, upload: upload, journal: journal}
+	return requestOutcome{row: row, file: file, upload: upload, journal: journal}
 }
 
 // The real engine accepts everything a blank file writes: the composition row

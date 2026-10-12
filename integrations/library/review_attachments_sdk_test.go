@@ -78,6 +78,9 @@ var (
 	sdkHandOffID   = regexp.MustCompile(`(?m)^const HAND_OFF_ID = /([^/\n]+)/;`)
 	sdkBounds      = regexp.MustCompile(`\{(\d+),(\d+)\}\$$`)
 	sdkSuffix      = regexp.MustCompile("\\$\\{requestId\\}([^`$]*)`")
+	// A `//` comment to the end of its line, or a `/* */` block. A string literal that holds a `//`
+	// is cut short too, which can only make a guard that reads code fail, never pass.
+	sdkComment = regexp.MustCompile(`(?s)/\*.*?\*/|//[^\n]*`)
 )
 
 // readSDKMirror reads the SDK's copy of the rules. Go's test cache does not notice
@@ -275,9 +278,10 @@ func TestSDKDecidesTheDescribedPathWithTheHandOffsRule(t *testing.T) {
 	if end < 0 {
 		t.Fatal("isDescribedMarkdown has no closing brace on a line of its own in the SDK hand-off; update this test with it")
 	}
-	body := strings.Join(lines[start:start+end+1], "\n")
+	// The code alone: a comment that names attachmentKind( is not a call to it.
+	body := sdkComment.ReplaceAllString(strings.Join(lines[start:start+end+1], "\n"), "")
 	if !strings.Contains(body, "attachmentKind(") {
-		t.Errorf("isDescribedMarkdown no longer calls attachmentKind in its own body. The SDK must decide the described path with the same rule the hand-off applies to a reference (the function the limits mirrored above feed), or its answer can differ from the server's and from what the hand-off will attach:\n%s", body)
+		t.Errorf("isDescribedMarkdown no longer calls attachmentKind in its own body (a comment is not a call). The SDK must decide the described path with the same rule the hand-off applies to a reference (the function the limits mirrored above feed), or its answer can differ from the server's and from what the hand-off will attach. Its code, comments removed:\n%s", body)
 	}
 	if !regexp.MustCompile(`(?m)^export (async )?function readDescribedMarkdown\(`).Match(raw) {
 		t.Error("readDescribedMarkdown is not exported from the SDK hand-off: a client that does not know the picked files' rows has no way to decide the path before it starts")
