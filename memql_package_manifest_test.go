@@ -559,6 +559,27 @@ func TestEngineManifestPostgresServiceIsPinnedByDigest(t *testing.T) {
 	}
 }
 
+// The step's Postgres is a throwaway, so it never waits on the disk. A build
+// node's steps share one disk, and on a workstation that disk saturates: during
+// the preflight run on #6018 (2026-10-11) a one-row commit on the cluster's own
+// database took 4.2 s while the tests stage built and ran, and a db test's read
+// deadline expired inside its commit (component/node, `i/o timeout`). The three
+// settings change only what survives a crash, which a test database never needs,
+// so every query sees the same database it would with them on. initdb takes
+// `-c` from PostgreSQL 16; the image runs 16.
+func TestEngineManifestPostgresServiceDoesNotWaitOnTheDisk(t *testing.T) {
+	postgres, ok := engineManifest(t).Pipeline.Services[manifestPostgresService]
+	if !ok {
+		t.Fatalf("the pipeline declares no %q service", manifestPostgresService)
+	}
+	args := " " + strings.Join(strings.Fields(postgres.Env["POSTGRES_INITDB_ARGS"]), " ") + " "
+	for _, setting := range []string{"fsync=off", "synchronous_commit=off", "full_page_writes=off"} {
+		if !strings.Contains(args, " -c "+setting+" ") {
+			t.Errorf("services.%s.env.POSTGRES_INITDB_ARGS does not set -c %s, so a commit waits on a shared disk", manifestPostgresService, setting)
+		}
+	}
+}
+
 // The toolchain image is pinned by digest: the one build-toolchain-image.yml's
 // run summary printed. A tag can be re-pushed (with allow_overwrite); a digest
 // names one image for good.

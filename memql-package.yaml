@@ -41,6 +41,12 @@ pipeline:
         POSTGRES_USER: memql
         POSTGRES_PASSWORD: memql_dev
         POSTGRES_DB: memql
+        # A throwaway database never waits on the disk. A build node's steps
+        # share one, and on a workstation a commit there took seconds while the
+        # tests stage built, long enough to expire a db test's read deadline.
+        # These change only what survives a crash, never what a query sees.
+        # initdb takes -c from PostgreSQL 16, which the image runs.
+        POSTGRES_INITDB_ARGS: -c fsync=off -c synchronous_commit=off -c full_page_writes=off
       # Over TCP, the way the step connects. The image's first start runs its
       # initialization on a server listening on its socket alone and then
       # restarts it, so a socket probe can pass before the server the step will
