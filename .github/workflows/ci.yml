@@ -614,6 +614,13 @@ jobs:
               # go-tests reaches cmd/memqlmigrate; the gate-inputs step does
               # not run cmd/**.
               - 'cmd/memqlmigrate/testdata/**'
+              # The table of the names a file is filed under: what the engine files each
+              # name as, which a Go test in integrations/compose computes through the
+              # engine's own filing, and which the OS client's tests run through the app's
+              # copy of the rule (the `osclient` bucket below has it too). integrations/compose
+              # is a db-gated tree, so db-tests, which gates on this bucket, is the lane that
+              # runs the Go half; a change to the table alone must reach it.
+              - 'integrations/compose/testdata/**'
             # The embedded DSL tree.
             dsl:
               - 'dsl/**'
@@ -717,6 +724,9 @@ jobs:
             osclient:
               # Checked against the live OS manifests by navigationContract.test.ts.
               - 'component/memql/os_navigation.json'
+              # The engine's table of filed names, which make.test.ts runs through the app's
+              # filedName (the `go` bucket above has it too, for the Go half).
+              - 'integrations/compose/testdata/**'
               - 'clients/**'
               - 'sdk/ts/**'
               - 'scripts/os/**'
@@ -1043,7 +1053,19 @@ jobs:
         # module's root package, not its subpackages, so a docs-only PR
         # changing the command reached no lane that checks it. DB-free and
         # under a second.
-        run: go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+        #
+        # `./integrations/compose` IS HERE FOR THE SAME REASON `./component/auth/...` IS:
+        # its drift guard (os_copies_test.go) reads clients/os/src/apps/materializer/make.ts
+        # and clients/os/src/items/materialize.ts, and holds the Materializer app's copies of
+        # the engine's rules (the files the composer reads, what can start blank, the name a
+        # file is filed under) to the engine. `clients/**` is a `gates` entry, so a PR that
+        # touches only the app reaches this step, and without the package here the guard
+        # would run only on the next Go change: the app could drift from the engine and merge
+        # green, which is how the app came to say an email template is filed as .json when
+        # the engine files .email.json. The package is a db-gated tree (db-tests runs it
+        # whole); here its database cases skip, as they do for the complement, and its other
+        # tests run, in about a second.
+        run: go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       #
@@ -1328,7 +1350,7 @@ jobs:
           # import graph can see: added for every change, including Go source.
           # The SAME list as go-checks' gate-inputs step, held to it by
           # scripts/dev/gate_inputs_lane_scope_test.go.
-          GATE_PACKAGES: ./ ./integrations ./integrations/customdomain ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+          GATE_PACKAGES: ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
           # The trees whose packages the node-tag passes test. A selected
           # package under one of them (or a changed file only a node tag
           # compiles) runs the tag passes; scripts/ci/selection's live test

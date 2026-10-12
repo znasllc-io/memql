@@ -38,6 +38,25 @@ import { deployableWord, formatWord } from "./words";
 //
 // AN UNANSWERED OPTIONAL IS LEFT OUT of the request, never sent empty: "the caller said
 // nothing" and "the caller said empty" are different statements to the cluster.
+//
+// ===========================================================================
+// WHAT THIS FILE COPIES FROM THE ENGINE, AND WHAT HOLDS THE COPIES
+// ===========================================================================
+// A person is told what will happen before the engine is asked, so some of the engine's rules
+// are copied here. A copy nothing holds drifts, and says something false to a person when it
+// does (it did: an email template is filed as .email.json, and this once said .json).
+// integrations/compose/os_copies_test.go reads this file and holds the copies to the engine:
+//
+//   READABLE_EXTENSIONS   the files the composer reads (source_content.go), in both directions
+//   BLANK_FORMATS         the formats RenderBlank files empty
+//   BLANK_DETAIL          the sentence ErrBlankFormat is
+//   PACKAGE_KINDS         the packages the engine writes (DeployableKinds)
+//   filedName             the name a file is filed under (filedFileName), through the table
+//                         integrations/compose/testdata/filed_names.json, which make.test.ts
+//                         runs through filedName and a Go test runs through the engine
+//
+// Those tests read the declarations above by their names and shapes. A declaration that moves
+// or changes shape fails them with a sentence naming this file; move the test with it.
 
 // ---------------------------------------------------------------------------
 // The draft
@@ -471,6 +490,9 @@ const EMAIL_TEMPLATE_SUFFIX = ".email.json";
  * made that way for any JSON file has its ".json" taken off, case-sensitively, and
  * ".email.json" put on. Meaningful once the name can be used (fileNameProblem finds nothing
  * wrong with it).
+ *
+ * The engine's table of these (integrations/compose/testdata/filed_names.json) is held to this
+ * function by make.test.ts, and to the engine by a Go test.
  */
 export function filedName(draft: MakeDraft): string {
   const format = formatOf(draft.fileKind);
@@ -531,6 +553,8 @@ const BLANK_FORMATS: readonly ComposeFormat[] = ["markdown", "txt", "html", "csv
 const canStartBlank = (kind: FileKind): boolean => kind.kind === "document" && BLANK_FORMATS.includes(kind.format);
 
 const NEEDS_SOMETHING = "Describe it or pick what to make it from";
+// What it says of a kind that cannot start blank: the engine's own refusal of one (ErrBlankFormat).
+const BLANK_DETAIL = "A blank file can be Markdown, text, HTML, CSV or JSON.";
 
 /**
  * What is missing before the file can be made, or null: the first that matches, in the
@@ -544,7 +568,7 @@ export function blocker(draft: MakeDraft, facts: MakeFacts): Blocker | null {
   if (!holds(draft.statement) && draft.ingredients.length === 0 && (templated || !canStartBlank(draft.fileKind))) {
     return {
       reason: "blank",
-      words: { word: NEEDS_SOMETHING, detail: templated ? "A template needs something to fill it." : "A blank file can be Markdown, text, HTML, CSV or JSON." },
+      words: { word: NEEDS_SOMETHING, detail: templated ? "A template needs something to fill it." : BLANK_DETAIL },
     };
   }
   if (draft.fileKind.kind === "emailTemplate" && draft.accountId === "") return { reason: "organization", words: { word: "Choose an organization" } };

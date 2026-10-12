@@ -131,6 +131,15 @@ var gateInputs = []struct {
 	// `**/*.md` already covers clients/README.md, so a row for that file would
 	// stay green with `clients/**` deleted and would assert nothing.
 	{"clients/os/package.json", ".", "TestClientsDirectoryIsAllowlisted"},
+	// The Materializer app copies some of the engine's rules (which files the composer
+	// reads, what can start blank, the name a file is filed under) because a person is told
+	// before the engine is asked, and os_copies_test.go in integrations/compose reads the
+	// app's source to hold each copy to the engine. The app is TypeScript under `clients/**`,
+	// so a PR touching only it reaches this lane and nothing else: the package has to be one
+	// the step runs, or the guard fires only on the next Go change (the app once said an
+	// email template is filed as .json where the engine files .email.json).
+	{"clients/os/src/apps/materializer/make.ts", "integrations/compose", "TestTheAppOffersExactlyTheFilesTheComposerReads"},
+	{"clients/os/src/items/materialize.ts", "integrations/compose", "TestTheAppOffersExactlyTheFormatsAndPackagesTheEngineWrites"},
 	// Not embedded, so embed_inventory_test.go does not pin it -- but a gate
 	// input all the same, and in no bucket this lane read until the same
 	// sweep found it. Renaming a `service:` reddens the model staleness check,

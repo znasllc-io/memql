@@ -496,7 +496,7 @@ pipeline:
             set -eu
             export GOFLAGS=-p=1 GOMEMLIMIT=512MiB GOGC=50
             bash scripts/identity/build-css.sh
-            go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+            go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
     # Analysis records findings independently of build/test success. It runs on
     # main pushes and release qualification, including their re-runs. The

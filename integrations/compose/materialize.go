@@ -932,10 +932,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 				return fail("materialization stopped", err)
 			}
 			fileId = stableMaterializeID("materialized-file", compositionId)
-			fileName = outputFileName(a.Name, a.Format, a.DeployableKind)
-			if a.OutputKind == "email_template" {
-				fileName = strings.TrimSuffix(fileName, ".json") + ".email.json"
-			}
+			fileName = filedFileName(a.Name, a.Format, a.DeployableKind, a.OutputKind)
 			mimeType = a.Format.MimeType()
 			if a.DeployableKind != "" {
 				mimeType = "application/zip"
@@ -1245,6 +1242,26 @@ func outputFileName(name string, format pure.Format, deployableKind string) stri
 		return stem
 	}
 	return stem + "." + ext
+}
+
+// filedFileName is the name a composition's file is filed under, from the composition's name (as
+// parseMaterializeArgs cleaned it) and what it was asked to make. The filing site calls it, and it is the
+// ONE place the rule lives.
+//
+// The Materializer app tells a person this name before the file exists (clients/os/src/apps/materializer/
+// make.ts, filedName), so the app holds a copy, and integrations/compose/testdata/filed_names.json is the
+// table both are held to: os_copies_test.go computes every row through this function, and the app's tests
+// through theirs. Change the rule here and the table, then the app's copy follows it.
+//
+// An email template is filed as <stem>.email.json: the .json file name is made as for any JSON file, its
+// ".json" is taken off (case-sensitively, so an upper-case one that the stem kept stays) and ".email.json"
+// put on.
+func filedFileName(name string, format pure.Format, deployableKind, outputKind string) string {
+	fileName := outputFileName(name, format, deployableKind)
+	if outputKind == "email_template" {
+		fileName = strings.TrimSuffix(fileName, ".json") + ".email.json"
+	}
+	return fileName
 }
 
 func sanitiseFileStem(name string) string {

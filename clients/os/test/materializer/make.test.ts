@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { LibraryFileFacts, LibraryFileLookup } from "@znasllc-io/memql-sdk-core/client";
 
@@ -843,6 +845,49 @@ describe("filedName", () => {
     expect(filed("...")).toBe("composition.md");
     expect(filed("a".repeat(130))).toBe(`${"a".repeat(120)}.md`);
     expect(filed("é".repeat(100))).toBe(`${"é".repeat(60)}.md`);
+  });
+});
+
+// THE ENGINE'S OWN TABLE of the names a file is filed under (integrations/compose/testdata/
+// filed_names.json). A Go test computes every row through the engine's parse and filing; this runs the
+// same rows through the app's copy of the rule. The app once said an email template is filed as .json
+// where the engine files .email.json, and nothing compared the two: this is what compares them.
+describe("filedName, held to the engine's table", () => {
+  interface Row { name: string; format: ComposeFormat; deployableKind: string; outputKind: string; filed: string }
+  const rows = (JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "..", "integrations", "compose", "testdata", "filed_names.json"), "utf8")) as { rows: Row[] }).rows;
+  const kindOf = (row: Row): FileKind =>
+    row.outputKind === "email_template" ? { kind: "emailTemplate" }
+      : row.deployableKind !== "" ? { kind: "package", deployableKind: row.deployableKind as "spa" | "static" | "shopify_storefront" }
+        : { kind: "document", format: row.format };
+  const label = (row: Row) => `${row.outputKind || row.deployableKind || row.format} ${JSON.stringify(row.name)}`;
+
+  it("files every name in the table as the engine does, and refuses the names it refuses", () => {
+    const wrong: string[] = [];
+    for (const row of rows) {
+      const d = draft({ name: row.name, fileKind: kindOf(row) });
+      const usable = stepState("name", d, facts()) === "done";
+      if (row.filed === "") {
+        if (usable) wrong.push(`${label(row)}: the engine refuses this name and the app calls it usable`);
+        continue;
+      }
+      if (!usable) {
+        wrong.push(`${label(row)}: the engine files this as ${JSON.stringify(row.filed)} and the app calls the name unusable`);
+        continue;
+      }
+      if (filedName(d) !== row.filed) wrong.push(`${label(row)}: the engine files this as ${JSON.stringify(row.filed)} and the app says ${JSON.stringify(filedName(d))}`);
+      if (answerOf("name", d, names) !== row.filed) wrong.push(`${label(row)}: the rail does not show the filed name`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  // A table that lost a kind, its refused names or its cuts would guard less than it says.
+  it("holds every kind of file, the names the engine refuses and the names it cuts inside a character", () => {
+    const kinds = new Set(rows.map((row) => fileKindEntry(kindOf(row)).value));
+    expect([...kinds].sort()).toEqual(FILE_KINDS.map((entry) => entry.value).sort());
+    expect(rows.length).toBeGreaterThanOrEqual(300);
+    expect(rows.filter((row) => row.filed === "").length).toBeGreaterThanOrEqual(20);
+    expect(rows.filter((row) => row.filed.includes("\ufffd")).length).toBeGreaterThanOrEqual(4);
+    expect(rows.filter((row) => row.outputKind === "email_template" && row.filed.endsWith(".email.json")).length).toBeGreaterThanOrEqual(20);
   });
 });
 
