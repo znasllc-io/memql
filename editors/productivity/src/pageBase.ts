@@ -78,8 +78,10 @@ export const BASE_STYLES = [
   `.icon-button{padding:8px;width:34px;height:34px}.primary{color:var(--vscode-button-foreground);background:var(--vscode-button-background);border-color:var(--vscode-button-border,transparent)}.primary:hover{background:var(--vscode-button-hoverBackground)}.secondary{border-color:var(--vscode-panel-border)}.text-act{padding:6px 8px;color:var(--vscode-textLink-foreground)}.text-act:hover{background:transparent;text-decoration:underline}`,
   // Fields. The zero-specificity :where() lets a page restyle a field with one class.
   `:where(input:not([type=checkbox],[type=radio],[type=color],[type=file],[type=range]),select,textarea){display:block;width:100%;min-height:34px;padding:6px 10px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,var(--vscode-panel-border));border-radius:6px}textarea{resize:vertical;min-height:98px;padding:10px 12px;line-height:1.6}::placeholder{color:var(--vscode-input-placeholderForeground)}`,
-  // Focus: one outline for what a keyboard can reach. Element-qualified like VS Code's own `input:focus` rule, which this must outrank by coming after it.
-  `button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,textarea:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:2px}`,
+  // Focus: one outline for every stop a keyboard can reach: the controls, links, and the pages' own stops (anything with a
+  // tabindex, an outline row, a radio, a switch). VS Code's own stylesheet comes first with `input:focus` and `a:focus`
+  // (an element and a pseudo-class); each selector here is at least that specific, so coming after it, it wins.
+  `a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible,textarea:focus-visible,[tabindex]:focus-visible,[role="treeitem"]:focus-visible,[role="radio"]:focus-visible,[role="switch"]:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:2px}`,
   // The segmented control.
   `.views{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--vscode-panel-border);border-radius:9px}.views button:not(.icon-button){min-width:75px}.views [aria-checked="true"]{background:var(--vscode-toolbar-activeBackground,var(--vscode-list-inactiveSelectionBackground))}`,
   // The action bar: state on the left, acts on the right.

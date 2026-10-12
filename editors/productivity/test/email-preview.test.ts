@@ -49,6 +49,62 @@ test("a document without the XHTML doctype previews in standards mode, names the
   });
 });
 
+test("nothing that runs, embeds, submits or reaches out survives the preview, whether or not block marks are kept", () => {
+  // One row per kind of hostile markup. Each must be gone from the preview, so adding
+  // any of these elements or attributes to the allowlists fails here.
+  const cases: Array<[string, string, string]> = [
+    ["a form", '<form action="https://outside.test/collect"><input name="q"><button>Send</button></form>', "form"],
+    ["a nested frame", '<iframe src="https://outside.test/frame"></iframe>', "iframe"],
+    ["an object", '<object data="https://outside.test/plugin.swf"><param name="movie" value="x"></object>', "object"],
+    ["an embed", '<embed src="https://outside.test/plugin.swf">', "embed"],
+    ["an svg", '<svg><a href="https://outside.test"><text>Hi</text></a><image href="https://tracker.test/s.png"/></svg>', "svg"],
+    ["math", '<math><mi xlink:href="https://outside.test">x</mi></math>', "math"],
+    ["a picture with sources", '<picture><source srcset="https://tracker.test/a.png 1x"><img src="data:image/png;base64,iVBORw0KGgo=" alt="Logo"></picture>', "picture,source,[srcset]"],
+    ["a source on its own", '<source src="https://tracker.test/a.mp4" srcset="https://tracker.test/a.png">', "source"],
+    ["a srcset on a picture that is allowed", '<img src="data:image/png;base64,iVBORw0KGgo=" srcset="https://tracker.test/b.png 2x" alt="Logo">', "[srcset]"],
+    ["a template", '<template><img src="https://tracker.test/t.png"></template>', "template"],
+    ["noscript", '<noscript><img src="https://tracker.test/n.png"></noscript>', "noscript"],
+    ["audio", '<audio src="https://tracker.test/a.mp3" autoplay></audio>', "audio"],
+    ["video", '<video poster="https://tracker.test/p.png"><source src="https://tracker.test/v.mp4"></video>', "video,source"],
+    ["a base address", '<base href="https://outside.test/">', "base"],
+    ["a stylesheet link", '<link rel="stylesheet" href="https://outside.test/a.css">', "link"],
+    ["a rival policy", '<meta http-equiv="Content-Security-Policy" content="default-src *; img-src *">', 'meta[content*="*"]'],
+  ];
+  withDOM(window => {
+    for (const [name, markup, gone] of cases) {
+      // In the head and in the body: the parser moves some of them, and both places must be clean.
+      for (const html of [`<html><head>${markup}</head><body><p data-block="intro">Hi</p></body></html>`, `<html><head></head><body><p data-block="intro">Hi</p>${markup}</body></html>`]) {
+        for (const blocks of [true, false]) {
+          const doc = new window.DOMParser().parseFromString(previewHTML(html, { blocks }), "text/html");
+          assert.equal(doc.querySelectorAll(gone).length, 0, `${name} (blocks: ${blocks}) left ${gone}`);
+          assert.equal(doc.querySelectorAll("meta").length, 1, `${name}: the preview's own policy is the only meta`);
+          assert.equal(doc.querySelector("meta")?.getAttribute("content"), PREVIEW_CSP, name);
+          assert.equal(doc.querySelectorAll("[data-block]").length, blocks ? 1 : 0, `${name}: block marks follow the option`);
+        }
+      }
+    }
+  });
+});
+
+test("a page nonce is a plain token, never a way into the policy", () => {
+  for (const nonce of ["x'; script-src *", "", "abc\n", "a b", "abc'", 'abc"']) {
+    assert.throws(() => pageCSP(nonce), /plain token/, JSON.stringify(nonce));
+    assert.throws(() => pageShell({ title: "T", nonce, script: "s.js", styles: "", body: "" }), /plain token/, JSON.stringify(nonce));
+  }
+  const hex = "9f86d081884c7d659a2feaa0c55ad015";
+  assert.equal(pageCSP(hex), `default-src 'none'; script-src 'nonce-${hex}'; style-src 'unsafe-inline'; img-src data:; frame-src 'self'; form-action 'none'; base-uri 'none'`);
+});
+
+test("every keyboard stop on the email pages gets the same visible focus ring", () => {
+  // The one focus rule: whatever a keyboard can land on, the ring is 2 pixels of the theme's focus colour.
+  const rule = /([^{}]*:focus-visible[^{}]*)\{outline:2px solid var\(--vscode-focusBorder\);outline-offset:2px\}/.exec(BASE_STYLES);
+  assert.ok(rule, "the focus rule exists");
+  const selectors = rule![1]!.split(",").map(selector => selector.trim());
+  for (const stop of ["a", "button", "input", "select", "summary", "textarea", "[tabindex]", '[role="treeitem"]', '[role="radio"]', '[role="switch"]']) {
+    assert.ok(selectors.includes(`${stop}:focus-visible`), `${stop} shows the focus ring`);
+  }
+});
+
 test("a document with nothing but a frameset still previews as an empty page", () => {
   withDOM(window => {
     const out = previewHTML("<html><frameset><frame src='https://outside.test'></frameset></html>", { blocks: false });
