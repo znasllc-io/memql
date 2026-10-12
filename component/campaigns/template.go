@@ -337,22 +337,12 @@ func (w *Worker) createTemplate(ctx context.Context, req templateRequest, render
 	values := rendered.content.values(req.templateID, revision)
 	values["accountId"] = req.accountID
 	if err := w.writeTemplate(ctx, "createTemplate", values); err != nil {
-		if req.sourceID != "" && req.templateID == sourceTemplateID(req.accountID, req.sourceID) && refusedAsAnotherOrganizations(err) {
+		if req.sourceID != "" && req.templateID == sourceTemplateID(req.accountID, req.sourceID) && errors.Is(err, memql.ErrOrganizationRowForbidden) {
 			return nil, errTemplateIDTaken
 		}
 		return nil, err
 	}
 	return templateReceipt(req.templateID, revision, "draft", rendered.issues)
-}
-
-// refusedAsAnotherOrganizations says whether err is the write guard's refusal of
-// a write to a row that exists in an organization the caller may not change
-// (validateOrganizationTransfer in component/memql). It is matched by the words
-// the guard writes, which are a code and a sentence of its own; the database
-// test of this case runs the real guard, so a change to them is a failing test
-// and not a raw refusal on somebody's screen.
-func refusedAsAnotherOrganizations(err error) bool {
-	return strings.Contains(err.Error(), "organization_forbidden: you cannot change data in the existing organization")
 }
 
 // changeTemplate saves, publishes, archives or restores a template that is

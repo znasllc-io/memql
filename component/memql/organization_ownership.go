@@ -5,6 +5,7 @@ package memql
 // not become ownership merely because they mention an account.
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/uptrace/bun"
 	"strings"
@@ -299,6 +300,14 @@ func (e *MemQLEngine) organizationUserRole(ctx context.Context, userID string) (
 	return auth.Role(role), true
 }
 
+// ErrOrganizationRowForbidden is the refusal of a write to a row that exists in
+// an organization the caller may not change. It is an exported value so that a
+// caller can recognise it with errors.Is and say it in words of its own, which
+// the text of an error is not a contract for. A create under an id that a row in
+// another organization already holds meets it too: the write is judged as the
+// update of the existing row it would be.
+var ErrOrganizationRowForbidden = errors.New("organization_forbidden: you cannot change data in the existing organization")
+
 // A record with dependent organization work cannot be retagged behind that
 // work's back. Unchanged attribution skips the dependent-row scan. A caller
 // authorized in both organizations can move an unused draft; moving history
@@ -317,7 +326,7 @@ func (e *MemQLEngine) validateOrganizationTransfer(ctx context.Context, concept,
 	// Otherwise membership in both accounts plus a target-only grant could
 	// take a row out of an organization the caller may only read.
 	if !e.OrganizationCapable(ctx, old, auth.VerbUpdate, auth.ResourceData) {
-		return fmt.Errorf("organization_forbidden: you cannot change data in the existing organization")
+		return ErrOrganizationRowForbidden
 	}
 	next, present := delta["accountId"].(string)
 	if !present || BareShortId(next) == BareShortId(old) {

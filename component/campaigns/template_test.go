@@ -1500,7 +1500,8 @@ func TestAGateThatFailsForAnotherReasonIsNotSomeoneElsesSave(t *testing.T) {
 // are not a claim about a file, and they pass through as they were.
 func TestOnlyACreateUnderTheFilesOwnIDIsReportedAsTaken(t *testing.T) {
 	const sentence = "This file is already linked to a template you can't open. Save it with a different template."
-	guard := errors.New("mutation createTemplate: organization_forbidden: you cannot change data in the existing organization")
+	// What the engine returns, as execServerOnly wraps it.
+	guard := fmt.Errorf("mutation createTemplate: %w", memql.ErrOrganizationRowForbidden)
 
 	fromTheFile := func(a map[string]any) { delete(a, "templateId"); a["sourceArtifactId"] = templateSource }
 	for _, c := range []struct {
@@ -1517,6 +1518,9 @@ func TestOnlyACreateUnderTheFilesOwnIDIsReportedAsTaken(t *testing.T) {
 		{"an id the caller chose, with a file", guard, func(a map[string]any) { a["sourceArtifactId"] = templateSource }, ""},
 		{"an id the caller chose, with no file", guard, func(map[string]any) {}, ""},
 		{"the id the file would get, refused for another reason", errors.New("mutation createTemplate: database unavailable"), fromTheFile, ""},
+		// The words are not the refusal: an error that only says them is some other
+		// error, and a sentence about a file would be a claim nobody checked.
+		{"the id the file would get, refused with the same words", errors.New("mutation createTemplate: organization_forbidden: you cannot change data in the existing organization"), fromTheFile, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tw := newTemplateWorld(t)
