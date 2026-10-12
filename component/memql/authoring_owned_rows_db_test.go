@@ -11,7 +11,9 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -63,20 +65,107 @@ func serverCreatesBundle(eng *MemQLEngine, owner context.Context, bundleId, titl
 	return eng.WriteAuthoringBundle(owner, AuthoringBundleInput{BundleId: bundleId, Title: title})
 }
 
-// retireWhenDone retires a bundle when the test ends, however it ends. Every
-// replica's reconcile pass and boot re-arm arm every bundle that reads active
-// in the database, and the test database is shared and never truncated, so a
-// bundle a test leaves active is armed in every run after it (memql#6022).
-// Registered right after the bundle is created -- before anything arms it --
-// so a test that stops midway still cleans up. A bundle that is already
-// retired, or was never created, only logs.
+// retireWhenDone retires a bundle when the test ends, however it ends, and then
+// PROVES it: the bundle is read back off the table and the test fails unless it
+// reads retired or is absent. Every replica's reconcile pass and boot re-arm arm
+// every bundle that reads active in the database, and the test database is
+// shared and never truncated, so a bundle a test leaves active is armed in every
+// run after it (memql#6022). A cleanup that only logged its own failure let
+// exactly that through, green.
+//
+// Registered right after the bundle is created -- before anything arms it -- so
+// a test that stops midway still cleans up. A bundle that was never created is
+// absent, so a failed retire of it only logs. The id may be bare or canonical.
 func retireWhenDone(t *testing.T, eng *MemQLEngine, owner context.Context, bundleId string) {
 	t.Helper()
 	t.Cleanup(func() {
-		if _, err := eng.Execute(owner, fmt.Sprintf(`mutation retireAuthoringBundle(bundleId: %s)`, languageParser.QuoteString(bundleId))); err != nil {
-			t.Logf("retire bundle %s after the test: %v", bundleId, err)
+		_, retireErr := eng.Execute(owner, fmt.Sprintf(`mutation retireAuthoringBundle(bundleId: %s)`, languageParser.QuoteString(bundleId)))
+		if err := bundleLeftBehind(context.Background(), eng.database(), bundleId); err != nil {
+			t.Errorf("bundle %s was not retired when the test ended: %v (the retire itself: %v). A bundle left behind is armed by every replica's reconcile pass and boot re-arm in every run after this one", bundleId, err, retireErr)
+			return
+		}
+		if retireErr != nil {
+			t.Logf("retire bundle %s after the test: %v", bundleId, retireErr)
 		}
 	})
+}
+
+// bundleLeftBehind reads a bundle's newest version straight off the table and
+// returns an error unless it reads retired or has no row at all -- the two states
+// in which no replica can arm it. The id may be bare or canonical (a durable
+// promote's bundle id is the bare one; the row is stored under the canonical
+// one).
+func bundleLeftBehind(ctx context.Context, db *bun.DB, bundleId string) error {
+	rowId := bundleId
+	if !strings.HasPrefix(rowId, bundleConceptID+":") {
+		rowId = bundleConceptID + ":" + rowId
+	}
+	var status sql.NullString
+	err := db.QueryRowContext(ctx,
+		`SELECT payload->>'status' FROM "MemoryNodes" WHERE concept = ? AND id = ? ORDER BY "createdAt" DESC LIMIT 1`,
+		bundleConceptID, rowId).Scan(&status)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return fmt.Errorf("the bundle could not be read back: %w", err)
+	case status.String != string(BundleRetired):
+		return fmt.Errorf("it reads %q", status.String)
+	}
+	return nil
+}
+
+// TestRetireWhenDoneCanTellARetiredBundleFromOneLeftBehind: the read-back every
+// retireWhenDone cleanup ends with can move. A bundle that reads draft or active
+// is reported, one that reads retired and one that was never written are not,
+// and a bare id finds the same row as the canonical one -- a durable promote
+// knows its bundle only by the bare id the row is stored under canonically.
+func TestRetireWhenDoneCanTellARetiredBundleFromOneLeftBehind(t *testing.T) {
+	eng, db, _ := sharedReadMergeEngine(t)
+	run := fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
+	owner := rowAuthzCallerCtx("u-left-behind-" + run)
+	bare := "left-behind-" + run
+	canonical := bundleConceptID + ":" + bare
+	ctx := context.Background()
+
+	leftBehind := func(state string) {
+		t.Helper()
+		for _, id := range []string{canonical, bare} {
+			err := bundleLeftBehind(ctx, db, id)
+			if err == nil {
+				t.Errorf("a bundle reading %q was not reported as left behind (asked by id %q)", state, id)
+			} else if !strings.Contains(err.Error(), fmt.Sprintf("%q", state)) {
+				t.Errorf("the report for a bundle reading %q does not name that status: %v", state, err)
+			}
+		}
+	}
+	notLeftBehind := func(state string) {
+		t.Helper()
+		for _, id := range []string{canonical, bare} {
+			if err := bundleLeftBehind(ctx, db, id); err != nil {
+				t.Errorf("a bundle that is %s was reported as left behind (asked by id %q): %v", state, id, err)
+			}
+		}
+	}
+
+	notLeftBehind("never written")
+
+	if err := serverCreatesBundle(eng, owner, canonical, "Left behind"); err != nil {
+		t.Fatalf("the bundle: %v", err)
+	}
+	retireWhenDone(t, eng, owner, canonical)
+	leftBehind("draft")
+
+	activation := &engineActivationStore{engine: eng}
+	if err := activation.SetBundleActive(owner, canonical); err != nil {
+		t.Fatalf("activate the bundle: %v", err)
+	}
+	leftBehind("active")
+
+	if err := activation.SetBundleRetired(owner, canonical); err != nil {
+		t.Fatalf("retire the bundle: %v", err)
+	}
+	notLeftBehind("retired")
 }
 
 // serverWritesConstruct is a gate-running pipeline's write of a member
