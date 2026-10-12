@@ -331,8 +331,8 @@ describe("the runs list", () => {
     const conn = fakeConnection({ runs: [runRow({ id: "r1" })] });
     mount(conn, "runs");
     await screen.findByText("nightlyReconcile");
-    expect(conn.query.workRunsForOwner).toHaveBeenCalledTimes(1);
-    expect(conn.query.workRunsForOwner.mock.calls[0]?.[0]).toEqual({});
+    expect(conn.query.workRunSummariesForOwner).toHaveBeenCalledTimes(1);
+    expect(conn.query.workRunSummariesForOwner.mock.calls[0]?.[0]).toEqual({});
   });
 
   it("hides finished runs under the settings preference, and says where the setting is", async () => {

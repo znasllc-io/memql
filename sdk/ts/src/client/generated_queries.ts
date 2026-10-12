@@ -12611,6 +12611,48 @@ QueryClient.prototype.workRunForOwner = function (this: QueryClient, args: WorkR
   return this.executeNamed("workRunForOwner", buildWorkRunForOwner(args), opts);
 };
 
+/** The caller's run navigation, in small pages. No execution payloads: long document work otherwise makes a single list response exceed the transport ceiling. This is a projection of the same owner-scoped history, not a template-specific subset. Clients follow its cursor to keep older runs. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummariesForOwner"] in generated_concepts.ts).
+export interface WorkRunSummariesForOwnerArgs {
+}
+
+export function buildWorkRunSummariesForOwner(args: WorkRunSummariesForOwnerArgs): string {
+  void args;
+  return "query workRunSummariesForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunSummariesForOwner(args?: WorkRunSummariesForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunSummariesForOwner = function (this: QueryClient, args: WorkRunSummariesForOwnerArgs = {} as WorkRunSummariesForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunSummariesForOwner", buildWorkRunSummariesForOwner(args), opts);
+};
+
+/** The same projection for live updates. Never fold a full CDC payload into a summary feed: that would gradually restore the retained execution data. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummaryForOwner"] in generated_concepts.ts).
+export interface WorkRunSummaryForOwnerArgs {
+  runId: string;
+}
+
+export function buildWorkRunSummaryForOwner(args: WorkRunSummaryForOwnerArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workRunSummaryForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunSummaryForOwner(args: WorkRunSummaryForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunSummaryForOwner = function (this: QueryClient, args: WorkRunSummaryForOwnerArgs = {} as WorkRunSummaryForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunSummaryForOwner", buildWorkRunSummaryForOwner(args), opts);
+};
+
 /** The caller's runs that are executing right now. Owned: `row.ownerUserId == actor.userId` binds server-side, so this answers for whoever the actor is and nobody else.
 SEPARATE FROM workRunsForOwner rather than a narrowing of it, for the reason that one states in its own comment: it is deliberately un-narrowed because two surfaces read it. This is a third question -- "what is in flight for this person" -- asked by the computer-use kill switch (memql#5066), where paging an active person's whole run history to find the few running ones is the wrong read for a control that has to act promptly.
 BOUNDED AT 500, which is a real limit and not a formality: a person with more than 500 runs executing at once would have some missed. Nothing in the product produces that state -- runs are opened per goal and per analysis -- and an unbounded scan on the path a kill switch takes is the worse failure. The pre-dispatch gate is refusing every new call meanwhile, so a missed run's next worker call is denied regardless. */

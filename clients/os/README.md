@@ -1825,6 +1825,14 @@ commerce cut is recorded in
 
 ## Nexus, the tenth app (the work spine, sub-projects A and B)
 
+The shared run feed pages through `workRunSummariesForOwner` and re-reads
+every live event through `workRunSummaryForOwner`. Keep captured inputs,
+compiled workflows and document outputs out of this retained navigation
+collection: full run history can exceed the browser transport ceiling. The
+summary preserves task titles, conversation scope and recovery controls;
+execution receipts are loaded only for the open run. Full run reads remain
+available to replay and other consumers.
+
 `src/apps/nexus/` is the goal surface: what a person asked the system to do,
 drawn as a place the work arrives at, plus the runs that carry it out, the
 automations it learned, and the places it had to stop and ask. Design records:
