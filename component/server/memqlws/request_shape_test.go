@@ -4,9 +4,10 @@ package memqlws
 //
 // The bridge decoded every request (protojson for JSON text, proto for binary)
 // before anything looked at it, and decoding allocates far more than a request's
-// bytes: 140 to 310 bytes for each value in it. A 32 MiB list of zeros took 2.4 GB
-// to decode before it was refused for being too large for the server, so one
-// request could take a node down. A request is now measured by its shape first,
+// bytes: from about 150 bytes for each value in it to over 400, and more when its
+// objects have long keys. A 32 MiB list of zeros took 2.4 GB to decode before it
+// was refused for being too large for the server, so one request could take a
+// node down. A request is now measured by its shape first,
 // from its bytes, and one that holds too many values, or nests them too deeply, is
 // refused by itself, as one over the frame limit is.
 
