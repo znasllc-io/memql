@@ -18,20 +18,11 @@ import { WORDS } from "../words";
 //   Sent, 30 days       the campaigns' own `sentCount`, over those started in the
 //                       window. The counters are the drain worker's own
 //                       tallies, and the campaigns feed walks every page.
-//   Open / Click rate   the engine's `campaignStats` (computed server-side --
-//                       never a client's tally of a capped page of
-//                       deliveries): unique openers (clickers) over what was
-//                       SENT, the campaigns' own `sentCount`, summed across the
-//                       campaigns that counted them. A unique figure is never a
-//                       floor: the engine folds it from a bounded read of the
-//                       engagement references and, when that read reaches its
-//                       bound, WITHHOLDS it (`uniqueUnmeasured`) rather than
-//                       truncate it, and the rate is then unmeasured, with that
-//                       reason. The breakdown's COUNT buckets are what can stop
-//                       at the engine's window unflagged -- delivered, skipped
-//                       and failed, bounces, spam reports, unsubscribes, the
-//                       opens and clicks totals -- and no figure here reads one
-//                       (see useCampaignStats).
+//   Open / Click rate   unique openers (clickers) over accepted sends from the
+//                       same campaignStats response, summed across campaigns
+//                       that tracked them. Missing or bounded counts withhold
+//                       the rate. Provider reports can repair an uncertain send
+//                       before the campaign's own progress counters catch up.
 //   Subscriptions       the engine's `audienceSubscriberCount` per active audience,
 //                       added up: a person on two audiences is two subscriptions,
 //                       so it is not called subscribers. A count that reached
@@ -157,8 +148,12 @@ function rateMetric(label: string, kind: "opens" | "clicks", i: OverviewInputs):
       reason ||= figure.absentBecause;
       continue;
     }
+    if (figure.atLeast || stats.sent.atLeast || stats.sent.value === null) {
+      reason ||= "The recorded counts are incomplete, so this rate cannot be stated exactly.";
+      continue;
+    }
     unique += figure.value;
-    sent += campaign.sentCount;
+    sent += stats.sent.value;
   }
 
   // WHAT IS KNOWN TO BE ABSENT OUTRANKS WHAT IS STILL ARRIVING: a rate that one
@@ -167,7 +162,7 @@ function rateMetric(label: string, kind: "opens" | "clicks", i: OverviewInputs):
   if (refusal !== "") return refused(label, refusal);
   if (reason !== "") return unmeasured(label, reason);
   if (waiting) return reading(label);
-  // `counted` only holds campaigns that sent something, so `sent` is not zero.
+  if (sent <= 0) return unmeasured(label, "No accepted sends were recorded for these campaigns.");
   return { label, figure: figureOf(unique / sent), format: formatRate };
 }
 

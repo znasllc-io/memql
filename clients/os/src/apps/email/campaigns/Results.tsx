@@ -6,6 +6,7 @@ import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
 import {
   deliveryFromRow,
   formatRate,
+  providerDeliverySentence,
   rateOf,
   sendBreakdown,
   skipReasonSentence,
@@ -41,6 +42,7 @@ export function Results({ campaign, stats }: { campaign: CampaignRow; stats: Rea
     <Panel label="Results">
       <Subhead>Results</Subhead>
       <SendBar campaign={campaign} />
+      <Caption>Sent means accepted for sending.</Caption>
       <Engagement campaign={campaign} stats={stats} />
     </Panel>
   );
@@ -62,8 +64,8 @@ function Engagement({ campaign, stats }: { campaign: CampaignRow; stats: Reading
   if (!campaign.trackOpens && !campaign.trackClicks) {
     return <Caption>Opens and clicks weren't counted for this campaign.</Caption>;
   }
-  const sent = sendBreakdown(campaign).segments.find((segment) => segment.key === "sent")?.count ?? 0;
   const value = stats.value;
+  const sent = value?.sent.value ?? 0;
   const reading = value === null && stats.state === "loading";
   return (
     <div className="os-send-engagement">
@@ -94,7 +96,7 @@ function EngagementFigure({ label, unique, total, sent, bounded, reading }: {
       <span className="os-send-engagement-label">{label}</span>
       {total === null || total.value === null ? null : (
         // A unique count that could not be measured is left out, not shown as a dash in a sentence.
-        <span className="os-caption">{unique === null || unique.value === null ? `${count(total)} times in all` : `${count(unique)} of the people who got it, ${count(total)} times in all`}</span>
+        <span className="os-caption">{unique === null || unique.value === null ? `${count(total)} times in all` : `${count(unique)} recipients, ${count(total)} times in all`}</span>
       )}
       {unique === null || unique.absentBecause === "" ? null : <span className="os-caption os-send-engagement-note">{unique.absentBecause}</span>}
     </div>
@@ -135,10 +137,15 @@ export function Breakdown({ campaign, stats }: { campaign: CampaignRow; stats: R
             <StatFact label="Skipped: on the do-not-mail list" figure={value.skippedSuppressed} />
             <StatFact label="Skipped: unsubscribed" figure={value.skippedUnsubscribed} />
             <StatFact label="Skipped: some other reason" figure={value.skippedOther} />
+            <StatFact label="Confirmed by recipient server" figure={value.deliveryConfirmed} />
+            <StatFact label="Failed after sending" figure={value.deliveryFailed} />
+            <StatFact label="Expanded to a distribution list" figure={value.deliveryExpanded} />
+            <StatFact label="Delivery unconfirmed" figure={value.deliveryUnconfirmed} />
             <StatFact label="Hard bounces" figure={value.hardBounces} />
             <StatFact label="Spam reports" figure={value.complaints} />
             <StatFact label="Unsubscribed from this" figure={value.unsubscribes} />
           </Facts>
+          <Caption>Server confirmation does not confirm inbox placement. Expanded lists have no final delivery report.</Caption>
           {/* Said once: there is never a soft-bounce figure to show, and a line
               for one would be read as a zero. */}
           <Caption>{value.softBounces.absentBecause}</Caption>
@@ -190,13 +197,13 @@ export function WhoGotIt({ campaignId, total }: { campaignId: string; total: num
     <>
       <AutoRefresh onRefresh={ledger.reload} busy={ledger.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
       {nothing ? null : (
-        <Panel label="Who got it">
+        <Panel label="Recipients">
           <Subhead
             meta={meta}
             actions={
               deliveries.length === 0 ? null : (
                 <Refine iconOnly search={search} onSearch={setSearch} chips={chips} label="Refine recipients">
-                  <Select id={`email-delivery-outcome-${campaignId}`} label="Delivery" value={outcome} onChange={(next) => setOutcome(next as Outcome)}>
+                  <Select id={`email-delivery-outcome-${campaignId}`} label="Sending" value={outcome} onChange={(next) => setOutcome(next as Outcome)}>
                     {OUTCOMES.map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
@@ -207,7 +214,7 @@ export function WhoGotIt({ campaignId, total }: { campaignId: string; total: num
               )
             }
           >
-            Who got it
+            Recipients
           </Subhead>
           {refused ? <Notice tone="error" sentence="This cluster did not return the delivery record." detail={ledger.error} /> : null}
           {first ? <RecordListSkeleton label="Loading the delivery record" /> : null}
@@ -219,9 +226,10 @@ export function WhoGotIt({ campaignId, total }: { campaignId: string; total: num
                   name={<span className="os-mono">{delivery.email || "--"}</span>}
                   state={WORDS.delivery[delivery.status] ?? delivery.status}
                   tone={delivery.status === "sent" ? "accent" : delivery.lastError !== "" ? "warn" : "muted"}
-                  secondary={delivery.lastError || (delivery.status === "skipped" ? skipReasonSentence(delivery.skipReason) : undefined)}
+                  secondary={[delivery.status === "sent" || delivery.providerStatus !== "" ? providerDeliverySentence(delivery.providerStatus) : "", delivery.lastError || (delivery.status === "skipped" ? skipReasonSentence(delivery.skipReason) : "")].filter(Boolean).join(". ")}
                 >
-                  {delivery.sentAt === "" ? null : <span className="os-caption">{shortMoment(delivery.sentAt)}</span>}
+                  {delivery.sentAt === "" ? null : <span className="os-caption">Sent {shortMoment(delivery.sentAt)}</span>}
+                  {delivery.providerAt === "" ? null : <span className="os-caption">Reported {shortMoment(delivery.providerAt)}</span>}
                 </RecordRow>
               ))}
             </RecordList>

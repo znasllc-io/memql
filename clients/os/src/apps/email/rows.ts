@@ -315,6 +315,11 @@ export interface CampaignStats {
   skippedSuppressed: Figure;
   skippedUnsubscribed: Figure;
   skippedOther: Figure;
+  /** Provider reports; sent remains transport acceptance. */
+  deliveryConfirmed: Figure;
+  deliveryFailed: Figure;
+  deliveryExpanded: Figure;
+  deliveryUnconfirmed: Figure;
   hardBounces: Figure;
   /** Never measured: nothing counts a soft bounce per campaign. Always absent, with why. */
   softBounces: Figure;
@@ -388,6 +393,10 @@ export function statsFromPayload(row: Row): CampaignStats {
     skippedSuppressed: nested("skipped", "suppressed", "skippedSuppressed"),
     skippedUnsubscribed: nested("skipped", "unsubscribed", "skippedUnsubscribed"),
     skippedOther: nested("skipped", "other", "skippedOther"),
+    deliveryConfirmed: nested("delivery", "confirmed", "deliveryConfirmed"),
+    deliveryFailed: nested("delivery", "failed", "deliveryFailed"),
+    deliveryExpanded: nested("delivery", "expanded", "deliveryExpanded"),
+    deliveryUnconfirmed: nested("delivery", "unconfirmed", "deliveryUnconfirmed", "Unconfirmed delivery could not be counted exactly."),
     hardBounces: nested("bounces", "hard", "hardBounces"),
     softBounces: { value: null, absentBecause: SOFT_BOUNCE_ABSENT },
     complaints: figureOf(flat, "complaints"),
@@ -399,22 +408,22 @@ export function statsFromPayload(row: Row): CampaignStats {
   };
   const bounds = flat.atLeast;
   if (bounds && typeof bounds === "object" && !Array.isArray(bounds)) {
-    const keys: Partial<Record<keyof CampaignStats, string>> = { pending: "pending", sent: "sent", failed: "failed", skipped: "skipped.total", skippedSuppressed: "skipped.suppressed", skippedUnsubscribed: "skipped.unsubscribed", skippedOther: "skipped.other", hardBounces: "bounces.hard", complaints: "complaints", unsubscribes: "unsubscribed", opensTotal: "opens.total", opensUnique: "opens.unique", clicksTotal: "clicks.total", clicksUnique: "clicks.unique" };
+    const keys: Partial<Record<keyof CampaignStats, string>> = { pending: "pending", sent: "sent", failed: "failed", skipped: "skipped.total", skippedSuppressed: "skipped.suppressed", skippedUnsubscribed: "skipped.unsubscribed", skippedOther: "skipped.other", deliveryConfirmed: "delivery.confirmed", deliveryFailed: "delivery.failed", deliveryExpanded: "delivery.expanded", hardBounces: "bounces.hard", complaints: "complaints", unsubscribes: "unsubscribed", opensTotal: "opens.total", opensUnique: "opens.unique", clicksTotal: "clicks.total", clicksUnique: "clicks.unique" };
     for (const [key, wire] of Object.entries(keys)) if ((bounds as Row)[wire] === true) stats[key as keyof CampaignStats].atLeast = true;
   }
   return stats;
 }
 
 /**
- * A rate expressed against what was actually delivered, or null.
+ * A rate expressed against what was accepted for sending, or null.
  *
- * OF DELIVERED, NEVER OF THE AUDIENCE. An open rate over the whole roster
+ * OF SENT, NEVER OF THE AUDIENCE. An open rate over the whole roster
  * silently punishes a campaign for its suppressions, which is the opposite of
  * what suppressing was for. A zero denominator has no rate -- not 0%.
  */
-export function rateOf(numerator: Figure, delivered: number, denominatorAtLeast = false): number | null {
-  if (numerator.value === null || numerator.atLeast || denominatorAtLeast || delivered <= 0) return null;
-  return numerator.value / delivered;
+export function rateOf(numerator: Figure, sent: number, denominatorAtLeast = false): number | null {
+  if (numerator.value === null || numerator.atLeast || denominatorAtLeast || sent <= 0) return null;
+  return numerator.value / sent;
 }
 
 /** A rate as a person reads one. Null renders as the em dash everywhere. */
@@ -1245,6 +1254,9 @@ export interface DeliveryRow {
   /** pending | sent | failed | skipped. */
   status: string;
   outboundRequestId: string;
+  /** Reported by the sending provider, never inferred from transport acceptance. */
+  providerStatus: string;
+  providerAt: string;
   skipReason: string;
   lastError: string;
   sentAt: string;
@@ -1260,11 +1272,28 @@ export function deliveryFromRow(row: Row): DeliveryRow {
     email: rowString(flat, "email"),
     status: rowString(flat, "status"),
     outboundRequestId: rowString(flat, "outboundRequestId"),
+    providerStatus: rowString(flat, "providerStatus"),
+    providerAt: rowString(flat, "providerAt"),
     skipReason: rowString(flat, "skipReason"),
     lastError: rowString(flat, "lastError"),
     sentAt: rowString(flat, "sentAt"),
     createdAt: rowString(flat, "createdAt"),
   };
+}
+
+/** A provider report is about delivery, separately from the send's transport status. */
+export function providerDeliverySentence(status: string): string {
+  switch (status) {
+    case "delivered": return "Confirmed by recipient server";
+    case "bounced": return "Delivery bounced";
+    case "suppressed": return "Delivery suppressed";
+    case "quarantined": return "Delivery quarantined";
+    case "filtered-spam": return "Filtered as spam";
+    case "expanded": return "Expanded to a distribution list";
+    case "failed": return "Delivery failed";
+    case "": return "Delivery unconfirmed";
+    default: return `Delivery report: ${status}`;
+  }
 }
 
 /**

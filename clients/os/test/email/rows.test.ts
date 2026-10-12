@@ -650,3 +650,37 @@ describe("bounded campaign statistics", () => {
     expect(rateOf(stats.opensTotal, 5000)).toBeNull();
   });
 });
+
+
+describe("reported delivery statistics", () => {
+  it("keeps transport acceptance separate from measured delivery outcomes", () => {
+    const stats = statsFromPayload({ sent: 40, failed: 5, delivery: { confirmed: 30, failed: 2, expanded: 1, unconfirmed: 7 } });
+    expect(stats.sent.value).toBe(40);
+    expect(stats.failed.value).toBe(5);
+    expect(stats.deliveryConfirmed.value).toBe(30);
+    expect(stats.deliveryFailed.value).toBe(2);
+    expect(stats.deliveryExpanded.value).toBe(1);
+    expect(stats.deliveryUnconfirmed.value).toBe(7);
+    // An absent report is never upgraded from the count accepted for sending.
+    expect(statsFromPayload({ sent: 40 }).deliveryConfirmed.value).toBeNull();
+    const noReports = statsFromPayload({ sent: 40, delivery: { confirmed: 0, failed: 0, expanded: 0, unconfirmed: 40 } });
+    expect(noReports.deliveryConfirmed.value).toBe(0);
+    expect(noReports.deliveryUnconfirmed.value).toBe(40);
+  });
+
+  it("preserves delivery bounds and an omitted unconfirmed count", () => {
+    const stats = statsFromPayload({ sent: 20000, delivery: { confirmed: 5000, failed: 5000, expanded: 5000 }, atLeast: { "delivery.confirmed": true, "delivery.failed": true, "delivery.expanded": true } });
+    expect([stats.deliveryConfirmed, stats.deliveryFailed, stats.deliveryExpanded].map(formatFigure)).toEqual(["≥5000", "≥5000", "≥5000"]);
+    expect(stats.deliveryUnconfirmed.value).toBeNull();
+    expect(stats.deliveryUnconfirmed.absentBecause).not.toBe("");
+  });
+
+  it("keeps the provider report and its time separate from sentAt", () => {
+    const delivery = deliveryFromRow(deliveryRow({ id: "d1", providerStatus: "bounced", providerAt: "2031-10-14T17:00:00Z" }));
+    expect(delivery.status).toBe("sent");
+    expect(delivery.providerStatus).toBe("bounced");
+    expect(delivery.providerAt).toBe("2031-10-14T17:00:00Z");
+    expect(delivery.sentAt).not.toBe(delivery.providerAt);
+    expect(deliveryFromRow(deliveryRow({ id: "d2" })).providerStatus).toBe("");
+  });
+});

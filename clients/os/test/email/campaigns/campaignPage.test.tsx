@@ -154,7 +154,7 @@ describe("a campaign's page", () => {
 
     // Nothing has gone out: no band, no breakdown, no ledger -- and nothing read for them.
     expect(screen.queryByRole("img")).toBeNull();
-    for (const name of ["Results", "Breakdown", "Who got it", "Tests"]) expect(screen.queryByRole("heading", { name })).toBeNull();
+    for (const name of ["Results", "Breakdown", "Recipients", "Tests"]) expect(screen.queryByRole("heading", { name })).toBeNull();
     await waitFor(() => expect(barActs()).toEqual(["Edit", "Send a test", "Send now"]));
     expect(barWord()).toBe("Draft");
     expect(conn.query.campaignStats).not.toHaveBeenCalled();
@@ -694,6 +694,7 @@ const STATS = {
   sent: 40,
   failed: 5,
   skipped: { total: 10, suppressed: 6, unsubscribed: 3, other: 1 },
+  delivery: { confirmed: 30, failed: 2, expanded: 1, unconfirmed: 7 },
   bounces: { hard: 2 },
   complaints: 1,
   unsubscribed: 4,
@@ -703,7 +704,7 @@ const STATS = {
 };
 
 describe("what happened when it went out", () => {
-  it("draws results, engagement as a rate of delivered, and an em dash with its reason", async () => {
+  it("draws results, engagement as a rate of sent, and an em dash with its reason", async () => {
     const conn = seed({
       campaigns: [
         draft({ id: "c1", status: "sending", recipientCount: 100, sentCount: 40, skippedCount: 10, failedCount: 5, startedAt: "2031-10-14T16:00:00Z" }),
@@ -718,7 +719,7 @@ describe("what happened when it went out", () => {
     // The audience, divided by what happened to it, readable without eyes.
     const results = screen.getByRole("region", { name: "Results" });
     expect(within(results).getByRole("img", { name: "100 recipients: 40 sent, 10 skipped, 5 failed, 45 not yet sent." })).toBeTruthy();
-    // Opens could not be counted exactly: an em dash, with why. Clicks are a rate of what was delivered.
+    // Opens could not be counted exactly: an em dash, with why. Clicks are a rate of what was accepted for sending.
     await waitFor(() => expect(within(results).getByText("10%")).toBeTruthy());
     expect(within(results).getByText(/count distinct recipients exactly/)).toBeTruthy();
     expect(within(results).getByText("Opened").parentElement?.querySelector(".os-send-engagement-rate")?.textContent).toBe("--");
@@ -740,6 +741,73 @@ describe("what happened when it went out", () => {
     expect(barDetail()).toBe("no email sender is registered on this node");
   });
 
+  it("shows reported outcomes without treating transport acceptance as confirmation", async () => {
+    const conn = seed({
+      campaigns: [draft({ id: "c1", status: "sent", recipientCount: 40, sentCount: 40 })],
+      campaignStats: [STATS],
+      deliveriesForCampaign: [
+        deliveryRow({ id: "confirmed", email: "confirmed@example.com", providerStatus: "delivered", providerAt: "2031-10-14T17:00:00Z" }),
+        deliveryRow({ id: "bounce", email: "bounce@example.com", providerStatus: "bounced", providerAt: "2031-10-14T17:01:00Z" }),
+        deliveryRow({ id: "list", email: "list@example.com", providerStatus: "expanded" }),
+        deliveryRow({ id: "spam", email: "spam@example.com", providerStatus: "filtered-spam" }),
+        deliveryRow({ id: "unknown", email: "unknown@example.com" }),
+      ],
+    });
+    mountWindow(conn);
+    await openCampaign();
+    const breakdown = screen.getByRole("region", { name: "Breakdown" });
+    await waitFor(() => expect(fact("Confirmed by recipient server", breakdown).textContent).toBe("30"));
+    expect(fact("Failed after sending", breakdown).textContent).toBe("2");
+    expect(fact("Expanded to a distribution list", breakdown).textContent).toBe("1");
+    expect(fact("Delivery unconfirmed", breakdown).textContent).toBe("7");
+    const recipients = screen.getByRole("region", { name: "Recipients" });
+    expect(await within(recipients).findByText("Confirmed by recipient server")).toBeTruthy();
+    expect(within(recipients).getByText("Delivery bounced")).toBeTruthy();
+    expect(within(recipients).getByText("Expanded to a distribution list")).toBeTruthy();
+    expect(within(recipients).getByText("Filtered as spam")).toBeTruthy();
+    expect(within(recipients).getByText("Delivery unconfirmed")).toBeTruthy();
+    // Every one was accepted for sending, even those that later bounced.
+    expect(within(recipients).getAllByText("Sent")).toHaveLength(5);
+    expect(within(recipients).getAllByText(/^Reported /)).toHaveLength(2);
+    expect(screen.getByText("Sent means accepted for sending.")).toBeTruthy();
+  });
+
+  it("uses the stats acceptance count for engagement after a late provider report", async () => {
+    const conn = seed({
+      campaigns: [draft({ id: "c1", status: "sent", recipientCount: 40, sentCount: 20 })],
+      campaignStats: [STATS],
+    });
+    mountWindow(conn);
+    await openCampaign();
+    expect(await within(screen.getByRole("region", { name: "Results" })).findByText("10%")).toBeTruthy();
+  });
+
+  it("leaves unconfirmed delivery and engagement rates unstated when their counts are bounded", async () => {
+    const conn = seed({
+      campaigns: [draft({ id: "c1", status: "sent", recipientCount: 10000, sentCount: 10000 })],
+      campaignStats: [{ ...STATS, sent: 5000, delivery: { confirmed: 5000, failed: 2, expanded: 1 }, atLeast: { sent: true, "delivery.confirmed": true } }],
+    });
+    mountWindow(conn);
+    await openCampaign();
+    const breakdown = screen.getByRole("region", { name: "Breakdown" });
+    await waitFor(() => expect(fact("Confirmed by recipient server", breakdown).textContent).toBe("≥5,000"));
+    expect(fact("Delivery unconfirmed", breakdown).textContent).toBe("--");
+    const results = screen.getByRole("region", { name: "Results" });
+    expect(within(results).getByText("Clicked").parentElement?.querySelector(".os-send-engagement-rate")?.textContent).toBe("--");
+  });
+
+  it("leaves mail without provider reports unconfirmed", async () => {
+    const conn = seed({
+      campaigns: [draft({ id: "c1", status: "sent", recipientCount: 40, sentCount: 40 })],
+      campaignStats: [{ sent: 40, delivery: { confirmed: 0, failed: 0, expanded: 0, unconfirmed: 40 } }],
+    });
+    mountWindow(conn);
+    await openCampaign();
+    const breakdown = screen.getByRole("region", { name: "Breakdown" });
+    await waitFor(() => expect(fact("Delivery unconfirmed", breakdown).textContent).toBe("40"));
+    expect(fact("Confirmed by recipient server", breakdown).textContent).toBe("0");
+  });
+
   it("says each number once: the breakdown holds only what the band's legend does not", async () => {
     const conn = seed({
       campaigns: [draft({ id: "c1", status: "sending", recipientCount: 100, sentCount: 40, skippedCount: 10, failedCount: 5, startedAt: "2031-10-14T16:00:00Z" })],
@@ -759,6 +827,10 @@ describe("what happened when it went out", () => {
       "Skipped: on the do-not-mail list",
       "Skipped: unsubscribed",
       "Skipped: some other reason",
+      "Confirmed by recipient server",
+      "Failed after sending",
+      "Expanded to a distribution list",
+      "Delivery unconfirmed",
       "Hard bounces",
       "Spam reports",
       "Unsubscribed from this",
@@ -800,7 +872,7 @@ describe("what happened when it went out", () => {
     expect(await screen.findByText("This cluster did not return the delivery record.")).toBeTruthy();
     expect(screen.getByText("reading deliveries is owner and admin only")).toBeTruthy();
     expect(screen.queryByText(/silence, not an empty send/)).toBeNull();
-    const who = screen.getByRole("region", { name: "Who got it" });
+    const who = screen.getByRole("region", { name: "Recipients" });
     expect(within(who).queryByRole("button", { name: "Show more" })).toBeNull();
     expect(who.querySelector(".os-subhead-meta")).toBeNull();
   });
@@ -824,7 +896,7 @@ describe("what happened when it went out", () => {
     mountWindow(conn);
     await openCampaign();
 
-    const who = screen.getByRole("region", { name: "Who got it" });
+    const who = screen.getByRole("region", { name: "Recipients" });
     expect(await within(who).findByText("dana@acme.com")).toBeTruthy();
     // More exist than were read: the heading says how many of how many.
     await waitFor(() => expect(who.querySelector(".os-subhead-meta")?.textContent).toBe("Latest 2 of 4"));
@@ -847,7 +919,7 @@ describe("what happened when it went out", () => {
     fireEvent.change(within(who).getByLabelText("Search"), { target: { value: "sam" } });
     expect(within(who).getByText("sam@acme.com")).toBeTruthy();
     expect(within(who).queryByText("dana@acme.com")).toBeNull();
-    chooseOption(within(who).getByLabelText("Delivery"), "Skipped");
+    chooseOption(within(who).getByLabelText("Sending"), "Skipped");
     expect(within(who).getByText("No match among the loaded recipients.")).toBeTruthy();
   });
 
