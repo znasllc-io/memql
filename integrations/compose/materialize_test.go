@@ -34,6 +34,13 @@ type materializeEngine struct {
 	failFileReady  bool
 	fileReadyError string
 	afterFile      func()
+
+	// cachedCompositions is what THIS node's result cache still holds for a
+	// composition another replica has changed since: a compositionById read that
+	// is not fresh is answered from here when it names one. compositionReads
+	// records, for each compositionById, whether it asked for a fresh read.
+	cachedCompositions map[string]map[string]any
+	compositionReads   []bool
 }
 
 func newMaterializeEngine(t *testing.T) *materializeEngine {
@@ -85,6 +92,13 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 		maps.Copy(row, args)
 	case "compositionById", "compositionExecutionById":
 		row = e.compositions[stringOf(args["compositionId"])]
+		if name == "compositionById" {
+			fresh := memql.FreshReadFromContext(ctx)
+			e.compositionReads = append(e.compositionReads, fresh)
+			if cached, ok := e.cachedCompositions[stringOf(args["compositionId"])]; ok && !fresh {
+				row = cached
+			}
+		}
 	case "createLibraryFile":
 		row = maps.Clone(args)
 		e.files[stringOf(args["fileId"])] = row
@@ -504,6 +518,41 @@ func TestMaterializeCancelRequestsItsWorkGoalToStop(t *testing.T) {
 		}
 	}
 	t.Fatal("composition cancellation never requested cancellation of its executing work run")
+}
+
+// A STOP IS DECIDED ON A FRESH READ. With two replicas the run that makes a file
+// usually finishes on the other one, and this node's cached copy of the
+// composition can still say `composing` after it is ready. Deciding on that copy
+// would mark a ready composition cancelled -- erasing that it made a file that is
+// still there -- and the person's client would report a stop for a file that
+// exists.
+func TestCancelDecidesOnAFreshReadOfTheComposition(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	e.compositions["c1"] = map[string]any{"compositionId": "c1", "status": "ready", "outputFileId": "f1", "goalId": "g1", "ownerUserId": "u-alice"}
+	e.cachedCompositions = map[string]map[string]any{"c1": {"compositionId": "c1", "status": "composing", "goalId": "g1", "ownerUserId": "u-alice"}}
+
+	nodes, err := i.handleCancel(materializeContext(), map[string]any{"compositionId": "c1", "reason": "Stopped by the person"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.compositionReads) != 1 || !e.compositionReads[0] {
+		t.Fatalf("the composition must be read once, fresh, before deciding the stop: %v", e.compositionReads)
+	}
+	var reply map[string]any
+	if len(nodes) != 1 || json.Unmarshal(nodes[0].Payload, &reply) != nil {
+		t.Fatalf("cancel answered %v", nodes)
+	}
+	if reply["cancelled"] != false || reply["status"] != "ready" {
+		t.Fatalf("a composition that had finished was reported as stopped: %v", reply)
+	}
+	if e.compositions["c1"]["status"] != "ready" {
+		t.Fatalf("a ready composition was marked %v", e.compositions["c1"]["status"])
+	}
+	for _, call := range e.calls {
+		if call == "updateCompositionState" || call == "cancelGoal" {
+			t.Fatalf("a finished composition was still stopped (%s): %v", call, e.calls)
+		}
+	}
 }
 
 func TestMaterializeReplayServesItsCompletedSourceRunFile(t *testing.T) {
