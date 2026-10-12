@@ -161,9 +161,14 @@ type linkRequest struct {
 	TemplateID       string
 	TemplateRevision string
 
-	// CampaignName and SenderName are what {{campaignName}} and the footer
-	// showed, so a later view renders the same words. Both are capped where
-	// they are saved (maxCampaignNameRunes, maxSenderNameRunes).
+	// CampaignName is what {{campaignName}} showed, and SenderName is the name
+	// the footer SHOWED -- footerSender's answer, which is the sender's name,
+	// else the organization's, else "this mailing list" -- so a later view
+	// renders the same words. The stored sender name may be empty and the
+	// footer still named somebody; the page has to be given who. A campaign's
+	// name is capped where it is saved (maxCampaignNameRunes). A sender's is
+	// too, but an organization's name is not, so SenderName is cut to
+	// maxSenderNameRunes on its way into the token rather than trusted.
 	CampaignName string
 	SenderName   string
 
@@ -209,7 +214,7 @@ func (w *Worker) messageLinks(req linkRequest) (MessageLinks, error) {
 
 	view := page
 	view.TemplateID, view.TemplateRevision = templateID, req.TemplateRevision
-	view.SenderName, view.CampaignName = req.SenderName, req.CampaignName
+	view.SenderName, view.CampaignName = clipRunes(req.SenderName, maxSenderNameRunes), req.CampaignName
 	if links.View, err = ViewURL(w.cfg, view); err != nil {
 		w.logger.Error("campaigns: no view-in-browser link could be built; the message goes without it",
 			"campaign", campaignID, "template", templateID, "recipient", recipientID, "error", err)
@@ -243,7 +248,9 @@ func inertLinks(cfg Config) MessageLinks {
 //
 // The view link carries the campaign's name and the sender's, and a token over
 // maxLinkTokenBytes is refused. Both are free text an operator types, so the
-// bound has to come from where they are saved. The numbers are the engine's
+// bound has to come from where they are saved (the sender's name the link
+// carries can also be the organization's, which has no cap of its own, and is
+// cut here instead; see linkRequest). The numbers are the engine's
 // (memql.CampaignNameMaxRunes and SenderNameMaxRunes, whose write guard refuses a
 // longer name with a sentence for the person who typed it), and
 // dsl/campaigns/concepts.memql declares the same on campaign.name,

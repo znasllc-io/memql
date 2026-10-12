@@ -115,13 +115,14 @@ import (
 //
 // # Size
 //
-// A view token carries the snapshot of what was sent (template revision, sender
-// and campaign names), so it is the longest of the three. Tokens over
-// maxLinkTokenBytes are refused before anything is decoded, and refused at
-// minting too: a link the parser would reject must never go out in a message.
-// The names are capped where they are saved (maxCampaignNameRunes,
-// maxSenderNameRunes) so that cannot happen to a message that was valid when it
-// was queued.
+// A view token carries the snapshot of what was sent (template revision, the
+// sender the footer named and the campaign's name), so it is the longest of the
+// three. Tokens over maxLinkTokenBytes are refused before anything is decoded,
+// and refused at minting too: a link the parser would reject must never go out
+// in a message. The campaign's name is capped where it is saved
+// (maxCampaignNameRunes) and the sender's name is cut to maxSenderNameRunes
+// when the link is built, so that cannot happen to a message that was valid
+// when it was queued.
 
 // LinkKind names the email-link page a token is for. Which kind is checked is
 // decided by the page a request arrives at, never by anything in the token.
@@ -221,8 +222,8 @@ type LinkPayload struct {
 	CampaignID       string `json:"c,omitempty"` // view: the campaign the message belonged to
 	TemplateID       string `json:"t,omitempty"` // view
 	TemplateRevision string `json:"v,omitempty"` // view: the template createdAt that was sent (RFC 3339 nano)
-	SenderName       string `json:"s,omitempty"` // view: the footer's sender as sent
-	CampaignName     string `json:"n,omitempty"` // view: {{campaignName}} as sent
+	SenderName       string `json:"s,omitempty"` // view: the sender the footer named (footerSender), cut to maxSenderNameRunes
+	CampaignName     string `json:"n,omitempty"` // view: what {{campaignName}} showed
 	ExpiresAt        int64  `json:"x,omitempty"` // confirm: unix seconds
 }
 

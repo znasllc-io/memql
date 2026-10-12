@@ -169,6 +169,32 @@ func TestASingleSendCarriesTheLinksButNoCampaign(t *testing.T) {
 	}
 }
 
+// TestASingleSendsViewLinkCarriesTheSenderTheFooterNamed: the same rule as a
+// campaign's. A rule-driven send has no sender of its own to name, and its
+// footer says so in words; the view page has to be given those words.
+func TestASingleSendsViewLinkCarriesTheSenderTheFooterNamed(t *testing.T) {
+	engine := recipientSendEngine()
+	engine.template["textBody"] = "View {{viewUrl}}"
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	if _, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0); err != nil {
+		t.Fatalf("sendToRecipient: %v", err)
+	}
+	body := sender.sent[0].TextBody
+	view, err := ParseLinkToken(w.cfg.UnsubscribeKeys(), LinkView, linkTokenIn(t, body, "https://example.test"+ViewPath), time.Now())
+	if err != nil {
+		t.Fatalf("the view link does not verify: %v", err)
+	}
+	const named = "this mailing list"
+	if view.SenderName != named {
+		t.Errorf("the view link carries the sender %q, want %q", view.SenderName, named)
+	}
+	if !strings.Contains(body, "you subscribed to "+named+".") {
+		t.Errorf("the footer does not say %q.\n%s", named, body)
+	}
+}
+
 // TestSendToRecipientRefusesATemplateWhoseFooterCannotBePlaced: a message whose
 // unsubscribe link cannot be placed, or would not be shown, is not sent, and
 // nothing is ledgered as an attempt: the refusal comes before the transport is

@@ -192,28 +192,30 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		})
 	}
 
-	// A rule is not a persisted campaign. Keep its ID out of the links'
-	// campaign relationship; the signed organization and digest identify the opt-out.
-	links, err := w.messageLinks(linkRequest{
-		OwnerUserID: ownerUserID, RecipientID: recipient.ID, AccountID: campaign.AccountID, EmailDigest: digest,
-		TemplateID: tmpl.ID, TemplateRevision: tmpl.Revision,
-		CampaignName: campaign.Name, SenderName: identity.SendAs.FromName,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("campaigns.sendToRecipient: cannot mint the links for the message: %w", err)
-	}
 	accountName, err := w.store.AccountName(ctx, campaign.AccountID)
 	if err != nil {
 		w.logger.Debug("campaigns.sendToRecipient: could not resolve the account name", "error", err)
 	}
-	msg, err := renderMessage(campaign, tmpl, recipient, RenderOptions{
+	opts := RenderOptions{
 		ReplyTo:     replyToFor(campaign, identity),
 		AccountName: accountName,
 		// The footer names the identity's display name, then the organization
 		// (F6). It used to name the synthetic campaign, which is the subject.
 		SenderName: identity.SendAs.FromName,
-		Links:      links,
+	}
+	// A rule is not a persisted campaign. Keep its ID out of the links'
+	// campaign relationship; the signed organization and digest identify the opt-out.
+	// The view link names the sender the footer shows, which the options decide.
+	links, err := w.messageLinks(linkRequest{
+		OwnerUserID: ownerUserID, RecipientID: recipient.ID, AccountID: campaign.AccountID, EmailDigest: digest,
+		TemplateID: tmpl.ID, TemplateRevision: tmpl.Revision,
+		CampaignName: campaign.Name, SenderName: footerSender(opts),
 	})
+	if err != nil {
+		return nil, fmt.Errorf("campaigns.sendToRecipient: cannot mint the links for the message: %w", err)
+	}
+	opts.Links = links
+	msg, err := renderMessage(campaign, tmpl, recipient, opts)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", err)
 	}

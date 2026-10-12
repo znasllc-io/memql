@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -91,6 +92,11 @@ type fakeEngine struct {
 	// accounts backs clientAccountById, keyed by bare id.
 	accounts map[string]map[string]any
 
+	// audiences backs audienceById, keyed by the id as the query carries it. An
+	// organization's campaign is checked against its audience's organization
+	// before it sends.
+	audiences map[string]map[string]any
+
 	// emailRules backs emailRuleById (memql#4829), keyed by bare id. Its one
 	// consumer is sendToRecipient resolving which audience a rule mails.
 	emailRules map[string]map[string]any
@@ -161,6 +167,11 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 			return nil, e.identityReadErr
 		}
 		if row, ok := e.senderIdentities[argOf(q, "senderIdentityId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query audienceById"):
+		if row, ok := e.audiences[argOf(q, "audienceId")]; ok {
 			return rowsEnvelope([]map[string]any{row}), nil
 		}
 		return rowsEnvelope(nil), nil
@@ -1010,6 +1021,117 @@ func TestCampaignSendsCarryPreferencesAndViewLinks(t *testing.T) {
 	}
 	if strings.Contains(msg.TextBody, ConfirmPath) {
 		t.Errorf("a campaign message carries a confirm link: %s", msg.TextBody)
+	}
+}
+
+// TestTheViewLinkCarriesTheSenderTheFooterNamed -- the view page shows the
+// message as it was sent, footer included, so the token carries the name the
+// footer SHOWED: the sender's, else the organization's, else "this mailing
+// list". Carrying the identity's name as it was stored would leave the page to
+// guess when there was none, and print a different footer.
+func TestTheViewLinkCarriesTheSenderTheFooterNamed(t *testing.T) {
+	const organization = "client-a"
+	for name, tc := range map[string]struct {
+		campaignFromName string // the campaign's own override
+		identityFromName string // the sending identity's, for an organization's campaign
+		organizationName string // "" for a campaign that belongs to none
+		want             string
+	}{
+		"the campaign's own name":                   {"Acme News", "", "", "Acme News"},
+		"the identity's name over the organization": {"", "Acme Identity", "Acme Org", "Acme Identity"},
+		"the organization when there is no sender":  {"", "", "Acme Org", "Acme Org"},
+		"neither":                 {"", "", "", "this mailing list"},
+		"a name that spans lines": {"Acme\n  News", "", "", "Acme News"},
+	} {
+		job := jobRow()
+		job["templateSnapshot"] = map[string]any{
+			"id": testTemplate, "subject": "Reviewed copy", "status": "ready", "revision": "2026-10-11T09:30:00.123456789Z",
+			"textBody": "View: {{viewUrl}}\n", "htmlBody": `<p><a href="{{viewUrl}}">View</a></p>`,
+		}
+		campaign := campaignRow()
+		campaign["fromName"] = tc.campaignFromName
+		recipient := recipientRow("r-1", "reader@example.test", "subscribed")
+		engine := &fakeEngine{jobs: []map[string]any{job}, campaign: campaign, template: templateRow(), roster: []map[string]any{recipient}}
+		if tc.organizationName != "" {
+			// An organization's campaign sends as one of its sender identities, and
+			// every resource it touches belongs to the organization.
+			job["templateSnapshot"].(map[string]any)["accountId"] = organization
+			job["campaignAccountId"] = organization
+			campaign["accountId"], campaign["senderIdentityId"] = organization, "sender"
+			recipient["accountId"] = organization
+			engine.senderIdentities = map[string]map[string]any{"sender": {
+				"id": "sender", "accountId": organization, "address": "hello@client-a.test", "fromName": tc.identityFromName, "status": "active",
+			}}
+			engine.accounts = map[string]map[string]any{organization: {"name": tc.organizationName}}
+			engine.audiences = map[string]map[string]any{testAudience: {"id": "v1:campaigns:audience:" + testAudience, "accountId": organization}}
+		}
+		sender := &recordingSender{}
+		w := newTestWorker(t, engine, sender)
+
+		w.DrainOnce(context.Background())
+
+		if sender.count() != 1 {
+			t.Errorf("%s: want one message, got %d", name, sender.count())
+			continue
+		}
+		msg := sender.sent[0]
+		view, err := ParseLinkToken(w.cfg.UnsubscribeKeys(), LinkView, linkTokenIn(t, msg.TextBody, "https://example.test"+ViewPath), time.Now())
+		if err != nil {
+			t.Errorf("%s: the view link does not verify: %v", name, err)
+			continue
+		}
+		if view.SenderName != tc.want {
+			t.Errorf("%s: the view link carries the sender %q, want %q", name, view.SenderName, tc.want)
+		}
+		if footer := "you subscribed to " + tc.want + "."; !strings.Contains(msg.TextBody, footer) {
+			t.Errorf("%s: the footer does not say %q.\n%s", name, footer, msg.TextBody)
+		}
+	}
+}
+
+// TestAnOrganizationNameTooLongForTheViewLinkIsClippedNotDropped -- the footer
+// can name the organization, and an organization's name has no cap of its own,
+// unlike a sender's. The view link's token has a size limit, and a name that
+// would break it must not cost the message its view link (a link that cannot be
+// sealed is left out): the name the link carries is cut to the sender cap, and
+// the footer still says all of it. Every "&" is six bytes in the token's JSON.
+func TestAnOrganizationNameTooLongForTheViewLinkIsClippedNotDropped(t *testing.T) {
+	const organization = "client-a"
+	long := strings.Repeat("&", 800)
+	job := jobRow()
+	job["templateSnapshot"] = map[string]any{
+		"id": testTemplate, "subject": "Reviewed copy", "status": "ready", "revision": "2026-10-11T09:30:00.123456789Z",
+		"textBody": "View: {{viewUrl}}\n", "htmlBody": `<p><a href="{{viewUrl}}">View</a></p>`, "accountId": organization,
+	}
+	job["campaignAccountId"] = organization
+	campaign := campaignRow()
+	campaign["accountId"], campaign["senderIdentityId"] = organization, "sender"
+	recipient := recipientRow("r-1", "reader@example.test", "subscribed")
+	recipient["accountId"] = organization
+	engine := &fakeEngine{jobs: []map[string]any{job}, campaign: campaign, template: templateRow(), roster: []map[string]any{recipient}}
+	engine.senderIdentities = map[string]map[string]any{"sender": {
+		"id": "sender", "accountId": organization, "address": "hello@client-a.test", "fromName": "", "status": "active",
+	}}
+	engine.accounts = map[string]map[string]any{organization: {"name": long}}
+	engine.audiences = map[string]map[string]any{testAudience: {"id": "v1:campaigns:audience:" + testAudience, "accountId": organization}}
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	w.DrainOnce(context.Background())
+
+	if sender.count() != 1 {
+		t.Fatalf("want one message, got %d", sender.count())
+	}
+	msg := sender.sent[0]
+	if !strings.Contains(msg.TextBody, "you subscribed to "+long+".") {
+		t.Errorf("the footer does not name the whole organization")
+	}
+	view, err := ParseLinkToken(w.cfg.UnsubscribeKeys(), LinkView, linkTokenIn(t, msg.TextBody, "https://example.test"+ViewPath), time.Now())
+	if err != nil {
+		t.Fatalf("the message has no view link that verifies: %v", err)
+	}
+	if want := strings.Repeat("&", maxSenderNameRunes); view.SenderName != want {
+		t.Errorf("the view link carries a sender of %d characters, want it cut to %d", utf8.RuneCountInString(view.SenderName), maxSenderNameRunes)
 	}
 }
 

@@ -744,17 +744,20 @@ func (w *Worker) processRecipient(
 
 	// The template is the frozen copy the job was queued with when it has one,
 	// so the view link names what was reviewed and sent and not what the
-	// template has become since.
+	// template has become since. The sender it names is the one the footer shows
+	// (footerSender), which is the options' business and so comes first.
+	opts := w.renderOptions(ownerCtx, campaign, identity, r.ID)
 	links, err := w.messageLinks(linkRequest{
 		OwnerUserID: job.CampaignOwnerUserID, RecipientID: r.ID, CampaignID: campaign.ID, AccountID: campaign.AccountID,
 		EmailDigest: digest, TemplateID: tmpl.ID, TemplateRevision: tmpl.Revision,
-		CampaignName: campaign.Name, SenderName: identity.SendAs.FromName,
+		CampaignName: campaign.Name, SenderName: footerSender(opts),
 	})
 	if err != nil {
 		w.failJob(systemCtx, *job, "cannot mint the links for the message: "+err.Error())
 		return true, err
 	}
-	msg, err := renderMessage(campaign, tmpl, r, w.renderOptions(ownerCtx, campaign, identity, r.ID, links))
+	opts.Links = links
+	msg, err := renderMessage(campaign, tmpl, r, opts)
 	if err != nil {
 		// Mirrors the mint failure above: a message we cannot render is a job
 		// that cannot proceed, not a recipient to skip silently.
@@ -882,7 +885,9 @@ func (w *Worker) deliver(ctx context.Context, msg email.Message, as email.SendAs
 }
 
 // renderOptions assembles everything one rendered message needs beyond the
-// campaign / template / recipient triple.
+// campaign / template / recipient triple, except its links: they carry the name
+// the footer shows, which these options decide, so the caller makes them after
+// and sets them.
 //
 // It runs under the OWNER's context because the one read it makes -- the
 // account's display name for {{accountName}} -- is composite-tier and belongs
@@ -890,7 +895,7 @@ func (w *Worker) deliver(ctx context.Context, msg email.Message, as email.SendAs
 // account that does not resolve renders the tag empty, which is the tag's
 // documented behaviour for an untied campaign, and an archived client must
 // not be able to stop a send.
-func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, identity resolvedIdentity, recipientID string, links MessageLinks) RenderOptions {
+func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, identity resolvedIdentity, recipientID string) RenderOptions {
 	accountName, err := w.store.AccountName(ownerCtx, campaign.AccountID)
 	if err != nil {
 		w.logger.Debug("campaigns worker: could not resolve the campaign's account name for {{accountName}}",
@@ -901,7 +906,6 @@ func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, iden
 		AccountName: accountName,
 		// The footer names the display name the message goes out under.
 		SenderName: identity.SendAs.FromName,
-		Links:      links,
 		Tracking:   w.cfg.trackingRenderFor(campaign, deliveryRowID(campaign.ID, recipientID)),
 	}
 }
