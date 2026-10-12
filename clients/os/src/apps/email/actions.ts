@@ -769,7 +769,6 @@ export interface TemplateFacts {
   htmlBody: string;
   status: string;
   accountId: string;
-  expectedRevision?: string;
 }
 
 export interface CreateTemplateState extends WriteState {
@@ -787,16 +786,27 @@ export function useCreateTemplate(): CreateTemplateState {
   return { busy, error, reset, create: call };
 }
 
+/** Putting a template away, or bringing it back. Neither is an edit: the call
+ *  names the revision that was read and the action, and its content is empty (the
+ *  engine ignores it and writes the stored content back). A list row has no body
+ *  to send, and a save of the row's missing body would write an empty email. */
+export interface TemplateMove {
+  name: string;
+  accountId: string;
+  /** The revision (createdAt) of the row that was read. */
+  expectedRevision: string;
+  action: "archive" | "restore";
+}
+
 export interface UpdateTemplateState extends WriteState {
-  update: (templateId: string, facts: TemplateFacts) => Promise<boolean>;
+  update: (templateId: string, move: TemplateMove) => Promise<boolean>;
 }
 
 export function useUpdateTemplate(): UpdateTemplateState {
   const { busy, error, reset, call } = useWrite(
-    async (query, templateId: string, facts: TemplateFacts) => {
-      const result = await query.campaignSaveTemplate({ templateId, name: facts.name.trim(), accountId: facts.accountId.trim(), expectedRevision: facts.expectedRevision || "",
-        content: { subject: facts.subject, textBody: facts.textBody, htmlBody: facts.htmlBody },
-        action: facts.status === "ready" ? "publish" : facts.status === "archived" ? "archive" : "save" });
+    async (query, templateId: string, move: TemplateMove) => {
+      const result = await query.campaignSaveTemplate({ templateId, name: move.name.trim(), accountId: move.accountId.trim(), expectedRevision: move.expectedRevision,
+        content: {}, action: move.action });
       if (!result.rows().map(flatten).some(row => row.saved === true && typeof row.revision === "string" && row.revision !== "")) throw new Error("The cluster did not confirm the template change.");
       return true;
     },

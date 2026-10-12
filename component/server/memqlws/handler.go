@@ -10,10 +10,12 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/grpclimits"
 	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -25,19 +27,41 @@ import (
 )
 
 const (
-	defaultClientId                  = "memql-ws"
-	defaultSDKName                   = "memql"
-	defaultSDKVersion                = "websocket"
-	defaultDialTimeout               = 5 * time.Second
-	defaultWriteTimeout              = 10 * time.Second
-	defaultMaxConcurrent             = 4
-	defaultMaxPending                = 64
-	defaultMaxLocalErrors            = 256
-	defaultMaxMessageBytes     int64 = 5 * 1024 * 1024
-	defaultPingInterval              = 15 * time.Second
-	defaultOverloadLogInterval       = 1 * time.Second
-	defaultLocalErrorInterval        = 50 * time.Millisecond
+	defaultClientId       = "memql-ws"
+	defaultSDKName        = "memql"
+	defaultSDKVersion     = "websocket"
+	defaultDialTimeout    = 5 * time.Second
+	defaultWriteTimeout   = 10 * time.Second
+	defaultMaxConcurrent  = 4
+	defaultMaxPending     = 64
+	defaultMaxLocalErrors = 256
+	// defaultMaxMessageBytes is the largest request the bridge takes from a
+	// browser: the server's own message cap, so that a request the server would
+	// accept is a request the bridge passes on. A template save sends a document of
+	// up to 2 MiB inside a JSON string, which escaping can inflate several-fold.
+	defaultMaxMessageBytes int64 = grpclimits.MaxMessageBytes
+	defaultPingInterval          = 15 * time.Second
+	defaultPingTimeout           = 10 * time.Second
+	// writeTimePerMiB is added to a message's write deadline for each MiB of it:
+	// a browser on an ordinary connection takes a large answer in seconds, and the
+	// deadline for a small one would end the session before it was done.
+	writeTimePerMiB = time.Second
+	// idPrefixBytes and idTailBytes are how much of the start and of the end of an
+	// oversized request are kept, to find the ids of the request that is being
+	// refused.
+	idPrefixBytes              = 64 << 10
+	idTailBytes                = 4 << 10
+	defaultOverloadLogInterval = 1 * time.Second
+	defaultLocalErrorInterval  = 50 * time.Millisecond
 )
+
+// anonymousMaxMessageBytes is the largest request taken from a session that has not
+// signed in (public reads): the bridge's limit before it took requests as large as
+// the server's cap, which template saves need. What a stranger may do, public-tier
+// reads and graph subscriptions, needs nothing near it, and a stranger's request is
+// what the bridge reads and holds for someone it does not know. A smaller limit an
+// operator set holds for it too.
+const anonymousMaxMessageBytes int64 = 5 << 20
 
 // Options configure the WebSocket bridge.
 type Options struct {
@@ -45,9 +69,20 @@ type Options struct {
 	Endpoint              string
 	DialTimeout           time.Duration
 	MaxConcurrentRequests int
-	MaxMessageBytes       int64
-	WriteTimeout          time.Duration
-	PingInterval          time.Duration
+	// MaxMessageBytes is the largest request taken from a browser (default: the
+	// server's own message cap). A request over it fails by itself, with a
+	// sentence, and the session carries on; the bridge reads and discards up to
+	// twice the limit for that, and closes the connection beyond it.
+	MaxMessageBytes int64
+	// WriteTimeout is the time a small message is given to be written; a larger
+	// one is given a second more for each MiB of it.
+	WriteTimeout time.Duration
+	PingInterval time.Duration
+	// PingTimeout is how long a ping waits for its pong (default 10 s). No ping is
+	// sent while a message is being written, nor while one is arriving and bytes
+	// of it are still coming (the sender's own: what is written to it does not
+	// count).
+	PingTimeout time.Duration
 	// OriginPatterns is the allow-list of Origin header values that may
 	// upgrade to a WebSocket. Patterns are passed verbatim to
 	// nhooyr.io/websocket's AcceptOptions; that library matches with
@@ -68,7 +103,13 @@ type Handler struct {
 	maxMessageBytes       int64
 	writeTimeout          time.Duration
 	pingInterval          time.Duration
+	pingTimeout           time.Duration
 	originPatterns        []string
+	// serverMessageBytes is the server's message cap, which a request is measured
+	// against before it is forwarded (see withinServerCap). It is always the real
+	// cap; it is a field so that a test can put the bridge in front of a server with
+	// a small one, and try the measure without building requests of 32 MiB.
+	serverMessageBytes int
 }
 
 // New constructs a Handler.
@@ -85,7 +126,9 @@ func New(opts Options) (*Handler, error) {
 		maxMessageBytes:       firstPositiveInt64(opts.MaxMessageBytes, defaultMaxMessageBytes),
 		writeTimeout:          firstDuration(opts.WriteTimeout, defaultWriteTimeout),
 		pingInterval:          firstDuration(opts.PingInterval, defaultPingInterval),
+		pingTimeout:           firstDuration(opts.PingTimeout, defaultPingTimeout),
 		originPatterns:        sanitizeOriginPatterns(opts.OriginPatterns),
+		serverMessageBytes:    grpclimits.MaxMessageBytes,
 	}, nil
 }
 
@@ -113,6 +156,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	identity, err := auth.UserIdentityFromContext(r.Context())
+	// signedIn is whether the upgrade carries an identity, which the auth middleware
+	// puts on a request whose credential it verified. A session without one is a
+	// stranger's (public reads, below), and keeps the small frame limit.
+	signedIn := err == nil
 	if err != nil {
 		// PUBLIC READS (epic memql#4541, D4). The 401 below is what makes a
 		// hosted site unable to serve a visitor who has not signed in --
@@ -189,7 +236,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn.SetReadLimit(h.maxMessageBytes)
+	frameLimit := h.maxMessageBytes
+	if !signedIn {
+		frameLimit = min(frameLimit, anonymousMaxMessageBytes)
+	}
+	conn.SetReadLimit(readLimit(frameLimit))
 	session := newSession(sessionConfig{
 		ctx:          ctx,
 		logger:       h.logger,
@@ -197,9 +248,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		stream:       stream,
 		principal:    identity.Subject,
 		maxActive:    h.maxConcurrentRequests,
-		maxBytes:     h.maxMessageBytes,
+		maxBytes:     frameLimit,
+		serverBytes:  h.serverMessageBytes,
 		writeLimit:   h.writeTimeout,
 		pingInterval: h.pingInterval,
+		pingTimeout:  h.pingTimeout,
 	})
 
 	if err := session.run(); err != nil && !errors.Is(err, context.Canceled) {
@@ -213,7 +266,17 @@ func (h *Handler) openStream(ctx context.Context, r *http.Request) (memqlv1.Memq
 	dialCtx, cancel := context.WithTimeout(ctx, h.dialTimeout)
 	defer cancel()
 
-	conn, err := grpc.DialContext(dialCtx, h.endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	// The receive limit is the server's send limit, not gRPC's 4 MiB default.
+	// A query answer is one message, so an answer past the default is a read
+	// error on this stream, and a read error ends the whole WebSocket (see
+	// writeLoop): every request in flight on the tab goes with the one that
+	// was too big. The server measures what it is about to send against the
+	// same number and answers an oversize result with a sentence for that one
+	// request, so a message this stream cannot receive is never sent.
+	conn, err := grpc.DialContext(dialCtx, h.endpoint,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(grpclimits.MaxMessageBytes)),
+		grpc.WithBlock())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -281,8 +344,10 @@ type sessionConfig struct {
 	principal    string
 	maxActive    int
 	maxBytes     int64
+	serverBytes  int
 	writeLimit   time.Duration
 	pingInterval time.Duration
+	pingTimeout  time.Duration
 }
 
 type session struct {
@@ -298,6 +363,21 @@ type session struct {
 
 	trafficMu   sync.Mutex
 	lastTraffic time.Time
+	// lastRead is the last time bytes of a message arrived from the peer. Unlike
+	// lastTraffic, nothing the bridge writes moves it: it is the peer's progress,
+	// which is what says whether a message that is arriving has stalled.
+	lastRead time.Time
+
+	// reading and writing count the messages being read from the peer and written
+	// to it right now. See messageMoving.
+	reading atomic.Int32
+	writing atomic.Int32
+	// turn lets one message at a time be written. See writeMessage.
+	turn turnLock
+	// pingTimeout is how long a ping may wait for its pong.
+	pingTimeout time.Duration
+	// serverBytes is the server's message cap (see Handler.serverMessageBytes).
+	serverBytes int
 
 	activeMu sync.Mutex
 	active   map[string]struct{}
@@ -322,6 +402,9 @@ type queuedLocalError struct {
 	requestId string
 	code      codes.Code
 	message   string
+	// correlate and metadata are for an error that names the message it answers.
+	correlate string
+	metadata  map[string]string
 }
 
 func newSession(cfg sessionConfig) *session {
@@ -332,6 +415,10 @@ func newSession(cfg sessionConfig) *session {
 	maxBytes := cfg.maxBytes
 	if maxBytes <= 0 {
 		maxBytes = defaultMaxMessageBytes
+	}
+	serverBytes := cfg.serverBytes
+	if serverBytes <= 0 {
+		serverBytes = grpclimits.MaxMessageBytes
 	}
 	writeLimit := cfg.writeLimit
 	if writeLimit <= 0 {
@@ -350,8 +437,10 @@ func newSession(cfg sessionConfig) *session {
 		principal:    cfg.principal,
 		maxActive:    maxActive,
 		maxBytes:     maxBytes,
+		serverBytes:  serverBytes,
 		writeLimit:   writeLimit,
 		pingInterval: pingInterval,
+		pingTimeout:  cfg.pingTimeout,
 		active:       make(map[string]struct{}),
 		pending:      make(chan *queuedExecute, defaultMaxPending),
 		pendingSet:   make(map[string]struct{}),
@@ -395,7 +484,22 @@ func (s *session) readLoop() error {
 		default:
 		}
 
-		msgType, data, err := s.conn.Read(s.ctx)
+		msgType, reader, err := s.conn.Reader(s.ctx)
+		if err != nil {
+			return err
+		}
+		// JSON is measured by its shape as it arrives (request_shape.go): decoding a
+		// request can cost up to a hundred times its size, so one with too many values
+		// in it is refused before it is decoded, and is not even held whole.
+		var shape *jsonShape
+		if msgType == websocket.MessageText {
+			shape = &jsonShape{}
+		}
+		// A message has started to arrive. It is moving while bytes of it keep
+		// coming, and no ping is due meanwhile (see messageMoving).
+		s.reading.Add(1)
+		data, over, err := readRequest(&progressReader{r: reader, session: s}, s.maxBytes, shape)
+		s.reading.Add(-1)
 		if err != nil {
 			return err
 		}
@@ -403,12 +507,23 @@ func (s *session) readLoop() error {
 			continue
 		}
 		s.noteTraffic()
-		if int64(len(data)) > s.maxBytes {
-			return fmt.Errorf("client message exceeded %d bytes", s.maxBytes)
+		if over != nil {
+			// A request over the limit, or over a bound of its shape, fails by itself.
+			// Returning from here would end the session, and every other request on
+			// the socket with it.
+			s.refuseOversizedRequest(msgType, over)
+			continue
 		}
 
 		clientMsg := &memqlv1.MemqlClientMessage{}
 		if msgType == websocket.MessageBinary {
+			// Protocol buffers decode at about a hundred bytes a value, and are measured
+			// by their shape before they are, as JSON is while it arrives.
+			if excess, over := measureProto(data).over(); over {
+				messageID, requestID := idsOfProtoPrefix(data)
+				s.refuseRequest(messageID, requestID, excess)
+				continue
+			}
 			if err := proto.Unmarshal(data, clientMsg); err != nil {
 				return err
 			}
@@ -440,6 +555,19 @@ func (s *session) readLoop() error {
 			}
 		}
 
+		// Measured as the server will measure it, which is not the size of the text
+		// above (see withinServerCap), and as the server will receive it: with the
+		// request id the bridge gives an executeQuery that came without one, which can
+		// be as long as the message id. A request the server would not take fails by
+		// itself here, as one over the frame limit does, named by the ids it was sent
+		// with.
+		messageID, requestID := clientMsg.GetMessageId(), clientMsg.GetExecuteQuery().GetRequestId()
+		assignRequestId(clientMsg)
+		if size, ok := withinServerCap(clientMsg, s.serverBytes); !ok {
+			s.refuseRequest(messageID, requestID, overLimit{unit: inBytes, size: int64(size), limit: int64(s.serverBytes)})
+			continue
+		}
+
 		if err := s.forwardClientMessage(clientMsg); err != nil {
 			return err
 		}
@@ -469,13 +597,117 @@ func (s *session) writeLoop() error {
 }
 
 func (s *session) writeMessage(payload []byte) error {
-	ctx, cancel := context.WithTimeout(s.ctx, s.writeLimit)
+	// A message's deadline is for writing it, so it starts when it is the message's
+	// turn. The WebSocket library writes one message at a time and a message waits
+	// for the writer under the same context its write is limited by, so a refusal
+	// queued behind an answer that is still going (which may hold the writer for the
+	// answer's own scaled deadline, 42 s for 32 MiB) gave up at its own, shorter
+	// one: the error was discarded, and the call it was for never settled. Waiting
+	// for the turn ends only with the session, and a write that then stalls is cut
+	// by its deadline, which closes the connection where it can be seen.
+	if err := s.turn.acquire(s.ctx); err != nil {
+		return err
+	}
+	defer s.turn.release()
+	ctx, cancel := context.WithTimeout(s.ctx, writeDeadline(s.writeLimit, len(payload)))
 	defer cancel()
+	// A message being written is its own sign of life: no ping is due while it
+	// is, because a ping waits behind a large frame for the write lock. It ends in
+	// the deadline above, or in its own error.
+	s.writing.Add(1)
 	err := s.conn.Write(ctx, websocket.MessageText, payload)
+	s.writing.Add(-1)
 	if err == nil {
 		s.noteTraffic()
 	}
 	return err
+}
+
+// turnLock is a lock whose waiters give up when their context ends. The zero value
+// is ready to use.
+type turnLock struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func (l *turnLock) acquire(ctx context.Context) error {
+	l.once.Do(func() { l.ch = make(chan struct{}, 1) })
+	select {
+	case l.ch <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (l *turnLock) release() { <-l.ch }
+
+// writeDeadline is the time allowed to write a message of size bytes: the base,
+// which a small message gets, and a second more for each MiB of it.
+func writeDeadline(base time.Duration, size int) time.Duration {
+	return base + time.Duration(int64(size)*int64(writeTimePerMiB)/(1<<20))
+}
+
+// messageMoving says that a message is on its way, in either direction, so that a
+// ping would only wait behind it: for the write lock behind a large frame, and for
+// a pong that a browser cannot slip into the middle of a large frame it is
+// sending. A message being written ends in its own deadline or error. One that is
+// arriving counts while bytes of it have come within the last two ping intervals
+// (the window a missed ping is forgiven in), so a sender that has started a message
+// and stopped is not one the keepalive stops watching. Only the sender's own bytes
+// count: what the bridge writes to a peer that has stopped sending (live-feed
+// events, answers) is not the peer's progress, and counting it would let a peer
+// that died mid-message on a socket still receiving them go unpinged until TCP
+// gave up.
+func (s *session) messageMoving() bool {
+	if s.writing.Load() > 0 {
+		return true
+	}
+	return s.reading.Load() > 0 && s.recentRead(2*s.pingInterval)
+}
+
+// progressReader notes the peer's progress as the bytes of a message arrive.
+type progressReader struct {
+	r       io.Reader
+	session *session
+}
+
+func (p *progressReader) Read(b []byte) (int, error) {
+	n, err := p.r.Read(b)
+	if n > 0 {
+		p.session.noteRead()
+	}
+	return n, err
+}
+
+func (s *session) pingTimeoutOrDefault() time.Duration {
+	if s.pingTimeout > 0 {
+		return s.pingTimeout
+	}
+	return defaultPingTimeout
+}
+
+// noteRead records bytes of a message arriving from the peer: traffic, and the
+// peer's own progress (see messageMoving).
+func (s *session) noteRead() {
+	if s == nil {
+		return
+	}
+	now := time.Now()
+	s.trafficMu.Lock()
+	s.lastTraffic = now
+	s.lastRead = now
+	s.trafficMu.Unlock()
+}
+
+func (s *session) recentRead(within time.Duration) bool {
+	if s == nil || within <= 0 {
+		return false
+	}
+	s.trafficMu.Lock()
+	last := s.lastRead
+	s.trafficMu.Unlock()
+	return !last.IsZero() && time.Since(last) <= within
 }
 
 func (s *session) noteTraffic() {
@@ -503,15 +735,7 @@ func (s *session) forwardClientMessage(msg *memqlv1.MemqlClientMessage) error {
 	}
 	switch payload := msg.GetPayload().(type) {
 	case *memqlv1.MemqlClientMessage_ExecuteQuery:
-		requestId := normalizeRequestId(msg.GetMessageId(), payload.ExecuteQuery.GetRequestId())
-		if requestId == "" {
-			requestId = id.NewShortId()
-		}
-		// Ensure the forwarded message always has a requestId set so server responses
-		// correlate to the ID we track locally.
-		if strings.TrimSpace(payload.ExecuteQuery.GetRequestId()) == "" {
-			payload.ExecuteQuery.RequestId = requestId
-		}
+		requestId := assignRequestId(msg)
 
 		// If this request is already pending or in-flight, ignore duplicates.
 		if !s.markPending(requestId) {
@@ -529,7 +753,11 @@ func (s *session) forwardClientMessage(msg *memqlv1.MemqlClientMessage) error {
 			s.unmarkPending(requestId)
 			s.maybeLogOverload("memql ws overload: pending queue full", "request_id", requestId, "pending_cap", cap(s.pending))
 			// Queue local errors so we don't spam the socket under a request storm.
-			s.queueLocalError(requestId, codes.ResourceExhausted, "too many concurrent MemQL queries")
+			// The refusal names the message it answers (correlateTo): that id is what
+			// the browser SDK finds the request by, and a refusal that carries only
+			// the request id reaches its event listeners while the call it was for
+			// stays pending.
+			s.queueLocalError(requestId, msg.GetMessageId(), codes.ResourceExhausted, "too many concurrent MemQL queries")
 			return nil
 		}
 	case *memqlv1.MemqlClientMessage_CancelRequest:
@@ -631,15 +859,17 @@ func (s *session) releaseRequest(requestId string) bool {
 	return existed
 }
 
-func (s *session) sendLocalError(requestId string, code codes.Code, message string) error {
+func (s *session) sendQueuedLocalError(item *queuedLocalError) error {
 	errMsg := &memqlv1.MemqlServerMessage{
-		MessageId: id.NewShortId(),
+		MessageId:   id.NewShortId(),
+		CorrelateTo: item.correlate,
 		Payload: &memqlv1.MemqlServerMessage_QueryError{
 			QueryError: &memqlv1.QueryErrorMsg{
-				RequestId: requestId,
+				RequestId: item.requestId,
 				Error: &memqlv1.QueryError{
-					Code:    code.String(),
-					Message: message,
+					Code:     item.code.String(),
+					Message:  item.message,
+					Metadata: item.metadata,
 				},
 			},
 		},
@@ -648,7 +878,7 @@ func (s *session) sendLocalError(requestId string, code codes.Code, message stri
 	if err != nil {
 		return err
 	}
-	s.logDebug("memql ws local error", "request_id", requestId, "code", code.String())
+	s.logDebug("memql ws local error", "request_id", item.requestId, "code", item.code.String())
 	return s.writeMessage(payload)
 }
 
@@ -759,20 +989,24 @@ func (s *session) maybeLogOverload(msg string, args ...any) {
 	s.logDebug(msg, args...)
 }
 
-func (s *session) queueLocalError(requestId string, code codes.Code, message string) {
-	if s == nil {
-		return
-	}
-	item := &queuedLocalError{
+func (s *session) queueLocalError(requestId, correlate string, code codes.Code, message string) {
+	s.queueLocalErrorItem(&queuedLocalError{
 		requestId: strings.TrimSpace(requestId),
+		correlate: strings.TrimSpace(correlate),
 		code:      code,
 		message:   message,
+	})
+}
+
+func (s *session) queueLocalErrorItem(item *queuedLocalError) {
+	if s == nil {
+		return
 	}
 	select {
 	case s.localErrors <- item:
 	default:
 		// If the local error queue is full, fall back to immediate send.
-		_ = s.sendLocalError(item.requestId, item.code, item.message)
+		_ = s.sendQueuedLocalError(item)
 	}
 }
 
@@ -794,7 +1028,7 @@ func (s *session) localErrorLoop() {
 				return
 			case <-ticker.C:
 			}
-			_ = s.sendLocalError(item.requestId, item.code, item.message)
+			_ = s.sendQueuedLocalError(item)
 		}
 	}
 }
@@ -825,7 +1059,10 @@ func (s *session) pingLoop() error {
 		case <-s.ctx.Done():
 			return s.ctx.Err()
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(s.ctx, 10*time.Second)
+			if s.messageMoving() {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(s.ctx, s.pingTimeoutOrDefault())
 			err := s.conn.Ping(ctx)
 			cancel()
 			if err == nil {
@@ -873,6 +1110,26 @@ func metadataFromRequest(r *http.Request) metadata.MD {
 		md.Append("authorization", "Bearer "+token)
 	}
 	return md
+}
+
+// assignRequestId gives an executeQuery the id the bridge tracks it by and returns
+// it: its own request id, or else its message id, or else a new id. One it gives is
+// written into the request, so that the server's answers carry the id the bridge is
+// waiting for; it is part of what the server receives. A message that is not an
+// executeQuery has none. Calling it again changes nothing.
+func assignRequestId(msg *memqlv1.MemqlClientMessage) string {
+	exec := msg.GetExecuteQuery()
+	if exec == nil {
+		return ""
+	}
+	requestId := normalizeRequestId(msg.GetMessageId(), exec.GetRequestId())
+	if requestId == "" {
+		requestId = id.NewShortId()
+	}
+	if strings.TrimSpace(exec.GetRequestId()) == "" {
+		exec.RequestId = requestId
+	}
+	return requestId
 }
 
 func normalizeRequestId(messageId, requestId string) string {

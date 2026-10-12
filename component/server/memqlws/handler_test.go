@@ -16,8 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/grpclimits"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/types/known/structpb"
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 )
@@ -224,11 +226,118 @@ func TestHandlerIgnoresUnknownClientMessageFields(t *testing.T) {
 	require.Equal(t, secondId, resultPayload["requestId"])
 }
 
+// TestHandlerCarriesAnAnswerLargerThanGRPCsDefault locks the size contract on
+// the server-to-browser half of the bridge.
+//
+// The bridge is one gRPC client dialled on behalf of a browser tab, and gRPC's
+// default receive limit is 4 MiB. A query answer is ONE message, so any answer
+// past 4 MiB was a read error on the bridge's stream, and the bridge ends the
+// whole WebSocket on any read error: not just the request that asked, but every
+// request in flight on that tab and every live feed riding the same socket.
+// A template list whose rows carry their document and rendered HTML reached
+// that size with three rows.
+//
+// The server is willing to send 32 MiB (grpclimits.MaxMessageBytes), so the
+// bridge has to be willing to receive what the server will send. The test
+// uses an answer between the two limits and asserts both halves: the large
+// answer arrives, and the session is still there for the next request, because
+// "did not sever the session" is the half that was broken.
+func TestHandlerCarriesAnAnswerLargerThanGRPCsDefault(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	// 6 MiB: over gRPC's 4 MiB default, well under the 32 MiB the server sends.
+	const answerBytes = 6 << 20
+	large := strings.Repeat("a", answerBytes)
+	testSvc := &stubMemqlService{answer: func(exec *memqlv1.ExecuteQueryMsg) *memqlv1.Result {
+		if exec.GetQuery() == "large" {
+			return &memqlv1.Result{Data: []*structpb.Value{structpb.NewStringValue(large)}}
+		}
+		return &memqlv1.Result{}
+	}}
+
+	// The server's own caps, as component/grpc installs them.
+	grpcServer := grpc.NewServer(
+		grpc.MaxSendMsgSize(grpclimits.MaxMessageBytes),
+		grpc.MaxRecvMsgSize(grpclimits.MaxMessageBytes),
+	)
+	memqlv1.RegisterMemqlServiceServer(grpcServer, testSvc)
+	go func() { _ = grpcServer.Serve(lis) }()
+	defer grpcServer.Stop()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler, err := New(Options{Logger: logger, Endpoint: lis.Addr().String()})
+	require.NoError(t, err)
+
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := map[string]any{"role": "admin", "sub": "tester"}
+		handler.ServeHTTP(w, r.WithContext(auth.ContextWithClaims(r.Context(), claims)))
+	}))
+	defer app.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(app.URL, "http")
+	conn, _, err := websocket.Dial(ctx, wsURL+"/memql/ws", nil)
+	require.NoError(t, err)
+	defer conn.Close(websocket.StatusNormalClosure, "done")
+	// This client is the test's, not the bridge under test: lift its own
+	// 32 KiB default so the only limit in play is the bridge's.
+	conn.SetReadLimit(grpclimits.MaxMessageBytes)
+
+	largeId := uuid.NewString()
+	require.NoError(t, wsjson.Write(ctx, conn, map[string]any{
+		"messageId": largeId,
+		"executeQuery": map[string]any{
+			"requestId": largeId,
+			"query":     "large",
+		},
+	}))
+
+	var response map[string]any
+	require.NoError(t, wsjson.Read(ctx, conn, &response),
+		"an answer past gRPC's default 4 MiB ended the whole session")
+	result, ok := response["queryResult"].(map[string]any)
+	require.True(t, ok, "expected a queryResult, got keys of %d", len(response))
+	require.Equal(t, largeId, result["requestId"])
+	body, ok := result["result"].(map[string]any)
+	require.True(t, ok, "the queryResult carries no result")
+	data, ok := body["data"].([]any)
+	require.True(t, ok, "the result carries no data")
+	require.Len(t, data, 1)
+	require.Len(t, data[0], answerBytes, "the large answer must arrive whole")
+
+	// The session must still be usable afterwards.
+	smallId := uuid.NewString()
+	require.NoError(t, wsjson.Write(ctx, conn, map[string]any{
+		"messageId": smallId,
+		"executeQuery": map[string]any{
+			"requestId": smallId,
+			"query":     "small",
+		},
+	}))
+	response = nil
+	require.NoError(t, wsjson.Read(ctx, conn, &response), "the session did not survive the large answer")
+	result, ok = response["queryResult"].(map[string]any)
+	require.True(t, ok, "expected a queryResult, got %v", response)
+	require.Equal(t, smallId, result["requestId"])
+}
+
 type stubMemqlService struct {
 	memqlv1.UnimplementedMemqlServiceServer
 	mu       sync.Mutex
 	received []*memqlv1.MemqlClientMessage
 	md       metadata.MD
+
+	// answer, when set, builds the result a query is answered with. Nil
+	// answers every query with an empty result, which is what the tests that
+	// are about something else want.
+	answer func(*memqlv1.ExecuteQueryMsg) *memqlv1.Result
+
+	// hold, when set, keeps every answer back until it is closed: the server is
+	// busy, and the requests that reached it stay in flight.
+	hold <-chan struct{}
 }
 
 func (s *stubMemqlService) Stream(stream memqlv1.MemqlService_StreamServer) error {
@@ -247,12 +356,26 @@ func (s *stubMemqlService) Stream(stream memqlv1.MemqlService_StreamServer) erro
 		s.mu.Unlock()
 
 		if exec := msg.GetExecuteQuery(); exec != nil {
+			if s.hold != nil {
+				select {
+				case <-s.hold:
+				case <-stream.Context().Done():
+					return stream.Context().Err()
+				}
+			}
+			result := &memqlv1.Result{}
+			if s.answer != nil {
+				result = s.answer(exec)
+			}
 			resp := &memqlv1.MemqlServerMessage{
 				MessageId: uuid.NewString(),
+				// As the real server answers: by the id of the message it answers,
+				// which is what a client finds its request by.
+				CorrelateTo: msg.GetMessageId(),
 				Payload: &memqlv1.MemqlServerMessage_QueryResult{
 					QueryResult: &memqlv1.QueryResultChunk{
 						RequestId: exec.GetRequestId(),
-						Result:    &memqlv1.Result{},
+						Result:    result,
 						Done:      true,
 					},
 				},

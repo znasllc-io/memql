@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -144,5 +145,28 @@ func TestOrganizationAppNamesTheAppAConceptsNamespaceBelongsTo(t *testing.T) {
 		if got := organizationApp(tc.concept); got != tc.want {
 			t.Errorf("organizationApp(%q) = %q, want %q", tc.concept, got, tc.want)
 		}
+	}
+}
+
+// A write to a row that exists in an organization the caller may not change is
+// refused with an exported value, so that a caller can say it in words of its own
+// (a template id another organization holds) without matching the text, and its
+// words are what they always were for anyone who reads them.
+func TestAWriteToARowInAnotherOrganizationIsTheExportedRefusal(t *testing.T) {
+	engine := &MemQLEngine{}
+	ctx := accountCtx(t, "member", accountScopeWith("acme"))
+	prior := map[string]any{"accountId": "beta"}
+
+	err := engine.validateOrganizationTransfer(ctx, "v1:campaigns:template", "t1", prior, map[string]any{"accountId": "acme"})
+	if !errors.Is(err, ErrOrganizationRowForbidden) {
+		t.Fatalf("a member of acme writing over beta's row: %v, want ErrOrganizationRowForbidden", err)
+	}
+	const words = "organization_forbidden: you cannot change data in the existing organization"
+	if err.Error() != words {
+		t.Errorf("the refusal says %q, want %q", err.Error(), words)
+	}
+	// A concept that is not organization-owned is not judged by it.
+	if err := engine.validateOrganizationTransfer(ctx, "v1:common:agent", "a1", prior, map[string]any{"accountId": "acme"}); err != nil {
+		t.Errorf("a concept no organization owns was refused: %v", err)
 	}
 }

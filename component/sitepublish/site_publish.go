@@ -69,6 +69,7 @@ import (
 	"github.com/znasllc-io/memql/component/edge"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/librarykey"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
@@ -478,6 +479,14 @@ func (i *SitePublishIntegration) publish(ctx context.Context, siteId, artifactId
 	key := storageKey(stringField(file, "blobUrl"))
 	if key == "" {
 		return publishResult{}, refuse(reasonBundleUnreadable, "file %q records no storage location", fileId)
+	}
+	// The row is the caller's; the KEY must be its owner's too. The read uses
+	// the node's storage credential and the bytes are then served publicly, so
+	// a row naming somebody else's object (one a client wrote before
+	// createLibraryFile was @serverOnly) would publish their file as the
+	// caller's site. Judged as the exact key read.
+	if err := librarykey.CheckKey(key, stringField(file, "ownerUserId")); err != nil {
+		return publishResult{}, refuse(reasonBundleUnreadable, "file %q is not stored in its owner's Library", fileId)
 	}
 	raw, err := store.reader.Get(ctx, key)
 	if err != nil {

@@ -147,11 +147,15 @@ mutation template createTemplate {
     subject string!
     textBody string!
     htmlBody string
+    preheader string
+    layoutId string
+    sourceArtifactId string
+    document object
     accountId string!
     versionTime datetime!
   }
   insert {
-    accept { name, subject, textBody, htmlBody, accountId }
+    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, accountId }
     stamp {
       id: args.templateId
       createdAt: args.versionTime
@@ -173,13 +177,70 @@ mutation template updateTemplate {
     subject string!
     textBody string!
     htmlBody string
+    preheader string
+    layoutId string
+    sourceArtifactId string
+    document object
     status string!
     versionTime datetime!
   }
   update {
-    accept { name, subject, textBody, htmlBody, status }
+    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, status }
     stamp {
       id: args.templateId
+      createdAt: args.versionTime
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Internal layout creation after organization and revision checks in campaignSaveLayout.
+/// actor.userId still stamps the first writer as the owner, but caller scoping alone cannot
+/// serialize a creation retry or enforce the server-assigned revision; the capability owns those.
+@actor
+@serverOnly
+mutation emailLayout createEmailLayout {
+  args {
+    layoutId         string!
+    name             string!
+    description      string
+    document         object!
+    sourceArtifactId string
+    accountId        string!
+    versionTime      datetime!
+  }
+  insert {
+    accept { name, description, document, sourceArtifactId, accountId }
+    stamp {
+      id: args.layoutId
+      createdAt: args.versionTime
+      ownerUserId: actor.userId
+      status: "active"
+    }
+  }
+}
+
+/// Internal layout update, for an edit, an archive or a restore. The capability locks and checks
+/// the read revision first. Content arguments are optional so archiving and restoring change the
+/// status and nothing else; the engine keeps every omitted field as it was stored.
+/// actor.userId scoping cannot prevent an authorized editor overwriting a concurrent edit;
+/// campaignSaveLayout checks that.
+@actor
+@serverOnly
+mutation emailLayout updateEmailLayout {
+  args {
+    layoutId         string!
+    name             string
+    description      string
+    document         object
+    sourceArtifactId string
+    status           string!
+    versionTime      datetime!
+  }
+  update {
+    accept { name, description, document, sourceArtifactId, status }
+    stamp {
+      id: args.layoutId
       createdAt: args.versionTime
       ownerUserId: actor.userId
     }

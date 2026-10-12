@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	grpcMetadata "google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -41,6 +42,7 @@ import (
 	healthsrv "github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/core/buildinfo"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/grpclimits"
 	"github.com/znasllc-io/memql/core/grpctls"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
@@ -314,7 +316,14 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 	// memql-cockpit's internal/worker/connect.go. 32 MiB covers a
 	// 6K screen capture (~28 MiB base64) with headroom for envelope
 	// metadata.
-	const maxWorkerMessageSize = 32 * 1024 * 1024
+	//
+	// The number lives in core/grpclimits because the browser bridge
+	// (component/server/memqlws) receives these messages for every
+	// browser tab and must be willing to receive whatever this server is
+	// willing to send. MemqlService.Stream measures a query answer
+	// against it before writing (sendServerMessage), so an answer over
+	// the limit fails its own request instead of ending the stream.
+	const maxWorkerMessageSize = grpclimits.MaxMessageBytes
 	// Recorded so a test can assert what was ACTUALLY installed rather than
 	// what a helper would have returned if called. See
 	// TestPrepareForRunInstallsTheClientOriginWrapper.
@@ -2057,16 +2066,10 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 			s.sendQueryErrorWithMetadata(requestId, envelope.GetMessageId(), status.Code(err), status.Convert(err).Message(), metadata)
 			return
 		}
-		chunk := &memqlv1.QueryResultChunk{
-			RequestId: requestId,
-			Result:    result,
-			Done:      true,
-		}
-		_ = s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
-			Payload: &memqlv1.MemqlServerMessage_QueryResult{
-				QueryResult: chunk,
-			},
-		})
+		// An answer over the stream's limit fails THIS request with a
+		// sentence (sendQueryResult); it is never handed to gRPC, which would
+		// end the stream and every other request riding it.
+		_ = s.sendQueryResult(requestId, envelope.GetMessageId(), result)
 	}()
 
 	return nil
@@ -2679,6 +2682,26 @@ func (s *streamSession) sendServerMessage(correlate string, msg *memqlv1.MemqlSe
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
 	s.stampEventContinuityLocked(msg)
+
+	// Measured AFTER stamping, so the size is what would go on the wire: the
+	// ids and, for an event, its sequence number are part of the message the
+	// receiver's limit applies to. A message over the limit is never given to
+	// the stream. grpc-go answers an oversize send by finishing the RPC with
+	// ResourceExhausted, which closes the stream for every request on it, so
+	// the refusal has to be made here, where the caller can still fail just
+	// the one request (sendQueryResult) or drop just the one event.
+	if size := proto.Size(msg); size > grpclimits.MaxMessageBytes {
+		if msg.GetEvent() != nil {
+			// The event never reached the wire, so it gives back the number
+			// it was stamped with (seq counts notifications ON the wire, and
+			// a number spent on one that never left would be a gap the
+			// client cannot tell from a real loss), and the next
+			// notification says that something was missed.
+			s.eventSeq.Add(^uint64(0))
+			s.eventGapped.Store(true)
+		}
+		return &messageTooLargeError{size: size, limit: grpclimits.MaxMessageBytes}
+	}
 	return s.stream.Send(msg)
 }
 

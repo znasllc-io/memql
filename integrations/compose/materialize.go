@@ -15,6 +15,7 @@ import (
 	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/librarykey"
 	"github.com/znasllc-io/memql/core/num"
 	work "github.com/znasllc-io/memql/integrations/work"
 )
@@ -1074,6 +1075,9 @@ func (i *Integration) templateBody(ctx context.Context, fileId string) (string, 
 	reader := i.sourceDownloader()
 	if reader == nil || stringOf(row["blobUrl"]) == "" {
 		return "", errors.New("template storage is unavailable")
+	}
+	if err := librarykey.Check(stringOf(row["blobUrl"]), stringOf(row["ownerUserId"]), ""); err != nil {
+		return "", errors.New("template file is not stored in its owner's Library")
 	}
 	data, err := reader.DownloadURLWithLimit(ctx, stringOf(row["blobUrl"]), maxReferenceText)
 	if err != nil {

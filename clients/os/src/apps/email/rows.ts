@@ -644,16 +644,27 @@ export function sendableCount(recipients: readonly RecipientRow[]): number {
 // Templates
 // ---------------------------------------------------------------------------
 
+/**
+ * A row of the templates list: a SUMMARY, as the engine's templateSummary shape
+ * projects it. It has no body and no document -- those can weigh megabytes, a
+ * query answer is one message and a list holds up to fifty, so a list that
+ * carried them would outgrow the connection. A template is read whole by id
+ * (templateById); nothing here is the content to edit or to send back.
+ */
 export interface TemplateRow {
   id: string;
   ownerUserId: string;
   name: string;
   subject: string;
-  textBody: string;
-  htmlBody: string;
   /** draft | ready | archived. */
   status: string;
   accountId: string;
+  /** The layout the email was made from ("builtin:<name>" / "org:<id>"), or "". */
+  layoutId: string;
+  preheader: string;
+  /** The Library file the template was published from, or "". */
+  sourceArtifactId: string;
+  /** The revision: it moves on every save. */
   createdAt: string;
 }
 
@@ -664,10 +675,11 @@ export function templateFromRow(row: Row): TemplateRow {
     ownerUserId: rowString(flat, "ownerUserId"),
     name: rowString(flat, "name"),
     subject: rowString(flat, "subject"),
-    textBody: rowString(flat, "textBody"),
-    htmlBody: rowString(flat, "htmlBody"),
     status: rowString(flat, "status"),
     accountId: rowString(flat, "accountId"),
+    layoutId: rowString(flat, "layoutId"),
+    preheader: rowString(flat, "preheader"),
+    sourceArtifactId: rowString(flat, "sourceArtifactId"),
     createdAt: rowString(flat, "createdAt"),
   };
 }
@@ -680,17 +692,19 @@ export function templateIsArchived(template: TemplateRow): boolean {
   return template.status === "archived";
 }
 
-/** THE BODIES ARE IN. A copy edit is the change this list exists to announce
- *  -- somebody else fixing a typo in a template a campaign is about to send is
- *  precisely the news the cue is for -- and no body field moves on a timer. */
+/** A COPY EDIT IS IN. Somebody else fixing a typo in a template a campaign is
+ *  about to send is precisely the news the cue is for, and no body field moves
+ *  on a timer. The list carries no body, so the edit is told by the revision:
+ *  every save writes a new version, and `createdAt` is the version's time. */
 export function templateFingerprint(template: TemplateRow): string {
   return [
     template.name,
     template.subject,
-    template.textBody,
-    template.htmlBody,
+    template.preheader,
+    template.layoutId,
     template.status,
     template.accountId,
+    template.createdAt,
   ].join("|");
 }
 

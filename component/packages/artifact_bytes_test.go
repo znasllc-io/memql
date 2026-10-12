@@ -27,12 +27,15 @@ func artifactRows(sourceRef string) []map[string]any {
 	}}
 }
 
+// fileRows is user u's file. The writers key a file's bytes under its owner,
+// library/{owner}/..., and the read is held to that.
 func fileRows(mime, blobUrl string) []map[string]any {
 	return []map[string]any{{
-		"id":       "v1:library:file:f1",
-		"mimeType": mime,
-		"blobUrl":  blobUrl,
-		"archived": false,
+		"id":          "v1:library:file:f1",
+		"ownerUserId": "v1:identity:user:u",
+		"mimeType":    mime,
+		"blobUrl":     blobUrl,
+		"archived":    false,
 	}}
 }
 
@@ -149,6 +152,25 @@ func TestArtifactBytesRefusesBeforeAByteMoves(t *testing.T) {
 				"query libraryFileById":     fileRows("application/zip", ""),
 			},
 			wantText: "no storage location",
+		},
+		{
+			// The row is the caller's; its key names somebody else's object --
+			// the row a client could write before createLibraryFile was
+			// @serverOnly. Refused as a key, before storage is asked.
+			name: "a key under another owner's library",
+			rows: map[string][]map[string]any{
+				"query libraryArtifactById": artifactRows("v1:library:file:f1"),
+				"query libraryFileById":     fileRows("application/zip", "library/someone-else/f9/site.zip"),
+			},
+			wantText: "its owner's Library",
+		},
+		{
+			name: "a URL under another owner's library",
+			rows: map[string][]map[string]any{
+				"query libraryArtifactById": artifactRows("v1:library:file:f1"),
+				"query libraryFileById":     fileRows("application/zip", "https://acct.blob.core.windows.net/memql/library/someone-else/f9/site.zip"),
+			},
+			wantText: "its owner's Library",
 		},
 		{
 			name: "object storage that cannot be read",

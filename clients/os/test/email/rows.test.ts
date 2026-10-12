@@ -189,10 +189,21 @@ describe("the other four cues", () => {
   });
 
   it("rings on a template COPY EDIT -- somebody fixing a typo is the news", () => {
+    // A list row carries no body (the list would outgrow the connection), so a
+    // copy edit is told by its revision: every save is a new version of the row.
     const base = templateRow({ id: "t1" });
     const before = templateFingerprint(templateFromRow(base));
-    expect(templateFingerprint(templateFromRow({ ...base, textBody: "Hi," }))).not.toBe(before);
+    expect(templateFingerprint(templateFromRow({ ...base, createdAt: "2026-08-02T00:00:00Z" }))).not.toBe(before);
     expect(templateFingerprint(templateFromRow({ ...base, subject: "New" }))).not.toBe(before);
+    expect(templateFingerprint(templateFromRow({ ...base, preheader: "A new line" }))).not.toBe(before);
+  });
+
+  it("reads a template list row as the summary it is: no body", () => {
+    const row = templateFromRow(templateRow({ id: "t1", layoutId: "builtin:letter", preheader: "Why we started" }));
+    expect(row).toEqual({
+      id: "t1", ownerUserId: "v1:identity:user:me", name: "August copy", subject: "What we shipped", status: "ready", accountId: "self",
+      layoutId: "builtin:letter", preheader: "Why we started", sourceArtifactId: "", createdAt: "2026-08-01T00:00:00Z",
+    });
   });
 
   it("rings on a mailbox being retired", () => {

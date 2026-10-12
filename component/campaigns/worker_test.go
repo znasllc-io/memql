@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -94,6 +95,19 @@ type fakeEngine struct {
 	// consumer is sendToRecipient resolving which audience a rule mails.
 	emailRules map[string]map[string]any
 
+	// emailLayouts backs emailLayoutById and emailLayoutsForAccount (the
+	// organization layouts), keyed by bare id. Absent means "not visible to
+	// this caller", which is the answer the real queries give a person
+	// outside the organization.
+	emailLayouts map[string]map[string]any
+
+	// templateBySource backs templateForSource, the template published from one
+	// Library file, keyed "accountId|sourceArtifactId" with both as the query
+	// is called (bare). Absent means "no template for that file in that
+	// organization", which is also what the real query says of a template the
+	// caller cannot see.
+	templateBySource map[string]map[string]any
+
 	// libraryArtifacts / libraryFiles back the CSV import's two owner-gated
 	// reads (memql#4822), keyed by bare id. Absent means "not visible to
 	// this caller", which is the same answer the real queries give and is
@@ -128,6 +142,11 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 		return rowsEnvelope([]map[string]any{e.campaign}), nil
 	case strings.HasPrefix(q, "query templateById"):
 		return rowsEnvelope([]map[string]any{e.template}), nil
+	case strings.HasPrefix(q, "query templateForSource"):
+		if row, ok := e.templateBySource[argOf(q, "accountId")+"|"+argOf(q, "sourceArtifactId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query audienceRosterForSend"):
 		// PAGED, because the send walks it (memql#3460). A fake that
 		// returned the whole roster at once would make every paging test
@@ -190,6 +209,30 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 			return rowsEnvelope([]map[string]any{row}), nil
 		}
 		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query emailLayoutById"):
+		if row, ok := e.emailLayouts[argOf(q, "layoutId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query emailLayoutsForAccount"):
+		// Narrowed by organization and, when the call names one, by status --
+		// the two arguments the real query filters on. Ordered by id so a test
+		// can name the order it expects.
+		ids := make([]string, 0, len(e.emailLayouts))
+		for id := range e.emailLayouts {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		account, status := argOf(q, "accountId"), argOf(q, "status")
+		var rows []map[string]any
+		for _, id := range ids {
+			row := e.emailLayouts[id]
+			if bare(str(row, "accountId")) != bare(account) || (status != "" && str(row, "status") != status) {
+				continue
+			}
+			rows = append(rows, row)
+		}
+		return rowsEnvelope(rows), nil
 	case strings.HasPrefix(q, "query audiences("):
 		rows := make([]map[string]any, 0, 1)
 		if len(e.roster) > 0 {

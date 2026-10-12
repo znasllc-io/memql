@@ -71,7 +71,7 @@ func TestLibraryFileIsOwnedAndPromotionIsIdempotent(t *testing.T) {
 
 	// createLibraryFile stamps ownerUserId from actor.userId, so the row
 	// is genuinely A's -- no argument names an owner.
-	runMutation(t, ctxA, eng, "createLibraryFile", libraryFileArgs(fileId, userA))
+	runMutation(t, auth.ContextWithInternalOrigin(ctxA), eng, "createLibraryFile", libraryFileArgs(fileId, userA))
 
 	// --- A reads their own file, through both named reads ---
 	for name, q := range map[string]string{
@@ -156,8 +156,8 @@ func TestArchiveHidesTheArtifactAndArchivesTheFile(t *testing.T) {
 	goneId := "libfile-gone-" + suffix
 	ctxA := rowAuthzCallerCtx(userA)
 
-	runMutation(t, ctxA, eng, "createLibraryFile", libraryFileArgs(keptId, userA))
-	runMutation(t, ctxA, eng, "createLibraryFile", libraryFileArgs(goneId, userA))
+	runMutation(t, auth.ContextWithInternalOrigin(ctxA), eng, "createLibraryFile", libraryFileArgs(keptId, userA))
+	runMutation(t, auth.ContextWithInternalOrigin(ctxA), eng, "createLibraryFile", libraryFileArgs(goneId, userA))
 
 	promote := func(fileId string) string {
 		return runMutation(t, ctxA, eng, "createArtifact", map[string]any{
@@ -276,7 +276,7 @@ func TestClusterOwnerSeesEveryLibraryRow(t *testing.T) {
 		&auth.TokenInfo{Subject: "cluster-owner-" + suffix},
 	)
 
-	runMutation(t, ctxA, eng, "createLibraryFile", libraryFileArgs(fileId, userA))
+	runMutation(t, auth.ContextWithInternalOrigin(ctxA), eng, "createLibraryFile", libraryFileArgs(fileId, userA))
 
 	// The CONTROL: a plain writer who owns nothing is denied the same
 	// row through the same spelling. Without it, a passing owner read

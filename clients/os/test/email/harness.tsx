@@ -341,15 +341,18 @@ export function audienceRow(over: Partial<Row> & { id: string }): Row {
   };
 }
 
+/** A row of the templates list: a summary, as the engine's templateSummary shape
+ *  projects it. It has no body and no document; a template is read whole by id. */
 export function templateRow(over: Partial<Row> & { id: string }): Row {
   return {
     ownerUserId: "v1:identity:user:me",
     name: "August copy",
     subject: "What we shipped",
-    textBody: "Hello {{displayName}},",
-    htmlBody: "",
     status: "ready",
     accountId: "self",
+    layoutId: "",
+    preheader: "",
+    sourceArtifactId: "",
     createdAt: "2026-08-01T00:00:00Z",
     ...over,
   };

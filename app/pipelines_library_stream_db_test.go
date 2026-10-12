@@ -414,8 +414,10 @@ func testPipelineStreamDBRetainedBytesSurviveEditableFileChanges(t *testing.T, n
 	if _, err := s.reserveStream(ctx, db, x); err != nil {
 		t.Fatalf("exact retained live file counted twice: %v", err)
 	}
-	// A direct owner edit is intentionally possible through the ordinary
-	// mutable Library API. It must not free the immutable object's six bytes.
+	// A row edited after the fact (its size, here) must not free the immutable
+	// object's six bytes: capacity is the journal's, not the row's.
+	// createLibraryFile is @serverOnly, so the edit is stamped the way a server
+	// writer stamps it.
 	call, err := langparser.RenderCall("createLibraryFile", map[string]any{
 		"fileId": got.FileID, "name": "changed", "mimeType": "text/plain", "size": 0,
 		"sha256": strings.Repeat("0", 64), "blobUrl": "https://blob.example/changed", "source": "uploaded",
@@ -423,7 +425,7 @@ func testPipelineStreamDBRetainedBytesSurviveEditableFileChanges(t *testing.T, n
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Execute(ctx, "mutation "+call); err != nil {
+	if _, err := e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call); err != nil {
 		t.Fatal(err)
 	}
 	next := pipelineStreamFile(f.OwnerUserID, "x")

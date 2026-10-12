@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	pure "github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/core/librarykey"
 )
 
 const (
@@ -65,6 +66,11 @@ func (i *Integration) captureSourceContents(ctx context.Context, sources []Resol
 		blob := stringOf(row["blobUrl"])
 		if blob == "" {
 			return fmt.Errorf("compose: reference %q has no stored content", source.Ref.Label)
+		}
+		// The row is the caller's; the key must be its owner's too, or a row
+		// naming somebody else's object would compose their bytes.
+		if err := librarykey.Check(blob, stringOf(row["ownerUserId"]), ""); err != nil {
+			return fmt.Errorf("compose: reference %q is not stored in its owner's Library", source.Ref.Label)
 		}
 		data, err := reader.DownloadURLWithLimit(ctx, blob, maxReferenceBytes)
 		if err != nil {
