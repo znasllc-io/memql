@@ -118,12 +118,23 @@ spec:
 
 var steadyTotal = regexp.MustCompile(`steady total=(\d+)`)
 
+// headroomCommand runs the gate with its own defaults: the environment variables
+// that override them are emptied (an empty one falls back to the default), so a
+// shell that happens to set one cannot move what these tests assert.
+func headroomCommand(t *testing.T, args ...string) *exec.Cmd {
+	t.Helper()
+	cmd := exec.Command("bash", append([]string{aksScript(t, "conn-headroom-check.sh")}, args...)...)
+	cmd.Env = append(os.Environ(), "MAX_CONNECTIONS=", "RESERVED_CONNECTIONS=", "MAX_OPEN_CONNS=",
+		"DIRECT_POOL_CONNS=", "MIGRATION_POOL_CONNS=", "GATE_POOL_CONNS=", "MANIFESTS_DIR=")
+	return cmd
+}
+
 func headroomSteady(t *testing.T, args ...string) (int, string) {
 	t.Helper()
 	if !pythonYAMLAvailable() {
 		t.Skip("python3 + PyYAML not available")
 	}
-	out, err := exec.Command("bash", append([]string{aksScript(t, "conn-headroom-check.sh")}, args...)...).CombinedOutput()
+	out, err := headroomCommand(t, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("the gate failed on a small fixture: %v\n%s", err, out)
 	}
@@ -170,7 +181,7 @@ func TestConnHeadroomWithoutADirectPool(t *testing.T) {
 // from component/database rather than repeated -- a default that moves in the code
 // and not here is a budget that is wrong without anyone noticing.
 func TestConnHeadroomDefaultsAreTheCodes(t *testing.T) {
-	out, err := exec.Command("bash", aksScript(t, "conn-headroom-check.sh"), "--help").CombinedOutput()
+	out, err := headroomCommand(t, "--help").CombinedOutput()
 	if err != nil {
 		t.Fatalf("--help: %v\n%s", err, out)
 	}
@@ -200,7 +211,7 @@ func TestConnHeadroomTheShippedBaseFitsTheLocalPreset(t *testing.T) {
 	if !pythonYAMLAvailable() {
 		t.Skip("python3 + PyYAML not available")
 	}
-	out, err := exec.Command("bash", aksScript(t, "conn-headroom-check.sh"), "--max-connections=200", "--reserved=10").CombinedOutput()
+	out, err := headroomCommand(t, "--max-connections=200", "--reserved=10").CombinedOutput()
 	if err != nil {
 		t.Fatalf("the shipped base does not fit 190 usable connections with every pool counted: %v\n%s", err, out)
 	}
