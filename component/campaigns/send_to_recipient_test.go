@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 )
@@ -80,6 +81,145 @@ func TestSendToRecipientMailsAndLedgersTheOutcome(t *testing.T) {
 	if !wroteContaining(engine, "mutation recordCampaignDelivery", `status: "sent"`) {
 		t.Errorf("no delivery row was written.\ncalls:\n%s",
 			strings.Join(callsWithPrefix(engine, "mutation recordCampaignDelivery"), "\n"))
+	}
+}
+
+// TestASingleSendFooterNeverNamesTheSubject: a single send has no campaign, so
+// its footer used to name the one thing the synthetic campaign was built from,
+// the template's subject ("you subscribed to Welcome to Acme!"). The footer
+// names who the person subscribed to: the sending identity's display name, and
+// failing that the organization, and failing that the list.
+func TestASingleSendFooterNeverNamesTheSubject(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		identity bool
+		want     string
+	}{
+		{"with a sending identity", true, "you subscribed to Acme News."},
+		{"with the configured default sender", false, "you subscribed to this mailing list."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := recipientSendEngine()
+			engine.template["subject"] = "Welcome to Acme!"
+			engine.template["htmlBody"] = "<p>Hello {{displayName}}.</p>"
+			engine.senderIdentities = map[string]map[string]any{
+				"si-acme": senderIdentityRow("si-acme", "news@acme.test", "Acme News", "active"),
+			}
+			sender := &recordingSender{}
+			w := newTestWorker(t, engine, sender)
+
+			args := sendToRecipientArgs()
+			if tc.identity {
+				args["senderIdentityId"] = "si-acme"
+			}
+			if _, err := w.handleSendToRecipient(importCtx(), args, 0); err != nil {
+				t.Fatalf("sendToRecipient: %v", err)
+			}
+			msg := sender.sent[0]
+			if msg.Subject != "Welcome to Acme!" {
+				t.Fatalf("the subject = %q; the test is not checking what it thinks it is", msg.Subject)
+			}
+			for part, body := range map[string]string{"text": msg.TextBody, "html": msg.HTMLBody} {
+				if !strings.Contains(body, tc.want) {
+					t.Errorf("%s footer: want %q in %q", part, tc.want, body)
+				}
+				if strings.Contains(body, "Welcome to Acme!") {
+					t.Errorf("%s part names the subject: %q", part, body)
+				}
+			}
+		})
+	}
+}
+
+// TestASingleSendCarriesTheLinksButNoCampaign: the opt-out, preferences and
+// view links of a rule-driven send name the recipient and the organization, and
+// no campaign, because a rule is not a campaign.
+func TestASingleSendCarriesTheLinksButNoCampaign(t *testing.T) {
+	engine := recipientSendEngine()
+	engine.template["textBody"] = "Manage {{preferencesUrl}} View {{viewUrl}} Leave {{unsubscribeUrl}}"
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	if _, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0); err != nil {
+		t.Fatalf("sendToRecipient: %v", err)
+	}
+	body := sender.sent[0].TextBody
+	keys := w.cfg.UnsubscribeKeys()
+
+	preferences, err := ParseLinkToken(keys, LinkPreferences, linkTokenIn(t, body, "https://example.test"+PreferencesPath), time.Now())
+	if err != nil {
+		t.Fatalf("the preferences link does not verify: %v", err)
+	}
+	if preferences.RecipientID != "r-1" || preferences.EmailDigest != EmailDigest("person@example.test") || preferences.CampaignID != "" {
+		t.Errorf("preferences payload = %+v", preferences)
+	}
+	view, err := ParseLinkToken(keys, LinkView, linkTokenIn(t, body, "https://example.test"+ViewPath), time.Now())
+	if err != nil {
+		t.Fatalf("the view link does not verify: %v", err)
+	}
+	if view.TemplateID != testTemplate || view.TemplateRevision == "" || view.CampaignID != "" {
+		t.Errorf("view payload = %+v", view)
+	}
+	unsubscribe, err := ParseUnsubscribeToken(keys, linkTokenIn(t, body, "https://example.test"+UnsubscribePath))
+	if err != nil {
+		t.Fatalf("the unsubscribe link does not verify: %v", err)
+	}
+	if unsubscribe.CampaignID != "" {
+		t.Errorf("a rule send names a campaign in its opt-out: %+v", unsubscribe)
+	}
+}
+
+// TestASingleSendsViewLinkCarriesTheSenderTheFooterNamed: the same rule as a
+// campaign's. A rule-driven send has no sender of its own to name, and its
+// footer says so in words; the view page has to be given those words.
+func TestASingleSendsViewLinkCarriesTheSenderTheFooterNamed(t *testing.T) {
+	engine := recipientSendEngine()
+	engine.template["textBody"] = "View {{viewUrl}}"
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	if _, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0); err != nil {
+		t.Fatalf("sendToRecipient: %v", err)
+	}
+	body := sender.sent[0].TextBody
+	view, err := ParseLinkToken(w.cfg.UnsubscribeKeys(), LinkView, linkTokenIn(t, body, "https://example.test"+ViewPath), time.Now())
+	if err != nil {
+		t.Fatalf("the view link does not verify: %v", err)
+	}
+	const named = "this mailing list"
+	if view.SenderName != named {
+		t.Errorf("the view link carries the sender %q, want %q", view.SenderName, named)
+	}
+	if !strings.Contains(body, "you subscribed to "+named+".") {
+		t.Errorf("the footer does not say %q.\n%s", named, body)
+	}
+}
+
+// TestSendToRecipientRefusesATemplateWhoseFooterCannotBePlaced: a message whose
+// unsubscribe link cannot be placed, or would not be shown, is not sent, and
+// nothing is ledgered as an attempt: the refusal comes before the transport is
+// contacted.
+func TestSendToRecipientRefusesATemplateWhoseFooterCannotBePlaced(t *testing.T) {
+	for name, tc := range map[string]struct{ html, want string }{
+		"a comment that never ends":          {"<p>Hi</p><!--", wantEndsOpen},
+		"an Outlook section left open":       {"<html><body><p>Hi</p><![if !mso]><p>x</p></body></html>", wantOutlookOpen},
+		"a comment only a tree builder sees": {"<html><body><p>Hi</p><noscript><!--</noscript></body></html>", wantEndsOpen},
+	} {
+		engine := recipientSendEngine()
+		engine.template["htmlBody"] = tc.html
+		sender := &recordingSender{}
+		w := newTestWorker(t, engine, sender)
+
+		_, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0)
+		if err == nil || err.Error() != "campaigns.sendToRecipient: "+tc.want {
+			t.Errorf("%s: err = %v, want the sentence %q", name, err, tc.want)
+		}
+		if sender.count() != 0 {
+			t.Errorf("%s: a message went out", name)
+		}
+		if written := callsWithPrefix(engine, "mutation recordCampaignDelivery"); len(written) != 0 {
+			t.Errorf("%s: a refused message was ledgered: %v", name, written)
+		}
 	}
 }
 

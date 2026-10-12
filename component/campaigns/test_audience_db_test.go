@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
@@ -76,7 +77,7 @@ func TestAudienceRunsUseNormalWorkerAcrossReplicas(t *testing.T) {
 	if _, err = workers[0].handleSaveTemplate(owner, templateArgs, 0); err != nil {
 		t.Fatal(err)
 	}
-	execute(owner, call("mutation", "createCampaign", arg{"campaignId", campaign}, arg{"accountId", org}, arg{"name", "Live campaign"}, arg{"audienceId", live}, arg{"templateId", template}, arg{"senderIdentityId", identity}))
+	execute(owner, call("mutation", "createCampaign", arg{"campaignId", campaign}, arg{"accountId", org}, arg{"name", strings.Repeat("L", maxCampaignNameRunes)}, arg{"audienceId", live}, arg{"templateId", template}, arg{"senderIdentityId", identity}))
 	for i, address := range []string{"one@example.test", "two@example.test", "optedout@example.test"} {
 		execute(owner, call("mutation", "addRecipient", arg{"recipientId", fmt.Sprintf("%s-r%d", suffix, i)}, arg{"audienceId", internal}, arg{"accountId", org}, arg{"email", address}, arg{"displayName", fmt.Sprintf("Tester %d", i)}, arg{"source", "manual"}))
 	}
@@ -184,6 +185,11 @@ func TestAudienceRunsUseNormalWorkerAcrossReplicas(t *testing.T) {
 	run, _, _ := workers[1].store.CampaignByID(memql.ContextWithFreshRead(owner), runID)
 	if run.Status != "sent" {
 		t.Fatalf("test status %q", run.Status)
+	}
+	// The live campaign is named at the cap and the engine refuses a campaign
+	// saved over it, so the run's name gave way at the base and kept its suffix.
+	if utf8.RuneCountInString(run.Name) != maxCampaignNameRunes || !strings.HasSuffix(run.Name, " · Test") {
+		t.Fatalf("the test run is named %q (%d characters), want the cap exactly and the suffix at the end", run.Name, utf8.RuneCountInString(run.Name))
 	}
 	source, _, _ := workers[1].store.CampaignByID(memql.ContextWithFreshRead(owner), campaign)
 	if source.Status != "draft" || source.AudienceID != live {

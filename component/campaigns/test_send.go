@@ -135,10 +135,12 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 		w.logger.Debug("campaigns.testSend: could not resolve the account name", "campaign", campaign.ID, "error", err)
 	}
 
-	msg, err := renderMessage(campaign, tmpl, recipient, unsubscribeURL(w.cfg.UnsubscribeBaseURL, inertUnsubscribeToken), RenderOptions{
+	msg, err := renderMessage(campaign, tmpl, recipient, RenderOptions{
 		ReplyTo:       replyToFor(campaign, identity),
 		AccountName:   accountName,
+		SenderName:    identity.SendAs.FromName,
 		SubjectPrefix: testSendSubjectPrefix,
+		Links:         inertLinks(w.cfg),
 		// Tracking is left ZERO. There is no delivery row to attribute a hit
 		// to, so a pixel here would record against an id nobody holds -- and
 		// the operator's own open would land in the campaign's numbers.
@@ -199,14 +201,15 @@ func (w *Worker) syntheticRecipient(ctx context.Context, campaign Campaign, to s
 	return recipient
 }
 
-// inertUnsubscribeToken is what the test message's footer and List-Unsubscribe
-// header carry.
+// inertUnsubscribeToken is what the test message's footer, List-Unsubscribe
+// header and four link tags carry (inertLinks).
 //
 // OBVIOUSLY INERT, and signed by nothing. A test send must still render the
 // unsubscribe surface -- it is most of what an operator is checking -- but a
 // REAL token would name a real recipient and a real campaign, and clicking it
 // out of curiosity would opt somebody out of a campaign that has not been
-// sent yet. The endpoint refuses this string like any other unverifiable
-// token and shows the "link not valid" page, which is the honest outcome for
-// a link in a message that was never really addressed to anyone.
+// sent yet, or subscribe or open the message of a person who never asked. The
+// endpoints refuse this string like any other unverifiable token and show the
+// "link not valid" page, which is the honest outcome for a link in a message
+// that was never really addressed to anyone.
 const inertUnsubscribeToken = "test-send-token-not-valid"

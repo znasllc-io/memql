@@ -167,11 +167,17 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	// The id is the RULE's when there is one, so `X-Campaign-Id` and the
 	// ledger both answer "which rule mailed this person". With no rule it is
 	// empty, and the ledger row is filed under the recipient alone.
+	//
+	// Its name is the template's subject, as it has always been, and that is
+	// what {{campaignName}} says for a send that has no campaign. It is cut to
+	// the length of a campaign's name because it is carried in the view link
+	// like one, and a subject is the one such name nothing else bounds. It is
+	// NOT what the footer names: that is the sending identity (F6).
 	campaign := Campaign{
 		AccountID:        recipient.AccountID,
 		ID:               emailRuleID,
 		OwnerUserID:      ownerUserID,
-		Name:             strings.TrimSpace(tmpl.Subject),
+		Name:             clipRunes(strings.TrimSpace(tmpl.Subject), maxCampaignNameRunes),
 		TemplateID:       templateID,
 		SenderIdentityID: senderIdentityID,
 		Status:           "sending",
@@ -228,20 +234,30 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		})
 	}
 
-	// A rule is not a persisted campaign. Keep its ID out of the unsubscribe
-	// campaign relationship; the signed organization and digest identify the opt-out.
-	token, err := MintUnsubscribeToken(w.cfg.UnsubscribeSecret, UnsubscribePayload{OwnerUserID: ownerUserID, RecipientID: recipient.ID, AccountID: campaign.AccountID, EmailDigest: digest})
-	if err != nil {
-		return nil, fmt.Errorf("campaigns.sendToRecipient: cannot mint an unsubscribe token: %w", err)
-	}
 	accountName, err := w.store.AccountName(ctx, campaign.AccountID)
 	if err != nil {
 		w.logger.Debug("campaigns.sendToRecipient: could not resolve the account name", "error", err)
 	}
-	msg, err := renderMessage(campaign, tmpl, recipient, unsubscribeURL(w.cfg.UnsubscribeBaseURL, token), RenderOptions{
+	opts := RenderOptions{
 		ReplyTo:     replyToFor(campaign, identity),
 		AccountName: accountName,
+		// The footer names the identity's display name, then the organization
+		// (F6). It used to name the synthetic campaign, which is the subject.
+		SenderName: identity.SendAs.FromName,
+	}
+	// A rule is not a persisted campaign. Keep its ID out of the links'
+	// campaign relationship; the signed organization and digest identify the opt-out.
+	// The view link names the sender the footer shows, which the options decide.
+	links, err := w.messageLinks(linkRequest{
+		OwnerUserID: ownerUserID, RecipientID: recipient.ID, AccountID: campaign.AccountID, EmailDigest: digest,
+		TemplateID: tmpl.ID, TemplateRevision: tmpl.Revision,
+		CampaignName: campaign.Name, SenderName: footerSender(opts),
 	})
+	if err != nil {
+		return nil, fmt.Errorf("campaigns.sendToRecipient: cannot mint the links for the message: %w", err)
+	}
+	opts.Links = links
+	msg, err := renderMessage(campaign, tmpl, recipient, opts)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", err)
 	}

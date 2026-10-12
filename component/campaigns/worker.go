@@ -753,16 +753,33 @@ func (w *Worker) processRecipient(
 		return false, nil
 	}
 
-	token, err := MintUnsubscribeToken(w.cfg.UnsubscribeSecret, UnsubscribePayload{OwnerUserID: job.CampaignOwnerUserID, RecipientID: r.ID, CampaignID: campaign.ID, AccountID: campaign.AccountID, EmailDigest: digest})
+	// The template is the frozen copy the job was queued with when it has one,
+	// so the view link names what was reviewed and sent and not what the
+	// template has become since. The sender it names is the one the footer shows
+	// (footerSender), which is the options' business and so comes first.
+	opts := w.renderOptions(ownerCtx, campaign, identity, r.ID)
+	links, err := w.messageLinks(linkRequest{
+		OwnerUserID: job.CampaignOwnerUserID, RecipientID: r.ID, CampaignID: campaign.ID, AccountID: campaign.AccountID,
+		EmailDigest: digest, TemplateID: tmpl.ID, TemplateRevision: tmpl.Revision,
+		CampaignName: campaign.Name, SenderName: footerSender(opts),
+	})
 	if err != nil {
-		w.failJob(systemCtx, *job, "cannot mint an unsubscribe token: "+err.Error())
+		w.failJob(systemCtx, *job, "cannot mint the links for the message: "+err.Error())
 		return true, err
 	}
-	msg, err := renderMessage(campaign, tmpl, r, unsubscribeURL(w.cfg.UnsubscribeBaseURL, token), w.renderOptions(ownerCtx, campaign, identity, r.ID))
+	opts.Links = links
+	msg, err := renderMessage(campaign, tmpl, r, opts)
 	if err != nil {
 		// Mirrors the mint failure above: a message we cannot render is a job
 		// that cannot proceed, not a recipient to skip silently.
-		w.failJob(systemCtx, *job, "cannot render the message: "+err.Error())
+		reason := "cannot render the message: " + err.Error()
+		var fault templateFault
+		if errors.As(err, &fault) {
+			// The template's author reads this on the campaign. It is already a
+			// sentence that says what to fix; a wrapper would only bury it.
+			reason = fault.Error()
+		}
+		w.failJob(systemCtx, *job, reason)
 		return true, err
 	}
 
@@ -879,7 +896,9 @@ func (w *Worker) deliver(ctx context.Context, msg email.Message, as email.SendAs
 }
 
 // renderOptions assembles everything one rendered message needs beyond the
-// campaign / template / recipient triple.
+// campaign / template / recipient triple, except its links: they carry the name
+// the footer shows, which these options decide, so the caller makes them after
+// and sets them.
 //
 // It runs under the OWNER's context because the one read it makes -- the
 // account's display name for {{accountName}} -- is composite-tier and belongs
@@ -896,7 +915,9 @@ func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, iden
 	return RenderOptions{
 		ReplyTo:     replyToFor(campaign, identity),
 		AccountName: accountName,
-		Tracking:    w.cfg.trackingRenderFor(campaign, deliveryRowID(campaign.ID, recipientID)),
+		// The footer names the display name the message goes out under.
+		SenderName: identity.SendAs.FromName,
+		Tracking:   w.cfg.trackingRenderFor(campaign, deliveryRowID(campaign.ID, recipientID)),
 	}
 }
 
