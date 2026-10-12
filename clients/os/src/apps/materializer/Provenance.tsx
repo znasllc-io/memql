@@ -46,6 +46,13 @@ export interface ProvenanceChainProps {
   models: ModelRow[];
   /** null while nothing has decided yet -- rendered as no claim at all. */
   embedded: boolean | null;
+  /**
+   * The record's own provenance sentence (`provenanceNote`), written by the
+   * stamp step, which is the only place that knows which branch it took. When
+   * there is one it is the claim, verbatim; the format's claim is for a record
+   * that has none.
+   */
+  note?: string;
   /** The composer renders the pending shape; the record renders the settled one. */
   pending?: boolean;
 }
@@ -64,9 +71,10 @@ export function ProvenanceChain({
   format,
   models,
   embedded,
+  note = "",
   pending = false,
 }: ProvenanceChainProps) {
-  const claim = provenanceClaim(embedded, format);
+  const claim = note.trim() !== "" ? note.trim() : provenanceClaim(embedded, format);
   const thought = models.length > 0;
 
   return (

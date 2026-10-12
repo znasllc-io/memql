@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -282,26 +282,57 @@ describe("the provenance chain", () => {
     );
   }
 
-  it("states the claim the format can actually make", async () => {
+  // THE RECORD'S OWN SENTENCE, WHEN IT HAS ONE. The stamp step writes provenanceNote
+  // knowing which branch it took, and the format alone cannot: a blank Markdown file
+  // carries no front matter because it was filed blank, not because Markdown has
+  // nowhere to put it.
+  it("states the record's own provenance sentence", async () => {
     const conn = fakeConnection({ compositions: [compositionRow({ id: `${COMPOSITION}:c1` })] });
     mountOn(conn, `${COMPOSITION}:c1`);
-    // The chain reads what was made, and the claim is the format's.
-    expect(await screen.findByText("the file carries it")).toBeTruthy();
+    expect(await screen.findByText("Provenance is in this PDF's XMP packet and Info dictionary.")).toBeTruthy();
+    expect(screen.queryByText("the file carries it")).toBeNull();
   });
 
-  it("says the record is the only copy where the format has no channel", async () => {
+  it("falls back to the claim the format can make for a record with no sentence of its own", async () => {
     const conn = fakeConnection({
       compositions: [
-        compositionRow({
-          id: `${COMPOSITION}:c2`,
-          name: "Figures",
-          format: "csv",
-          provenanceEmbedded: false,
-        }),
+        compositionRow({ id: `${COMPOSITION}:c1`, provenanceNote: "" }),
+        compositionRow({ id: `${COMPOSITION}:c2`, name: "Figures", format: "csv", provenanceEmbedded: false, provenanceNote: "" }),
       ],
     });
+    mountOn(conn, `${COMPOSITION}:c1`);
+    expect(await screen.findByText("the file carries it")).toBeTruthy();
+    cleanup();
     mountOn(conn, `${COMPOSITION}:c2`);
     expect(await screen.findByText(/only copy/)).toBeTruthy();
+  });
+
+  it("says a blank file was created blank, and never that its format has nowhere to put provenance", async () => {
+    const note = "Created blank. Its history is kept on its composition, not in the file.";
+    for (const [id, format] of [["c-md", "markdown"], ["c-html", "html"]] as const) {
+      const conn = fakeConnection({
+        compositions: [compositionRow({ id: `${COMPOSITION}:${id}`, name: "Notes", format, statement: "", sources: [], modelsUsed: [], provenanceEmbedded: false, provenanceNote: note })],
+      });
+      mountOn(conn, `${COMPOSITION}:${id}`);
+      expect(await screen.findByText(note)).toBeTruthy();
+      expect(screen.queryByText(/nowhere to put it/)).toBeNull();
+      expect(screen.getByText("This file was created blank.")).toBeTruthy();
+      expect(screen.queryByText(/composed text/)).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("says the composed text is in the file for a file a model wrote", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: `${COMPOSITION}:c1` })] });
+    mountOn(conn, `${COMPOSITION}:c1`);
+    expect(await screen.findByText("The composed text is in the file. Open it to read what was made.")).toBeTruthy();
+  });
+
+  it("claims no file while the composition is still being made", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: `${COMPOSITION}:c1`, status: "composing", outputFileId: "" })] });
+    mountOn(conn, `${COMPOSITION}:c1`);
+    await screen.findByRole("button", { name: "Stop" });
+    expect(screen.queryByText(/composed text|created blank|created from a description/)).toBeNull();
   });
 
   // A list row's job is to ASK for the window to move, which is the

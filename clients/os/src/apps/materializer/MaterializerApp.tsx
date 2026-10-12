@@ -182,6 +182,9 @@ export function MaterializerApp({
       ? appById(os.registry, returnFor.appId)?.name
       : undefined;
   const description = open !== null ? descriptions.find((outcome) => sameEntityId(outcome.compositionId, open.id)) : undefined;
+  // Whether this window asked for the open file by describing it: it then knows
+  // more than the row does about what the file is (see madeCaption).
+  const describedHere = open !== null && materialize.described.some((file) => sameEntityId(file.compositionId, open.id));
 
   function openComposition(id: string) {
     if (id.trim() === "") return;
@@ -321,6 +324,7 @@ export function MaterializerApp({
       onApplied={(applied) => setSetup((now) => (now === applied ? null : now))}
       backTo={backTo}
       description={description}
+      describedHere={describedHere}
       onNewComposition={() => {
         setOpenCompositionId("");
         setReturnFor(null);

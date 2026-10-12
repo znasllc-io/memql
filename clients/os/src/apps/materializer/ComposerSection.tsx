@@ -21,10 +21,12 @@ import {
   DESCRIPTION_NOT_SENT,
   DESCRIPTION_NOT_SENT_NEXT,
   FORMATS,
+  NOT_ATTACHED,
   UNOFFERED_FORMATS,
   deployableWord,
   formatWord,
-  notAttachedSentence,
+  madeCaption,
+  notSentDetail,
 } from "./words";
 
 // Materializer collects the brief, sources, and output settings. File content
@@ -64,6 +66,8 @@ export interface ComposerSectionProps {
    * while the hand-off is still on its way.
    */
   description?: { failure: string; unattached: string[] };
+  /** Whether this window asked for the open file by describing it, and so hands its description on. */
+  describedHere?: boolean;
   onMaterialize: (facts: {
     accountIds: string[];
     name: string;
@@ -103,11 +107,13 @@ interface ArrivedNotice {
 function noticesFor(description: { failure: string; unattached: string[] }): ArrivedNotice[] {
   const notices: ArrivedNotice[] = [];
   if (description.failure) {
-    notices.push({ key: "not-sent", tone: "warn", sentence: DESCRIPTION_NOT_SENT, next: DESCRIPTION_NOT_SENT_NEXT, detail: description.failure });
+    notices.push({ key: "not-sent", tone: "warn", sentence: DESCRIPTION_NOT_SENT, next: DESCRIPTION_NOT_SENT_NEXT, detail: notSentDetail(description.failure) });
   }
-  if (description.unattached.length > 0) {
-    notices.push({ key: "not-attached", tone: "info", sentence: notAttachedSentence(description.unattached) });
-  }
+  // One notice per reference left off, named by the label the person gave it.
+  // The entry carries no reason, so none is given (see NOT_ATTACHED).
+  description.unattached.forEach((label, index) => {
+    notices.push({ key: `not-attached-${index}`, tone: "info", sentence: NOT_ATTACHED, detail: label });
+  });
   return notices;
 }
 
@@ -149,6 +155,7 @@ export function ComposerSection({
   onApplied,
   backTo,
   description,
+  describedHere = false,
   onMaterialize,
   onAct,
   onNewComposition,
@@ -242,6 +249,9 @@ export function ComposerSection({
   };
   const acts = actsFor(open, draftState, backTo);
   const arrived = open !== null && description ? noticesFor(description) : [];
+  // What the open file is -- blank, described, or written by a model -- said
+  // under what was asked for, from its record and what this window knows.
+  const caption = open === null ? "" : madeCaption(open, compositionSources, compositionModels, describedHere, description);
 
   // The chain reads the OPEN composition once there is one, and the form
   // otherwise -- so the same device says "here is what you are about to
@@ -303,6 +313,7 @@ export function ComposerSection({
 
         <BriefColumn
           open={open}
+          caption={caption}
           name={name}
           onName={(next) => {
             setName(next);
@@ -342,6 +353,7 @@ export function ComposerSection({
         format={open ? open.format : format}
         models={open ? compositionModels : []}
         embedded={open ? open.provenanceEmbedded : null}
+        note={open ? open.provenanceNote : ""}
         pending={open === null}
       />
 
@@ -556,6 +568,7 @@ function matches(c: ComposableConcept, query: string): boolean {
 function BriefColumn({
   accounts, accountId, onAccount,
   open,
+  caption,
   name,
   onName,
   nameProblem,
@@ -563,6 +576,8 @@ function BriefColumn({
   onStatement,
 }: {
   open: CompositionRow | null;
+  /** What the open file is (madeCaption), or "" to say nothing. */
+  caption: string;
   name: string;
   onName: (v: string) => void;
   /** What is wrong with the name as typed, said beside the field; absent when it can be used. */
@@ -578,18 +593,17 @@ function BriefColumn({
       <section className="os-mz-col os-mz-col-brief" aria-label="What was made">
         <Subhead>What was asked for</Subhead>
         <p className="os-mz-statement">{open.statement || "No statement was recorded."}</p>
+        {/* THE DRAFT IS NOT RE-RENDERED HERE, and that absence is deliberate:
+            what the file holds lives in the FILE, and showing a second copy in
+            this window would leave a person with two things that could disagree.
+            The caption says what the file is -- composed, blank, or described and
+            waiting on the Library's draft -- and the act that opens it is on the
+            bar. */}
         {open.failureReason ? (
           <Notice tone="error" sentence={open.failureReason} />
-        ) : (
-          <p className="os-caption">
-            {/* THE DRAFT IS NOT RE-RENDERED HERE, and that absence is
-                deliberate: the composed text lives in the FILE now, and
-                showing a second copy in this window would leave a person
-                with two things that could disagree. The act that opens
-                the real one is on the bar. */}
-            The composed text is in the file. Open it to read what was made.
-          </p>
-        )}
+        ) : caption ? (
+          <p className="os-caption">{caption}</p>
+        ) : null}
       </section>
     );
   }

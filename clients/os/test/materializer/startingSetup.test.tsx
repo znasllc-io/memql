@@ -569,8 +569,12 @@ describe("a name and a refusal, as a person reads them", () => {
 
 describe("a Markdown file asked for by describing it", () => {
   const ARTIFACT = { id: "artifact-1", sourceConceptRef: "v1:library:file:f-new", title: "Notes.md" } as unknown as Row;
+  // As the cluster writes a described file: filed blank, so no model was called and nothing is embedded.
   const ready = (over: Record<string, unknown> = {}) =>
-    compositionRow({ id: "c-new", name: "Notes", status: "ready", format: "markdown", outputFileId: "f-new", sources: [], statement: "A one page brief", ...over });
+    compositionRow({
+      id: "c-new", name: "Notes", status: "ready", format: "markdown", outputFileId: "f-new", sources: [], statement: "A one page brief",
+      modelsUsed: [], provenanceEmbedded: false, provenanceNote: "Created blank. Its history is kept on its composition, not in the file.", ...over,
+    });
   const seed = (over: Record<string, unknown> = {}) => ({
     materializeReply: { compositionId: "c-new" } as unknown as Row,
     compositions: [] as Row[],
@@ -604,7 +608,7 @@ describe("a Markdown file asked for by describing it", () => {
     });
     // Nothing to say: it went through.
     expect(screen.queryByText(/description was not sent/)).toBeNull();
-    expect(screen.queryByText(/Not attached/)).toBeNull();
+    expect(screen.queryByText(/wasn't attached/)).toBeNull();
   });
 
   it("waits for the composition to be ready, not merely to name a file", async () => {
@@ -676,10 +680,95 @@ describe("a Markdown file asked for by describing it", () => {
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
 
     expect(await shown("The file was created, but the description was not sent for writing.")).toBeTruthy();
-    // The reason is the cluster's own words, in the data voice.
-    expect(document.querySelector(".os-notice-detail")?.textContent).toMatch(/revision budget exhausted/);
+    // The reason is the cluster's own words, in the data voice, and only those: the notice's own
+    // sentence already says the description was not sent, so the SDK's lead-in saying so again is gone.
+    expect(document.querySelector(".os-notice-detail")?.textContent).toBe("revision budget exhausted");
     // And the file is still there to open.
     expect(screen.getByRole("button", { name: "Open Notes" })).toBeTruthy();
+  });
+
+  // WHAT THE FILE IS, under what was asked for. A described file is empty until the
+  // person approves the Library's draft, so "the composed text is in the file" would
+  // be false; the caption follows what this window knows of the hand-off.
+  describe("the caption says what the file is", () => {
+    const caption = () => document.querySelector(".os-mz-col-brief .os-caption")?.textContent ?? "";
+    const NOT_COMPOSED = /composed text/;
+
+    it("says the description was sent, once this window has sent it", async () => {
+      const conn = fakeConnection(seed());
+      mount(conn);
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      await waitFor(() => expect(caption()).toBe("Your description was sent to be written. Open the file to review and approve the draft."));
+      expect(document.body.textContent).not.toMatch(NOT_COMPOSED);
+    });
+
+    it("leaves it to the failure notice when this window could not send it", async () => {
+      const conn = fakeConnection(seed());
+      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
+      mount(conn);
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      await shown("The file was created, but the description was not sent for writing.");
+      expect(caption()).toBe("");
+      expect(document.body.textContent).not.toMatch(NOT_COMPOSED);
+    });
+
+    it("says only that it was created from a description when it is opened later, from the list", async () => {
+      const conn = fakeConnection(seed({ compositions: [ready({ id: "c-elsewhere" })] }));
+      mount(conn, { intent: { id: "open", payload: { compositionId: "c-elsewhere" } } });
+      await screen.findByRole("button", { name: "Open Notes" });
+      expect(caption()).toBe("This file was created from a description. Open it to continue.");
+      expect(document.body.textContent).not.toMatch(NOT_COMPOSED);
+    });
+
+    it("says the same while this window has not heard back from the Library", async () => {
+      const conn = fakeConnection(seed({ outputArtifact: undefined }));
+      mount(conn);
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      // Ready, but its Files entry has not been written, so nothing has been sent yet.
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      await screen.findByRole("button", { name: "Open Notes" });
+      expect(caption()).toBe("This file was created from a description. Open it to continue.");
+      expect(conn.query.libraryAddDocumentComment).not.toHaveBeenCalled();
+    });
+  });
+
+  it("names each reference that went without being attached, on its own", async () => {
+    const conn = fakeConnection(
+      seed({
+        artifactsByFile: { "f-spec": { id: "a-spec" } as unknown as Row, "f-sheet": { id: "a-sheet" } as unknown as Row },
+        filesById: {
+          "f-spec": { id: "f-spec", name: "spec.pdf", size: 900, versionNumber: 1 } as unknown as Row,
+          "f-sheet": { id: "f-sheet", name: "numbers.csv", size: 300, versionNumber: 1 } as unknown as Row,
+        },
+      }),
+    );
+    mount(conn, {
+      intent: setupIntent("i1", {
+        format: "markdown",
+        sources: [
+          { kind: "library_file", ref: "f-spec", label: "spec.pdf" },
+          { kind: "library_file", ref: "f-sheet", label: "numbers.csv" },
+        ],
+      }),
+    });
+    await screen.findByRole("list", { name: "Picked sources" });
+    await materializeNotes();
+    await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+    conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+    await waitFor(() => expect(document.querySelectorAll(".os-notice-line")).toHaveLength(2));
+    const notices = [...document.querySelectorAll(".os-notice")].map((notice) => [
+      notice.querySelector(".os-notice-line")?.textContent,
+      notice.querySelector(".os-notice-detail")?.textContent,
+    ]);
+    expect(notices).toEqual([
+      ["This reference wasn't attached.", "spec.pdf"],
+      ["This reference wasn't attached.", "numbers.csv"],
+    ]);
   });
 
   // What arrives a moment after "Ready" is not something the person did, so it
@@ -714,7 +803,8 @@ describe("a Markdown file asked for by describing it", () => {
       expect(region?.textContent).toContain("revision budget exhausted");
       // Each part is spoken as a sentence. The cluster's reason has no full stop of its own, and
       // without one a screen reader runs it into whatever comes next.
-      expect(region?.textContent).toMatch(/send it again\. The description could not be sent for writing: revision budget exhausted\.$/);
+      expect(region?.textContent).toMatch(/send it again\. revision budget exhausted\.$/);
+      expect(region?.textContent).not.toMatch(/could not be sent for writing/);
       // The visible notice is a notice, not a live region and not inside one.
       expect(region?.contains(notice)).toBe(false);
       expect(notice.closest("[role=status]")).toBeNull();
@@ -761,9 +851,9 @@ describe("a Markdown file asked for by describing it", () => {
       const region = announcer();
       expect(region?.textContent).toBe("");
       conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
-      await shown("Not attached: spec.pdf. Only Markdown and images can be attached.");
+      await shown("This reference wasn't attached.");
       expect(announcer()).toBe(region);
-      expect(region?.textContent).toBe("Not attached: spec.pdf. Only Markdown and images can be attached.");
+      expect(region?.textContent).toBe("This reference wasn't attached. spec.pdf.");
     });
 
     it("and goes quiet again when the file is left", async () => {
@@ -818,7 +908,12 @@ describe("a Markdown file asked for by describing it", () => {
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
 
-    expect(await shown("Not attached: spec.pdf. Only Markdown and images can be attached.")).toBeTruthy();
+    // Each reference left off is named on its own, by the label the person gave it. The SDK does not say
+    // why one was left off (its kind, its size, the Library's limits, not being found), so nor does this.
+    const notice = (await shown("This reference wasn't attached.")).closest(".os-notice");
+    expect(notice?.querySelector(".os-notice-detail")?.textContent).toBe("spec.pdf");
+    expect(document.querySelectorAll(".os-notice-line")).toHaveLength(1);
+    expect(document.body.textContent).not.toMatch(/Only Markdown and images/);
     expect(conn.query.libraryAddDocumentComment.mock.calls[0]?.[0]).toMatchObject({
       attachments: [{ artifactId: "a-notes", version: 2, revision: "file:2" }],
     });

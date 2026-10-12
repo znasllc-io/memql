@@ -1707,6 +1707,21 @@ a failed composition has already answered, so "try again" carries a new id.
 The cluster looks the id up and then writes, so the hook also lets only one
 start be in flight.
 
+**A FINISHED FILE SAYS WHAT IT IS** (`words.ts` `madeCaption`, `Provenance.tsx`).
+The cluster files two kinds of file empty, a blank one and a described one, and
+"the composed text is in the file" is false of both. The caption under what was
+asked for follows what is known: "This file was created blank."; for a described
+file, "Your description was sent to be written. Open the file to review and
+approve the draft." once this window has sent it, the failure notice alone when it
+could not, and "This file was created from a description. Open it to continue."
+when the window does not know (opened later from the list, or not heard back yet);
+and the composed-file caption for a file a model wrote. The row tells them apart
+(a statement, its sources, no model call, provenance not carried), and the
+window's own list of described files wins over it. Nothing is said of a file that
+does not exist yet. The provenance line renders the record's `provenanceNote`,
+which the stamp step writes knowing which branch it took, and falls back to the
+format's claim only for a record without one.
+
 **A NAME IS CHECKED AS IT IS TYPED, AND A REFUSAL IS ONE SENTENCE**
 (`ComposerSection.tsx`, `actions.ts`). The Name field says what is wrong with a
 name beside it, with the SDK's `fileNameProblem`: the rule and the words of the
@@ -1731,10 +1746,12 @@ cannot do is outlive the window: close it between ready and sent and the
 composition keeps the statement while the editor's empty page offers **Describe
 document**.
 
-Two notices follow the file, in place and not as errors, because the file exists
+Notices follow the file, in place and not as errors, because the file exists
 either way: the description could not be sent (with what to do, and the
-cluster's reason verbatim), and the references the Library could not take
-("Not attached: spec.pdf. Only Markdown and images can be attached."). They are
+cluster's reason verbatim, without the SDK's lead-in that repeats the notice),
+and one per reference the Library did not take ("This reference wasn't
+attached.", its label beside it; the SDK's entry carries no reason, so none is
+given). They are
 announced by a separate, always-mounted, visually hidden `role="status"` element
 that receives their text. It is not a wrapper around the notices: Safari and
 VoiceOver drop the role of an element laid out with `display: contents`, and a

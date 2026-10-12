@@ -298,14 +298,20 @@ What the cluster does with a request, whichever client sends it:
 | Markdown, described in words, from records or a query | A file written by the composer, which reads the records. The revision workflow cannot read the graph, so it does not take this request |
 | A template, another kind of file, an email template or a package | A file written by the composer |
 
-If the description cannot be sent, a notice beside the file says so, and the empty
+Under what was asked for, the composer says what the file is: "This file was
+created blank." for a blank one; for a described one, "Your description was sent
+to be written. Open the file to review and approve the draft." once it has sent
+it, or "This file was created from a description. Open it to continue." when you
+open one later from **Materialized**. The line that says where the file's
+provenance is kept is the record's own sentence. If the description cannot be
+sent, a notice beside the file says so, with the cluster's reason, and the empty
 file's page still offers **Describe document**.
 
 When a described request names Library files, the revision workflow takes Markdown
 files (up to 32 KiB each) and images (up to 8 MiB each) as references, eight at
-most; a file it cannot take is named in a notice beside the new file ("Not
-attached: spec.pdf. Only Markdown and images can be attached."), and the file is
-made either way. The OS composer's picker lists records, not Library files, so
+most and within its size totals; each reference that is not attached is named in a
+notice of its own beside the new file ("This reference wasn't attached."), and the
+file is made either way. The OS composer's picker lists records, not Library files, so
 Library files reach it only in a starting setup.
 
 A folder the caller cannot use, because it cannot read it or it is in the Bin, is
