@@ -1292,6 +1292,7 @@
         "accountId",
         "domain",
         "emailDigest",
+        "liftedAt",
         "note",
         "reason",
         "sourceCampaignId",

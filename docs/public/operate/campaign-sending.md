@@ -979,6 +979,40 @@ The endpoint is HTTP, which is a documented exception to the gRPC-first rule
 for the same reason `POST /inbound/{source}` is: the caller is the recipient's
 mail client, and there is no gRPC version of that conversation.
 
+### Confirmation, preferences, and viewing an email
+
+Email templates can use `{{confirmUrl}}`, `{{preferencesUrl}}`, and `{{viewUrl}}`.
+The confirmation link is present only in a confirmation message. Each opens a
+small recipient page on the same origin as the unsubscribe link. These three
+HTTP exceptions were owner-approved on 2026-10-11: a recipient's browser follows
+an ordinary email link and cannot speak the MemQL stream protocol.
+
+| Page | What it does |
+| --- | --- |
+| `GET /email/confirm` | Shows whether confirmation is still needed. |
+| `POST /email/confirm` | Records consent, confirms a pending subscription, and wakes waiting automations. |
+| `GET /email/preferences` | Shows the subscription and its available choices. |
+| `POST /email/preferences` | Unsubscribes, confirms a pending subscription, or subscribes again after an organization opt-out. |
+| `GET /email/view` | Renders the exact saved template revision used for the message, without tracking. |
+
+GET never changes consent, so email scanners cannot confirm or unsubscribe
+someone. Forms use POST. A bounce, complaint, or cluster-wide suppression cannot
+be undone from preferences. Subscribing again lifts only that organization's
+opt-out; a later unsubscribe blocks mail again. Confirmation, preference changes,
+and one-click opt-outs serialize across replicas and shared mailbox memberships.
+
+Each page's token is encrypted and authenticated for that page alone. A view
+token cannot confirm a subscription. The recipient's current organization and
+mailbox must still match the token. A confirmation received after an automation's
+confirmation timeout resumes after that step only while the automation is active.
+It keeps the same enrollment and cannot revive an earlier audience membership.
+Subscribing again from preferences records a new membership for future enrollments.
+Retrying a confirmation is safe if the subscription was saved before its automation
+could resume. Confirmation links expire after 30 days;
+preferences and view links do not expire. A missing saved message returns an
+unavailable page. A failed write returns `503` with `Retry-After: 30`, so the
+person can safely retry the same link.
+
 ### Rotating the unsubscribe signing key
 
 The token names the key that signed it, and the node verifies against a ring of

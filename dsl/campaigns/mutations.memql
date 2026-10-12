@@ -651,6 +651,7 @@ mutation suppression recordOrganizationSuppression {
     stamp {
       id: args.suppressionId
       suppressedAt: now
+      liftedAt: ""
     }
   }
 }
@@ -1327,6 +1328,21 @@ mutation campaign createCampaignTestRun {
       skippedCount: 0
     }
   }
+}
+
+/// Recipient-authorized preferences action. The handler permits only organization opt-outs.
+@serverOnly
+mutation suppression liftOrganizationSuppression {
+ args {
+  suppressionId string!
+  accountId string!
+  liftedAt datetime!
+  versionTime datetime!
+ }
+ update {
+  accept { accountId, liftedAt }
+  stamp { id: args.suppressionId, createdAt: args.versionTime }
+ }
 }
 
 /// Choose whether new newsletter members must confirm their address.

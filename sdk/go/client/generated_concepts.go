@@ -1016,6 +1016,7 @@ var BoundConcepts = map[string]string{
 	"syncStatesAll":                                    "v1:platform:syncState",
 	"systemActiveAuthoringBundles":                     "v1:authoring:bundle",
 	"takeBooking":                                      "v1:calendar:booking",
+	"templateAtRevision":                               "v1:campaigns:template",
 	"templateById":                                     "v1:campaigns:template",
 	"templateForSource":                                "v1:campaigns:template",
 	"templates":                                        "v1:campaigns:template",

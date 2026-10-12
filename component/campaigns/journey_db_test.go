@@ -3,6 +3,8 @@ package campaigns
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -85,12 +87,29 @@ func TestJourneyAcrossIndependentReplicas(t *testing.T) {
 	if got := enrollment(); str(got, "status") != "waiting" || n.sender.count() != 1 {
 		t.Fatalf("first step=%v sends=%d", got, n.sender.count())
 	}
-	if err = n.store.ConfirmRecipient(n.owner, recipient, time.Now()); err != nil {
-		t.Fatal(err)
+	// Follow the actual message on another node: no sender-local state or
+	// direct test-only confirmation call may be required for the journey to run.
+	n.sender.mu.Lock()
+	message := n.sender.sent[0].TextBody
+	n.sender.mu.Unlock()
+	var confirmToken string
+	for _, word := range strings.Fields(message) {
+		if strings.Contains(word, ConfirmPath+"?token=") {
+			address, parseErr := url.Parse(word)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			confirmToken = address.Query().Get("token")
+			break
+		}
 	}
-	got := enrollment()
-	if err = n.worker.newsletterWrite(n.system, "nudgeJourneyEnrollment", map[string]any{"enrollmentId": enrollmentID, "nextAt": time.Now().Format(time.RFC3339Nano), "versionTime": memql.VersionTimeAfter(templateTime(got["createdAt"]), time.Now()).Format(time.RFC3339Nano)}); err != nil {
-		t.Fatal(err)
+	if confirmToken == "" {
+		t.Fatal("the confirmation message has no confirm link")
+	}
+	page := NewEmailLinkHandler(deliveryDBEngine{e2}, n.worker.cfg, quietLogger(), gatePoolFor(t))
+	response := pageRequest(page, "POST", ConfirmPath, confirmToken, "")
+	if response.Code != 200 {
+		t.Fatalf("confirmation page: %d %s", response.Code, response.Body.String())
 	}
 	// A tick performs one durable step per selected enrollment. Replaying each
 	// tick on the other node still submits each intended email just once.
@@ -114,4 +133,104 @@ func TestJourneyAcrossIndependentReplicas(t *testing.T) {
 	if n.sender.count() != 3 {
 		t.Fatal("completed enrollment resent")
 	}
+	// A later member times out, remains inert while paused, and a genuine late
+	// confirmation resumes after Confirm once the automation is active again.
+	late := n.suffix + "-late"
+	if err = n.store.AddRecipient(n.owner, late, n.audience, "late@example.test", "Late Reader", "signup", n.org, "pending", nil); err != nil {
+		t.Fatal(err)
+	}
+	lateMember, found, err := n.store.RecipientByID(n.owner, late)
+	if err != nil || !found {
+		t.Fatal(err)
+	}
+	lateID := journeyEnrollmentID(fmt.Sprint(args["journeyId"]), late, lateMember.JoinedAt)
+	lateRow := func() map[string]any {
+		t.Helper()
+		r, err := n.worker.newsletterRow(n.system, "journeyEnrollmentById", "enrollmentId", lateID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	race()
+	if got := lateRow(); str(got, "status") != "waiting" || n.sender.count() != 4 {
+		t.Fatalf("late member=%v sends=%d", got, n.sender.count())
+	}
+	n.sender.mu.Lock()
+	lateMessage := n.sender.sent[3].TextBody
+	n.sender.mu.Unlock()
+	var lateToken string
+	for _, word := range strings.Fields(lateMessage) {
+		if strings.Contains(word, ConfirmPath+"?token=") {
+			u, err := url.Parse(word)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lateToken = u.Query().Get("token")
+			break
+		}
+	}
+	if lateToken == "" {
+		t.Fatal("late confirmation has no link")
+	}
+	later := future.Add(8 * 24 * time.Hour)
+	for _, w := range []*Worker{n.worker, second} {
+		w.now = func() time.Time { return later }
+	}
+	race()
+	if got := lateRow(); str(got, "status") != "exited" || str(got, "exitReason") != "not confirmed" {
+		t.Fatal(got)
+	}
+	state := func(action string) {
+		t.Helper()
+		row, err := n.worker.newsletterRow(n.owner, "journeyById", "journeyId", fmt.Sprint(args["journeyId"]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = n.worker.handleSetJourneyState(n.owner, map[string]any{"journeyId": args["journeyId"], "action": action, "expectedRevision": templateTime(row["createdAt"]).Format(time.RFC3339Nano)}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state("pause")
+	page.now = func() time.Time { return later }
+	response = pageRequest(page, "POST", ConfirmPath, lateToken, "")
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	race()
+	if got := lateRow(); str(got, "status") != "exited" || n.sender.count() != 4 {
+		t.Fatalf("paused recovered enrollment=%v sends=%d", got, n.sender.count())
+	}
+	state("activate")
+	// Retrying the same successful confirmation heals a nudge that was deferred
+	// while paused, without adding another grant or a second confirmation email.
+	response = pageRequest(page, "POST", ConfirmPath, lateToken, "")
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	if got := lateRow(); str(got, "status") != "active" || str(got, "stepId") != "welcome" || str(got, "exitReason") != "" || str(got, "completedAt") != "" {
+		t.Fatalf("late recovery=%v", got)
+	}
+	race()
+	race()
+	if n.sender.count() != 5 {
+		t.Fatalf("late confirmation sent %d messages, want5total", n.sender.count())
+	}
+	state("archive")
+	for _, w := range []*Worker{n.worker, second} {
+		if err = w.retireJourney(context.Background(), n.system, map[string]any{"id": args["journeyId"]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := lateRow(); str(got, "status") != "exited" || str(got, "exitReason") != "automation retired" {
+		t.Fatalf("archive=%v", got)
+	}
+	response = pageRequest(page, "POST", ConfirmPath, lateToken, "")
+	if response.Code != 200 {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	if got := lateRow(); str(got, "status") != "exited" {
+		t.Fatalf("archived journey reopened: %v", got)
+	}
+
 }

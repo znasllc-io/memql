@@ -763,6 +763,18 @@ query campaign campaignTestRuns {
   shape campaignFull
 }
 
+/// The stored message revision named by an authenticated view-in-browser token.
+@actor
+query template templateAtRevision {
+ args {
+  templateId string!
+  revision datetime!
+ }
+ asOf args.revision ?? latest
+ filter row => row.id == args.templateId
+ shape templateFull
+}
+
 /// Internal scan of due single-recipient deliveries deferred by the rate limiter.
 /// actor.userId scoping would omit other owners' work; internal origin and clusterOwner restrict the sweep.
 @actor
@@ -915,7 +927,7 @@ query journeyEnrollment waitingEnrollmentsForRecipient {
  args {
  recipientId string!
  }
- filter row => actor.isClusterOwner == true && (row.recipientId == args.recipientId && row.status == "waiting")
+ filter row => actor.isClusterOwner == true && (row.recipientId == args.recipientId && (row.status == "waiting" || (row.status == "exited" && row.exitReason == "not confirmed")))
  sort "row.createdAt", "asc"
  paginate 100
  shape journeyEnrollmentFull
