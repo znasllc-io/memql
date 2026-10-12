@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState } from "react";
-import { newShortId, type Connection, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { newShortId, refusalSentence, type Connection, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
-import { campaignName, engineSentence, type AudienceRow, type CampaignRow, type RecipientMode } from "./rows";
+import { campaignName, type AudienceRow, type CampaignRow, type RecipientMode } from "./rows";
 
 // Every write the Email app makes, and the busy/error pair each one owns.
 //
@@ -970,7 +970,7 @@ export function useCreateRule(): CreateRuleState {
     return emailRuleId;
   }, "");
   // The rules surface shows a refusal's sentence, never its transport frames.
-  return { busy, error: engineSentence(error), reset, create: call };
+  return { busy, error: refusalSentence(error, "createEmailRule"), reset, create: call };
 }
 
 export interface UpdateRuleState extends WriteState {
@@ -997,7 +997,7 @@ export function useUpdateRule(): UpdateRuleState {
     },
     false,
   );
-  return { busy, error: engineSentence(error), reset, update: call };
+  return { busy, error: refusalSentence(error, "updateEmailRule"), reset, update: call };
 }
 
 export interface RuleArmingState extends WriteState {
@@ -1022,9 +1022,11 @@ export interface RuleArmingState extends WriteState {
  *
  * One error slot, for the reason `useSendControls` has one: these three are a
  * single cluster of controls on one row, and only one can be pressed at once.
- * The slot holds the ENGINE'S SENTENCE (engineSentence), not the call's error
- * text: that is what lets the rule page see that the refusal it is about to
- * show is the one `lastError` already shows, and say it once.
+ * The slot holds the ENGINE'S SENTENCE (the SDK's `refusalSentence` of the
+ * refused call, in that call's name), not the call's error text: that is what
+ * lets the rule page see that the refusal it is about to show is the one
+ * `lastError` already shows -- compared in the same words, so a sentence that
+ * opens with the engine's package name is still said once -- and say it once.
  */
 export function useRuleArming(): RuleArmingState {
   const activate = useWrite(async (query, emailRuleId: string) => {
@@ -1041,9 +1043,17 @@ export function useRuleArming(): RuleArmingState {
   }, false);
 
   const parts = [activate, retire, status];
+  // The first refused call's sentence, in the name that call was made with.
+  const refused = (
+    [
+      ["campaignActivateEmailRule", activate],
+      ["campaignRetireEmailRule", retire],
+      ["setEmailRuleStatus", status],
+    ] as const
+  ).find(([, part]) => part.error !== "");
   return {
     busy: parts.some((p) => p.busy),
-    error: engineSentence(parts.map((p) => p.error).find((e) => e !== "") ?? ""),
+    error: refused === undefined ? "" : refusalSentence(refused[1].error, refused[0]),
     reset: () => parts.forEach((p) => p.reset()),
     activate: activate.call,
     retire: retire.call,

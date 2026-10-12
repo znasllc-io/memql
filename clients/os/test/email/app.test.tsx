@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { chooseOption, openSelect } from "../selectControl";
@@ -16,6 +16,7 @@ vi.mock("../../src/auth/context", () => ({
 }));
 
 const { EmailApp } = await import("../../src/apps/email/EmailApp");
+const { useCreateRule, useRuleArming, useUpdateRule } = await import("../../src/apps/email/actions");
 const { LocalEmailSettingsStore } = await import("../../src/apps/email/settings");
 const {
   audienceRow,
@@ -523,6 +524,49 @@ describe("a refused activation", () => {
     expect(screen.queryByText("The cluster refused that.")).toBeNull();
   });
 
+  it("is said once when the engine's own sentence opens with its package name", async () => {
+    // The engine records the sentence on the rule exactly as it wrote it, and the
+    // call fails with the same words inside two transport frames. The package
+    // name is the engine's, not the person's: it comes off the call's sentence,
+    // so the two have to be compared the same way or the page says it twice.
+    const PACKAGED = "emailrules: arming an event-email rule is owner or developer only -- it authors an automation that sends mail on this cluster's behalf";
+    const SAID = PACKAGED.replace("emailrules: ", "");
+    const conn = fakeConnection({ emailRules: [RULE], templates: [], concepts: [] });
+    conn.query.campaignActivateEmailRule.mockImplementation(async () => {
+      conn.subscriptions.emit(RULE_CONCEPT, { ...RULE, status: "failed", lastError: PACKAGED });
+      throw new Error(`campaignActivateEmailRule: MemQL engine failed to execute query. Details: ${PACKAGED}`);
+    });
+    await turnOn(conn);
+
+    expect(await screen.findByText("This rule is not running. The cluster refused it.")).toBeTruthy();
+    const text = document.body.textContent ?? "";
+    expect(text.split(SAID).length - 1).toBe(1);
+    expect(text).not.toContain("MemQL engine failed to execute query");
+    expect(text).not.toContain("campaignActivateEmailRule");
+    expect(screen.getByText("Not running -- the cluster refused it. The reason is above.")).toBeTruthy();
+  });
+
+  it("shows the sentence without the engine's package name where the rule does not carry it yet", async () => {
+    const PACKAGED = "emailrules: arming an event-email rule is owner or developer only";
+    const conn = fakeConnection({ emailRules: [RULE], templates: [], concepts: [] });
+    conn.query.campaignActivateEmailRule.mockImplementation(async () => {
+      throw new Error(`campaignActivateEmailRule: MemQL engine failed to execute query. Details: ${PACKAGED}`);
+    });
+    await turnOn(conn);
+
+    await waitFor(() => expect(screen.getByText("The cluster refused that.")).toBeTruthy());
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("arming an event-email rule is owner or developer only");
+    expect(text).not.toContain("emailrules:");
+
+    // The record arrives with the sentence as the engine wrote it: the panel's copy goes.
+    await act(async () => {
+      conn.subscriptions.emit(RULE_CONCEPT, { ...RULE, status: "failed", lastError: PACKAGED });
+    });
+    expect(screen.queryByText("The cluster refused that.")).toBeNull();
+    expect((document.body.textContent ?? "").split("arming an event-email rule is owner or developer only").length - 1).toBe(1);
+  });
+
   it("frames nothing on a refused save either", async () => {
     const conn = fakeConnection({
       emailRules: [],
@@ -548,6 +592,102 @@ describe("a refused activation", () => {
     const text = document.body.textContent ?? "";
     expect(text).not.toContain("MemQL engine failed to execute query");
     expect(text).not.toContain("createEmailRule");
+  });
+});
+
+// What a rules write puts in its error slot is the SDK's refusalSentence of the
+// refused call: the call's name, the server's frame and a leading package name
+// come off, once each, and the rest is the cluster's own words.
+describe("the sentence a refused rules write carries", () => {
+  const FRAME = "MemQL engine failed to execute query. Details: ";
+  const REFUSED = 'Braces, @ and semicolons can only appear inside quotes, like row.email == "boss@acme.com".';
+  const PACKAGED = "emailrules: arming an event-email rule is owner or developer only";
+  const FACTS = {
+    name: "Tell the owner",
+    description: "",
+    triggerConcept: "v1:identity:user",
+    eventKind: "created",
+    condition: "",
+    templateId: "t1",
+    recipientMode: "cluster_roles" as const,
+    recipientRoles: ["owner"],
+    audienceId: "",
+    recipientField: "",
+    accountId: "self",
+    senderIdentityId: "",
+  };
+
+  type Call = "activate" | "retire" | "setStatus" | "create" | "update";
+  const NAME: Record<Call, string> = {
+    activate: "campaignActivateEmailRule",
+    retire: "campaignRetireEmailRule",
+    setStatus: "setEmailRuleStatus",
+    create: "createEmailRule",
+    update: "updateEmailRule",
+  };
+  const CALLS = Object.keys(NAME) as Call[];
+
+  /** The error slot of one rules write after the cluster refused it with `message`. */
+  async function refusedWith(call: Call, message: string): Promise<string> {
+    const conn = fakeConnection({});
+    conn.query[NAME[call] as "createEmailRule"].mockRejectedValue(new Error(message));
+    h.connection = conn;
+    if (call === "create") {
+      const { result } = renderHook(() => useCreateRule());
+      await act(async () => { await result.current.create(FACTS); });
+      return result.current.error;
+    }
+    if (call === "update") {
+      const { result } = renderHook(() => useUpdateRule());
+      await act(async () => { await result.current.update("r1", FACTS); });
+      return result.current.error;
+    }
+    const { result } = renderHook(() => useRuleArming());
+    await act(async () => {
+      if (call === "setStatus") await result.current.setStatus("r1", "paused");
+      else await result.current[call]("r1");
+    });
+    return result.current.error;
+  }
+
+  it.each(CALLS)("takes off the call's name and the server's frame, and nothing else: %s", async (call) => {
+    expect(await refusedWith(call, `${NAME[call]}: ${FRAME}${REFUSED}`)).toBe(REFUSED);
+  });
+
+  it.each(CALLS)("takes off the call's name where the server added no frame: %s", async (call) => {
+    expect(await refusedWith(call, `${NAME[call]}: ${REFUSED}`)).toBe(REFUSED);
+  });
+
+  it("takes off the engine's own package name as well, once", async () => {
+    expect(await refusedWith("activate", `campaignActivateEmailRule: ${FRAME}${PACKAGED}`)).toBe(
+      "arming an event-email rule is owner or developer only",
+    );
+    expect(await refusedWith("retire", "authoring: actor x cannot activate bundle owned by y")).toBe(
+      "actor x cannot activate bundle owned by y",
+    );
+  });
+
+  it("keeps a server frame with nothing in it, which is then all the cluster said", async () => {
+    expect(await refusedWith("setStatus", "setEmailRuleStatus: MemQL engine failed to execute query.")).toBe(
+      "MemQL engine failed to execute query.",
+    );
+  });
+
+  it("leaves its own words alone where there is no connection", async () => {
+    h.connection = null;
+    const { result } = renderHook(() => useRuleArming());
+    await act(async () => { await result.current.activate("r1"); });
+    expect(result.current.error).toBe("Not connected to the cluster, so nothing was written.");
+  });
+
+  it("answers the first refused call's sentence from the three arming calls, in its own name", async () => {
+    // The one slot is shared by activate, retire and pause/resume; the name that comes off is the failing call's.
+    const conn = fakeConnection({});
+    conn.query.campaignRetireEmailRule.mockRejectedValue(new Error(`campaignRetireEmailRule: ${REFUSED}`));
+    h.connection = conn;
+    const { result } = renderHook(() => useRuleArming());
+    await act(async () => { await result.current.retire("r1"); });
+    expect(result.current.error).toBe(REFUSED);
   });
 });
 

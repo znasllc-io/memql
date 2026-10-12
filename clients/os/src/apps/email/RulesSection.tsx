@@ -1,7 +1,7 @@
 import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
 import { Fragment, useMemo, useState } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { refusalSentence, type Row } from "@znasllc-io/memql-sdk-core/client";
 import { Zap } from "lucide-react";
 
 import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
@@ -467,8 +467,12 @@ function RuleDetail({
  * Details:". Here a refusal appears only when the rule does not carry it: the
  * engine refused before recording anything (who may author, which rule), or
  * its record has not reached this window yet -- and the moment it does, this
- * copy steps aside. A refused activation also closes the question: the line
- * below then says the cluster refused it and where the reason is.
+ * copy steps aside. The two are compared in the same words, the SDK's
+ * `refusalSentence` of each: the call's sentence has its frames and the
+ * engine's package name off, and the engine records its sentence with that
+ * package name still on ("emailrules: ..."). A refused activation also closes
+ * the question: the line below then says the cluster refused it and where the
+ * reason is.
  */
 function ArmingPanel({
   rule,
@@ -481,7 +485,7 @@ function ArmingPanel({
   const active = rule.status === "active";
   const paused = rule.status === "paused";
   const refusal = arming.error;
-  const refusalIsOnTheRule = refusal !== "" && refusal === rule.lastError.trim();
+  const refusalIsOnTheRule = refusal !== "" && refusal === refusalSentence(rule.lastError);
 
   return (
     <Panel label="Turn this rule on or off">
