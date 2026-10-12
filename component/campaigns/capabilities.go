@@ -53,6 +53,9 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		ops[name] = nil
 	}
 	return append([]memql.IntegrationCapability{
+		{Name: "saveJourney", Description: "Save a revision of an email automation.", Handler: w.handleSaveJourney},
+		{Name: "setJourneyState", Description: "Turn an email automation on, pause or archive it.", Handler: w.handleSetJourneyState},
+		{Name: "stageOperationalEmail", Description: "Render a published operational rule template into the server outbox.", Handler: w.handleStageOperationalEmail},
 		{Name: "configureTestAudience", Description: "Configure the organization testing audience.", Handler: w.handleConfigureTestAudience},
 		{Name: "testAudienceSend", Description: "Queue a test through the normal campaign worker.", Handler: w.handleTestAudienceSend},
 		{Name: "sendingReadiness", Description: "Check the selected organization's sender and unsubscribe setup without sending mail.", Handler: w.handleSendingReadiness},
@@ -372,6 +375,14 @@ func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (i
 }
 
 func (w *Worker) preflightAudience(ctx context.Context, op string, campaign Campaign, allowEmpty bool) (int, Template, error) {
+	return w.preflightAudienceWith(ctx, op, campaign, allowEmpty, nil)
+}
+
+// preflightAudienceWith is preflightAudience for a caller that has just counted the
+// audience itself: known is that count, and the audience is not counted a second
+// time. Every count reads every recipient in the cluster, whatever the audience
+// holds, so a caller that already has the number hands it in.
+func (w *Worker) preflightAudienceWith(ctx context.Context, op string, campaign Campaign, allowEmpty bool, known *int) (int, Template, error) {
 	if err := w.requireSendAuthority(ctx, campaign.AccountID); err != nil {
 		return 0, Template{}, err
 	}
@@ -420,9 +431,13 @@ func (w *Worker) preflightAudience(ctx context.Context, op string, campaign Camp
 	// difference is the whole issue: measuring a bounded page and calling it
 	// a total is what made 5000 a ceiling, and a count query has no window
 	// to be bounded by.
-	size, err := w.store.RosterSize(ctx, campaign.AudienceID)
-	if err != nil {
+	var size int
+	if known != nil {
+		size = *known
+	} else if counted, err := w.store.RosterSize(ctx, campaign.AudienceID); err != nil {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: %w", op, err)
+	} else {
+		size = counted
 	}
 	if size == 0 && !allowEmpty {
 		return 0, Template{}, fmt.Errorf("campaigns.%s: audience %q has no recipients", op, campaign.AudienceID)

@@ -45,8 +45,14 @@ type (
 		// held session (epic memql#1925). nil when DIRECT_DSN is unset, in
 		// which case DirectBunDB() falls back to the main (pooled) Bun -- so
 		// local/dev without a pooler is unaffected (env-agnostic).
-		DirectDB     *sql.DB
-		DirectBun    *bun.DB
+		DirectDB  *sql.DB
+		DirectBun *bun.DB
+		// Gate is the pool write gates run on (gate_pool.go): connections used
+		// for nothing else, so a gate holder never waits for one to do its work
+		// and a session sitting idle in a gate's transaction is not held to the
+		// request pool's limits. nil when it was not opened; there is no fallback
+		// to the request pool.
+		Gate         *sql.DB
 		ticker       *time.Ticker
 		firstPing    bool
 		isRunning    bool
@@ -115,6 +121,7 @@ type (
 		maxConnRetriesIntervalMs int
 		sqlOpener                SQLOpener
 		migrationOpener          SQLOpener // nil: migrate over the request pool
+		gateOpener               SQLOpener // nil: no gate pool (gate_pool.go)
 		bunFactory               BunFactory
 		bunOptions               []BunOption
 		migrator                 Migrator
@@ -294,6 +301,7 @@ func defaultConfig() *config {
 		driverName:               "bun:pg",
 		sqlOpener:                pgSQLOpener(sessionConnParams),
 		migrationOpener:          pgSQLOpener(migrationConnParams),
+		gateOpener:               pgSQLOpener(gateConnParams),
 		bunFactory: func(db *sql.DB) (*bun.DB, error) {
 			if db == nil {
 				return nil, fmt.Errorf("bun factory: nil sql.DB")
@@ -593,6 +601,7 @@ func (d *Database) WithSQLOpener(opener SQLOpener) DatabaseArg {
 		if opener != nil {
 			c.sqlOpener = opener
 			c.migrationOpener = nil
+			c.gateOpener = nil
 		}
 	})
 }
@@ -819,10 +828,12 @@ func (d *Database) ClosePool(ctx context.Context) sql.DBStats {
 	bunDB := d.Bun
 	directDB := d.DirectDB
 	directBun := d.DirectBun
+	gate := d.Gate
 	d.DB = nil
 	d.Bun = nil
 	d.DirectDB = nil
 	d.DirectBun = nil
+	d.Gate = nil
 	d.isRunning = false
 	d.Unlock()
 
@@ -840,6 +851,10 @@ func (d *Database) ClosePool(ctx context.Context) sql.DBStats {
 
 	if directDB != nil {
 		_ = directDB.Close()
+	}
+
+	if gate != nil {
+		_ = gate.Close()
 	}
 
 	return stats
@@ -924,6 +939,19 @@ func (d *Database) logPoolStats() {
 		"waitCount", stats.WaitCount,
 		"waitDuration", stats.WaitDuration.String(),
 	)
+
+	// The write-gate pool is a second budget against the same ceiling; a gate
+	// that waits for a connection here is the pod being busy, and the line says so.
+	if gate := d.GateDB(); gate != nil {
+		g := gate.Stats()
+		d.Logger.Info("db gate pool stats",
+			"open", g.OpenConnections,
+			"inUse", g.InUse,
+			"maxOpen", g.MaxOpenConnections,
+			"waitCount", g.WaitCount,
+			"waitDuration", g.WaitDuration.String(),
+		)
+	}
 }
 
 func (d *Database) prepareForRun(ctx context.Context) (context.Context, context.CancelFunc, error) {
@@ -960,6 +988,10 @@ func (d *Database) prepareForRun(ctx context.Context) (context.Context, context.
 	// leaves DirectBun nil so DirectBunDB() falls back to the main pool rather
 	// than blocking startup (epic memql#1925).
 	d.openDirectPool()
+
+	// The pool write gates run on (memql#6022): its own connections, so a gate
+	// holder never waits for one to do its work. Best-effort like the direct pool.
+	d.openGatePool()
 
 	// Migrations run on the DIRECT endpoint when configured: the bun migrator
 	// takes a session-scoped pg_advisory_lock held across the whole migration,
@@ -1008,11 +1040,13 @@ func (d *Database) cleanupAfterRun() {
 	bunDB := d.Bun
 	directDB := d.DirectDB
 	directBun := d.DirectBun
+	gate := d.Gate
 	d.ticker = nil
 	d.DB = nil
 	d.Bun = nil
 	d.DirectDB = nil
 	d.DirectBun = nil
+	d.Gate = nil
 	d.isRunning = false
 	d.Unlock()
 
@@ -1034,6 +1068,10 @@ func (d *Database) cleanupAfterRun() {
 
 	if directDB != nil {
 		_ = directDB.Close()
+	}
+
+	if gate != nil {
+		_ = gate.Close()
 	}
 }
 
@@ -1216,6 +1254,29 @@ const (
 	directMaxIdleConns = 1
 )
 
+// The connections a process can open against max_connections, pool by pool, as
+// the deploy gate and the budget documentation count them
+// (scripts/deploy/conn-headroom-check.sh, which conn_headroom_test.go holds to
+// these; docs/public/operate/db-connection-budget.md). With the gate pool
+// (DefaultGatePoolSize, gate_pool.go) they are a process's four pools.
+const (
+	// DefaultRequestPoolSize is the main (request) pool's limit when nothing
+	// configures one (MAX_OPEN_CONNS under the database's env prefix).
+	DefaultRequestPoolSize = defaultRequestMaxOpenConns
+	// DirectPoolSize is the direct pool's fixed limit, opened only when a
+	// direct DSN is configured.
+	DirectPoolSize = directMaxOpenConns
+	// MigrationPoolSize is the connection a startup migration opens.
+	MigrationPoolSize = migrationMaxOpenConns
+)
+
+// defaultRequestMaxOpenConns and migrationMaxOpenConns are the request pool's
+// default limit and the startup migration pool's.
+const (
+	defaultRequestMaxOpenConns = 10
+	migrationMaxOpenConns      = 1
+)
+
 // openDirectSQL opens the direct (non-pooled) *sql.DB from DIRECT_DSN using the
 // same configured opener as the main pool (so a test-injected opener applies
 // to both), then clamps it to a small fixed pool. Caller guarantees
@@ -1297,8 +1358,8 @@ func (d *Database) migrationBunDB(fallback *bun.DB) (*bun.DB, func()) {
 		d.Logger.Warn("migration pool unavailable; migrating over the request pool under its statement timeout", "error", err)
 		return fallback, noop
 	}
-	sqlDB.SetMaxOpenConns(1)
-	sqlDB.SetMaxIdleConns(1)
+	sqlDB.SetMaxOpenConns(migrationMaxOpenConns)
+	sqlDB.SetMaxIdleConns(migrationMaxOpenConns)
 	migrationDB, err := d.config.bunFactory(sqlDB)
 	if err != nil {
 		_ = sqlDB.Close()
@@ -1705,10 +1766,10 @@ func pgSQLOpener(params func() map[string]any) SQLOpener {
 		// 25/node x ~20 pods at surge blew past the Tiger Cloud ceiling ->
 		// 53300 storms). Override per env via MAX_OPEN_CONNS / MAX_IDLE_CONNS;
 		// budget = (max_connections - reserved) / max_pods(steady+surge).
-		db.SetMaxOpenConns(10)                 // Max concurrent connections per node
-		db.SetMaxIdleConns(1)                  // Keep ONE idle connection warm (memql#1817)
-		db.SetConnMaxLifetime(1 * time.Hour)   // Rotate connections hourly
-		db.SetConnMaxIdleTime(2 * time.Minute) // Close idle connections after 2min (memql#1817)
+		db.SetMaxOpenConns(defaultRequestMaxOpenConns) // Max concurrent connections per node
+		db.SetMaxIdleConns(1)                          // Keep ONE idle connection warm (memql#1817)
+		db.SetConnMaxLifetime(1 * time.Hour)           // Rotate connections hourly
+		db.SetConnMaxIdleTime(2 * time.Minute)         // Close idle connections after 2min (memql#1817)
 
 		return db, nil
 	}

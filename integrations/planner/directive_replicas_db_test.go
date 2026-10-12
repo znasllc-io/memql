@@ -5,13 +5,13 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -54,9 +54,14 @@ func TestStandingDirectiveAppendSurvivesReplicaChange(t *testing.T) {
 			t.Fatal(err)
 		}
 		r := NewReactiveLoop(&draftDBCompiler{engine: engine}, testLogger())
-		r.writeGate = func(ctx context.Context, agentID string) (func(), error) {
-			return memql.AcquireWriteGate(ctx, db.DB, "agent-directive:"+strings.TrimPrefix(agentID, "v1:agents:agent:"))
+		// The replica's write-gate pool, as its database opens one (memql#6022):
+		// the directive's lock is held there, never on the engine's pool.
+		gates, err := database.NewGatePool(dbtest.DSN(), 0)
+		if err != nil {
+			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = gates.Close() })
+		r.writeGate = (&PlannerIntegration{gateDBGetter: func() *sql.DB { return gates }}).directiveGate
 		return r
 	}
 	one, two := newReplica(), newReplica()

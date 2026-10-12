@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/id"
@@ -311,7 +314,15 @@ func TestProcedureLifecycleDB_RecordedToTrustedAndBackToShadow(t *testing.T) {
 	// --- 4. The owner approves it through integrations/work's REAL decide
 	// handler, and the promotion decision moves shadow to canary.
 	decided := false
-	for _, c := range workspine.New(e, logger, func() *bun.DB { return db }).Capabilities() {
+	// Its approval-decision gate runs on a pool of its own (memql#6022), as deployed.
+	gates, err := database.NewGatePool(dbtest.DSN(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gates.Close() })
+	spine := workspine.New(e, logger, func() *bun.DB { return db })
+	spine.SetGateDB(func() *sql.DB { return gates })
+	for _, c := range spine.Capabilities() {
 		if c.Name != "decideApproval" {
 			continue
 		}

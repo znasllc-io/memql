@@ -57,7 +57,8 @@ const (
 	// layoutListPages bounds the walk over an organization's layouts at a hundred
 	// rows a page. Reaching it is a refusal and not a truncation: a picker that
 	// silently dropped layouts would be worse than one that said it could not list.
-	layoutListPages = 50
+	layoutListPages            = 50
+	maxLayoutListDocumentBytes = 8 << 20
 )
 
 func (w *Worker) handleSaveLayout(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -256,17 +257,42 @@ func (w *Worker) handleEmailLayouts(ctx context.Context, args map[string]any, _ 
 			"id": info.ID, "kind": "builtin", "name": info.Name, "description": info.Description, "document": document, "status": "active",
 		})
 	}
-	stored, err := w.store.EmailLayoutsForAccount(ctx, accountID, boolean(args, "includeArchived"))
-	if err != nil {
-		return nil, err
+	used := 0
+	appendDocument := func(row map[string]any) error {
+		encoded, err := json.Marshal(row["document"])
+		if err != nil {
+			return fmt.Errorf("email layout document: %w", err)
+		}
+		if len(encoded) > maxLayoutListDocumentBytes-used {
+			delete(row, "document")
+			row["documentOmitted"] = true
+		} else {
+			used += len(encoded)
+		}
+		return nil
 	}
-	for _, row := range stored {
+	for _, row := range rows {
+		if err := appendDocument(row); err != nil {
+			return nil, err
+		}
+	}
+	// Consume one page at a time: omitted documents need not stay in memory
+	// while the remaining pages are read.
+	err = w.store.eachEmailLayoutForAccount(ctx, accountID, boolean(args, "includeArchived"), func(row map[string]any) error {
 		layoutID := bare(str(row, "id"))
-		rows = append(rows, map[string]any{
+		listed := map[string]any{
 			"id": "org:" + layoutID, "layoutId": layoutID, "kind": "organization", "name": str(row, "name"), "description": str(row, "description"),
 			"document": row["document"], "status": str(row, "status"), "sourceArtifactId": bare(str(row, "sourceArtifactId")),
 			"revision": templateTime(row["createdAt"]).UTC().Format(time.RFC3339Nano),
-		})
+		}
+		if err := appendDocument(listed); err != nil {
+			return err
+		}
+		rows = append(rows, listed)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return resultRows("emailLayout", rows)
 }
@@ -301,23 +327,38 @@ func (s *Store) EmailLayoutByID(ctx context.Context, layoutID string) (map[strin
 // active ones, or all of them with includeArchived. It walks every page, since
 // a list that stopped at the first hundred would drop layouts without saying so.
 func (s *Store) EmailLayoutsForAccount(ctx context.Context, accountID string, includeArchived bool) ([]map[string]any, error) {
+	var out []map[string]any
+	err := s.eachEmailLayoutForAccount(ctx, accountID, includeArchived, func(row map[string]any) error {
+		out = append(out, row)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *Store) eachEmailLayoutForAccount(ctx context.Context, accountID string, includeArchived bool, visit func(map[string]any) error) error {
 	args := []arg{{"accountId", accountID}}
 	if !includeArchived {
 		args = append(args, arg{"status", "active"})
 	}
 	q := call("query", "emailLayoutsForAccount", args...)
-	var out []map[string]any
 	cursor := ""
 	for page := 0; page < layoutListPages; page++ {
 		rows, next, err := s.rowsPage(ctx, cursor, q)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		out = append(out, rows...)
+		for _, row := range rows {
+			if err := visit(row); err != nil {
+				return err
+			}
+		}
 		if next == "" {
-			return out, nil
+			return nil
 		}
 		cursor = next
 	}
-	return nil, errors.New("campaigns: emailLayoutsForAccount: this organization has more layouts than can be listed")
+	return errors.New("campaigns: emailLayoutsForAccount: this organization has more layouts than can be listed")
 }

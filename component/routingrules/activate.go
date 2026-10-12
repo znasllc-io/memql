@@ -19,6 +19,8 @@ package routingrules
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -105,7 +107,7 @@ func (a *Activator) Activate(ctx context.Context, owner string, f Form) (Result,
 
 	// 2. Gate 1: the real parser and binder, over the real corpus.
 	report := memql.ValidateBundle(source, "rules/rules.memql")
-	bundleId := bundleIdFor(res.Name)
+	bundleId := BundleIdFor(owner, res.Name)
 	res.BundleId = bundleId
 	if !report.OK {
 		res.Status = "failed"
@@ -160,27 +162,50 @@ func (a *Activator) Retire(ctx context.Context, owner, name string) (Result, err
 			"re-read from the embedded tree on every boot; a rule you want out of the way is out-ranked with a "+
 			"custom rule at a higher precedence, not removed", name)
 	}
-	bundleId := bundleIdFor(name)
+	bundleId := BundleIdFor(owner, name)
 	if err := a.engine.RetireActiveBundle(ctx, strings.TrimSpace(owner), bundleId, a.deps()); err != nil {
 		return Result{Name: name, BundleId: bundleId, Status: "failed", Error: err.Error()}, err
 	}
 	return Result{Name: name, BundleId: bundleId, Status: "retired", ConstructName: name}, nil
 }
 
-// bundleIdFor is DERIVED from the rule name rather than minted fresh, so
-// re-arming an edited rule supersedes its own previous bundle instead of
-// accumulating one per save. A rule is addressed by name everywhere else; this
-// keeps the bundle addressed the same way.
-func bundleIdFor(name string) string {
-	return "v1:authoring:bundle:routingrule-" + strings.ToLower(name)
+// BundleIdFor is the id of an owner's routing rule's bundle. It is DERIVED
+// rather than minted fresh, so re-arming an edited rule rewrites its own
+// bundle instead of accumulating one per save; a rule is addressed by name
+// everywhere else, and its bundle carries the name too.
+//
+// And it is derived from the OWNER as well as the name (memql#6022). Derived
+// from the name alone, the first person to arm a name -- or to create a bundle
+// at its id -- owned that id, and everybody else's rule of that name was
+// refused at the bundle write. Two people may each have a rule of one name;
+// neither one's derivation reaches the other's id, and no client can create a
+// bundle (createAuthoringBundle is @serverOnly). The owner is keyed bare, so
+// either spelling of one person derives one id.
+//
+// There is no rule row and no version: an edit rewrites the same bundle in
+// place. Nothing armed under the name-only id needs to be found again,
+// because nothing ever was: the bundle splitter Gate 1 runs has never
+// classified a `rule` region, so Gate 1 has refused every generated rule
+// since this package landed, and a refused rule is never activated.
+func BundleIdFor(owner, name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	sum := sha256.Sum256([]byte(memql.BareShortId(owner) + "\x00" + name))
+	return "v1:authoring:bundle:routingrule-" + name + "-" + hex.EncodeToString(sum[:16])
 }
 
 func constructIdFor(bundleId string) string {
 	return "v1:authoring:construct:" + strings.TrimPrefix(bundleId, "v1:authoring:bundle:")
 }
 
+// writeBundle writes the bundle, as a draft, then its one construct. Both
+// writes are @serverOnly (memql#6022), so each stamps internal origin, inline,
+// like the two gate writes below: the bundle because its id is known before it
+// is written, and a bundle anyone could create there first would block this
+// activation; the construct because an active bundle arms every construct it
+// holds, so only the pipeline that runs the gates writes one, and only while
+// the bundle is a draft.
 func (a *Activator) writeBundle(ctx context.Context, bundleId string, f Form, source string) error {
-	if err := a.render(ctx, "createAuthoringBundle", map[string]any{
+	if err := a.render(auth.ContextWithInternalOrigin(ctx), "createAuthoringBundle", map[string]any{
 		"bundleId": bundleId,
 		"title":    "Routing rule: " + ConstructNameFor(f),
 		"summary":  summaryFor(f),
@@ -188,7 +213,7 @@ func (a *Activator) writeBundle(ctx context.Context, bundleId string, f Form, so
 	}); err != nil {
 		return err
 	}
-	return a.render(ctx, "createAuthoringConstruct", map[string]any{
+	return a.render(auth.ContextWithInternalOrigin(ctx), "createAuthoringConstruct", map[string]any{
 		"constructId":     constructIdFor(bundleId),
 		"bundleId":        bundleId,
 		"kind":            "rule",

@@ -91,6 +91,37 @@ const (
 	backoffCap    = time.Hour
 )
 
+// newsletterGateWait is how long the newsletter's gate waits for its locks, in
+// total; zero is memql's default (6 s, under pgdriver's 10 s read deadline). A
+// variable only so a test can shorten it.
+var newsletterGateWait time.Duration
+
+// The lock keys of the campaigns domain. Every replica must derive the same text
+// for the same thing, so each prefix is written once, here.
+const (
+	newsletterLockPrefix = "campaign-newsletter:"
+	singleSendLockPrefix = "campaign-single-send:"
+)
+
+// newsletterLock is the key of one of the newsletter's locks: "site" for a
+// storefront, "audience" for the audience its forms feed.
+func newsletterLock(kind, id string) string { return newsletterLockPrefix + kind + ":" + id }
+
+// singleSendLock is the key of one single send's receipt.
+func singleSendLock(receiptID string) string { return singleSendLockPrefix + receiptID }
+
+// gateBusyRetry is how long a job waits, when a send found a lock busy, before the
+// next batch tries again.
+const gateBusyRetry = 15 * time.Second
+
+// gateHold is an open write gate: the transaction holding the newsletter's locks.
+// The holder gives them up when it is done, and can ask whether they are still
+// held (memql.GateHold) before it writes what they exist to protect.
+type gateHold interface {
+	Release()
+	Verify(context.Context) error
+}
+
 // ExecutionClaimer is the cross-replica claim gate (the automations
 // ClusterExecutionGuard satisfies it). Nil leaves a single-replica
 // deployment correct -- the poll is the only driver -- but MUST be wired
@@ -104,12 +135,18 @@ type ExecutionClaimer interface {
 
 // Worker drains v1:campaigns:sendJob rows.
 type Worker struct {
-	testGate       func(context.Context, string) (func(), error)
-	templateGate   func(context.Context, string) (func(), error)
-	layoutGate     func(context.Context, string) (func(), error)
-	singleSendGate func(context.Context, string) (func(), error)
+	testGate     func(context.Context, string) (func(), error)
+	templateGate func(context.Context, string) (func(), error)
+	layoutGate   func(context.Context, string) (func(), error)
+	// singleSendGate holds the receipt lock and verifies ownership before an attempt.
+	singleSendGate func(context.Context, string) (gateHold, error)
+	journeyGate    func(context.Context, string) (func(), error)
 	seriesGate     func(context.Context, string) (func(), error)
-	newsletterGate func(context.Context, string) (func(), error)
+	// newsletterGate takes the locks for the keys it is given -- full keys, from
+	// newsletterLock and singleSendLock -- in the order given, in ONE transaction on
+	// ONE connection of the gate pool (memql.AcquireGateHold). A flow that needs
+	// several names them together instead of taking them one inside another.
+	newsletterGate func(context.Context, ...string) (gateHold, error)
 	store          *Store
 	claimer        ExecutionClaimer
 	resolve        func() email.Sender
@@ -151,6 +188,16 @@ type Worker struct {
 	// deployment that has sent nothing still has a ladder to start.
 	activeIdentities map[string]bool
 
+	// digestSweep is the sweep of recipients written without an address digest
+	// (digest_sweep.go), installed by the application before Start. Nil means the
+	// worker never sweeps. digestSweepFirst and digestSweepEvery are the schedule;
+	// zero means the defaults, and only a test sets them. sweepDoneCh is closed
+	// when the sweep goroutine has returned; nil when none was started.
+	digestSweep      RecipientDigestSweep
+	digestSweepFirst time.Duration
+	digestSweepEvery time.Duration
+	sweepDoneCh      chan struct{}
+
 	cancel      context.CancelFunc
 	running     atomic.Bool
 	startOnce   sync.Once
@@ -167,53 +214,66 @@ type Worker struct {
 // time rather than at construction, mirroring the outbound email
 // transport: on a booting node the plug-in registry may not be populated
 // yet, and a sender captured at wiring time would be nil forever.
-func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() email.Sender, logger *slog.Logger, database ...func() *sql.DB) *Worker {
+//
+// gateDB resolves the pool the worker's write gates run on
+// (database.Database.GateDB, memql#6022): connections used for nothing else,
+// never the request pool the engine works on. Without one every gate refuses,
+// saying which wiring is missing.
+func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() email.Sender, logger *slog.Logger, gateDB ...func() *sql.DB) *Worker {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	cfg := LoadConfig()
+	var resolve func() *sql.DB
+	if len(gateDB) > 0 {
+		resolve = gateDB[0]
+	}
+	// gates resolves the gate pool or says which wiring is missing.
+	gates := func() (*sql.DB, error) {
+		return memql.ResolveWriteGatePool(resolve, "campaigns", "pass database.Database.GateDB to campaigns.NewWorker (a test or a tool opens one with database.NewGatePool)")
+	}
+	gate := func(ctx context.Context, key string) (func(), error) {
+		db, err := gates()
+		if err != nil {
+			return nil, err
+		}
+		return memql.AcquireWriteGate(ctx, db, key)
+	}
 	return &Worker{
 		testGate: func(ctx context.Context, key string) (func(), error) {
-			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
-			}
-			return memql.AcquireWriteGate(ctx, db, "campaign-test:"+key)
+			return gate(ctx, "campaign-test:"+key)
 		},
-		newsletterGate: func(ctx context.Context, key string) (func(), error) {
-			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
+		newsletterGate: func(ctx context.Context, keys ...string) (gateHold, error) {
+			db, err := gates()
+			if err != nil {
+				return nil, err
 			}
-			return memql.AcquireWriteGate(ctx, db, "campaign-newsletter:"+key)
+			hold, err := memql.AcquireGateHold(ctx, db, newsletterGateWait, keys...)
+			if err != nil {
+				return nil, err
+			}
+			return hold, nil
 		},
+		journeyGate: func(ctx context.Context, key string) (func(), error) { return gate(ctx, "campaign-journey:"+key) },
 		seriesGate: func(ctx context.Context, key string) (func(), error) {
-			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
-			}
-			return memql.AcquireWriteGate(ctx, db, "campaign-series:"+key)
+			return gate(ctx, "campaign-series:"+key)
 		},
-		singleSendGate: func(ctx context.Context, key string) (func(), error) {
-			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
+		singleSendGate: func(ctx context.Context, key string) (gateHold, error) {
+			db, err := gates()
+			if err != nil {
+				return nil, err
 			}
-			return memql.AcquireWriteGate(ctx, db, "campaign-single-send:"+key)
+			hold, err := memql.AcquireGateHold(ctx, db, 0, singleSendLock(key))
+			if err != nil {
+				return nil, err
+			}
+			return hold, nil
 		},
 		templateGate: func(ctx context.Context, key string) (func(), error) {
-			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
-			}
-			return memql.AcquireWriteGate(ctx, db, "campaign-template:"+key)
+			return gate(ctx, "campaign-template:"+key)
 		},
 		layoutGate: func(ctx context.Context, key string) (func(), error) {
-			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
-			}
-			return memql.AcquireWriteGate(ctx, db, "campaign-layout:"+key)
+			return gate(ctx, "campaign-layout:"+key)
 		},
 		store:      NewStore(engine),
 		claimer:    claimer,
@@ -228,47 +288,75 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 	}
 }
 
-// Start launches the drain loop. Idempotent; a no-op when disabled or
-// unwired.
+// Start launches the drain loop and, when the application installed one, the
+// digest sweep. Idempotent.
+//
+// The two are independent. The drain is off when campaigns are disabled
+// (MEMQL_CAMPAIGNS_ENABLED=false) or the engine is not wired; the sweep is not,
+// because recipients are written on a node whether or not it sends campaigns --
+// a signup, an email rule, the portal -- and a recipient written without a digest
+// (during a rollout) is found by the slower path until the sweep has filled it in.
 func (w *Worker) Start(_ context.Context) {
 	w.startOnce.Do(func() {
 		defer close(w.readyCh)
-		if !w.cfg.Enabled {
-			w.logger.Info("campaigns worker: disabled (MEMQL_CAMPAIGNS_ENABLED=false)")
-			close(w.doneCh)
-			return
-		}
-		if w.store == nil || w.store.engine == nil {
-			w.logger.Warn("campaigns worker: no engine wired; not starting")
-			close(w.doneCh)
-			return
-		}
-		// A loud, ONE-TIME warning rather than a refusal to start. The
-		// worker still has work to do without an unsubscribe secret --
-		// draining a paused or cancelled job to its terminal status -- and
-		// the actual refusal lives at campaignStartSend, where it can be
-		// reported to the operator who pressed the button instead of
-		// buried in a boot log.
-		if reason := w.cfg.RequireUnsubscribe(); reason != "" {
-			w.logger.Warn("campaigns worker: one-click unsubscribe is NOT configured, so no campaign can be started", "reason", reason)
-		}
-		// Said once, loudly: a malformed ladder leaves the ramp OFF, and an
-		// operator who configured warming and got none should learn it here
-		// rather than by watching a rate that never moves.
-		if w.cfg.WarmupStepsError != "" {
-			w.logger.Warn("campaigns worker: MEMQL_CAMPAIGNS_WARMUP_STEPS is malformed, so the warming ramp is DISABLED",
-				"error", w.cfg.WarmupStepsError)
-		} else if w.cfg.WarmupEnabled {
-			w.logger.Info("campaigns worker: warming ramp enabled",
-				"identity", w.cfg.SendingIdentity, "steps", w.cfg.WarmupSteps)
-		}
 		runCtx, cancel := context.WithCancel(context.Background())
+		var sweepDone chan struct{}
+		if w.digestSweep != nil {
+			sweepDone = make(chan struct{})
+		}
+		drain := w.drainWanted()
+		if !drain {
+			close(w.doneCh)
+		}
+		if !drain && sweepDone == nil {
+			cancel()
+			return
+		}
 		w.mu.Lock()
 		w.cancel = cancel
+		w.sweepDoneCh = sweepDone
 		w.mu.Unlock()
 		w.running.Store(true)
-		go w.loop(runCtx)
+		if drain {
+			go w.loop(runCtx)
+		}
+		if sweepDone != nil {
+			go w.digestSweepLoop(runCtx, sweepDone)
+		}
 	})
+}
+
+// drainWanted says whether the drain loop should run on this node, and says why
+// when it should not.
+func (w *Worker) drainWanted() bool {
+	if !w.cfg.Enabled {
+		w.logger.Info("campaigns worker: disabled (MEMQL_CAMPAIGNS_ENABLED=false)")
+		return false
+	}
+	if w.store == nil || w.store.engine == nil {
+		w.logger.Warn("campaigns worker: no engine wired; not starting")
+		return false
+	}
+	// A loud, ONE-TIME warning rather than a refusal to start. The
+	// worker still has work to do without an unsubscribe secret --
+	// draining a paused or cancelled job to its terminal status -- and
+	// the actual refusal lives at campaignStartSend, where it can be
+	// reported to the operator who pressed the button instead of
+	// buried in a boot log.
+	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
+		w.logger.Warn("campaigns worker: one-click unsubscribe is NOT configured, so no campaign can be started", "reason", reason)
+	}
+	// Said once, loudly: a malformed ladder leaves the ramp OFF, and an
+	// operator who configured warming and got none should learn it here
+	// rather than by watching a rate that never moves.
+	if w.cfg.WarmupStepsError != "" {
+		w.logger.Warn("campaigns worker: MEMQL_CAMPAIGNS_WARMUP_STEPS is malformed, so the warming ramp is DISABLED",
+			"error", w.cfg.WarmupStepsError)
+	} else if w.cfg.WarmupEnabled {
+		w.logger.Info("campaigns worker: warming ramp enabled",
+			"identity", w.cfg.SendingIdentity, "steps", w.cfg.WarmupSteps)
+	}
+	return true
 }
 
 // Stop cancels the loop.
@@ -277,10 +365,14 @@ func (w *Worker) Stop(_ context.Context) {
 		w.mu.Lock()
 		cancel := w.cancel
 		w.cancel = nil
+		sweepDone := w.sweepDoneCh
 		w.mu.Unlock()
 		if cancel != nil {
 			cancel()
 			<-w.doneCh
+			if sweepDone != nil {
+				<-sweepDone
+			}
 		}
 		w.running.Store(false)
 	})
@@ -549,8 +641,9 @@ func (w *Worker) sendBatch(
 	identity, refusal := w.resolveSendIdentity(ownerCtx, campaign)
 	if refusal.refused() {
 		if refusal.Terminal {
+			// failJob also marks the campaign `failed` with this reason, which is
+			// where the operator who picked the mailbox looks.
 			w.failJob(systemCtx, *job, refusal.Reason)
-			w.stampCampaignError(ownerCtx, campaign.ID, refusal.Reason)
 			return errors.New(refusal.Reason)
 		}
 		w.stampCampaignError(ownerCtx, campaign.ID, refusal.Reason)
@@ -664,16 +757,33 @@ func (w *Worker) processRecipient(
 		return false, nil
 	}
 
-	token, err := MintUnsubscribeToken(w.cfg.UnsubscribeSecret, UnsubscribePayload{OwnerUserID: job.CampaignOwnerUserID, RecipientID: r.ID, CampaignID: campaign.ID, AccountID: campaign.AccountID, EmailDigest: digest})
+	// The template is the frozen copy the job was queued with when it has one,
+	// so the view link names what was reviewed and sent and not what the
+	// template has become since. The sender it names is the one the footer shows
+	// (footerSender), which is the options' business and so comes first.
+	opts := w.renderOptions(ownerCtx, campaign, identity, r.ID)
+	links, err := w.messageLinks(linkRequest{
+		OwnerUserID: job.CampaignOwnerUserID, RecipientID: r.ID, CampaignID: campaign.ID, AccountID: campaign.AccountID,
+		EmailDigest: digest, TemplateID: tmpl.ID, TemplateRevision: tmpl.Revision,
+		CampaignName: campaign.Name, SenderName: footerSender(opts),
+	})
 	if err != nil {
-		w.failJob(systemCtx, *job, "cannot mint an unsubscribe token: "+err.Error())
+		w.failJob(systemCtx, *job, "cannot mint the links for the message: "+err.Error())
 		return true, err
 	}
-	msg, err := renderMessage(campaign, tmpl, r, unsubscribeURL(w.cfg.UnsubscribeBaseURL, token), w.renderOptions(ownerCtx, campaign, identity, r.ID))
+	opts.Links = links
+	msg, err := renderMessage(campaign, tmpl, r, opts)
 	if err != nil {
 		// Mirrors the mint failure above: a message we cannot render is a job
 		// that cannot proceed, not a recipient to skip silently.
-		w.failJob(systemCtx, *job, "cannot render the message: "+err.Error())
+		reason := "cannot render the message: " + err.Error()
+		var fault templateFault
+		if errors.As(err, &fault) {
+			// The template's author reads this on the campaign. It is already a
+			// sentence that says what to fix; a wrapper would only bury it.
+			reason = fault.Error()
+		}
+		w.failJob(systemCtx, *job, reason)
 		return true, err
 	}
 
@@ -681,6 +791,15 @@ func (w *Worker) processRecipient(
 	sendCtx, cancel := context.WithTimeout(ctx, w.cfg.SendTimeout)
 	err = w.deliver(sendCtx, msg, identity.SendAs)
 	cancel()
+	// A lock that was busy is nothing attempted: the message was never judged and
+	// no attempt is spent on it. It is handled as the pause a provider asks for --
+	// the delivery stays retryable and the job waits a moment, so the rest of the
+	// batch does not spend the same busy lock one recipient at a time.
+	if err != nil && memql.IsWriteGateBusy(err) {
+		if _, throttled := email.IsThrottled(err); !throttled {
+			err = &email.SendError{Throttled: true, RetryAfter: gateBusyRetry, Detail: err.Error(), Cause: err}
+		}
+	}
 
 	attempts := item.attempts + 1
 	if err == nil {
@@ -747,6 +866,20 @@ func (w *Worker) processRecipient(
 	return false, nil
 }
 
+// reserveDelivery asks the transport for whatever it must hold before it can begin
+// delivering msg (email.Reserver), and returns the context to deliver with and the
+// function that gives it back. A transport with nothing to reserve, and a test's
+// send hook, reserve nothing.
+func (w *Worker) reserveDelivery(ctx context.Context, msg email.Message, as email.SendAs) (context.Context, func(), error) {
+	if w.sendHook != nil {
+		return ctx, func() {}, nil
+	}
+	if reserver, ok := w.resolveSender().(email.Reserver); ok {
+		return reserver.Reserve(ctx, msg, as)
+	}
+	return ctx, func() {}, nil
+}
+
 // deliver hands one message to the transport as the resolved identity.
 //
 // `as` is a PARAMETER rather than a header on the message, and that placement
@@ -767,7 +900,9 @@ func (w *Worker) deliver(ctx context.Context, msg email.Message, as email.SendAs
 }
 
 // renderOptions assembles everything one rendered message needs beyond the
-// campaign / template / recipient triple.
+// campaign / template / recipient triple, except its links: they carry the name
+// the footer shows, which these options decide, so the caller makes them after
+// and sets them.
 //
 // It runs under the OWNER's context because the one read it makes -- the
 // account's display name for {{accountName}} -- is composite-tier and belongs
@@ -784,7 +919,9 @@ func (w *Worker) renderOptions(ownerCtx context.Context, campaign Campaign, iden
 	return RenderOptions{
 		ReplyTo:     replyToFor(campaign, identity),
 		AccountName: accountName,
-		Tracking:    w.cfg.trackingRenderFor(campaign, deliveryRowID(campaign.ID, recipientID)),
+		// The footer names the display name the message goes out under.
+		SenderName: identity.SendAs.FromName,
+		Tracking:   w.cfg.trackingRenderFor(campaign, deliveryRowID(campaign.ID, recipientID)),
 	}
 }
 
@@ -936,6 +1073,21 @@ func (w *Worker) completeJob(systemCtx, ownerCtx context.Context, job SendJob, c
 		"sent", job.SentCount, "skipped", job.SkippedCount, "failed", job.FailedCount)
 }
 
+// failJob ends a send job terminally and carries the failure to its campaign.
+//
+// The job row is clusterOwner-tier and the operator never reads it; the
+// campaign is the row they do read. Failing only the job left the campaign
+// reading `sending` behind a job nothing would ever drain again -- a send that
+// looks in flight and is not (memql#6022) -- so the failure and its reason are
+// written to both.
+//
+// The campaign write is the OWNED-tier one, made under the campaign owner's
+// borrowed identity exactly like completeJob's. A job that names no owner fails
+// without it: ownerActorContext hands a blank owner back the engine's own
+// context, and the campaign must not be written as the cluster.
+//
+// Both writes are best-effort and independent -- a failed one is logged, never
+// returned, and the job's failure does not wait on the campaign's.
 func (w *Worker) failJob(systemCtx context.Context, job SendJob, reason string) {
 	now := w.now().UTC()
 	status := "failed"
@@ -944,6 +1096,15 @@ func (w *Worker) failJob(systemCtx context.Context, job SendJob, reason string) 
 		Status: &status, LastError: &detail, CompletedAt: &now,
 	}); err != nil {
 		w.logger.Warn("campaigns worker: could not fail send job", "error", err)
+	}
+	if job.CampaignOwnerUserID != "" {
+		ownerCtx := w.ownerActorContext(systemCtx, job.CampaignOwnerUserID)
+		if err := w.store.UpdateCampaignProgress(ownerCtx, job.CampaignID, CampaignProgress{
+			Status: &status, LastError: &detail, CompletedAt: &now,
+		}); err != nil {
+			w.logger.Warn("campaigns worker: could not mark the campaign of a failed send job as failed",
+				"job", job.ID, "campaign", job.CampaignID, "error", err)
+		}
 	}
 	w.logger.Warn("campaigns worker: send job failed", "job", job.ID, "reason", reason)
 }

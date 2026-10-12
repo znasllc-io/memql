@@ -108,6 +108,7 @@ func TestEveryRenderedCallParses(t *testing.T) {
 				CampaignID: awkward, RecipientID: awkward, Email: awkward,
 				Status: "failed", SkipReason: awkward, LastError: awkward,
 				SentAt: now, Attempts: 2, NextAttemptAt: now,
+				RequestID: awkward, TemplateID: awkward, SenderIdentityID: awkward,
 			})
 		}},
 		{"updateCampaignProgress", func() error {
@@ -139,6 +140,14 @@ func TestEveryRenderedCallParses(t *testing.T) {
 		}},
 		{"deliveryLedgerForCampaign", func() error { _, err := store.Ledger(ctx, awkward); return err }},
 		{"recipientById", func() error { _, _, err := store.RecipientByID(ctx, awkward); return err }},
+		{"recipientInAudienceByDigest", func() error {
+			_, err := store.RecipientsInAudienceByDigest(ctx, awkward, strings.Repeat("a", 64))
+			return err
+		}},
+		{"recipientsWithoutDigestInAudience", func() error {
+			_, err := store.RecipientsWithoutDigestInAudience(ctx, awkward)
+			return err
+		}},
 
 		// identity + accounts (memql#4821, #4822)
 		{"senderIdentityById", func() error { _, _, err := store.SenderIdentityByID(ctx, awkward); return err }},
@@ -169,10 +178,10 @@ func TestEveryRenderedCallParses(t *testing.T) {
 			return err
 		}},
 		{"addRecipient (no fields)", func() error {
-			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, nil)
+			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, "subscribed", nil)
 		}},
 		{"addRecipient (awkward field keys)", func() error {
-			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, map[string]string{
+			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, "subscribed", map[string]string{
 				// The header shapes a real spreadsheet produces. A bare key
 				// here is a parse error, which is memql#4265's whole shape.
 				"Company Name": awkward,

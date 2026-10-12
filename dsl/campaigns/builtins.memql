@@ -152,7 +152,7 @@ builtin campaignImportRecipients {
   hasHeader   bool  @description("Whether the first row is a header. Defaults true. A file with no header cannot be imported: the column mapping IS the header, and guessing which column holds addresses is how an import mails the wrong list.")
 }
 
-@description("Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer carries an obviously-inert token. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of.")
+@description("Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer and the four link tags ({{unsubscribeUrl}}, {{preferencesUrl}}, {{viewUrl}}, {{confirmUrl}}) carry an obviously-inert token, so every link renders and none of them does anything. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of.")
 @sdk
 @executor("integration.campaigns.testSend")
 builtin campaignTestSend {
@@ -226,7 +226,7 @@ builtin campaignSaveLayout {
   action            string   @description("save (default), archive or restore.")
 }
 
-@description("The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. The id is opaque: pass it to composeMaterialize as layoutId.")
+@description("The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId.")
 @sdk
 @executor("integration.campaigns.emailLayouts")
 builtin emailLayouts {
@@ -262,7 +262,7 @@ builtin campaignConfigureSeries {
 builtin campaignConfigureNewsletter {
   siteId string!
   audienceId string!
-  templateId string!
+  templateId string
   senderIdentityId string!
   consentText string!
   enabled bool!
@@ -340,3 +340,68 @@ builtin campaignFlushReputation {  }
 @executor("integration.campaigns.campaignProcessSelected")
 @args(profile="object")
 builtin campaignProcessSelected { id string! }
+
+/// Render a published operational rule template and stage one authorized cluster recipient in the server outbox.
+@executor("integration.campaigns.stageOperationalEmail")
+builtin campaignStageOperationalEmail {
+ requestId string!
+ templateId string!
+ to string!
+ displayName string
+ dedupeKey string!
+ emailRuleId string!
+}
+
+/// Retry due single-recipient sends inside the campaign drain scope.
+@executor("integration.campaigns.campaignRetryDeferredSends")
+builtin campaignRetryDeferredSends { }
+
+@sdk
+@description("Save an email automation with an exact revision. Omit expectedRevision to create one under a new caller-generated id. Editable while draft or paused. Never sends mail; returns the revision and what still blocks turning it on.")
+@executor("integration.campaigns.saveJourney")
+builtin campaignSaveJourney {
+  journeyId         string!   @description("Stable caller-generated id; reuse it after an uncertain create.")
+  accountId         string!   @description("Owning organization; immutable after creation.")
+  name              string!
+  description       string
+  trigger           object!   @description("{kind: joined | confirmed, audienceId}")
+  steps             []object! @description("Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, timeoutDays?}")
+  expectedRevision  string    @description("Exact revision from journeyById; omit when creating.")
+}
+
+@sdk
+@description("Turn an email automation on, pause it, or archive it. Turning on checks templates, senders and the audience first; archiving is permanent and exits everyone still in it.")
+@executor("integration.campaigns.setJourneyState")
+builtin campaignSetJourneyState {
+  journeyId         string!
+  action            enum("activate", "pause", "archive")!
+  expectedRevision  string!
+}
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignDrainJourneys")
+builtin campaignDrainJourneys {  }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneyExit")
+builtin campaignJourneyExit { reason string! }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneyComplete")
+builtin campaignJourneyComplete {  }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneyAdvance")
+builtin campaignJourneyAdvance {  }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneyWait")
+builtin campaignJourneyWait {  }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneyAwaitConfirmation")
+builtin campaignJourneyAwaitConfirmation {  }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneySend")
+builtin campaignJourneySend {  }

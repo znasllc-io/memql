@@ -14,6 +14,7 @@
 package app
 
 import (
+	"database/sql"
 	"log/slog"
 	"net/http"
 	"os"
@@ -369,6 +370,23 @@ func (a *App) directDBGetter() func() *bun.DB {
 			return nil
 		}
 		return a.db.DirectBunDB()
+	}
+}
+
+// gateDBGetter returns the *sql.DB resolver for the pool WRITE GATES run on
+// (memql#6022): connections used for nothing else, opened beside the request pool
+// by the database component (component/database, gate_pool.go;
+// MEMQL_DB_GATE_POOL_SIZE, 4 by default). Everything that takes a write gate
+// resolves its pool here. It is never the request pool -- the work under a gate
+// needs a connection of that one, and its sessions end an idle transaction after
+// 60 s, which would take the gate's lock with them -- and there is no fallback to
+// it: nil means "shared write coordination is unavailable", and the gate says so.
+func (a *App) gateDBGetter() func() *sql.DB {
+	return func() *sql.DB {
+		if a.db == nil {
+			return nil
+		}
+		return a.db.GateDB()
 	}
 }
 

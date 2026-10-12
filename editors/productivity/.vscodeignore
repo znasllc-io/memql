@@ -2,6 +2,8 @@ src/**
 test/**
 node_modules/**
 dist-test/**
+gallery/**
+dist-gallery/**
 *.map
 *.ts
 *.json.map

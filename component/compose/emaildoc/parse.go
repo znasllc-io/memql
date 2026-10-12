@@ -140,14 +140,20 @@ const (
 // hrefProblem says what is wrong with a link, or "" when it is allowed. A link
 // is empty (when allowEmpty), a web address (http:// or https://), an email
 // address (mailto:), a phone number (tel:) or exactly one of the four link
-// merge tags. It is at most 2000 bytes and holds no space, control character,
-// quote, angle bracket, backtick or backslash.
+// merge tags, which appear nowhere else in it. It is at most 2000 bytes and
+// holds no space, control character, quote, angle bracket, backtick or
+// backslash.
 //
 // A merge tag is replaced with a value a recipient supplied, and that value
 // must never choose where a link goes. So no other merge tag may stand where
 // the site is chosen: a web address takes merge tags in its path, query and
 // fragment ("https://example.com/?e={{email}}") but not in its host, user name
 // or port, and an email or phone link takes none.
+//
+// A link tag is the recipient's own signed link, and it is a link by itself or
+// plain text, never part of another address: inside one
+// ("https://x.test/?u={{unsubscribeUrl}}") it would be handed to that site when
+// the recipient clicks.
 func hrefProblem(href string, allowEmpty bool) string {
 	if href == "" {
 		if allowEmpty {
@@ -158,6 +164,11 @@ func hrefProblem(href string, allowEmpty bool) string {
 	for _, tag := range linkTags {
 		if href == tag {
 			return ""
+		}
+	}
+	for _, tag := range linkTags {
+		if strings.Contains(href, tag) {
+			return tag + " must be the whole link, never part of another address"
 		}
 	}
 	if len(href) > maxHrefBytes {
@@ -832,6 +843,13 @@ func fourLengths(raw json.RawMessage, name string) (*[4]float64, error) {
 // absent value, except where noted. Links, columns and nested blocks are read
 // by the caller.
 func blockProblem(b *Block) string {
+	if b.Type != typeText {
+		for _, text := range append([]string{b.Text, b.Label, b.Alt, b.Title}, b.Lines...) {
+			if problem := LinkTextProblem(text); problem != "" {
+				return problem
+			}
+		}
+	}
 	switch b.Role {
 	case "", "brand", "content":
 	default:
@@ -979,31 +997,8 @@ func inlineMarks(s string) int {
 // markdownProblem reads the Markdown of a text block and applies the link rule
 // to every link in it. A link in Markdown always has an address.
 func markdownProblem(text string) string {
-	elements, err := parseMarkdown(text)
-	if err != nil {
-		return err.Error()
-	}
-	linkProblem := func(inline []mdInline) string {
-		for _, node := range inline {
-			if node.Kind == mdLink {
-				if problem := hrefProblem(node.URL, false); problem != "" {
-					return problem
-				}
-			}
-		}
-		return ""
-	}
-	for _, element := range elements {
-		if problem := linkProblem(element.Inline); problem != "" {
-			return problem
-		}
-		for _, item := range element.Items {
-			if problem := linkProblem(item.Inline); problem != "" {
-				return problem
-			}
-		}
-	}
-	return ""
+	_, _, problem := markdownLinkFacts(text)
+	return problem
 }
 
 // columns reads the columns of a columns block: one to four, each a width in

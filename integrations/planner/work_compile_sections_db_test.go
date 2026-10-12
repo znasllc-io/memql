@@ -118,11 +118,12 @@ func TestCompileSectionsDB_ACataloguedSectionRunsFromTheDraft(t *testing.T) {
 	for n, name := range []string{"summariseInvoices", "countInvoiceLines"} {
 		arg := []string{"month", "invoiceSummary"}[n]
 		bundleId, constructId := "sections-bundle-"+name, "sections-"+name
-		write(false, "createAuthoringBundle", map[string]any{"bundleId": bundleId, "title": name})
-		write(false, "createAuthoringConstruct", map[string]any{"constructId": constructId, "bundleId": bundleId, "kind": "automation",
+		// @serverOnly: the pipeline's write.
+		write(true, "createAuthoringBundle", map[string]any{"bundleId": bundleId, "title": name})
+		write(true, "createAuthoringConstruct", map[string]any{"constructId": constructId, "bundleId": bundleId, "kind": "automation", // @serverOnly: the pipeline's write while the bundle is a draft
 			"name": name, "targetNamespace": authoredTargetNamespace, "source": catalogSource(name, "Answer a section.", arg)})
 		write(false, "setConstructStatus", map[string]any{"constructId": constructId, "status": "active"})
-		write(false, "activateAuthoringBundle", map[string]any{"bundleId": bundleId})
+		write(true, "activateAuthoringBundle", map[string]any{"bundleId": bundleId}) // @serverOnly: the gated activation's write
 		write(false, "catalogueConstruct", map[string]any{"constructId": constructId, "catalogKey": name, "catalogMatchText": "kind:automation intent:Answer a section.", "fromBundleId": bundleId})
 		write(true, "recordConstructGoalSignature", map[string]any{"constructId": constructId, "goalSignature": work.SectionSignature(workSection(usable[n]))})
 	}

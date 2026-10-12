@@ -62,11 +62,18 @@ const maxFanout = 200
 // cannot prove it is first must not send.
 type FirstFireClaim func(ctx context.Context, ruleID, rowID string) bool
 
+// FirstFireRelease gives back the claim a created rule took for a row, so the row's
+// firing can be made again. It is for a firing that ended with nothing attempted --
+// the cluster's lock was busy -- and only that: a firing that began a send keeps its
+// claim, which is what keeps the row from sending twice.
+type FirstFireRelease func(ctx context.Context, ruleID, rowID string)
+
 // Firer executes one rule against one triggering event.
 type Firer struct {
-	store *Store
-	claim FirstFireClaim
-	gate  FiringGate
+	store   *Store
+	claim   FirstFireClaim
+	release FirstFireRelease
+	gate    FiringGate
 }
 
 func NewFirer(engine Engine) *Firer { return &Firer{store: NewStore(engine)} }
@@ -74,6 +81,14 @@ func NewFirer(engine Engine) *Firer { return &Firer{store: NewStore(engine)} }
 // WithFirstFireClaim returns the Firer with the claim a created rule needs.
 func (f *Firer) WithFirstFireClaim(claim FirstFireClaim) *Firer {
 	f.claim = claim
+	return f
+}
+
+// WithFirstFireRelease returns the Firer with the release that goes with the claim.
+// Without one, a created rule's firing that was held up by a busy lock keeps its
+// claim, and the row can never fire again.
+func (f *Firer) WithFirstFireRelease(release FirstFireRelease) *Firer {
+	f.release = release
 	return f
 }
 
@@ -91,11 +106,17 @@ type FireOutcome struct {
 	Lane       string
 	Recipients int
 	Sent       int
+	Deferred   int
 	Skipped    int
 	Refusals   []string
 	// Duplicate is a created rule's second firing for one row -- two writes
 	// raced on a new row -- which sends nothing and is not counted as a firing.
 	Duplicate bool
+	// Busy: a send found the cluster's lock busy and, after a few short pauses,
+	// still busy. Nothing was attempted for that recipient, the rule's fault it is
+	// not, and a created rule's claim for the row was given back so the row can fire
+	// again.
+	Busy bool
 }
 
 // Fire resolves the rule, decides the lane from who receives, and sends.
@@ -131,6 +152,18 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 		return out, nil
 	}
 
+	// A ROW-ADDRESS RULE LOOKS AT THE MAILBOX BEFORE IT CLAIMS THE ROW (below). The
+	// claim is the row's one chance, and a firing that ends in a refusal -- "could not
+	// tell yet", or a read that failed and will be retried -- has not used it: claimed
+	// first, it would leave the row with a claim taken and no mail, and nothing could
+	// ever fire for it again.
+	var plan rowAddressPlan
+	if rule.RecipientMode == ModeRowAddress {
+		if plan, err = f.planRowAddress(ctx, rule, event, &out); err != nil {
+			return out, err
+		}
+	}
+
 	// A CREATED RULE SENDS ONCE PER ROW. Its trigger already admits only the
 	// write that materialised a row's first version (firstVersionGuard); this
 	// closes the one gap the trigger cannot see. Two writes racing on a new id
@@ -139,22 +172,33 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 	// claim is a primary-key insert, so exactly one firing -- on any replica,
 	// with no local state -- wins. The loser is a duplicate of a creation that
 	// already fired: it sends nothing and is not recorded as a firing.
-	if strings.TrimSpace(rule.EventKind) == "created" {
+	claimed := false
+	if !plan.refused && strings.TrimSpace(rule.EventKind) == "created" {
 		if f.claim == nil || !f.claim(ctx, rule.ID, nodeID) {
 			out.Duplicate = true
 			return out, nil
 		}
+		claimed = true
 	}
 
-	switch rule.RecipientMode {
-	case ModeClusterRoles:
+	switch {
+	case plan.refused:
+		// Said while planning; the firing is recorded below, with the reason.
+	case rule.RecipientMode == ModeClusterRoles:
 		err = f.fireOperational(ctx, rule, nodeID, event, &out)
-	case ModeAudience:
+	case rule.RecipientMode == ModeAudience:
 		err = f.fireAudience(ctx, rule, nodeID, event, &out)
-	case ModeRowAddress:
-		err = f.fireRowAddress(ctx, rule, nodeID, event, &out)
+	case rule.RecipientMode == ModeRowAddress:
+		err = f.fireRowAddress(ctx, rule, nodeID, event, plan, &out)
 	default:
 		err = fmt.Errorf("emailrules: rule %q has recipient mode %q, which this engine does not know", ruleID, rule.RecipientMode)
+	}
+
+	// A send that found the cluster's lock busy attempted nothing. The row's claim
+	// goes back with it: kept, the row's one chance would be spent on a firing that
+	// sent no mail, and nothing could fire for it again.
+	if out.Busy && claimed && f.release != nil {
+		f.release(ctx, rule.ID, nodeID)
 	}
 
 	// The firing is recorded either way. A rule that fired and failed is a
@@ -245,13 +289,14 @@ func (f *Firer) fireOperational(ctx context.Context, rule Rule, nodeID string, e
 	if !ok {
 		return fmt.Errorf("emailrules: rule %q names template %q, which is not readable", rule.ID, rule.TemplateID)
 	}
+	if str(tmpl, "status") != "ready" {
+		return fmt.Errorf("publish the rule's template before it can send")
+	}
 	users, err := f.store.UsersInRoles(auth.ContextWithInternalOrigin(ctx))
 	if err != nil {
 		return err
 	}
 	wanted := NormalizedRoles(rule.RecipientRoles)
-	subject := str(tmpl, "subject")
-	body := str(tmpl, "textBody")
 
 	for _, u := range users {
 		role := strings.ToLower(str(u, "role"))
@@ -284,7 +329,7 @@ func (f *Firer) fireOperational(ctx context.Context, rule Rule, nodeID string, e
 			stamp, _ := event["timestamp"].(string)
 			key = dedupeKey(rule.ID, nodeID, stamp, email)
 		}
-		if err := f.store.StageOutbound(ctx, "obr"+key, email, subject, body, key, rule.OwnerUserID); err != nil {
+		if err := f.store.StageOperationalEmail(ctx, "obr"+key, rule.TemplateID, email, str(u, "displayName"), key, rule.ID); err != nil {
 			out.Refusals = append(out.Refusals, err.Error())
 			continue
 		}
@@ -311,62 +356,117 @@ func roleWanted(role string, wanted []string) bool {
 
 // fireAudience mails an existing audience through the campaign machinery.
 func (f *Firer) fireAudience(ctx context.Context, rule Rule, nodeID string, event map[string]any, out *FireOutcome) error {
-	recipients, err := f.store.RecipientsForAudience(ctx, rule.AudienceID)
-	if err != nil {
-		return err
-	}
-	for _, r := range recipients {
-		out.Recipients++
-		if out.Recipients > maxFanout {
-			out.Refusals = append(out.Refusals, fmt.Sprintf("stopped at %d recipients; an audience this size is a campaign, and a campaign has the pacing, the ledger and the warm-up a rule does not", maxFanout))
-			break
+	return f.store.EachSendableRecipient(ctx, rule.AudienceID, func(r map[string]any) bool {
+		if out.Recipients >= maxFanout {
+			out.Refusals = append(out.Refusals, fmt.Sprintf("stopped at %d recipients; an audience this size is a campaign", maxFanout))
+			return false
 		}
+		out.Recipients++
 		f.sendMarketing(ctx, rule, nodeID, str(r, "id"), event, out)
-	}
-	return nil
+		return !out.Busy
+	})
 }
 
-// fireRowAddress mails one address read off the TRIGGERING EVENT.
+// rowAddressPlan is what a row-address firing settles before it claims anything:
+// the address, and whom to mail for it.
+type rowAddressPlan struct {
+	// refused: the firing ends here, with the reason already in the outcome.
+	refused bool
+	address string
+	// target is the recipient the send is addressed to; found is false when the
+	// address is in no row of the audience and has to be enrolled first.
+	target string
+	found  bool
+}
+
+// planRowAddress reads the address off the TRIGGERING EVENT and finds its
+// mailbox in the rule's audience. It writes nothing.
 //
-// Off the event, not off the row: see this file's header. The address is
-// enrolled into the rule's audience first, because an unsubscribe token is
-// minted from (owner, recipient, campaign) -- an address with no recipient row
-// has no way to opt out, and marketing mail nobody can unsubscribe from is the
-// one thing this engine will not send.
-func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, event map[string]any, out *FireOutcome) error {
+// Off the event, not off the row: see this file's header.
+//
+// Whether the address is a member already is found by its digest and, for the
+// rows that carry none, by comparing addresses (Store.MailboxMembers), not by
+// listing the audience (memql#6022, F9). The rows are found in any state, and ANY
+// row that is not subscribed keeps the mailbox from being enrolled again or
+// mailed through a subscribed sibling: the send goes to the row that opted out,
+// where the send path refuses it and writes the ledger row the operator is owed.
+// The reads are fresh ones, because they decide whether to write: a cached
+// "nobody" from before another replica's enrolment would enrol the mailbox a
+// second time.
+func (f *Firer) planRowAddress(ctx context.Context, rule Rule, event map[string]any, out *FireOutcome) (rowAddressPlan, error) {
+	plan := rowAddressPlan{refused: true}
 	address := strings.TrimSpace(payloadField(event, rule.RecipientField))
 	if address == "" {
 		out.Refusals = append(out.Refusals, fmt.Sprintf("the triggering row carries no %q, so there is nobody to mail", rule.RecipientField))
-		return nil
+		return plan, nil
 	}
-	if !strings.Contains(address, "@") {
+	// An address with no digest cannot be looked up, deduplicated or suppressed,
+	// and the send would refuse it anyway: say so before anything is written.
+	if addressDigest(address) == "" {
 		out.Refusals = append(out.Refusals, fmt.Sprintf("%q is not an address", rule.RecipientField))
-		return nil
+		return plan, nil
 	}
 
-	recipients, err := f.store.RecipientsForAudience(ctx, rule.AudienceID)
+	members, complete, err := f.store.MailboxMembers(memql.ContextWithFreshRead(ctx), rule.AudienceID, address)
 	if err != nil {
-		return err
+		return plan, err
 	}
-	target := ""
-	for _, r := range recipients {
-		if strings.EqualFold(strings.TrimSpace(str(r, "email")), address) {
-			target = str(r, "id")
-			break
-		}
+	if !complete {
+		out.Refusals = append(out.Refusals, fmt.Sprintf(
+			"could not check every membership for %q in the audience. Nothing was sent; try again later",
+			rule.RecipientField))
+		return plan, nil
 	}
-	if target == "" {
+	plan.refused, plan.address = false, address
+	plan.target, plan.found = mailboxTarget(members)
+	return plan, nil
+}
+
+// fireRowAddress mails one address read off the TRIGGERING EVENT, as planned.
+//
+// The address is enrolled into the rule's audience first, because an unsubscribe
+// token is minted from (owner, recipient, campaign) -- an address with no
+// recipient row has no way to opt out, and marketing mail nobody can unsubscribe
+// from is the one thing this engine will not send. The enrolment names the rule's
+// organization, because the send refuses a recipient outside the campaign's.
+func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, event map[string]any, plan rowAddressPlan, out *FireOutcome) error {
+	target := plan.target
+	if !plan.found {
 		// Not in the audience yet. Enrol, then send -- and note that the
 		// enrolment is what an unsubscribe later acts on, so a second firing
 		// for the same address consults the state the first one gave it.
-		target = "rcp" + dedupeKey(rule.AudienceID, address, "")
-		if err := f.store.AddRecipient(ctx, target, rule.AudienceID, address, payloadField(event, "displayName")); err != nil {
+		target = "rcp" + dedupeKey(rule.AudienceID, plan.address, "")
+		confirmation, err := f.store.AudienceConfirmation(ctx, rule.AudienceID)
+		if err != nil {
+			return err
+		}
+		status := "subscribed"
+		if confirmation == "required" {
+			status = "pending"
+		}
+		if err := f.store.AddRecipient(ctx, target, rule.AudienceID, plan.address, payloadField(event, "displayName"), memql.BareShortId(rule.AccountID), status); err != nil {
 			return err
 		}
 	}
 	out.Recipients++
 	f.sendMarketing(ctx, rule, nodeID, target, event, out)
 	return nil
+}
+
+// mailboxTarget picks the row a send is addressed to: the first one that is not
+// subscribed, so a mailbox that opted out is never mailed through a sibling that
+// has not heard of it, and otherwise the first (oldest) row. found is false when
+// the mailbox holds none.
+func mailboxTarget(members []map[string]any) (id string, found bool) {
+	for _, r := range members {
+		if status := str(r, "subscriptionStatus"); status != "" && status != "subscribed" {
+			return str(r, "id"), true
+		}
+	}
+	if len(members) > 0 {
+		return str(members[0], "id"), true
+	}
+	return "", false
 }
 
 // Stable across replicas and checkpoint replay. A created rule names one row's
@@ -397,12 +497,21 @@ func (f *Firer) sendMarketing(ctx context.Context, rule Rule, nodeID, recipientI
 		out.Refusals = append(out.Refusals, err.Error())
 		return
 	}
-	result, err := f.store.SendToRecipient(ctx, rule.TemplateID, recipientID, rule.SenderIdentity, rule.ID, requestID)
+	result, err := f.sendWithPatience(ctx, rule, recipientID, requestID)
+	if memql.IsWriteGateBusy(err) {
+		// Nothing was attempted for this recipient: the cluster's lock was busy
+		// through every pause. Not a refusal of the message, and not the rule's fault.
+		out.Busy = true
+		out.Refusals = append(out.Refusals, "the cluster was too busy to start this send, so nothing was sent to this recipient; the firing can be made again")
+		return
+	}
 	if err != nil {
 		out.Refusals = append(out.Refusals, err.Error())
 		return
 	}
 	switch {
+	case result["deferred"] == true:
+		out.Deferred++
 	case result["uncertain"] == true:
 		out.Refusals = append(out.Refusals, "a previous send has an uncertain provider outcome; it was not submitted again")
 	case result["skipped"] == true || (result["sent"] == true && result["replayed"] == true):
@@ -412,6 +521,31 @@ func (f *Firer) sendMarketing(ctx context.Context, rule Rule, nodeID, recipientI
 	default:
 		out.Refusals = append(out.Refusals, "campaign send returned no recognized outcome")
 	}
+}
+
+// busyPauses are the waits between one send and the next when the cluster's lock
+// was busy (a variable only so a test can shorten them). The lock is usually busy
+// for a moment, and a few short pauses inside the firing keep the row from needing a
+// second delivery at all. Only a lock that was busy is tried again: a refusal on
+// the merits is final for the firing, as it always was.
+var busyPauses = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+
+// sendWithPatience makes the send, and makes it again after each pause while the
+// answer is that the cluster's lock was busy.
+func (f *Firer) sendWithPatience(ctx context.Context, rule Rule, recipientID, requestID string) (map[string]any, error) {
+	result, err := f.store.SendToRecipient(ctx, rule.TemplateID, recipientID, rule.SenderIdentity, rule.ID, requestID)
+	for _, pause := range busyPauses {
+		if !memql.IsWriteGateBusy(err) {
+			break
+		}
+		select {
+		case <-time.After(pause):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		result, err = f.store.SendToRecipient(ctx, rule.TemplateID, recipientID, rule.SenderIdentity, rule.ID, requestID)
+	}
+	return result, err
 }
 
 // payloadField reads a dotted path out of the event envelope's payload.

@@ -65,8 +65,10 @@ const workIntegrationName = "work"
 // workActs is the work spine's integration as a node materializes it, registered
 // on the engine the first time a lifecycle opens. Built by the plug-in's OWN
 // factory with the plug-in context a node gives it -- the engine, the database
-// handle, the row-admission gate -- so the acts and the builtins behave as on a
-// node, the version-history read included, which refuses without the last two.
+// handle, the gate pool, the row-admission gate -- so the acts and the builtins
+// behave as on a node: the version-history read, which refuses without the
+// database handle and the gate, and the acts that decide (a step run again takes
+// the goal's decision gate), which refuse without the gate pool.
 func (h *engineLifecycle) workActs() (memqlengine.IntegrationProvider, error) {
 	h.once.Do(func() {
 		if p := h.e.IntegrationByName(workIntegrationName); p != nil {
@@ -91,6 +93,7 @@ func (h *engineLifecycle) workActs() (memqlengine.IntegrationProvider, error) {
 				Engine:         h.e,
 				BunDB:          func() *bun.DB { return db },
 				DirectBunDB:    func() *bun.DB { return db },
+				GateDB:         h.gatePool,
 				AdmitSourceRow: memqlengine.AdmitSourceRow,
 			})
 			switch {

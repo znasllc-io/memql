@@ -204,7 +204,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// with these three writes. `writer.go` is the operation family and
 		// `selection.go` beside it holds no engine at all.
 		"component/skills":     "the capability graph's three @serverOnly writers -- server-initiated evidence and executable lists, refused without the stamp (memql#4970)",
-		"component/emailrules": "event-email rule generation, activation and firing -- server-initiated; the callers are the authoring pipeline and an authored automation, and the three writes it stamps for are @serverOnly (memql#4829)",
+		"component/emailrules": "event-email rule generation, activation and firing -- server-initiated; the callers are the authoring pipeline and an authored automation, and the authoring writes it stamps for -- the rule's bundle, its construct and their two gate verdicts -- are @serverOnly, as are the rule's own records (memql#4829, memql#6022)",
 		// Routing-rule activation (epic memql#5127). Same shape as
 		// component/emailrules one line up, and the reasoning is the same
 		// three sentences: the package is SMALL, it exists for ONE operation
@@ -215,18 +215,20 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// Retire with every role against an engine that refuses everything
 		// and counts the attempts).
 		//
-		// The two writes it stamps for are `recordBundleValidation` and
-		// `recordBundleDryRun`, both @serverOnly. What internal origin buys is
-		// the ability to call them AT ALL -- origin defaults to CLIENT and the
-		// function validator refuses -- so without it a rule would be rendered,
-		// compile, and then be armed with neither gate verdict recorded, which
-		// is a bundle nobody can audit rather than a visible failure.
-		//
-		// The stamp is deliberately NOT on the bundle and construct writes,
-		// which are ordinary mutations run under the ARMING CALLER's actor:
-		// the bundle is theirs, and stamping there would hand an author's write
-		// the engine's escape.
-		"component/routingrules": "routing-rule activation and retirement -- server-initiated behind one auth.CanAuthor gate; the two writes it stamps for (recordBundleValidation, recordBundleDryRun) are @serverOnly (epic memql#5127)",
+		// The four writes it stamps for are all @serverOnly since memql#6022:
+		// the rule's bundle and construct (createAuthoringBundle,
+		// createAuthoringConstruct) and their two gate verdicts
+		// (recordBundleValidation, recordBundleDryRun). What internal origin
+		// buys is the ability to make them AT ALL -- origin defaults to CLIENT
+		// and the function validator refuses -- so without it a rule would be
+		// rendered, compile, and then have nothing to arm. A rule's bundle id
+		// is derived -- from its owner and its name -- so it is known before it
+		// is written; an active bundle arms every construct it holds; and a
+		// verdict is the claim that a gate ran. All four still run under the
+		// ARMING CALLER's actor, so the bundle is stamped theirs and the
+		// construct write guard admits the construct only into their own draft
+		// bundle.
+		"component/routingrules": "routing-rule activation and retirement -- server-initiated behind one auth.CanAuthor gate; the four writes it stamps for -- the rule's bundle, its construct and their two gate verdicts -- are @serverOnly (epic memql#5127, memql#6022)",
 		// The custom-domain reconciliation sweep (epic memql#4805). SERVER-
 		// INITIATED, and not one of the request-derived exceptions: the caller
 		// is a scheduled automation, not an HTTP handler, and the six writes it
@@ -641,7 +643,51 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// nothing else. Asserted in
 		// component/memql/pack_flip_internal_origin_test.go (the stamp's
 		// placement, and a refused caller never reaching the engine).
-		"component/memql": "seed materialiser, authoring capability store (both boot-time), the module-readiness writer (epic memql#5077), the loop-stops reader (memql#5384), the sharing ledger's window read and the two machine acts (epic memql#5327 -- REQUEST-DERIVED, and each one stamps a LOCAL context for ONE rendered call after the caller's ownership of the machine has already been proven through the authorized workersForUser read; asserted by test/dslconformance's TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin, which sees RenderCall since that epic), and the Modules pack flip (REQUEST-DERIVED, downstream of AuthorizeSetPackEnabled in SetPackEnabled; asserted by component/memql/pack_flip_internal_origin_test.go)",
+		//
+		// The sixth, the authored bundle's lifecycle writes (memql#6022):
+		// activateAuthoringBundle and setAuthoringBundleStatus became
+		// @serverOnly, because every replica arms every bundle that reads
+		// active. Their writers stamp inline at the one Execute each: the
+		// gated activation's commit write (SetBundleActive -- REQUEST-DERIVED,
+		// reached only through ActivateApprovedBundle, which refuses a bundle
+		// that is not dryRunPassed or not the caller's, behind the callers'
+		// own CanAuthor gates), the durable promote (downstream of the
+		// owner-only promote gate) and the breaker's pause (server-initiated).
+		// The write guard that holds the transition for raw writes is asserted
+		// against a real database in
+		// component/memql/authoring_bundle_activation_guard_db_test.go.
+		//
+		// The seventh, a bundle's member constructs (memql#6022, round 3):
+		// createAuthoringConstruct became @serverOnly, and WriteAuthoredConstruct
+		// is the engine's one writer of it, stamping inline at its one Execute.
+		// The planner's capture and work compile -- integrations/planner may not
+		// stamp, for the reason component/skills gives above -- hand the write
+		// to it, and so does the durable promote. What bounds it is the
+		// construct write guard: a construct joins only its own owner's bundle,
+		// and only before that bundle has passed its dry run, so nothing written
+		// through it reaches a bundle that is armed. Asserted against a real
+		// database in component/memql/authoring_owned_rows_db_test.go.
+		//
+		// The eighth, a bundle coming to exist (memql#6022, round 4):
+		// createAuthoringBundle became @serverOnly, because a rule's bundle id
+		// is known before it is written and a bundle another person created
+		// there first blocked its owner. WriteAuthoringBundle is the engine's
+		// one creator of a draft bundle for the pipelines that may not stamp --
+		// the planner's capture and work compile -- and the durable promote
+		// writes through it too; it stamps inline at its one Execute, and every
+		// caller mints the bundle's id fresh. Asserted against a real database
+		// in component/memql/authoring_bundle_create_guard_db_test.go.
+		//
+		// The ninth, a bundle's Gate 1 verdict (memql#6022, round 5):
+		// recordBundleValidation and recordBundleDryRun became @serverOnly,
+		// because a verdict is the claim that a gate ran -- a work template runs
+		// from a validated bundle, a bundle activates from dryRunPassed.
+		// RecordBundleValidation is the engine's one recorder of Gate 1's
+		// verdict for the planner's capture and work compile, each of which
+		// runs the gate first; it stamps inline at its one Execute. The verdict
+		// guard holds raw writes to the same rule; asserted against a real
+		// database in component/memql/authoring_bundle_verdict_guard_db_test.go.
+		"component/memql": "seed materialiser, authoring capability store (both boot-time), the module-readiness writer (epic memql#5077), the loop-stops reader (memql#5384), the sharing ledger's window read and the two machine acts (epic memql#5327 -- REQUEST-DERIVED, and each one stamps a LOCAL context for ONE rendered call after the caller's ownership of the machine has already been proven through the authorized workersForUser read; asserted by test/dslconformance's TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin, which sees RenderCall since that epic), the Modules pack flip (REQUEST-DERIVED, downstream of AuthorizeSetPackEnabled in SetPackEnabled; asserted by component/memql/pack_flip_internal_origin_test.go), the authored bundle's activation and breaker-pause writes (memql#6022 -- the gated activation's commit write is REQUEST-DERIVED, behind ActivateApprovedBundle's dryRunPassed and owner checks), and the one writer of a bundle's member constructs (WriteAuthoredConstruct, memql#6022 -- held by the construct write guard to the owner's own bundle before its dry run), and the one creator of a draft bundle and recorder of its Gate 1 verdict for the pipelines that may not stamp (WriteAuthoringBundle, RecordBundleValidation, memql#6022 -- every caller mints the id fresh and runs the gate first)",
 		// SERVER-INITIATED, not request-derived -- the same class as
 		// integrations/agent/worker below rather than the three exceptions
 		// above, and the distinction is worth stating because this package

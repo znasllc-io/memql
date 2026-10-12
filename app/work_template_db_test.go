@@ -79,16 +79,21 @@ func TestWorkTemplateDBResolvesAndRunsOnAnotherEngine(t *testing.T) {
 	logic := name + "Answer"
 	source := fmt.Sprintf("@template\nautomation %s {\n  answer := logic %s()\n}", name, logic)
 	logicSource := fmt.Sprintf("logic %s {\n  return 42\n}", logic)
-	templateMutation(t, writer, ctx, "createAuthoringBundle", map[string]any{"bundleId": bundle, "title": "Execution test", "sourceRunId": run})
-	templateMutation(t, writer, ctx, "createAuthoringConstruct", map[string]any{"constructId": construct, "bundleId": bundle, "kind": "automation", "name": name, "targetNamespace": "work", "source": source})
-	templateMutation(t, writer, ctx, "createAuthoringConstruct", map[string]any{"constructId": id.NewShortId(), "bundleId": bundle, "kind": "logic", "name": logic, "targetNamespace": "work", "source": logicSource})
+	// The bundle and its members are the work compile's own writes:
+	// createAuthoringBundle and createAuthoringConstruct are @serverOnly, under
+	// internal origin, the members while the bundle is a draft (memql#6022).
+	templateMutation(t, writer, auth.ContextWithInternalOrigin(ctx), "createAuthoringBundle", map[string]any{"bundleId": bundle, "title": "Execution test", "sourceRunId": run})
+	templateMutation(t, writer, auth.ContextWithInternalOrigin(ctx), "createAuthoringConstruct", map[string]any{"constructId": construct, "bundleId": bundle, "kind": "automation", "name": name, "targetNamespace": "work", "source": source})
+	templateMutation(t, writer, auth.ContextWithInternalOrigin(ctx), "createAuthoringConstruct", map[string]any{"constructId": id.NewShortId(), "bundleId": bundle, "kind": "logic", "name": logic, "targetNamespace": "work", "source": logicSource})
 	j := &automations.RunJournal{RunId: run, GoalId: "g", OwnerUserId: owner, AutomationName: name, TemplateConstructId: construct}
 	j.TemplateVersion = memql.WorkBundleVersion([]memql.SandboxConstruct{{Kind: "automation", Name: name, Source: source}, {Kind: "logic", Name: logic, Source: logicSource}})
 	loader := automations.NewLoader(automations.LoaderOptions{Logger: reader.Logger})
 	if _, err := loadWorkTemplate(ctx, reader, loader, j); err == nil {
 		t.Fatal("unvalidated draft executed")
 	}
-	templateMutation(t, writer, ctx, "recordBundleValidation", map[string]any{"bundleId": bundle, "status": "validated", "validationReport": map[string]any{"ok": true}})
+	// Gate 1's verdict is the work compile's own write too: recordBundleValidation
+	// is @serverOnly (memql#6022).
+	templateMutation(t, writer, auth.ContextWithInternalOrigin(ctx), "recordBundleValidation", map[string]any{"bundleId": bundle, "status": "validated", "validationReport": map[string]any{"ok": true}})
 	reader.InvalidateCacheForConcept("v1:authoring:bundle")
 	tpl, err := loadWorkTemplate(ctx, reader, loader, j)
 	if err != nil {

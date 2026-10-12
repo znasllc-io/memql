@@ -78,8 +78,9 @@ Provisioning detail, alerts, and the failover/restore drills:
 
 The whole mesh (7 node-types × replicas) shares **one** database.
 
-`max_connections` is now **ours to set** — 200 for a local cluster, 400 for a
-cloud one — so the ceiling is a sizing decision rather than a tier limit. It
+`max_connections` is now **ours to set** — 400 for a local cluster and for the
+mid and top cloud presets, 200 for the entry preset — so the ceiling is a sizing
+decision rather than a tier limit. It
 is still a ceiling: every Postgres backend is a process with its own memory, so
 raising it trades RAM for headroom, which is why the budget below is still
 enforced by a deploy gate.

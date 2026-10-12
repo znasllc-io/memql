@@ -142,7 +142,7 @@ func (w *Worker) handleTestAudienceSend(ctx context.Context, args map[string]any
 		}
 		run = definition
 		run.ID, run.TestSourceCampaignID, run.OwnerUserID = runID, source, bare(callerUserID(ctx))
-		run.AudienceID, run.Name, run.Status, run.ScheduledAt = audience, original.Name+" · Test", "draft", time.Time{}
+		run.AudienceID, run.Name, run.Status, run.ScheduledAt = audience, nameWithSuffix(original.Name, " · Test"), "draft", time.Time{}
 		// Refuse before writing anything when the normal send checks would fail.
 		if _, _, err := w.preflight(ctx, "testAudienceSend", run); err != nil {
 			return nil, err

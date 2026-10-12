@@ -4252,6 +4252,90 @@ func InvocationsForWorkerAsOperatorBuild(args InvocationsForWorkerAsOperatorArgs
 	return b.String()
 }
 
+// JourneyById -- Organization-authorized email automation read.
+//
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeyById"] in generated_concepts.go).
+type JourneyByIdArgs struct {
+	JourneyId string
+}
+
+// JourneyById calls the engine query journeyById.
+func (qc *QueryClient) JourneyById(ctx context.Context, args JourneyByIdArgs) (*Result, error) {
+	call := JourneyByIdBuild(args)
+	return qc.executeNamed(ctx, "journeyById", call)
+}
+
+func JourneyByIdBuild(args JourneyByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeyById(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// JourneyEnrollmentCounts -- Organization-authorized email automation read.
+//
+// Bound concept: v1:campaigns:journeyEnrollment (machine-readable: BoundConcepts["journeyEnrollmentCounts"] in generated_concepts.go).
+type JourneyEnrollmentCountsArgs struct {
+	JourneyId string
+	Status    string
+	StepId    string
+}
+
+// JourneyEnrollmentCounts calls the engine query journeyEnrollmentCounts.
+func (qc *QueryClient) JourneyEnrollmentCounts(ctx context.Context, args JourneyEnrollmentCountsArgs) (*Result, error) {
+	call := JourneyEnrollmentCountsBuild(args)
+	return qc.executeNamed(ctx, "journeyEnrollmentCounts", call)
+}
+
+func JourneyEnrollmentCountsBuild(args JourneyEnrollmentCountsArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeyEnrollmentCounts(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	if args.Status != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	if args.StepId != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("stepId: ")
+		b.WriteString(quoteMemQL(args.StepId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// Journeys -- Organization-authorized email automation read.
+//
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeys"] in generated_concepts.go).
+type JourneysArgs struct {
+	Status string
+}
+
+// Journeys calls the engine query journeys.
+func (qc *QueryClient) Journeys(ctx context.Context, args JourneysArgs) (*Result, error) {
+	call := JourneysBuild(args)
+	return qc.executeNamed(ctx, "journeys", call)
+}
+
+func JourneysBuild(args JourneysArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeys(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // KnowledgeDomainsAll -- Every knowledge domain this cluster holds.
 // The read the Training app's domain cards have never had (epic memql#4800). Until this landed, that page was entirely CHUNK-derived: it rolled domains up out of `v1:knowledge:documentChunk.domainId` and labelled each card with the raw id, because the domain row itself had no client read surface and no concept declaration behind it. With this, a card can say the domain's name and render the account it is tagged with.
 // NO ACTOR TERM, and now that is a declaration rather than an omission (memql#4809). The concept declares `@rowAuthz(public, requiresIdentity)`: its rows carry no row-level distinction to draw -- the catalog is the same population for every caller -- so there is no tier conjunct to AND in here and nothing for one to narrow.
@@ -7231,6 +7315,34 @@ func RecipientByIdBuild(args RecipientByIdArgs) string {
 	return b.String()
 }
 
+// RecipientInAudienceByDigest -- The memberships for one mailbox in one audience, by address digest. Organization-authorized. The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a signup or a row-address rule finds a page of the rows a mailbox holds without walking the roster. Matches are in any subscription state, oldest first: the same mailbox can hold more than one row (a manual add beside an earlier row, a race), and one can have opted out while another has not. A FULL page cannot rule out another opted-out row beyond it; the caller must refuse rather than assume it saw every membership. A row carries a digest only if it was written by addRecipient or filled in by the digest sweep, so a mailbox can also hold rows this does not return: recipientsWithoutDigestInAudience is the other half. The caller checks each row's own address before it believes the key; a raw write can set a digest that is not its address's.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientInAudienceByDigest"] in generated_concepts.go).
+type RecipientInAudienceByDigestArgs struct {
+	AudienceId  string
+	EmailDigest string
+}
+
+// RecipientInAudienceByDigest calls the engine query recipientInAudienceByDigest.
+func (qc *QueryClient) RecipientInAudienceByDigest(ctx context.Context, args RecipientInAudienceByDigestArgs) (*Result, error) {
+	call := RecipientInAudienceByDigestBuild(args)
+	return qc.executeNamed(ctx, "recipientInAudienceByDigest", call)
+}
+
+func RecipientInAudienceByDigestBuild(args RecipientInAudienceByDigestArgs) string {
+	var b strings.Builder
+	b.WriteString("query recipientInAudienceByDigest(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RecipientsForAudience -- Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the caller conjunct is doubly load-bearing here.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsForAudience"] in generated_concepts.go).
@@ -7247,6 +7359,28 @@ func (qc *QueryClient) RecipientsForAudience(ctx context.Context, args Recipient
 func RecipientsForAudienceBuild(args RecipientsForAudienceArgs) string {
 	var b strings.Builder
 	b.WriteString("query recipientsForAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecipientsWithoutDigestInAudience -- One page of the rows of an audience that carry no address digest, oldest first. Organization-authorized. Those are the rows written before the digest existed, by a replica still running the previous release, or by a raw write, until the digest sweep fills them in. A lookup by digest cannot see them, so a signup or a row-address rule reads this page too and compares each row's address; a FULL page proves nothing about the rows beyond it and the caller must not read it as "no such row".
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsWithoutDigestInAudience"] in generated_concepts.go).
+type RecipientsWithoutDigestInAudienceArgs struct {
+	AudienceId string
+}
+
+// RecipientsWithoutDigestInAudience calls the engine query recipientsWithoutDigestInAudience.
+func (qc *QueryClient) RecipientsWithoutDigestInAudience(ctx context.Context, args RecipientsWithoutDigestInAudienceArgs) (*Result, error) {
+	call := RecipientsWithoutDigestInAudienceBuild(args)
+	return qc.executeNamed(ctx, "recipientsWithoutDigestInAudience", call)
+}
+
+func RecipientsWithoutDigestInAudienceBuild(args RecipientsWithoutDigestInAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("query recipientsWithoutDigestInAudience(")
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
 	b.WriteString(")")

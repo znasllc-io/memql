@@ -476,6 +476,45 @@ query recipient recipientById {
   shape   recipientFull
 }
 
+/// The memberships for one mailbox in one audience, by address digest. Organization-authorized.
+/// The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a
+/// signup or a row-address rule finds a page of the rows a mailbox holds without walking the roster.
+/// Matches are in any subscription state, oldest first: the same mailbox can hold more than one row
+/// (a manual add beside an earlier row, a race), and one can have opted out while another has not.
+/// A FULL page cannot rule out another opted-out row beyond it; the caller must refuse rather than
+/// assume it saw every membership. A row carries a digest only if it was written
+/// by addRecipient or filled in by the digest sweep, so a mailbox can also hold rows this does not
+/// return: recipientsWithoutDigestInAudience is the other half. The caller checks each row's own
+/// address before it believes the key; a raw write can set a digest that is not its address's.
+@actor
+query recipient recipientInAudienceByDigest {
+  args {
+    audienceId   string!
+    emailDigest  string!
+  }
+  filter    row => row.audienceId == args.audienceId && row.emailDigest == args.emailDigest
+  sort      "row.createdAt", "asc"
+  paginate  50
+  shape     recipientFull
+}
+
+/// One page of the rows of an audience that carry no address digest, oldest first.
+/// Organization-authorized. Those are the rows written before the digest existed, by a replica still
+/// running the previous release, or by a raw write, until the digest sweep fills them in. A lookup by
+/// digest cannot see them, so a signup or a row-address rule reads this page too and compares each
+/// row's address; a FULL page proves nothing about the rows beyond it and the caller must not read
+/// it as "no such row".
+@actor
+query recipient recipientsWithoutDigestInAudience {
+  args {
+    audienceId  string!
+  }
+  filter    row => row.audienceId == args.audienceId && (row.emailDigest == nil || row.emailDigest == "")
+  sort      "row.createdAt", "asc"
+  paginate  50
+  shape     recipientFull
+}
+
 /// Every sending identity the caller may use, newest first. Backs the identity picker on the
 /// campaign editor and the Senders list in the OS app's Settings. Composite tier, so a cluster
 /// owner sees every operator's -- which is what makes "who is this cluster mailing as"
@@ -744,4 +783,161 @@ query campaign campaignTestRuns {
   sort "row.createdAt", "desc"
   paginate 50
   shape campaignFull
+}
+
+/// Internal scan of due single-recipient deliveries deferred by the rate limiter.
+@actor
+@serverOnly
+query delivery deferredSingleSends {
+ args { dueAt datetime! }
+ filter row => actor.isClusterOwner == true && statusIsPending(row) && row.requestId != nil && row.requestId != "" && row.nextAttemptAt <= args.dueAt
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape deferredSendRef
+}
+
+/// Organization-authorized email automation read.
+@actor
+query journey journeys {
+ args {
+ status string
+ }
+ filter row => ((args.status == nil || row.status == args.status))
+ sort "row.createdAt", "asc"
+ paginate 50
+ shape journeyFull
+}
+
+/// Organization-authorized email automation read.
+@actor
+query journey journeyById {
+ args {
+ journeyId string!
+ }
+ filter row => (row.id == args.journeyId)
+ shape journeyFull
+}
+
+/// Organization-authorized email automation read.
+@actor
+query journeyEnrollment journeyEnrollmentCounts {
+ args {
+ journeyId string!
+ status string
+ stepId string
+ }
+ filter row => (row.journeyId == args.journeyId && (args.status == nil || row.status == args.status) && (args.stepId == nil || row.stepId == args.stepId))
+ count
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journey activeJourneys {
+ filter row => actor.isClusterOwner == true && (statusIsActive(row))
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journey journeysToRetire {
+ filter row => actor.isClusterOwner == true && (row.status == "archived" && (row.retiredAt == nil || row.retiredAt == ""))
+ sort "row.createdAt", "asc"
+ paginate 50
+ shape journeyFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journeyEnrollment dueEnrollmentsForJourney {
+ args {
+ journeyId string!
+ dueAt datetime!
+ }
+ filter row => actor.isClusterOwner == true && (row.journeyId == args.journeyId && (statusIsActive(row) || row.status == "waiting") && row.nextAt <= args.dueAt)
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journeyEnrollment openEnrollmentsForJourney {
+ args {
+ journeyId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.journeyId == args.journeyId && (statusIsActive(row) || row.status == "waiting"))
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journeyEnrollment newestJourneyEnrollment {
+ args {
+ journeyId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.journeyId == args.journeyId)
+ sort "triggeredAt", "desc"
+ paginate 1
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journeyEnrollment journeyEnrollmentById {
+ args {
+ enrollmentId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.id == args.enrollmentId)
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query recipient audienceJoinersSince {
+ args {
+ audienceId string!
+ since datetime!
+ }
+ filter row => actor.isClusterOwner == true && (row.audienceId == args.audienceId && row.joinedAt >= args.since && (isSendableRecipient(row) || row.subscriptionStatus == "pending"))
+ sort "row.createdAt", "asc"
+ paginate 200
+ shape recipientEnrollmentRef
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query recipient audienceConfirmationsSince {
+ args {
+ audienceId string!
+ since datetime!
+ }
+ filter row => actor.isClusterOwner == true && (row.audienceId == args.audienceId && row.confirmedAt >= args.since && isSendableRecipient(row))
+ sort "row.createdAt", "asc"
+ paginate 200
+ shape recipientEnrollmentRef
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journeyEnrollment waitingEnrollmentsForRecipient {
+ args {
+ recipientId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.recipientId == args.recipientId && row.status == "waiting")
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
 }

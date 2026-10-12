@@ -1,22 +1,14 @@
 import * as vscode from "vscode";
-import { reportProblem, type Problem } from "./problems.js";
+import { reportProblem } from "./problems.js";
 
 let output: vscode.OutputChannel | undefined;
 export function setProblemOutput(value: vscode.OutputChannel): void { output = value; }
+/**
+ * One toast per problem. When the problem has a reference, the toast's one button reveals the output channel,
+ * which holds the reference line with the technical details. There is no dialog behind it.
+ */
 export async function showProblem(error: unknown, operation: string): Promise<void> {
   const problem = reportProblem(error, operation);
-  const choice = await vscode.window.showErrorMessage(problem.message, ...(problem.reference ? ["Details"] : []));
-  if (choice === "Details") await showProblemDetails(problem);
-}
-export async function showProblemDetails(problem: Problem): Promise<void> {
-  if (!problem.reference) return;
-  const choice = await vscode.window.showInformationMessage("Troubleshooting reference", {
-    modal: true,
-    detail: `${problem.reference}\n\nSearch this reference in MemQL OS → Logs. If the cluster was unavailable, technical details remain in the MemQL Productivity Tools output here.`,
-  }, "Copy reference", "Open local log");
-  if (choice === "Copy reference") {
-    try { await vscode.env.clipboard.writeText(problem.reference); }
-    catch (error) { void showProblem(error, "copy the reference"); }
-  }
-  if (choice === "Open local log") output?.show(true);
+  const choice = await vscode.window.showErrorMessage(problem.message, ...(problem.reference ? ["Show details"] : []));
+  if (choice === "Show details") output?.show(true);
 }

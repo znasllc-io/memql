@@ -451,7 +451,7 @@ func TestSaveTemplateRendersALayoutDocument(t *testing.T) {
 
 	// The three parts are what the send-mode render makes of the document, and
 	// the document is the one that was sent, written as its file is.
-	parsed, err := emaildoc.Parse(mustJSON(t, doc))
+	parsed, err := emaildoc.Parse(templateDocumentJSON(t, doc))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func TestSaveTemplateRendersALayoutDocument(t *testing.T) {
 	}
 }
 
-func mustJSON(t *testing.T, v any) []byte {
+func templateDocumentJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	encoded, err := json.Marshal(v)
 	if err != nil {

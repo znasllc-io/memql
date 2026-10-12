@@ -18,9 +18,11 @@ import (
 // supplies a logical key only after its actor/organization check. Reads bypass
 // process caches and updates serialize in PostgreSQL across every replica.
 type connectionStore struct {
-	engine   ConfigWriter
-	database func() *sql.DB
-	now      func() time.Time
+	engine ConfigWriter
+	// gateDB resolves the pool this store's write gates run on (memql#6022): the
+	// database component's gate pool, never the request pool the engine works on.
+	gateDB func() *sql.DB
+	now    func() time.Time
 }
 
 func emailStateContext(ctx context.Context) context.Context {
@@ -63,16 +65,27 @@ func (s *connectionStore) read(ctx context.Context, key string, target any) (boo
 	return true, revision, nil
 }
 
+// gates resolves the pool this store's write gates run on, or says which wiring
+// is missing.
+func (s *connectionStore) gates() (*sql.DB, error) {
+	var resolve func() *sql.DB
+	if s != nil {
+		resolve = s.gateDB
+	}
+	return memql.ResolveWriteGatePool(resolve, "email", "a node's email plug-in takes database.Database.GateDB from PluginContext.GateDB (a test or a tool opens one with database.NewGatePool)")
+}
+
 // change executes the supplied update while holding a database transaction
-// lock. A network-backed update must itself use bounded request deadlines.
+// lock. A network-backed update must itself use bounded request deadlines. A
+// gate that could not be taken says why: busy (try again), or no gate pool.
 func (s *connectionStore) change(ctx context.Context, key string, target any, change func(found bool) error) error {
-	var db *sql.DB
-	if s != nil && s.database != nil {
-		db = s.database()
+	db, err := s.gates()
+	if err != nil {
+		return fmt.Errorf("email connection coordination is unavailable: %w", err)
 	}
 	release, err := memql.AcquireWriteGate(ctx, db, "email-connection:"+emailStateID(key))
 	if err != nil {
-		return fmt.Errorf("email connection coordination is unavailable")
+		return fmt.Errorf("email connection coordination is unavailable: %w", err)
 	}
 	defer release()
 	found, prior, err := s.read(ctx, key, target)

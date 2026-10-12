@@ -1,3 +1,4 @@
+import { readTheBar } from "../readTheBar";
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { Layers } from "lucide-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";

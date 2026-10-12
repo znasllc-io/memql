@@ -29,31 +29,11 @@ QueryClient.prototype.acknowledgeAttention = function (this: QueryClient, args: 
   return this.executeNamed("acknowledgeAttention", buildAcknowledgeAttention(args), opts);
 };
 
-/** Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via setConstructStatus. */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["activateAuthoringBundle"] in generated_concepts.ts).
-export interface ActivateAuthoringBundleArgs {
-  bundleId: string;
-}
-
-export function buildActivateAuthoringBundle(args: ActivateAuthoringBundleArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  return "mutation activateAuthoringBundle(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    activateAuthoringBundle(args: ActivateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.activateAuthoringBundle = function (this: QueryClient, args: ActivateAuthoringBundleArgs = {} as ActivateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("activateAuthoringBundle", buildActivateAuthoringBundle(args), opts);
-};
-
-/** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. */
+/** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest) so the membership can be found by it (recipientInAudienceByDigest). */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.ts).
 export interface AddRecipientArgs {
+  // Enum: subscribed | pending
+  subscriptionStatus?: string;
   recipientId: string;
   audienceId: string;
   email: string;
@@ -65,6 +45,7 @@ export interface AddRecipientArgs {
 
 export function buildAddRecipient(args: AddRecipientArgs): string {
   const parts: string[] = [];
+  if (args.subscriptionStatus !== undefined) parts.push("subscriptionStatus: " + renderMemQLValue(args.subscriptionStatus));
   parts.push("recipientId: " + renderMemQLValue(args.recipientId));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("email: " + renderMemQLValue(args.email));
@@ -1306,6 +1287,8 @@ QueryClient.prototype.createAskConversation = function (this: QueryClient, args:
 /** Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own audiences. */
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["createAudience"] in generated_concepts.ts).
 export interface CreateAudienceArgs {
+  // Enum: none | required
+  confirmation?: string;
   audienceId: string;
   name: string;
   description?: string;
@@ -1314,6 +1297,7 @@ export interface CreateAudienceArgs {
 
 export function buildCreateAudience(args: CreateAudienceArgs): string {
   const parts: string[] = [];
+  if (args.confirmation !== undefined) parts.push("confirmation: " + renderMemQLValue(args.confirmation));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("name: " + renderMemQLValue(args.name));
   if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
@@ -1467,79 +1451,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.createAuthSession = function (this: QueryClient, args: CreateAuthSessionArgs = {} as CreateAuthSessionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("createAuthSession", buildCreateAuthSession(args), opts);
-};
-
-/** Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via createAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs. */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["createAuthoringBundle"] in generated_concepts.ts).
-export interface CreateAuthoringBundleArgs {
-  bundleId: string;
-  title: string;
-  summary?: string;
-  responsibilityId?: string;
-  sourceRunId?: string;
-  version?: number;
-  supersedesBundleId?: string;
-  reusedConstructRefs?: Record<string, unknown>[];
-}
-
-export function buildCreateAuthoringBundle(args: CreateAuthoringBundleArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("title: " + renderMemQLValue(args.title));
-  if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
-  if (args.responsibilityId !== undefined) parts.push("responsibilityId: " + renderMemQLValue(args.responsibilityId));
-  if (args.sourceRunId !== undefined) parts.push("sourceRunId: " + renderMemQLValue(args.sourceRunId));
-  if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
-  if (args.supersedesBundleId !== undefined) parts.push("supersedesBundleId: " + renderMemQLValue(args.supersedesBundleId));
-  if (args.reusedConstructRefs !== undefined) parts.push("reusedConstructRefs: " + renderMemQLValue(args.reusedConstructRefs));
-  return "mutation createAuthoringBundle(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createAuthoringBundle(args: CreateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createAuthoringBundle = function (this: QueryClient, args: CreateAuthoringBundleArgs = {} as CreateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createAuthoringBundle", buildCreateAuthoringBundle(args), opts);
-};
-
-/** Create an authored construct (the .memql source for one concept / automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle. */
-// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["createAuthoringConstruct"] in generated_concepts.ts).
-export interface CreateAuthoringConstructArgs {
-  constructId: string;
-  bundleId: string;
-  // Enum: concept | automation | logic | shape | spec | trait | policy | mutation | query | prompt
-  kind: string;
-  name: string;
-  targetNamespace: string;
-  source: string;
-  origin?: string;
-  grammarVersion?: string;
-}
-
-export function buildCreateAuthoringConstruct(args: CreateAuthoringConstructArgs): string {
-  const parts: string[] = [];
-  parts.push("constructId: " + renderMemQLValue(args.constructId));
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("kind: " + renderMemQLValue(args.kind));
-  parts.push("name: " + renderMemQLValue(args.name));
-  parts.push("targetNamespace: " + renderMemQLValue(args.targetNamespace));
-  parts.push("source: " + renderMemQLValue(args.source));
-  if (args.origin !== undefined) parts.push("origin: " + renderMemQLValue(args.origin));
-  if (args.grammarVersion !== undefined) parts.push("grammarVersion: " + renderMemQLValue(args.grammarVersion));
-  return "mutation createAuthoringConstruct(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createAuthoringConstruct(args: CreateAuthoringConstructArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createAuthoringConstruct = function (this: QueryClient, args: CreateAuthoringConstructArgs = {} as CreateAuthoringConstructArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createAuthoringConstruct", buildCreateAuthoringConstruct(args), opts);
 };
 
 /** Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex hash of the badge/device id. */
@@ -1845,6 +1756,7 @@ export interface CreateComposeRecipeArgs {
   templateId?: string;
   format: string;
   outputKind?: string;
+  layoutId?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -1858,6 +1770,7 @@ export function buildCreateComposeRecipe(args: CreateComposeRecipeArgs): string 
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation createComposeRecipe(" + parts.join(", ") + ")";
@@ -4615,64 +4528,6 @@ QueryClient.prototype.recordApprovalDecision = function (this: QueryClient, args
   return this.executeNamed("recordApprovalDecision", buildRecordApprovalDecision(args), opts);
 };
 
-/** Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact). */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["recordBundleDryRun"] in generated_concepts.ts).
-export interface RecordBundleDryRunArgs {
-  bundleId: string;
-  // Enum: dryRunPassed | failed
-  status: string;
-  dryRunReport: Record<string, unknown>;
-  failureReason?: string;
-}
-
-export function buildRecordBundleDryRun(args: RecordBundleDryRunArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  parts.push("dryRunReport: " + renderMemQLValue(args.dryRunReport));
-  if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
-  return "mutation recordBundleDryRun(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordBundleDryRun(args: RecordBundleDryRunArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordBundleDryRun = function (this: QueryClient, args: RecordBundleDryRunArgs = {} as RecordBundleDryRunArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordBundleDryRun", buildRecordBundleDryRun(args), opts);
-};
-
-/** Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status is validated on success or failed on a binding error; validationReport carries the structured diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row owned + satisfies per-row authz). */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["recordBundleValidation"] in generated_concepts.ts).
-export interface RecordBundleValidationArgs {
-  bundleId: string;
-  // Enum: validated | failed
-  status: string;
-  validationReport: Record<string, unknown>;
-  failureReason?: string;
-}
-
-export function buildRecordBundleValidation(args: RecordBundleValidationArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  parts.push("validationReport: " + renderMemQLValue(args.validationReport));
-  if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
-  return "mutation recordBundleValidation(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    recordBundleValidation(args: RecordBundleValidationArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.recordBundleValidation = function (this: QueryClient, args: RecordBundleValidationArgs = {} as RecordBundleValidationArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("recordBundleValidation", buildRecordBundleValidation(args), opts);
-};
-
 /** Append a provider bounce event. Append-only. */
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["recordConsentBounce"] in generated_concepts.ts).
 export interface RecordConsentBounceArgs {
@@ -6386,6 +6241,31 @@ QueryClient.prototype.setArtifactAccounts = function (this: QueryClient, args: S
   return this.executeNamed("setArtifactAccounts", buildSetArtifactAccounts(args), opts);
 };
 
+/** Choose whether new newsletter members must confirm their address. */
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["setAudienceConfirmation"] in generated_concepts.ts).
+export interface SetAudienceConfirmationArgs {
+  audienceId: string;
+  // Enum: none | required
+  confirmation: string;
+}
+
+export function buildSetAudienceConfirmation(args: SetAudienceConfirmationArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  parts.push("confirmation: " + renderMemQLValue(args.confirmation));
+  return "mutation setAudienceConfirmation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setAudienceConfirmation(args: SetAudienceConfirmationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setAudienceConfirmation = function (this: QueryClient, args: SetAudienceConfirmationArgs = {} as SetAudienceConfirmationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setAudienceConfirmation", buildSetAudienceConfirmation(args), opts);
+};
+
 /** Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate. */
 // Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["setAuthoredAutomationsEnabled"] in generated_concepts.ts).
 export interface SetAuthoredAutomationsEnabledArgs {
@@ -6406,33 +6286,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.setAuthoredAutomationsEnabled = function (this: QueryClient, args: SetAuthoredAutomationsEnabledArgs = {} as SetAuthoredAutomationsEnabledArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setAuthoredAutomationsEnabled", buildSetAuthoredAutomationsEnabled(args), opts);
-};
-
-/** Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by retireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional. */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["setAuthoringBundleStatus"] in generated_concepts.ts).
-export interface SetAuthoringBundleStatusArgs {
-  bundleId: string;
-  // Enum: draft | paused | active | failed
-  status: string;
-  failureReason?: string;
-}
-
-export function buildSetAuthoringBundleStatus(args: SetAuthoringBundleStatusArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
-  return "mutation setAuthoringBundleStatus(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setAuthoringBundleStatus(args: SetAuthoringBundleStatusArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setAuthoringBundleStatus = function (this: QueryClient, args: SetAuthoringBundleStatusArgs = {} as SetAuthoringBundleStatusArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setAuthoringBundleStatus", buildSetAuthoringBundleStatus(args), opts);
 };
 
 /** Flip the published flag (and optional hours) without a deploy. */
@@ -7804,6 +7657,7 @@ export interface UpdateComposeRecipeArgs {
   templateId?: string;
   format?: string;
   outputKind?: string;
+  layoutId?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -7817,6 +7671,7 @@ export function buildUpdateComposeRecipe(args: UpdateComposeRecipeArgs): string 
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation updateComposeRecipe(" + parts.join(", ") + ")";

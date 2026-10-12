@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 )
 
@@ -138,6 +139,27 @@ func TestALearnedRowForAnotherSignatureIsDropped(t *testing.T) {
 type mislabelledProcedures struct {
 	*countingCompileEngine
 	row map[string]any
+}
+
+// WriteAuthoredConstruct records the member-construct write as the call the
+// planner used to send (memql#6022).
+func (m *mislabelledProcedures) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	_, err := m.Execute(ctx, constructCall(c))
+	return err
+}
+
+// WriteAuthoringBundle records the bundle creation as the call the planner
+// used to send (memql#6022).
+func (m *mislabelledProcedures) WriteAuthoringBundle(ctx context.Context, b memql.AuthoringBundleInput) error {
+	_, err := m.Execute(ctx, bundleCall(b))
+	return err
+}
+
+// RecordBundleValidation records the Gate 1 verdict as the call the planner
+// used to send (memql#6022).
+func (m *mislabelledProcedures) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := m.Execute(ctx, validationCall(v))
+	return err
 }
 
 func (m *mislabelledProcedures) Execute(ctx context.Context, q string) (any, error) {

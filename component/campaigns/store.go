@@ -206,6 +206,7 @@ func (s SenderIdentity) Disabled() bool { return s.Status == "disabled" }
 
 // Template is the authored content.
 type Template struct {
+	Name      string `json:"name"`
 	AccountID string `json:"accountId"`
 	ID        string `json:"id"`
 	Subject   string `json:"subject"`
@@ -225,8 +226,10 @@ type Template struct {
 
 // Recipient is one address in the audience roster.
 type Recipient struct {
-	AccountID string
-	ID        string
+	JoinedAt, ConfirmedAt time.Time
+	AudienceID            string
+	AccountID             string
+	ID                    string
 	// CanonicalID is the stored `v1:campaigns:recipient:<short>` form. Kept
 	// alongside the bare id because the ledger page read compares a LIST of
 	// recipient ids, and the engine's relationship-canonicalizing pre-walk
@@ -447,6 +450,7 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 	r := rows[0]
 	return Template{
 		Revision:  templateTime(r["createdAt"]).Format(time.RFC3339Nano),
+		Name:      str(r, "name"),
 		AccountID: bare(str(r, "accountId")),
 		ID:        bare(str(r, "id")),
 		Subject:   str(r, "subject"),
@@ -510,7 +514,9 @@ func (s *Store) RosterPage(ctx context.Context, audienceID, cursor string) ([]Re
 func recipientFromRow(r map[string]any) Recipient {
 	canonical := str(r, "id")
 	return Recipient{
-		AccountID:          bare(str(r, "accountId")),
+		AccountID:  bare(str(r, "accountId")),
+		AudienceID: bare(str(r, "audienceId")),
+		JoinedAt:   templateTime(r["joinedAt"]), ConfirmedAt: templateTime(r["confirmedAt"]),
 		ID:                 bare(canonical),
 		CanonicalID:        canonical,
 		Email:              str(r, "email"),
@@ -523,7 +529,9 @@ func recipientFromRow(r map[string]any) Recipient {
 // Roster reads the whole audience by walking every page. OWNED tier.
 //
 // Retained for the callers that genuinely want the set rather than a batch:
-// the unsubscribe endpoint resolving one recipient, and tests. THE SEND PATH
+// the recipient import, which de-duplicates a whole file against the whole
+// audience, and tests. A caller that wants ONE member by address does not
+// belong here -- that is RecipientInAudienceByDigest (memql#6022). THE SEND PATH
 // DOES NOT USE IT -- it walks RosterPage, because materializing a
 // hundred-thousand-address audience once per batch is the shape memql#3460
 // removed. maxRows bounds it so "the whole audience" cannot become an
@@ -857,6 +865,18 @@ type Delivery struct {
 	// until the concept gained the field -- meant the answer existed for the
 	// length of one HTTP response.
 	EmailRuleID string
+
+	// RequestID, TemplateID and SenderIdentityID describe a SINGLE send (memql#6022,
+	// F7), and are EMPTY on a campaign delivery, whose template and sender are its
+	// campaign's. RequestID is the stable request the message was sent under, and it
+	// is the ledger key of a send with no campaign: the row's id derives from
+	// (RequestID, RecipientID), so each message to a person has a row of its own
+	// (singleDeliveryRowID). TemplateID and SenderIdentityID say what the message
+	// was and who it went out as, which the rule or journey that sent it may no
+	// longer say once it has been edited. Each is rendered only when set.
+	RequestID        string
+	TemplateID       string
+	SenderIdentityID string
 }
 
 // RecordDelivery writes the ledger row. OWNED tier: issue under the
@@ -878,6 +898,15 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	}
 	if d.EmailRuleID != "" {
 		args = append(args, arg{"emailRuleId", d.EmailRuleID})
+	}
+	if d.RequestID != "" {
+		args = append(args, arg{"requestId", d.RequestID})
+	}
+	if d.TemplateID != "" {
+		args = append(args, arg{"templateId", d.TemplateID})
+	}
+	if d.SenderIdentityID != "" {
+		args = append(args, arg{"senderIdentityId", d.SenderIdentityID})
 	}
 	if d.LastError != "" {
 		args = append(args, arg{"lastError", truncateError(d.LastError)})
@@ -989,11 +1018,12 @@ func (s *Store) SetRecipientSubscription(ctx context.Context, recipientID, statu
 // more often than it is an identifier -- and a bare key there is a parse
 // error at call time, which is the failure mode a fake-engine test suite
 // cannot see (memql#3035's shape).
-func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, source, accountID string, fields map[string]string) error {
+func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, source, accountID, status string, fields map[string]string) error {
 	args := []arg{
 		{"recipientId", recipientID},
 		{"audienceId", audienceID},
 		{"email", email},
+		{"subscriptionStatus", status},
 	}
 	if displayName != "" {
 		args = append(args, arg{"displayName", displayName})
@@ -1251,6 +1281,70 @@ func (s *Store) RecipientByID(ctx context.Context, recipientID string) (Recipien
 	return recipientFromRow(rows[0]), true, nil
 }
 
+// RecipientsInAudienceByDigest returns the memberships of one audience that
+// carry the digest of one address (EmailDigest, which addRecipient stamps on
+// every recipient it writes as emailDigest), oldest first and in ANY
+// subscription state. OWNED tier: organization-authorized, like every read of a
+// recipient.
+//
+// EVERY match comes back, not the first. A mailbox can hold more than one row (a
+// manual add beside an earlier row, a race), one of them can have opted out by
+// hand while another has not, and a caller that looked at one row would act for
+// the mailbox on the strength of the wrong one. A form refuses when ANY of them
+// is not subscribed (memql#6022).
+//
+// The digest is a KEY, not proof: a raw write can set a digest that is not the
+// digest of the row's own address, so a caller compares each row's address
+// before it believes the match. MailboxMembers does.
+//
+// Rows that carry no digest are checked by RecipientsWithoutDigestInAudience.
+// A full page returns ErrMailboxUndecidable: an opted-out duplicate may follow
+// it. The page bounds the result, not the number of rows the planner examines.
+//
+// A digest of "" matches NOTHING and is not sent: EmailDigest answers "" for an
+// address that cannot be a mailbox, and as a filter value "" would select every
+// row that has no digest at all.
+func (s *Store) RecipientsInAudienceByDigest(ctx context.Context, audienceID, digest string) ([]Recipient, error) {
+	if digest == "" {
+		return nil, nil
+	}
+	rows, err := s.rows(ctx, call("query", "recipientInAudienceByDigest", arg{"audienceId", audienceID}, arg{"emailDigest", digest}))
+	if err != nil {
+		return nil, err
+	}
+	// A full page can hide an opted-out duplicate. This read also runs under
+	// the signup lock, so refuse an incomplete answer instead of walking more
+	// pages while holding the lock.
+	if len(rows) >= digestWindow {
+		return nil, fmt.Errorf("%w: the mailbox filled the digest lookup's %d-row window", ErrMailboxUndecidable, digestWindow)
+	}
+	return recipientsFromRows(rows), nil
+}
+
+// RecipientsWithoutDigestInAudience returns ONE PAGE (digestLessWindow rows,
+// oldest first) of the audience's recipients that carry no digest, in any
+// subscription state. OWNED tier.
+//
+// Those are the rows written before the digest existed, by a replica still on
+// the previous release, or by a raw write, until the digest sweep fills them in.
+// A lookup by digest cannot see them. A page that is FULL proves nothing about
+// the rows beyond it; MailboxMembers does not read it as "no such row".
+func (s *Store) RecipientsWithoutDigestInAudience(ctx context.Context, audienceID string) ([]Recipient, error) {
+	rows, err := s.rows(ctx, call("query", "recipientsWithoutDigestInAudience", arg{"audienceId", audienceID}))
+	if err != nil {
+		return nil, err
+	}
+	return recipientsFromRows(rows), nil
+}
+
+func recipientsFromRows(rows []map[string]any) []Recipient {
+	out := make([]Recipient, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, recipientFromRow(r))
+	}
+	return out
+}
+
 // --- plumbing -----------------------------------------------------------
 
 type arg struct {
@@ -1365,33 +1459,7 @@ func (s *Store) rowsPage(ctx context.Context, cursor, q string) ([]map[string]an
 	if err != nil {
 		return nil, "", fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
-	return memql.MaterializeRows(res), cursorFromResult(res), nil
-}
-
-// cursorFromResult lifts the continuation token off whatever the engine seam
-// handed back. Two shapes, and both are real: the in-process engine returns
-// an *ExecuteResult carrying ResultMeta, and the package's tests fake flat row
-// envelopes (the seam is `Execute(ctx, string) (any, error)` precisely so they
-// can). A result with neither is an exhausted page, which is the safe reading
-// -- it ends the walk rather than continuing from a position nobody supplied.
-func cursorFromResult(res any) string {
-	type metaCarrier interface{ GetMeta() *memql.ResultMeta }
-	if carrier, ok := res.(metaCarrier); ok {
-		if meta := carrier.GetMeta(); meta != nil {
-			return strings.TrimSpace(meta.Cursor)
-		}
-	}
-	if envelope, ok := res.(map[string]any); ok {
-		if raw, ok := envelope["cursor"].(string); ok {
-			return strings.TrimSpace(raw)
-		}
-		if meta, ok := envelope["meta"].(map[string]any); ok {
-			if raw, ok := meta["cursor"].(string); ok {
-				return strings.TrimSpace(raw)
-			}
-		}
-	}
-	return ""
+	return memql.MaterializeRows(res), memql.ResultCursor(res), nil
 }
 
 func (s *Store) exec(ctx context.Context, q string) error {
@@ -1746,4 +1814,18 @@ func templateSnapshot(value any) *Template {
 		return &Template{}
 	}
 	return &snapshot
+}
+
+type Audience struct{ ID, AccountID, Name, Status, Confirmation string }
+
+func (s *Store) AudienceByID(ctx context.Context, id string) (Audience, bool, error) {
+	rows, err := s.rows(ctx, call("query", "audienceById", arg{"audienceId", bare(id)}))
+	if err != nil || len(rows) == 0 {
+		return Audience{}, false, err
+	}
+	r := rows[0]
+	return Audience{ID: bare(str(r, "id")), AccountID: bare(str(r, "accountId")), Name: str(r, "name"), Status: str(r, "status"), Confirmation: str(r, "confirmation")}, true, nil
+}
+func (s *Store) ConfirmRecipient(ctx context.Context, id string, at time.Time) error {
+	return s.execServerOnly(ctx, call("mutation", "confirmRecipientSubscription", arg{"recipientId", bare(id)}, arg{"confirmedAt", at.UTC().Format(time.RFC3339Nano)}))
 }

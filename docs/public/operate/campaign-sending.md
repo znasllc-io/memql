@@ -57,8 +57,7 @@ shows this delivery mode before sending and when confirming a test. A captured
 test verifies rendering and local persistence, not Azure delivery.
 
 Review the campaign's template and mark it `ready` before **Send now** or
-scheduling. Open the template in the editor and choose **Use in Email →
-Publish template for campaigns** after reviewing the preview. Saving keeps it
+scheduling. Open the template in the editor and choose **Publish** after reviewing the preview. Saving keeps it
 as a draft. The campaign's **Review template** action opens that editor; send
 and schedule actions appear when its publication arrives through the live
 collection. **Send a test** queues a separate run using a published template and the
@@ -94,25 +93,35 @@ Rule-triggered deliveries name their email rule; they do not invent a campaign
 relationship. Historical records are attributed only when an existing parent
 proves which organization owns them.
 
-## Templates in Productivity Tools
+## Templates in the editor
 
-Create a named template in **Email → Templates**, choose its organization,
-then open it in the editor. File content lives in MemQL Productivity Tools:
-**Source**, **Preview**, and **Split** use the same editable document. The OS
+Choose **Create new template** from the Email app to write a template in the editor. The editor keeps the file content:
+**Design**, **Source**, and **Split** use the same editable document. The OS
 keeps the template list, organization, status, and archive controls. Files
 settings select browser VS Code (the default), desktop VS Code, or Cursor.
 
-**Create from examples** starts a Materializer draft from an image, individual
-files, or an explicitly selected ZIP of resources plus your brief. MemQL reads
-the authorized bytes and produces editable HTML, plain text, and a subject in
-an `.email.json` file. A resource ZIP is inspected only for that explicit
-composition; opening a ZIP in Files still downloads it intact. Choose which images are visual inspiration and which should appear in the
-email. Included PNG, JPEG and GIF bytes stay with the editable template and
-are sent as inline attachments; the flow does not publish private file URLs.
-Review the generated layout and links before publishing.
+**New Email** asks for the organization, layout and name. Start from the layout
+or describe it with an image, individual files or a selected ZIP of resources. MemQL reads
+the authorized bytes and writes the email into a layout: the Article unless
+another is chosen (`composeMaterialize.layoutId`, one of the built-in layouts
+or one your organization saved). It writes the subject, the preheader and the
+layout's content blocks; the brand blocks (logo, signature, footer) stay as the
+layout has them. A draft aimed at a brand block, at a link tag such as
+`{{confirmUrl}}`, or at a picture you did not include is refused, and nothing
+is filed. With no brief and no files, the new `.email.json` is the layout
+itself, made without a model call. A resource ZIP is inspected only for that
+explicit composition; opening a ZIP in Files still downloads it intact. Choose
+which images are visual inspiration and which should appear in the email. An
+included picture that is one of your own Library files stays a reference to
+that file; one from a ZIP, or a file you cannot reference, is embedded as a
+copy of the bytes you selected. Pictures are sent as inline attachments; the
+flow does not publish private file URLs. Review the words, pictures and links
+before publishing.
 
-Use **Use in Email** to save a draft or publish the reviewed template for
-its organization. Publishing makes it available to send; it does not send
+Use **Publish** to save and publish the reviewed email for its organization.
+Publishing the same file updates that template. Resolve displayed issues first.
+**Save as layout** keeps its design for future emails. Local files use
+**Save to MemQL** first. Publishing makes it available to send; it does not send
 mail. Editing a published template returns it to draft. Concurrent edits fail
 with a comparison prompt, and publishing requires the exact saved revision.
 An existing template cannot be moved to another organization by editing its
@@ -149,7 +158,10 @@ Colours in a block are the theme's own (`page`, `canvas`, `primary`,
 `secondary`, `accent`, `tint`, `text`, `muted` and `white`), never a value of
 their own. A link is empty, a web, email or phone address, or exactly one of
 the four link tags `{{unsubscribeUrl}}`, `{{preferencesUrl}}`, `{{viewUrl}}`
-and `{{confirmUrl}}`, which sending replaces for each recipient. No other merge
+and `{{confirmUrl}}`, which sending replaces for each recipient. A recipient
+link must stand alone, never inside another address or a link label; saves
+and previews refuse it there too. Sentence punctuation around a bare link is
+allowed. No other merge
 tag can stand in for an address, so a recipient's own value can never become a
 link. A picture is `artifact:<id>`, a PNG, JPEG or GIF in the Library, or a
 `data:` image. An email carries at most eight pictures and 1 MiB of picture
@@ -174,7 +186,10 @@ the next email in the series.
   `{id, kind, name, description, document, status}`, and an organization's own
   also carry `layoutId`, `revision` and `sourceArtifactId`. The `id`
   (`builtin:<name>` or `org:<layoutId>`) is opaque: a client passes it on and
-  never builds or splits one.
+  never builds or splits one. Documents are included up to an 8 MiB answer
+  budget. A later row may have `documentOmitted: true` with no `document`;
+  read `emailLayoutById` with its `layoutId` before opening or previewing it.
+  Every layout remains listed, with its metadata and order intact.
 - `campaignSaveLayout({layoutId, accountId, name, description, document,
   sourceArtifactId, expectedRevision, action})` saves an organization's layout
   with the same exact-revision rule as a template. It takes a layout-mode
@@ -449,6 +464,98 @@ complained-about or suppressed addresses are not silently resubscribed.
 
 Repeated submissions converge on one signup and one intended welcome per
 normalized address and audience, even across deployables and worker replicas.
+An address already in the audience is found by its digest, the SHA-256 of the
+trimmed, lower-cased address, which the engine puts on each recipient it adds,
+instead of by reading the whole audience. A recipient written before the digest
+existed has none until the digest sweep reaches it, so the rows without a digest
+are checked by their address as well. Any row for the mailbox that has
+unsubscribed, bounced or complained keeps the form from enrolling it again or
+sending it a welcome, including a row opted out by hand and a row beside a
+duplicate for the same mailbox. The lookup is not an index read: the cost of
+each signup grows with the number of recipients in the cluster.
+
+The digest lookup returns at most 50 memberships. If it fills that page, the
+signup and row-address email rule refuse to proceed: an opted-out duplicate
+could be beyond the page. No consent, enrollment or send follows that incomplete
+answer. Consolidate duplicate memberships while preserving any opt-out before
+retrying; the digest sweep does not remove duplicates.
+
+**Rolling out the digest.** The digest is put on existing recipients by a sweep
+in the campaigns worker, not by a migration. A recipient record refuses a field
+it does not declare, so a replica still running the previous release cannot
+update a recipient that carries a digest: an unsubscribe it receives answers the
+retry page, a bounce or complaint it handles cannot be applied to the recipient,
+and a by-hand change through it errors, until that replica is gone. A migration
+would run before the new replicas start and stamp every recipient while the
+previous release is still serving, so the sweep runs ten minutes after each node
+starts and hourly after that, when a rollout is normally over. It runs whether or
+not campaign sending is enabled on the node (MEMQL_CAMPAIGNS_ENABLED), because
+signups and email rules write recipients either way. The ten minutes is a guess,
+not a check: a rollout that outlasts it is swept while an old replica still
+serves, and the recipients that pass reaches cannot be updated by that replica
+until it is gone. New recipients carry the digest from the first request of the
+new release, and rolling back to a release before the digest leaves them in the
+same state, so roll forward instead. Replicas sweep side by side without waiting
+for each other: a pass that finds a batch's lock taken skips the batch, tries it
+once more at its end, and leaves what is still held for the next pass.
+
+Until the sweep has been through, a signup always reads one page of the
+audience's recipients that have no digest as well, and once it has that page is
+empty. While an audience holds a full page of them (50), which is every audience
+of 50 or more recipients between a rollout and the first sweep, the signup reads
+the audience page by page (500 recipients a page, about two seconds a page with
+200,000 recipients in the cluster) and stops at the first row for the address
+that opted out. That is the cost the digest removed, so it stops after ten pages:
+in an audience of more than 5,000 recipients it does not start (the audience's
+size says it cannot rule an opt-out out), and the form asks the visitor to try
+again later at once. An email rule that sends to an address on a row has no such
+read, and declines to fire and says so in its refusals. The sweep logs "put the
+address digest on recipients written without one" with a count when it stamps
+anything; a pass over recipients that all carry a digest writes nothing.
+
+**What a signup holds.** A signup serialises its writes with two advisory locks,
+the storefront's and then the audience's, taken together in one transaction on
+one connection of the pod's write-gate pool: connections used for nothing else
+(`MEMQL_DB_GATE_POOL_SIZE`, four by default), so the work under the locks keeps
+all of the request pool, and the locks are not subject to the request pool's
+60-second limit on a session idle in a transaction. A gate session may sit idle
+for five minutes (`MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS`), and a signup stays far
+inside that.
+
+*Uncontended*, which is the usual case: the locks are taken at once. Everything
+slow is read before them (the form, the mailbox and the audience's size above, the
+welcome template), so a slow read delays only that visitor. Under the locks the
+signup checks again only what must be exact when it writes: the storefront's
+binding, the signup row, the suppression list and, for a mailbox it is about to
+add, the audience's room and the mailbox by digest, so signups that ran side by
+side cannot together pass the audience's ceiling or add the same person twice.
+Immediately before each write it asks its gate whether the locks are still held.
+The single-row reads and the writes are milliseconds. The two reads for a new
+mailbox are not: the engine answers any recipient read from every current
+recipient in the cluster, which costs one to four seconds each at 200,000
+recipients, depending on how busy the database is. A new subscriber at that size
+holds the locks for about two of them, and about twenty seconds in all.
+
+*Contended*: new subscribers to one audience take their turns. A signup that has
+waited six seconds for its locks, or for a connection of the gate pool, answers
+"Too many signups at once. Try again in a moment." and writes nothing; at 200,000
+recipients that is more than a couple of new subscribers to one audience at the
+same moment. A signup that gets its locks but is under them for more than thirty
+seconds starts no further write and gives the same answer; a write already under
+way when its time runs out, or when the visitor leaves, is waited for (up to ten
+seconds, past the database's own eight-second limit on a statement) and commits
+while the locks are still held. Ten seconds is a wait, not a cancel: the database
+driver sends the server no cancellation, so a write still running when the wait
+ends (it takes more than one statement, or a stalled network, to outlast the
+database's own limit) is given up on, the locks are given back, and the server may
+still commit it afterwards, beside whichever signup has taken the locks since.
+Consent is written first and keyed by the signup, so asking again is safe at
+every step. If PostgreSQL ends the
+gate's session (an administrator, a failover) the signup finds out before its next
+write and makes none. A pod whose gate connections are all held (four signups,
+welcomes or other gates at the same moment) makes the next signup wait for one, up
+to the same six seconds, and then give the same answer.
+
 Consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and
 published welcome content. Editing the template later does not rewrite that
@@ -456,9 +563,30 @@ welcome. Changing the recipient's mailbox blocks the queued welcome instead of
 redirecting it to an address that did not consent. Current authority, sender
 availability and suppression are checked again before sending.
 
+A welcome takes the storefront's lock, the audience's and its own send receipt's
+together, in that order, in one transaction on one connection. It holds them for
+at most the send's timeout plus thirty seconds for its reads (two minutes at most),
+and a send that began can hold them past that for up to twenty seconds: an attempt
+receipt begun at the phase boundary can take ten seconds, followed by up to ten
+seconds to write the welcome's outcome. The receipt that says an attempt began and the outcome are
+written only if the locks are still held, and a write begun is waited for rather
+than cut; the one exception is the ten-second wait described under signups, which a
+write can outlast without the server ending it. A lock that is busy at any point
+before the send begins, including the email provider's own (Azure's send receipt),
+is "nothing attempted, try later": the welcome stays pending, nothing is marked
+blocked, and the next worker pass sends it. So is a welcome whose time under its
+locks runs out, or whose worker stops, before its send begins, one whose storefront
+could not be read, and one whose send hit a database error before it began, reading
+the template, the recipient, the sender or the do-not-mail list, or recording that
+an attempt began: only a send that began ends a welcome, and its outcome is
+recorded even when the send outlasts the welcome's time. A welcome is marked
+blocked only for a reason of its own (the newsletter or its storefront was turned
+off, the saved copy of the reviewed template cannot be read, the send was refused,
+for instance because the recipient's address changed or the sender was retired).
+
 **Recent welcomes** shows the latest 50 outcomes, read when the audience opens
-and updates on its own. A rate limit leaves mail pending for a later worker
-pass. A blocked welcome shows its reason; after resolving it, **Check again**
+and updates on its own. A rate limit or a busy lock leaves mail pending for a
+later worker pass. A blocked welcome shows its reason; after resolving it, **Check again**
 rechecks that exact saved outcome. An attempt with a lost provider response is
 `uncertain` and is never automatically submitted again. `sent` means the
 transport accepted the message, not proof of inbox delivery. Local capture sends
@@ -518,6 +646,14 @@ Email rules supply a stable identifier automatically for each event and recipien
 Their firing reports count suppressed and replayed sends as skipped, and show
 uncertain outcomes as refusals.
 
+An email rule fires once, on the replica where its triggering write happened, and
+the limits its runs draw on (10 concurrent runs and the automation execution
+budget) are counted per replica, so the cluster-wide ceiling is those limits times
+the number of replicas. A rule fires once per event: two identical updates to the
+same row within about an hour count as one, on a single node too. Each replica
+counts failures on its own, so a failing rule can fail up to five times on each
+replica before it stops everywhere.
+
 Other automations that call `campaignSendToRecipient` should supply a stable
 `requestId` for each intended message, such as one signup event's welcome.
 Keep that identifier unchanged when retrying the same event. The recipient,
@@ -532,9 +668,35 @@ and delivery records before deciding whether another message is warranted.
 This prevents duplicate submissions; it does not guarantee mailbox delivery.
 Requests that omit `requestId` retain the existing per-invocation behavior.
 
+**Each request has its own delivery row.** A send made with a `requestId` is
+recorded on a delivery row keyed by that request and the recipient, and the row
+names the request, the template and the sender (`requestId`, `templateId`,
+`senderIdentityId`) beside the outcome. A welcome, a journey step and a rule's
+send to the same person are three rows; they used to be three versions of one row
+that each replaced the last, so which message a person got could not be answered.
+A retry of the same request writes a new version of its own row. A send made
+without a `requestId` keeps the row it always had, one per rule and recipient (or
+per recipient when no rule is behind it), and still overwrites its earlier record.
+A campaign's deliveries are unchanged: one row per campaign and recipient.
+
 Suppression and preflight refusals make no external send attempt and remain
-retryable. Receipt reads still require current send authority in the recorded
-organization. The internal receipt cannot be forged through client mutations.
+retryable, and so does a send whose coordination lock was busy: the attempt is
+recorded only after every lock the send needs has been taken, including the email
+provider's, so a busy lock leaves no record that an attempt began and the same
+request, made again, goes out. It is recorded only while the send still holds its
+own lock: if PostgreSQL ended the session that holds it, the send records nothing,
+contacts nothing and answers that its lock was lost, and the same request, made
+again, goes out. A database error while a send reads what it needs, or while it
+records the attempt, leaves it undecided in the same way: nothing was attempted, and
+a welcome stays pending instead of being marked blocked. An email rule that finds the lock busy tries again
+within its firing after one, two and four seconds. If it is still busy it reports a
+refusal ("nothing was sent to this recipient; the firing can be made again"),
+stops an audience rule at that recipient, and for a rule that fires when a row is
+created gives the row's claim back, so the event delivered again fires for it. The
+bulk send treats a busy lock as a wait: the delivery keeps its attempt count and the
+campaign pauses for fifteen seconds. Receipt reads still require current send
+authority in the recorded organization. The internal receipt cannot be forged
+through client mutations.
 
 ## Local test inbox
 
@@ -750,10 +912,11 @@ something you have to do in three places to avoid silent truncation.
 ### Idempotency is the ledger, not a retry flag
 
 `v1:campaigns:delivery` has one row per (campaign, recipient), at a
-deterministically derived id. The worker's batch is *"roster members with no
-delivery row, plus rows still `pending` whose retry is due"*. A recipient that
-reached `sent`, `skipped` or terminal `failed` is simply not in the next
-batch.
+deterministically derived id. (A single send outside a campaign has one per
+(request, recipient); see [Retrying event emails](#retrying-event-emails).)
+The worker's batch is *"roster members with no delivery row, plus rows still
+`pending` whose retry is due"*. A recipient that reached `sent`, `skipped` or
+terminal `failed` is simply not in the next batch.
 
 So a resumed send, a restarted process, a paused-and-resumed campaign and a
 claim lost to a dead replica all converge on the same behaviour, and none of

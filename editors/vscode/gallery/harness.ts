@@ -11,7 +11,8 @@
 // them can look wrong inside the editor:
 //   1. the theme's colours and fonts as `--vscode-*` custom properties on
 //      <html> (the values below are the Dark Modern and Light Modern themes,
-//      for every variable the extension's CSS reads);
+//      for every variable the extensions' pages read: MemQL's, and
+//      Productivity Tools' email pages, whose gallery uses this harness too);
 //   2. a default stylesheet (link and code colours, the focus outline,
 //      scrollbars, a 20px body gutter) that follows the EDITOR's theme;
 //   3. a `vscode-light` / `vscode-dark` class on <body> and the
@@ -58,7 +59,13 @@ const FONTS: Readonly<Record<string, string>> = {
     "\"SF Mono\", Monaco, Menlo, Consolas, \"Ubuntu Mono\", \"Liberation Mono\", \"DejaVu Sans Mono\", \"Courier New\", monospace",
 };
 
-/** Dark Modern and Light Modern, for every `--vscode-*` colour the extension or VS Code's defaults read. */
+/**
+ * Dark Modern and Light Modern, for every `--vscode-*` colour the pages or VS
+ * Code's defaults read, written as a webview receives them. A value is the
+ * theme's own (dark_modern.json and light_modern.json in VS Code's
+ * extensions/theme-defaults/themes/) or, for a colour those files inherit, the
+ * one a real webview reads in that theme (VS Code 1.108.2).
+ */
 export const VSCODE_THEME_VARS: Readonly<Record<GalleryTheme, Readonly<Record<string, string>>>> = {
   dark: {
     ...FONTS,
@@ -73,6 +80,13 @@ export const VSCODE_THEME_VARS: Readonly<Record<GalleryTheme, Readonly<Record<st
     "--vscode-button-hoverBackground": "#026ec1",
     "--vscode-button-secondaryBackground": "#313131",
     "--vscode-button-secondaryForeground": "#cccccc",
+    "--vscode-button-border": "rgba(255, 255, 255, 0.07)",
+    "--vscode-toolbar-hoverBackground": "rgba(90, 93, 94, 0.31)",
+    "--vscode-toolbar-activeBackground": "rgba(99, 102, 103, 0.31)",
+    "--vscode-list-hoverBackground": "#2a2d2e",
+    "--vscode-list-inactiveSelectionBackground": "#37373d",
+    "--vscode-editorWidget-background": "#202020",
+    "--vscode-widget-border": "#313131",
     "--vscode-input-background": "#313131",
     "--vscode-input-border": "#3c3c3c",
     "--vscode-input-foreground": "#cccccc",
@@ -105,6 +119,13 @@ export const VSCODE_THEME_VARS: Readonly<Record<GalleryTheme, Readonly<Record<st
     "--vscode-button-hoverBackground": "#0258a8",
     "--vscode-button-secondaryBackground": "#e5e5e5",
     "--vscode-button-secondaryForeground": "#3b3b3b",
+    "--vscode-button-border": "rgba(0, 0, 0, 0.1)",
+    "--vscode-toolbar-hoverBackground": "rgba(184, 184, 184, 0.31)",
+    "--vscode-toolbar-activeBackground": "rgba(166, 166, 166, 0.31)",
+    "--vscode-list-hoverBackground": "#f2f2f2",
+    "--vscode-list-inactiveSelectionBackground": "#e4e6f1",
+    "--vscode-editorWidget-background": "#f8f8f8",
+    "--vscode-widget-border": "#e5e5e5",
     "--vscode-input-background": "#ffffff",
     "--vscode-input-border": "#cecece",
     "--vscode-input-foreground": "#3b3b3b",
@@ -125,6 +146,14 @@ export const VSCODE_THEME_VARS: Readonly<Record<GalleryTheme, Readonly<Record<st
     "--vscode-widget-shadow": "rgba(0, 0, 0, 0.16)",
   },
 };
+
+/**
+ * Variables a page reads that Dark Modern and Light Modern leave unset. VS Code
+ * gives them a value only in the high contrast themes, so a webview in either
+ * of these has no such property and the page's own fallback applies; the
+ * gallery leaves them out for the same reason.
+ */
+export const VSCODE_UNSET_VARS: readonly string[] = ["--vscode-contrastActiveBorder", "--vscode-contrastBorder"];
 
 /** VS Code's default webview stylesheet (src/vs/workbench/contrib/webview/browser/pre/index.html). */
 const VSCODE_DEFAULT_STYLES = `

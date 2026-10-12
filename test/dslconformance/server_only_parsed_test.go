@@ -173,6 +173,26 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Durable email automation coordination; public callers use gated capabilities.
+		{Path: "campaigns/queries.memql", Name: "deferredSingleSends"}:            true,
+		{Path: "campaigns/queries.memql", Name: "activeJourneys"}:                 true,
+		{Path: "campaigns/queries.memql", Name: "journeysToRetire"}:               true,
+		{Path: "campaigns/queries.memql", Name: "dueEnrollmentsForJourney"}:       true,
+		{Path: "campaigns/queries.memql", Name: "openEnrollmentsForJourney"}:      true,
+		{Path: "campaigns/queries.memql", Name: "newestJourneyEnrollment"}:        true,
+		{Path: "campaigns/queries.memql", Name: "journeyEnrollmentById"}:          true,
+		{Path: "campaigns/queries.memql", Name: "audienceJoinersSince"}:           true,
+		{Path: "campaigns/queries.memql", Name: "audienceConfirmationsSince"}:     true,
+		{Path: "campaigns/queries.memql", Name: "waitingEnrollmentsForRecipient"}: true,
+		{Path: "campaigns/mutations.memql", Name: "confirmRecipientSubscription"}: true,
+		{Path: "campaigns/mutations.memql", Name: "createJourney"}:                true,
+		{Path: "campaigns/mutations.memql", Name: "updateJourney"}:                true,
+		{Path: "campaigns/mutations.memql", Name: "setJourneyStatus"}:             true,
+		{Path: "campaigns/mutations.memql", Name: "recordJourneyDrain"}:           true,
+		{Path: "campaigns/mutations.memql", Name: "enrollJourneyRecipient"}:       true,
+		{Path: "campaigns/mutations.memql", Name: "advanceJourneyEnrollment"}:     true,
+		{Path: "campaigns/mutations.memql", Name: "nudgeJourneyEnrollment"}:       true,
+
 		// Webhook resolution has no signed-in user. The connector's internal
 		// cluster-owner actor walks the installation directory at one snapshot;
 		// per-user scoping would silently discard other configured stores.
@@ -318,6 +338,42 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// what has actually succeeded, and a tier cannot say "these are yours
 		// and still not yours to write".
 		{Path: "authoring/mutations.memql", Name: "recordConstructGoalSignature"}: true,
+
+		// memql#6022. A bundle that reads active is armed on every replica --
+		// the boot re-arm, each reconcile pass and the arm broadcast all follow
+		// the row -- so `active` is the claim that the gates passed. Scoping to
+		// actor.userId is not the missing piece: the bundle IS its owner's, and
+		// the owner is exactly who the gates stand in front of. What a caller
+		// may not do is make the claim at all; the gated activation and the
+		// durable promote write it under internal origin, and the breaker's
+		// pause is the system's own decision. Raw writes are held at the write
+		// chokepoint too (component/memql/authoring_bundle_activation_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "activateAuthoringBundle"}:  true,
+		{Path: "authoring/mutations.memql", Name: "setAuthoringBundleStatus"}: true,
+		// The same argument for a bundle's MEMBERS: an active bundle arms every
+		// construct it holds, so a construct joining a bundle is a claim that
+		// the bundle's gates saw it. The pipelines that run the gates write
+		// them, under internal origin, while the bundle reads draft; the write
+		// guard holds raw writes to the same rule
+		// (component/memql/authoring_construct_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "createAuthoringConstruct"}: true,
+		// And a bundle COMING TO EXIST (memql#6022): an email or
+		// routing rule's bundle id is derived from its owner and the rule, so
+		// the id a person's next activation writes is known before it is
+		// written, and a bundle another person created there first was theirs
+		// -- the owner's activation refused at a row it did not own. Only the
+		// server pipelines create a bundle, each deriving for its own owner or
+		// minting a fresh id; the create guard holds raw writes to the same
+		// rule (component/memql/authoring_bundle_create_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "createAuthoringBundle"}: true,
+		// And a GATE'S VERDICT (memql#6022): the claim that a gate ran. A work
+		// template runs from a bundle only once it reads validated, and a bundle
+		// activates only from dryRunPassed, so the server pipelines that run the
+		// gates record them, under internal origin; the verdict guard holds raw
+		// writes to the same rule
+		// (component/memql/authoring_bundle_verdict_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "recordBundleValidation"}: true,
+		{Path: "authoring/mutations.memql", Name: "recordBundleDryRun"}:     true,
 
 		// epic memql#4966. workRunsInFlight is the wait-and-abandon sweep's
 		// read. (A2 briefly carried a closeWorkGoal beside it; epic A3's

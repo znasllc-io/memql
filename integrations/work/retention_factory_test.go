@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"database/sql"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"testing"
@@ -13,7 +14,13 @@ func TestProductionFactoryWiresVerifiableArchive(t *testing.T) {
 	t.Setenv("MEMQL_AZURE_STORAGE_CONNECTION_STRING", "DefaultEndpointsProtocol=https;AccountName=retentiontest;AccountKey=dGVzdA==;EndpointSuffix=core.windows.net")
 	for _, p := range memql.RegisteredPlugins() {
 		if p.Name == "work" {
-			provider, err := p.Factory(memql.PluginContext{AdmitSourceRow: func(context.Context, memorynodes.MemoryNode) bool { return true }})
+			// GateDB as a node wires it: a resolver of the gate pool, here one with no
+			// pool behind it (this takes no gate; the plug-in refuses a context without
+			// the resolver).
+			provider, err := p.Factory(memql.PluginContext{
+				AdmitSourceRow: func(context.Context, memorynodes.MemoryNode) bool { return true },
+				GateDB:         func() *sql.DB { return nil },
+			})
 			if err != nil {
 				t.Fatal(err)
 			}

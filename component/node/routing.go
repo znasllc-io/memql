@@ -105,8 +105,30 @@ func defaultRoutingRules() []RoutingRule {
 		// the demoted bundle's constructs on the broadcast. Same single-broadcast
 		// pattern as cache.invalidate.* / authoring.promote.*.
 		{Pattern: "authoring.demote.*", TargetType: ""},
+		// Authoring-arm forwarding (memql#6022, F1). Activating an authored
+		// bundle emits authoring.arm.<bundleId> (see
+		// MemQLEngine.publishAuthoringArm); ONLY the authoring-arm subscriber
+		// consumes it (no automations, no other consumers), so forwarding it
+		// everywhere has ZERO side effects. This is what arms an email rule or
+		// an owner-added routing rule on EVERY replica the moment it is
+		// activated: each replica reads the bundle from the shared DB and
+		// registers it into its own authored registry and scheduler. Without it
+		// the bundle reached the other replicas at their next boot, and since
+		// the owner gate runs an owner's automations on one node of the mesh, a
+		// rule activated anywhere else did not fire at all. A separate channel
+		// from authoring.promote.*, which re-hydrates plain constructs into the
+		// SHARED registry; arming is owner-scoped.
+		{Pattern: "authoring.arm.*", TargetType: ""},
+		// Authoring-disarm forwarding (memql#6022, F1). The inverse of the
+		// authoring.arm.* rule above: retiring an active bundle emits
+		// authoring.disarm.<bundleId> (see MemQLEngine.publishAuthoringDisarm),
+		// and every replica takes the bundle's constructs out of its own
+		// authored runtime -- so a rule retired on one node stops firing on
+		// every node, not only on the one that handled the retire. Same
+		// single-broadcast pattern as authoring.promote.* / authoring.demote.*.
+		{Pattern: "authoring.disarm.*", TargetType: ""},
 		// Providers-reload forwarding (epic memql#4440). Same shape and same
-		// reasoning as the three rules above: the owner-gated
+		// reasoning as the broadcast rules above: the owner-gated
 		// `providersReload` builtin emits providers.reload.<requestId>, ONLY
 		// the providers-reload subscriber consumes it (no automations, no
 		// other consumers), so forwarding it everywhere has ZERO side
@@ -822,6 +844,8 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.updated.v1:campaigns:newsletterBinding", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:testSettings", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:campaigns:testSettings", TargetType: ""},
+		{Pattern: "graph.node.created.v1:campaigns:journey", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:journey", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:campaignSeries", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:campaigns:campaignSeries", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:campaign", TargetType: ""},

@@ -820,6 +820,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	if (conceptMeta.Name == "v1:email:connectionState" || conceptMeta.Name == "v1:email:sendOperation") && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("email connection state requires internal origin from the authorized connection capability")
 	}
+	if (conceptMeta.Name == "v1:campaigns:journey" || conceptMeta.Name == "v1:campaigns:journeyEnrollment") && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("automation writes require campaignSaveJourney, campaignSetJourneyState or the automation drain")
+	}
 	if (conceptMeta.Name == "v1:campaigns:newsletterBinding" || conceptMeta.Name == "v1:campaigns:newsletterSignup") && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("newsletter writes require their configuration, signup or progress capability")
 	}
@@ -1105,6 +1108,28 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+	// A BUNDLE BECOMES ACTIVE only through the gated activation (memql#6022),
+	// at the same seam and for the same reasons: every replica arms every
+	// bundle that reads active, the read-merge carries status through writes
+	// that never name it, and an owner's before-write hook could otherwise set
+	// it. See authoring_bundle_activation_write_guard.go. And a bundle COMES
+	// TO EXIST only as a server pipeline's write: a rule's next bundle id is
+	// known before it is written, and a bundle another person created there
+	// first would block its owner. See authoring_bundle_create_write_guard.go.
+	// And a GATE'S VERDICT is the server's claim that the gate ran: a work
+	// template runs from a validated bundle, and a bundle activates from
+	// dryRunPassed. See authoring_bundle_verdict_write_guard.go.
+	if conceptMeta.Name == conceptAuthoringBundle {
+		if err := validateBundleCreateServerOnly(ctx, organizationPrior); err != nil {
+			return nil, meta, err
+		}
+		if err := validateBundleVerdictServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+		if err := validateBundleActivationServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 	// PROTECTED OUTBOUND ROWS -- secret targets and server-staged deliveries --
 	// are server-written only (memql#5480), at the same seam for the ladder's
 	// reasons: the rule is about a CHANGE, so it needs the stored row and the
@@ -1198,6 +1223,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// worker_sharing_write_guard.go.
 	if conceptMeta.Name == WorkerRegistrationConcept {
 		if err := validateWorkerConsentServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
+	// A BUNDLE'S MEMBERS are what its gates saw (memql#6022): a construct
+	// joins a bundle, or changes what it arms, only as the server's write
+	// into its owner's bundle before that bundle has passed its dry run.
+	// Here, beside the sharing guard and for its reason: it judges the
+	// OWNER, which is final only after the stamps above -- a raw insert's
+	// owner is stamped there. Before canonicalization, so it compares owners
+	// and bundle ids tolerantly. See authoring_construct_write_guard.go.
+	if conceptMeta.Name == memorynodes.ConceptAuthoringConstruct {
+		if err := e.validateConstructMembership(ctx, organizationPrior, payload); err != nil {
 			return nil, meta, err
 		}
 	}
@@ -1567,6 +1604,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// neither expressible in a mutation body. See shopify_store_guard.go.
 	if conceptMeta.Name == conceptShopifyStore {
 		if err := validateShopifyStoreWrite(payload, id, meta.priorExisted, meta.priorStorefrontTokenRef); err != nil {
+			return nil, meta, err
+		}
+	}
+
+	// The names a campaign's mail shows are capped (memql#6033): the view link
+	// carries them and a link token has a size limit. The sentence the person
+	// reads lives here because a mutation cannot state its own refusal, and on
+	// the merged row so a name saved before the cap is told about too. See
+	// campaign_name_guard.go.
+	if conceptMeta.Name == conceptCampaignsCampaign || conceptMeta.Name == conceptCampaignsSenderIdentity {
+		if err := validateCampaignNameLengths(conceptMeta.Name, payload); err != nil {
 			return nil, meta, err
 		}
 	}

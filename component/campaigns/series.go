@@ -299,7 +299,7 @@ func (w *Worker) promoteSeries(ctx, systemCtx context.Context, scanned map[strin
 		return w.advanceSeries(systemCtx, row, "blocked", when, "", err.Error())
 	}
 	campaign.ID = occurrenceID(bare(str(row, "id")), when)
-	campaign.Name += " · " + when.UTC().Format("2006-01-02 15:04 UTC")
+	campaign.Name = nameWithSuffix(campaign.Name, " · "+when.UTC().Format("2006-01-02 15:04 UTC"))
 	existing, found, err := w.store.CampaignByID(ownerCtx, campaign.ID)
 	if err != nil {
 		return err
