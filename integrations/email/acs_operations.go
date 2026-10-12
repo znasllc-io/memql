@@ -86,7 +86,7 @@ func (i *Integration) PollOperations(ctx context.Context) error {
 }
 
 func (a *azureSetup) pollOperation(ctx context.Context, store acsOperationStore, key string) error {
-	release, err := store.lock(ctx, key)
+	hold, err := store.lock(context.WithoutCancel(ctx), key)
 	if memql.IsWriteGateBusy(err) {
 		// A delivery holds its receipt's lock from before its first receipt to after
 		// its outcome (acs.go, submitOnce), so a busy lock is a send in flight right
@@ -97,7 +97,7 @@ func (a *azureSetup) pollOperation(ctx context.Context, store acsOperationStore,
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer hold.Release()
 	op, prior, found, err := store.read(ctx, key)
 	if err != nil || !found {
 		return err
@@ -135,7 +135,12 @@ func (a *azureSetup) pollOperation(ctx context.Context, store acsOperationStore,
 			}
 		}
 	}
-	_, err = store.write(ctx, key, op, prior)
+	if err = hold.Verify(ctx); err != nil {
+		return err
+	}
+	write, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	_, err = store.write(write, key, op, prior)
 	return err
 }
 

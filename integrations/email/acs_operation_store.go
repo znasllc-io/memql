@@ -26,15 +26,20 @@ type acsOperation struct {
 	SubmittedAt, CheckedAt, NextPollAt                    time.Time
 }
 
+type acsOperationGate interface {
+	Release()
+	Verify(context.Context) error
+}
+
 type acsOperationStore interface {
-	lock(context.Context, string) (func(), error)
+	lock(context.Context, string, ...string) (acsOperationGate, error)
 	read(context.Context, string) (acsOperation, time.Time, bool, error)
 	write(context.Context, string, acsOperation, time.Time) (time.Time, error)
 }
 
 type storedACSOperations struct{ connection *connectionStore }
 
-func (s *storedACSOperations) lock(ctx context.Context, key string) (func(), error) {
+func (s *storedACSOperations) lock(ctx context.Context, key string, keys ...string) (acsOperationGate, error) {
 	var connection *connectionStore
 	if s != nil {
 		connection = s.connection
@@ -43,7 +48,7 @@ func (s *storedACSOperations) lock(ctx context.Context, key string) (func(), err
 	if err != nil {
 		return nil, err
 	}
-	return memql.AcquireWriteGate(ctx, db, "email-operation:"+key)
+	return memql.AcquireGateHold(ctx, db, 0, append([]string{"email-operation:" + key}, keys...)...)
 }
 
 func (s *storedACSOperations) rows(ctx context.Context, name string, args map[string]any) ([]map[string]any, error) {

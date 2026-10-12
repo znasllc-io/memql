@@ -30,6 +30,7 @@ type AzureDeliveryReport struct {
 	OperationID, DeliveryID, AccountID, Email, Status string
 	OccurredAt, AcceptedAt                            time.Time
 	verify                                            func(context.Context) error
+	verifyGate                                        func(context.Context, string) error
 }
 
 func (r AzureDeliveryReport) Verify(ctx context.Context) error {
@@ -38,6 +39,17 @@ func (r AzureDeliveryReport) Verify(ctx context.Context) error {
 	}
 	return r.verify(ctx)
 }
+
+// VerifyGate checks that the native callback's ledger lock is part of the
+// original receipt transaction, rather than taking another pool connection.
+func (r AzureDeliveryReport) VerifyGate(ctx context.Context, key string) error {
+	if r.verifyGate == nil {
+		return errors.New("provider feedback has no held delivery gate")
+	}
+	return r.verifyGate(ctx, key)
+}
+
+type AzureDeliveryGateResolver func(context.Context, string) (string, error)
 
 type acsMessageKey struct{}
 type acsMessageIdentity struct{ DeliveryID, RecipientDigest, SenderDigest string }
@@ -93,7 +105,7 @@ func sameAzureResource(a, b string) bool {
 // Authorization header. Authentication is not the subscription handshake: every
 // delivery also needs the credential, expected topic, and original send receipt.
 // Secrets never appear in URLs, logs, events, or the public connection response.
-func NewAzureFeedbackHandler(resolve func() *Integration, apply func(context.Context, AzureDeliveryReport) error) http.Handler {
+func NewAzureFeedbackHandler(resolve func() *Integration, apply func(context.Context, AzureDeliveryReport) error, gateResolver ...AzureDeliveryGateResolver) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodPost {
@@ -190,7 +202,7 @@ func NewAzureFeedbackHandler(resolve func() *Integration, apply func(context.Con
 			}
 		}
 		for index, event := range events {
-			if err := a.applyDeliveryEvent(ctx, configured, event, reports[index], apply); err != nil {
+			if err := a.applyDeliveryEvent(ctx, configured, event, reports[index], apply, gateResolver...); err != nil {
 				// Never log provider payloads, bearer values, or recipient addresses.
 				if integration.logger != nil {
 					integration.logger.Warn("Azure email feedback will retry", "error", err)
@@ -204,7 +216,7 @@ func NewAzureFeedbackHandler(resolve func() *Integration, apply func(context.Con
 	})
 }
 
-func (a *azureSetup) applyDeliveryEvent(ctx context.Context, configured azureFeedbackConnection, event azureEvent, data azureDeliveryData, apply func(context.Context, AzureDeliveryReport) error) error {
+func (a *azureSetup) applyDeliveryEvent(ctx context.Context, configured azureFeedbackConnection, event azureEvent, data azureDeliveryData, apply func(context.Context, AzureDeliveryReport) error, gateResolver ...AzureDeliveryGateResolver) error {
 	store := &storedACSOperations{connection: a.store}
 	rows, err := store.rows(ctx, "emailSendOperationByProviderId", map[string]any{"accountId": configured.AccountID, "providerMessageId": data.MessageID})
 	if err != nil {
@@ -218,7 +230,21 @@ func (a *azureSetup) applyDeliveryEvent(ctx context.Context, configured azureFee
 	if err != nil {
 		return err
 	}
-	hold, err := memql.AcquireGateHold(context.WithoutCancel(ctx), db, 0, "email-operation:"+key)
+	keys := []string{"email-operation:" + key}
+	initial, _, found, err := store.read(ctx, key)
+	if err != nil || !found {
+		return errors.New("the original Azure send receipt is unavailable")
+	}
+	if len(gateResolver) > 0 && gateResolver[0] != nil && initial.DeliveryID != "" {
+		gate, err := gateResolver[0](emailStateContext(ctx), initial.DeliveryID)
+		if err != nil {
+			return err
+		}
+		if gate != "" {
+			keys = append(keys, gate)
+		}
+	}
+	hold, err := memql.AcquireGateHold(context.WithoutCancel(ctx), db, 0, keys...)
 	if err != nil {
 		return err
 	}
@@ -227,7 +253,7 @@ func (a *azureSetup) applyDeliveryEvent(ctx context.Context, configured azureFee
 	if err != nil {
 		return err
 	}
-	if !found || op.ID != data.MessageID || op.AccountID != configured.AccountID || !sameAzureResource(op.ResourceID, event.Topic) || op.RecipientDigest != azureMailboxDigest(data.Recipient) || op.SenderDigest != azureMailboxDigest(data.Sender) {
+	if !found || op.DeliveryID != initial.DeliveryID || op.ID != data.MessageID || op.AccountID != configured.AccountID || !sameAzureResource(op.ResourceID, event.Topic) || op.RecipientDigest != azureMailboxDigest(data.Recipient) || op.SenderDigest != azureMailboxDigest(data.Sender) {
 		return errors.New("the delivery report does not match the original Azure send")
 	}
 	status := azureDeliveryStatus(data.Status)
@@ -238,7 +264,14 @@ func (a *azureSetup) applyDeliveryEvent(ctx context.Context, configured azureFee
 	// arrives later. A later failure never erases a confirmed MTA handoff.
 	rank := map[string]int{"expanded": 1, "failed": 2, "quarantined": 2, "filtered-spam": 2, "delivered": 3, "bounced": 4, "suppressed": 4}
 	if rank[status] > rank[op.DeliveryStatus] || (rank[status] == rank[op.DeliveryStatus] && data.AttemptTime.After(op.DeliveryAt)) {
-		report := AzureDeliveryReport{OperationID: op.ID, DeliveryID: op.DeliveryID, AccountID: op.AccountID, Email: data.Recipient, Status: status, OccurredAt: data.AttemptTime.UTC(), AcceptedAt: op.SubmittedAt, verify: hold.Verify}
+		report := AzureDeliveryReport{OperationID: op.ID, DeliveryID: op.DeliveryID, AccountID: op.AccountID, Email: data.Recipient, Status: status, OccurredAt: data.AttemptTime.UTC(), AcceptedAt: op.SubmittedAt, verify: hold.Verify, verifyGate: func(ctx context.Context, key string) error {
+			for _, held := range keys[1:] {
+				if held == key {
+					return hold.Verify(ctx)
+				}
+			}
+			return errors.New("provider feedback did not reserve this delivery gate")
+		}}
 		if err := hold.Verify(ctx); err != nil {
 			return err
 		}

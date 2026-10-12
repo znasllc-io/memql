@@ -41,9 +41,10 @@ type Sender interface {
 // and the function that gives the reservation back, which the caller calls when the
 // delivery is over, whatever its outcome. A Send whose context carries no
 // reservation takes what it needs itself. A sender with nothing to reserve does not
-// implement it.
+// implement it. Optional gateKeys coordinate the caller's final ledger write on
+// the same connection as the receipt; BorrowDeliveryGate verifies that reservation.
 type Reserver interface {
-	Reserve(ctx context.Context, msg Message, as SendAs) (context.Context, func(), error)
+	Reserve(ctx context.Context, msg Message, as SendAs, gateKeys ...string) (context.Context, func(), error)
 }
 
 // SendAs names the mailbox a message leaves from (design D5, memql#4821).

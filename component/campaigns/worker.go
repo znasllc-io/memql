@@ -816,11 +816,12 @@ func (w *Worker) processRecipient(
 
 	msg.IntentID = "campaign:" + bare(campaign.ID) + ":recipient:" + bare(r.ID)
 	msg.DeliveryID = deliveryRowID(campaign.ID, r.ID)
-	reserved, release, reserveErr := w.reserveDelivery(ctx, msg, identity.SendAs)
+	reserved, release, reserveErr := w.reserveDelivery(ctx, msg, identity.SendAs, providerLedgerLock(campaign.ID))
 	if reserveErr != nil {
 		err = reserveErr
 	} else {
 		defer release() // Provider feedback waits until the delivery ledger is written.
+		ownerCtx = email.CopyDeliveryGates(ownerCtx, reserved)
 		sendCtx, cancel := context.WithTimeout(reserved, w.cfg.SendTimeout)
 		err = w.deliver(sendCtx, msg, identity.SendAs)
 		cancel()
@@ -904,12 +905,12 @@ func (w *Worker) processRecipient(
 // delivering msg (email.Reserver), and returns the context to deliver with and the
 // function that gives it back. A transport with nothing to reserve, and a test's
 // send hook, reserve nothing.
-func (w *Worker) reserveDelivery(ctx context.Context, msg email.Message, as email.SendAs) (context.Context, func(), error) {
+func (w *Worker) reserveDelivery(ctx context.Context, msg email.Message, as email.SendAs, gateKeys ...string) (context.Context, func(), error) {
 	if w.sendHook != nil {
 		return ctx, func() {}, nil
 	}
 	if reserver, ok := w.resolveSender().(email.Reserver); ok {
-		return reserver.Reserve(ctx, msg, as)
+		return reserver.Reserve(ctx, msg, as, gateKeys...)
 	}
 	return ctx, func() {}, nil
 }

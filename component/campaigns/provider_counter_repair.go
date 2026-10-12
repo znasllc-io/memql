@@ -8,6 +8,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/email"
 )
 
 // progressWrite serializes the ordinary worker's last counter writes with a
@@ -194,9 +195,15 @@ func (w *Worker) recordWorkerDelivery(ownerCtx context.Context, delivery Deliver
 	if w.providerLedgerGate == nil {
 		return fmt.Errorf("campaign ledger coordination is unavailable")
 	}
-	hold, err := w.providerLedgerGate(context.WithoutCancel(ownerCtx), delivery.CampaignID)
-	if err != nil {
-		return err
+	var hold gateHold
+	var err error
+	if verify, ok := email.BorrowDeliveryGate(ownerCtx, providerLedgerLock(delivery.CampaignID)); ok {
+		hold = borrowedDeliveryGate{verify: verify}
+	} else {
+		hold, err = w.providerLedgerGate(context.WithoutCancel(ownerCtx), delivery.CampaignID)
+		if err != nil {
+			return err
+		}
 	}
 	defer hold.Release()
 	system := auth.ContextWithInternalOrigin(w.systemActorContext(memql.ContextWithFreshRead(ownerCtx)))
@@ -230,3 +237,8 @@ func (w *Worker) recordWorkerDelivery(ownerCtx context.Context, delivery Deliver
 	delivery.VersionTime = &version
 	return commitCampaignProgress(ownerCtx, hold, func(commit context.Context) error { return w.store.RecordDelivery(commit, delivery) })
 }
+
+type borrowedDeliveryGate struct{ verify func(context.Context) error }
+
+func (h borrowedDeliveryGate) Verify(ctx context.Context) error { return h.verify(ctx) }
+func (h borrowedDeliveryGate) Release()                         {}

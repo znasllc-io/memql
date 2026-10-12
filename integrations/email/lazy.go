@@ -94,13 +94,13 @@ func (l *LazySender) Send(ctx context.Context, msg Message, as SendAs) error {
 
 // Reserve reserves on the Sender this wrapper resolves to for the identity, when
 // that Sender reserves (Reserver). One that does not has nothing to hold.
-func (l *LazySender) Reserve(ctx context.Context, msg Message, as SendAs) (context.Context, func(), error) {
+func (l *LazySender) Reserve(ctx context.Context, msg Message, as SendAs, gateKeys ...string) (context.Context, func(), error) {
 	sender, err := l.senderFor(ctx, as)
 	if err != nil {
 		return nil, nil, err
 	}
 	if reserver, ok := sender.(Reserver); ok {
-		return reserver.Reserve(ctx, msg, as)
+		return reserver.Reserve(ctx, msg, as, gateKeys...)
 	}
 	return ctx, func() {}, nil
 }

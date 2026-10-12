@@ -21,6 +21,12 @@ func (a *App) mountAzureEmailFeedback() {
 			return fmt.Errorf("campaign feedback is unavailable")
 		}
 		return worker.ApplyAzureDelivery(ctx, report)
+	}, func(ctx context.Context, deliveryID string) (string, error) {
+		worker, ok := a.engine.Integrations().Provider("campaigns").(*campaigns.Worker)
+		if !ok || worker == nil {
+			return "", fmt.Errorf("campaign feedback is unavailable")
+		}
+		return worker.AzureDeliveryGateKey(ctx, deliveryID)
 	})
 	for _, path := range server.AzureEmailFeedbackPaths() {
 		a.handleRoute("POST "+path, handler)

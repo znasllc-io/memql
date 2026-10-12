@@ -200,14 +200,44 @@ func (s *ACSSender) operationKey(intent string) string {
 // reserved (Reserve) and holds until the delivery is over.
 type heldOperationKey struct{}
 
-func withHeldOperation(ctx context.Context, key string) context.Context {
-	return context.WithValue(ctx, heldOperationKey{}, key)
+type heldOperationScope struct {
+	key  string
+	hold acsOperationGate
+	keys []string
 }
 
-func heldOperation(ctx context.Context) string {
-	key, _ := ctx.Value(heldOperationKey{}).(string)
-	return key
+func withHeldOperation(ctx context.Context, key string, hold acsOperationGate, keys []string) context.Context {
+	return context.WithValue(ctx, heldOperationKey{}, heldOperationScope{key: key, hold: hold, keys: keys})
 }
+func heldOperation(ctx context.Context) heldOperationScope {
+	hold, _ := ctx.Value(heldOperationKey{}).(heldOperationScope)
+	return hold
+}
+
+// CopyDeliveryGates preserves native reservation evidence on the caller's own
+// identity context. It carries no serialized or caller-supplied authority.
+func CopyDeliveryGates(target, source context.Context) context.Context {
+	return context.WithValue(target, heldOperationKey{}, heldOperation(source))
+}
+
+// BorrowDeliveryGate verifies a lock already reserved with the send receipt on
+// the same connection. Its lifetime belongs to the reservation's caller.
+func BorrowDeliveryGate(ctx context.Context, key string) (func(context.Context) error, bool) {
+	scope := heldOperation(ctx)
+	for _, held := range scope.keys {
+		if held == key && scope.hold != nil {
+			return scope.hold.Verify, true
+		}
+	}
+	return nil, false
+}
+
+type boundedOperationGate struct {
+	acsOperationGate
+	cancel context.CancelFunc
+}
+
+func (h boundedOperationGate) Release() { h.acsOperationGate.Release(); h.cancel() }
 
 // lockDelivery takes a delivery's receipt lock and returns the function that gives
 // it up. The lock is held on a context the caller's CANCELLATION does not end: a
@@ -221,9 +251,9 @@ func heldOperation(ctx context.Context) string {
 // so as a throttle: the callers that already know how to wait for a provider
 // (the bulk drain parks the job, the transactional worker backs off) wait, and
 // it costs no attempt.
-func (s *ACSSender) lockDelivery(ctx context.Context, key string) (func(), error) {
+func (s *ACSSender) lockDelivery(ctx context.Context, key string, keys ...string) (acsOperationGate, error) {
 	hold, cancel := context.WithTimeout(context.WithoutCancel(ctx), acsHoldLimit)
-	release, err := s.operations.lock(hold, key)
+	gate, err := s.operations.lock(hold, key, keys...)
 	if err != nil {
 		cancel()
 		if memql.IsWriteGateBusy(err) {
@@ -236,27 +266,27 @@ func (s *ACSSender) lockDelivery(ctx context.Context, key string) (func(), error
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		release()
+		gate.Release()
 		cancel()
 		return nil, err
 	}
-	return func() { release(); cancel() }, nil
+	return boundedOperationGate{acsOperationGate: gate, cancel: cancel}, nil
 }
 
 // Reserve takes the receipt's lock for a delivery before its caller records that an
 // attempt has begun (Reserver). The Send that follows, called with the context
 // returned here, does not ask for the lock again; the caller gives it back when the
 // delivery is over.
-func (s *ACSSender) Reserve(ctx context.Context, msg Message, _ SendAs) (context.Context, func(), error) {
+func (s *ACSSender) Reserve(ctx context.Context, msg Message, _ SendAs, keys ...string) (context.Context, func(), error) {
 	if s.operations == nil || msg.IntentID == "" {
 		return ctx, func() {}, nil
 	}
 	key := s.operationKey(msg.IntentID)
-	release, err := s.lockDelivery(ctx, key)
+	hold, err := s.lockDelivery(ctx, key, keys...)
 	if err != nil {
 		return nil, nil, err
 	}
-	return withHeldOperation(ctx, key), release, nil
+	return withHeldOperation(ctx, key, hold, keys), hold.Release, nil
 }
 
 func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) error {
@@ -273,12 +303,14 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 	// message the provider accepted, whose receipt says "submitting" and so can
 	// never be submitted again, and whose caller was told it failed. Nothing that
 	// can be refused for being busy happens after the first receipt.
-	if heldOperation(ctx) != key {
-		release, err := s.lockDelivery(ctx, key)
+	scope := heldOperation(ctx)
+	if scope.key != key {
+		hold, err := s.lockDelivery(ctx, key)
 		if err != nil {
 			return err
 		}
-		defer release()
+		defer hold.Release()
+		scope = heldOperationScope{key: key, hold: hold}
 	}
 	op, prior, found, err := s.operations.read(ctx, key)
 	if err != nil {
@@ -303,6 +335,9 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 		}
 	}
 	op.Status, op.Detail, op.SubmittedAt, op.NextPollAt = "submitting", "", s.now().UTC(), s.now().UTC().Add(15*time.Second)
+	if err = scope.hold.Verify(ctx); err != nil {
+		return err
+	}
 	_, err = s.operations.write(ctx, key, op, prior)
 	if err != nil {
 		return err
@@ -335,6 +370,9 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 		return operationSendOutcome(current)
 	}
 	prior = revision
+	if err = scope.hold.Verify(persist); err != nil {
+		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
+	}
 	if _, err = s.operations.write(persist, key, op, prior); err != nil {
 		return permanentSendRefusal("Azure acceptance needs reconciliation; the saved attempt prevents another submission")
 	}

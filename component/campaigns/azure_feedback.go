@@ -25,15 +25,9 @@ func (w *Worker) ApplyAzureDelivery(ctx context.Context, report email.AzureDeliv
 	if digest == "" || report.OperationID == "" || report.AccountID == "" {
 		return fmt.Errorf("provider feedback identity is missing")
 	}
-	var ledgerHold gateHold
 	write := func(effect func(context.Context) error) error {
 		if err := report.Verify(ctx); err != nil {
 			return err
-		}
-		if ledgerHold != nil {
-			if err := ledgerHold.Verify(ctx); err != nil {
-				return err
-			}
 		}
 		return detachedWrite(ctx, func(commit context.Context) error { return effect(w.systemActorContext(commit)) })
 	}
@@ -49,20 +43,8 @@ func (w *Worker) ApplyAzureDelivery(ctx context.Context, report email.AzureDeliv
 			return fmt.Errorf("the original campaign delivery is not recorded yet")
 		}
 		if campaignID := bare(str(delivery, "campaignId")); campaignID != "" {
-			if w.newsletterGate == nil {
-				return fmt.Errorf("provider ledger coordination is unavailable")
-			}
-			ledgerHold, err = w.newsletterGate(context.WithoutCancel(ctx), "campaign-provider-ledger:"+campaignID)
-			if err != nil {
+			if err := report.VerifyGate(ctx, providerLedgerLock(campaignID)); err != nil {
 				return err
-			}
-			defer ledgerHold.Release()
-			delivery, err = w.newsletterRow(system, "providerDeliveryById", "deliveryId", report.DeliveryID)
-			if err != nil {
-				return err
-			}
-			if delivery == nil || bare(str(delivery, "campaignId")) != campaignID {
-				return fmt.Errorf("original campaign delivery changed")
 			}
 		}
 		if !sameOrganization(str(delivery, "accountId"), report.AccountID) || EmailDigest(str(delivery, "email")) != digest {
@@ -107,4 +89,24 @@ func (w *Worker) ApplyAzureDelivery(ctx context.Context, report email.AzureDeliv
 		values["providerCountersPending"] = true
 	}
 	return write(func(commit context.Context) error { return w.newsletterWrite(commit, "recordProviderDelivery", values) })
+}
+
+// AzureDeliveryGateKey selects the immutable campaign ledger identity before
+// the integration takes receipt + ledger in one transaction. Apply rechecks
+// attribution and the exact held key after the receipt has been reread.
+func (w *Worker) AzureDeliveryGateKey(ctx context.Context, deliveryID string) (string, error) {
+	if !auth.OriginFromContext(ctx).IsInternal() {
+		return "", fmt.Errorf("provider coordination requires internal origin")
+	}
+	row, err := w.newsletterRow(w.systemActorContext(memql.ContextWithFreshRead(ctx)), "providerDeliveryById", "deliveryId", deliveryID)
+	if err != nil {
+		return "", err
+	}
+	if row == nil {
+		return "", fmt.Errorf("the original campaign delivery is not recorded yet")
+	}
+	if campaignID := bare(str(row, "campaignId")); campaignID != "" {
+		return providerLedgerLock(campaignID), nil
+	}
+	return "", nil
 }

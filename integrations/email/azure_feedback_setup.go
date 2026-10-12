@@ -160,6 +160,19 @@ func (a *azureSetup) feedbackStatus(ctx context.Context, account string) (string
 	if !found {
 		return "not-configured", nil
 	}
+	var connection azureConnection
+	active, _, err := a.store.read(ctx, "organization:"+account, &connection)
+	if err != nil {
+		return "", err
+	}
+	var cluster azureClusterConnection
+	connected, _, err := a.store.read(ctx, azureClusterKey, &cluster)
+	if err != nil {
+		return "", err
+	}
+	if !active || connection.Status != "ready" || connection.AccountID != account || configured.PlanID != azurePlanID(connection) || !sameAzureResource(configured.Topic, connection.Plan.communicationPath()) || !connected || (cluster.Status != "connected" && cluster.Status != "reauthorize") || cluster.ID != connection.Plan.ClusterID {
+		return "not-configured", nil
+	}
 	return configured.Status, nil
 }
 

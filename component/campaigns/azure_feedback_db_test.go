@@ -28,11 +28,19 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 	n := f.newEmptyNewsletter(t, "provider-hop")
 	e2, db2 := digestDBEngine(t)
 	w2 := newGatedWorker(t, e2, db2, n.sender)
+	// One shared connection must accommodate receipt + ledger together.
+	tiny, err := database.NewGatePool(dbtest.DSN(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tiny.Close() })
+	sharedGate := func() *sql.DB { return tiny }
+	w2.newsletterGate = NewWorker(deliveryDBEngine{e2}, nil, nil, quietLogger(), sharedGate).newsletterGate
 	providers := make([]*email.Integration, 2)
 	for index, engine := range []*memql.MemQLEngine{n.engine, e2} {
 		for _, registration := range memql.RegisteredPlugins() {
 			if registration.Name == "email" {
-				provider, err := registration.Factory(memql.PluginContext{Engine: engine, GateDB: gatePoolFor(t), Logger: quietLogger()})
+				provider, err := registration.Factory(memql.PluginContext{Engine: engine, GateDB: sharedGate, Logger: quietLogger()})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -99,7 +107,7 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 			t.Logf("apply: %v", err)
 		}
 		return err
-	})
+	}, w2.AzureDeliveryGateKey)
 	receipt := func(label, status string) (string, string, string) {
 		t.Helper()
 		recipient := n.suffix + "-" + label
@@ -212,12 +220,6 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 	}
 	// Both repair locks must fit on one connection; nested gate acquisition
 	// would wait on itself even after the peer releases its progress lock.
-	tiny, err := database.NewGatePool(dbtest.DSN(), 1)
-	if err != nil {
-		hold.Release()
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = tiny.Close() })
 	w2.newsletterGate = NewWorker(deliveryDBEngine{e2}, nil, nil, quietLogger(), func() *sql.DB { return tiny }).newsletterGate
 	entered, done := make(chan struct{}), make(chan error, 1)
 	originalGate := w2.newsletterGate
