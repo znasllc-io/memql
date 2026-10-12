@@ -2,12 +2,14 @@ package campaigns
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/email"
 )
@@ -426,5 +428,41 @@ func TestAWelcomesAttemptCommitsUnderItsLocksEvenWhenItsPhaseEndsDuringTheWrite(
 	}
 	if n.singleSendReceipt(t, receiptID) == nil {
 		t.Error("the receipt the welcome waited for is not there")
+	}
+}
+
+// TestAWelcomeIsLedgeredUnderItsOwnRequest (memql#6022, F7): a welcome is sent under
+// the request newsletter-<signup>, and the delivery row it leaves is the one that
+// request names -- not a version of a row every other message to the person shares --
+// carrying the request, the template and the sender it went out with.
+func TestAWelcomeIsLedgeredUnderItsOwnRequest(t *testing.T) {
+	n := newEmptyNewsletter(t, "welcome-ledger")
+	signup := pendingWelcome(t, n)
+
+	if err := n.worker.sendNewsletterWelcome(context.Background(), n.worker.systemActorContext(context.Background()), signup); err != nil {
+		t.Fatal(err)
+	}
+	if got := str(n.signupRow(t), "status"); got != "sent" {
+		t.Fatalf("the welcome is %q, want sent", got)
+	}
+
+	request := "newsletter-" + bare(str(signup, "id"))
+	id := "v1:campaigns:delivery:" + singleDeliveryRowID(request, bare(str(signup, "recipientId")))
+	var rows []memorynodes.MemoryNode
+	if err := n.db.NewSelect().Model(&rows).Where("concept = ?", "v1:campaigns:delivery").Where("id = ?", id).Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("%d ledger rows for the welcome's request, want 1 (%s)", len(rows), id)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rows[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["status"] != "sent" || payload["requestId"] != request {
+		t.Errorf("the row does not record the welcome's request as sent: %v", payload)
+	}
+	if bare(str(payload, "templateId")) != bare(str(signup, "templateId")) || bare(str(payload, "senderIdentityId")) != bare(str(signup, "senderIdentityId")) {
+		t.Errorf("the row does not name the template and sender the welcome went out with: %v (signup %v / %v)", payload, str(signup, "templateId"), str(signup, "senderIdentityId"))
 	}
 }

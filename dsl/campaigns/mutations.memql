@@ -405,6 +405,15 @@ mutation campaign updateCampaignProgress {
 /// recipient from the next batch. Each part is hashed before concatenation (authoring rule 20), so no
 /// separator in a caller-supplied id can make two different pairs collide onto one timeline.
 ///
+/// A SINGLE SEND UNDER A REQUEST (memql#6022, F7) has no campaign, and the row it is keyed by is the
+/// REQUEST's: `requestId` stands in the first part, so a welcome, a journey step and a rule's send to
+/// one person are three rows, not three versions of one. A request id never contains a colon
+/// (component/campaigns singleSendRequestID) and a canonical campaign id always does, so the two cannot
+/// alias. A campaign delivery passes no requestId, and a blank one is no request (`??` skips it): its
+/// id is exactly what it was. component/campaigns/delivery_id.go re-derives this in Go
+/// (deliveryRowID, singleDeliveryRowID) and delivery_id_test.go evaluates THIS expression to hold the
+/// two together.
+///
 /// Owned: ownerUserId is stamped from actor.userId. The worker runs this under the CAMPAIGN OWNER'S
 /// actor, so the value is the campaign's owner and no caller can name a different one.
 /// SCOPING TO actor.userId IS NOT THE FIX HERE, which is why this is @serverOnly.
@@ -430,13 +439,18 @@ mutation delivery recordCampaignDelivery {
     outboundRequestId  string
     emailRuleId        string
     accountId          string
+    requestId          string
+    templateId         string
+    senderIdentityId   string
   }
   insert {
-    accept { campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId, emailRuleId }
+    accept { campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId, emailRuleId, requestId, templateId, senderIdentityId }
     stamp {
-      // Keep the existing per-rule ledger identity without inventing a campaign reference.
+      // A single send is keyed by its request; a campaign delivery and a send with no request
+      // keep the existing identity, per rule when there is one, without inventing a campaign
+      // reference.
       id: hash(
-        hash(canonicalId(args.campaignId ?? args.emailRuleId ?? "", "campaign")) +
+        hash(args.requestId ?? canonicalId(args.campaignId ?? args.emailRuleId ?? "", "campaign")) +
         hash(canonicalId(args.recipientId, "recipient"))
       )
       ownerUserId: actor.userId

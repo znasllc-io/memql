@@ -495,6 +495,17 @@ and delivery records before deciding whether another message is warranted.
 This prevents duplicate submissions; it does not guarantee mailbox delivery.
 Requests that omit `requestId` retain the existing per-invocation behavior.
 
+**Each request has its own delivery row.** A send made with a `requestId` is
+recorded on a delivery row keyed by that request and the recipient, and the row
+names the request, the template and the sender (`requestId`, `templateId`,
+`senderIdentityId`) beside the outcome. A welcome, a journey step and a rule's
+send to the same person are three rows; they used to be three versions of one row
+that each replaced the last, so which message a person got could not be answered.
+A retry of the same request writes a new version of its own row. A send made
+without a `requestId` keeps the row it always had, one per rule and recipient (or
+per recipient when no rule is behind it), and still overwrites its earlier record.
+A campaign's deliveries are unchanged: one row per campaign and recipient.
+
 Suppression and preflight refusals make no external send attempt and remain
 retryable, and so does a send whose coordination lock was busy: the attempt is
 recorded only after every lock the send needs has been taken, including the email
@@ -728,10 +739,11 @@ something you have to do in three places to avoid silent truncation.
 ### Idempotency is the ledger, not a retry flag
 
 `v1:campaigns:delivery` has one row per (campaign, recipient), at a
-deterministically derived id. The worker's batch is *"roster members with no
-delivery row, plus rows still `pending` whose retry is due"*. A recipient that
-reached `sent`, `skipped` or terminal `failed` is simply not in the next
-batch.
+deterministically derived id. (A single send outside a campaign has one per
+(request, recipient); see [Retrying event emails](#retrying-event-emails).)
+The worker's batch is *"roster members with no delivery row, plus rows still
+`pending` whose retry is due"*. A recipient that reached `sent`, `skipped` or
+terminal `failed` is simply not in the next batch.
 
 So a resumed send, a restarted process, a paused-and-resumed campaign and a
 claim lost to a dead replica all converge on the same behaviour, and none of

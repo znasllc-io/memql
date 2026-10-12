@@ -37,7 +37,19 @@ type singleSendReceipt struct {
 // after the provider accepted it. This is at-most-once submission, not a claim
 // that SMTP or a provider can guarantee exactly-once mailbox delivery.
 func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	return w.sendToRecipientOnce(ctx, args, nil, "")
+	return w.sendToRecipientOnce(ctx, args, singleSend{})
+}
+
+// singleSend is what only an internal, durable caller can say about a single send,
+// and never wire args: the reviewed template snapshot a welcome froze at signup, and
+// the digest of the address its consent covered. The zero value is an ordinary send.
+type singleSend struct {
+	// snapshot, when set, is the template the send must carry: the copy frozen when
+	// the person signed up, checked against the stored template's identity.
+	snapshot *Template
+	// emailDigest, when set, is the digest of the address consent was recorded for;
+	// the send is refused if the recipient's address has since changed.
+	emailDigest string
 }
 
 // singleSendReceiptID is the identity of one single send's receipt, and of the lock
@@ -51,7 +63,7 @@ func singleSendReceiptID(owner, requestID string) string {
 // singleSendReceiptFor validates a single send's identity and derives its receipt.
 // ok is false for a send with no request identifier, which has no receipt and no
 // lock and is made as often as it is asked for.
-func singleSendReceiptFor(ctx context.Context, args map[string]any, snapshot *Template, expectedEmailDigest string) (receipt *singleSendReceipt, ok bool, err error) {
+func singleSendReceiptFor(ctx context.Context, args map[string]any, opts singleSend) (receipt *singleSendReceipt, ok bool, err error) {
 	requestID := argString(args, "requestId")
 	if requestID == "" {
 		return nil, false, nil
@@ -64,25 +76,25 @@ func singleSendReceiptFor(ctx context.Context, args map[string]any, snapshot *Te
 	for _, key := range []string{"templateId", "recipientId", "senderIdentityId", "emailRuleId"} {
 		values[key] = memql.BareShortId(strings.TrimSpace(argString(args, key)))
 	}
-	if snapshot != nil {
-		values["templateRevision"] = snapshot.Revision
+	if opts.snapshot != nil {
+		values["templateRevision"] = opts.snapshot.Revision
 	}
-	if expectedEmailDigest != "" {
-		values["emailDigest"] = expectedEmailDigest
+	if opts.emailDigest != "" {
+		values["emailDigest"] = opts.emailDigest
 	}
 	encoded, _ := json.Marshal(values)
 	return &singleSendReceipt{id: singleSendReceiptID(owner, requestID), fingerprint: sha256Hex(string(encoded))}, true, nil
 }
 
-// snapshot is accepted only from an internal durable welcome, never wire args.
-func (w *Worker) sendToRecipientOnce(ctx context.Context, args map[string]any, snapshot *Template, expectedEmailDigest string) ([]memorynodes.MemoryNode, error) {
+// opts is accepted only from an internal durable caller (a welcome), never wire args.
+func (w *Worker) sendToRecipientOnce(ctx context.Context, args map[string]any, opts singleSend) ([]memorynodes.MemoryNode, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
-	receipt, ok, err := singleSendReceiptFor(ctx, args, snapshot, expectedEmailDigest)
+	receipt, ok, err := singleSendReceiptFor(ctx, args, opts)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return w.sendToRecipient(ctx, args, nil, snapshot, expectedEmailDigest)
+		return w.sendToRecipient(ctx, args, nil, opts)
 	}
 	if w.singleSendGate == nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: send coordination is unavailable")
@@ -102,14 +114,14 @@ func (w *Worker) sendToRecipientOnce(ctx context.Context, args map[string]any, s
 	}
 	defer hold.Release()
 	receipt.hold = hold
-	return w.sendToRecipientHeld(ctx, args, snapshot, expectedEmailDigest, receipt)
+	return w.sendToRecipientHeld(ctx, args, receipt, opts)
 }
 
 // sendToRecipientHeld is sendToRecipientOnce for a caller that already holds the
 // receipt's lock (singleSendLock of receipt.id), taken together with the others it
 // needed, and has set receipt.hold to the gate that holds it. It does not take it
 // again: a second transaction asking for a lock the first holds would wait for it.
-func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, snapshot *Template, expectedEmailDigest string, receipt *singleSendReceipt) ([]memorynodes.MemoryNode, error) {
+func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, receipt *singleSendReceipt, opts singleSend) ([]memorynodes.MemoryNode, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
 	values := map[string]string{}
 	for _, key := range []string{"templateId", "recipientId", "senderIdentityId", "emailRuleId"} {
@@ -142,7 +154,7 @@ func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, s
 			"recipientId": values["recipientId"], "emailRuleId": values["emailRuleId"],
 		})
 	}
-	nodes, err := w.sendToRecipient(ctx, args, receipt, snapshot, expectedEmailDigest)
+	nodes, err := w.sendToRecipient(ctx, args, receipt, opts)
 	if err != nil || len(nodes) != 1 {
 		return nodes, err
 	}

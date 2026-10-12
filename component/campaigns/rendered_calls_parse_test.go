@@ -108,6 +108,7 @@ func TestEveryRenderedCallParses(t *testing.T) {
 				CampaignID: awkward, RecipientID: awkward, Email: awkward,
 				Status: "failed", SkipReason: awkward, LastError: awkward,
 				SentAt: now, Attempts: 2, NextAttemptAt: now,
+				RequestID: awkward, TemplateID: awkward, SenderIdentityID: awkward,
 			})
 		}},
 		{"updateCampaignProgress", func() error {

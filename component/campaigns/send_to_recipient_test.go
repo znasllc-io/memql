@@ -451,3 +451,114 @@ func TestASendRefusedOnItsMeritsIsNotUndecided(t *testing.T) {
 		})
 	}
 }
+
+// openGate is the hold of a worker with no database: there is no lock to lose.
+type openGate struct{}
+
+func (openGate) Release()                     {}
+func (openGate) Verify(context.Context) error { return nil }
+
+// withOpenGate gives a unit-test worker the single-send gate it needs to send under a
+// request identifier.
+func withOpenGate(w *Worker) *Worker {
+	w.singleSendGate = func(context.Context, string) (gateHold, error) { return openGate{}, nil }
+	return w
+}
+
+// TestEachSingleSendRequestHasItsOwnLedgerRow (memql#6022, F7): the ledger row of a
+// single send used to be keyed by (rule, recipient) -- or by the recipient alone when
+// no rule was behind it -- so a welcome, a journey step and a rule's send to one person
+// all wrote versions of ONE row, each replacing the last, and "which message did this
+// person get" had no answer. The row is keyed by the request that made the send.
+//
+// Two sends to one recipient under two request ids record two recordCampaignDelivery
+// calls carrying those ids, and the ids the engine derives from them (the DSL's own
+// expression, evaluated) differ -- and are the ones the Go mirror names.
+func TestEachSingleSendRequestHasItsOwnLedgerRow(t *testing.T) {
+	engine := recipientSendEngine()
+	engine.senderIdentities = map[string]map[string]any{
+		"si-acme": senderIdentityRow("si-acme", "news@acme.test", "Acme News", "active"),
+	}
+	sender := &recordingSender{}
+	w := withOpenGate(newTestWorker(t, engine, sender))
+	requests := []string{"newsletter-aaaaaaaa", "journey-bbbbbbbb-step1"}
+
+	for _, request := range requests {
+		args := sendToRecipientArgs()
+		delete(args, "emailRuleId")
+		args["senderIdentityId"] = "si-acme"
+		args["requestId"] = request
+		nodes, err := w.handleSendToRecipient(importCtx(), args, 0)
+		if err != nil {
+			t.Fatalf("sendToRecipient %s: %v", request, err)
+		}
+		if got := decodeResult(t, nodes); got["sent"] != true {
+			t.Fatalf("%s: result = %+v, want sent", request, got)
+		}
+	}
+
+	written := callsWithPrefix(engine, "mutation recordCampaignDelivery")
+	if len(written) != len(requests) {
+		t.Fatalf("%d delivery rows were written for %d sends.\ncalls:\n%s", len(written), len(requests), strings.Join(written, "\n"))
+	}
+	derive := deliveryIDFromTheMutation(t)
+	ids := map[string]string{}
+	for i, q := range written {
+		request := argOf(q, "requestId")
+		if request != requests[i] {
+			t.Errorf("delivery %d names request %q, want %q: %s", i, request, requests[i], q)
+		}
+		// What the engine stamps as the row's id, from exactly this call's arguments.
+		id := derive(map[string]any{
+			"requestId": request, "recipientId": argOf(q, "recipientId"),
+			"campaignId": argOf(q, "campaignId"), "emailRuleId": argOf(q, "emailRuleId"),
+		})
+		if want := singleDeliveryRowID(requests[i], "r-1"); id != want {
+			t.Errorf("request %q is on ledger row %s, want %s", requests[i], id, want)
+		}
+		if other, dup := ids[id]; dup {
+			t.Errorf("requests %q and %q are on one ledger row %s", other, requests[i], id)
+		}
+		ids[id] = requests[i]
+		if got := argOf(q, "templateId"); got != testTemplate {
+			t.Errorf("delivery %d names template %q, want %q", i, got, testTemplate)
+		}
+		if got := argOf(q, "senderIdentityId"); got != "si-acme" {
+			t.Errorf("delivery %d names sender %q, want si-acme", i, got)
+		}
+	}
+	if len(ids) != len(requests) {
+		t.Errorf("the %d sends are on %d ledger rows", len(requests), len(ids))
+	}
+}
+
+// TestASendWithNoRequestKeepsItsRuleKeyedRow: a send made with no request identifier
+// -- by hand, or by a caller that supplies none -- has no request to key its row by,
+// stamps none, and keeps the (rule, recipient) row it always had. It still records
+// the template it used.
+func TestASendWithNoRequestKeepsItsRuleKeyedRow(t *testing.T) {
+	engine := recipientSendEngine()
+	w := newTestWorker(t, engine, &recordingSender{})
+
+	if _, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0); err != nil {
+		t.Fatalf("sendToRecipient: %v", err)
+	}
+
+	written := callsWithPrefix(engine, "mutation recordCampaignDelivery")
+	if len(written) != 1 {
+		t.Fatalf("%d delivery rows were written, want 1", len(written))
+	}
+	if strings.Contains(written[0], "requestId:") {
+		t.Errorf("a send with no request stamped one: %s", written[0])
+	}
+	id := deliveryIDFromTheMutation(t)(map[string]any{"recipientId": argOf(written[0], "recipientId"), "emailRuleId": argOf(written[0], "emailRuleId")})
+	if want := deliveryRowID(testEmailRule, "r-1"); id != want {
+		t.Errorf("the row is %s, want the (rule, recipient) row %s", id, want)
+	}
+	if got := argOf(written[0], "templateId"); got != testTemplate {
+		t.Errorf("the delivery names template %q, want %q", got, testTemplate)
+	}
+	if strings.Contains(written[0], "senderIdentityId:") {
+		t.Errorf("a send that named no sender stamped one: %s", written[0])
+	}
+}

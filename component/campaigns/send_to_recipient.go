@@ -82,7 +82,7 @@ func isUndecided(err error) bool {
 	return errors.As(err, &u)
 }
 
-func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, receipt *singleSendReceipt, snapshot *Template, expectedEmailDigest string) ([]memorynodes.MemoryNode, error) {
+func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, receipt *singleSendReceipt, opts singleSend) ([]memorynodes.MemoryNode, error) {
 	templateID := memql.BareShortId(strings.TrimSpace(argString(args, "templateId")))
 	recipientID := memql.BareShortId(strings.TrimSpace(argString(args, "recipientId")))
 	senderIdentityID := memql.BareShortId(strings.TrimSpace(argString(args, "senderIdentityId")))
@@ -111,11 +111,11 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	if !found {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: template %q is not readable", templateID)
 	}
-	if snapshot != nil {
-		if bare(snapshot.ID) != bare(tmpl.ID) || !sameOrganization(snapshot.AccountID, tmpl.AccountID) || snapshot.Status != "ready" {
+	if opts.snapshot != nil {
+		if bare(opts.snapshot.ID) != bare(tmpl.ID) || !sameOrganization(opts.snapshot.AccountID, tmpl.AccountID) || opts.snapshot.Status != "ready" {
 			return nil, errors.New("campaigns.sendToRecipient: reviewed welcome snapshot does not match its template")
 		}
-		tmpl = *snapshot
+		tmpl = *opts.snapshot
 	}
 	if tmpl.Status != "ready" {
 		return nil, errors.New("campaigns.sendToRecipient: publish the reviewed template before sending")
@@ -134,7 +134,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		return nil, fmt.Errorf("campaigns.sendToRecipient: recipient %q is not readable", recipientID)
 	}
 
-	if expectedEmailDigest != "" && EmailDigest(recipient.Email) != expectedEmailDigest {
+	if opts.emailDigest != "" && EmailDigest(recipient.Email) != opts.emailDigest {
 		return nil, errors.New("campaigns.sendToRecipient: the recipient address changed after signup; the original consent does not cover the new address")
 	}
 
@@ -176,10 +176,12 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		SenderIdentityID: senderIdentityID,
 		Status:           "sending",
 		// Tracking OFF. A tracked link needs a delivery row id in the body,
-		// and this path's delivery id is derived from a campaign id that may
-		// be empty -- so a pixel would attribute hits to a row that is not
-		// per-send distinguishable. Event-email tracking is a follow-up, not
-		// a thing to approximate.
+		// and this path's delivery id is derived from a rule id that may be
+		// empty -- so a pixel would attribute hits to a row that is not
+		// per-send distinguishable. A send under a request now has a row of its
+		// own (singleDeliveryRowID), but one without a request does not, and an
+		// engagement event names a campaign. Event-email tracking is a
+		// follow-up, not a thing to approximate.
 	}
 
 	identity, refusal := w.resolveSendIdentity(ctx, campaign)
@@ -208,7 +210,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: the suppression list could not be consulted, "+
 			"so this send is refused rather than made: %w", err))
 	} else if suppressed {
-		w.recordLoneDelivery(ctx, campaign, recipient, emailRuleID, Delivery{
+		w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{
 			Status: "skipped", SkipReason: sup.Reason,
 		})
 		return resultNode("campaignRecipientSend", map[string]any{
@@ -217,7 +219,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		})
 	}
 	if recipient.SubscriptionStatus != "" && recipient.SubscriptionStatus != "subscribed" {
-		w.recordLoneDelivery(ctx, campaign, recipient, emailRuleID, Delivery{
+		w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{
 			Status: "skipped", SkipReason: recipient.SubscriptionStatus,
 		})
 		return resultNode("campaignRecipientSend", map[string]any{
@@ -275,7 +277,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	cancel()
 
 	if sendErr != nil {
-		w.recordLoneDelivery(ctx, campaign, recipient, emailRuleID, Delivery{
+		w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{
 			Status: "failed", Attempts: 1, LastError: sendErr.Error(),
 		})
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", sendErr)
@@ -283,7 +285,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 
 	w.reputation.observeAs(now, identity.Label, recipient.Email, "accepted")
 	w.noteActiveIdentity(identity.Label)
-	w.recordLoneDelivery(ctx, campaign, recipient, emailRuleID, Delivery{
+	w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{
 		Status: "sent", SentAt: now, Attempts: 1,
 	})
 	return resultNode("campaignRecipientSend", map[string]any{
@@ -326,25 +328,39 @@ func (w *Worker) recordAttempt(ctx context.Context, receipt *singleSendReceipt) 
 // it is campaignId would point at the wrong concept and fail organization
 // validation after the message has already left.
 //
-// # One row per (rule, recipient), and that is history rather than safety
+// # One row per request (memql#6022, F7)
 //
-// The delivery id derives from (emailRuleId, recipientId), so a rule that
-// fires twice for the same person writes a new VERSION of one row rather than
-// two rows. On the campaign path that derivation IS the idempotency
-// mechanism; here nothing reads the ledger to decide whether to send -- an
-// event triggered this, not a roster diff -- so what is lost is the earlier
-// send's record, not correctness. Worth knowing before treating this ledger
-// as a per-send log.
+// A send made under a stable requestId -- a welcome, a journey step, a rule's
+// event -- is keyed by that request: the delivery id derives from (requestId,
+// recipientId) (singleDeliveryRowID), so every message to a person has a row of
+// its own, and "which message did this person get" has an answer. The row names
+// the request, the template and the sender. Before this the id derived from
+// (emailRuleId, recipientId), or the recipient alone when no rule was behind the
+// send, and a welcome, a journey step and a rule's send to one person were
+// versions of ONE row, each replacing the last.
+//
+// A send made WITHOUT a request has nothing to key by and keeps the key it always
+// had. Two such sends from one rule to one person are still two versions of one
+// row, and that is history rather than safety: nothing reads this ledger to decide
+// whether to send -- an event triggered the send, not a roster diff -- so what is
+// lost is the earlier send's record, not correctness. A retry of the SAME request
+// writes a new version of ITS row, as a campaign's resumed send does.
 //
 // Best-effort, and that asymmetry is the campaign path's: the message IS
 // sent, and a failed ledger write must not turn a delivered message into an
 // error the caller retries. Logged loudly instead, because an unrecorded send
 // is invisible everywhere else.
-func (w *Worker) recordLoneDelivery(ctx context.Context, campaign Campaign, recipient Recipient, emailRuleID string, d Delivery) {
+func (w *Worker) recordLoneDelivery(ctx context.Context, args map[string]any, campaign Campaign, recipient Recipient, emailRuleID string, d Delivery) {
 	d.CampaignID = "" // This synthetic send has no campaign relationship.
 	d.RecipientID = recipient.ID
 	d.Email = recipient.Email
 	d.EmailRuleID = emailRuleID
+	// What a single send is, beside who it went to. The request id was checked
+	// against singleSendRequestID before any send was made (singleSendReceiptFor);
+	// blank when the send was made without one, and then not stamped.
+	d.RequestID = argString(args, "requestId")
+	d.TemplateID = campaign.TemplateID
+	d.SenderIdentityID = campaign.SenderIdentityID
 	// The client tie, copied from the campaign (epic memql#5165, section J).
 	// Set HERE rather than at the four call sites above, because this is the
 	// one place every lone delivery passes through -- and a stamp spread

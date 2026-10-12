@@ -827,6 +827,18 @@ type Delivery struct {
 	// until the concept gained the field -- meant the answer existed for the
 	// length of one HTTP response.
 	EmailRuleID string
+
+	// RequestID, TemplateID and SenderIdentityID describe a SINGLE send (memql#6022,
+	// F7), and are EMPTY on a campaign delivery, whose template and sender are its
+	// campaign's. RequestID is the stable request the message was sent under, and it
+	// is the ledger key of a send with no campaign: the row's id derives from
+	// (RequestID, RecipientID), so each message to a person has a row of its own
+	// (singleDeliveryRowID). TemplateID and SenderIdentityID say what the message
+	// was and who it went out as, which the rule or journey that sent it may no
+	// longer say once it has been edited. Each is rendered only when set.
+	RequestID        string
+	TemplateID       string
+	SenderIdentityID string
 }
 
 // RecordDelivery writes the ledger row. OWNED tier: issue under the
@@ -848,6 +860,15 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	}
 	if d.EmailRuleID != "" {
 		args = append(args, arg{"emailRuleId", d.EmailRuleID})
+	}
+	if d.RequestID != "" {
+		args = append(args, arg{"requestId", d.RequestID})
+	}
+	if d.TemplateID != "" {
+		args = append(args, arg{"templateId", d.TemplateID})
+	}
+	if d.SenderIdentityID != "" {
+		args = append(args, arg{"senderIdentityId", d.SenderIdentityID})
 	}
 	if d.LastError != "" {
 		args = append(args, arg{"lastError", truncateError(d.LastError)})

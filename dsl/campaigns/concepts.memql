@@ -231,6 +231,14 @@ concept campaign {
 /// recipient that already reached `sent` or `skipped` is simply not in the next batch. There is no
 /// "already sent?" flag to forget to check: the absence of the row IS the work queue.
 ///
+/// A SINGLE SEND IS KEYED BY ITS REQUEST (memql#6022, F7). A message sent outside a campaign -- an
+/// automation's, a welcome, a journey step -- has no campaign to key its row by. Keying it by
+/// (rule, recipient), or by the recipient alone when no rule was behind it, made every message to a
+/// person write a new VERSION of one row, each replacing the last, so "which message did this person
+/// get" had no answer. A send made under a stable `requestId` is keyed by (requestId, recipientId)
+/// instead: each message has a row of its own, naming the request, the template and the sender.
+/// Campaign deliveries pass no requestId, so their ids are what they always were.
+///
 /// Written by component/campaigns' drain worker through `recordCampaignDelivery`, which runs under
 /// the CAMPAIGN OWNER'S actor -- so `ownerUserId` is stamped from `actor.userId` like every other
 /// write in this domain, never from a caller argument. That is what memql#3348 supplies and what
@@ -264,12 +272,17 @@ concept delivery {
   attempts           int  @description("Delivery attempts made for this recipient. Incremented on each transport failure and bounded by MEMQL_CAMPAIGNS_MAX_ATTEMPTS, past which the row goes terminal 'failed'. Zero on a 'skipped' row, which never reaches the transport.")
   emailRuleId        string   @description("v1:campaigns:emailRule.id of the event rule that produced this send, when one did (memql#4829). Empty on every ordinary campaign delivery, which is the overwhelming majority. It exists because an event rule mails one person at a time in response to something that happened, and 'which rule mailed this person, and why' is the FIRST question anybody asks about automated mail -- a question the campaign id alone cannot answer, because a rule's sends carry no campaign at all.")
   nextAttemptAt      datetime  @description("When a retryable 'pending' row becomes eligible again -- bounded exponential backoff with jitter, or the provider's own Retry-After when it supplied one. Compared Go-side by the drain worker, which is why it is a stored instant rather than a computed one.")
+  requestId          string   @description("The single-send request this row records (memql#6022, F7): the stable requestId an automation, a welcome or a journey step supplied for ONE intended message. It is the LEDGER KEY of a send that has no campaign -- the row id derives from (requestId, recipientId), so each message to a person has a row of its own. A request id never contains a colon, which is what keeps it from aliasing a canonical campaign id in that derivation. Empty on every campaign delivery and on a send made without a requestId, which keeps the (rule, recipient) row it always had.")
+  templateId         string   @description("v1:campaigns:template.id of the message a single send carried (memql#6022, F7), so a row answers 'what was this person sent' after the rule or journey that sent it has been edited. Empty on a campaign delivery, whose template is its campaign's.")
+  senderIdentityId   string   @description("v1:campaigns:senderIdentity.id a single send went out as (memql#6022, F7). Empty when the send named no identity -- it went out as the configured default -- and on a campaign delivery, whose sender is its campaign's.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")
   @relationship(type="references", field="recipientId", target=recipient, direction="outgoing")
   @relationship(type="references", field="outboundRequestId", target=outboundRequest, direction="outgoing")
   @relationship(type="references", as="sentByRule", field="emailRuleId", target=emailRule, direction="outgoing")
+  @relationship(type="references", field="templateId", target=template, direction="outgoing")
+  @relationship(type="references", as="sentAs", field="senderIdentityId", target=senderIdentity, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }
 

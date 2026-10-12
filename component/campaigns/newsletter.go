@@ -689,14 +689,15 @@ func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned m
 			reason = "The reviewed welcome template could not be read."
 		} else {
 			args := map[string]any{"requestId": requestID, "templateId": bare(str(row, "templateId")), "recipientId": bare(str(row, "recipientId")), "senderIdentityId": bare(str(row, "senderIdentityId"))}
-			receipt, _, receiptErr := singleSendReceiptFor(owner, args, &snapshot, str(row, "emailDigest"))
+			opts := singleSend{snapshot: &snapshot, emailDigest: str(row, "emailDigest")}
+			receipt, _, receiptErr := singleSendReceiptFor(owner, args, opts)
 			if receiptErr != nil || receipt.id != receiptID {
 				return fmt.Errorf("the welcome's send identity changed after it was scanned; it stays pending: %v", receiptErr)
 			}
 			// The receipt's lock is one of the three taken above; the receipt that says
 			// an attempt began is written only while the gate says it is still held.
 			receipt.hold = hold
-			nodes, sendErr := w.sendToRecipientHeld(owner, args, &snapshot, str(row, "emailDigest"), receipt)
+			nodes, sendErr := w.sendToRecipientHeld(owner, args, receipt, opts)
 			// The send began when its attempt was recorded (saveSingleSendReceipt).
 			began = !receipt.revision.IsZero()
 			// No provider attempt has begun. Leave the unchanged row pending

@@ -102,6 +102,9 @@ shape delivery deliveryFull {
   lastError
   sentAt
   emailRuleId
+  requestId
+  templateId
+  senderIdentityId
   row.createdAt
 }
 

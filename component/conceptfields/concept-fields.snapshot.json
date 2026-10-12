@@ -857,9 +857,12 @@
         "outboundRequestId",
         "ownerUserId",
         "recipientId",
+        "requestId",
+        "senderIdentityId",
         "sentAt",
         "skipReason",
-        "status"
+        "status",
+        "templateId"
       ],
       "required": [
         "email",
