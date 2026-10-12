@@ -10,9 +10,9 @@ import (
 	"golang.org/x/net/html/atom"
 )
 
-// The allowlists of an html block. They are those of the Materializer's
-// generated email markup (integrations/compose, validateGeneratedEmailMarkup),
-// less what an html block must not do on its own:
+// The allowlists of an html block. They began as those the Materializer held
+// its generated email HTML to, before it wrote emails into layouts, less what
+// an html block must not do on its own:
 //
 //   - no document structure: html, head, body and title belong to the renderer;
 //   - no pictures: img and the src attribute are gone. A picture is an image

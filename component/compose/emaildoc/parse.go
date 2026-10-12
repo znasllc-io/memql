@@ -140,14 +140,20 @@ const (
 // hrefProblem says what is wrong with a link, or "" when it is allowed. A link
 // is empty (when allowEmpty), a web address (http:// or https://), an email
 // address (mailto:), a phone number (tel:) or exactly one of the four link
-// merge tags. It is at most 2000 bytes and holds no space, control character,
-// quote, angle bracket, backtick or backslash.
+// merge tags, which appear nowhere else in it. It is at most 2000 bytes and
+// holds no space, control character, quote, angle bracket, backtick or
+// backslash.
 //
 // A merge tag is replaced with a value a recipient supplied, and that value
 // must never choose where a link goes. So no other merge tag may stand where
 // the site is chosen: a web address takes merge tags in its path, query and
 // fragment ("https://example.com/?e={{email}}") but not in its host, user name
 // or port, and an email or phone link takes none.
+//
+// A link tag is the recipient's own signed link, and it is a link by itself or
+// plain text, never part of another address: inside one
+// ("https://x.test/?u={{unsubscribeUrl}}") it would be handed to that site when
+// the recipient clicks.
 func hrefProblem(href string, allowEmpty bool) string {
 	if href == "" {
 		if allowEmpty {
@@ -158,6 +164,11 @@ func hrefProblem(href string, allowEmpty bool) string {
 	for _, tag := range linkTags {
 		if href == tag {
 			return ""
+		}
+	}
+	for _, tag := range linkTags {
+		if strings.Contains(href, tag) {
+			return tag + " must be the whole link, never part of another address"
 		}
 	}
 	if len(href) > maxHrefBytes {

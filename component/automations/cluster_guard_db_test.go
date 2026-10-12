@@ -201,3 +201,35 @@ func TestClusterGuardPrunePreservesLongWorkflowClaim(t *testing.T) {
 	second.prune(context.Background())
 	require.True(t, second.StrictClaimer().ClaimWithTTL(context.Background(), name, "domain", 6*time.Hour))
 }
+
+// TestClusterGuard_DBReleasedClaimCanBeClaimedAgain: a claim for work that could
+// not begin (nothing was attempted) is given back, so a later delivery of the same
+// event claims it again; and only the claimant's own claim is given back -- a peer
+// replica's claim, which is work that did begin there, stays.
+func TestClusterGuard_DBReleasedClaimCanBeClaimedAgain(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	automation := fmt.Sprintf("test_release_%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		_, _ = db.DB.ExecContext(context.Background(),
+			`DELETE FROM automation_execution_claims WHERE automation_name = $1`, automation)
+	})
+	g := NewClusterExecutionGuard(func() *bun.DB { return db }, nil)
+	ctx := context.Background()
+
+	require.True(t, g.StrictClaimer().ClaimWithTTL(ctx, automation, "row-1", 0))
+	assert.False(t, g.StrictClaimer().ClaimWithTTL(ctx, automation, "row-1", 0), "a claim that is held is a duplicate")
+
+	assert.True(t, g.StrictClaimer().Release(ctx, automation, "row-1"), "the claimant gives its claim back")
+	assert.True(t, g.StrictClaimer().ClaimWithTTL(ctx, automation, "row-1", 0), "a released claim can be claimed again")
+
+	// A peer's claim is not this node's to give back.
+	_, err := db.DB.ExecContext(ctx, `INSERT INTO automation_execution_claims (automation_name, dedup_key, claimed_by) VALUES ($1, 'row-2', 'another-replica')`, automation)
+	require.NoError(t, err)
+	assert.False(t, g.StrictClaimer().Release(ctx, automation, "row-2"), "another replica's claim was released by this one")
+	assert.False(t, g.StrictClaimer().ClaimWithTTL(ctx, automation, "row-2", 0), "the peer's claim was lost")
+
+	// Releasing what is not claimed is a no-op.
+	assert.False(t, g.StrictClaimer().Release(ctx, automation, "never-claimed"))
+}

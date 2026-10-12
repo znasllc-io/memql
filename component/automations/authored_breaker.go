@@ -36,9 +36,25 @@ import (
 type BreakerTripInfo struct {
 	Owner      string
 	Automation string
-	Failures   int
-	LastError  string
-	TrippedAt  time.Time
+	// BundleId and Version name the construct the tripping run was armed
+	// from (memql#6022). The pause a trip leads to runs later, off the failing
+	// run's goroutine, and a fix may be armed under the same name by then;
+	// only these tell the version that failed from the one that replaced it.
+	BundleId  string
+	Version   int
+	Failures  int
+	LastError string
+	TrippedAt time.Time
+}
+
+// BreakerSubject is the run a failure is recorded against: the (owner,
+// automation) the breaker keys on, and the bundle and version it was armed
+// from, which a trip hands on in BreakerTripInfo.
+type BreakerSubject struct {
+	Owner      string
+	Automation string
+	BundleId   string
+	Version    int
 }
 
 // BreakerOnTrip is invoked exactly once when an automation's breaker opens.
@@ -113,11 +129,13 @@ func (b *AuthoredBreaker) RecordSuccess(owner, name string) {
 	st.consecutiveFailures = 0
 }
 
-// RecordFailure increments the consecutive-failure count for (owner, name) and
-// trips the breaker when it reaches the threshold. Returns true when THIS call
-// is the one that opened the breaker (so the caller logs/surfaces it once). The
-// onTrip callback fires once, outside the lock, on the tripping call.
-func (b *AuthoredBreaker) RecordFailure(owner, name, errMsg string) bool {
+// RecordFailure increments the consecutive-failure count for the subject's
+// (owner, automation) and trips the breaker when it reaches the threshold.
+// Returns true when THIS call is the one that opened the breaker (so the
+// caller logs/surfaces it once). The onTrip callback fires once, outside the
+// lock, on the tripping call, naming the subject's bundle and version.
+func (b *AuthoredBreaker) RecordFailure(subject BreakerSubject, errMsg string) bool {
+	owner, name := subject.Owner, subject.Automation
 	b.mu.Lock()
 	key := breakerKey(owner, name)
 	st := b.states[key]
@@ -140,6 +158,8 @@ func (b *AuthoredBreaker) RecordFailure(owner, name, errMsg string) bool {
 		info = BreakerTripInfo{
 			Owner:      owner,
 			Automation: name,
+			BundleId:   subject.BundleId,
+			Version:    subject.Version,
 			Failures:   st.consecutiveFailures,
 			LastError:  errMsg,
 			TrippedAt:  st.trippedAt,

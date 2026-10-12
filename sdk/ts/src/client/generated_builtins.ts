@@ -811,11 +811,13 @@ export interface ComposeMaterializeArgs {
   statement?: string;
   /** markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of. */
   format: string;
-  /** email_template produces a validated .email.json with subject, editable HTML, and plain-text alternative; requires format json. Empty creates an ordinary document. The result is a draft, never published or sent automatically. */
+  /** email_template writes a .email.json email document into a layout (layoutId); requires format json and one accountIds entry. With no statement, draft or sources it files the layout itself without a model call. The result is a draft, never published or sent. */
   outputKind?: string;
+  /** builtin:confirmation, builtin:letter, builtin:article or builtin:spotlight, or an organization layout's id from emailLayouts. Email templates only; empty means builtin:article. */
+  layoutId?: string;
   /** What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each. */
   sources?: Record<string, unknown>[];
-  /** A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly. */
+  /** A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly -- except an email template's: an email is only ever its layout, written by the composer, so on a node with no composer its draft is refused. */
   draft?: string;
   /** Ordered completed text step keys in the CURRENT work run. Renders their saved replies verbatim, separated by blank lines, without another model call. Exclude research-only notes; include every final chapter in delivery order. Preserves recorded model/source provenance. Requires a prose format and no draft, outputKind or deployableKind. Missing, unfinished, duplicate or non-text sections are refused. */
   sectionKeys?: string[];
@@ -841,6 +843,7 @@ export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
   if (args.statement !== undefined) parts.push("statement: " + renderMemQLValue(args.statement));
   parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.sources !== undefined) parts.push("sources: " + renderMemQLValue(args.sources));
   if (args.draft !== undefined) parts.push("draft: " + renderMemQLValue(args.draft));
   if (args.sectionKeys !== undefined) parts.push("sectionKeys: " + renderMemQLValue(args.sectionKeys));

@@ -14,6 +14,7 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
@@ -38,6 +39,19 @@ type actsDB struct {
 	owner string
 }
 
+// testGates is the pool an integration's write gates run on when the Database
+// component hands it one (memql#6022): its own connections over the test server,
+// shaped like the deployed pool, and not the pool the test's engine works on.
+func testGates(t *testing.T) func() *sql.DB {
+	t.Helper()
+	pool, err := database.NewGatePool(dbtest.DSN(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	return func() *sql.DB { return pool }
+}
+
 func openActsDB(t *testing.T) actsDB {
 	t.Helper()
 	eng := openWorkTestEngine(t)
@@ -45,6 +59,7 @@ func openActsDB(t *testing.T) actsDB {
 	t.Cleanup(func() { _ = db.Close() })
 	i := New(eng, testLogger())
 	i.bunDB = func() *bun.DB { return db }
+	i.SetGateDB(testGates(t))
 	i.admitRow = memqlengine.AdmitSourceRow
 	owner := "dbtest-work-acts-" + strings.NewReplacer(".", "", ":", "").Replace(time.Now().UTC().Format("20060102150405.000000000"))
 	return actsDB{i: i, eng: eng, db: db, owner: owner}
@@ -158,6 +173,7 @@ func TestWorkVersionActs(t *testing.T) {
 			a.owner = fmt.Sprintf("dbtest-work-acts-%d", time.Now().UnixNano())
 			a.i = New(a.eng, testLogger())
 			a.i.bunDB = func() *bun.DB { return a.db }
+			a.i.SetGateDB(testGates(t))
 			a.i.admitRow = memqlengine.AdmitSourceRow
 			tc.run(t, a)
 		})

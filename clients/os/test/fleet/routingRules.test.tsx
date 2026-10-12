@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBarNow } from "../readTheBar";
 
 // Fleet > Routing > Rules (was Settings > Rules; epic memql#5153, D1, and the
 // routing redesign of 2026-09-28).
@@ -80,6 +81,18 @@ function customLine(when: RegExp): HTMLElement {
 }
 function floorBar(): HTMLElement {
   return screen.getByRole("group", { name: "What you can do with this" });
+}
+
+// A bar that has just changed takes no press for a moment (kit ActionBar), and
+// a step, a choice or a write changes the routing bars: each press reads the
+// bar first, on a fake Date so reading costs nothing.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { vi.useRealTimers(); });
+
+/** Presses one of a bar's acts once the bar has been read. */
+function pressBar(group: () => HTMLElement, name: string | RegExp) {
+  readTheBarNow();
+  fireEvent.click(within(group()).getByRole("button", { name }));
 }
 
 describe("who may see the rules", () => {
@@ -271,7 +284,7 @@ describe("adding a rule", () => {
     const review = document.querySelector(".fleet-rule-review")!;
     expect(review.querySelector(".fleet-rule-when")?.textContent).toBe("Strong work");
     expect(review.querySelector(".fleet-rule-route")?.textContent).toBe("Local only");
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Add rule" }));
+    pressBar(floorBar, "Add rule");
     await settle();
     expect(calls.routingRuleValidate).toHaveBeenCalled();
     expect(calls.routingRuleSave).toHaveBeenCalledWith(expect.objectContaining({ name: "strongWorkLocalOnly", conditions: { level: "strong" }, policy: "localOnly", precedence: 40, expectedRevision: 7 }));
@@ -283,10 +296,10 @@ describe("adding a rule", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
     fireEvent.click(screen.getByRole("radio", { name: "Who is watching" }));
     fireEvent.change(screen.getByLabelText("Role watching"), { target: { value: "operator" } });
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Next" }));
+    pressBar(floorBar, "Next");
     fireEvent.click(screen.getByRole("radio", { name: /Local first/ }));
     expect(document.querySelector(".fleet-rule-review .fleet-rule-when")?.textContent).toBe("Operator watching");
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Add rule" }));
+    pressBar(floorBar, "Add rule");
     await settle();
     expect(calls.routingRuleSave).toHaveBeenCalledWith(expect.objectContaining({ conditions: { actorRole: "operator" } }));
   });
@@ -297,9 +310,9 @@ describe("adding a rule", () => {
     fireEvent.click(screen.getByRole("radio", { name: "A prompt" }));
     expect(within(floorBar()).queryByRole("button", { name: "Next" })).toBeNull();
     fireEvent.change(screen.getByLabelText("Prompt name"), { target: { value: "agentReply" } });
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Next" }));
+    pressBar(floorBar, "Next");
     fireEvent.click(screen.getByRole("radio", { name: /Local first/ }));
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Add rule" }));
+    pressBar(floorBar, "Add rule");
     await settle();
     expect(calls.routingRuleSave).toHaveBeenCalledWith(expect.objectContaining({ conditions: { prompt: "agentReply" }, policy: "localFirst" }));
   });
@@ -312,15 +325,15 @@ describe("adding a rule", () => {
     // Nothing to do yet: no forward act at all.
     expect(within(floorBar()).queryByRole("button", { name: "Compile it" })).toBeNull();
     fireEvent.change(box, { target: { value: "send planning work to my own machines" } });
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Compile it" }));
+    pressBar(floorBar, "Compile it");
     await settle();
     const said = screen.getByRole("group", { name: "The rule it becomes" });
     expect(said.querySelector(".fleet-rule-when")?.textContent).toBe("Tagged planning");
     expect(said.querySelector(".fleet-rule-route")?.textContent).toBe("Local only");
     expect(within(floorBar()).queryByRole("button", { name: "Activate" })).toBeNull();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Check it" }));
+    pressBar(floorBar, "Check it");
     await settle();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Activate" }));
+    pressBar(floorBar, "Activate");
     await settle();
     expect(calls.routingRuleSave).toHaveBeenCalledWith(expect.objectContaining({ name: "planningIsLocal", conditions: { tag: "planning" }, policy: "localOnly", description: "send planning work to my own machines" }));
   });
@@ -331,9 +344,9 @@ describe("adding a rule", () => {
     fireEvent.click(screen.getByRole("button", { name: "Describe it instead" }));
     const box = screen.getByLabelText("Describe a rule in your own words");
     fireEvent.change(box, { target: { value: "send planning work to my own machines" } });
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Compile it" }));
+    pressBar(floorBar, "Compile it");
     await settle();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Check it" }));
+    pressBar(floorBar, "Check it");
     await settle();
     expect(within(floorBar()).getByRole("button", { name: "Activate" })).toBeTruthy();
     fireEvent.change(box, { target: { value: "send planning work anywhere" } });
@@ -347,19 +360,19 @@ describe("adding a rule", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
     fireEvent.click(screen.getByRole("button", { name: "Describe it instead" }));
     fireEvent.change(screen.getByLabelText("Describe a rule in your own words"), { target: { value: "send planning work to my own machines" } });
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Compile it" }));
+    pressBar(floorBar, "Compile it");
     await settle();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Check it" }));
+    pressBar(floorBar, "Check it");
     await settle();
     // Somebody wrote after the check.
     state.revision = 30;
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Activate" }));
+    pressBar(floorBar, "Activate");
     await settle();
     expect(screen.getByText("Routing changed since this page read it.")).toBeTruthy();
     expect(within(floorBar()).queryByRole("button", { name: "Activate" })).toBeNull();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Check it" }));
+    pressBar(floorBar, "Check it");
     await settle();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Activate" }));
+    pressBar(floorBar, "Activate");
     await settle();
     expect(calls.routingRuleSave).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 30 }));
   });
@@ -372,7 +385,7 @@ describe("adding a rule", () => {
     fireEvent.click(screen.getByRole("button", { name: "Describe it instead" }));
     const words = "send planning work to my own machines, never to a paid vendor";
     fireEvent.change(screen.getByLabelText("Describe a rule in your own words"), { target: { value: words } });
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Compile it" }));
+    pressBar(floorBar, "Compile it");
     await settle();
     expect(screen.getByText(refusal)).toBeTruthy();
     expect((screen.getByLabelText("Describe a rule in your own words") as HTMLTextAreaElement).value).toBe(words);
@@ -387,9 +400,9 @@ describe("a rule's own page", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "the call's tag" })); // untick the tag
     fireEvent.click(screen.getByRole("checkbox", { name: "the kind of call" }));
     fireEvent.change(screen.getByLabelText("Value for the kind of call"), { target: { value: "vision" } });
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Check it" }));
+    pressBar(floorBar, "Check it");
     await settle();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Activate" }));
+    pressBar(floorBar, "Activate");
     await settle();
     const conditions = calls.routingRuleSave.mock.calls[0]![0].conditions as Record<string, string>;
     expect(conditions).toEqual({ modality: "vision" });
@@ -408,9 +421,9 @@ describe("a rule's own page", () => {
     await openRules();
     fireEvent.click(customLine(/Tagged nightly/));
     chooseOption(screen.getByLabelText("Route"), "Fast local first");
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Check it" }));
+    pressBar(floorBar, "Check it");
     await settle();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Activate" }));
+    pressBar(floorBar, "Activate");
     await settle();
     expect(calls.routingRuleSave).toHaveBeenCalledWith(expect.objectContaining({ name: "nightlyIsCheap", policy: "fastLocalFirst" }));
   });
@@ -430,10 +443,10 @@ describe("a rule's own page", () => {
   it("removes a rule after asking, in the bar", async () => {
     await openRules();
     fireEvent.click(customLine(/Tagged nightly/));
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Remove" }));
+    pressBar(floorBar, "Remove");
     expect(floorBar().textContent).toContain("Remove this rule?");
     expect(calls.routingRuleRemove).not.toHaveBeenCalled();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Remove rule" }));
+    pressBar(floorBar, "Remove rule");
     await settle();
     expect(calls.routingRuleRemove).toHaveBeenCalledWith({ name: "nightlyIsCheap", expectedRevision: 7 });
   });
@@ -451,7 +464,7 @@ describe("a rule a shipped rule already decides", () => {
     expect(floorBar().textContent).toContain("Fast work already takes Fast local first");
     // No Add rule: a rule that can never fire is not an act.
     expect(within(floorBar()).queryByRole("button", { name: "Add rule" })).toBeNull();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Change Fast local first" }));
+    pressBar(floorBar, "Change Fast local first");
     await settle();
     // Routes, on that route's own page.
     expect(screen.getByRole("list", { name: "Sources, in the order they are tried" })).toBeTruthy();
@@ -478,7 +491,7 @@ describe("a rule a shipped rule already decides", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
     fireEvent.click(screen.getByRole("button", { name: "Describe it instead" }));
     fireEvent.change(screen.getByLabelText("Describe a rule in your own words"), { target: { value: "send fast work to my own machines" } });
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Compile it" }));
+    pressBar(floorBar, "Compile it");
     await settle();
     expect(floorBar().textContent).toContain("Decided by a shipped rule");
     expect(within(floorBar()).queryByRole("button", { name: "Check it" })).toBeNull();

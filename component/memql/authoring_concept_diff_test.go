@@ -732,13 +732,22 @@ func conceptDiffDBEngine(t *testing.T) (*MemQLEngine, context.Context) {
 	return eng, ctx
 }
 
+// promoteDurably is PromoteBundleDurable over the REAL store, as owner-1, with
+// every bundle it persists retired when the test ends -- a durable promote leaves
+// its bundle active, and an active bundle is armed in every run after the test
+// (memql#6022).
+func promoteDurably(t *testing.T, eng *MemQLEngine, ctx context.Context, source, origin string, allowBreaking bool) (PromoteBundleResult, error) {
+	t.Helper()
+	return eng.promoteBundleDurableWithStore(ctx, newRecordingPromoteStore(t, eng), "owner-1", source, origin, allowBreaking)
+}
+
 // promoteOrFail promotes a bundle and fails with the per-construct diagnostics
 // folded in. A bare "N of M constructs did not compile" says only THAT a fixture
 // was rejected, never why, which is the difference between a five-second fix and
 // a bisect.
 func promoteOrFail(t *testing.T, eng *MemQLEngine, ctx context.Context, source, origin string) {
 	t.Helper()
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", source, origin, false)
+	res, err := promoteDurably(t, eng, ctx, source, origin, false)
 	if err == nil {
 		return
 	}
@@ -836,7 +845,7 @@ concept order {
   status       enum("draft", "placed", "shipped")
 }`)
 
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, ns+"/concepts.memql", false)
+	res, err := promoteDurably(t, eng, ctx, v2, ns+"/concepts.memql", false)
 	if err == nil {
 		t.Fatal("re-promoting with `sku` removed was allowed against a table that holds rows carrying it")
 	}
@@ -862,7 +871,7 @@ concept order {
 	}
 
 	// The override is the same call with the flag, and it must actually land.
-	overridden, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, ns+"/concepts.memql", true)
+	overridden, err := promoteDurably(t, eng, ctx, v2, ns+"/concepts.memql", true)
 	if err != nil {
 		t.Fatalf("allow_breaking must land the change: %v", err)
 	}
@@ -933,7 +942,7 @@ concept ticket {
   status       enum("open", "closed")
 }`)
 
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, ns+"/concepts.memql", false)
+	res, err := promoteDurably(t, eng, ctx, v2, ns+"/concepts.memql", false)
 	if err == nil {
 		t.Fatal("narrowing an enum away from a value rows still hold was allowed")
 	}

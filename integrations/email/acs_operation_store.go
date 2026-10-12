@@ -2,7 +2,6 @@ package email
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -32,9 +31,13 @@ type acsOperationStore interface {
 type storedACSOperations struct{ connection *connectionStore }
 
 func (s *storedACSOperations) lock(ctx context.Context, key string) (func(), error) {
-	var db *sql.DB
-	if s != nil && s.connection != nil && s.connection.database != nil {
-		db = s.connection.database()
+	var connection *connectionStore
+	if s != nil {
+		connection = s.connection
+	}
+	db, err := connection.gates()
+	if err != nil {
+		return nil, err
 	}
 	return memql.AcquireWriteGate(ctx, db, "email-operation:"+key)
 }

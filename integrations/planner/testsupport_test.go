@@ -12,12 +12,15 @@ package planner
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/memql"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -42,7 +45,85 @@ type fakeEngine struct {
 	toolErr    error
 }
 
-func (f *fakeEngine) Execute(_ context.Context, query string) (any, error) {
+// constructCall is the createAuthoringConstruct call the planner sent through
+// Execute before the write moved onto the engine's construct writer
+// (memql#6022). A fake renders a writer call back into it, so the tests that
+// read the recorded calls see the member construct exactly as before.
+func constructCall(c memql.AuthoredConstructInput) string {
+	args := map[string]any{
+		"constructId":     c.ConstructId,
+		"bundleId":        c.BundleId,
+		"kind":            c.Kind,
+		"name":            c.Name,
+		"targetNamespace": c.TargetNamespace,
+		"source":          c.Source,
+	}
+	if c.Origin != "" {
+		args["origin"] = c.Origin
+	}
+	return "createAuthoringConstruct(" + encodeArgs(args) + ")"
+}
+
+// WriteAuthoredConstruct records the write the way the planner used to send
+// it, stamped as the engine's writer stamps it.
+func (f *fakeEngine) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	_, err := f.Execute(auth.ContextWithInternalOrigin(ctx), constructCall(c))
+	return err
+}
+
+// bundleCall is the createAuthoringBundle call the planner sent through
+// Execute before the write moved onto the engine's bundle writer
+// (memql#6022). A fake renders a writer call back into it, so the tests that
+// read the recorded calls see the bundle exactly as before.
+func bundleCall(b memql.AuthoringBundleInput) string {
+	args := map[string]any{"bundleId": b.BundleId, "title": b.Title}
+	if b.Summary != "" {
+		args["summary"] = b.Summary
+	}
+	if b.SourceRunId != "" {
+		args["sourceRunId"] = b.SourceRunId
+	}
+	if b.ReusedConstructRefs != nil {
+		args["reusedConstructRefs"] = b.ReusedConstructRefs
+	}
+	return "createAuthoringBundle(" + encodeArgs(args) + ")"
+}
+
+// WriteAuthoringBundle records the bundle creation the way the planner used to
+// send it, stamped as the engine's writer stamps it.
+func (f *fakeEngine) WriteAuthoringBundle(ctx context.Context, b memql.AuthoringBundleInput) error {
+	_, err := f.Execute(auth.ContextWithInternalOrigin(ctx), bundleCall(b))
+	return err
+}
+
+// validationCall is the recordBundleValidation call the planner sent through
+// Execute before the write moved onto the engine's recorder (memql#6022),
+// rendered back the same way.
+func validationCall(v memql.BundleValidationInput) string {
+	args := map[string]any{"bundleId": v.BundleId, "status": v.Status, "validationReport": v.Report}
+	if v.FailureReason != "" {
+		args["failureReason"] = v.FailureReason
+	}
+	return "recordBundleValidation(" + encodeArgs(args) + ")"
+}
+
+// RecordBundleValidation records the verdict the way the planner used to send
+// it, stamped as the engine's recorder stamps it.
+func (f *fakeEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := f.Execute(auth.ContextWithInternalOrigin(ctx), validationCall(v))
+	return err
+}
+
+// Execute refuses the @serverOnly authoring writes the planner makes without
+// internal origin, as the engine does (memql#6022) -- and only the engine's
+// writers stamp it. A planner write that bypassed the writer would otherwise
+// pass here and be refused in production.
+func (f *fakeEngine) Execute(ctx context.Context, query string) (any, error) {
+	for _, write := range []string{"createAuthoringBundle(", "createAuthoringConstruct(", "recordBundleValidation(", "recordBundleDryRun("} {
+		if strings.HasPrefix(query, write) && !auth.OriginFromContext(ctx).IsInternal() {
+			return nil, fmt.Errorf("fakeEngine: %s is @serverOnly; called without internal origin", strings.TrimSuffix(write, "("))
+		}
+	}
 	f.mu.Lock()
 	f.execCalls = append(f.execCalls, query)
 	f.mu.Unlock()

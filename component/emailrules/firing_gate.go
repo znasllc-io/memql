@@ -21,9 +21,8 @@ package emailrules
 // to count. So the read and the write happen while ONE firing holds a Postgres
 // advisory lock keyed on the rule, the identity gate's magic-link pattern
 // (component/identity/magic_link_gate.go). An in-process mutex would not do:
-// the authored owner gate runs an author's rules on one node only while every
-// node agrees on the membership, and two nodes that disagree during a rollout or
-// a scale both run them.
+// a rule fires on whichever replica its triggering write landed on, so two
+// firings of one rule routinely run on two nodes at once.
 //
 // The lock is TRANSACTION-scoped (pg_advisory_xact_lock under SET LOCAL
 // lock_timeout, on a connection held for it alone): the server bounds the wait,

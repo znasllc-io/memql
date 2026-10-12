@@ -310,7 +310,8 @@ export function Wizard({
         </section>
       </div>
 
-      <ActionBar state={status.word} detail={status.detail} tone={status.tone} meta={status.meta} live acts={acts}>
+      {/* A new step holds presses even when its actions have the same labels. */}
+      <ActionBar state={status.word} detail={status.detail} tone={status.tone} meta={status.meta} live acts={acts} scope={open}>
         {confirm}
       </ActionBar>
     </div>

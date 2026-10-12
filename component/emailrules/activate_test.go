@@ -124,6 +124,26 @@ func deps() func() memql.AuthoredRuntimeDeps {
 	return func() memql.AuthoredRuntimeDeps { return memql.AuthoredRuntimeDeps{} }
 }
 
+// TestABundleIdIsItsOwnersOwn: one person derives one id for a rule's version,
+// however their id is spelled; two people derive two; and neither is the id
+// derived before ids carried the owner (memql#6022).
+func TestABundleIdIsItsOwnersOwn(t *testing.T) {
+	const rule = "v1:campaigns:emailRule:ab12cd34"
+	id := bundleIDFor("v1:identity:user:owner1", rule, 1)
+	if bundleIDFor("owner1", rule, 1) != id {
+		t.Fatalf("one owner derives two ids: %s and %s", id, bundleIDFor("owner1", rule, 1))
+	}
+	if bundleIDFor("v1:identity:user:someone-else", rule, 1) == id {
+		t.Fatalf("two owners derive one id, %s", id)
+	}
+	if id == legacyBundleIDFor(rule, 1) || bundleIDFor("owner1", rule, 2) == id {
+		t.Fatalf("the id %s is the old derivation, or the same for two versions", id)
+	}
+	if !strings.HasPrefix(id, ruleBundlePrefix) || !strings.HasPrefix(legacyBundleIDFor(rule, 1), ruleBundlePrefix) {
+		t.Fatalf("a rule bundle id does not start with %q, which is how a breaker's pause recognises one", ruleBundlePrefix)
+	}
+}
+
 // The whole point of this package: the rule is live when Activate returns, not
 // at next boot. ActivateApprovedBundle had NO production caller before it.
 func TestActivateReachesTheRealActivationEntryPoint(t *testing.T) {
@@ -168,8 +188,10 @@ func TestEveryRenderedCallParses(t *testing.T) {
 	}
 }
 
-// The three @serverOnly writes are refused with only a WARN when unstamped, so
-// the stamping is load-bearing rather than hygiene.
+// The @serverOnly and gate writes are refused when unstamped, so the stamping
+// is load-bearing rather than hygiene. The bundle and its construct are among
+// them since memql#6022: a bundle's id is known before it is written, and an
+// active bundle arms every construct it holds.
 func TestServerOnlyWritesStampInternalOrigin(t *testing.T) {
 	e := &fakeEngine{rule: ruleRow()}
 	if _, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), "v1:identity:user:owner1", "v1:campaigns:emailRule:ab12cd34"); err != nil {
@@ -177,6 +199,8 @@ func TestServerOnlyWritesStampInternalOrigin(t *testing.T) {
 	}
 	for _, prefix := range []string{
 		"mutation recordEmailRuleGeneration",
+		"mutation createAuthoringBundle",
+		"mutation createAuthoringConstruct",
 		"mutation recordBundleValidation",
 		"mutation recordBundleDryRun",
 	} {

@@ -1,13 +1,21 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ownershipState, nativeIdentity, identityEntry, identityLocation } from "../../src/auth/nativeIdentity";
 import { OwnershipWizard } from "../../src/auth/OwnershipWizard";
 import { IdentityAccount } from "../../src/apps/identity/IdentityAccount";
 import { registerPasskey, loginWithPasskey } from "../../src/auth/passkeys";
 import { probeSession } from "../../src/auth/identityClient";
+import { readTheBarNow } from "../readTheBar";
 
 const config = { identityUrl: "https://identity.example.test", identityApiBaseUrl: "", oauthClientId: "os", authEnabled: true, domain: "example.test" };
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState({}, "", "/"); });
+// The setup wizard's Continue moves it to another step, and a bar that has just
+// changed takes no press for a moment (kit ActionBar): each step is read before
+// the next press, on a fake Date so reading costs nothing.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); window.history.replaceState({}, "", "/"); });
+
+/** Presses an act of the wizard's bar once it has been read. */
+const pressBar = (name: string) => { readTheBarNow(); fireEvent.click(screen.getByRole("button", { name })); };
 
 describe("identity authority", () => {
   it("does not present an identity outage as signed out", async () => {
@@ -51,8 +59,8 @@ it("walks through all existing setup choices and submits only on verification", 
   fireEvent.change(screen.getByLabelText("Organization name"), { target: { value: "   " } });
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   fireEvent.change(screen.getByLabelText("Organization name"), { target: { value: "Example" } });
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  pressBar("Continue");
+  pressBar("Continue");
   fireEvent.click(screen.getByText("Internal team defaults"));
   fireEvent.change(screen.getByLabelText("Internal email domains (optional)"), { target: { value: "example.test" } });
   fireEvent.click(screen.getByRole("button", { name: "Add internal domain" }));
@@ -60,9 +68,9 @@ it("walks through all existing setup choices and submits only on verification", 
   fireEvent.click(screen.getByRole("option", { name: "Approved email domains" }));
   fireEvent.change(screen.getByLabelText("Approved email domains"), { target: { value: "partner.test" } });
   fireEvent.change(screen.getByLabelText("Notify about requests (optional)"), { target: { value: "ops@example.test" } });
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  pressBar("Continue");
   expect(submit).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Send verification link" }));
+  pressBar("Send verification link");
   await waitFor(() => expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({
     owner_first_name: "Ada", owner_last_name: "Lovelace", owner_email: "ada@example.test", domain: "example.test",
     owner_phone: "+1555010100", owner_primary_role: "Engineer", brand_name: "Example",
@@ -78,8 +86,8 @@ it.each([true, false])("ownership setup omits gender and birthdate even when pre
   expect(screen.queryByLabelText(/gender/i)).toBeNull();
   expect(screen.queryByLabelText(/date of birth/i)).toBeNull();
   expect(document.querySelector('input[type="date"]')).toBeNull();
-  for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-  fireEvent.click(screen.getByRole("button", { name: local ? "Continue to passkey" : "Send verification link" }));
+  for (let i = 0; i < 3; i++) pressBar("Continue");
+  pressBar(local ? "Continue to passkey" : "Send verification link");
   expect(submit).toHaveBeenCalledOnce();
   expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("owner_gender");
   expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("owner_birthdate");
@@ -100,8 +108,8 @@ it("requires the server's revocation warning and keeps unknown sessions distinct
 
 it("requires allowed domains before choosing domain-restricted registration", () => {
   render(<OwnershipWizard data={{ PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Lovelace", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "example.test", PrefillOrgName: "Example", PrefillMode: "domain_restricted" }} busy={false} error="" submit={vi.fn()} />);
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  pressBar("Continue");
+  pressBar("Continue");
   expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   fireEvent.change(screen.getByLabelText("Approved email domains"), { target: { value: "example.test" } });
   expect(screen.getByRole("button", { name: "Continue" })).toBeTruthy();
@@ -112,10 +120,10 @@ it("local setup requires a passkey and never offers an email verification action
   const submit = vi.fn();
   render(<OwnershipWizard data={{ Local: true, PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Owner", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "test", PrefillOrgName: "Example" }} busy={false} error="" submit={submit} />);
   expect(screen.getByText(/Contact information only/)).toBeTruthy();
-  for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  for (let i = 0; i < 3; i++) pressBar("Continue");
   expect(screen.queryByRole("button", { name: "Send verification link" })).toBeNull();
   expect(screen.getByText(/No email is sent/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Continue to passkey" }));
+  pressBar("Continue to passkey");
   expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({ owner_email: "ada@example.test" }));
 });
 
@@ -158,8 +166,8 @@ it("preserves custom profile titles without treating them as authorization roles
   render(<OwnershipWizard data={{ Local: true, PrefillOwnerFirstName: "Ada", PrefillOwnerLastName: "Owner", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "test", PrefillOrgName: "Example", PrefillOwnerPrimaryRole: "Chief Researcher" }} busy={false} error="" submit={submit} />);
   expect(screen.getByLabelText("Your title")).toHaveProperty("value", "Chief Researcher");
   fireEvent.change(screen.getByLabelText("Your title"), { target: { value: "Community steward" } });
-  for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-  fireEvent.click(screen.getByRole("button", { name: "Continue to passkey" }));
+  for (let i = 0; i < 3; i++) pressBar("Continue");
+  pressBar("Continue to passkey");
   expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({ owner_primary_role: "Community steward", brand_name: "Example" }));
   expect(submit.mock.calls[0]?.[1]).not.toHaveProperty("role");
 });

@@ -8,6 +8,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
+import { readTheBar } from "../readTheBar";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { CUSTOM_DOMAIN_CONCEPT } from "../../src/apps/deployables/domains";
 import {
@@ -245,6 +246,8 @@ describe("the domains, as a list", () => {
 
     await openAddDomain();
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    // Add domain joined the bar with the name, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: /add domain/i }));
     await waitFor(() => expect(connection.callsNamed("customDomainAdd")).toHaveLength(1));
     expect(connection.callsNamed("customDomainAdd")[0]).toContain('siteId: "site-shop"');
@@ -650,6 +653,8 @@ describe("adding a domain", () => {
     await openAddDomain();
     const input = screen.getByLabelText("Domain to bind") as HTMLInputElement;
     await type(input, "  WWW.Acme.com. ");
+    // Add domain joined the bar with the name, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: /add domain/i }));
 
     await waitFor(() => {
@@ -678,6 +683,8 @@ describe("adding a domain", () => {
     await screen.findByText("Domains");
     await openAddDomain();
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "shop.memql.example.com");
+    // Add domain joined the bar with the name, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: /add domain/i }));
 
     await screen.findByText(refusal);
@@ -700,12 +707,15 @@ describe("adding a domain", () => {
     await screen.findByText("Domains");
     await openAddDomain();
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    // Add domain joined the bar with the name, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: /add domain/i }));
 
     // THE WIZARD MOVES ON with the server's own answer -- the token it minted
     // is the ownership record, on screen the instant the bind returns.
     await screen.findByLabelText("Copy value: tok-minted-server-side");
     // The LIST still has nothing until the cluster says so.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Leave" }));
     const list = await screen.findByRole("region", { name: /^Domains for / });
     expect(within(list).queryByRole("button", { name: opens("www.acme.com") })).toBeNull();
@@ -755,6 +765,8 @@ describe("the add wizard", () => {
     await openShop(fakeConnection({ sites: [SHOP], domains: [] }));
     await openAddDomain();
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    // Add domain joined the bar with the name, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Add domain" }));
 
     await waitFor(() => expect(stepStates()).toEqual(["done", "current", "waiting", "ahead", "ahead"]));
@@ -781,6 +793,8 @@ describe("the add wizard", () => {
     await openShop(connection);
     await openAddDomain();
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    // Add domain joined the bar with the name, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Add domain" }));
     await waitFor(() => expect(within(bar()).getByText("not checked yet")).toBeTruthy());
 
@@ -804,6 +818,8 @@ describe("the add wizard", () => {
     await openShop(connection);
     await openAddDomain();
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    // Add domain joined the bar with the name, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Add domain" }));
     await waitFor(() => expect(within(bar()).getByText("not checked yet")).toBeTruthy());
 
@@ -821,6 +837,8 @@ describe("the add wizard", () => {
     await openShop(connection);
     await openAddDomain();
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    // Add domain joined the bar with the name, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Add domain" }));
     // The history row has the name and a check time; the new binding has neither yet.
     await waitFor(() => expect(within(bar()).getByText("not checked yet")).toBeTruthy());
@@ -831,6 +849,8 @@ describe("the add wizard", () => {
     await openShop(fakeConnection({ sites: [SHOP], domains: [] }));
     await openAddDomain();
     await type(screen.getByLabelText("Domain to bind") as HTMLInputElement, "www.acme.com");
+    // Add domain joined the bar with the name, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Add domain" }));
     await screen.findByLabelText("Copy value: tok-minted-server-side");
     // Both records are created in the same place, so the second is one click
@@ -885,6 +905,7 @@ describe("removing a binding", () => {
     expect(within(floor()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Keep", "Remove"]);
     expect(floor().querySelectorAll(".os-button")).toHaveLength(1);
 
+    await readTheBar();
     await click(within(floor()).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(connection.callsNamed("removeCustomDomain")).toHaveLength(1));
     const list = await screen.findByRole("region", { name: /^Domains for / });
@@ -910,6 +931,7 @@ describe("removing a binding", () => {
     // IN SURFACE, never a browser dialog: window.confirm blocks the whole
     // shell and looks like a tab.
     await screen.findByText("Stop serving www.acme.com?");
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Keep" }));
 
     await waitFor(() => expect(screen.queryByText("Stop serving www.acme.com?")).toBeNull());
@@ -926,6 +948,7 @@ describe("removing a binding", () => {
     await findCard("www.acme.com");
     await click(screen.getByRole("button", { name: "Remove www.acme.com" }));
     await screen.findByText("Stop serving www.acme.com?");
+    await readTheBar();
     const confirm = within(card("www.acme.com")).getByRole("button", { name: "Remove" });
     await click(confirm);
 

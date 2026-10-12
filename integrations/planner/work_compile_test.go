@@ -27,6 +27,27 @@ type countingCompileEngine struct {
 	triage     any
 }
 
+// WriteAuthoredConstruct records the member-construct write as the call the
+// planner used to send (memql#6022).
+func (e *countingCompileEngine) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	_, err := e.Execute(ctx, constructCall(c))
+	return err
+}
+
+// WriteAuthoringBundle records the bundle creation as the call the planner
+// used to send (memql#6022).
+func (e *countingCompileEngine) WriteAuthoringBundle(ctx context.Context, b memql.AuthoringBundleInput) error {
+	_, err := e.Execute(ctx, bundleCall(b))
+	return err
+}
+
+// RecordBundleValidation records the Gate 1 verdict as the call the planner
+// used to send (memql#6022).
+func (e *countingCompileEngine) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	_, err := e.Execute(ctx, validationCall(v))
+	return err
+}
+
 func (e *countingCompileEngine) Execute(_ context.Context, q string) (any, error) {
 	e.queries = append(e.queries, q)
 	if strings.Contains(q, "procedureConstructsForGoalSignature") {

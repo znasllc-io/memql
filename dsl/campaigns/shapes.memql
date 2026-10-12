@@ -33,6 +33,7 @@ shape recipient recipientFull {
   accountId
   audienceId
   email
+  emailDigest
   displayName
   subscriptionStatus
   unsubscribedAt

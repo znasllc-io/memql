@@ -5,9 +5,10 @@ package memqlws
 //
 // The bridge decodes a request from a browser (protojson for JSON text, proto for
 // binary) before anything else can look at it, and decoding allocates far more
-// than the request's bytes: 100 to 310 bytes for each value it holds. A 32 MiB list
-// of zeros took 2.7 GB to decode, and was refused only after that, for being too
-// large for the server; one request could take a node down. What decoding costs is
+// than the request's bytes: from about 150 bytes for each value it holds to over
+// 400, and more when its objects have long keys. A 32 MiB list of zeros took 2.7
+// GB to decode, and was refused only after that, for being too large for the
+// server; one request could take a node down. What decoding costs is
 // set by how many values a request holds, so that is measured first, from the
 // bytes, in a pass that allocates nothing, together with how deeply the values
 // nest; a request over either bound is refused by itself, as one over the frame
@@ -19,8 +20,9 @@ package memqlws
 // with its arguments in it as the query text, which is one JSON string: a template
 // save, the largest request there is, holds five values however large its
 // document. An AI chat holds three or four for each message of its conversation.
-// A hundred thousand values cost at most about 31 MB to decode (an empty object,
-// the dearest value, is 310 bytes).
+// A request at the bound was measured at 40 to 70 MB to decode: 41 MB for a list
+// of {"a":{}} (410 bytes a value), 69 MB for 99,990 keys of 300 bytes each mapping
+// to {} (a key is not a value, but decoding keeps it).
 //
 // Depth is bounded for a reason of its own. protojson counts one level for each list
 // or object nested in variables and refuses past ten thousand; the server decodes

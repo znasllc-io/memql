@@ -34,6 +34,23 @@ type draftDBCompiler struct {
 	calls  int
 }
 
+// WriteAuthoredConstruct is the engine's own writer: the database decides
+// whether the member construct may join its bundle (memql#6022).
+func (e *draftDBCompiler) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	return e.engine.WriteAuthoredConstruct(ctx, c)
+}
+
+// WriteAuthoringBundle is the engine's own writer of a new bundle (memql#6022).
+func (e *draftDBCompiler) WriteAuthoringBundle(ctx context.Context, in memql.AuthoringBundleInput) error {
+	return e.engine.WriteAuthoringBundle(ctx, in)
+}
+
+// RecordBundleValidation is the engine's own recorder of Gate 1's verdict
+// (memql#6022).
+func (e *draftDBCompiler) RecordBundleValidation(ctx context.Context, v memql.BundleValidationInput) error {
+	return e.engine.RecordBundleValidation(ctx, v)
+}
+
 func (e *draftDBCompiler) Execute(ctx context.Context, q string) (any, error) {
 	return e.engine.Execute(ctx, q)
 }

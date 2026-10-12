@@ -87,6 +87,13 @@ func (i *Integration) PollOperations(ctx context.Context) error {
 
 func (a *azureSetup) pollOperation(ctx context.Context, store acsOperationStore, key string) error {
 	release, err := store.lock(ctx, key)
+	if memql.IsWriteGateBusy(err) {
+		// A delivery holds its receipt's lock from before its first receipt to after
+		// its outcome (acs.go, submitOnce), so a busy lock is a send in flight right
+		// now. It is not this pass's to reconcile, and it is not an error: the
+		// receipt's next poll time has not moved, and a later pass takes it.
+		return nil
+	}
 	if err != nil {
 		return err
 	}
