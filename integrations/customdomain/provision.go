@@ -169,13 +169,15 @@ const (
 // Ingress's OWN namespace. These Ingresses are created in the namespace
 // MEMQL_CUSTOM_DOMAIN_NAMESPACE names (Config.Namespace), which defaults to the
 // engine's, where error-pages runs. An installation that moves custom domains
-// into another namespace needs an `error-pages` Service there as well, which
-// this release does not add. Until it has one ingress-nginx cannot read the
-// Service and skips the annotation (annotations.Extractor.Extract continues past
-// a parse error that is not a validation or a denial, saying nothing at the
-// default log level): the Ingress behaves exactly as it did before, so the cost
-// of the gap is the missing page and nothing worse. The annotation is likewise
-// ignored while the Service has no ready endpoint of its own.
+// into another namespace needs an `error-pages` Deployment AND Service there as
+// well -- a Service alone selects no pods in that namespace -- which this
+// release does not add. Until it has a Service ingress-nginx cannot read it and
+// skips the annotation (annotations.Extractor.Extract continues past a parse
+// error that is not a validation or a denial, saying nothing at the default log
+// level): the Ingress behaves exactly as it did before, so the cost of the gap
+// is the missing page and nothing worse. The annotation is likewise ignored
+// while that Service has no ready endpoint of its own, which a Service with no
+// Deployment behind it never has.
 //
 // THE PROTOCOL. Only a plain-HTTP backend qualifies, and every other protocol
 // rules an Ingress out on its own account. ingress-nginx builds the custom

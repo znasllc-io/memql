@@ -48,8 +48,9 @@
 # grpc_pass they would be sent h2c and behind HTTPS a TLS handshake -- and
 # either way the proxy answers 502, which is worse than the bare 503 it
 # replaces. The Service is looked up in --namespace; a namespace other than the
-# engine's needs an `error-pages` Service of its own, and until it has one
-# ingress-nginx skips the annotation and the Ingress behaves as it did before.
+# engine's needs an `error-pages` Deployment AND Service of its own (a Service
+# alone selects no pods there), and until it has both ingress-nginx skips the
+# fallback and the Ingress behaves as it did before.
 # account_front_door_test.go holds all four.
 #
 # ONE CERTIFICATE WITH THREE SANs, AND THAT IS THE ACTIVATION RULE (design D8).

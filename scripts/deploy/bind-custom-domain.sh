@@ -34,8 +34,9 @@
 # holds the two Ingresses equal, since this script and the engine's API
 # substrate write ONE object between them. The Service is looked up in
 # --namespace, so a namespace other than the engine's needs an `error-pages`
-# Service of its own; until it has one ingress-nginx skips the annotation and
-# the Ingress behaves as it did before.
+# Deployment AND Service of its own (a Service alone selects no pods there);
+# until it has both, ingress-nginx skips the fallback and the Ingress behaves as
+# it did before.
 #
 # WHAT IT REFUSES, AND WHY THAT IS A REFUSAL RATHER THAN A FAILURE. With no
 # --issuer this cluster has no ACME issuer, and a Certificate with an empty

@@ -2,7 +2,6 @@ package customdomain
 
 import (
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -158,27 +157,42 @@ func TestErrorPagesAreOfferedOnlyToPlainHTTPBackends(t *testing.T) {
 	}
 }
 
-// THE UPGRADE BACKFILL SELECTS ON WHAT THE BUILDERS WRITE. The reconciler
-// applies an Ingress only while a binding is issuing, so a custom domain or an
-// account door that is already live when the annotation ships does not carry
-// it until it is bound again. docs/public/operate/front-door.md gives the
-// one-off that adds it, and that command selects the custom-domain Ingresses by
-// one label, and a door's app and api Ingresses by label AND name suffix --
-// the four of a door share every label, so no label tells app and api from id
-// and the gRPC half. This holds the command to the objects it acts on: if a
-// builder's label or suffix moves, or a fifth door Ingress appears, the doc's
-// command would silently annotate the wrong set (or none), and the failure
-// would surface during an outage.
+// THE UPGRADE BACKFILL SELECTS WHAT THE BUILDERS ANNOTATE, BY THEIR OWN RULE.
+// The reconciler applies an Ingress only while a binding is issuing, so a
+// custom domain or an account door that is already live when the annotation
+// ships does not carry it until it is bound again.
+// docs/public/operate/front-door.md gives the one-off that adds it: it lists
+// the custom-domain and door Ingresses by their labels, and annotates each one
+// whose backend-protocol annotation is absent or HTTP -- withErrorPagesBackend's
+// own rule, read off the object. The protocol and not a name suffix, because the
+// objects it acts on were written by OLDER engine versions: what an Ingress's
+// proxy speaks is on the object whichever version wrote it, while a suffix is a
+// convention of the builder that wrote it. This holds the command to the
+// objects it acts on: the labels it selects are the builders' labels, and its
+// filter, applied to every Ingress the builders render, picks exactly the ones
+// they annotate. If a builder's label moves, or a protocol is added that the
+// filter would misread, the doc's command would silently annotate the wrong set
+// (or none), and the failure would surface during an outage.
 func TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel(t *testing.T) {
 	const (
 		customDomainSelector = "app.kubernetes.io/name=custom-domain"
 		doorSelector         = "app.kubernetes.io/name=account-front-door"
-		doorNameFilter       = "-(app|api)$"
+		// The doc's jsonpath prints each Ingress's backend-protocol annotation
+		// beside its name, and its awk filter keeps the rows whose protocol is
+		// empty or HTTP.
+		protocolPath   = `{.metadata.annotations.nginx\.ingress\.kubernetes\.io/backend-protocol}`
+		protocolFilter = `$2 == "" || toupper($2) == "HTTP"`
 	)
+	// picks is protocolFilter as awk applies it to the printed protocol.
+	picks := func(protocol string) bool { return protocol == "" || strings.ToUpper(protocol) == "HTTP" }
 
 	labelOf := func(obj map[string]any, key string) string {
 		labels, _ := obj["metadata"].(map[string]any)["labels"].(map[string]any)
 		v, _ := labels[key].(string)
+		return v
+	}
+	protocolOf := func(obj map[string]any) string {
+		v, _ := ingressAnnotations(t, obj)[backendProtocolKey].(string)
 		return v
 	}
 
@@ -186,9 +200,12 @@ func TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel(t *testing.T) {
 	if got := labelOf(domain, "app.kubernetes.io/name"); got != "custom-domain" {
 		t.Errorf("the custom domain Ingress is labelled app.kubernetes.io/name=%q; the backfill selects %q", got, customDomainSelector)
 	}
+	if _, has := ingressAnnotations(t, domain)[defaultBackendKey]; !has || !picks(protocolOf(domain)) {
+		t.Errorf("the custom domain Ingress: carries the annotation = %v, the backfill's filter picks it = %v; want both",
+			has, picks(protocolOf(domain)))
+	}
 
 	door := DoorBindRequest{AccountID: "a1", ReservedName: "memql.example.com", Namespace: "memql", IngressClass: "nginx"}
-	filter := regexp.MustCompile(doorNameFilter)
 	var annotated, selected int
 	for _, obj := range doorIngressObjects(door, []string{"/healthz"}) {
 		name, _ := obj["metadata"].(map[string]any)["name"].(string)
@@ -196,10 +213,10 @@ func TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel(t *testing.T) {
 			t.Errorf("%s is labelled app.kubernetes.io/name=%q; the backfill selects %q", name, got, doorSelector)
 		}
 		_, has := ingressAnnotations(t, obj)[defaultBackendKey]
-		picked := filter.MatchString(name)
+		picked := picks(protocolOf(obj))
 		if has != picked {
-			t.Errorf("%s: carries the annotation = %v, but the backfill's name filter %q picks it = %v; "+
-				"the one-off would annotate the wrong set of door Ingresses", name, has, doorNameFilter, picked)
+			t.Errorf("%s (backend protocol %q): carries the annotation = %v, but the backfill's filter %s picks it = %v; "+
+				"the one-off would annotate the wrong set of door Ingresses", name, protocolOf(obj), has, protocolFilter, picked)
 		}
 		if has {
 			annotated++
@@ -217,9 +234,12 @@ func TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel(t *testing.T) {
 		t.Fatalf("reading the front-door page: %v", err)
 	}
 	doc := string(raw)
-	for _, want := range []string{"-l " + customDomainSelector, "-l " + doorSelector, "'" + doorNameFilter + "'", "default-backend=error-pages"} {
+	for _, want := range []string{customDomainSelector, doorSelector, protocolPath, "'" + protocolFilter, "default-backend=error-pages"} {
 		if !strings.Contains(doc, want) {
-			t.Errorf("docs/public/operate/front-door.md does not contain %q; the upgrade backfill the page gives must select exactly what the builders label", want)
+			t.Errorf("docs/public/operate/front-door.md does not contain %q; the upgrade backfill the page gives must select exactly what the builders annotate", want)
 		}
+	}
+	if strings.Contains(doc, "-(app|api)$") {
+		t.Error("docs/public/operate/front-door.md still selects door Ingresses by name suffix; an older engine's names are a convention, its backend protocol is on the object")
 	}
 }

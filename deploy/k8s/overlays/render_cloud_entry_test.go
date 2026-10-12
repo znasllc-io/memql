@@ -465,7 +465,10 @@ func TestCloudKeepsDrainBeforeStartAtTwoReplicas(t *testing.T) {
 // placeholder would pull a tag nobody pushed, at the one moment the fallback
 // is needed.
 func TestCloudEntryRendersErrorPages(t *testing.T) {
-	dep := assertErrorPagesRender(t, entryOverlay)
+	// The shape is TestEveryInstanceOverlayRendersTheErrorPages/cloud-entry's;
+	// this reads the Deployment only for its image.
+	var dep errorPagesDeployment
+	namedDocument(t, render(t, entryOverlay), "Deployment", errorPagesName, &dep)
 
 	raw, err := os.ReadFile(filepath.Join(entryOverlay, "kustomization.yaml"))
 	if err != nil {

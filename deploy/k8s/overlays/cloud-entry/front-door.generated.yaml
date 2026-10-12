@@ -44,18 +44,21 @@
 # spec.source.kustomize.patches. `.localhost` is unroutable, so a cluster reconciled
 # before its domain is set fails visibly rather than half-working.
 #
-# THE ERROR PAGES. Every Ingress below whose proxy speaks plain HTTP to its backend carries
-# nginx.ingress.kubernetes.io/default-backend: error-pages, so that when the Service it
-# routes to has no ready endpoints ingress-nginx answers with the maintenance page
-# (`memql error-pages`, deploy/k8s/base/error-pages.yaml) instead of its own bare 503, which
-# is what every host on the cluster answered on 2026-10-11. Two Ingresses do NOT, each on its
-# own backend protocol: api-front-door-grpc (GRPC: the proxy would speak h2c to the error
-# pages) and identity-front-door (HTTPS: the proxy would open a TLS connection to the error
-# pages, which speak none). ingress-nginx keeps an Ingress's backend protocol when it swaps
-# in the default backend, and the error pages are a plain HTTP/1.1 server, so behind either
-# the proxy would answer 502 rather than the page. Nothing here sets custom-http-errors,
-# which would replace the application's own error responses. cmd/frontdoorhosts/manifest.go
-# has the reasoning and deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.
+# THE ERROR PAGES. Every Ingress below whose proxy speaks plain HTTP to its backend, bar
+# mcp-front-door, carries nginx.ingress.kubernetes.io/default-backend: error-pages,
+# so that when the Service it routes to has no ready endpoints ingress-nginx answers with the
+# maintenance page (`memql error-pages`, deploy/k8s/base/error-pages.yaml) instead of its own
+# bare 503, which is what every host on the cluster answered on 2026-10-11. Two Ingresses do
+# NOT, each on its own backend protocol: api-front-door-grpc (GRPC: the proxy would speak h2c
+# to the error pages) and identity-front-door (HTTPS: the proxy would open a TLS connection to
+# the error pages, which speak none). ingress-nginx keeps an Ingress's backend protocol when
+# it swaps in the default backend, and the error pages are a plain HTTP/1.1 server, so behind
+# either the proxy would answer 502 rather than the page. mcp-front-door does not either, by
+# choice: mcp is disabled by default (0 replicas on the entry shape), so its page would say
+# "being updated" for good, and MCP is a machine surface. Nothing here sets
+# custom-http-errors, which would replace the application's own error responses.
+# cmd/frontdoorhosts/manifest.go has the reasoning and
+# deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.
 #
 # NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx
 # resolves server_name by specificity in its own core -- an exact name beats a leading
@@ -414,15 +417,13 @@ spec:
 # speaking plain HTTP, and backend protocol is not a per-path setting. Not proxied
 # through the edge either -- MCP clients configure a URL, they are not browsers, and an
 # extra hop on a tool-calling path buys nothing.
+#
+# NO default-backend (see the top of this file): entry installs run mcp at 0 replicas; MCP is for machines.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: mcp-front-door
   namespace: memql
-  annotations:
-    # THE MAINTENANCE PAGE: where ingress-nginx sends a request when this Ingress's Service has
-    # no ready endpoints, in place of its own bare 503 (see the top of this file).
-    nginx.ingress.kubernetes.io/default-backend: error-pages
 spec:
   ingressClassName: nginx
   tls:

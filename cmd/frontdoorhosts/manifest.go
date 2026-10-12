@@ -50,7 +50,8 @@ const ingressClass = "nginx"
 // on the platform's hosts and on every customer's.
 //
 // WHICH INGRESSES CARRY IT: every one whose proxy speaks plain HTTP to its
-// backend, which is all but two. ingress-nginx builds the custom default
+// backend, bar mcp-front-door (below), which is all but three. ingress-nginx
+// builds the custom default
 // backend as a copy of the Ingress's own upstream and KEEPS the location's
 // backend protocol; only its built-in default backend is forced back to plain
 // http (buildProxyPass, v1.15.1). `memql error-pages` is a plain HTTP/1.1
@@ -70,8 +71,20 @@ const ingressClass = "nginx"
 // Either 502 is worse than the bare 503 it would replace, so those two keep
 // ingress-nginx's own 503 during an outage until the error pages can answer TLS
 // (a listener and a Service of their own, which is later work).
+//
+// mcp-front-door speaks plain HTTP and is left out by choice. mcp is disabled
+// by default -- cloud-entry renders it at 0 replicas -- so its host would answer
+// "MemQL is being updated, back in a few minutes" with Retry-After 120 for good
+// on every entry installation, which is false, and MCP is a machine surface
+// whose clients read the status, not a page. It keeps ingress-nginx's answer.
 // TestEveryFrontDoorIngressHasErrorPagesBackend pins the rule by protocol and
-// the two names, so a later edit cannot silently add the annotation to either.
+// the three names, so a later edit cannot silently add the annotation to any.
+//
+// ENTERING OR LEAVING THE FALLBACK COSTS A FULL NGINX RELOAD: ingress-nginx's
+// Location.Equal compares the location's Backend, which the swap changes, so a
+// role whose ready endpoints flap at zero reloads the controller each time, and
+// a reload closes long-lived connections controller-wide once
+// worker-shutdown-timeout has passed.
 //
 // NEVER `custom-http-errors`: that would make ingress-nginx replace the
 // application's own 4xx and 5xx responses, the API's JSON error bodies
@@ -163,18 +176,21 @@ func header(overlay, domain string) string {
 		"# spec.source.kustomize.patches. `.localhost` is unroutable, so a cluster reconciled\n" +
 		"# before its domain is set fails visibly rather than half-working.\n" +
 		"#\n" +
-		"# THE ERROR PAGES. Every Ingress below whose proxy speaks plain HTTP to its backend carries\n" +
-		"# " + defaultBackendAnnotation + ": " + errorPagesService + ", so that when the Service it\n" +
-		"# routes to has no ready endpoints ingress-nginx answers with the maintenance page\n" +
-		"# (`memql error-pages`, deploy/k8s/base/error-pages.yaml) instead of its own bare 503, which\n" +
-		"# is what every host on the cluster answered on 2026-10-11. Two Ingresses do NOT, each on its\n" +
-		"# own backend protocol: api-front-door-grpc (GRPC: the proxy would speak h2c to the error\n" +
-		"# pages) and identity-front-door (HTTPS: the proxy would open a TLS connection to the error\n" +
-		"# pages, which speak none). ingress-nginx keeps an Ingress's backend protocol when it swaps\n" +
-		"# in the default backend, and the error pages are a plain HTTP/1.1 server, so behind either\n" +
-		"# the proxy would answer 502 rather than the page. Nothing here sets custom-http-errors,\n" +
-		"# which would replace the application's own error responses. cmd/frontdoorhosts/manifest.go\n" +
-		"# has the reasoning and deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.\n" +
+		"# THE ERROR PAGES. Every Ingress below whose proxy speaks plain HTTP to its backend, bar\n" +
+		"# mcp-front-door, carries " + defaultBackendAnnotation + ": " + errorPagesService + ",\n" +
+		"# so that when the Service it routes to has no ready endpoints ingress-nginx answers with the\n" +
+		"# maintenance page (`memql error-pages`, deploy/k8s/base/error-pages.yaml) instead of its own\n" +
+		"# bare 503, which is what every host on the cluster answered on 2026-10-11. Two Ingresses do\n" +
+		"# NOT, each on its own backend protocol: api-front-door-grpc (GRPC: the proxy would speak h2c\n" +
+		"# to the error pages) and identity-front-door (HTTPS: the proxy would open a TLS connection to\n" +
+		"# the error pages, which speak none). ingress-nginx keeps an Ingress's backend protocol when\n" +
+		"# it swaps in the default backend, and the error pages are a plain HTTP/1.1 server, so behind\n" +
+		"# either the proxy would answer 502 rather than the page. mcp-front-door does not either, by\n" +
+		"# choice: mcp is disabled by default (0 replicas on the entry shape), so its page would say\n" +
+		"# \"being updated\" for good, and MCP is a machine surface. Nothing here sets\n" +
+		"# custom-http-errors, which would replace the application's own error responses.\n" +
+		"# cmd/frontdoorhosts/manifest.go has the reasoning and\n" +
+		"# deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.\n" +
 		"#\n" +
 		"# NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx\n" +
 		"# resolves server_name by specificity in its own core -- an exact name beats a leading\n" +
@@ -396,13 +412,13 @@ func mcpIngress(domain string) string {
 		"# speaking plain HTTP, and backend protocol is not a per-path setting. Not proxied\n" +
 		"# through the edge either -- MCP clients configure a URL, they are not browsers, and an\n" +
 		"# extra hop on a tool-calling path buys nothing.\n" +
+		"#\n" +
+		"# NO default-backend (see the top of this file): entry installs run mcp at 0 replicas; MCP is for machines.\n" +
 		"apiVersion: networking.k8s.io/v1\n" +
 		"kind: Ingress\n" +
 		"metadata:\n" +
 		"  name: mcp-front-door\n" +
 		"  namespace: memql\n" +
-		"  annotations:\n" +
-		errorPagesBackend() +
 		"spec:\n" +
 		"  ingressClassName: " + ingressClass + "\n" +
 		tlsBlock(host) +

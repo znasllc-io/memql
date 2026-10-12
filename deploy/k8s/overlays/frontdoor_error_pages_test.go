@@ -51,21 +51,36 @@ const (
 var errorPagesOverlays = []string{cloudOverlay, entryOverlay, "local"}
 
 // errorPagesExcluded are the front-door Ingresses that must NOT name the error
-// pages, and the backend protocol that rules each out.
+// pages, and why.
 //
-// ingress-nginx builds the custom default backend as a copy of the location's
-// own upstream and keeps the location's protocol: only its built-in default
-// backend is forced back to plain http (template.go buildProxyPass, v1.15.1).
-// `memql error-pages` is a plain HTTP/1.1 server, so each protocol below rules
-// an Ingress out ON ITS OWN ACCOUNT (errorPagesUnfitReason says how): HTTPS is
-// not the GRPC case under another name, and would hold if the gRPC Ingress did
-// not exist. Either way the proxy answers 502, worse than the bare 503 it would
-// replace. The exclusion is pinned by NAME as well as by the protocol rule, so
-// that flipping an Ingress's protocol annotation and adding the default backend
-// in the same edit cannot satisfy the rule by changing the question.
-var errorPagesExcluded = []struct{ name, protocol string }{
-	{"api-front-door-grpc", "GRPC"},
-	{"identity-front-door", "HTTPS"},
+// Two are ruled out by their backend protocol. ingress-nginx builds the custom
+// default backend as a copy of the location's own upstream and keeps the
+// location's protocol: only its built-in default backend is forced back to plain
+// http (template.go buildProxyPass, v1.15.1). `memql error-pages` is a plain
+// HTTP/1.1 server, so each protocol below rules an Ingress out ON ITS OWN
+// ACCOUNT (errorPagesUnfitReason says how): HTTPS is not the GRPC case under
+// another name, and would hold if the gRPC Ingress did not exist. Either way the
+// proxy answers 502, worse than the bare 503 it would replace. The exclusion is
+// pinned by NAME as well as by the protocol rule, so that flipping an Ingress's
+// protocol annotation and adding the default backend in the same edit cannot
+// satisfy the rule by changing the question.
+//
+// One is ruled out by what it serves, not by its protocol, which is plain HTTP:
+// mcp-front-door. Its protocol is empty below and its reason says why.
+var errorPagesExcluded = []struct{ name, protocol, reason string }{
+	{name: "api-front-door-grpc", protocol: "GRPC"},
+	{name: "identity-front-door", protocol: "HTTPS"},
+	{name: "mcp-front-door", reason: "mcp is disabled by default -- cloud-entry renders it at 0 replicas -- so on every entry " +
+		"installation the page would answer \"MemQL is being updated, back in a few minutes\" with Retry-After 120 for " +
+		"good, which is false; and MCP is a machine surface, whose clients read the status, not a page"},
+}
+
+// excludedWhy says why an excluded Ingress must not name the error pages.
+func excludedWhy(protocol, reason string) string {
+	if protocol == "" {
+		return reason
+	}
+	return "backend protocol " + protocol + ": " + errorPagesUnfitReason(protocol)
 }
 
 // plainHTTPBackend reports whether an Ingress's proxy speaks plain HTTP to its
@@ -155,9 +170,9 @@ func ingressesIn(t *testing.T, stream string) []annotatedIngress {
 }
 
 // assertErrorPagesBackends applies the rule to the front-door Ingresses of one
-// stream: every one whose proxy speaks plain HTTP names the error pages, every
-// other one does not, and none of them replaces the application's own error
-// responses.
+// stream: every one whose proxy speaks plain HTTP names the error pages, but
+// mcp-front-door (errorPagesExcluded), every other one does not, and none of
+// them replaces the application's own error responses.
 //
 // Scoped to the generator's closed set (frontDoorIngressNames) rather than to
 // every Ingress the stream happens to carry, so an Ingress an overlay adds for
@@ -169,6 +184,14 @@ func assertErrorPagesBackends(t *testing.T, where string, ingresses []annotatedI
 	byName := map[string]annotatedIngress{}
 	for _, ing := range ingresses {
 		byName[ing.Metadata.Name] = ing
+	}
+	// Excluded by what it serves rather than by its protocol: plain HTTP, and
+	// still no error pages. Its absence is asserted by name, below.
+	byChoice := map[string]bool{}
+	for _, x := range errorPagesExcluded {
+		if x.protocol == "" {
+			byChoice[x.name] = true
+		}
 	}
 
 	var plain, excluded int
@@ -186,6 +209,11 @@ func assertErrorPagesBackends(t *testing.T, where string, ingresses []annotatedI
 				"responses -- the API's JSON error bodies included -- with the maintenance page. The "+
 				"error pages are the fallback for a Service with no endpoints and nothing else.",
 				where, name, customHTTPErrorsAnnotation)
+		}
+
+		if byChoice[name] {
+			excluded++
+			continue
 		}
 
 		if plainHTTPBackend(annotations) {
@@ -207,21 +235,22 @@ func assertErrorPagesBackends(t *testing.T, where string, ingresses []annotatedI
 		}
 	}
 
-	// The two exclusions, by name: the protocol rule above is satisfied just as
-	// well by changing an Ingress's protocol annotation and adding the default
-	// backend in the one edit, which would change the question rather than
-	// answer it.
+	// The exclusions, by name: the protocol rule above is satisfied just as well
+	// by changing an Ingress's protocol annotation and adding the default backend
+	// in the one edit, which would change the question rather than answer it.
 	for _, x := range errorPagesExcluded {
 		ing, ok := byName[x.name]
 		if !ok {
 			continue // reported above
 		}
-		if got := strings.ToUpper(ing.Metadata.Annotations[backendProtocolAnnotation]); got != x.protocol {
-			t.Errorf("%s: %s has backend protocol %q, want %q (that is why it is excluded)", where, x.name, got, x.protocol)
+		if x.protocol != "" {
+			if got := strings.ToUpper(ing.Metadata.Annotations[backendProtocolAnnotation]); got != x.protocol {
+				t.Errorf("%s: %s has backend protocol %q, want %q (that is why it is excluded)", where, x.name, got, x.protocol)
+			}
 		}
-		if _, has := ing.Metadata.Annotations[defaultBackendAnnotation]; has {
-			t.Errorf("%s: %s names the error pages; it must not (backend protocol %s: %s)",
-				where, x.name, x.protocol, errorPagesUnfitReason(x.protocol))
+		if got, has := ing.Metadata.Annotations[defaultBackendAnnotation]; has {
+			t.Errorf("%s: %s names the error pages (%s=%q); it must not (%s)",
+				where, x.name, defaultBackendAnnotation, got, excludedWhy(x.protocol, x.reason))
 		}
 	}
 
@@ -448,9 +477,8 @@ func selects(selector, labels map[string]string) bool {
 }
 
 // assertErrorPagesRender is everything a rendered overlay must say about the
-// error pages. It returns the Deployment so a caller can add overlay-specific
-// assertions.
-func assertErrorPagesRender(t *testing.T, overlay string) errorPagesDeployment {
+// error pages.
+func assertErrorPagesRender(t *testing.T, overlay string) {
 	t.Helper()
 	rendered := render(t, overlay)
 
@@ -583,6 +611,13 @@ func assertErrorPagesRender(t *testing.T, overlay string) errorPagesDeployment {
 				overlay, what, probe.HTTPGet.Path, probe.HTTPGet.Port)
 		}
 	}
+	// A startup probe is optional, but one there must be on the probe listener
+	// too: on the public port it would read the 503 page for good, never pass,
+	// and have the kubelet restart the container each time it gave up.
+	if probe := c.StartupProbe; probe != nil && (probe.HTTPGet.Path != "/healthz" || probe.HTTPGet.Port != "health") {
+		t.Errorf("%s: the startup probe is GET %s on port %v, want none or GET /healthz on port \"health\" (the public "+
+			"listener answers every path, /healthz included, with the 503 page)", overlay, probe.HTTPGet.Path, probe.HTTPGet.Port)
+	}
 
 	// Resources: measured, not guessed. RSS is 53-55 MiB for the memql binary,
 	// so a 64Mi request is honest and 128Mi is the ceiling with headroom.
@@ -666,8 +701,6 @@ func assertErrorPagesRender(t *testing.T, overlay string) errorPagesDeployment {
 	if g := spec.TerminationGracePeriodSeconds; g == nil || *g < 20 {
 		t.Errorf("%s: error-pages terminationGracePeriodSeconds is %v, want at least 20 (5 s drain + 10 s shutdown + slack)", overlay, deref(g))
 	}
-
-	return dep
 }
 
 // TestEveryInstanceOverlayRendersTheErrorPages: all three overlays compose the
