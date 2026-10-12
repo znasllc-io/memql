@@ -76,6 +76,16 @@ export const WORDS = {
   templateDraft: "Draft",
 
   /**
+   * What a section says, in place on its list, when search or Ask named a record
+   * the cluster does not hold for this person: gone, or not theirs to read. One
+   * noun per section; a section that opens records by id adds its own when it
+   * says this.
+   */
+  unavailable: {
+    campaign: "That campaign isn't available.",
+  } as const,
+
+  /**
    * The cluster's own sender, which only the operator organization may send as.
    * Spelled as it reads inside a sentence ("as this cluster's sender"); a line
    * that starts with it capitalizes it.

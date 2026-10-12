@@ -80,6 +80,10 @@ export function CampaignsSection({
   onCampaign?: (campaignId: string) => void;
 }) {
   const [openId, setOpenId] = useState("");
+  // The campaign somebody ELSE named -- search, Ask or another page -- as opposed
+  // to one this section is opening itself, whose row is on its way (the wizard
+  // just made it). Only the first can be called missing.
+  const [requested, setRequested] = useState("");
   const [adding, setAdding] = useState(false);
   // A copy Duplicate made opens when its row arrives; until then the page it was made from stays.
   const [arriving, setArriving] = useState("");
@@ -91,10 +95,12 @@ export function CampaignsSection({
   useOpenRequest(openRequest, (target) => {
     if ("add" in target) {
       setOpenId("");
+      setRequested("");
       setAdding(true);
     } else {
       setAdding(false);
       setOpenId(target.id);
+      setRequested(target.id);
     }
   });
 
@@ -180,6 +186,12 @@ export function CampaignsSection({
   }
 
   const failed = feeds.campaigns.snapshot.error !== "";
+  // A CAMPAIGN SOMEBODY ASKED FOR THAT THE CLUSTER DOES NOT HOLD, said in place.
+  // Only once the cluster has answered: while the feed is still reading, or when
+  // it could not be asked, the record is not "missing", and the page opens if it
+  // arrives. The sentence goes with the request -- another campaign opened, the
+  // way back from the page, or the wizard started.
+  const missing = requested !== "" && requested === openId && feeds.campaigns.snapshot.state === "live" && !failed;
   const narrowed = facet !== "" || needle !== "";
   // A list the cluster says is empty has nothing to ask a question of (rule 2).
   // A question that emptied it stays, so it can be taken back.
@@ -201,8 +213,16 @@ export function CampaignsSection({
             </Select>
           </Refine>
         )}
-        <AddButton label="Add a campaign" onClick={() => setAdding(true)} />
+        <AddButton
+          label="Add a campaign"
+          onClick={() => {
+            setRequested("");
+            setAdding(true);
+          }}
+        />
       </Head>
+
+      {missing ? <Notice tone="info" sentence={WORDS.unavailable.campaign} /> : null}
 
       {/* Keyed on the question, so asking another one RE-BASELINES the arrival
           cues: rows the browser already had are not the cluster sending them. */}

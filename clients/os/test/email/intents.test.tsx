@@ -209,11 +209,14 @@ describe("a record named by an intent", () => {
     // Nothing to open yet, so the person is on the list and not on a blank page.
     expect(await heading("Campaigns")).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 3, name: "August update" })).toBeNull();
+    // And nothing is said about it: the cluster has not answered, so the record is not "missing".
+    expect(screen.queryByText("That campaign isn't available.")).toBeNull();
     expect(navigate).toHaveBeenCalledWith("campaigns", { fromContent: true });
     expect(consumeIntent).toHaveBeenCalledWith("i1");
 
     await act(async () => release());
     expect(await heading("August update")).toBeTruthy();
+    expect(screen.queryByText("That campaign isn't available.")).toBeNull();
   });
 
   it("leaves the person on the list when the cluster has no such record", async () => {
@@ -226,6 +229,69 @@ describe("a record named by an intent", () => {
     expect(screen.getByRole("heading", { level: 3, name: "Campaigns" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Back to Campaigns" })).toBeNull();
     expect(consumeIntent).toHaveBeenCalledWith("i1");
+    // ...and says so, in place, rather than leaving the person on a list with
+    // nothing to show for what they asked.
+    expect(await screen.findByText("That campaign isn't available.")).toBeTruthy();
+  });
+
+  it("says the campaign is not available, with no campaigns at all, above the empty list", async () => {
+    const { deliver } = mountWindow(fakeConnection());
+
+    deliver({ id: "i1", payload: { campaignId: "missing" } });
+
+    expect(await screen.findByText("That campaign isn't available.")).toBeTruthy();
+    expect(screen.getByText("No campaigns yet")).toBeTruthy();
+  });
+
+  it("takes the sentence back when the campaign arrives after all, and opens it", async () => {
+    const conn = fakeConnection({ campaigns: [campaignRow({ id: "other", name: "Somebody else's" })] });
+    const { deliver } = mountWindow(conn);
+    deliver({ id: "i1", payload: { campaignId: "late" } });
+    expect(await screen.findByText("That campaign isn't available.")).toBeTruthy();
+
+    await act(async () => {
+      conn.subscriptions.emit("v1:campaigns:campaign", campaignRow({ id: "late", name: "Came late" }), "NODE_CREATED");
+    });
+
+    expect(await heading("Came late")).toBeTruthy();
+    expect(screen.queryByText("That campaign isn't available.")).toBeNull();
+  });
+
+  it("takes the sentence back when another campaign is asked for", async () => {
+    const conn = fakeConnection({ campaigns: [campaignRow({ id: "x1" })] });
+    const { deliver } = mountWindow(conn);
+    deliver({ id: "i1", payload: { campaignId: "missing" } });
+    expect(await screen.findByText("That campaign isn't available.")).toBeTruthy();
+
+    deliver({ id: "i2", payload: { campaignId: "x1" } });
+
+    expect(await heading("August update")).toBeTruthy();
+    expect(screen.queryByText("That campaign isn't available.")).toBeNull();
+  });
+
+  it("takes the sentence back when the person starts adding a campaign instead", async () => {
+    const { deliver } = mountWindow(fakeConnection({ campaigns: [campaignRow({ id: "other", name: "Somebody else's" })] }));
+    deliver({ id: "i1", payload: { campaignId: "missing" } });
+    expect(await screen.findByText("That campaign isn't available.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add a campaign" }));
+    expect(await screen.findByRole("heading", { level: 3, name: "Add a campaign" })).toBeTruthy();
+    // ...and it does not come back when the wizard is left: that request was answered.
+    fireEvent.click(screen.getByRole("button", { name: "Back to Campaigns" }));
+    expect(await screen.findByText("Somebody else's")).toBeTruthy();
+    expect(screen.queryByText("That campaign isn't available.")).toBeNull();
+  });
+
+  it("does not call a campaign missing when the cluster could not be asked", async () => {
+    // A refused read says nothing about whether the record exists, and the list
+    // already says that it did not come back.
+    const conn = fakeConnection();
+    conn.query.campaigns.mockRejectedValue(new Error("read refused"));
+    const { deliver } = mountWindow(conn);
+    deliver({ id: "i1", payload: { campaignId: "x1" } });
+
+    expect((await screen.findAllByText("This cluster did not return your campaigns.")).length).toBeGreaterThan(0);
+    expect(screen.queryByText("That campaign isn't available.")).toBeNull();
   });
 
   it("opens the same record again when it is asked for again after going back", async () => {
