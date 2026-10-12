@@ -489,7 +489,7 @@ func (s *session) readLoop() error {
 			return err
 		}
 		// JSON is measured by its shape as it arrives (request_shape.go): decoding a
-		// request costs a hundred times its size and more, so one with too many values
+		// request can cost up to a hundred times its size, so one with too many values
 		// in it is refused before it is decoded, and is not even held whole.
 		var shape *jsonShape
 		if msgType == websocket.MessageText {
