@@ -48,9 +48,10 @@ const writeGateWait = 6 * time.Second
 const writeGateGrace = time.Second
 
 // gateHeldTooLong is when releasing a gate says that it was held long enough to be
-// at risk (a variable only so a test can shorten it). PostgreSQL ends an idle transaction at idle_in_transaction_session_timeout
-// (60 s by default) and the advisory lock with it, without telling the holder, so a
-// gated section is meant to last seconds. This is the sign that one did not.
+// at risk (a variable only so a test can shorten it). PostgreSQL ends an idle
+// transaction at idle_in_transaction_session_timeout (60 s by default) and the
+// advisory lock with it, without telling the holder, so a gated section is meant to
+// last seconds. This is the sign that one did not.
 var gateHeldTooLong = 30 * time.Second
 
 // gateSlots holds, per pool, how many write gates may be open at once. See slotsFor.

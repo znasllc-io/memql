@@ -598,8 +598,9 @@ func TestAPassNeverWaitsForABatchAnotherReplicaHolds(t *testing.T) {
 	if got := f.sweptVersions("v1:campaigns:recipient:held-%"); got != 0 {
 		t.Errorf("%d recipients were stamped under a lock another replica held", got)
 	}
-	if waiting := f.count(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`); waiting != 0 {
-		t.Errorf("%d advisory-lock requests are left on the server", waiting)
+	if waiting := f.count(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+		AND objsubid = 1 AND classid = (?::bigint >> 32)::oid AND objid = (?::bigint & 4294967295)::oid`, recipientEmailDigestLockKey, recipientEmailDigestLockKey); waiting != 0 {
+		t.Errorf("%d requests for the sweep's lock are left on the server", waiting)
 	}
 	if inUse := f.db.Stats().InUse; inUse != 0 {
 		t.Errorf("%d connections are still held by the pass", inUse)

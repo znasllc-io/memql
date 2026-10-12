@@ -384,6 +384,48 @@ func TestTwoConcurrentSignupsForTheSameNewAddressMakeOneMember(t *testing.T) {
 	}
 }
 
+// TestTwoStorefrontsOnOneAudienceTakeOneMemberForOneAddress: two forms on two
+// storefronts of one audience share the audience's lock but not the storefront's.
+// The same address, signed up on both at once after both have read "nobody has it",
+// is one member and one signup, which names that member: the audience's lock is
+// where the two meet, and the second finds the first's signup under it.
+func TestTwoStorefrontsOnOneAudienceTakeOneMemberForOneAddress(t *testing.T) {
+	n := newEmptyNewsletter(t, "gate-two-sites")
+	second := n.suffix + "-site-two"
+	n.execute(t, n.owner, call("mutation", "createSite", arg{"siteId", second}, arg{"accountId", n.org}, arg{"hostname", n.suffix + "-two.example.test"}, arg{"bundleRef", "sites/newsletter/test"}, arg{"kind", "static"}))
+	nodes, err := n.worker.handleConfigureNewsletter(n.owner, map[string]any{"siteId": second, "audienceId": n.audience, "templateId": n.suffix + "-tpl", "senderIdentityId": n.suffix + "-sender", "consentText": "I agree to receive Client's newsletter by email.", "enabled": true}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := n.formFor("same@example.test")
+	other["siteId"], other["consentRevision"], other["submissionId"] = second, decodeResult(t, nodes)["revision"], "second-site"
+	first := n.formFor("same@example.test")
+	first["submissionId"] = "first-site"
+
+	actual := n.worker.store.engine
+	n.worker.store.engine = meetingEngine{Engine: actual, prefix: "query recipientsWithoutDigestInAudience", meeting: newMeeting(2)}
+	defer func() { n.worker.store.engine = actual }()
+	errs := signupsTogether(n.worker, n.owner, []map[string]any{first, other})
+	n.worker.store.engine = actual
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("signup %d: %v", i, err)
+		}
+	}
+	roster := n.roster(t)
+	if len(roster) != 1 {
+		t.Fatalf("the audience holds %d members for one address, want 1", len(roster))
+	}
+	row, err := n.worker.newsletterRow(n.owner, "newsletterSignupById", "signupId", newsletterSignupID(n.audience, "same@example.test"))
+	if err != nil || row == nil {
+		t.Fatalf("no signup was recorded: %v %v", row, err)
+	}
+	if got := bare(str(row, "recipientId")); got != roster[0].ID {
+		t.Errorf("the signup names recipient %q, want the member there is, %q", got, roster[0].ID)
+	}
+}
+
 // addsMeanwhile adds a recipient for the mailbox through another path -- an
 // operator, an import, another form's signup -- at the moment a signup finishes its
 // last read before the locks: after it has decided the mailbox is new.
@@ -503,11 +545,12 @@ func TestAGatePastItsWaitGivesThePersonTheSentence(t *testing.T) {
 	}
 	n.assertTheFormDidNothing(t, 0)
 	var waiting int
-	if err := n.db.DB.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&waiting); err != nil {
+	if err := n.db.DB.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+		AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid`, "campaign-newsletter:site:"+bare(argString(n.args, "siteId"))).Scan(&waiting); err != nil {
 		t.Fatal(err)
 	}
 	if waiting != 0 {
-		t.Errorf("%d advisory-lock waiters are left on the server: the gate's wait must end there, not on the client", waiting)
+		t.Errorf("%d requests for the storefront's lock are left on the server: the gate's wait must end there, not on the client", waiting)
 	}
 }
 

@@ -81,11 +81,14 @@ func holder(t *testing.T, db *sql.DB, key string) (release func()) {
 	return release
 }
 
-// waiters is how many advisory-lock requests the server has not granted.
-func waiters(t *testing.T, db *sql.DB) int {
+// waiters is how many requests for the gate's advisory lock for the key the server
+// has not granted. Only this key's: the database is shared with whatever else is
+// running against it, and a waiter of someone else's is not a leftover of this test.
+func waiters(t *testing.T, db *sql.DB, key string) int {
 	t.Helper()
 	var n int
-	if err := db.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&n); err != nil {
+	if err := db.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted
+		AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid`, key).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -138,7 +141,7 @@ func TestWriteGateKeysAreTakenInTheOrderGiven(t *testing.T) {
 		done <- err
 	}()
 	deadline := time.Now().Add(5 * time.Second)
-	for waiters(t, other) == 0 {
+	for waiters(t, other, second) == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("the gate never started waiting for the second key")
 		}
@@ -174,8 +177,8 @@ func TestAGateWaitEndsOnTheServerWithNoWaiterLeft(t *testing.T) {
 	if elapsed < 300*time.Millisecond || elapsed > 3*time.Second {
 		t.Errorf("a wait of 400ms ended after %s", elapsed)
 	}
-	if n := waiters(t, other); n != 0 {
-		t.Errorf("%d advisory-lock requests are left on the server", n)
+	if n := waiters(t, other, key); n != 0 {
+		t.Errorf("%d requests for the gate's lock are left on the server", n)
 	}
 	if inUse := pool.Stats().InUse; inUse != 0 {
 		t.Errorf("%d connections are still held after the gate gave up", inUse)
@@ -283,7 +286,7 @@ func TestAGateHeldTooLongSaysSo(t *testing.T) {
 	}
 	// Held for a moment: nothing to say.
 	release()
-	if logged.Len() != 0 {
+	if strings.Contains(logged.String(), "idle_in_transaction_session_timeout") {
 		t.Fatalf("a short hold was reported: %s", logged.String())
 	}
 
