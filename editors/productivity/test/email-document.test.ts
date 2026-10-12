@@ -331,11 +331,11 @@ test("a refused email says which rule it broke, in the sentences of the table", 
 
   for (const subject of ["", "  ", " ", "a\nb", "a\u0000b", 5, null]) refuses(() => readEmail(custom({ subject })), /^Enter a subject on one line\.$/);
   refuses(() => readEmail(JSON.stringify({ textBody: "y", htmlBody: "" })), /^Enter a subject on one line\.$/);
-  refuses(() => readEmail(custom({ subject: "é".repeat(500) })), /^The subject must be under 999 bytes\.$/);
+  refuses(() => readEmail(custom({ subject: "é".repeat(500) })), /^Enter a shorter subject\.$/);
   assert.doesNotThrow(() => readEmail(custom({ subject: "a".repeat(998) })));
   assert.doesNotThrow(() => readEmail(custom({ subject: "é".repeat(499) })));
   assert.doesNotThrow(() => readEmail(custom({ subject: "﻿" })), "the engine trims only Unicode spaces, and a byte order mark is none");
-  refuses(() => readEmail(custom({ subject: "a".repeat(999) })), /under 999 bytes/);
+  refuses(() => readEmail(custom({ subject: "a".repeat(999) })), /^Enter a shorter subject\.$/);
 
   for (const preheader of ["a\nb", 5, "p".repeat(201), "😀".repeat(201)]) refuses(() => readEmail(custom({ preheader })), /^The preheader must be one line of 200 characters or fewer\.$/);
   assert.doesNotThrow(() => readEmail(custom({ preheader: "p".repeat(200) })));
@@ -525,7 +525,7 @@ test("subject and preheader edits follow the rules of the file", () => {
   assert.equal((editEmail(doc, { kind: "subject", value: "Welcome" }) as LayoutEmail).subject, "Welcome");
   refuses(() => editEmail(doc, { kind: "subject", value: "" }), /^Enter a subject on one line\.$/);
   refuses(() => editEmail(doc, { kind: "subject", value: "two\nlines" }), /^Enter a subject on one line\.$/);
-  refuses(() => editEmail(doc, { kind: "subject", value: "é".repeat(500) }), /^The subject must be under 999 bytes\.$/);
+  refuses(() => editEmail(doc, { kind: "subject", value: "é".repeat(500) }), /^Enter a shorter subject\.$/);
   assert.equal((editEmail(doc, { kind: "preheader", value: "Later" }) as LayoutEmail).preheader, "Later");
   assert.ok(!("preheader" in editEmail(doc, { kind: "preheader", value: "" })), "an empty preheader deletes its key");
   refuses(() => editEmail(doc, { kind: "preheader", value: "p".repeat(201) }), /^The preheader must be one line of 200 characters or fewer\.$/);

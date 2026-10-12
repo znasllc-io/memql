@@ -1146,3 +1146,71 @@ test("a refused draft and its notice stay while the person is in the page", () =
   assert.equal(subject.getAttribute("aria-invalid"), "true");
   f.dom.window.close();
 });
+
+test("a colour still being picked survives the echo of the one before it while the person is elsewhere", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  const page = f.el("theme-page") as HTMLInputElement;
+  page.focus();
+  f.type(page, "#112233");
+  f.advance(250);
+  assert.deepEqual(f.edits(), [{ kind: "theme", key: "page", value: "#112233" }]);
+  // The system colour panel takes the keyboard; the picker moves on before its pause.
+  f.away();
+  f.type(page, "#445566");
+  const echoed = clone(article);
+  echoed.theme.page = "#112233";
+  f.send({ type: "document", version: 2, email: echoed });
+  assert.equal(page.value, "#445566", "a pick with no refusal showing is the person's, not a draft to discard");
+  f.advance(250);
+  assert.deepEqual(f.edits().at(-1), { kind: "theme", key: "page", value: "#445566" });
+  // The picker's commit alone sends too, at once.
+  page.value = "#aa00aa";
+  page.dispatchEvent(new f.dom.window.Event("change", { bubbles: true }));
+  assert.deepEqual(f.edits().at(-1), { kind: "theme", key: "page", value: "#aa00aa" });
+  f.dom.window.close();
+});
+
+test("after a refused Add, a selection the host makes for its own reasons takes no focus", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  f.select("headline");
+  f.el("add-after").click();
+  f.el("add-menu").querySelectorAll<HTMLElement>('[role="menuitem"]')[1]!.click();
+  f.send({ type: "problem", problem: { message: "Fix the email in Source first." } });
+  const before = f.focuses.length;
+  f.send({ type: "select", block: "cta" });
+  assert.equal(f.row("cta").getAttribute("aria-selected"), "true");
+  assert.equal(f.focuses.length, before, "the refused Add no longer waits for its block");
+  assert.equal(f.doc.activeElement, f.el("add-after"));
+  f.dom.window.close();
+});
+
+test("a restore and a context update what the person left for another window, and spare what they are using", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  const sample = f.el("samples").querySelector<HTMLInputElement>("input")!;
+  sample.focus();
+  f.type(sample, "typed");
+  f.away();
+  f.send({ type: "restore", state: { width: "desktop", samples: { displayName: "From state" } } });
+  assert.equal(sample.value, "From state", "a value left for another window takes the restored one");
+  f.back();
+  sample.focus();
+  f.type(sample, "typing now");
+  f.send({ type: "restore", state: { width: "desktop", samples: { displayName: "From state 2" } } });
+  assert.equal(sample.value, "typing now", "a value being typed is not overwritten");
+  const choices = [{ id: "a", name: "Acme" }, { id: "b", name: "Beta" }];
+  f.send({ type: "context", connected: true, organization: { id: "a", name: "Acme" }, choices });
+  const select = f.el("organization") as HTMLSelectElement;
+  select.focus();
+  f.away();
+  f.send({ type: "context", connected: true, organization: { id: "b", name: "Beta" }, choices: [...choices, { id: "c", name: "Cora" }] });
+  assert.deepEqual([...select.options].map(option => option.textContent), ["Acme", "Beta", "Cora"], "a select left for another window takes the new choices");
+  assert.equal(select.value, "b");
+  f.back();
+  select.focus();
+  f.send({ type: "context", connected: true, organization: { id: "c", name: "Cora" }, choices: [choices[0]!, { id: "c", name: "Cora" }] });
+  assert.deepEqual([...select.options].map(option => option.textContent), ["Acme", "Beta", "Cora"], "a select in use is not rebuilt under the person's hand");
+  f.dom.window.close();
+});

@@ -9,7 +9,7 @@ export function readTemplate(value: string): EmailTemplate {
   for (const key of Object.keys(row)) if (!["subject", "textBody", "htmlBody"].includes(key)) throw new Error(`Unknown template field: ${key}`);
   if (typeof row.subject !== "string" || !row.subject.trim() || /[\u0000-\u001f\u007f]/.test(row.subject)) throw new UserInputError("Enter a subject on one line.");
   if (typeof row.textBody !== "string" || typeof row.htmlBody !== "string") throw new UserInputError("The template needs textBody and htmlBody strings.");
-  if (new TextEncoder().encode(row.subject).byteLength > 998) throw new UserInputError("The subject must be under 999 bytes.");
+  if (new TextEncoder().encode(row.subject).byteLength > 998) throw new UserInputError("Enter a shorter subject.");
   if (!row.textBody.trim()) throw new UserInputError("Include a plain-text version.");
   return { subject: row.subject, textBody: row.textBody, htmlBody: row.htmlBody };
 }

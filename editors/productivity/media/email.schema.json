@@ -26,7 +26,7 @@
           "maxLength": 998,
           "pattern": "^(?=.*[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000])[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "patternErrorMessage": "Enter a subject on one line.",
-          "description": "One line, up to 998 bytes."
+          "description": "One line."
         },
         "preheader": {
           "type": "string",
@@ -66,7 +66,7 @@
           "maxLength": 998,
           "pattern": "^(?=.*[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000])[^\\u0000-\\u001f\\u007f-\\u009f]+$",
           "patternErrorMessage": "Enter a subject on one line.",
-          "description": "One line, up to 998 bytes."
+          "description": "One line."
         },
         "preheader": {
           "type": "string",

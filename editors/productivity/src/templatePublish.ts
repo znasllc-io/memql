@@ -39,7 +39,8 @@ export class TemplatePublisher {
           { title: "Use in Campaigns · Organization", placeHolder: "Choose the organization this email will represent", ignoreFocusOut: true });
         if (!organization) return;
         const name = await vscode.window.showInputBox({ title: "Use in Campaigns · Name", value: source?.resource.name.replace(/\.email\.json$/i, "") || "Email template", ignoreFocusOut: true,
-          validateInput: value => value.trim() && new TextEncoder().encode(value.trim()).length <= 200 && !/[\u0000-\u001f\u007f-\u009f]/.test(value) ? undefined : "Enter a name up to 200 bytes without control characters." });
+          // The name is at most 200 bytes; the person reads only that it is missing or too long.
+          validateInput: value => !value.trim() ? "Enter a name." : new TextEncoder().encode(value.trim()).length > 200 ? "Enter a shorter name." : /[\u0000-\u001f\u007f-\u009f]/.test(value) ? "Enter a name without control characters." : undefined });
         if (!name) return;
         publication = { domain: lease.domain, templateId: globalThis.crypto.randomUUID(), accountId: organization.id, name, revision: "" };
         // Persist BEFORE the request, so a lost response retries the same ID.

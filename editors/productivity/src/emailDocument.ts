@@ -145,7 +145,7 @@ const SENTENCES = {
   bothModes: "An email is either a layout (blocks) or custom HTML (textBody and htmlBody), not both.",
   neitherMode: "An email needs blocks (a layout) or textBody and htmlBody (custom HTML).",
   subject: "Enter a subject on one line.",
-  subjectLength: "The subject must be under 999 bytes.",
+  subjectLength: "Enter a shorter subject.",
   preheader: "The preheader must be one line of 200 characters or fewer.",
   bodies: "The email needs textBody and htmlBody strings.",
   plainText: "Include a plain-text version.",
@@ -659,7 +659,7 @@ function blockBranch(type: BlockType): Schema {
 
 /** The JSON schema (draft-07) that validates `*.email.json` in Source, generated from the field tables. */
 export function emailSchema(): Record<string, unknown> {
-  const subject: Schema = { type: "string", minLength: 1, maxLength: MAX_SUBJECT_BYTES, pattern: SUBJECT_PATTERN, patternErrorMessage: SENTENCES.subject, description: "One line, up to 998 bytes." };
+  const subject: Schema = { type: "string", minLength: 1, maxLength: MAX_SUBJECT_BYTES, pattern: SUBJECT_PATTERN, patternErrorMessage: SENTENCES.subject, description: "One line." };
   const preheader: Schema = { type: "string", maxLength: MAX_PREHEADER, pattern: ONE_LINE_PATTERN, patternErrorMessage: SENTENCES.preheader, description: "The preview line after the subject: one line, up to 200 characters." };
   const themeColours = Object.fromEntries(THEME_COLOURS.map(name => [name, { type: "string", pattern: HEX_PATTERN, patternErrorMessage: SENTENCES.themeColour, description: "A colour as #rrggbb." }]));
   const font: Schema = { type: "string", pattern: FONT_PATTERN, patternErrorMessage: SENTENCES.font, description: "A font name using letters, digits, spaces or hyphens." };

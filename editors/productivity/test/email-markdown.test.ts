@@ -17,6 +17,15 @@ test("the editor refuses exactly the Markdown links the engine refuses", () => {
   assert.deepEqual(disagreements, []);
 });
 
+test("the corpus is plain ASCII: every invisible character is written as an escape a reviewer can see", () => {
+  const raw = readFileSync(CORPUS, "utf8");
+  const hidden = [...raw].filter(character => character !== "\n" && (character < " " || character > "~"));
+  assert.deepEqual(hidden.map(character => `U+${character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`), []);
+  // The escapes stand for the characters the cases are about.
+  const texts = (JSON.parse(raw) as { text: string }[]).map(item => item.text);
+  for (const character of ["\u00a0", "\u0085", "\ufeff", "\u200b", "\u3000"]) assert.ok(texts.some(text => text.includes(character)), JSON.stringify(character));
+});
+
 test("a refusal says whether the label or the address is missing", () => {
   assert.equal(markdownLinkProblem("See [ ](https://acme.example)"), "label");
   assert.equal(markdownLinkProblem("See [our site](ftp://acme.example)"), "address");

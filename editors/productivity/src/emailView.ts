@@ -131,9 +131,10 @@ const selectedBlock = () => selectedPlace()?.block;
 // sending, it refuses what the engine's parser would refuse, in its own notice:
 // quietly while typing goes on, out loud on leaving, and it clears itself the
 // moment the value is right. A document update never overwrites a field being
-// typed in, or one whose sent edit the host has not answered yet. Typing the
-// field refused stays while the person is in the page; a newer document that
-// arrives while they work elsewhere (Source, in Split) replaces it.
+// typed in, typing waiting for its pause, or a sent edit the host has not
+// answered yet. Typing the field refused stays while the person is in the
+// page; a newer document that arrives while they work elsewhere (Source, in
+// Split) replaces it.
 
 interface Field {
   /** The control, or the group of controls, the value lives in. */
@@ -221,7 +222,8 @@ function refresh(field: Field): void {
   const key = field.key();
   if (field.typed && holds(field.control)) return;
   if (key !== undefined && dirty.has(key)) {
-    if (holds(document.body) || version <= dirty.get(key)!) return;
+    // Only a draft whose refusal is showing gives way; a value still waiting for its pause (a colour being picked) is the person's.
+    if (holds(document.body) || version <= dirty.get(key)! || !field.notice?.textContent) return;
     dirty.delete(key);
     tell(field, "");
   }
@@ -483,7 +485,8 @@ const themeFields: readonly Field[] = [
       edit: value => ({ kind: "theme", key, value: value as string }),
     };
     control.addEventListener("input", () => changed(field));
-    control.addEventListener("change", () => commit(field, true));
+    // The picker's commit sends at once, whether or not it moved through input events first.
+    control.addEventListener("change", () => chose(field));
     return field;
   }),
   ...(["headingFont", "bodyFont"] as const).map(key => textField(byId<HTMLInputElement>(`theme-${key}`), byId(`theme-${key}-notice`), () => `theme:${key}`,

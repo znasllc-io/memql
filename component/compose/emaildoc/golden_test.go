@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-var updateGolden = flag.Bool("update", false, "rewrite testdata/golden from the renderer")
+var updateGolden = flag.Bool("update", false, "rewrite testdata/golden from the renderer and the verdicts of testdata/markdown-links.json from the parser")
 
 func checkGolden(t *testing.T, name, got string) {
 	t.Helper()

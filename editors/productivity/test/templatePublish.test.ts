@@ -78,3 +78,15 @@ test("an existing client template publishes using its opened revision without an
   assert.match(f.calls[0].query,/expectedRevision:\s*"2026-09-01T12:00:00Z"/);
   assert.equal(source.template?.status,"ready");
 });
+
+test("the template name says what is wrong with it in words a person reads, and keeps the byte limit in code", async () => {
+  const f = fixture();
+  let validate: ((value: string) => unknown) | undefined;
+  vscode.window.showInputBox = (async (options?: { validateInput?: (value: string) => unknown }) => { validate = options?.validateInput; return "Welcome"; }) as typeof vscode.window.showInputBox;
+  await f.publisher.publish(f.document);
+  assert.ok(validate);
+  assert.equal(validate!("  "), "Enter a name.");
+  assert.equal(validate!("é".repeat(101)), "Enter a shorter name.", "202 bytes is too long, though it is 101 characters");
+  assert.equal(validate!("é".repeat(100)), undefined);
+  assert.equal(validate!("Welcome\u0007"), "Enter a name without control characters.");
+});
