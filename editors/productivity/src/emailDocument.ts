@@ -395,6 +395,7 @@ function authorityOf(afterScheme: string): string {
 export function validLink(href: string): boolean {
   if (typeof href !== "string") return false;
   if (href === "" || (LINK_TAGS as readonly string[]).includes(href)) return true;
+  if (LINK_TAGS.some(tag => href.includes(tag))) return false;
   if (utf8Length(href) > 2000 || UNSAFE_LINK_CHAR.test(href)) return false;
   const web = WEB_SCHEME.exec(href);
   if (web && href.length > web[0].length) return !authorityOf(href.slice(web[0].length)).includes("{{");
@@ -407,7 +408,7 @@ export function validLink(href: string): boolean {
 const LINK_PATTERN = "^(?:" + [
   "",
   LINK_TAGS.map(tag => tag.replace(/[{}]/g, "\\$&")).join("|"),
-  `[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^${UNSAFE_IN_LINK}]+`,
+  `(?!.*(?:${LINK_TAGS.map(tag => tag.replace(/[{}]/g, "\\$&")).join("|")}))[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^${UNSAFE_IN_LINK}]+`,
   `(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^${UNSAFE_IN_LINK}]+`,
 ].join("|") + ")$";
 

@@ -10,7 +10,7 @@
 
 import { EMAIL_COPY } from "./emailCopy.js";
 import { EDITABLE_FIELDS, THEME_COLOURS, THEME_TOKENS, blockLabel, canMove, editEmail, isLayoutEmail, sampleKeys, validLink, walkBlocks, type AddableType, type EditableField, type EmailBlock, type EmailDocument, type EmailEdit } from "./emailDocument.js";
-import { markdownLinkProblem } from "./emailMarkdown.js";
+import { markdownLinkProblem, linkTextProblem } from "./emailMarkdown.js";
 import { PREVIEW_CSP, previewHTML, skeletonHTML } from "./emailPreview.js";
 import { ICONS } from "./pageBase.js";
 import type { Problem } from "./problems.js";
@@ -270,8 +270,8 @@ const subjectField = textField(subject, byId("subject-notice"), () => "subject",
 const preheaderField = textField(preheader, byId("preheader-notice"), () => "preheader", () => str(email?.preheader), value => ({ kind: "preheader", value }));
 
 const wordsField = blockText("text", value => {
-  const problem = selectedBlock()?.type === "text" ? markdownLinkProblem(value) : undefined;
-  return problem === "label" ? C.wordsLinkLabel : problem === "address" ? C.wordsLinkAddress : undefined;
+  const problem = selectedBlock()?.type === "text" ? markdownLinkProblem(value) : linkTextProblem(value) ? "recipient" : undefined;
+  return problem === "recipient" ? C.wordsRecipientLink : problem === "label" ? C.wordsLinkLabel : problem === "address" ? C.wordsLinkAddress : undefined;
 });
 // The engine counts a label in bytes; the person reads only that it is missing or too long.
 const labelField = blockText("label", value => { const size = bytes(value); return size < 1 ? C.buttonLabelEmpty : size > 200 ? C.buttonLabelInvalid : undefined; });

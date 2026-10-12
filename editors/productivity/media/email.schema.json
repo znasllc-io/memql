@@ -263,7 +263,7 @@
               "href": {
                 "type": "string",
                 "maxLength": 2000,
-                "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
+                "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|(?!.*(?:\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}))[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
                 "patternErrorMessage": "Enter a web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}.",
                 "description": "A web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}."
               },
@@ -687,7 +687,7 @@
               "href": {
                 "type": "string",
                 "maxLength": 2000,
-                "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
+                "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|(?!.*(?:\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}))[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
                 "patternErrorMessage": "Enter a web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}.",
                 "description": "A web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}."
               },
@@ -1234,7 +1234,7 @@
         "href": {
           "type": "string",
           "maxLength": 2000,
-          "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
+          "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|(?!.*(?:\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}))[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
           "patternErrorMessage": "Enter a web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}.",
           "description": "A web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}."
         },
@@ -1266,7 +1266,7 @@
         "href": {
           "type": "string",
           "maxLength": 2000,
-          "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
+          "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|(?!.*(?:\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}))[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
           "patternErrorMessage": "Enter a web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}.",
           "description": "A web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}."
         }

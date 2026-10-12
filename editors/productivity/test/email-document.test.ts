@@ -976,3 +976,11 @@ test("a picture's source is a Library file, an embedded picture or nothing", () 
   const schema = JSON.stringify(emailSchema());
   assert.ok(schema.includes('"patternErrorMessage":"A picture is artifact:<id> from Files, an embedded PNG, JPEG or GIF, or empty."'), "the schema and the edit say the same");
 });
+
+
+test("signed recipient links remain complete addresses", () => {
+  for (const tag of ["{{confirmUrl}}", "{{viewUrl}}", "{{unsubscribeUrl}}", "{{preferencesUrl}}"]) {
+    assert.equal(validLink(tag), true);
+    for (const href of [`https://example.test/?link=${tag}`, `https://example.test/${tag}`, `${tag}/next`, `mailto:${tag}`]) assert.equal(validLink(href), false, href);
+  }
+});

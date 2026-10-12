@@ -10,11 +10,12 @@
 //
 // Pure: no vscode and no DOM.
 
-import { validLink } from "./emailDocument.js";
+import { validLink, LINK_TAGS } from "./emailDocument.js";
 
 const ESCAPABLE = "\\*[]()";
 /** What Go's strings.TrimSpace trims (unicode.IsSpace). */
 const GO_SPACE = "\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
+const ONE_SPACE = new RegExp(`^[${GO_SPACE}]$`);
 const EDGE_SPACE = new RegExp(`^[${GO_SPACE}]+|[${GO_SPACE}]+$`, "g");
 /** A line that starts a list item: "- ", or one to nine digits and ". ". */
 const LIST_ITEM = /^(?:- |\d{1,9}\. )/;
@@ -25,7 +26,7 @@ const escapes = (text: string, at: number) => text[at] === "\\" && at + 1 < text
 const unescape = (text: string) => text.replace(/\\([\\*[\]()])/g, "$1");
 
 /** What is wrong with the first link the parser would refuse: its label is missing, or its address. Nothing when every link is fine. */
-export function markdownLinkProblem(source: string): "label" | "address" | undefined {
+export function markdownLinkProblem(source: string): "label" | "address" | "recipient" | undefined {
   const runs: string[] = [];
   let paragraph: string[] = [];
   const endParagraph = () => { if (paragraph.length) runs.push(paragraph.join("\n")); paragraph = []; };
@@ -45,21 +46,62 @@ export function markdownLinkProblem(source: string): "label" | "address" | undef
   return undefined;
 }
 
-function linkProblem(text: string): "label" | "address" | undefined {
-  if (!text.includes("](")) return undefined;
-  const parens = matchParens(text);
-  for (let at = 0; at < text.length;) {
-    if (escapes(text, at)) { at += 2; continue; }
-    if (text[at] !== "[") { at++; continue; }
-    const close = labelEnd(text, at);
-    const closeParen = close < 0 || text[close + 1] !== "(" ? 0 : parens[close + 1] ?? 0;
-    if (closeParen === 0) { at++; continue; }
-    if (goTrim(unescape(text.slice(at + 1, close)).replace(/\n/g, " ")) === "") return "label";
-    const address = unescape(text.slice(close + 2, closeParen));
-    if (address === "" || !validLink(address)) return "address";
-    at = closeParen + 1;
+/** Recipient links must stand alone in visible text, just as the engine requires. */
+export function linkTextProblem(text: string): boolean {
+  const address = (character: string | undefined) => character !== undefined && /[\p{L}\p{Nd}\p{M}=&?/#%+\-._~:@]/u.test(character);
+  for (const tag of LINK_TAGS) {
+    let from = 0, at: number;
+    while ((at = text.indexOf(tag, from)) >= 0) {
+      const before = [...text.slice(Math.max(0, at - 2), at)].at(-1), after = [...text.slice(at + tag.length, at + tag.length + 4)];
+      const terminalPeriod = after[0] === "." && !address(after[1]);
+      if (address(before) || address(after[0]) && !terminalPeriod) return true;
+      from = at + tag.length;
+    }
   }
-  return undefined;
+  return false;
+}
+
+function linkProblem(text: string): "label" | "address" | "recipient" | undefined {
+  const parens = text.includes("](") ? matchParens(text) : [];
+  const tokens: { text: string; stars?: number; canOpen?: boolean; canClose?: boolean; paired?: boolean }[] = [];
+  let plain = "";
+  const flush = () => { if (plain) tokens.push({ text: plain }); plain = ""; };
+  const space = (character: string) => ONE_SPACE.test(character);
+  for (let at = 0; at < text.length;) {
+    if (escapes(text, at)) { plain += text[at + 1]; at += 2; continue; }
+    if (text[at] === "*") {
+      let end = at + 1; while (text[end] === "*") end++;
+      const count = end - at;
+      if (count > 3) plain += text.slice(at, end);
+      else { flush(); tokens.push({ text: text.slice(at, end), stars: count, canOpen: end < text.length && !space(text[end]!), canClose: at > 0 && !space(text[at - 1]!) }); }
+      at = end; continue;
+    }
+    if (text[at] === "[") {
+      const close = labelEnd(text, at), end = close < 0 || text[close + 1] !== "(" ? 0 : parens[close + 1] ?? 0;
+      if (end !== 0) {
+        const label = unescape(text.slice(at + 1, close)).replace(/\n/g, " ");
+        if (goTrim(label) === "") return "label";
+        const address = unescape(text.slice(close + 2, end));
+        if (address === "" || !validLink(address)) return "address";
+        if (LINK_TAGS.some(tag => label.includes(tag))) return "recipient";
+        plain += label; at = end + 1; continue;
+      }
+    }
+    plain += text[at++];
+  }
+  flush();
+  // Exact counterpart of the renderer's pairStars: matching delimiters never
+  // cross, and an unmatched delimiter stays visible rather than being stripped.
+  const open: number[][] = [[], [], [], []];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!, n = token.stars; if (!n) continue;
+    const stack = open[n]!;
+    if (token.canClose && stack.length) {
+      const start = stack.pop()!; tokens[start]!.paired = token.paired = true;
+      for (let size = 1; size <= 3; size++) while ((open[size]!.at(-1) ?? -1) > start) open[size]!.pop();
+    } else if (token.canOpen) stack.push(i);
+  }
+  return linkTextProblem(tokens.filter(token => !token.paired).map(token => token.text).join("")) ? "recipient" : undefined;
 }
 
 /** For each "(", the index of the ")" that closes it, or 0 (a ")" is never at 0). */

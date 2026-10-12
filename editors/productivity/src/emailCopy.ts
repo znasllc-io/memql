@@ -47,6 +47,7 @@ export const EMAIL_COPY = {
     emailView: "Email view", previewWidth: "Preview width",
     buttonLabelEmpty: "Enter a label.", buttonLabelInvalid: "Enter a shorter label.", linkLabelInvalid: "Enter a link label up to 80 characters.",
     networkEmpty: "Enter a network name.", networkInvalid: "Enter a shorter network name.", tooManyLines: "Use up to 12 lines.", lineTooLong: "Use up to 300 characters in each line.",
+    wordsRecipientLink: "Use a recipient link on its own, never inside another address or as a link label.",
     wordsLinkLabel: "Give each link a label, as in [label](address).",
     wordsLinkAddress: "Give each link a web address, an email address (mailto:), a phone number (tel:) or a link tag.",
   },
