@@ -923,14 +923,10 @@ func mutationCall(name string, args ...[2]string) string {
 
 // CreatePromoteBundle writes the bundle as a draft: createAuthoringBundle
 // inserts status "draft", and the bundle stays there until its construct is
-// written (ActivatePromoteBundle).
+// written (ActivatePromoteBundle). Through the engine's one bundle writer
+// (WriteAuthoringBundle: createAuthoringBundle is @serverOnly, memql#6022).
 func (s *enginePromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, title, summary string) error {
-	_, err := s.engine.Execute(ctx, mutationCall("createAuthoringBundle",
-		[2]string{"bundleId", bundleId},
-		[2]string{"title", title},
-		[2]string{"summary", summary},
-	))
-	return err
+	return s.engine.WriteAuthoringBundle(ctx, AuthoringBundleInput{BundleId: bundleId, Title: title, Summary: summary})
 }
 
 // ActivatePromoteBundle transitions the bundle to active so the boot

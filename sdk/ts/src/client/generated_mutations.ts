@@ -1447,42 +1447,6 @@ QueryClient.prototype.createAuthSession = function (this: QueryClient, args: Cre
   return this.executeNamed("createAuthSession", buildCreateAuthSession(args), opts);
 };
 
-/** Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via createAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs. */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["createAuthoringBundle"] in generated_concepts.ts).
-export interface CreateAuthoringBundleArgs {
-  bundleId: string;
-  title: string;
-  summary?: string;
-  responsibilityId?: string;
-  sourceRunId?: string;
-  version?: number;
-  supersedesBundleId?: string;
-  reusedConstructRefs?: Record<string, unknown>[];
-}
-
-export function buildCreateAuthoringBundle(args: CreateAuthoringBundleArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("title: " + renderMemQLValue(args.title));
-  if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
-  if (args.responsibilityId !== undefined) parts.push("responsibilityId: " + renderMemQLValue(args.responsibilityId));
-  if (args.sourceRunId !== undefined) parts.push("sourceRunId: " + renderMemQLValue(args.sourceRunId));
-  if (args.version !== undefined) parts.push("version: " + renderMemQLValue(args.version));
-  if (args.supersedesBundleId !== undefined) parts.push("supersedesBundleId: " + renderMemQLValue(args.supersedesBundleId));
-  if (args.reusedConstructRefs !== undefined) parts.push("reusedConstructRefs: " + renderMemQLValue(args.reusedConstructRefs));
-  return "mutation createAuthoringBundle(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createAuthoringBundle(args: CreateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createAuthoringBundle = function (this: QueryClient, args: CreateAuthoringBundleArgs = {} as CreateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createAuthoringBundle", buildCreateAuthoringBundle(args), opts);
-};
-
 /** Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex hash of the badge/device id. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createBadgeIdentity"] in generated_concepts.ts).
 export interface CreateBadgeIdentityArgs {

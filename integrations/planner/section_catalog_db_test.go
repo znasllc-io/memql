@@ -64,6 +64,11 @@ func (b *sectionCatalogBridge) WriteAuthoredConstruct(ctx context.Context, c mem
 	return b.engine.WriteAuthoredConstruct(ctx, c)
 }
 
+// WriteAuthoringBundle is the engine's own writer of a new bundle (memql#6022).
+func (b *sectionCatalogBridge) WriteAuthoringBundle(ctx context.Context, in memql.AuthoringBundleInput) error {
+	return b.engine.WriteAuthoringBundle(ctx, in)
+}
+
 func (b *sectionCatalogBridge) Execute(ctx context.Context, q string) (any, error) {
 	if strings.Contains(q, "assistantAgentForUser(") {
 		return []map[string]any{{"id": sectionCatalogAgent}}, nil

@@ -79,10 +79,10 @@ func TestWorkTemplateDBResolvesAndRunsOnAnotherEngine(t *testing.T) {
 	logic := name + "Answer"
 	source := fmt.Sprintf("@template\nautomation %s {\n  answer := logic %s()\n}", name, logic)
 	logicSource := fmt.Sprintf("logic %s {\n  return 42\n}", logic)
-	templateMutation(t, writer, ctx, "createAuthoringBundle", map[string]any{"bundleId": bundle, "title": "Execution test", "sourceRunId": run})
-	// The members are the work compile's own writes: createAuthoringConstruct
-	// is @serverOnly, under internal origin while the bundle is a draft
-	// (memql#6022).
+	// The bundle and its members are the work compile's own writes:
+	// createAuthoringBundle and createAuthoringConstruct are @serverOnly, under
+	// internal origin, the members while the bundle is a draft (memql#6022).
+	templateMutation(t, writer, auth.ContextWithInternalOrigin(ctx), "createAuthoringBundle", map[string]any{"bundleId": bundle, "title": "Execution test", "sourceRunId": run})
 	templateMutation(t, writer, auth.ContextWithInternalOrigin(ctx), "createAuthoringConstruct", map[string]any{"constructId": construct, "bundleId": bundle, "kind": "automation", "name": name, "targetNamespace": "work", "source": source})
 	templateMutation(t, writer, auth.ContextWithInternalOrigin(ctx), "createAuthoringConstruct", map[string]any{"constructId": id.NewShortId(), "bundleId": bundle, "kind": "logic", "name": logic, "targetNamespace": "work", "source": logicSource})
 	j := &automations.RunJournal{RunId: run, GoalId: "g", OwnerUserId: owner, AutomationName: name, TemplateConstructId: construct}

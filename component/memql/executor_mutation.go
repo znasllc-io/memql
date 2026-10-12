@@ -1081,8 +1081,14 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// at the same seam and for the same reasons: every replica arms every
 	// bundle that reads active, the read-merge carries status through writes
 	// that never name it, and an owner's before-write hook could otherwise set
-	// it. See authoring_bundle_activation_write_guard.go.
+	// it. See authoring_bundle_activation_write_guard.go. And a bundle COMES
+	// TO EXIST only as a server pipeline's write: a rule's next bundle id is
+	// known before it is written, and a bundle another person created there
+	// first would block its owner. See authoring_bundle_create_write_guard.go.
 	if conceptMeta.Name == conceptAuthoringBundle {
+		if err := validateBundleCreateServerOnly(ctx, organizationPrior); err != nil {
+			return nil, meta, err
+		}
 		if err := validateBundleActivationServerOnly(ctx, organizationPrior, payload); err != nil {
 			return nil, meta, err
 		}

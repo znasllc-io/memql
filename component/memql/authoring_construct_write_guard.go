@@ -108,6 +108,11 @@ func errConstructMembership(what, why string) error {
 // bundleRowForGuard reads a bundle's latest status and owner straight off the
 // table: the guard needs the truth about the row, not what the writer may
 // read of it.
+//
+// staged-data: INDIFFERENT -- the read is pinned to concept
+// v1:authoring:bundle, a core concept that is never promoted, so no row it can
+// return is staged data: the staged-data predicate (row.concept != the staged
+// concept) holds for every one, and the gate has nothing to withhold.
 func (e *MemQLEngine) bundleRowForGuard(ctx context.Context, bundleId string) (status, owner string, exists bool, err error) {
 	db := e.database()
 	if db == nil {

@@ -47,15 +47,16 @@ func TestAClientCannotGetAnUngatedBundleArmed(t *testing.T) {
 	// internal origin.
 	client := rowAuthzCallerCtx(owner)
 
-	// draft writes one bundle with one automation, as a client may.
+	// draft writes one bundle with one automation, the client's own, as the
+	// server pipelines write them (memql#6022): a client may neither create a
+	// bundle nor add a construct, even to its own draft.
 	draft := func(t *testing.T, name string) (bundleId, automation string) {
 		t.Helper()
 		bundleId = bundleConceptID + ":ungated-" + name + "-" + run
 		automation = "ungated" + camel(name)
-		mustExecute(t, eng, client, fmt.Sprintf(`mutation createAuthoringBundle(bundleId: %s, title: %s)`,
-			languageParser.QuoteString(bundleId), languageParser.QuoteString("An ungated bundle")))
-		// The construct is the gate-running pipeline's write (memql#6022):
-		// a client may not add one even to its own draft.
+		if err := serverCreatesBundle(eng, client, bundleId, "An ungated bundle"); err != nil {
+			t.Fatalf("setup: the bundle: %v", err)
+		}
 		if err := serverWritesConstruct(eng, client, "v1:authoring:construct:ungated-"+name+"-"+run, bundleId, automation); err != nil {
 			t.Fatalf("setup: the bundle's construct: %v", err)
 		}

@@ -36,12 +36,13 @@ import (
 const constructConceptID = "v1:authoring:construct"
 
 // seedLearnedConstruct writes one construct the way the lift does, owned by the
-// caller, and returns its stored id: its bundle first, then the construct under
-// internal origin while the bundle is a draft -- createAuthoringConstruct is
-// @serverOnly and a construct joins only a bundle that exists (memql#6022).
+// caller, and returns its stored id: its bundle first, then the construct while
+// the bundle is a draft, both under internal origin -- createAuthoringBundle and
+// createAuthoringConstruct are @serverOnly, and a construct joins only a bundle
+// that exists (memql#6022).
 func seedLearnedConstruct(t *testing.T, eng *MemQLEngine, owner, constructId string) string {
 	t.Helper()
-	runMutation(t, rowAuthzCallerCtx(owner), eng, "createAuthoringBundle", map[string]any{
+	runMutation(t, auth.ContextWithInternalOrigin(rowAuthzCallerCtx(owner)), eng, "createAuthoringBundle", map[string]any{
 		"bundleId": "bundle-" + constructId,
 		"title":    "Learned " + constructId,
 	})

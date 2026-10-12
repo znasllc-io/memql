@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // TestAPausedBundleTurnedOnAgainCarriesNoFailureReason: the breaker's pause is
@@ -38,9 +37,7 @@ func TestAPausedBundleTurnedOnAgainCarriesNoFailureReason(t *testing.T) {
 	bundleId := "v1:authoring:bundle:pause-clear-" + run
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
 
-	create := fmt.Sprintf(`mutation createAuthoringBundle(bundleId:%s, title:%s)`,
-		languageParser.QuoteString(bundleId), languageParser.QuoteString("A paused bundle turned on again"))
-	if _, err := eng.Execute(ctx, create); err != nil {
+	if err := serverCreatesBundle(eng, ctx, bundleId, "A paused bundle turned on again"); err != nil {
 		t.Fatalf("create the bundle: %v", err)
 	}
 	activation := &engineActivationStore{engine: eng}
@@ -78,8 +75,9 @@ func TestARetiredBundleTurnedOnAgainCarriesNoRetirement(t *testing.T) {
 	owner := "u-retire-clear-" + run
 	bundleId := "v1:authoring:bundle:retire-clear-" + run
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
-	mustExecute(t, eng, ctx, fmt.Sprintf(`mutation createAuthoringBundle(bundleId:%s, title:%s)`,
-		languageParser.QuoteString(bundleId), languageParser.QuoteString("A bundle turned off and on")))
+	if err := serverCreatesBundle(eng, ctx, bundleId, "A bundle turned off and on"); err != nil {
+		t.Fatalf("create the bundle: %v", err)
+	}
 	activation := &engineActivationStore{engine: eng}
 	if err := activation.SetBundleActive(ctx, bundleId); err != nil {
 		t.Fatalf("activate the bundle: %v", err)
@@ -132,8 +130,9 @@ func TestAPauseNeverOverwritesARetireWrittenElsewhere(t *testing.T) {
 	owner := "u-fenced-pause-" + run
 	bundleId := "v1:authoring:bundle:fenced-pause-" + run
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
-	mustExecute(t, eng, ctx, fmt.Sprintf(`mutation createAuthoringBundle(bundleId:%s, title:%s)`,
-		languageParser.QuoteString(bundleId), languageParser.QuoteString("A bundle retired while it tripped")))
+	if err := serverCreatesBundle(eng, ctx, bundleId, "A bundle retired while it tripped"); err != nil {
+		t.Fatalf("create the bundle: %v", err)
+	}
 	if err := serverWritesConstruct(eng, ctx, "v1:authoring:construct:fenced-pause-"+run, bundleId, "autoFencedPause"); err != nil {
 		t.Fatalf("setup: the bundle's construct: %v", err)
 	}

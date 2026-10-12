@@ -45,9 +45,9 @@ func TestSealWorkDraftDBUsesOwnedCurrentCatalog(t *testing.T) {
 	write := func(owner, name string, args map[string]any) {
 		t.Helper()
 		wctx := auth.ContextWithUserActor(ctx, owner)
-		if name == "createAuthoringConstruct" {
-			// @serverOnly (memql#6022): the pipeline's write, under internal
-			// origin, while the bundle above is a draft.
+		if name == "createAuthoringBundle" || name == "createAuthoringConstruct" {
+			// @serverOnly (memql#6022): the pipeline's writes, under internal
+			// origin -- the bundle, then its member while it is a draft.
 			wctx = auth.ContextWithInternalOrigin(wctx)
 		}
 		if _, err := e.Execute(wctx, "mutation "+name+"("+encodeArgs(args)+")"); err != nil {

@@ -245,12 +245,14 @@ func (l *PlannerAgentLoop) persistWorkDraft(ctx context.Context, req CompileRequ
 		}
 		return nil
 	}
-	args := map[string]any{"bundleId": bundleId, "title": truncate(req.Statement, 120), "sourceRunId": req.RunId}
+	// createAuthoringBundle is @serverOnly (memql#6022): the engine creates the
+	// bundle, as it writes its members below.
+	draft := memql.AuthoringBundleInput{BundleId: bundleId, Title: truncate(req.Statement, 120), SourceRunId: req.RunId}
 	if len(bundle.ReuseEdges) > 0 {
-		args["reusedConstructRefs"] = bundle.ReuseEdges
+		draft.ReusedConstructRefs = bundle.ReuseEdges
 	}
-	if err := write("createAuthoringBundle", args); err != nil {
-		return out, fmt.Errorf("work compile: persist bundle: %w", err)
+	if err := writeAuthoringBundle(ownerActorContext(ctx, req.OwnerUserId), l.engine, draft); err != nil {
+		return out, fmt.Errorf("work compile: persist bundle: %w", &draftPersistenceError{err: err})
 	}
 	for _, construct := range bundle.Constructs {
 		constructId := id.NewShortId()

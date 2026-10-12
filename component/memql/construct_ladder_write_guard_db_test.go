@@ -269,7 +269,7 @@ func TestConstructLadderWriteGuard_TheSameWritesWithInternalOriginLand(t *testin
 	// that is already there, before its gates run (memql#6022).
 	name := "internal_" + strings.ReplaceAll(suffix, "-", "_")
 	id := constructConceptID + ":" + name
-	runMutation(t, rowAuthzCallerCtx(owner), eng, "createAuthoringBundle", map[string]any{"bundleId": "bundle-" + name, "title": "Ladder " + name})
+	runMutation(t, internal, eng, "createAuthoringBundle", map[string]any{"bundleId": "bundle-" + name, "title": "Ladder " + name})
 	payload := wholeConstruct(name)
 	payload["ownerUserId"] = owner
 	for field, value := range plantedLadderValues {

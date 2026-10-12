@@ -338,16 +338,15 @@ var transcriptName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // --- persistence (transcript-specific) ------------------------------------
 
+// persistTranscriptBundle creates the transcript's bundle through the
+// engine's bundle writer: createAuthoringBundle is @serverOnly (memql#6022).
 func (d *AuthoringCaptureDispatcher) persistTranscriptBundle(ctx context.Context, ownerUserId, bundleId, runId, title string, callCount int) error {
-	args := map[string]any{
-		"bundleId":    bundleId,
-		"title":       truncate(title, 120),
-		"summary":     fmt.Sprintf("Verbatim transcript of the %d call(s) this run made.", callCount),
-		"sourceRunId": runId,
-	}
-	q := fmt.Sprintf(`createAuthoringBundle(%s)`, encodeArgs(args))
-	_, err := d.engine.Execute(ownerActorContext(ctx, ownerUserId), q)
-	return err
+	return writeAuthoringBundle(ownerActorContext(ctx, ownerUserId), d.engine, memql.AuthoringBundleInput{
+		BundleId:    bundleId,
+		Title:       truncate(title, 120),
+		Summary:     fmt.Sprintf("Verbatim transcript of the %d call(s) this run made.", callCount),
+		SourceRunId: runId,
+	})
 }
 
 // recordTranscriptValidated records the bundle's validation result. The

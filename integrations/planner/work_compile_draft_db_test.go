@@ -40,6 +40,11 @@ func (e *draftDBCompiler) WriteAuthoredConstruct(ctx context.Context, c memql.Au
 	return e.engine.WriteAuthoredConstruct(ctx, c)
 }
 
+// WriteAuthoringBundle is the engine's own writer of a new bundle (memql#6022).
+func (e *draftDBCompiler) WriteAuthoringBundle(ctx context.Context, in memql.AuthoringBundleInput) error {
+	return e.engine.WriteAuthoringBundle(ctx, in)
+}
+
 func (e *draftDBCompiler) Execute(ctx context.Context, q string) (any, error) {
 	return e.engine.Execute(ctx, q)
 }

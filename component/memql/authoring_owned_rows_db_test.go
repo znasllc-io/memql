@@ -56,6 +56,13 @@ func refusedBecause(t *testing.T, err error, why, what string) {
 	}
 }
 
+// serverCreatesBundle is a server pipeline's creation of a draft bundle, as
+// the owner: the engine's bundle writer, which writes createAuthoringBundle
+// under internal origin (memql#6022).
+func serverCreatesBundle(eng *MemQLEngine, owner context.Context, bundleId, title string) error {
+	return eng.WriteAuthoringBundle(owner, AuthoringBundleInput{BundleId: bundleId, Title: title})
+}
+
 // serverWritesConstruct is a gate-running pipeline's write of a member
 // construct: createAuthoringConstruct under internal origin, as the owner.
 func serverWritesConstruct(eng *MemQLEngine, owner context.Context, constructId, bundleId, name string) error {
@@ -76,7 +83,9 @@ func TestASecondUserCannotTouchAnotherUsersBundle(t *testing.T) {
 	a, b := rowAuthzCallerCtx("u-first-"+run), rowAuthzCallerCtx("u-second-"+run)
 	bundleId := bundleConceptID + ":owned-" + run
 	constructId := constructConcept + ":owned-" + run
-	mustExecute(t, eng, a, fmt.Sprintf(`mutation createAuthoringBundle(bundleId: %s, title: "The first user's rule")`, languageParser.QuoteString(bundleId)))
+	if err := serverCreatesBundle(eng, a, bundleId, "The first user's rule"); err != nil {
+		t.Fatalf("the first user's bundle: %v", err)
+	}
 	if err := serverWritesConstruct(eng, a, constructId, bundleId, "ownedRule"); err != nil {
 		t.Fatalf("the first user's construct: %v", err)
 	}
@@ -159,7 +168,9 @@ func TestAGatedBundleArmsOnlyWhatItsGateSaw(t *testing.T) {
 
 	// The gated pipeline: the bundle, its one construct, both gate verdicts,
 	// the activation.
-	mustExecute(t, eng, owner, fmt.Sprintf(`mutation createAuthoringBundle(bundleId: %s, title: "Gated")`, languageParser.QuoteString(bundleId)))
+	if err := serverCreatesBundle(eng, owner, bundleId, "Gated"); err != nil {
+		t.Fatalf("the pipeline's bundle: %v", err)
+	}
 	// Not even into the owner's own draft from a client, and not from the
 	// pipeline as somebody else.
 	_, err := eng.Execute(owner, fmt.Sprintf(`insert("%s", id="%s", payload={"bundleId":%q,"kind":"automation","name":"clientDraft","targetNamespace":"campaigns","source":"automation clientDraft { }","status":"draft"})`,

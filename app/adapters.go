@@ -49,6 +49,16 @@ func (a *CognitionEngineAdapter) WriteAuthoredConstruct(ctx context.Context, c m
 	return a.Engine.WriteAuthoredConstruct(ctx, c)
 }
 
+// WriteAuthoringBundle hands the planner's bundle creations to the engine's
+// one writer of them: createAuthoringBundle is @serverOnly (memql#6022), and
+// the planner does not stamp internal origin.
+func (a *CognitionEngineAdapter) WriteAuthoringBundle(ctx context.Context, b memql.AuthoringBundleInput) error {
+	if a == nil || a.Engine == nil {
+		return fmt.Errorf("memql engine not configured")
+	}
+	return a.Engine.WriteAuthoringBundle(ctx, b)
+}
+
 func (a *CognitionEngineAdapter) RegisterIntegration(provider memql.IntegrationProvider) error {
 	if a == nil || a.Engine == nil {
 		return fmt.Errorf("memql engine not configured")

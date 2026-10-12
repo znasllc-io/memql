@@ -136,6 +136,13 @@ func (e *uncertainDraftEngine) WriteAuthoredConstruct(ctx context.Context, c mem
 	return err
 }
 
+// WriteAuthoringBundle records the bundle creation as the call the planner
+// used to send (memql#6022).
+func (e *uncertainDraftEngine) WriteAuthoringBundle(ctx context.Context, b memql.AuthoringBundleInput) error {
+	_, err := e.Execute(ctx, bundleCall(b))
+	return err
+}
+
 func (e *uncertainDraftEngine) Execute(ctx context.Context, q string) (any, error) {
 	if strings.HasPrefix(q, "createAuthoringBundle(") {
 		e.writes++

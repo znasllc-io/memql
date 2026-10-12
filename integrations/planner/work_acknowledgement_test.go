@@ -34,6 +34,13 @@ func (e *acknowledgementTestEngine) WriteAuthoredConstruct(ctx context.Context, 
 	return err
 }
 
+// WriteAuthoringBundle records the bundle creation as the call the planner
+// used to send (memql#6022).
+func (e *acknowledgementTestEngine) WriteAuthoringBundle(ctx context.Context, b memql.AuthoringBundleInput) error {
+	_, err := e.Execute(ctx, bundleCall(b))
+	return err
+}
+
 func (e *acknowledgementTestEngine) Execute(ctx context.Context, q string) (any, error) {
 	if strings.Contains(q, "workAcknowledgementCache") {
 		return []map[string]any{e.candidate}, nil

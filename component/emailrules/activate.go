@@ -188,7 +188,7 @@ func (a *Activator) Activate(ctx context.Context, owner, ruleID string) (Result,
 	report := memql.ValidateBundle(source, "campaigns/automations.memql")
 	if !report.OK {
 		reasons := diagnosticSentences(report)
-		bundleID := bundleIDFor(rule.ID, a.nextVersion(ctx, state))
+		bundleID := bundleIDFor(owner, rule.ID, a.nextVersion(ctx, state))
 		// The failed gate is RECORDED rather than skipped: a bundle that exists
 		// and says why it failed is one an operator can look at, and the same
 		// row is what tells the next activation which version it supersedes.
@@ -199,7 +199,7 @@ func (a *Activator) Activate(ctx context.Context, owner, ruleID string) (Result,
 
 	// 3. Write the rows and both gate verdicts.
 	version := a.nextVersion(ctx, state)
-	bundleID := bundleIDFor(rule.ID, version)
+	bundleID := bundleIDFor(owner, rule.ID, version)
 	res.BundleID = bundleID
 	if err := a.writeBundle(ctx, bundleID, rule, state, source); err != nil {
 		return a.refuse(ctx, rule.ID, res, state, err)
@@ -236,6 +236,11 @@ func (a *Activator) Activate(ctx context.Context, owner, ruleID string) (Result,
 // a rule somebody turned off is a different thing from one that never existed,
 // and an app that deleted the row would have nothing to show for the mail it
 // already sent.
+//
+// It retires the bundle the rule row NAMES, never one derived again: a bundle
+// keeps the id it was armed under, which for a rule armed before ids carried
+// their owner is the old derivation (legacyBundleIDFor). The activation after
+// it derives afresh, with the owner.
 func (a *Activator) Retire(ctx context.Context, owner, ruleID string) (Result, error) {
 	if a.deps == nil {
 		return Result{}, fmt.Errorf("emailrules: the authored runtime is not wired on this node, so a rule cannot be retired here")
@@ -306,12 +311,15 @@ func (a *Activator) verifyReadable(ctx context.Context, rule Rule) error {
 	return nil
 }
 
-// writeBundle writes the bundle, as a draft, then its one construct. The
-// construct write is @serverOnly (memql#6022) -- an active bundle arms every
-// construct it holds, so only the pipeline that runs the gates writes one, and
-// only while the bundle is a draft -- so it stamps internal origin, inline.
+// writeBundle writes the bundle, as a draft, then its one construct. Both
+// writes are @serverOnly (memql#6022), so each stamps internal origin, inline:
+// the bundle because its id is known before it is written, and a bundle
+// anyone could create there first would block this activation; the construct
+// because an active bundle arms every construct it holds, so only the
+// pipeline that runs the gates writes one, and only while the bundle is a
+// draft.
 func (a *Activator) writeBundle(ctx context.Context, bundleID string, rule Rule, state RuleState, source string) error {
-	if err := a.store.CreateBundle(ctx, bundleID, BundleTitleFor(rule), summaryFor(rule), state.BundleID, a.nextVersion(ctx, state)); err != nil {
+	if err := a.store.CreateBundle(auth.ContextWithInternalOrigin(ctx), bundleID, BundleTitleFor(rule), summaryFor(rule), state.BundleID, a.nextVersion(ctx, state)); err != nil {
 		return err
 	}
 	return a.store.CreateConstruct(auth.ContextWithInternalOrigin(ctx), constructIDFor(bundleID), bundleID, ConstructNameFor(rule.ID), "campaigns", source)
@@ -513,18 +521,38 @@ func summaryFor(r Rule) string {
 		r.TriggerConcept, r.EventKind, r.TemplateID, who, r.ID, LaneFor(r.RecipientMode))
 }
 
-// bundleIDFor is DERIVED, and per version. Deriving it means a retried
-// activation reuses the id rather than accumulating a second bundle for one
-// attempt; including the version means an EDIT produces a new bundle the
-// activation planner can supersede the old one with, which is what makes the
-// old automation stop firing the instant the new one is armed.
-func bundleIDFor(ruleID string, version int) string {
+// bundleIDFor is DERIVED -- from the rule's owner, the rule and the version.
+// Deriving it means a retried activation reuses the id rather than
+// accumulating a second bundle for one attempt; including the version means an
+// EDIT produces a new bundle the activation planner can supersede the old one
+// with, which is what makes the old automation stop firing the instant the new
+// one is armed.
+//
+// Including the OWNER means no one else's derivation ever reaches it
+// (memql#6022). A derived id is known before it is written, and a bundle is
+// its creator's from then on, so the id a person's next activation writes must
+// be one only that person's activation writes; a bundle no client can create
+// (createAuthoringBundle is @serverOnly) is the other half. The owner is keyed
+// bare, so either spelling of one person derives one id.
+func bundleIDFor(owner, ruleID string, version int) string {
+	sum := sha256.Sum256([]byte(memql.BareShortId(owner) + "\x00" + ruleID + "\x00" + fmt.Sprint(version)))
+	return ruleBundlePrefix + hex.EncodeToString(sum[:16])
+}
+
+// legacyBundleIDFor is the id a rule's bundle was derived as before ids
+// carried the owner: the rule and the version alone. A bundle armed then
+// keeps its id -- the rule row names it, so turning the rule off retires it
+// and an edit supersedes it -- and a breaker's pause of it is still traced
+// back to its rule (Store.RuleOfBundle). Nothing writes a bundle at this id
+// any more: the next activation of such a rule derives with its owner.
+func legacyBundleIDFor(ruleID string, version int) string {
 	sum := sha256.Sum256([]byte(ruleID + "\x00" + fmt.Sprint(version)))
 	return ruleBundlePrefix + hex.EncodeToString(sum[:16])
 }
 
-// ruleBundlePrefix starts every rule bundle id (bundleIDFor), which is how a
-// bundle is recognised as a rule's without a read.
+// ruleBundlePrefix starts every rule bundle id, under either derivation
+// (bundleIDFor, legacyBundleIDFor), which is how a bundle is recognised as a
+// rule's without a read.
 const ruleBundlePrefix = "emr"
 
 func constructIDFor(bundleID string) string {

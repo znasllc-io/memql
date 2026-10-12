@@ -25,6 +25,13 @@ func (e *workDependencyEngine) WriteAuthoredConstruct(ctx context.Context, c mem
 	return err
 }
 
+// WriteAuthoringBundle records the bundle creation as the call the planner
+// used to send (memql#6022).
+func (e *workDependencyEngine) WriteAuthoringBundle(ctx context.Context, b memql.AuthoringBundleInput) error {
+	_, err := e.Execute(ctx, bundleCall(b))
+	return err
+}
+
 func (e *workDependencyEngine) Execute(ctx context.Context, query string) (any, error) {
 	ac, ok := auth.AccessFromContext(ctx)
 	if !ok || ac.UserId != "alice" {

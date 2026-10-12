@@ -458,6 +458,12 @@ func (e *spineMeteredEngine) WriteAuthoredConstruct(ctx context.Context, c memql
 	return writeAuthoredConstruct(ctx, e.Engine, c)
 }
 
+// WriteAuthoringBundle passes a bundle creation through to the metered engine,
+// for the same reason (memql#6022).
+func (e *spineMeteredEngine) WriteAuthoringBundle(ctx context.Context, b memql.AuthoringBundleInput) error {
+	return writeAuthoringBundle(ctx, e.Engine, b)
+}
+
 func (e *spineMeteredEngine) InvokeAI(ctx context.Context, name string, data map[string]any) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

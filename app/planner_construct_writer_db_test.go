@@ -1,13 +1,15 @@
 package app
 
-// planner_construct_writer_db_test.go -- the planner's member-construct writes
-// reach the database through the App's planner engine (memql#6022).
+// planner_construct_writer_db_test.go -- the planner's bundle and
+// member-construct writes reach the database through the App's planner engine
+// (memql#6022).
 //
-// createAuthoringConstruct is @serverOnly and integrations/planner may not stamp
-// internal origin, so the planner hands the write to the engine's writer
-// through CognitionEngineAdapter. A planner build asserts the adapter has the
-// method (integrations_planner_init.go); this asserts the method WRITES, against
-// a real Postgres, and that the write guard still holds it to a draft bundle.
+// createAuthoringBundle and createAuthoringConstruct are @serverOnly and
+// integrations/planner may not stamp internal origin, so the planner hands the
+// writes to the engine's writers through CognitionEngineAdapter. A planner
+// build asserts the adapter has the methods (integrations_planner_init.go);
+// this asserts the methods WRITE, against a real Postgres, and that the write
+// guard still holds a member to a draft bundle.
 
 import (
 	"context"
@@ -18,13 +20,21 @@ import (
 	"github.com/znasllc-io/memql/core/id"
 )
 
-func TestCognitionEngineAdapterWritesAuthoredConstructs(t *testing.T) {
+func TestCognitionEngineAdapterWritesAuthoringBundlesAndConstructs(t *testing.T) {
 	engine, db := workTemplateDBEngineAndDB(t)
 	adapter := &CognitionEngineAdapter{Engine: engine}
 	owner := id.NewShortId()
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
 	bundle := "v1:authoring:bundle:" + id.NewShortId()
-	templateMutation(t, engine, ctx, "createAuthoringBundle", map[string]any{"bundleId": bundle, "title": "Planner draft"})
+	if err := adapter.WriteAuthoringBundle(ctx, memql.AuthoringBundleInput{BundleId: bundle, Title: "Planner draft"}); err != nil {
+		t.Fatalf("the planner's bundle: %v", err)
+	}
+	var stored string
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT COALESCE(payload->>'ownerUserId', '') FROM "MemoryNodes" WHERE concept = 'v1:authoring:bundle' AND id = ? ORDER BY "createdAt" DESC LIMIT 1`, bundle).Scan(&stored); err != nil ||
+		memql.BareShortId(stored) != owner {
+		t.Fatalf("the planner's bundle did not land as the owner's (owner %q, %v)", stored, err)
+	}
 
 	construct := "v1:authoring:construct:" + id.NewShortId()
 	if err := adapter.WriteAuthoredConstruct(ctx, memql.AuthoredConstructInput{

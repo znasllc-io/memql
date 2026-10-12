@@ -40,8 +40,10 @@ func (a EngineAdapter) SetAuthoredPauseListener(name string, listener memql.Auth
 // -- turning the rule on again supersedes it, and turning it off retires it.
 //
 // Only a bundle shaped like a rule's is read: every rule bundle id is derived
-// from the rule's id and version (bundleIDFor), which is also how the bundle
-// is traced back to its rule (Store.RuleOfBundle). Everything it acts on is
+// from the rule's owner, id and version (bundleIDFor) -- or, armed before ids
+// carried the owner, from the id and version alone (legacyBundleIDFor) --
+// which is also how the bundle is traced back to its rule
+// (Store.RuleOfBundle). Everything it acts on is
 // read fresh -- the listener runs after the pause went out, and the rule or
 // the bundle may have moved on since:
 //

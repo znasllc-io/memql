@@ -125,13 +125,23 @@ func liveRule(bundleID string) map[string]any {
 	return r
 }
 
-// ruleBundle is the bundle a rule's activation at version writes, as a read
-// returns it once a breaker paused it: its id derived from the rule and the
-// version, and the rule named in its dry-run report.
+// ruleBundle is the bundle the owner's activation of a rule at version
+// writes, as a read returns it once a breaker paused it: its id derived from
+// the owner, the rule and the version, its owner on the row, and the rule
+// named in its dry-run report.
 func ruleBundle(ruleID string, version int) (string, map[string]any) {
-	id := "v1:authoring:bundle:" + bundleIDFor(ruleID, version)
+	return pausedRuleBundle("v1:authoring:bundle:"+bundleIDFor(testOwner, ruleID, version), ruleID, version)
+}
+
+// legacyRuleBundle is the same bundle armed before ids carried the owner: its
+// id derived from the rule and the version alone.
+func legacyRuleBundle(ruleID string, version int) (string, map[string]any) {
+	return pausedRuleBundle("v1:authoring:bundle:"+legacyBundleIDFor(ruleID, version), ruleID, version)
+}
+
+func pausedRuleBundle(id, ruleID string, version int) (string, map[string]any) {
 	return id, map[string]any{
-		"id": id, "version": version, "status": "paused",
+		"id": id, "ownerUserId": testOwner, "version": version, "status": "paused",
 		"dryRunReport": map[string]any{"ok": true, "generator": "component/emailrules", "rule": ruleID},
 	}
 }
@@ -174,6 +184,30 @@ func TestABreakerPauseMarksTheRulePaused(t *testing.T) {
 	}
 }
 
+// TestABreakerPauseOfABundleArmedBeforeIdsCarriedTheOwnerMarksItsRule: a rule
+// armed before bundle ids carried their owner keeps its bundle's id, and a
+// breaker's pause of that bundle is still traced back to the rule and marked
+// on its row (memql#6022). Turning the rule on again derives with the owner.
+func TestABreakerPauseOfABundleArmedBeforeIdsCarriedTheOwnerMarksItsRule(t *testing.T) {
+	paused, bundle := legacyRuleBundle(testRule, 1)
+	e := &rowEngine{fakeEngine: &fakeEngine{rule: liveRule(paused), bundle: bundle}}
+
+	if err := recordBreakerPause(context.Background(), e, testOwner, paused); err != nil {
+		t.Fatalf("record the breaker's pause: %v", err)
+	}
+	if e.rule["status"] != "paused" || e.rule["lastError"] != BreakerStoppedSentence || e.rule["bundleId"] != paused {
+		t.Fatalf("the rule row reads status %q, lastError %q, bundleId %q; want paused, %q, and the paused bundle",
+			e.rule["status"], e.rule["lastError"], e.rule["bundleId"], BreakerStoppedSentence)
+	}
+	res, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), testOwner, testRule)
+	if err != nil {
+		t.Fatalf("turn the rule on again: %v", err)
+	}
+	if want := bundleIDFor(testOwner, testRule, 2); res.BundleID != want {
+		t.Fatalf("turned on again at %q, want the id derived with the owner, %q", res.BundleID, want)
+	}
+}
+
 // TestABreakerPauseOfABundleTheRuleNoLongerRunsChangesNothing: the pause marks
 // a rule only while the rule reads active and runs the paused bundle, and only
 // while that bundle still reads paused. A bundle that is not an email rule's is
@@ -196,6 +230,9 @@ func TestABreakerPauseOfABundleTheRuleNoLongerRunsChangesNothing(t *testing.T) {
 	turnedOnAgain["status"] = "active"
 	otherRules, claimed := ruleBundle("v1:campaigns:emailRule:other0001", 1)
 	claimed["dryRunReport"] = map[string]any{"rule": testRule}
+	// Derived for somebody else: the row names this rule and this owner, and
+	// the id is the one another owner's activation of it would write.
+	foreign, foreignBundle := pausedRuleBundle("v1:authoring:bundle:"+bundleIDFor("v1:identity:user:someone-else", testRule, 1), testRule, 1)
 
 	for _, c := range []struct {
 		name     string
@@ -209,6 +246,7 @@ func TestABreakerPauseOfABundleTheRuleNoLongerRunsChangesNothing(t *testing.T) {
 		{"the rule does not read active", refused, bundle, v1, true},
 		{"the bundle no longer reads paused", liveRule(v1), turnedOnAgain, v1, false},
 		{"the bundle's row names a rule that does not derive it", liveRule(otherRules), claimed, otherRules, false},
+		{"the bundle's id is derived for someone else", liveRule(foreign), foreignBundle, foreign, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			before := map[string]any{"status": c.rule["status"], "bundleId": c.rule["bundleId"]}
@@ -505,7 +543,7 @@ func TestARefusedEditAfterAFailedTurnOffKeepsNamingTheLiveVersion(t *testing.T) 
 func TestARefusedEditLeavesARowAnotherActivationChanged(t *testing.T) {
 	v1, bundle := ruleBundle(testRule, 1)
 	bundle["status"] = "active"
-	v3 := "v1:authoring:bundle:" + bundleIDFor(testRule, 3)
+	v3 := "v1:authoring:bundle:" + bundleIDFor(testOwner, testRule, 3)
 	e := &rowEngine{fakeEngine: &fakeEngine{rule: liveRule(v1), bundle: bundle}}
 	refusal := errors.New("authoring: automation emailRuleAb12cd34 does not compile on this node")
 	e.activate = func(_, bundleID string) error {

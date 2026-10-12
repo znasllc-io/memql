@@ -148,6 +148,13 @@ func (m *mislabelledProcedures) WriteAuthoredConstruct(ctx context.Context, c me
 	return err
 }
 
+// WriteAuthoringBundle records the bundle creation as the call the planner
+// used to send (memql#6022).
+func (m *mislabelledProcedures) WriteAuthoringBundle(ctx context.Context, b memql.AuthoringBundleInput) error {
+	_, err := m.Execute(ctx, bundleCall(b))
+	return err
+}
+
 func (m *mislabelledProcedures) Execute(ctx context.Context, q string) (any, error) {
 	if strings.Contains(q, "procedureConstructsForGoalSignature") {
 		r := map[string]any{}

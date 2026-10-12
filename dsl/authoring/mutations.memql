@@ -10,8 +10,18 @@
 
 /// Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId
 /// is stamped from actor.userId. Members are added via createAuthoringConstruct; reused (composed)
-/// constructs are recorded on reusedConstructRefs.
+/// constructs are recorded on reusedConstructRefs. @serverOnly (memql#6022): an email or routing
+/// rule's bundle id is derived, so the id a person's next activation writes is known before it is
+/// written, and a bundle anyone could create was a bundle another person could create there first
+/// -- theirs from then on, and the owner's activation refused at a row it did not own. Its writers
+/// are the server pipelines (the rule activations, the planner's capture and work compile, the
+/// procedure learner, the durable promote), under internal origin. SCOPING TO actor.userId IS NOT
+/// THE FIX: the stamp already makes the bundle the caller's, and owning a row at someone else's
+/// next id is exactly the block; what must not be caller-writable is a bundle coming to exist. A
+/// raw insert() never consults this annotation, so creation is also held at the write chokepoint:
+/// component/memql/authoring_bundle_create_write_guard.go.
 @actor
+@serverOnly
 mutation bundle createAuthoringBundle {
   args {
     bundleId            string!

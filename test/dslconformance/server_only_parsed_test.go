@@ -337,6 +337,15 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// guard holds raw writes to the same rule
 		// (component/memql/authoring_construct_write_guard.go).
 		{Path: "authoring/mutations.memql", Name: "createAuthoringConstruct"}: true,
+		// And a bundle COMING TO EXIST (memql#6022): an email or
+		// routing rule's bundle id is derived from its owner and the rule, so
+		// the id a person's next activation writes is known before it is
+		// written, and a bundle another person created there first was theirs
+		// -- the owner's activation refused at a row it did not own. Only the
+		// server pipelines create a bundle, each deriving for its own owner or
+		// minting a fresh id; the create guard holds raw writes to the same
+		// rule (component/memql/authoring_bundle_create_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "createAuthoringBundle"}: true,
 
 		// epic memql#4966. workRunsInFlight is the wait-and-abandon sweep's
 		// read. (A2 briefly carried a closeWorkGoal beside it; epic A3's

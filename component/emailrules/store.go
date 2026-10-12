@@ -138,9 +138,11 @@ func (s *Store) RuleStateByID(ctx context.Context, ruleID string) (RuleState, bo
 // RuleOfBundle names the rule a generated bundle was built for, and the
 // bundle's status, read under the caller's own actor. The bundle's dry-run
 // report records the rule (RecordDryRun), and the bundle id is derived from
-// that rule and the bundle's version (bundleIDFor) -- so the id is re-derived
-// from what the row says, and a bundle whose row names a rule that does not
-// derive it names none.
+// the bundle's owner, that rule and the bundle's version (bundleIDFor) -- so
+// the id is re-derived from what the row says, and a bundle whose row names a
+// rule that does not derive it names none. A bundle armed before ids carried
+// their owner is derived without it (legacyBundleIDFor), and is the rule's
+// too.
 func (s *Store) RuleOfBundle(ctx context.Context, bundleID string) (ruleID, status string, ok bool, err error) {
 	rows, err := s.rows(ctx, call("query", "authoringBundleById", arg{"bundleId", memql.BareShortId(bundleID)}))
 	if err != nil || len(rows) == 0 {
@@ -148,7 +150,11 @@ func (s *Store) RuleOfBundle(ctx context.Context, bundleID string) (ruleID, stat
 	}
 	report, _ := rows[0]["dryRunReport"].(map[string]any)
 	ruleID = strings.TrimSpace(str(report, "rule"))
-	if ruleID == "" || bundleIDFor(ruleID, integer(rows[0], "version")) != memql.BareShortId(bundleID) {
+	if ruleID == "" {
+		return "", "", false, nil
+	}
+	version, id := integer(rows[0], "version"), memql.BareShortId(bundleID)
+	if bundleIDFor(str(rows[0], "ownerUserId"), ruleID, version) != id && legacyBundleIDFor(ruleID, version) != id {
 		return "", "", false, nil
 	}
 	return ruleID, str(rows[0], "status"), true, nil
@@ -280,6 +286,9 @@ func (s *Store) RecordFiring(ctx context.Context, ruleID string, firedCount int,
 // The authoring pipeline's four writes
 // ---------------------------------------------------------------------------
 
+// CreateBundle writes a rule's bundle as a draft. createAuthoringBundle is
+// @serverOnly (memql#6022), so the caller stamps internal origin -- see
+// Activator.writeBundle, where it is done inline at the one call.
 func (s *Store) CreateBundle(ctx context.Context, bundleID, title, summary, supersedes string, version int) error {
 	args := []arg{
 		{"bundleId", bundleID},

@@ -17,6 +17,10 @@ var _ planner.ToolCallSpeller = (*CognitionEngineAdapter)(nil)
 // capture and the work compile could not persist a construct at all.
 var _ planner.AuthoredConstructWriter = (*CognitionEngineAdapter)(nil)
 
+// And so do the bundles they belong to (createAuthoringBundle is @serverOnly,
+// memql#6022); without it neither could create one.
+var _ planner.AuthoringBundleWriter = (*CognitionEngineAdapter)(nil)
+
 // setupPlannerIntegration creates and registers the planner
 // integration on a planner-tagged binary. The integration owns
 // Plan / Task lifecycle: subscribes to graph.node.updated events
