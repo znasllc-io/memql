@@ -2,9 +2,11 @@ package work
 
 import (
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
@@ -183,4 +185,68 @@ func enumOf(t *testing.T, concept, field string) []string {
 		t.Fatalf("%s declares no %s enum; the check would pass over nothing", concept, field)
 	}
 	return enum
+}
+
+// TestRetentionWalkConstants pins what the day-window walk is bounded by
+// (2026-10-11, storage growth stability): a day, a hundred candidates, four
+// minutes.
+func TestRetentionWalkConstants(t *testing.T) {
+	if retentionCandidateWindow != 24*time.Hour || retentionCandidateLimit != 100 || retentionRunBudget != 4*time.Minute {
+		t.Fatalf("the walk reads %s windows, %d candidates at a time, for %s; the decided values are 24h, 100 and 4m",
+			retentionCandidateWindow, retentionCandidateLimit, retentionRunBudget)
+	}
+	// A read is a batch. A page larger than a batch would be split into several
+	// the walk never sees one by one; a smaller one would never look full.
+	if retentionCandidateLimit != retirementBatchSize {
+		t.Fatalf("a candidate read returns %d and a batch is %d; they are one number", retentionCandidateLimit, retirementBatchSize)
+	}
+}
+
+// TestEveryPolicysCandidateReadIsBounded: whatever the policy, a candidate read
+// is bounded below and above by createdAt, ends in a constant LIMIT, carries the
+// policy's predicate unchanged, and -- when it is the next page of a window --
+// starts after the last row of the page before. And its placeholders are filled,
+// one argument each, in the order they appear: a miscount here is a policy that
+// reads the wrong window, or none.
+func TestEveryPolicysCandidateReadIsBounded(t *testing.T) {
+	cutoff := time.Date(2026, 9, 11, 3, 40, 0, 0, time.UTC)
+	lo := time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)
+	hi := lo.Add(retentionCandidateWindow)
+	cursor := &pageEnd{scanned: retentionCandidateLimit, at: lo.Add(3 * time.Hour), id: "v1:work:run:last-of-the-page-before"}
+	for _, p := range operationalPolicies {
+		for _, after := range []*pageEnd{nil, cursor} {
+			name := fmt.Sprintf("%s on %s, paged=%v", p.concept, p.env, after != nil)
+			query, params := retentionCandidateRead(p, cutoff, lo, hi, after)
+			for _, want := range []string{`n."createdAt" >= ?`, `n."createdAt" < ?`, ` LIMIT ` + fmt.Sprint(retentionCandidateLimit), `(` + p.predicate + `)`} {
+				if !strings.Contains(query, want) {
+					t.Errorf("%s: the read lacks %q:\n%s", name, want, query)
+				}
+			}
+			if !strings.HasSuffix(query, ` LIMIT `+fmt.Sprint(retentionCandidateLimit)) {
+				t.Errorf("%s: the read does not end in its constant LIMIT:\n%s", name, query)
+			}
+			if got := strings.Count(query, `(n."createdAt",n.id) > (?,?)`); (after != nil) != (got == 1) {
+				t.Errorf("%s: %d page cursors in the read", name, got)
+			}
+			if got := strings.Count(query, "?"); got != len(params) {
+				t.Errorf("%s: %d placeholders and %d arguments:\n%s", name, got, len(params), query)
+				continue
+			}
+			from := lo
+			if after != nil {
+				from = after.at
+			}
+			if params[0] != p.concept || !params[1].(time.Time).Equal(from) || !params[2].(time.Time).Equal(hi) {
+				t.Errorf("%s: arguments %v, want the concept and the window [%s, %s)", name, params[:3], from, hi)
+			}
+			if after != nil && (!params[3].(time.Time).Equal(after.at) || params[4] != after.id) {
+				t.Errorf("%s: the page cursor is %v, want (%s, %s)", name, params[3:5], after.at, after.id)
+			}
+			// The run policies' child test is the only one with a cutoff of its own.
+			wantCutoff := p.concept == runConcept
+			if has := len(params) > 0 && params[len(params)-1] == any(cutoff); has != wantCutoff {
+				t.Errorf("%s: cutoff argument present=%v, want %v", name, has, wantCutoff)
+			}
+		}
+	}
 }
