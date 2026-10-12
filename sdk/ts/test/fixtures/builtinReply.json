@@ -1,0 +1,100 @@
+[
+  {
+    "name": "PreserveOrder with nanosecond stamps and reversed ID order",
+    "result": { "data": [{
+      "a-custom": { "id": "a-custom", "concept": "v1:email:layout", "createdAt": "2026-09-03T20:09:48.145304797Z", "payload": { "name": "Custom", "builtin": false } },
+      "z-builtin": { "id": "z-builtin", "concept": "v1:email:layout", "createdAt": "2026-09-03T20:09:48.1453048Z", "payload": { "name": "Built in", "builtin": true, "options": { "width": 600 } }, "type": "object", "createdBy": "system", "metadata": { "ignored": true } }
+    }] },
+    "rows": [
+      { "id": "z-builtin", "concept": "v1:email:layout", "createdAt": "2026-09-03T20:09:48.1453048Z", "name": "Built in", "builtin": true, "options": { "width": 600 } },
+      { "id": "a-custom", "concept": "v1:email:layout", "createdAt": "2026-09-03T20:09:48.145304797Z", "name": "Custom", "builtin": false }
+    ]
+  },
+  {
+    "name": "single builtin reply with a zero timestamp",
+    "result": { "data": [{ "reply": { "id": "reply", "concept": "integration:identity:githubConnectBegin", "createdAt": "0001-01-01T00:00:00Z", "payload": { "reason": "github_app_not_configured" } } }] },
+    "rows": [{ "id": "reply", "concept": "integration:identity:githubConnectBegin", "createdAt": "0001-01-01T00:00:00Z", "reason": "github_app_not_configured" }]
+  },
+  {
+    "name": "timestamps compare by instant including timezone offsets",
+    "result": { "data": [{
+      "a": { "id": "a", "concept": "x", "createdAt": "2026-09-03T20:09:48.9Z" },
+      "b": { "id": "b", "concept": "x", "createdAt": "2026-09-03T15:09:49-05:00" }
+    }] },
+    "rows": [
+      { "id": "b", "concept": "x", "createdAt": "2026-09-03T15:09:49-05:00" },
+      { "id": "a", "concept": "x", "createdAt": "2026-09-03T20:09:48.9Z" }
+    ]
+  },
+  {
+    "name": "equal instants retain the wire key order",
+    "result": { "data": [{
+      "a": { "id": "a", "concept": "x", "createdAt": "2026-09-03T20:09:48Z" },
+      "z": { "id": "z", "concept": "x", "createdAt": "2026-09-03T15:09:48-05:00" }
+    }] },
+    "rows": [
+      { "id": "a", "concept": "x", "createdAt": "2026-09-03T20:09:48Z" },
+      { "id": "z", "concept": "x", "createdAt": "2026-09-03T15:09:48-05:00" }
+    ]
+  },
+  {
+    "name": "numeric object keys use JavaScript enumeration order on ties",
+    "result": { "data": [{
+      "01": { "id": "01", "concept": "x" },
+      "10": { "id": "10", "concept": "x" },
+      "2": { "id": "2", "concept": "x" },
+      "4294967294": { "id": "4294967294", "concept": "x" },
+      "4294967295": { "id": "4294967295", "concept": "x" }
+    }] },
+    "rows": [
+      { "id": "2", "concept": "x" },
+      { "id": "10", "concept": "x" },
+      { "id": "4294967294", "concept": "x" },
+      { "id": "01", "concept": "x" },
+      { "id": "4294967295", "concept": "x" }
+    ]
+  },
+  {
+    "name": "missing and invalid timestamps match TypeScript placement",
+    "result": { "data": [{
+      "a": { "id": "a", "concept": "x", "createdAt": "2026-09-03T20:09:48Z" },
+      "b": { "id": "b", "concept": "x", "createdAt": "invalid" },
+      "c": { "id": "c", "concept": "x", "createdAt": null },
+      "d": { "id": "d", "concept": "x" }
+    }] },
+    "rows": [
+      { "id": "b", "concept": "x", "createdAt": "invalid" },
+      { "id": "c", "concept": "x" },
+      { "id": "d", "concept": "x" },
+      { "id": "a", "concept": "x", "createdAt": "2026-09-03T20:09:48Z" }
+    ]
+  },
+  {
+    "name": "flattening uses payload fields over intrinsics",
+    "result": { "data": [{ "a": { "id": "a", "concept": "x", "payload": { "id": "projected-id", "concept": "projected-concept" } } }] },
+    "rows": [{ "id": "projected-id", "concept": "projected-concept" }]
+  },
+  {
+    "name": "flat rows and non-node objects stay intact alongside builtin maps",
+    "result": { "data": [
+      { "id": "flat", "name": "Flat" },
+      {},
+      { "a": { "id": "a", "value": 1 }, "b": { "id": "b", "value": 2 } },
+      { "a": { "id": "a", "concept": "x" }, "count": 1 },
+      { "a": { "id": 1, "concept": "x" } },
+      { "a": null },
+      { "a": [] },
+      { "reply": { "id": "reply", "concept": "x", "payload": { "ok": true } } }
+    ] },
+    "rows": [
+      { "id": "flat", "name": "Flat" },
+      {},
+      { "a": { "id": "a", "value": 1 }, "b": { "id": "b", "value": 2 } },
+      { "a": { "id": "a", "concept": "x" }, "count": 1 },
+      { "a": { "id": 1, "concept": "x" } },
+      { "a": null },
+      { "a": [] },
+      { "id": "reply", "concept": "x", "ok": true }
+    ]
+  }
+]
