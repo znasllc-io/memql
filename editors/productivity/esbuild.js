@@ -6,7 +6,7 @@ async function main() {
   await Promise.all([
     esbuild.build({ entryPoints: ["src/extension.ts"], outfile: "out/extension.js", bundle: true, platform: "node", format: "cjs", target: "node20", external: ["vscode"], logLevel: "info" }),
     esbuild.build({ entryPoints: ["src/extension.ts"], outfile: "out/webExtension.js", bundle: true, platform: "browser", format: "cjs", target: "es2022", external: ["vscode"], logLevel: "info", metafile: true }).then(r => fs.writeFileSync("out/web-meta.json", JSON.stringify(r.metafile))),
-    esbuild.build({ entryPoints: ["src/pdfView.ts", "src/markdownView.ts", "src/templateView.ts"], outdir: "out", bundle: true, platform: "browser", format: "iife", target: "es2022", logLevel: "info" }),
+    esbuild.build({ entryPoints: ["src/pdfView.ts", "src/markdownView.ts", "src/templateView.ts", "src/emailView.ts"], outdir: "out", bundle: true, platform: "browser", format: "iife", target: "es2022", logLevel: "info" }),
   ]);
   fs.copyFileSync("node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "out/pdf.worker.mjs");
   for (const assets of ["cmaps", "standard_fonts", "wasm"]) fs.cpSync(`node_modules/pdfjs-dist/${assets}`, `out/${assets}`, { recursive: true });

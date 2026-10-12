@@ -42,6 +42,11 @@ export const EMAIL_COPY = {
     connect: "Connect", openSource: "Open Source", saveToMemQL: "Save to MemQL", saveLayout: "Save as layout", publish: "Publish",
     layoutName: "Layout name", saveLayoutConfirm: "Save layout", cancel: "Cancel",
     renderFailed: "Couldn’t show this email.", invalidJson: "This email has invalid JSON. Open Source and correct its formatting.",
+    emailPreview: "Email preview", removeLink: "Remove link", colourDefault: "Default",
+    buttonLabelInvalid: "Enter a label up to 200 bytes.", linkLabelInvalid: "Enter a link label up to 80 characters.",
+    networkInvalid: "Enter a network name up to 40 bytes.", tooManyLines: "Use up to 12 lines.", lineTooLong: "Use up to 300 characters in each line.",
+    wordsLinkLabel: "Give each link a label, as in [label](address).",
+    wordsLinkAddress: "Give each link a web address, an email address (mailto:), a phone number (tel:) or a link tag.",
   },
   host: {
     connectFirst: "Connect to your cluster in MemQL before writing an email.",
