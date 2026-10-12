@@ -283,6 +283,12 @@ can also choose a template, or a package kind to deploy the file as. The finishe
 file opens in your editor from **Open the file**, and **Compose another** starts a
 clean form.
 
+The name is checked as you type it, with the same rule and words as the editor's
+**New Markdown**: a name with a slash, an empty one, or one that is only the
+file's extension is pointed out beside the Name field, and nothing is sent until
+it can be used. When the cluster refuses something, you read its sentence alone,
+without the call or engine details it arrived in.
+
 What the cluster does with a request, whichever client sends it:
 
 | The request | What is made |

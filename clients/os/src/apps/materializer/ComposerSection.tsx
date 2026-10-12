@@ -2,6 +2,7 @@ import { AccountPicker } from "../accounts/AccountPicker";
 import { accountIsArchived, type AccountRow } from "../accounts/rows";
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fileNameProblem } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Chip, Fact, Facts, Field, FormRow, Head, Input, Notice, RecordList, RecordRow, Select, Subhead } from "../../kit";
 import { ActionBar } from "../../kit/ActionBar";
@@ -153,6 +154,10 @@ export function ComposerSection({
   onNewComposition,
 }: ComposerSectionProps) {
   const [name, setName] = useState("");
+  // Whether to say what is wrong with the name: once the person has typed in the
+  // field, or pressed Materialize without a name it can use. A form that has not
+  // been touched does not open on a complaint.
+  const [nameChecked, setNameChecked] = useState(false);
   const [accountId, setAccountId] = useState("");
   const [statement, setStatement] = useState("");
   const [format, setFormat] = useState(defaultFormat);
@@ -178,6 +183,7 @@ export function ComposerSection({
     // A new setup is a new file. What the person typed for the last one is not
     // part of it; the organization they chose is, as it always is, theirs.
     setName("");
+    setNameChecked(false);
     setStatement("");
     setTemplateId("");
     setDeployableKind("");
@@ -189,7 +195,18 @@ export function ComposerSection({
     onApplied?.(initial);
   }, [initial]);
 
+  // THE NAME IS CHECKED HERE, AS IT IS TYPED, with the rule and the words of the
+  // editor's New Markdown (the SDK's fileNameProblem): a slash, a control
+  // character, an empty or over-long name, or only the chosen kind of file's
+  // extension. A name the cluster would refuse is never sent to be refused.
+  const kind = FORMATS.find((candidate) => candidate === format);
+  const nameProblem = kind === undefined ? undefined : fileNameProblem(name, kind);
+
   function materialize() {
+    if (nameProblem !== undefined) {
+      setNameChecked(true);
+      return;
+    }
     const held = generation.current;
     void onMaterialize({
       name,
@@ -287,7 +304,11 @@ export function ComposerSection({
         <BriefColumn
           open={open}
           name={name}
-          onName={setName}
+          onName={(next) => {
+            setName(next);
+            setNameChecked(true);
+          }}
+          nameProblem={nameChecked ? nameProblem : undefined}
           statement={statement}
           onStatement={setStatement}
           accounts={accounts}
@@ -537,12 +558,15 @@ function BriefColumn({
   open,
   name,
   onName,
+  nameProblem,
   statement,
   onStatement,
 }: {
   open: CompositionRow | null;
   name: string;
   onName: (v: string) => void;
+  /** What is wrong with the name as typed, said beside the field; absent when it can be used. */
+  nameProblem?: string;
   statement: string;
   onStatement: (v: string) => void;
   accounts: AccountRow[];
@@ -578,6 +602,11 @@ function BriefColumn({
       <Field label="Name">
         <Input id="mz-name" value={name} onChange={onName} label="Name" placeholder="Q3 report" />
       </Field>
+      {nameProblem ? (
+        <p className="os-mz-name-problem" role="alert">
+          {nameProblem}
+        </p>
+      ) : null}
       <Field label="What do you want made?">
         <Input
           id="mz-statement"

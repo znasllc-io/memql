@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import {
+  fileNameProblem,
   isDescribedMarkdown,
+  refusalSentence,
   startMaterialize,
   type MaterializeExecute,
   type MaterializeRequest,
@@ -35,9 +37,14 @@ import { FORMATS } from "./words";
 // and the template form are three different places on screen -- and a
 // shared slot puts a refusal under a control somebody is looking at,
 // naming a failure they did not cause.
+//
+// THE SENTENCE AND NOTHING ELSE. A refusal arrives with the call's name in
+// front and inside the engine's frame ("composeCancel: MemQL engine failed to
+// execute query. Details: compose: ..."); the SDK's refusalSentence takes those
+// off, so a person reads only what the cluster wrote for them.
 
 function describe(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return refusalSentence(err);
 }
 
 export interface WriteState {
@@ -156,22 +163,25 @@ export function useMaterialize(): MaterializeState {
         setError(NOT_CONNECTED);
         return "";
       }
-      const name = facts.name.trim();
-      if (name === "") {
-        // The one rule a browser can answer, answered here rather than
-        // sent. `name` is `string!`, so the server would refuse it too --
-        // but a round trip to be told what this form already knows is a
-        // round trip somebody waits for.
-        setError("Give it a name first — it becomes the file's name too.");
-        return "";
-      }
-      if (facts.accountIds.length !== 1 || !facts.accountIds[0]?.trim()) {
-        setError("Choose an organization for this file.");
-        return "";
-      }
       const format = FORMATS.find((candidate) => candidate === facts.format);
       if (format === undefined) {
         setError("Choose what kind of file to make.");
+        return "";
+      }
+      // The one rule a browser can answer, answered here rather than sent: the
+      // SDK's fileNameProblem, the rule and the words the editor's New Markdown
+      // uses. The composer says it beside the Name field as it is typed; this is
+      // the same check for any other caller of the hook. The cluster would
+      // refuse these names too, but a round trip to be told what this form
+      // already knows is a round trip somebody waits for.
+      const problem = fileNameProblem(facts.name, format);
+      if (problem !== undefined) {
+        setError(problem);
+        return "";
+      }
+      const name = facts.name.trim();
+      if (facts.accountIds.length !== 1 || !facts.accountIds[0]?.trim()) {
+        setError("Choose an organization for this file.");
         return "";
       }
       setBusy(true);

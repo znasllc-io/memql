@@ -22,7 +22,7 @@ vi.mock("../../src/chrome/state", async (importOriginal) => ({
 const { MaterializerApp } = await import("../../src/apps/materializer/MaterializerApp");
 const { useMaterialize } = await import("../../src/apps/materializer/actions");
 const { composeIntent } = await import("../../src/items/materialize");
-const { compositionRow, fakeConnection, memoryStore, rowsResult, templateRow, withSession } = await import("./harness");
+const { compositionRow, fakeConnection, memoryStore, refused, rowsResult, templateRow, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -280,7 +280,7 @@ describe("the folder a setup names", () => {
 
   it("shows the cluster's refusal beside the control, verbatim, and keeps the act", async () => {
     const conn = fakeConnection({ materializeReply: reply });
-    conn.query.composeMaterialize.mockRejectedValueOnce(new Error(REFUSAL));
+    conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", REFUSAL));
     await start(conn, "folder-gone");
     await materializeNotes();
     expect(await screen.findByText(REFUSAL)).toBeTruthy();
@@ -291,7 +291,7 @@ describe("the folder a setup names", () => {
 
   it("asks again with the folder it was refused for and the same request id, because that is the same ask", async () => {
     const conn = fakeConnection({ materializeReply: reply });
-    conn.query.composeMaterialize.mockRejectedValueOnce(new Error(REFUSAL));
+    conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", REFUSAL));
     await start(conn, "folder-gone");
     await materializeNotes();
     await screen.findByText(REFUSAL);
@@ -423,7 +423,7 @@ describe("creating a file", () => {
 
   it("asks with a new request id once the facts have changed: that is a different ask", async () => {
     const conn = fakeConnection({ materializeReply: reply });
-    conn.query.composeMaterialize.mockRejectedValueOnce(new Error("refused"));
+    conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", "refused"));
     mount(conn);
     await materializeNotes();
     expect(await screen.findByText(/refused/)).toBeTruthy();
@@ -471,7 +471,7 @@ describe("creating a file", () => {
 
   it("asks with a new request id after the form is reset, because a reset abandons the ask", async () => {
     const conn = fakeConnection({ materializeReply: reply });
-    conn.query.composeMaterialize.mockRejectedValueOnce(new Error("refused"));
+    conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", "refused"));
     h.connection = conn;
     const { result } = renderHook(() => useMaterialize());
     const facts = {
@@ -490,6 +490,76 @@ describe("creating a file", () => {
     mount(conn);
     await materializeNotes();
     expect(await screen.findByText(/did not confirm a composition/)).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The name, checked as it is typed, and a refusal, as a person reads it
+// ---------------------------------------------------------------------------
+//
+// The composer checks a name with the SDK's fileNameProblem: the rule and the
+// words VS Code's New Markdown uses, so the two clients say the same thing about
+// the same name. And whatever the cluster refuses arrives framed (the call's
+// name, the engine's frame); the person reads the sentence alone.
+
+describe("a name and a refusal, as a person reads them", () => {
+  const reply = { compositionId: "c1" } as unknown as Row;
+  const problem = () => document.querySelector(".os-mz-name-problem")?.textContent ?? "";
+  const typeName = (value: string) => fireEvent.change(screen.getByLabelText("Name"), { target: { value } });
+
+  it("checks a name as it is typed, in the editor's words, and sends nothing until it can be used", async () => {
+    const conn = fakeConnection({ materializeReply: reply });
+    mount(conn);
+    await materializeNotes({ name: "Notes 10/11" });
+    expect(problem()).toBe("Enter a file name, without a folder path.");
+    expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
+    typeName("Notes");
+    expect(problem()).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Materialize" }));
+    await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+    expect(sent(conn)["name"]).toBe("Notes");
+  });
+
+  it("says nothing about a name before one is typed, and asks for one when Materialize is pressed without it", async () => {
+    const conn = fakeConnection({ materializeReply: reply });
+    mount(conn);
+    fireEvent.change(screen.getByLabelText("What do you want made?"), { target: { value: "A one page brief" } });
+    await chooseOrganization();
+    expect(problem()).toBe("");
+    fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
+    expect(problem()).toBe("Enter a file name, without a folder path.");
+    expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
+  });
+
+  it("refuses an extension of the chosen kind of file with nothing before it, and only that kind's", async () => {
+    const conn = fakeConnection({ materializeReply: reply });
+    mount(conn, { intent: setupIntent("i1", { format: "csv" }) });
+    await waitFor(() => expect(kindOfFile()).toContain("Spreadsheet (CSV)"));
+    typeName(".CSV");
+    expect(problem()).toBe("Enter a name before the extension.");
+    // ".md" is not a spreadsheet's extension: it is the name.
+    typeName(".md");
+    expect(problem()).toBe("");
+    typeName("x".repeat(151));
+    expect(problem()).toBe("Enter a file name, without a folder path.");
+  });
+
+  it("shows the cluster's refusal of a file as its sentence alone, not the frames it arrived in", async () => {
+    const conn = fakeConnection({ materializeReply: reply });
+    conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", "Enter a name without slashes."));
+    mount(conn);
+    await materializeNotes();
+    expect(await shown("Enter a name without slashes.")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/composeMaterialize|MemQL engine|Details:/);
+  });
+
+  it("shows the cluster's refusal of a stop the same way, a Go package name taken off as well", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: `${COMPOSITION}:c9`, status: "composing", outputFileId: "" })] });
+    conn.query.composeCancel.mockRejectedValueOnce(refused("composeCancel", "compose: no composition with that id is readable by you"));
+    mount(conn, { intent: { id: "open", payload: { compositionId: `${COMPOSITION}:c9` } } });
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(await shown("no composition with that id is readable by you")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/composeCancel|MemQL engine|Details:|compose:/);
   });
 });
 
@@ -599,7 +669,7 @@ describe("a Markdown file asked for by describing it", () => {
 
   it("says so, beside the file, when the description could not be sent", async () => {
     const conn = fakeConnection(seed());
-    conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(new Error("revision budget exhausted"));
+    conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
     mount(conn);
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
@@ -624,7 +694,7 @@ describe("a Markdown file asked for by describing it", () => {
 
     it("in a visually hidden live region of its own, mounted before there is anything to say", async () => {
       const conn = fakeConnection(seed());
-      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(new Error("revision budget exhausted"));
+      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
       mount(conn);
       await materializeNotes();
       await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
@@ -652,7 +722,7 @@ describe("a Markdown file asked for by describing it", () => {
 
     it("without wrapping the visible notices in a status region", async () => {
       const conn = fakeConnection(seed());
-      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(new Error("revision budget exhausted"));
+      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
       mount(conn);
       await materializeNotes();
       await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
@@ -698,7 +768,7 @@ describe("a Markdown file asked for by describing it", () => {
 
     it("and goes quiet again when the file is left", async () => {
       const conn = fakeConnection(seed());
-      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(new Error("revision budget exhausted"));
+      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
       mount(conn);
       await materializeNotes();
       await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
@@ -758,7 +828,7 @@ describe("a Markdown file asked for by describing it", () => {
 
   it("shows what happened to this file's description only on this file", async () => {
     const conn = fakeConnection(seed({ compositions: [ready({ id: "c-other", name: "Another file", outputFileId: "f-other" })] }));
-    conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(new Error("revision budget exhausted"));
+    conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
     const { deliver } = mount(conn);
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());

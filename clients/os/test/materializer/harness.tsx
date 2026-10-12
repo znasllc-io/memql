@@ -21,6 +21,18 @@ export function rowsResult(rows: Row[]): Result {
   return new Result({ data: rows } as never);
 }
 
+/**
+ * A refusal AS THE APP REALLY RECEIVES IT. The server wraps an internal engine
+ * error in "MemQL engine failed to execute query. Details: "
+ * (buildEngineErrorMessage, component/grpc/server.go) and the SDK's executeNamed
+ * puts the call's name in front, so a typed method rejects with both. A fake
+ * that rejected with the bare sentence would pass an app that shows a person
+ * the frames.
+ */
+export function refused(construct: string, sentence: string): Error {
+  return new Error(`${construct}: MemQL engine failed to execute query. Details: ${sentence}`);
+}
+
 export function bundleResult(rows: Row[]): Result {
   const nodes = rows.map((row) => {
     const { id, createdAt, ...fields } = row as Record<string, unknown>;
@@ -76,7 +88,10 @@ export interface FakeSeed {
   composables?: Row;
   /** What `composeResolveSources` answers with. */
   resolved?: Row;
-  /** Make a write REFUSE: the surface must show the server's own sentence. */
+  /**
+   * Make a write REFUSE with this sentence: it arrives framed as a real refusal
+   * does (see `refused`), and the surface must show the sentence alone.
+   */
   writeError?: Error;
   /** What `composeMaterialize` answers with. */
   materializeReply?: Row;
@@ -96,9 +111,9 @@ export interface FakeSeed {
 }
 
 export function fakeConnection(seed: FakeSeed = {}) {
-  const write = (reply?: Row) =>
+  const write = (construct: string, reply?: Row) =>
     vi.fn(async (_args: Record<string, unknown>) => {
-      if (seed.writeError) throw seed.writeError;
+      if (seed.writeError) throw refused(construct, seed.writeError.message);
       return rowsResult(reply ? [reply] : []);
     });
   // Read lazily, so a test can add the Files entry AFTER the file is ready --
@@ -144,26 +159,28 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // the caller cannot read or that is archived), and the app shows that
       // answer. This exists so a test can prove no read was made.
       libraryFolderById: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
-      libraryAddDocumentComment: write(seed.commentReply ?? ({ saved: true, commentId: "comment-1" } as Row)),
-      libraryRequestDocumentRevision: write(seed.revisionReply ?? ({ runId: "run-1", proposal: "proposal-1" } as Row)),
-      composeMaterialize: write(seed.materializeReply),
-      composeRunRecipe: write(seed.materializeReply),
-      composeCancel: write(),
-      archiveComposition: write(),
-      restoreComposition: write(),
-      createComposeTemplate: write(),
-      archiveComposeTemplate: write(),
-      restoreComposeTemplate: write(),
-      createComposeRecipe: write(),
-      archiveComposeRecipe: write(),
-      restoreComposeRecipe: write(),
+      libraryAddDocumentComment: write("libraryAddDocumentComment", seed.commentReply ?? ({ saved: true, commentId: "comment-1" } as Row)),
+      libraryRequestDocumentRevision: write("libraryRequestDocumentRevision", seed.revisionReply ?? ({ runId: "run-1", proposal: "proposal-1" } as Row)),
+      composeMaterialize: write("composeMaterialize", seed.materializeReply),
+      composeRunRecipe: write("composeRunRecipe", seed.materializeReply),
+      composeCancel: write("composeCancel"),
+      archiveComposition: write("archiveComposition"),
+      restoreComposition: write("restoreComposition"),
+      createComposeTemplate: write("createComposeTemplate"),
+      archiveComposeTemplate: write("archiveComposeTemplate"),
+      restoreComposeTemplate: write("restoreComposeTemplate"),
+      createComposeRecipe: write("createComposeRecipe"),
+      archiveComposeRecipe: write("archiveComposeRecipe"),
+      restoreComposeRecipe: write("restoreComposeRecipe"),
       // THE FUNNEL THE SDK HELPERS SPEAK. `startMaterialize` and
       // `handOffDescription` take an `execute(name, call)` over this method,
       // not the typed methods above, so a call to a construct that has a mock
       // here is handed to THAT mock with the args it was rendered from. A test
       // therefore sees `composeMaterialize.mock.calls[0][0]` as an object
       // whichever way the app reached it. A name with no mock here is the
-      // by-id read, answered from `byId`.
+      // by-id read, answered from `byId`. A mock's refusal is passed on as it
+      // is: a typed mock already rejects the way the real call does (`refused`),
+      // and the real executeNamed is where that wording comes from.
       //
       // The explicit return type is what lets this refer to `fake`: without
       // it the object's type depends on its own initializer.

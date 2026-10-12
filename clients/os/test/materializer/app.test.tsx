@@ -178,7 +178,8 @@ describe("the composer", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
 
-    expect(await screen.findByText(/Give it a name first/)).toBeTruthy();
+    // The rule and the words are the editor's (the SDK's fileNameProblem), shown where the name is typed.
+    expect(await screen.findByText("Enter a file name, without a folder path.")).toBeTruthy();
     expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
   });
 

@@ -1707,6 +1707,16 @@ a failed composition has already answered, so "try again" carries a new id.
 The cluster looks the id up and then writes, so the hook also lets only one
 start be in flight.
 
+**A NAME IS CHECKED AS IT IS TYPED, AND A REFUSAL IS ONE SENTENCE**
+(`ComposerSection.tsx`, `actions.ts`). The Name field says what is wrong with a
+name beside it, with the SDK's `fileNameProblem`: the rule and the words of the
+editor's New Markdown (no slash or control character, not empty, at most 150
+characters, something before the chosen kind of file's extension), so the two
+clients say the same thing about the same name and the cluster is never sent a
+name it would refuse. Whatever the cluster does refuse arrives with the call's
+name in front and inside the engine's frame; `refusalSentence` takes those (and
+a Go package name) off, so the person reads only the sentence.
+
 **A DESCRIBED FILE'S DESCRIPTION IS SENT BY THIS WINDOW, AS THE PERSON**
 (`descriptionHandOff.ts`). The Library refuses a revision request made from
 inside a work run, deliberately, so the cluster files the empty page and the
