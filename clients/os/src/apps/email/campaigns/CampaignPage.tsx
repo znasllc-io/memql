@@ -537,7 +537,7 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
         />
       </div>
 
-      <ActionBar state={reading.word} detail={detail} tone={reading.tone} live acts={toKitActs(barSpecs, run, busyId)}>
+      <ActionBar state={reading.word} detail={detail} tone={reading.tone} live acts={toKitActs(barSpecs, run, busyId)} asking={askingNow !== ""}>
         {question === null ? null : <span className="os-actbar-confirm">{question}</span>}
       </ActionBar>
     </div>

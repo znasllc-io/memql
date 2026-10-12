@@ -6,11 +6,14 @@ import { ActionBar, type Act } from "../../src/kit/ActionBar";
 
 // AN ASK AND ITS CONFIRMATION, ONE DOUBLE-CLICK APART (memql#6033).
 //
-// Send now asks first, in the bar, and names how many people it reaches -- and
-// the confirmation stands where the ask stood, under the same label. Without a
-// guard the second click of a double-click lands on it and confirms a question
-// nobody read. The bar holds such an act for a moment after it appears, for
-// every ask in the shell.
+// Send now asks first, in the bar, and names how many people it reaches; Cancel
+// asks and is answered by Cancel campaign. The question's acts stand where the
+// bar's acts stood, right-aligned, so which of them ends up under the pointer
+// is a matter of widths -- a different label, or another place in the list, is
+// no protection. Without a guard the second click of a double-click confirms a
+// question nobody read. So a bar that turns into a question takes no press at
+// all for a moment, whatever stands where; and an ask that comes back to its
+// place is held the same way, so the rest of a double-click does not ask again.
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -39,25 +42,25 @@ function AskThenSend({ onSend, onTest = () => {} }: { onSend: () => void; onTest
         { label: "Send now", tone: "primary", onAct: () => setAsking(true) },
       ];
   return (
-    <ActionBar state="Ready to send" acts={acts}>
+    <ActionBar state="Ready to send" acts={acts} asking={asking}>
       {asking ? <span className="os-actbar-confirm">Send “August update” to 1,204 subscribers now?</span> : null}
     </ActionBar>
   );
 }
 
 /** Archive asks from the left; its confirmation stands on the right edge. */
-function ArchiveFromTheLeft({ onArchive }: { onArchive: () => void }) {
+function ArchiveFromTheLeft({ onArchive, onKeep = () => {} }: { onArchive: () => void; onKeep?: () => void }) {
   const [asking, setAsking] = useState(false);
   const acts: Act[] = asking
     ? [
-        { label: "Keep", text: true, onAct: () => setAsking(false) },
+        { label: "Keep", text: true, onAct: () => { onKeep(); setAsking(false); } },
         { label: "Archive", tone: "danger", onAct: onArchive },
       ]
     : [
         { label: "Archive", text: true, onAct: () => setAsking(true) },
         { label: "Edit", text: true, onAct: () => {} },
       ];
-  return <ActionBar state="Active" acts={acts}>{asking ? <span>Archive news@acme.com?</span> : null}</ActionBar>;
+  return <ActionBar state="Active" acts={acts} asking={asking}>{asking ? <span>Archive news@acme.com?</span> : null}</ActionBar>;
 }
 
 describe("a confirmation that takes the place of its ask", () => {
@@ -101,6 +104,52 @@ describe("a confirmation that takes the place of its ask", () => {
   });
 });
 
+/** The campaign page's Cancel: a lone text act answered by Keep and Cancel campaign. */
+function CancelAsks({ before = [], onCancel, onKeep = () => {} }: { before?: Act[]; onCancel: () => void; onKeep?: () => void }) {
+  const [asking, setAsking] = useState(false);
+  const acts: Act[] = asking
+    ? [
+        { label: "Keep", text: true, onAct: () => { onKeep(); setAsking(false); } },
+        { label: "Cancel campaign", tone: "danger", onAct: onCancel },
+      ]
+    : [{ label: "Cancel", text: true, onAct: () => setAsking(true) }, ...before];
+  return <ActionBar state="Scheduled" acts={acts} asking={asking}>{asking ? <span className="os-actbar-confirm">Cancel “Launch day”?</span> : null}</ActionBar>;
+}
+
+describe("a question that replaces its ask under other labels", () => {
+  it("is not answered by the second click of the double-click that asked", () => {
+    // [Cancel] becomes [Keep, Cancel campaign]: the confirmation stands on the
+    // right edge, exactly where Cancel stood, under another label.
+    const cancel = vi.fn();
+    render(<CancelAsks onCancel={cancel} />);
+    press("Cancel");
+    press("Cancel campaign");
+    expect(cancel).not.toHaveBeenCalled();
+    expect(screen.getByText("Cancel “Launch day”?")).toBeTruthy();
+    later(400);
+    press("Cancel campaign");
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes no press at all for a moment where it only partly covers what stood there", () => {
+    // [Cancel, Send now] becomes [Keep, Cancel campaign]: wider acts, other
+    // places -- whichever one the second click lands on, it does nothing.
+    const cancel = vi.fn();
+    const keep = vi.fn();
+    render(<CancelAsks before={[{ label: "Send now", tone: "primary", onAct: () => {} }]} onCancel={cancel} onKeep={keep} />);
+    press("Cancel");
+    press("Cancel campaign");
+    press("Keep");
+    expect(cancel).not.toHaveBeenCalled();
+    expect(keep).not.toHaveBeenCalled();
+    expect(screen.getByText("Cancel “Launch day”?")).toBeTruthy();
+    later(400);
+    press("Keep");
+    expect(keep).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Cancel “Launch day”?")).toBeNull();
+  });
+});
+
 describe("the way back", () => {
   it("is held too when a refused confirmation puts its ask back in that place", () => {
     // The confirmation is refused at once and the bar asks again; the rest of
@@ -116,7 +165,7 @@ describe("the way back", () => {
             { label: "Cancel", text: true, onAct: () => {} },
             { label: "Send now", tone: "primary", onAct: () => setAsking(true) },
           ];
-      return <ActionBar state="Draft" acts={acts}>{asking ? <span>Send now?</span> : null}</ActionBar>;
+      return <ActionBar state="Draft" acts={acts} asking={asking}>{asking ? <span>Send now?</span> : null}</ActionBar>;
     }
     render(<RefusedAtOnce />);
     press("Send now");
@@ -128,6 +177,24 @@ describe("the way back", () => {
     later(400);
     press("Send now");
     expect(screen.getByText("Send now?")).toBeTruthy();
+  });
+});
+
+describe("a question that asks from somewhere else", () => {
+  it("holds the confirmation even where it stands at another place than its ask", () => {
+    // Archive asks from the left and is confirmed from the right edge: the
+    // places differ, but a place counts acts, not pixels.
+    const archive = vi.fn();
+    const keep = vi.fn();
+    render(<ArchiveFromTheLeft onArchive={archive} onKeep={keep} />);
+    press("Archive");
+    press("Archive");
+    press("Keep");
+    expect(archive).not.toHaveBeenCalled();
+    expect(keep).not.toHaveBeenCalled();
+    later(400);
+    press("Archive");
+    expect(archive).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -172,13 +239,6 @@ describe("what the guard leaves alone", () => {
     expect(resume).toHaveBeenCalledTimes(1);
   });
 
-  it("a confirmation that stands somewhere else than its ask takes the first press", () => {
-    const archive = vi.fn();
-    render(<ArchiveFromTheLeft onArchive={archive} />);
-    press("Archive");
-    press("Archive");
-    expect(archive).toHaveBeenCalledTimes(1);
-  });
 
   it("a wizard's next step is a new question, not the answer to the last one", () => {
     // Next on one step, Next on the step it opens: the same label at the same
@@ -199,6 +259,23 @@ describe("what the guard leaves alone", () => {
     press("Next");
     press("Next");
     expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it("a bar that draws something else beside its acts is not a question", () => {
+    // A refusal drawn in the bar beside acts that changed: nothing was asked,
+    // so the act that now stands there answers the very next press.
+    const retry = vi.fn();
+    function Refused() {
+      const [failed, setFailed] = useState(false);
+      const acts: Act[] = failed
+        ? [{ label: "Try again", tone: "primary", onAct: retry }]
+        : [{ label: "Run", tone: "primary", onAct: () => setFailed(true) }];
+      return <ActionBar state="Ready" acts={acts}>{failed ? <span role="alert">The run was refused.</span> : null}</ActionBar>;
+    }
+    render(<Refused />);
+    press("Run");
+    press("Try again");
+    expect(retry).toHaveBeenCalledTimes(1);
   });
 
   it("holds nothing on a bar nobody has pressed yet", () => {

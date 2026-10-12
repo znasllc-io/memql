@@ -520,6 +520,7 @@ describe("cancel after a mint asks which of two things", () => {
     expect((screen.getByLabelText("the uninstall command") as HTMLInputElement).value).toBe(
       uninstallCommand("mac", { clusterUrl: workerClusterUrl("memql.example.com") }),
     );
+    await readTheQuestion();
     await click(within(bar()).getByRole("button", { name: "Cancel setup" }));
     await settle();
     expect(h.revoke).toHaveBeenCalledTimes(1);
@@ -532,6 +533,7 @@ describe("cancel after a mint asks which of two things", () => {
     mount(fakeConnection());
     await describeAndMint();
     await click(within(bar()).getByRole("button", { name: "Cancel setup" }));
+    await readTheQuestion();
     await click(within(bar()).getByRole("button", { name: "Cancel setup" }));
     await settle();
     expect(screen.getByText(/identity not found/)).toBeTruthy();
@@ -543,6 +545,7 @@ describe("cancel after a mint asks which of two things", () => {
     mount(fakeConnection());
     await describeAndMint();
     await click(within(bar()).getByRole("button", { name: "Cancel setup" }));
+    await readTheQuestion();
     await click(within(bar()).getByRole("button", { name: "Keep setting up" }));
     expect(within(bar()).getByText("Waiting for studio-mac-mini")).toBeTruthy();
     expect(h.revoke).not.toHaveBeenCalled();
@@ -555,6 +558,7 @@ describe("cancel after a mint asks which of two things", () => {
     await describeAndMint();
     await click(screen.getAllByRole("button", { name: "Back to Machines" })[0]!);
     expect(within(bar()).getByText("Back to Machines?")).toBeTruthy();
+    await readTheQuestion();
     await click(within(bar()).getByRole("button", { name: "Stay" }));
     expect(within(bar()).getByText("Waiting for studio-mac-mini")).toBeTruthy();
     expect(h.revoke).not.toHaveBeenCalled();

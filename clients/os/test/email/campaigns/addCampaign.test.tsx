@@ -419,7 +419,8 @@ describe("Add a campaign, on Review", () => {
     expect(screen.getByText("Send “August copy” to 1,204 subscribers now?")).toBeTruthy();
     expect(barActs()).toEqual(["Not yet", "Send now"]);
     expect(conn.query.createCampaign).not.toHaveBeenCalled();
-    // Not yet writes nothing and asks nothing.
+    // Not yet writes nothing and asks nothing -- once the question has been read.
+    await readTheQuestion();
     press("Not yet");
     expect(barActs()).toEqual(["Send a test", "Save as draft", "Send now"]);
     expect(screen.queryByText("Send “August copy” to 1,204 subscribers now?")).toBeNull();
@@ -671,11 +672,18 @@ describe("Add a campaign, on Review", () => {
     press("Cancel");
     expect(screen.getByText("Cancel “Spring sale”?")).toBeTruthy();
     expect(barActs()).toEqual(["Keep", "Cancel campaign"]);
+    // The second click of a double-click on Cancel lands on the question, whose
+    // Cancel campaign stands where Cancel stood: it answers nothing.
+    press("Cancel campaign");
+    expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
+    expect(screen.getByText("Cancel “Spring sale”?")).toBeTruthy();
+    await readTheQuestion();
     press("Keep");
     expect(barActs()).toEqual(["Cancel", "Send a test", "Send now"]);
     expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
 
     press("Cancel");
+    await readTheQuestion();
     press("Cancel campaign");
     await waitFor(() => expect(conn.query.cancelCampaign).toHaveBeenCalledWith({ campaignId: createdCampaign(conn).campaignId }));
     // Back on the list.

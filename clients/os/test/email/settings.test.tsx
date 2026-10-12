@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { readTheQuestion } from "../readTheQuestion";
 import { chooseOption, openSelect } from "../selectControl";
 import { installSeededAccess } from "../seededAccess";
 import { readiness, verdict, withOs } from "../setup/harness";
@@ -641,11 +642,16 @@ describe("A sender's page", () => {
     expect(barButtons()).toEqual(["Keep", "Archive"]);
     expect(conn.query.setSenderIdentityStatus).not.toHaveBeenCalled();
 
+    await readTheQuestion();
     fireEvent.click(within(bar()).getByRole("button", { name: "Keep" }));
     expect(barButtons()).toEqual(["Archive", "Edit"]);
     expect(conn.query.setSenderIdentityStatus).not.toHaveBeenCalled();
 
+    // A double-click on Archive asks; its second click does not answer.
     fireEvent.click(within(bar()).getByRole("button", { name: "Archive" }));
+    fireEvent.click(within(bar()).getByRole("button", { name: "Archive" }));
+    expect(conn.query.setSenderIdentityStatus).not.toHaveBeenCalled();
+    await readTheQuestion();
     fireEvent.click(within(bar()).getByRole("button", { name: "Archive" }));
     await waitFor(() =>
       expect(conn.query.setSenderIdentityStatus).toHaveBeenCalledWith({ senderIdentityId: "s1", status: "disabled" }),
@@ -669,6 +675,7 @@ describe("A sender's page", () => {
     conn.query.setSenderIdentityStatus.mockRejectedValueOnce(new Error("Only the owner of this sender can archive it."));
     await openSender(conn);
     fireEvent.click(within(bar()).getByRole("button", { name: "Archive" }));
+    await readTheQuestion();
     fireEvent.click(within(bar()).getByRole("button", { name: "Archive" }));
     expect(await screen.findByText("Only the owner of this sender can archive it.")).toBeTruthy();
     // Still the sender it was, still asking.

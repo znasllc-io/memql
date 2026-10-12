@@ -217,7 +217,8 @@ describe("acting on a campaign", () => {
     expect(await within(bar()).findByText("Send “August update” to 4,182 subscribers now?")).toBeTruthy();
     expect(barActs()).toEqual(["Not yet", "Send now"]);
     expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
-    // Not yet sends nothing and asks nothing.
+    // Not yet sends nothing and asks nothing -- once the question has been read.
+    await readTheQuestion();
     press("Not yet");
     expect(barActs()).toEqual(["Edit", "Send a test", "Send now"]);
     expect(within(bar()).queryByText(/subscribers now\?$/)).toBeNull();
@@ -250,6 +251,12 @@ describe("acting on a campaign", () => {
     press("Cancel");
     expect(within(bar()).getByText("Cancel “August update”? Nobody will get it, and it stays on the list as cancelled.")).toBeTruthy();
     expect(barActs()).toEqual(["Keep", "Cancel campaign"]);
+    // A double-click on Cancel: its second click lands on the question, whose
+    // Cancel campaign stands on the right edge where Cancel's row of acts
+    // ended. It answers nothing.
+    press("Cancel campaign");
+    expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
+    await readTheQuestion();
     press("Keep");
     expect(barActs()).toEqual(["Cancel", "Send a test", "Send now"]);
     expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
@@ -805,6 +812,7 @@ describe("testing a campaign", () => {
     // Before anything goes, the question says where it goes.
     press("Send now");
     expect(await within(bar()).findByText("This cluster keeps email in Inbox instead of delivering it.")).toBeTruthy();
+    await readTheQuestion();
     press("Not yet");
     press("Send a test");
     fireEvent.click(await screen.findByRole("button", { name: "View it in Inbox" }));

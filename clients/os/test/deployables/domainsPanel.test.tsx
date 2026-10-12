@@ -8,6 +8,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
+import { readTheQuestion } from "../readTheQuestion";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
 import { CUSTOM_DOMAIN_CONCEPT } from "../../src/apps/deployables/domains";
 import {
@@ -885,6 +886,7 @@ describe("removing a binding", () => {
     expect(within(floor()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Keep", "Remove"]);
     expect(floor().querySelectorAll(".os-button")).toHaveLength(1);
 
+    await readTheQuestion();
     await click(within(floor()).getByRole("button", { name: "Remove" }));
     await waitFor(() => expect(connection.callsNamed("removeCustomDomain")).toHaveLength(1));
     const list = await screen.findByRole("region", { name: /^Domains for / });
@@ -910,6 +912,7 @@ describe("removing a binding", () => {
     // IN SURFACE, never a browser dialog: window.confirm blocks the whole
     // shell and looks like a tab.
     await screen.findByText("Stop serving www.acme.com?");
+    await readTheQuestion();
     await click(screen.getByRole("button", { name: "Keep" }));
 
     await waitFor(() => expect(screen.queryByText("Stop serving www.acme.com?")).toBeNull());
@@ -926,6 +929,7 @@ describe("removing a binding", () => {
     await findCard("www.acme.com");
     await click(screen.getByRole("button", { name: "Remove www.acme.com" }));
     await screen.findByText("Stop serving www.acme.com?");
+    await readTheQuestion();
     const confirm = within(card("www.acme.com")).getByRole("button", { name: "Remove" });
     await click(confirm);
 

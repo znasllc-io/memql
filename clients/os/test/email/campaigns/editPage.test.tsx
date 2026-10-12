@@ -155,6 +155,7 @@ describe("editing a campaign", () => {
     // The second click of a double-click is not an answer.
     press("Cancel campaign");
     expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
+    await readTheQuestion();
     press("Keep");
     expect(barActs()).toEqual(["Cancel campaign"]);
 
@@ -163,6 +164,21 @@ describe("editing a campaign", () => {
     press("Cancel campaign");
     await waitFor(() => expect(conn.query.cancelCampaign).toHaveBeenCalledWith({ campaignId: "c1" }));
     expect(await screen.findByRole("heading", { level: 3, name: "August update" })).toBeTruthy();
+  });
+
+  it("a double-click on Cancel campaign beside unsaved changes does not cancel", async () => {
+    // [Cancel campaign, Discard changes, Save] becomes [Keep, Cancel campaign]:
+    // the confirmation is at another place than the ask, and still under the
+    // pointer's reach. The question takes no press until it can be read.
+    const conn = seed();
+    mountWindow(conn);
+    await openEdit();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "September update" } });
+    await waitFor(() => expect(barActs()).toEqual(["Cancel campaign", "Discard changes", "Save"]));
+    press("Cancel campaign");
+    press("Cancel campaign");
+    expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
+    expect(barActs()).toEqual(["Keep", "Cancel campaign"]);
   });
 
   it("defaults to the client's organization, filters resources and sends no owner", async () => {

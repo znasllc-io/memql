@@ -522,7 +522,7 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
         </Panel>
       </div>
 
-      <ActionBar state="Editing" detail={askingNow === "" ? blocked : undefined} acts={toKitActs(specs, run, busyId)}>
+      <ActionBar state="Editing" detail={askingNow === "" ? blocked : undefined} acts={toKitActs(specs, run, busyId)} asking={askingNow !== ""}>
         {question === null ? null : <span className="os-actbar-confirm">{question}</span>}
       </ActionBar>
     </div>
