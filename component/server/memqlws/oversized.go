@@ -9,8 +9,10 @@ import (
 	"regexp"
 	"strconv"
 
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/protobuf/encoding/protowire"
+	"google.golang.org/protobuf/proto"
 	"nhooyr.io/websocket"
 )
 
@@ -92,20 +94,38 @@ func (t *tailKeeper) Write(p []byte) (int, error) {
 // for that request alone.
 func (s *session) refuseOversizedRequest(msgType websocket.MessageType, over *oversizedRequest) {
 	messageID, requestID := idsOfAnOversizedRequest(msgType, over.prefix, over.tail)
+	s.refuseRequest(messageID, requestID, over.size, s.maxBytes)
+}
+
+// withinServerCap says whether the server will take msg. The server limits the
+// protocol buffers encoding of a request, which is not the size of the JSON text
+// the frame limit measured: a list of small numbers is two bytes of JSON each and
+// eleven of protocol buffers. grpc-go refuses a message over its limit by failing
+// the stream's Recv, and the server's stream loop returns on that, so the whole
+// session would end. The request is measured here the way the server will.
+func withinServerCap(msg *memqlv1.MemqlClientMessage, limit int) (size int, ok bool) {
+	size = proto.Size(msg)
+	return size, size <= limit
+}
+
+// refuseRequest answers a request that cannot be forwarded with an error for that
+// request alone, by the ids it came with (requestID, or the message id when there
+// is none), and the sentence for a request that is too large.
+func (s *session) refuseRequest(messageID, requestID string, size, limit int64) {
 	named := requestID
 	if named == "" {
 		named = messageID
 	}
-	s.logDebug("memql ws request refused: too large", "request_id", named, "bytes", over.size, "limit", s.maxBytes)
+	s.logDebug("memql ws request refused: too large", "request_id", named, "bytes", size, "limit", limit)
 	s.queueLocalErrorItem(&queuedLocalError{
 		requestId: named,
 		correlate: messageID,
 		code:      codes.ResourceExhausted,
-		message:   requestTooLargeSentence(over.size, s.maxBytes),
+		message:   requestTooLargeSentence(size, limit),
 		metadata: map[string]string{
 			"code":       "REQUEST_TOO_LARGE",
-			"sizeBytes":  strconv.FormatInt(over.size, 10),
-			"limitBytes": strconv.FormatInt(s.maxBytes, 10),
+			"sizeBytes":  strconv.FormatInt(size, 10),
+			"limitBytes": strconv.FormatInt(limit, 10),
 		},
 	})
 }

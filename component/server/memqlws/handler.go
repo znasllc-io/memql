@@ -509,6 +509,15 @@ func (s *session) readLoop() error {
 			}
 		}
 
+		// Measured as the server will measure it, which is not the size of the text
+		// above (see withinServerCap). A request the server would not take fails by
+		// itself here, as one over the frame limit does.
+		if size, ok := withinServerCap(clientMsg, grpclimits.MaxMessageBytes); !ok {
+			messageID := clientMsg.GetMessageId()
+			s.refuseRequest(messageID, clientMsg.GetExecuteQuery().GetRequestId(), int64(size), grpclimits.MaxMessageBytes)
+			continue
+		}
+
 		if err := s.forwardClientMessage(clientMsg); err != nil {
 			return err
 		}
