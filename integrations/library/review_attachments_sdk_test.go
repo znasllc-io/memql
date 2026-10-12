@@ -45,6 +45,14 @@ import (
 // constants here, and a limit that drifts is a request sent to the revision
 // workflow with a file it refuses, or sent to the composer with one it would have
 // taken.
+//
+// The person's client makes that same decision from the same rows. The SDK's
+// isDescribedMarkdown applies the rule through attachmentKind, the function the
+// limits above feed, rather than a list of its own, so the SDK holds one copy of
+// the rule and not two; TestSDKDecidesTheDescribedPathWithTheHandOffsRule holds
+// it to that. A client that decided otherwise would hand on a description the
+// server had composed (a second draft over the first), or leave a file filed
+// empty with its description unsent.
 
 const sdkMaterializeSource = "../../sdk/ts/src/client/materialize.ts"
 
@@ -243,6 +251,36 @@ func TestComposeMirrorsTheReviewAttachmentRules(t *testing.T) {
 	sort.Strings(want)
 	if !slices.Equal(got, want) {
 		t.Errorf("compose takes the picture formats %v and the Library takes %v (reviewImageFormats; \".jpg\" is read as \".jpeg\" by both): they must be the same", got, want)
+	}
+}
+
+// The SDK decides whether a request is a described one with the hand-off's own rule: the body
+// of isDescribedMarkdown calls attachmentKind (the function MAX_MARKDOWN_BYTES, MAX_IMAGE_BYTES
+// and IMAGE_EXTENSIONS feed, which TestSDKMirrorsTheReviewAttachmentRules holds to the
+// Library's), and readDescribedMarkdown is exported for a client that must read the rows first.
+// A second list of types and sizes in the predicate would be a copy nothing holds.
+//
+// It reads the SDK's source, which Go's test cache does not notice changing: run it with -count=1 after editing that file.
+func TestSDKDecidesTheDescribedPathWithTheHandOffsRule(t *testing.T) {
+	raw, err := os.ReadFile(sdkMaterializeSource)
+	if err != nil {
+		t.Fatalf("the SDK hand-off is not at %s (%v): if it moved, update sdkMaterializeSource -- this test is what keeps its decision of the described path honest", sdkMaterializeSource, err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	start := slices.IndexFunc(lines, func(line string) bool { return strings.HasPrefix(line, "export function isDescribedMarkdown(") })
+	if start < 0 {
+		t.Fatal("isDescribedMarkdown is gone from the SDK hand-off, or no longer begins a line with `export function isDescribedMarkdown(`; update this test with it")
+	}
+	end := slices.Index(lines[start:], "}")
+	if end < 0 {
+		t.Fatal("isDescribedMarkdown has no closing brace on a line of its own in the SDK hand-off; update this test with it")
+	}
+	body := strings.Join(lines[start:start+end+1], "\n")
+	if !strings.Contains(body, "attachmentKind(") {
+		t.Errorf("isDescribedMarkdown no longer calls attachmentKind in its own body. The SDK must decide the described path with the same rule the hand-off applies to a reference (the function the limits mirrored above feed), or its answer can differ from the server's and from what the hand-off will attach:\n%s", body)
+	}
+	if !regexp.MustCompile(`(?m)^export (async )?function readDescribedMarkdown\(`).Match(raw) {
+		t.Error("readDescribedMarkdown is not exported from the SDK hand-off: a client that does not know the picked files' rows has no way to decide the path before it starts")
 	}
 }
 

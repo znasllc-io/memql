@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import {
   fileNameProblem,
-  isDescribedMarkdown,
+  readDescribedMarkdown,
   refusalSentence,
   startMaterialize,
   type MaterializeExecute,
@@ -210,10 +210,17 @@ export function useMaterialize(): MaterializeState {
         const key = JSON.stringify(request);
         if (ask.current?.key !== key) ask.current = { key, id: newId() };
         const requestId = ask.current.id;
-        const id = await startMaterialize(executeOver(query), { ...request, requestId });
+        // WHETHER THE FILE IS DESCRIBED IS DECIDED HERE, FROM THE PICKED FILES' ROWS, as the cluster
+        // decides it: a description is handed to the Library only when every picked file is one it
+        // can attach, and any other file sends the request to the composer. It reads one row per
+        // picked file and nothing at all for a request that cannot be described. A refused read is
+        // the cluster's sentence and starts nothing, so the same ask can be pressed again.
+        const execute = executeOver(query);
+        const isDescribed = await readDescribedMarkdown(execute, request);
+        const id = await startMaterialize(execute, { ...request, requestId });
         ask.current = null;
         setCompositionId(id);
-        if (isDescribedMarkdown(request)) {
+        if (isDescribed) {
           setDescribed((prev) => [...prev, { compositionId: id, statement: request.statement ?? "", sources: request.sources ?? [], requestId }]);
         }
         return id;

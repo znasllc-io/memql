@@ -473,6 +473,9 @@ describe("creating a file", () => {
       first = result.current.materialize(facts);
       second = result.current.materialize(facts);
     });
+    // The press decides the path first (it reads the picked files' rows, and none are picked here), so
+    // the request leaves a moment after the press rather than within it: wait for it, then answer.
+    await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     answer();
     await expect(Promise.all([first, second])).resolves.toEqual(["c1", "c1"]);
     expect(conn.query.composeMaterialize).toHaveBeenCalledOnce();
@@ -746,25 +749,25 @@ describe("a Markdown file asked for by describing it", () => {
     });
   });
 
+  // THE LIBRARY'S TOTALS ARE WHAT LEAVES A REFERENCE OFF. A file it cannot attach at all (a PDF, a
+  // spreadsheet) keeps the composer, so it never reaches this hand-off; what can still go without being
+  // attached is a reference past the Library's eight files, 16 MiB, or 64 KiB of Markdown. These are
+  // Markdown files of 30 KiB: each is one it attaches, and the third passes its 64 KiB.
+  const MARKDOWN_FILE = 30 * 1024;
+  /** `count` Markdown files of 30 KiB, as the Library holds them: a file row and a Files entry each. */
+  const markdownFiles = (names: string[]) => ({
+    artifactsByFile: Object.fromEntries(names.map((_, n) => [`f-${n + 1}`, { id: `a-${n + 1}` } as unknown as Row])),
+    filesById: Object.fromEntries(names.map((name, n) => [`f-${n + 1}`, { id: `f-${n + 1}`, name, size: MARKDOWN_FILE, versionNumber: n === 0 ? 2 : 1 } as unknown as Row])),
+  });
+  const pickedMarkdown = (names: string[]) =>
+    setupIntent("i1", { format: "markdown", sources: names.map((name, n) => ({ kind: "library_file" as const, ref: `f-${n + 1}`, label: name })) });
+  const attached = (...files: number[]) =>
+    files.map((n) => ({ artifactId: `a-${n}`, version: n === 1 ? 2 : 1, revision: `file:${n === 1 ? 2 : 1}` }));
+
   it("names each reference that went without being attached, on its own", async () => {
-    const conn = fakeConnection(
-      seed({
-        artifactsByFile: { "f-spec": { id: "a-spec" } as unknown as Row, "f-sheet": { id: "a-sheet" } as unknown as Row },
-        filesById: {
-          "f-spec": { id: "f-spec", name: "spec.pdf", size: 900, versionNumber: 1 } as unknown as Row,
-          "f-sheet": { id: "f-sheet", name: "numbers.csv", size: 300, versionNumber: 1 } as unknown as Row,
-        },
-      }),
-    );
-    mount(conn, {
-      intent: setupIntent("i1", {
-        format: "markdown",
-        sources: [
-          { kind: "library_file", ref: "f-spec", label: "spec.pdf" },
-          { kind: "library_file", ref: "f-sheet", label: "numbers.csv" },
-        ],
-      }),
-    });
+    const names = ["first.md", "second.md", "third.md", "fourth.md"];
+    const conn = fakeConnection(seed(markdownFiles(names)));
+    mount(conn, { intent: pickedMarkdown(names) });
     await screen.findByRole("list", { name: "Picked sources" });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
@@ -775,9 +778,11 @@ describe("a Markdown file asked for by describing it", () => {
       notice.querySelector(".os-notice-detail")?.textContent,
     ]);
     expect(notices).toEqual([
-      ["This reference wasn't attached.", "spec.pdf"],
-      ["This reference wasn't attached.", "numbers.csv"],
+      ["This reference wasn't attached.", "third.md"],
+      ["This reference wasn't attached.", "fourth.md"],
     ]);
+    // The first two, in the order they were picked, went with the revision.
+    expect(conn.query.libraryAddDocumentComment.mock.calls[0]?.[0]).toMatchObject({ attachments: attached(1, 2) });
   });
 
   // What arrives a moment after "Ready" is not something the person did, so it
@@ -836,24 +841,9 @@ describe("a Markdown file asked for by describing it", () => {
     });
 
     it("including the references that could not be attached, which arrive instead of a failure", async () => {
-      const conn = fakeConnection(
-        seed({
-          artifactsByFile: { "f-notes": { id: "a-notes" } as unknown as Row, "f-spec": { id: "a-spec" } as unknown as Row },
-          filesById: {
-            "f-notes": { id: "f-notes", name: "notes.md", size: 120, versionNumber: 2 } as unknown as Row,
-            "f-spec": { id: "f-spec", name: "spec.pdf", size: 900, versionNumber: 1 } as unknown as Row,
-          },
-        }),
-      );
-      mount(conn, {
-        intent: setupIntent("i1", {
-          format: "markdown",
-          sources: [
-            { kind: "library_file", ref: "f-notes", label: "notes.md" },
-            { kind: "library_file", ref: "f-spec", label: "spec.pdf" },
-          ],
-        }),
-      });
+      const names = ["first.md", "second.md", "third.md"];
+      const conn = fakeConnection(seed(markdownFiles(names)));
+      mount(conn, { intent: pickedMarkdown(names) });
       await screen.findByRole("list", { name: "Picked sources" });
       await materializeNotes();
       await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
@@ -862,7 +852,8 @@ describe("a Markdown file asked for by describing it", () => {
       conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
       await shown("This reference wasn't attached.");
       expect(announcer()).toBe(region);
-      expect(region?.textContent).toBe("This reference wasn't attached. spec.pdf.");
+      expect(region?.textContent).toBe("This reference wasn't attached. third.md.");
+      expect(conn.query.libraryAddDocumentComment.mock.calls[0]?.[0]).toMatchObject({ attachments: attached(1, 2) });
     });
 
     it("and goes quiet again when the file is left", async () => {
@@ -893,39 +884,22 @@ describe("a Markdown file asked for by describing it", () => {
   });
 
   it("names the references that could not be attached, after opening the revision with the ones that could", async () => {
-    const conn = fakeConnection(
-      seed({
-        artifactsByFile: { "f-notes": { id: "a-notes" } as unknown as Row, "f-spec": { id: "a-spec" } as unknown as Row },
-        filesById: {
-          "f-notes": { id: "f-notes", name: "notes.md", size: 120, versionNumber: 2 } as unknown as Row,
-          "f-spec": { id: "f-spec", name: "spec.pdf", size: 900, versionNumber: 1 } as unknown as Row,
-        },
-      }),
-    );
+    const names = ["first.md", "second.md", "third.md"];
+    const conn = fakeConnection(seed(markdownFiles(names)));
     // The new file itself has no entry in `artifactsByFile`: it falls back to ARTIFACT.
-    mount(conn, {
-      intent: setupIntent("i1", {
-        format: "markdown",
-        sources: [
-          { kind: "library_file", ref: "f-notes", label: "notes.md" },
-          { kind: "library_file", ref: "f-spec", label: "spec.pdf" },
-        ],
-      }),
-    });
+    mount(conn, { intent: pickedMarkdown(names) });
     await screen.findByRole("list", { name: "Picked sources" });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
 
     // Each reference left off is named on its own, by the label the person gave it. The SDK does not say
-    // why one was left off (its kind, its size, the Library's limits, not being found), so nor does this.
+    // why one was left off (the Library's totals, or what only its bytes show), so nor does this.
     const notice = (await shown("This reference wasn't attached.")).closest(".os-notice");
-    expect(notice?.querySelector(".os-notice-detail")?.textContent).toBe("spec.pdf");
+    expect(notice?.querySelector(".os-notice-detail")?.textContent).toBe("third.md");
     expect(document.querySelectorAll(".os-notice-line")).toHaveLength(1);
     expect(document.body.textContent).not.toMatch(/Only Markdown and images/);
-    expect(conn.query.libraryAddDocumentComment.mock.calls[0]?.[0]).toMatchObject({
-      attachments: [{ artifactId: "a-notes", version: 2, revision: "file:2" }],
-    });
+    expect(conn.query.libraryAddDocumentComment.mock.calls[0]?.[0]).toMatchObject({ attachments: attached(1, 2) });
     await waitFor(() => expect(conn.query.libraryRequestDocumentRevision).toHaveBeenCalledOnce());
     expect(screen.queryByText(/description was not sent/)).toBeNull();
   });
@@ -994,6 +968,59 @@ describe("a Markdown file asked for by describing it", () => {
     expect(conn.query.libraryArtifactForFile).not.toHaveBeenCalled();
     expect(conn.query.libraryAddDocumentComment).not.toHaveBeenCalled();
     expect(conn.query.libraryRequestDocumentRevision).not.toHaveBeenCalled();
+  });
+
+  // THE FILES DECIDE THE PATH, AND THE PATH IS DECIDED BEFORE THE PRESS SENDS ANYTHING. The Library
+  // attaches Markdown and pictures to a review comment and nothing else, so a spreadsheet among the
+  // files sends the whole request to the composer, which reads every file it is given. Each file's row
+  // is read once, before the request goes, and a window that read them hands nothing on afterwards.
+  it("does not hand on a Markdown request with a spreadsheet among its files: the composer reads it", async () => {
+    const conn = fakeConnection(
+      seed({
+        artifactsByFile: { "f-notes": { id: "a-notes" } as unknown as Row, "f-sheet": { id: "a-sheet" } as unknown as Row },
+        filesById: {
+          "f-notes": { id: "f-notes", name: "notes.md", size: 120, versionNumber: 2 } as unknown as Row,
+          "f-sheet": { id: "f-sheet", name: "numbers.csv", size: 300, versionNumber: 1 } as unknown as Row,
+        },
+      }),
+    );
+    mount(conn, {
+      intent: setupIntent("i1", {
+        format: "markdown",
+        sources: [
+          { kind: "library_file", ref: "f-notes", label: "notes.md" },
+          { kind: "library_file", ref: "f-sheet", label: "numbers.csv" },
+        ],
+      }),
+    });
+    await screen.findByRole("list", { name: "Picked sources" });
+    await materializeNotes();
+    await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+    // One read of each file's row, and both before the request was sent.
+    expect(conn.query.libraryFileById.mock.calls.map(([args]) => args["fileId"]).sort()).toEqual(["f-notes", "f-sheet"]);
+    expect(Math.max(...conn.query.libraryFileById.mock.invocationCallOrder)).toBeLessThan(conn.query.composeMaterialize.mock.invocationCallOrder[0] ?? 0);
+    // Both files go with the request as it was asked for: the composer reads them.
+    expect(sent(conn)).toMatchObject({
+      format: "markdown",
+      statement: "A one page brief",
+      sources: [
+        { kind: "library_file", ref: "f-notes", label: "notes.md" },
+        { kind: "library_file", ref: "f-sheet", label: "numbers.csv" },
+      ],
+    });
+    // As the composer writes a file: a model was used and the provenance is in the file.
+    conn.subscriptions.emit(
+      COMPOSITION,
+      ready({ modelsUsed: [{ provider: "anthropic", model: "claude-sonnet-5", calls: 1, tokens: 900 }], provenanceEmbedded: true, provenanceNote: "Provenance is in this file's front matter." }),
+      "NODE_UPDATED",
+    );
+    await screen.findByText("Ready");
+    await act(async () => {});
+    expect(conn.query.libraryArtifactForFile).not.toHaveBeenCalled();
+    expect(conn.query.libraryAddDocumentComment).not.toHaveBeenCalled();
+    expect(conn.query.libraryRequestDocumentRevision).not.toHaveBeenCalled();
+    // And the files were not read a second time for a hand-off that was never made.
+    expect(conn.query.libraryFileById).toHaveBeenCalledTimes(2);
   });
 
   it("does not hand on a composition this window did not start", async () => {

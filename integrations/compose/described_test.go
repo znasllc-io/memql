@@ -43,6 +43,7 @@ func TestAttachableByLibraryIsTheLibrarysPerFileRule(t *testing.T) {
 		{"photo.jpg", 10, true, true}, // ".jpg" is read as ".jpeg"
 		{"photo.jpeg", 10, true, true},
 		{"anim.gif", 10, true, true},
+		{"anim.G\u0130F", 10, true, true}, // a Turkish locale's capital dotted I is "i" to strings.ToLower, as the Library reads it
 		{"pic.webp", 10, true, true},
 		{"dir/notes.md", 10, true, true}, // the extension of the last element
 		// Not taken: a size the Library refuses.
@@ -129,6 +130,11 @@ func TestDescribedMarkdownNeedsEveryPickedFileToBeOneTheLibraryAttaches(t *testi
 	conceptRow := Resolved{Ref: SourceRef{Kind: KindConceptRow, Ref: "v1:billing:invoice#invoice-1", Label: "INV-1"}, Rows: []map[string]any{{"id": "invoice-1"}}, Count: 1}
 	twoRows := pickedFile("notes.md", 100)
 	twoRows.Rows = append(twoRows.Rows, map[string]any{"id": "another", "name": "notes.md", "size": float64(100)})
+	// A file's size is an int, so these do not occur; they are read as the SDK reads them.
+	fraction := pickedFile("notes.md", 0)
+	fraction.Rows[0]["size"] = 0.25
+	pastTheLimit := pickedFile("notes.md", 0)
+	pastTheLimit.Rows[0]["size"] = 32768.5
 
 	for name, tc := range map[string]struct {
 		picked []Resolved
@@ -139,6 +145,8 @@ func TestDescribedMarkdownNeedsEveryPickedFileToBeOneTheLibraryAttaches(t *testi
 		"a Markdown file and a picture":          {[]Resolved{pickedFile("notes.md", 2048), pickedFile("logo.png", 40<<10)}, true},
 		"a file that is not archived":            {[]Resolved{notArchived}, true},
 		"a Markdown file whose row says no size": {[]Resolved{unsized}, true},
+		"a fraction of a byte":                   {[]Resolved{fraction}, true},
+		"a fraction of a byte past the limit":    {[]Resolved{pastTheLimit}, false},
 		"a spreadsheet":                          {[]Resolved{pickedFile("numbers.csv", 4096)}, false},
 		"a Markdown file and a spreadsheet":      {[]Resolved{pickedFile("notes.md", 2048), pickedFile("numbers.csv", 4096)}, false},
 		"a spreadsheet and a Markdown file":      {[]Resolved{pickedFile("numbers.csv", 4096), pickedFile("notes.md", 2048)}, false},
