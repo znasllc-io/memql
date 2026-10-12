@@ -1,0 +1,136 @@
+{{- /*
+  The page the platform's own hosts get while the platform is down: the apex
+  and api, identity, mcp, os and vscode under it. errorpages.go says why.
+
+  Everything is inline because nothing else may be reachable while this page
+  is up: one stylesheet, the mark in the markup, no font file, no script, no
+  image. The Content-Security-Policy the server sends allows this one
+  stylesheet by hash and nothing else.
+*/ -}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f7f5">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#07090a">
+<title>{{.Title}}</title>
+<meta name="description" content="{{.Message}}">
+<style>
+/*
+  THE PALETTE IS THE BRAND'S, WRITTEN OUT. brand/tokens.css is the one source,
+  but a page that may fetch nothing cannot import it, so these six values are
+  copied from it and errorpages_test.go fails the build when they drift. They
+  are written as a plain light set plus a dark override rather than as the
+  tokens' light-dark(): a browser that does not know light-dark() would drop
+  every colour, and this is the page that has to render for everybody.
+*/
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --fg: #191d1a;
+  --muted: #5b615c;
+  --line: #e5e6e2;
+  --accent: #047d5a;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #07090a;
+    --surface: #0b1110;
+    --fg: #e8e6dd;
+    --muted: #9ca395;
+    --line: #18231e;
+    --accent: #5ccda7;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+
+/*
+  The brand's type stack, faces first. Nothing here can be fetched, so a
+  machine without Inter or Squada One wears the system face; the wordmark
+  is the only place that matters.
+*/
+body {
+  margin: 0;
+  padding: 1.5rem;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "InterVariable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A border, not a shadow, and the brand's radius: the same card the sign-in page is. */
+main {
+  width: 100%;
+  max-width: 26rem;
+  padding: 2.75rem 2rem 2.5rem;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.625rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+}
+.mark {
+  display: block;
+  width: 2.5rem;
+  height: 2.5rem;
+  color: var(--accent);
+}
+.mark svg { display: block; width: 100%; height: 100%; }
+.name {
+  font-family: "Squada One", "InterVariable", "Inter", ui-sans-serif, sans-serif;
+  font-size: 2rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+p {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+
+/* A slow breath on the mark: a thing that is running, saying so. Held still for anyone who asks. */
+@keyframes breathe { 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: no-preference) {
+  .mark { animation: breathe 4s ease-in-out infinite; }
+}
+</style>
+</head>
+<body>
+<main>
+<div class="brand">
+<span class="mark">{{.Mark}}</span>
+<span class="name">MemQL</span>
+</div>
+<h1>{{.Heading}}</h1>
+<p>{{.Detail}}</p>
+</main>
+</body>
+</html>

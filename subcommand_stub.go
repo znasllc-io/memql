@@ -19,6 +19,12 @@ func dispatchSubcommand(args []string) (bool, int) {
 	// database, so it has no build-tag dependencies of its own.
 	case "dsl-fetch":
 		return true, runDslFetchSubcommand(args[1:])
+	// Available on EVERY node binary: the maintenance pages are served by the
+	// engine image the edge already runs (`/app/memql error-pages`), and the
+	// subcommand needs no database, secret or mesh, so it has no build-tag
+	// dependencies of its own.
+	case "error-pages":
+		return true, runErrorPagesSubcommand(args[1:])
 	case "pat":
 		return true, runPATSubcommand(args[1:])
 	case "enrolment-token":
