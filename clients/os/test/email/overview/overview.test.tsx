@@ -221,6 +221,13 @@ describe("what the Overview measures", () => {
     expect(counted).toEqual(["a1", "a2"]);
   });
 
+  it("says a sum that includes a count stopped at the engine's window is at least that", async () => {
+    // Newsletter is larger than the engine's window: 5,000 is where its count
+    // stopped, so the total is a floor too -- never 5,086 as if it were exact.
+    mountWindow(seeded({ subscriberCounts: { a1: { atLeast: 5000 }, a2: 86, a3: 500 } }));
+    await waitFor(() => expect(cell("Subscriptions").value).toBe("5,086 or more"));
+  });
+
   it("draws the campaign distribution", async () => {
     const campaigns = [
       campaignRow({ id: "d1", status: "draft" }),

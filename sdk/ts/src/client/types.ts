@@ -339,6 +339,14 @@ export function rowArray(row: Row | null, key: string): unknown[] | null {
   return Array.isArray(v) ? v : null;
 }
 
+// CountAnswer is what a `count` query answered: `count` rows matched, or --
+// when `atLeast` is true -- the engine stopped at its window and at least
+// that many did (memql#6033). Read by Result.count().
+export interface CountAnswer {
+  count: number;
+  atLeast: boolean;
+}
+
 // Result wraps a typed engine response. Generated query / mutation /
 // logic methods return Result. Consumers iterate via .rows() rather
 // than reaching into the raw envelope. Mirrors sdk/go's Result.
@@ -378,6 +386,22 @@ export class Result {
   single(): Row | null {
     const rs = this.rows();
     return rs.length > 0 ? (rs[0] ?? null) : null;
+  }
+
+  // count reads the aggregate a `count` query answers (memql#6033): how many
+  // rows matched, and whether that is the whole number. The engine reads a
+  // count up to its window (5,000 by default, and configurable) and one row
+  // past it, so a larger set answers the window with `atLeast` true -- "this
+  // many or more". Read the signal rather than comparing the figure with a
+  // window a client cannot know. Null when the result is not a count.
+  count(): CountAnswer | null {
+    const row = this.single();
+    if (row === null) return null;
+    const raw = row["count"];
+    // A string is parsed: the wire carries large integers as strings.
+    const n = typeof raw === "number" ? raw : typeof raw === "string" && raw.trim() !== "" ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(n)) return null;
+    return { count: n, atLeast: row["atLeast"] === true };
   }
 
   // rawNodes returns the bundle's nodes with their full nested shape

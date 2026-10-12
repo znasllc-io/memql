@@ -684,6 +684,14 @@ describe("subscriber counts", () => {
     expect(result.current.counts.get("a1")).toEqual(figureOf(7));
   });
 
+  it("keeps a count that stopped at the engine's window a floor, never an exact figure", async () => {
+    const conn = fakeConnection({ subscriberCounts: { a1: { atLeast: 5000 }, a2: 3 } });
+    h.connection = conn;
+    const { result } = renderHook(() => useSubscriberCounts(["a1", "a2"]));
+    await waitFor(() => expect(result.current.counts.get("a1")).toEqual(figureOf(5000, true)));
+    expect(result.current.counts.get("a2")).toEqual(figureOf(3));
+  });
+
   it("does not turn a missing count into a zero", async () => {
     const conn = fakeConnection();
     conn.query.audienceSubscriberCount.mockImplementation(async () => rowsResult([]));

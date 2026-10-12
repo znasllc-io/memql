@@ -269,7 +269,10 @@ Audit inventory: [loading and navigation coverage](qa/loading-and-navigation.md)
 Overview is the shared summary destination. Use `kit/Overview` for the header
 and measured statistics, and `OverviewBreakdown` for a current distribution.
 Each app supplies facts from its existing authorized reads; unavailable values
-use `Figure` absence semantics instead of zero. Only draw activity history when
+use `Figure` absence semantics instead of zero. A count the engine stopped at
+its window is a floor (`countFigure`, from the SDK's `Result.count()`) and
+reads "5,000 or more", never as exact; a sum with a floor in it is a floor
+too. Only draw activity history when
 a real time series exists. Keep record lists and editors in their own sections.
 Four figures stand in one row, then two; five stand in one row while each label
 fits on one line, then three, then two.

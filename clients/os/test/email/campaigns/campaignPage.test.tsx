@@ -237,6 +237,16 @@ describe("acting on a campaign", () => {
     expect(conn.query.campaignStartSend).toHaveBeenCalledTimes(1);
   });
 
+  it("names an audience past the engine's window as at least that many", async () => {
+    const conn = seed({ campaigns: [draft()], subscriberCounts: { a1: { atLeast: 5000 } } });
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barActs()).toEqual(["Edit", "Send a test", "Send now"]));
+    await readTheBar();
+    press("Send now");
+    expect(await within(bar()).findByText("Send “August update” to 5,000 or more subscribers now?")).toBeTruthy();
+  });
+
   it("schedules a draft at its saved time, after asking", async () => {
     const conn = seed({ campaigns: [draft({ id: "c1", scheduledAt: OCT_14 })] });
     mountWindow(conn);

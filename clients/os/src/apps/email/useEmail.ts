@@ -8,7 +8,7 @@ import {
 } from "@znasllc-io/memql-sdk-core/client";
 
 import { useSession } from "../../chrome/access";
-import { absent, figureFrom, type Figure } from "../../kit/measure";
+import { absent, countFigure, type Figure } from "../../kit/measure";
 import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
 import { feedIsBehind, useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
@@ -1026,7 +1026,8 @@ export function useSubscriberCounts(audienceIds: readonly string[]): {
       const answers = await readEach(wanted, async (audienceId): Promise<[string, Figure]> => {
         try {
           const result = await query.audienceSubscriberCount({ audienceId }, { signal });
-          return [audienceId, figureFrom(result.rows()[0] ?? null, "count")];
+          // Exact, or -- past the engine's window -- a floor the page says as "N or more".
+          return [audienceId, countFigure(result.count())];
         } catch (err) {
           // An aborted read is somebody leaving, not an answer.
           if (signal.aborted) throw err;

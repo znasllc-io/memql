@@ -170,6 +170,23 @@ const createdCampaign = (conn: Conn) => conn.query.createCampaign.mock.calls[0]!
 // ---------------------------------------------------------------------------
 
 describe("Add a campaign", () => {
+  it("says an audience past the engine's window has at least that many subscribers, wherever it names the count", async () => {
+    // 5,000 is where the engine's count stopped, not the audience's size.
+    const conn = seed({ subscriberCounts: { a1: { atLeast: 5000 }, "a-test": 3 } });
+    mountWindow(conn);
+    await openWizard();
+    expect(await screen.findByRole("radio", { name: /^Newsletter.*5,000 or more subscribers/ })).toBeTruthy();
+    choose(/^Newsletter/);
+    choose(/^August copy/);
+    choose(/^news@acme\.com/);
+    choose(/^Send now/);
+    expect(await screen.findByText("Send “August copy” to Newsletter (5,000 or more subscribers) as news@acme.com now.")).toBeTruthy();
+    await waitFor(() => expect(barActs()).toContain("Send now"));
+    await readTheBar();
+    press("Send now");
+    expect(screen.getByText("Send “August copy” to 5,000 or more subscribers now?")).toBeTruthy();
+  });
+
   it("asks one question a step and answers a choice by choosing", async () => {
     const conn = seed();
     mountWindow(conn);

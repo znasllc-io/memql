@@ -800,7 +800,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
         </>
       );
     }
-    const parts = [figure.kind === "measured" ? WORDS.subscribers(figure.value) : "", confirms].filter((part) => part !== "");
+    const parts = [figure.kind === "measured" ? WORDS.subscribers(figure) : "", confirms].filter((part) => part !== "");
     return parts.length === 0 ? undefined : parts.join(" · ");
   }
 

@@ -1207,7 +1207,7 @@ QueryClient.prototype.audienceRosterForSend = function (this: QueryClient, args:
   return this.executeNamed("audienceRosterForSend", buildAudienceRosterForSend(args), opts);
 };
 
-/** ENGINE (owner-scoped): how many recipients an audience holds, as a {count: N} aggregate (memql#3460). Computed server-side, so it is the one question about a large audience that needs no window at all -- which is exactly why the preflight and the frozen `recipientCount` use it rather than measuring the length of a bounded read. Measuring a page and calling it a total is how the 5000 ceiling came to be load-bearing in the first place. Owned. */
+/** ENGINE (owner-scoped): how many recipients an audience holds, as a {count, atLeast} aggregate (memql#3460). Computed server-side rather than by measuring the length of a bounded read, which is why the preflight and the frozen `recipientCount` use it: measuring a page and calling it a total is how the 5000 ceiling came to be load-bearing in the first place. The count still reads up to the engine's window: past it, `count` is the window and `atLeast` is true (memql#6033). Owned. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceRosterSize"] in generated_concepts.ts).
 export interface AudienceRosterSizeArgs {
   audienceId: string;
@@ -1229,7 +1229,7 @@ QueryClient.prototype.audienceRosterSize = function (this: QueryClient, args: Au
   return this.executeNamed("audienceRosterSize", buildAudienceRosterSize(args), opts);
 };
 
-/** How many people in one audience can be mailed now, as a {count: N} aggregate. Pending and unsubscribed members are on the list but are not counted. The Email app's audience rows, the campaign wizard and the send confirmation name this number. */
+/** How many people in one audience can be mailed now, as a {count, atLeast} aggregate. Pending and unsubscribed members are on the list but are not counted. The Email app's audience rows, the campaign wizard and the send confirmation name this number. Past the engine's window, `count` is the window and `atLeast` is true, which the Email app says as "5,000 or more" (memql#6033). */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceSubscriberCount"] in generated_concepts.ts).
 export interface AudienceSubscriberCountArgs {
   audienceId: string;
@@ -11939,7 +11939,7 @@ QueryClient.prototype.userById = function (this: QueryClient, args: UserByIdArgs
   return this.executeNamed("userById", buildUserById(args), opts);
 };
 
-/** Count of active v1:identity:user rows. Returns a {count: N} aggregate. */
+/** Count of active v1:identity:user rows. Returns a {count, atLeast} aggregate: past the engine's window, `count` is the window and `atLeast` is true (memql#6033). */
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userCount"] in generated_concepts.ts).
 export interface UserCountArgs {
 }

@@ -11739,6 +11739,13 @@ a.os-button {
   color: var(--os-muted);
   font-size: var(--os-text-xs);
 }
+/* A floor: the count stopped at a window and found more ("5,000 or more",
+ * memql#6033). Drawn like the unit, and never split from the number. */
+.os-figure-floor {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  white-space: nowrap;
+}
 .os-figure-absent {
   color: var(--os-muted);
   font-variant-numeric: tabular-nums;

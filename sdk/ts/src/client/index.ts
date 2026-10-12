@@ -67,6 +67,7 @@ export {
   type ConceptFieldKind,
   type ConceptRegistryDelta,
   type ConceptRelationship,
+  type CountAnswer,
   type DomainSubscription,
   type Event,
   type GraphAction,

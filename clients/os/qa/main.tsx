@@ -728,6 +728,7 @@ const VIEWS: Record<
   "email-overview-refused": emailOverviewView("refused"),
   "email-overview-unmeasured": emailOverviewView("unmeasured"),
   "email-overview-untracked": emailOverviewView("untracked"),
+  "email-overview-floor": emailOverviewView("floor"),
   // The page a moment after the cluster stopped answering: the figures it had, and one
   // notice -- the cluster refusing a refresh, and the connection dropping.
   "email-overview-interrupted": emailOverviewInterruptedView("refused"),
@@ -1326,7 +1327,7 @@ function EmailPane({ section }: { section: string }) {
   return <WindowBody fallback="Email"><EmailApp sectionId={current} navigate={(id) => setCurrent(id)} askContext={() => {}} store={store}/></WindowBody>;
 }
 
-type OverviewScene = "populated" | "empty" | "reading" | "refused" | "unmeasured" | "untracked";
+type OverviewScene = "populated" | "empty" | "reading" | "refused" | "unmeasured" | "untracked" | "floor";
 
 /**
  * Email -> Overview as it reads in each of the ways it can. Dates are relative to
@@ -1364,7 +1365,10 @@ function emailOverviewView(scene: OverviewScene) {
         ],
         subscriberCounts: scene === "refused"
           ? { "qa-newsletter": new Error("Counting subscribers is not yours to do."), "qa-signups": 86, "qa-reviewers": 3 }
-          : { "qa-newsletter": 1204, "qa-signups": 86, "qa-reviewers": 3, "qa-old": 500 },
+          : scene === "floor"
+            // Newsletter is past the engine's window: its count stopped at 5,000.
+            ? { "qa-newsletter": { atLeast: 5000 }, "qa-signups": 86, "qa-reviewers": 3, "qa-old": 500 }
+            : { "qa-newsletter": 1204, "qa-signups": 86, "qa-reviewers": 3, "qa-old": 500 },
         emailRules: scene === "empty" ? [] : [
           emailRule({ id: "qa-r1", name: "Tell the owner about new admins", status: "active" }),
           emailRule({ id: "qa-r2", name: "Welcome new users", status: "active" }),

@@ -262,11 +262,12 @@ query recipient audienceRosterForSend {
   shape     recipientFull
 }
 
-/// ENGINE (owner-scoped): how many recipients an audience holds, as a {count: N} aggregate
-/// (memql#3460). Computed server-side, so it is the one question about a large audience that needs
-/// no window at all -- which is exactly why the preflight and the frozen `recipientCount` use it
-/// rather than measuring the length of a bounded read. Measuring a page and calling it a total is
-/// how the 5000 ceiling came to be load-bearing in the first place. Owned.
+/// ENGINE (owner-scoped): how many recipients an audience holds, as a {count, atLeast} aggregate
+/// (memql#3460). Computed server-side rather than by measuring the length of a bounded read, which
+/// is why the preflight and the frozen `recipientCount` use it: measuring a page and calling it a
+/// total is how the 5000 ceiling came to be load-bearing in the first place. The count still reads
+/// up to the engine's window: past it, `count` is the window and `atLeast` is true (memql#6033).
+/// Owned.
 @actor
 query recipient audienceRosterSize {
   args {
@@ -277,9 +278,10 @@ query recipient audienceRosterSize {
   count
 }
 
-/// How many people in one audience can be mailed now, as a {count: N} aggregate. Pending and
+/// How many people in one audience can be mailed now, as a {count, atLeast} aggregate. Pending and
 /// unsubscribed members are on the list but are not counted. The Email app's audience rows, the
-/// campaign wizard and the send confirmation name this number.
+/// campaign wizard and the send confirmation name this number. Past the engine's window, `count` is
+/// the window and `atLeast` is true, which the Email app says as "5,000 or more" (memql#6033).
 @actor
 query recipient audienceSubscriberCount {
   args {

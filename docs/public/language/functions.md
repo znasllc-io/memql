@@ -274,8 +274,8 @@ leaves.
 ### Counting
 
 A `count` clause makes the query return the cardinality of the
-matching set as a self-describing `{count: N}` aggregate computed
-server-side, instead of the rows themselves:
+matching set as a self-describing `{count: N, atLeast: B}` aggregate
+computed server-side, instead of the rows themselves:
 
 <!-- corpus: 2026/examples/functions/queries/query-count.memql -->
 ```memql
@@ -294,6 +294,14 @@ the deduped, latest-version, post-filtered set -- the same row
 pipeline a normal query uses -- so it is correct under the
 time-series versioning model. Callers read `count` off the returned
 object rather than counting a row array.
+
+A count reads up to the engine's window (`MEMQL_MEMORY_ENGINE_MAX_WINDOW`,
+5,000 by default) and one row past it. When more rows match than the
+window holds, `count` is the window and `atLeast` is `true`: read it as
+"this many or more". Within the window `atLeast` is `false` and the count
+is exact. The window is configurable, so read `atLeast` rather than
+comparing `count` with a number you assume; the SDKs expose both as
+`Result.count()` (TypeScript) and `Result.Count()` (Go).
 
 ---
 

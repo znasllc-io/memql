@@ -265,6 +265,12 @@ describe("the campaign as a sentence", () => {
       expect(campaignSentence({ ...names, subscribers }, NOW_WHEN, ZONE)).toBe("Send “Welcome 2” to Newsletter as news@acme.com now.");
     }
   });
+
+  it("says a count that stopped at the engine's window is at least that many", () => {
+    expect(campaignSentence({ ...names, subscribers: figureOf(5000, true) }, NOW_WHEN, ZONE)).toBe(
+      "Send “Welcome 2” to Newsletter (5,000 or more subscribers) as news@acme.com now.",
+    );
+  });
 });
 
 describe("the question before the act", () => {
@@ -274,6 +280,8 @@ describe("the question before the act", () => {
       "Schedule “August update” for Tue, Oct 14 at 9:00 (America/Phoenix), to 1,204 subscribers?",
     );
     expect(reviewQuestion(draft(), facts({ subscribers: figureOf(1) }), ZONE)).toBe("Send “August update” to 1 subscriber now?");
+    // A count that stopped at the engine's window is a floor, and says so.
+    expect(reviewQuestion(draft(), facts({ subscribers: figureOf(5000, true) }), ZONE)).toBe("Send “August update” to 5,000 or more subscribers now?");
   });
 
   it("names the audience, not a count, for a campaign that repeats", () => {

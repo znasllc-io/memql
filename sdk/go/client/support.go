@@ -3,8 +3,10 @@ package client
 import (
 	"context"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -206,6 +208,50 @@ func (r *Result) Single() Row {
 		return nil
 	}
 	return rows[0]
+}
+
+// CountAnswer is what a `count` query answered: Count rows matched, or --
+// when AtLeast is true -- the engine stopped at its window and at least that
+// many did (memql#6033). Read by Result.Count.
+type CountAnswer struct {
+	Count   int64
+	AtLeast bool
+}
+
+// Count reads the aggregate a `count` query answers (memql#6033): how many
+// rows matched, and whether that is the whole number. The engine reads a
+// count up to its window (5,000 by default, and configurable) and one row
+// past it, so a larger set answers the window with AtLeast true -- "this
+// many or more". Read the signal rather than comparing the figure with a
+// window a client cannot know. ok is false when the result is not a count.
+func (r *Result) Count() (CountAnswer, bool) {
+	row := r.Single()
+	if row == nil {
+		return CountAnswer{}, false
+	}
+	var n float64
+	switch v := row["count"].(type) {
+	case float64:
+		n = v
+	case int64:
+		n = float64(v)
+	case int:
+		n = float64(v)
+	case string:
+		// The wire carries large integers as strings in places.
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			return CountAnswer{}, false
+		}
+		n = parsed
+	default:
+		return CountAnswer{}, false
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		return CountAnswer{}, false
+	}
+	atLeast, _ := row["atLeast"].(bool)
+	return CountAnswer{Count: int64(n), AtLeast: atLeast}, true
 }
 
 // RawNodes returns the result's rows preserving the FULL nested

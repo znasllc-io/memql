@@ -326,6 +326,12 @@ describe("Subscriptions", () => {
     expect(metric(inputs({ audiencesSettled: false }), "Subscriptions").loading).toBe(true);
   });
 
+  it("are at least their sum when a count stopped at the engine's window", () => {
+    // 5,000 is the engine's window, not the audience: the sum is a floor too.
+    const counted = new Map([["a1", figureOf(5000, true)], ["a2", figureOf(1204)]]);
+    expect(metric(inputs({ subscribers: counted }), "Subscriptions").figure).toEqual(figureOf(6204, true));
+  });
+
   it("are a real zero when there is no active audience to count", () => {
     expect(metric(inputs({ subscribers: new Map() }), "Subscriptions").figure).toEqual(figureOf(0));
   });

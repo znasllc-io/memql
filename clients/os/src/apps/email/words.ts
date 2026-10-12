@@ -9,6 +9,8 @@
 // THIS FILE GROWS WITH THE APP. It holds what the screens that exist say; each
 // later screen that names a state adds its words here rather than spelling them.
 
+import type { MeasuredFigure } from "../../kit/measure";
+
 export const WORDS = {
   /** A thing that is in use. */
   active: "Active",
@@ -80,6 +82,14 @@ export const WORDS = {
    */
   clusterSender: "this cluster's sender",
 
-  /** How many people an audience reaches now: "1,204 subscribers", "1 subscriber". */
-  subscribers: (count: number): string => `${count.toLocaleString("en-US")} ${count === 1 ? "subscriber" : "subscribers"}`,
+  /**
+   * How many people an audience reaches now: "1,204 subscribers", "1 subscriber",
+   * and -- for a count the engine stopped at its window -- "5,000 or more
+   * subscribers" (memql#6033).
+   */
+  subscribers: (figure: MeasuredFigure): string => {
+    const count = figure.value.toLocaleString("en-US");
+    if (figure.atLeast) return `${count} or more subscribers`;
+    return `${count} ${figure.value === 1 ? "subscriber" : "subscribers"}`;
+  },
 } as const;

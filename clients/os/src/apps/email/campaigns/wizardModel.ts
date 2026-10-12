@@ -185,9 +185,9 @@ export function askingActs(asking: "forward" | "cancel", forward: Forward | null
   ];
 }
 
-/** "1,204 subscribers", or nothing for a count that is not a measurement. */
+/** "1,204 subscribers" ("5,000 or more subscribers" past the engine's window), or nothing for a count that is not a measurement. */
 function subscriberWords(subscribers: Figure | undefined): string {
-  return subscribers?.kind === "measured" ? WORDS.subscribers(subscribers.value) : "";
+  return subscribers?.kind === "measured" ? WORDS.subscribers(subscribers) : "";
 }
 
 /**

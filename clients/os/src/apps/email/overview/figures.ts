@@ -164,18 +164,22 @@ function subscriptionsMetric(i: OverviewInputs): OverviewMetric {
   if (i.audiencesError !== undefined && i.audiencesError !== "") return refused(label, i.audiencesError);
   if (!i.audiencesSettled) return reading(label);
   let total = 0;
+  let floor = false;
   let waiting = false;
   let failure: Figure | null = null;
   for (const figure of i.subscribers.values()) {
-    if (figure.kind === "measured") total += figure.value;
-    else if (figure.reason === "unread") waiting = true;
+    if (figure.kind === "measured") {
+      total += figure.value;
+      // A count the engine stopped at its window makes the sum a floor too: "N or more".
+      floor ||= figure.atLeast === true;
+    } else if (figure.reason === "unread") waiting = true;
     else failure ??= figure;
   }
   // A count that cannot be had makes the sum something nobody can state; the
   // sum of the others would read as the whole.
   if (failure !== null) return { label, figure: failure };
   if (waiting) return reading(label);
-  return { label, figure: figureOf(total), format: count };
+  return { label, figure: figureOf(total, floor), format: count };
 }
 
 function automationsMetric(i: OverviewInputs): OverviewMetric {

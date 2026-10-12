@@ -81,3 +81,36 @@ func TestASTConverter_CountExpr(t *testing.T) {
 	require.True(t, ok, "expected *CountExpression, got %T", out)
 	require.NotNil(t, count.Target)
 }
+
+// A count reads one row past the engine's window, so it can say when the set
+// was larger than the window rather than passing the window off as exact
+// (memql#6033): past it, the answer is the window and "at least".
+func TestCountOf_SaysWhenTheWindowWasReached(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		matched int
+		window  int
+		count   int64
+		atLeast bool
+	}{
+		{name: "nothing matched", matched: 0, window: 3, count: 0, atLeast: false},
+		{name: "below the window", matched: 2, window: 3, count: 2, atLeast: false},
+		{name: "exactly the window", matched: 3, window: 3, count: 3, atLeast: false},
+		{name: "one past the window", matched: 4, window: 3, count: 3, atLeast: true},
+		{name: "far past the window", matched: 40, window: 3, count: 3, atLeast: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			count, atLeast := countOf(tc.matched, tc.window)
+			require.Equal(t, tc.count, count)
+			require.Equal(t, tc.atLeast, atLeast)
+		})
+	}
+}
+
+// The window a count reads is the engine's, plus the one row that tells a
+// full window from a larger set; an engine configured without a window reads
+// to its result ceiling, as the rest of the read path does.
+func TestCountWindow_IsTheEngineWindow(t *testing.T) {
+	require.Equal(t, 5000, (&MemQLEngine{config: engineConfig{MaxResults: 500, MaxWindow: 5000}}).countWindow())
+	require.Equal(t, 500, (&MemQLEngine{config: engineConfig{MaxResults: 500}}).countWindow())
+}

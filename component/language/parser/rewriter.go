@@ -1107,7 +1107,7 @@ func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf, refine
 	}
 	// count is the outermost wrapper and mutually exclusive with shape
 	// (enforced in emitQuery). It aggregates the matching set to a
-	// numeric {count: N} envelope.
+	// numeric {count: N, atLeast: B} envelope.
 	if count {
 		return fmt.Sprintf("count(%s)", base)
 	}

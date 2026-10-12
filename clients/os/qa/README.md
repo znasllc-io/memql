@@ -265,7 +265,9 @@ warning), `email-overview-refused` has three reads refused with nothing to show
 (dashes and the engine's sentences, never a zero), `email-overview-unmeasured`
 has a rate the engine could not state exactly (a dash with its reason beneath)
 and `email-overview-untracked` has two rates with the same reason (said once,
-under the first). Two scenes catch the page a few seconds after the cluster
+under the first). `email-overview-floor` has an audience past the engine's count
+window, so Subscriptions is a floor: `5,089 or more`, never an exact-looking sum.
+Two scenes catch the page a few seconds after the cluster
 stopped answering, with every figure still the last one: `email-overview-interrupted`
 (the cluster refuses the refreshes: one notice carrying its sentence) and
 `email-overview-reconnecting` (the connection dropped: the same notice, saying it

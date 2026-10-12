@@ -291,6 +291,8 @@ describe("the question an act asks first", () => {
   it("names how many people a send reaches, and leaves out a count it could not read", () => {
     expect(confirmSentence("send", facts(), figureOf(1204))).toBe("Send “August update” to 1,204 subscribers now?");
     expect(confirmSentence("send", facts(), figureOf(1))).toBe("Send “August update” to 1 subscriber now?");
+    // A count that stopped at the engine's window is a floor, and says so.
+    expect(confirmSentence("send", facts(), figureOf(5000, true))).toBe("Send “August update” to 5,000 or more subscribers now?");
     expect(confirmSentence("send", facts(), absent("failed", "Counting is not yours to do."))).toBe("Send “August update” now?");
   });
 

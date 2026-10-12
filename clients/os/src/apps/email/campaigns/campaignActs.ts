@@ -226,7 +226,7 @@ function progress(campaign: CampaignRow): string {
  */
 export function confirmSentence(act: "send" | "schedule" | "cancel" | "cancel-draft", f: CampaignFacts, subscribers: Figure): string {
   const name = `“${campaignName(f.campaign)}”`;
-  const count = subscribers.kind === "measured" ? WORDS.subscribers(subscribers.value) : "";
+  const count = subscribers.kind === "measured" ? WORDS.subscribers(subscribers) : "";
   const zone = f.zone ?? browserZone();
   switch (act) {
     case "send":

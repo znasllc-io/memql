@@ -139,9 +139,11 @@ export interface FakeSeed {
    * it. An Error rejects, which is how the cluster refuses.
    */
   azure?: (args: { accountId: string; action: string }) => Row | Error | Promise<Row | Error>;
-  /** Audience id -> `audienceSubscriberCount`'s answer. An Error is a refused
-   *  read; an audience not named here is an empty one (the engine answers 0). */
-  subscriberCounts?: Record<string, number | Error>;
+  /** Audience id -> `audienceSubscriberCount`'s answer. A number is an exact
+   *  count; `{ atLeast: n }` is a count that stopped at the engine's window n
+   *  (memql#6033); an Error is a refused read; an audience not named here is an
+   *  empty one (the engine answers 0). */
+  subscriberCounts?: Record<string, number | { atLeast: number } | Error>;
   concepts?: { id: string; domain: string; entity: string }[];
 }
 
@@ -205,7 +207,9 @@ export function fakeConnection(seed: FakeSeed = {}) {
       audienceSubscriberCount: vi.fn(async (args: { audienceId?: string }, _opts?: unknown) => {
         const answer = seed.subscriberCounts?.[args.audienceId ?? ""];
         if (answer instanceof Error) throw answer;
-        return rowsResult([{ count: answer ?? 0 }]);
+        // The engine's own envelope: the count, and whether it stopped at the window.
+        if (typeof answer === "object") return rowsResult([{ count: answer.atLeast, atLeast: true }]);
+        return rowsResult([{ count: answer ?? 0, atLeast: false }]);
       }),
       campaignStats: reader(seed.campaignStats),
       campaignsForAccount: reader(seed.campaignsForAccount),
