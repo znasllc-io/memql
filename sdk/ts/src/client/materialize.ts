@@ -53,7 +53,24 @@
 // handOffDescription derives its two Library request ids from the request id
 // (`<id>-comment`, `<id>-revision`), so a retry returns the first receipts. The
 // Library accepts only letters, digits, "-" and "_" (8 to 120 characters) as a
-// request id, so a request id used with a description is at most 111 of them.
+// request id, so a request id used with a description is at most 111 of them;
+// startMaterialize refuses a described request whose id is not, before the file
+// is made, because the file would exist and its description could not be sent.
+//
+// A RETRY OF THE HAND-OFF MUST SEND THE SAME INPUTS. The Library answers a repeat
+// of a request id with the first receipt only when the repeat says the same
+// thing; a changed description or reference list under an old id is refused
+// ("this feedback request was already used with different content"). Changed
+// inputs are a new ask and need a new request id.
+//
+// A STOP DOES NOT TAKE A FILE AWAY. From the moment the composition is ready the
+// file exists, and a stop has nothing left to cancel. So materialize still
+// resolves with the file: it skips the hand-off and, for a described request,
+// says so in `revisionFailure` ("Stopped before the description was sent."), so
+// the caller can open the empty file and offer the description again. The one
+// stop that still throws after the file exists is one that lands while its Files
+// entry is not there yet (see followComposition): without the entry there is no
+// artifact to hand back.
 import {
   buildComposeCancel,
   buildComposeMaterialize,
@@ -110,6 +127,8 @@ const FIRST_REVISION = "file:1";
 const WHOLE_DOCUMENT = { kind: "document", quote: "Entire document" };
 const HAND_OFF_ID = /^[A-Za-z0-9_-]{1,111}$/;
 const HAND_OFF_FAILED = "The description could not be sent for writing: ";
+const STOPPED_BEFORE_HAND_OFF = "Stopped before the description was sent.";
+const HAND_OFF_ID_RULE = "A request id for a file that is asked for by describing it uses letters, digits, - and _ (at most 111 characters), because its description is sent under it.";
 
 // What the Library takes as a review attachment (integrations/library/
 // review_attachments.go). A comment carrying anything else is refused whole, so
@@ -156,7 +175,10 @@ export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" |
  */
 export async function startMaterialize(execute: MaterializeExecute, request: MaterializeRequest): Promise<string> {
   if (!has(request.requestId)) throw new Error("A request id is required, so that a repeated request makes one file.");
-  const args: ComposeMaterializeArgs = { name: request.name, format: request.format, requestId: request.requestId };
+  // The server trims it, and the hand-off must ask under the id the file was made under.
+  const requestId = request.requestId.trim();
+  if (isDescribedMarkdown(request) && !HAND_OFF_ID.test(requestId)) throw new Error(HAND_OFF_ID_RULE);
+  const args: ComposeMaterializeArgs = { name: request.name, format: request.format, requestId };
   if (has(request.statement)) args.statement = request.statement;
   if (request.sources?.length) args.sources = request.sources.map(source => ({ ...source }));
   if (has(request.templateId)) args.templateId = request.templateId;
@@ -214,16 +236,36 @@ async function deadRunMessage(execute: MaterializeExecute, runId: string): Promi
  * Polls the composition until it is ready and has its Files entry, reporting
  * each status through `onStatus`. Throws MaterializeFailed with the
  * composition's reason (or its run's, when the run stopped first) and
- * MaterializeCancelled when it was stopped. An aborted `signal` cancels the
- * composition once and stops polling; if that cancel request itself fails, its
- * error is thrown instead, because the composition may still finish.
+ * MaterializeCancelled when it was stopped.
+ *
+ * An aborted `signal` before the composition is ready cancels it once and stops
+ * polling; if that cancel request itself fails, its error is thrown instead,
+ * because the composition may still finish. Once it is ready its file exists and
+ * there is nothing to cancel, so a stop then only ends the wait for the Files
+ * entry: it takes one last look, returns the file when the entry is there, and
+ * throws MaterializeCancelled when it is not (there is no artifact yet to hand
+ * back; the composition stays ready and its file is kept).
  *
  * Never hands a description to the Library: see the header, and materialize.
  */
 export async function followComposition(ports: MaterializePorts, compositionId: string): Promise<MaterializeResult> {
   const { execute, signal } = ports;
   const interval = ports.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const stop = async (): Promise<never> => {
+  // The file, once the composition is ready. A new file's Files entry is written
+  // after the file, by an automation, so it may not be there yet.
+  let made: { fileId: string; name: string } | null = null;
+  const filesEntry = async ({ fileId, name }: { fileId: string; name: string }): Promise<MaterializeResult | null> => {
+    const artifact = first(await execute("libraryArtifactForFile", buildLibraryArtifactForFile({ fileId })));
+    const artifactId = rowString(artifact, "id");
+    return artifactId ? { compositionId, fileId, artifactId, name: rowString(artifact, "title") || name } : null;
+  };
+  const stop = async (): Promise<MaterializeResult> => {
+    if (made) {
+      // Nothing to cancel, and the stop may have cut a wait short: look once more.
+      const kept = await filesEntry(made);
+      if (kept) return kept;
+      throw new MaterializeCancelled(STOPPED);
+    }
     await execute("composeCancel", buildComposeCancel({ compositionId, reason: STOP_REASON }));
     throw new MaterializeCancelled(STOPPED);
   };
@@ -235,13 +277,13 @@ export async function followComposition(ports: MaterializePorts, compositionId: 
     if (status === "failed") throw new MaterializeFailed(rowString(row, "failureReason") || "Materializer could not finish this file.");
     if (status === "cancelled") throw new MaterializeCancelled(STOPPED);
     if (status === "ready") {
-      // A new file's Files entry is written after the file, by an automation, so
-      // it may not be there yet. A ready composition keeps its file whatever its
-      // run says, which is why the run is not read here.
-      const fileId = rowString(row, "outputFileId");
-      const artifact = first(await execute("libraryArtifactForFile", buildLibraryArtifactForFile({ fileId })));
-      const artifactId = rowString(artifact, "id");
-      if (artifactId) return { compositionId, fileId, artifactId, name: rowString(artifact, "title") || rowString(row, "name") };
+      // A ready composition keeps its file whatever its run says, which is why
+      // the run is not read here.
+      made = { fileId: rowString(row, "outputFileId"), name: rowString(row, "name") };
+      const entry = await filesEntry(made);
+      if (entry) return entry;
+      // A stop already in effect saw the look just made: that was the last one.
+      if (signal?.aborted) throw new MaterializeCancelled(STOPPED);
       ports.onStatus?.("Saved; waiting for its Files entry");
     } else {
       const runId = rowString(row, "runId");
@@ -361,6 +403,22 @@ const attachmentsOf = (references: Reference[]): ReviewAttachment[] =>
   references.flatMap(reference => (reference.attachment ? [reference.attachment] : []));
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+// executeNamed words every refusal as "<construct name>: <reason>"
+// (query.ts). The name is the cluster's word for the call, not something a person
+// can act on, and the hand-off's failure is shown to people: so the calls it makes
+// go through here, which takes off the name of the call that was made.
+function withoutConstructName(execute: MaterializeExecute): MaterializeExecute {
+  return async (name, call) => {
+    try {
+      return await execute(name, call);
+    } catch (error) {
+      const prefix = `${name}: `;
+      if (error instanceof Error && error.message.startsWith(prefix)) throw new Error(error.message.slice(prefix.length), { cause: error });
+      throw error;
+    }
+  };
+}
+
 /**
  * Gives a described file's description to the Library's revision workflow, as
  * the person: a document-level comment carrying the statement (the library_file
@@ -386,11 +444,13 @@ const errorText = (error: unknown): string => (error instanceof Error ? error.me
  */
 export async function handOffDescription(execute: MaterializeExecute, request: HandOffRequest): Promise<HandOffResult> {
   try {
-    const { artifactId, requestId } = request;
+    const run = withoutConstructName(execute);
+    const { artifactId } = request;
+    const requestId = (request.requestId ?? "").trim();
     if (!has(request.statement)) throw new Error("there is no description to send.");
     if (!HAND_OFF_ID.test(requestId)) throw new Error("request ids for a description use letters, digits, - and _ (at most 111 characters).");
-    let references = await chooseReferences(execute, request.sources ?? []);
-    const postComment = async (): Promise<Row | null> => first(await execute("libraryAddDocumentComment", buildLibraryAddDocumentComment({
+    let references = await chooseReferences(run, request.sources ?? []);
+    const postComment = async (): Promise<Row | null> => first(await run("libraryAddDocumentComment", buildLibraryAddDocumentComment({
       artifactId, expectedVersion: FIRST_VERSION, expectedRevision: FIRST_REVISION,
       anchor: WHOLE_DOCUMENT, body: request.statement, requestId: `${requestId}-comment`, attachments: attachmentsOf(references),
     })));
@@ -405,7 +465,7 @@ export async function handOffDescription(execute: MaterializeExecute, request: H
     const commentId = rowString(comment, "commentId");
     if (!comment?.["saved"] || !commentId) throw new Error("the cluster did not confirm the description. Retry to recover it.");
     const revisionId = `${requestId}-revision`;
-    const revision = first(await execute("libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision({
+    const revision = first(await run("libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision({
       artifactId, expectedVersion: FIRST_VERSION, expectedRevision: FIRST_REVISION,
       commentIds: [commentId], instruction: "", requestId: revisionId,
     })));
@@ -422,16 +482,21 @@ export async function handOffDescription(execute: MaterializeExecute, request: H
  * for a described Markdown request, hands the description to the Library's
  * revision workflow, returning its `revisionId` or `revisionFailure` on the
  * result, with the references it could not attach in `unattached`. Resolves once
- * the FILE exists even when the hand-off failed. See the header for the request
- * id rules.
+ * the FILE exists even when the hand-off failed, or was stopped: a stop after the
+ * file exists skips the hand-off and comes back as `revisionFailure` ("Stopped
+ * before the description was sent."), never as an error that hides the file. A
+ * stop before the file exists throws MaterializeCancelled. See the header for
+ * the request id rules.
+ *
+ * The hand-off itself is not interruptible: once it has begun it finishes.
  */
 export async function materialize(ports: MaterializePorts, request: MaterializeRequest): Promise<MaterializeResult> {
   if (ports.signal?.aborted) throw new MaterializeCancelled(STOPPED);
   const result = await followComposition(ports, await startMaterialize(ports.execute, request));
   if (!isDescribedMarkdown(request)) return result;
   // The description is the one step here that spends model calls. A stop that
-  // arrived while the file was being found ends it, as a stop anywhere else does.
-  if (ports.signal?.aborted) throw new MaterializeCancelled(STOPPED);
+  // arrived while the file was being found ends it, but not the file.
+  if (ports.signal?.aborted) return { ...result, revisionFailure: STOPPED_BEFORE_HAND_OFF };
   const handOff = await handOffDescription(ports.execute, {
     artifactId: result.artifactId, statement: request.statement ?? "", sources: request.sources, requestId: request.requestId,
   });
