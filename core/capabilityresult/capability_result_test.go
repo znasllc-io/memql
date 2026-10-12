@@ -1,4 +1,4 @@
-package deploycontrol
+package capabilityresult
 
 import (
 	"encoding/json"

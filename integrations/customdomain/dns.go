@@ -9,7 +9,7 @@
 // one because of it (design D2). The objects a bound domain needs -- an
 // exact-host Ingress and a cert-manager Certificate -- are applied by an
 // idempotent capability script, reached through the existing action-dispatch
-// seam (component/automations/steps -> deploycontrol.ParseCapabilityResult). An
+// seam (component/automations/steps -> capabilityresult.ParseCapabilityResult). An
 // in-engine client-go reconciler would be a SECOND way to touch cluster
 // objects beside the GitOps/script path, which is precisely what
 // environment-parity review rejects.

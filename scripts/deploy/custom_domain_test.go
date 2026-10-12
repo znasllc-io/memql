@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/deploycontrol"
+	"github.com/znasllc-io/memql/core/capabilityresult"
 	"github.com/znasllc-io/memql/integrations/customdomain"
 	"gopkg.in/yaml.v3"
 )
@@ -31,10 +31,10 @@ const (
 )
 
 // envelopeFrom runs a script and parses its stdout through the SAME parser the
-// engine uses. Parsing with deploycontrol.ParseCapabilityResult rather than
+// engine uses. Parsing with capabilityresult.ParseCapabilityResult rather than
 // encoding/json is the point: a script whose envelope this parser cannot read
 // is a script the engine cannot read either, however valid its JSON.
-func envelopeFrom(t *testing.T, script string, args ...string) (deploycontrol.CapabilityResult, int) {
+func envelopeFrom(t *testing.T, script string, args ...string) (capabilityresult.CapabilityResult, int) {
 	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not available")
@@ -52,7 +52,7 @@ func envelopeFrom(t *testing.T, script string, args ...string) (deploycontrol.Ca
 		}
 		code = exitErr.ExitCode()
 	}
-	env, perr := deploycontrol.ParseCapabilityResult(stdout)
+	env, perr := capabilityresult.ParseCapabilityResult(stdout)
 	if perr != nil {
 		t.Fatalf("%s emitted no readable envelope on stdout (exit %d): %v\nstdout was:\n%s",
 			script, code, perr, string(stdout))

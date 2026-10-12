@@ -2019,7 +2019,7 @@ They `source scripts/lib/capability.sh` (`cap_init` / `cap_param` / `cap_ok` /
 `scripts/lib/capability_contract_test.go` enforces the contract on every script
 that sources the library and gates non-interactivity across
 `scripts/{k3d,deploy,release,docs}`; the Go effect seam parses the envelope via
-`deploycontrol.ParseCapabilityResult`.
+`capabilityresult.ParseCapabilityResult`.
 
 ### Documentation Style Guidelines
 

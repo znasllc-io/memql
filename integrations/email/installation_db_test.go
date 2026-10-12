@@ -116,7 +116,7 @@ func TestEmailInstallationResumesOnIndependentReplica(t *testing.T) {
 	if rows, err := cache.Execute(accountCtx, `query clientAccountById(accountId: "self")`); err != nil || len(memql.MaterializeRows(rows)) != 0 {
 		t.Fatalf("prewarm absent account: %v %v", rows, err)
 	}
-	if _, err := instances[1].store.engine.Execute(ctx, fmt.Sprintf(`mutation createClientAccount(accountId: %q, name: "Existing company")`, accountID)); err != nil {
+	if _, err := instances[1].store.engine.Execute(ctx, renderConfigCall("createClientAccount", map[string]string{"accountId": accountID, "name": "Existing company"})); err != nil {
 		t.Fatal(err)
 	}
 	if rows, err := cache.Execute(accountCtx, `query clientAccountById(accountId: "self")`); err != nil || len(memql.MaterializeRows(rows)) != 0 {

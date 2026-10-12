@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/znasllc-io/memql/component/deploycontrol"
+	"github.com/znasllc-io/memql/core/capabilityresult"
 )
 
 // capability_script.go is the I8 (#2222) capability-script RUNNER: the safe
@@ -48,7 +48,7 @@ import (
 //
 // The script writes its human logs to stderr and exactly one JSON result
 // envelope to stdout; the runner parses that envelope through the canonical
-// deploycontrol.ParseCapabilityResult (the Go side of the I14 contract) instead
+// capabilityresult.ParseCapabilityResult (the Go side of the I14 contract) instead
 // of scraping prose. A deterministic script + deterministic params yields a
 // deterministic result, which is what lets an authored deploy action replay
 // token-free and fingerprint-verifiably.
@@ -429,7 +429,7 @@ func truncateForError(b []byte) string {
 // it could record anything.
 //
 // It is the SAME runner, the SAME allowlist and the SAME
-// deploycontrol.ParseCapabilityResult the action path uses. That is the point:
+// capabilityresult.ParseCapabilityResult the action path uses. That is the point:
 // a second copy of the resolution, the confinement check and the argv
 // construction would be a copy that drifts, and this map is the security
 // boundary for both callers rather than for one of them.
@@ -438,7 +438,7 @@ func truncateForError(b []byte) string {
 // path that escapes the root, a missing backend, output carrying no envelope.
 // A script that ran and refused comes back as a CapabilityResult with OK
 // false, which the caller reads through Err() or Error.Code.
-func RunCapabilityScript(ctx context.Context, id string, params map[string]any) (deploycontrol.CapabilityResult, error) {
+func RunCapabilityScript(ctx context.Context, id string, params map[string]any) (capabilityresult.CapabilityResult, error) {
 	runner := newCapabilityScriptRunner()
 	// NO CAPACITY HINT. `len(params)+1` is arithmetic on a length in an
 	// allocation size, which CodeQL's go/allocation-size-overflow flags -- and
@@ -459,19 +459,19 @@ func RunCapabilityScript(ctx context.Context, id string, params map[string]any) 
 // run is Invoke's body up to the point the two callers diverge: it resolves
 // and executes the script and parses the envelope, and leaves the decision of
 // what a non-ok envelope MEANS to its caller.
-func (r *capabilityScriptRunner) run(ctx context.Context, args map[string]any) (deploycontrol.CapabilityResult, error) {
+func (r *capabilityScriptRunner) run(ctx context.Context, args map[string]any) (capabilityresult.CapabilityResult, error) {
 	idVal, ok := args[scriptParamKey]
 	if !ok {
-		return deploycontrol.CapabilityResult{}, fmt.Errorf("shell capability requires a %q argument naming the capability script to run (the action's argTemplate must render %q)", scriptParamKey, scriptParamKey)
+		return capabilityresult.CapabilityResult{}, fmt.Errorf("shell capability requires a %q argument naming the capability script to run (the action's argTemplate must render %q)", scriptParamKey, scriptParamKey)
 	}
 	id, ok := idVal.(string)
 	if !ok || strings.TrimSpace(id) == "" {
-		return deploycontrol.CapabilityResult{}, fmt.Errorf("shell capability %q argument must be a non-empty string, got %T", scriptParamKey, idVal)
+		return capabilityresult.CapabilityResult{}, fmt.Errorf("shell capability %q argument must be a non-empty string, got %T", scriptParamKey, idVal)
 	}
 
 	path, err := r.scriptPath(id)
 	if err != nil {
-		return deploycontrol.CapabilityResult{}, err
+		return capabilityresult.CapabilityResult{}, err
 	}
 
 	// Every arg except `script` becomes a single `--name=value` argv flag
@@ -490,7 +490,7 @@ func (r *capabilityScriptRunner) run(ctx context.Context, args map[string]any) (
 	for _, k := range keys {
 		ev, eerr := encodeFlagValue(args[k])
 		if eerr != nil {
-			return deploycontrol.CapabilityResult{}, fmt.Errorf("capability-script %q: encode param %q: %w", id, k, eerr)
+			return capabilityresult.CapabilityResult{}, fmt.Errorf("capability-script %q: encode param %q: %w", id, k, eerr)
 		}
 		flags = append(flags, "--"+k+"="+ev)
 	}
@@ -500,12 +500,12 @@ func (r *capabilityScriptRunner) run(ctx context.Context, args map[string]any) (
 	// The script emits its result envelope on stdout even on failure (the
 	// contract's EXIT trap guarantees it). Parse stdout first; only when there
 	// is genuinely no envelope do we surface the raw exec error + stderr.
-	res, perr := deploycontrol.ParseCapabilityResult(stdout)
+	res, perr := capabilityresult.ParseCapabilityResult(stdout)
 	if perr != nil {
 		if runErr != nil {
-			return deploycontrol.CapabilityResult{}, fmt.Errorf("capability-script %q (%s) failed: %v\nstderr:\n%s", id, path, runErr, truncateForError(stderr))
+			return capabilityresult.CapabilityResult{}, fmt.Errorf("capability-script %q (%s) failed: %v\nstderr:\n%s", id, path, runErr, truncateForError(stderr))
 		}
-		return deploycontrol.CapabilityResult{}, fmt.Errorf("capability-script %q (%s): %v\nstderr:\n%s", id, path, perr, truncateForError(stderr))
+		return capabilityresult.CapabilityResult{}, fmt.Errorf("capability-script %q (%s): %v\nstderr:\n%s", id, path, perr, truncateForError(stderr))
 	}
 	return res, nil
 }

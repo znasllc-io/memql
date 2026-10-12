@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/znasllc-io/memql/component/deploycontrol"
+	"github.com/znasllc-io/memql/core/capabilityresult"
 	"gopkg.in/yaml.v3"
 )
 
@@ -148,7 +148,7 @@ func TestSeedInstanceSecretProtectionPreservesCredentials(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			cmd.Stdout, cmd.Stderr = &stdout, &stderr
 			err = cmd.Run()
-			envelope, parseErr := deploycontrol.ParseCapabilityResult(stdout.Bytes())
+			envelope, parseErr := capabilityresult.ParseCapabilityResult(stdout.Bytes())
 			require.NoError(t, parseErr, stdout.String())
 			if tc.fail != "" || tc.refused {
 				require.Error(t, err)

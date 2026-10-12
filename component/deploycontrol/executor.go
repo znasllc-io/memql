@@ -29,8 +29,8 @@ import (
 // resolves to are CAPABILITY SCRIPTS -- non-interactive, structured params in,
 // a single JSON result envelope on stdout, logs on stderr, honest exit codes
 // (docs/internal/design/capability-script-contract.md). Those are run by
-// component/automations/steps, which parses the envelope with this package's
-// ParseCapabilityResult (capability_result.go) rather than scraping prose. No
+// component/automations/steps, which parses the envelope with
+// core/capabilityresult.ParseCapabilityResult rather than scraping prose. No
 // effect on THIS interface invokes one; git and kubectl are not capability
 // scripts and their output is read directly.
 //

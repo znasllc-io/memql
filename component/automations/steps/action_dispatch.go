@@ -39,7 +39,7 @@ type engineToolInvoker interface {
 // `sh -c` -- that would be a command-injection sink on author/event-derived
 // params. The capability-script runner (capability_script.go, I8/#2222)
 // launches an ALLOWLISTED script via an argv slice and parses its envelope
-// through deploycontrol.ParseCapabilityResult.
+// through capabilityresult.ParseCapabilityResult.
 type defaultDispatcher struct {
 	engine engineToolInvoker
 	script *capabilityScriptRunner

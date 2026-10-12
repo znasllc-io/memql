@@ -1,0 +1,397 @@
+{
+  "construct": "deployment/logic.memql emailInstallationChoices",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "communicationService": "s-communicationService",
+          "emailDataLocation": "s-emailDataLocation",
+          "emailIdentityName": "s-emailIdentityName",
+          "emailLocation": "s-emailLocation",
+          "emailReplyTo": "s-emailReplyTo",
+          "emailResourceGroup": "s-emailResourceGroup",
+          "emailService": "s-emailService",
+          "facts": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "s-communicationService",
+          "dataLocation": "s-emailDataLocation",
+          "emailService": "s-emailService",
+          "identityName": "s-emailIdentityName",
+          "location": "s-emailLocation",
+          "replyTo": "s-emailReplyTo",
+          "resourceGroup": "s-emailResourceGroup-"
+        }
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "communicationService": "s-communicationService",
+          "emailDataLocation": "s-emailDataLocation",
+          "emailIdentityName": "s-emailIdentityName",
+          "emailLocation": "s-emailLocation",
+          "emailReplyTo": "s-emailReplyTo",
+          "emailResourceGroup": "s-emailResourceGroup",
+          "emailService": "s-emailService",
+          "facts": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "s-communicationService",
+          "dataLocation": "s-emailDataLocation",
+          "emailService": "s-emailService",
+          "identityName": "s-emailIdentityName",
+          "location": "s-emailLocation",
+          "replyTo": "s-emailReplyTo",
+          "resourceGroup": "s-emailResourceGroup-"
+        }
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "communicationService": "s-communicationService",
+          "emailDataLocation": "s-emailDataLocation",
+          "emailIdentityName": "s-emailIdentityName",
+          "emailLocation": "s-emailLocation",
+          "emailReplyTo": "s-emailReplyTo",
+          "emailResourceGroup": "s-emailResourceGroup",
+          "emailService": "s-emailService",
+          "facts": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "s-communicationService",
+          "dataLocation": "s-emailDataLocation",
+          "emailService": "s-emailService",
+          "identityName": "s-emailIdentityName",
+          "location": "s-emailLocation",
+          "replyTo": "s-emailReplyTo",
+          "resourceGroup": "s-emailResourceGroup-"
+        }
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "communicationService": "s-communicationService",
+          "emailDataLocation": "s-emailDataLocation",
+          "emailIdentityName": "s-emailIdentityName",
+          "emailLocation": "s-emailLocation",
+          "emailReplyTo": "s-emailReplyTo",
+          "emailResourceGroup": "s-emailResourceGroup",
+          "emailService": "s-emailService",
+          "facts": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "s-communicationService",
+          "dataLocation": "s-emailDataLocation",
+          "emailService": "s-emailService",
+          "identityName": "s-emailIdentityName",
+          "location": "s-emailLocation",
+          "replyTo": "s-emailReplyTo",
+          "resourceGroup": "s-emailResourceGroup-"
+        }
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "communicationService": "s-communicationService",
+          "emailDataLocation": "s-emailDataLocation",
+          "emailIdentityName": "s-emailIdentityName",
+          "emailLocation": "s-emailLocation",
+          "emailReplyTo": "s-emailReplyTo",
+          "emailResourceGroup": "s-emailResourceGroup",
+          "emailService": "s-emailService",
+          "facts": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "s-communicationService",
+          "dataLocation": "s-emailDataLocation",
+          "emailService": "s-emailService",
+          "identityName": "s-emailIdentityName",
+          "location": "s-emailLocation",
+          "replyTo": "s-emailReplyTo",
+          "resourceGroup": "s-emailResourceGroup-"
+        }
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "communicationService": "s-communicationService",
+          "emailDataLocation": "s-emailDataLocation",
+          "emailIdentityName": "s-emailIdentityName",
+          "emailLocation": "s-emailLocation",
+          "emailReplyTo": "s-emailReplyTo",
+          "emailResourceGroup": "s-emailResourceGroup",
+          "emailService": "s-emailService",
+          "facts": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "s-communicationService",
+          "dataLocation": "s-emailDataLocation",
+          "emailService": "s-emailService",
+          "identityName": "s-emailIdentityName",
+          "location": "s-emailLocation",
+          "replyTo": "s-emailReplyTo",
+          "resourceGroup": "s-emailResourceGroup-"
+        }
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "communicationService": "s-communicationService",
+          "emailDataLocation": "s-emailDataLocation",
+          "emailIdentityName": "s-emailIdentityName",
+          "emailLocation": "s-emailLocation",
+          "emailReplyTo": "s-emailReplyTo",
+          "emailResourceGroup": "s-emailResourceGroup",
+          "emailService": "s-emailService",
+          "facts": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "s-communicationService",
+          "dataLocation": "s-emailDataLocation",
+          "emailService": "s-emailService",
+          "identityName": "s-emailIdentityName",
+          "location": "s-emailLocation",
+          "replyTo": "s-emailReplyTo",
+          "resourceGroup": "s-emailResourceGroup-"
+        }
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "communicationService": "s-communicationService",
+          "emailDataLocation": "s-emailDataLocation",
+          "emailIdentityName": "s-emailIdentityName",
+          "emailLocation": "s-emailLocation",
+          "emailReplyTo": "s-emailReplyTo",
+          "emailResourceGroup": "s-emailResourceGroup",
+          "emailService": "s-emailService",
+          "facts": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "s-communicationService",
+          "dataLocation": "s-emailDataLocation",
+          "emailService": "s-emailService",
+          "identityName": "s-emailIdentityName",
+          "location": "s-emailLocation",
+          "replyTo": "s-emailReplyTo",
+          "resourceGroup": "s-emailResourceGroup-"
+        }
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "facts": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "send-",
+          "dataLocation": null,
+          "emailService": "email-",
+          "identityName": "memql-email",
+          "location": null,
+          "replyTo": "",
+          "resourceGroup": "memql-email-"
+        }
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "facts": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "send-",
+          "dataLocation": null,
+          "emailService": "email-",
+          "identityName": "memql-email",
+          "location": null,
+          "replyTo": "",
+          "resourceGroup": "memql-email-"
+        }
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "facts": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "send-",
+          "dataLocation": null,
+          "emailService": "email-",
+          "identityName": "memql-email",
+          "location": null,
+          "replyTo": "",
+          "resourceGroup": "memql-email-"
+        }
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "facts": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "send-",
+          "dataLocation": null,
+          "emailService": "email-",
+          "identityName": "memql-email",
+          "location": null,
+          "replyTo": "",
+          "resourceGroup": "memql-email-"
+        }
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "facts": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "send-",
+          "dataLocation": null,
+          "emailService": "email-",
+          "identityName": "memql-email",
+          "location": null,
+          "replyTo": "",
+          "resourceGroup": "memql-email-"
+        }
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "facts": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "send-",
+          "dataLocation": null,
+          "emailService": "email-",
+          "identityName": "memql-email",
+          "location": null,
+          "replyTo": "",
+          "resourceGroup": "memql-email-"
+        }
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "facts": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "send-",
+          "dataLocation": null,
+          "emailService": "email-",
+          "identityName": "memql-email",
+          "location": null,
+          "replyTo": "",
+          "resourceGroup": "memql-email-"
+        }
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "facts": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": {
+          "communicationService": "send-",
+          "dataLocation": null,
+          "emailService": "email-",
+          "identityName": "memql-email",
+          "location": null,
+          "replyTo": "",
+          "resourceGroup": "memql-email-"
+        }
+      }
+    }
+  }
+}
