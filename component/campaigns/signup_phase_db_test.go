@@ -24,20 +24,28 @@ import (
 // there. These tests make the locks go, and the time run out, on purpose.
 
 // sessionEnder ends the gate session holding a key's lock the first time the
-// signup, while it holds its locks, asks for the audience's size -- the way the
-// server ends a session for reasons of its own -- and does not return until the
-// lock is gone from the server.
+// signup, while it holds its locks, asks for the audience's size (or makes the
+// query `on` picks) -- the way the server ends a session for reasons of its own --
+// and does not return until the lock is gone from the server.
 type sessionEnder struct {
 	Engine
 	admin *sql.DB
 	key   string
+	on    func(q string) bool // nil: the audience's size
 	held  atomic.Bool
 	ended atomic.Bool
 	t     *testing.T
 }
 
+func (e *sessionEnder) triggers(q string) bool {
+	if e.on != nil {
+		return e.on(q)
+	}
+	return strings.HasPrefix(q, "query audienceRosterSize")
+}
+
 func (e *sessionEnder) Execute(ctx context.Context, q string) (any, error) {
-	if e.held.Load() && strings.HasPrefix(q, "query audienceRosterSize") && !e.ended.Swap(true) {
+	if e.held.Load() && e.triggers(q) && !e.ended.Swap(true) {
 		var pid int
 		if err := e.admin.QueryRow(`SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted
 			AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid`, e.key).Scan(&pid); err != nil {

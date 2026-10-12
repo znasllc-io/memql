@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -168,5 +169,50 @@ func TestAWelcomeWhoseSendBeganIsEndedByItEvenPastItsPhase(t *testing.T) {
 	}
 	if n.sender.count() != 1 {
 		t.Errorf("%d messages were sent, want 1", n.sender.count())
+	}
+}
+
+// TestAWelcomeWritesNoVerdictAfterItsLocksWereLost: PostgreSQL ends the welcome's
+// gate session after its send, before its verdict, and the locks go with it. The
+// verdict is not written -- another replica may hold the locks by now -- and
+// nothing is lost: the next pass finds the send's receipt and records the welcome
+// as sent without sending it again.
+func TestAWelcomeWritesNoVerdictAfterItsLocksWereLost(t *testing.T) {
+	n := newEmptyNewsletter(t, "welcome-lost")
+	signup := pendingWelcome(t, n)
+	actual := n.worker.store.engine
+	ender := &sessionEnder{Engine: actual, admin: n.db.DB, key: newsletterLock("audience", n.audience), t: t,
+		on: func(q string) bool {
+			return strings.HasPrefix(q, "mutation recordCampaignSingleSend") && strings.Contains(q, "complete")
+		}}
+	n.worker.store.engine = ender
+	restoreGate := heldGate(n, &ender.held)
+	system := n.worker.systemActorContext(context.Background())
+
+	err := n.worker.sendNewsletterWelcome(context.Background(), system, signup)
+
+	if !ender.ended.Load() {
+		t.Fatal("the test never ended the gate's session; it is not testing what it says")
+	}
+	if !errors.Is(err, memql.ErrWriteGateLost) {
+		t.Errorf("a welcome whose locks were lost before its verdict answered %v, want ErrWriteGateLost", err)
+	}
+	if got := str(n.signupRow(t), "status"); got != "pending" {
+		t.Errorf("a welcome whose locks were lost before its verdict is %q, want pending: the verdict was written without them", got)
+	}
+	if n.sender.count() != 1 {
+		t.Fatalf("%d messages were sent, want 1", n.sender.count())
+	}
+
+	n.worker.store.engine = actual
+	restoreGate()
+	if err := n.worker.sendNewsletterWelcome(context.Background(), system, signup); err != nil {
+		t.Fatal(err)
+	}
+	if got := str(n.signupRow(t), "status"); got != "sent" {
+		t.Errorf("the welcome is %q on the next pass, want sent", got)
+	}
+	if n.sender.count() != 1 {
+		t.Errorf("%d messages were sent after the next pass, want still 1: the receipt answers for the send", n.sender.count())
 	}
 }

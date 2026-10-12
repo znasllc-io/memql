@@ -608,8 +608,9 @@ const welcomePhaseCeiling = 2 * time.Minute
 // (its receipt says an attempt was recorded), whatever the time, and for a
 // decision on the merits (the newsletter is off, the snapshot is unreadable, the
 // send was refused) made and written inside the phase. The verdict is written as
-// a signup's writes are (detachedWrite): its start is never cut by the phase, so
-// it commits while the locks are held -- they are given back only after it -- or
+// a signup's writes are: only if the gate says its locks are still held
+// (GateHold.Verify), and on detachedWrite -- its start is never cut by the phase,
+// so it commits while the locks are held (they are given back only after it) or
 // it does not start.
 func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned map[string]any) error {
 	scannedOwner := bare(str(scanned, "ownerUserId"))
@@ -708,6 +709,13 @@ func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned m
 		return fmt.Errorf("the welcome ran out of its time under its locks before its verdict was written; it stays pending: %w", phase.Err())
 	}
 	return detachedWrite(system, func(ctx context.Context) error {
+		// Immediately before the verdict, as a signup before each write: a session
+		// PostgreSQL ended took the locks with it, and a verdict written now could
+		// land beside another replica's. Not writing it loses nothing: the welcome
+		// stays pending, and the next pass reads the send's receipt.
+		if err := hold.Verify(ctx); err != nil {
+			return err
+		}
 		return w.newsletterWrite(ctx, "updateNewsletterWelcome", map[string]any{"signupId": bare(str(row, "id")), "status": status, "lastError": truncateError(reason), "versionTime": memql.VersionTimeAfter(templateTime(row["createdAt"]), w.nowUTC()).Format(time.RFC3339Nano)})
 	})
 }
