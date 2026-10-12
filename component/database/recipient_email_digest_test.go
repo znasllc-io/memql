@@ -2,72 +2,52 @@ package database
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/uptrace/bun/migrate"
 )
 
-// recipient_email_digest_test.go -- the parts of the recipient digest backfill
+// recipient_email_digest_test.go -- the parts of the recipient digest sweep
 // (memql#6022, F9) that need no database. The walk itself is in
 // recipient_email_digest_db_test.go.
 
-// THE BACKFILL IS GO, REGISTERED ONCE, AND NAMED FROM ITS FILE. bun derives a Go
-// migration's version and comment from the file its Register call sits in, so a
-// registration moved into another file would run under the wrong version --
-// possibly one a cluster has already recorded as applied. And bun's Register
-// appends without looking, so a set registered twice would run it twice.
-func TestTheRecipientEmailDigestBackfillIsAGoMigrationRegisteredOnceUnderItsFileName(t *testing.T) {
+// THE SWEEP IS NOT A MIGRATION. It adds a field the previous release's replicas
+// cannot write, and a migration runs in the pre-deploy Job, before they are
+// gone: every unsubscribe one of them took in the meantime would fail. The
+// campaigns worker runs the sweep after a rollout instead
+// (component/campaigns/digest_sweep.go). A cluster that applied the first form of
+// this change recorded a migration named 20261011000000; the runner ignores a
+// recorded migration it no longer registers, and this test is what keeps it from
+// being registered again.
+func TestTheRecipientEmailDigestSweepIsNotAMigration(t *testing.T) {
 	m := migrate.NewMigrations()
 	registerTimescaleMigrations(m, nil)
-	registerTimescaleMigrations(m, nil)
 
-	version, comment, _ := strings.Cut(recipientEmailDigestMigrationName, "_")
-	var got []migrate.Migration
 	for _, mig := range m.Sorted() {
-		if mig.Name == version {
-			got = append(got, mig)
+		if mig.Name == "20261011000000" || strings.Contains(mig.Comment, "recipient_email_digest") || strings.Contains(mig.Comment, "recipient-email-digest") {
+			t.Errorf("migration %s (%s) stamps recipients before a rollout: the previous release's replicas cannot write a recipient that carries emailDigest, "+
+				"so the digest is filled in by the campaigns worker's sweep after one", mig.Name, mig.Comment)
 		}
 	}
-	if len(got) != 1 {
-		t.Fatalf("migration %s is registered %d times, want exactly once", version, len(got))
-	}
-	if got[0].Comment != comment {
-		t.Errorf("migration %s carries comment %q, want %q: bun names a Go migration after the file its Register "+
-			"call sits in, and this one no longer sits in %s.go", version, got[0].Comment, comment, recipientEmailDigestMigrationName)
-	}
-	if got[0].Up == nil || got[0].Down == nil {
-		t.Errorf("migration %s: Up set = %v, Down set = %v; both must be functions", version, got[0].Up != nil, got[0].Down != nil)
-	}
-	leftover, err := fs.Glob(timescaleMigrationsFS, "memory-nodes/migrations/"+version+"_*")
+	leftover, err := fs.Glob(timescaleMigrationsFS, "memory-nodes/migrations/*recipient*digest*")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(leftover) != 0 {
-		t.Errorf("the embedded migrations carry %v; %s is a Go migration", leftover, version)
-	}
-	// It runs after the migrations it reads through: the latest-row index the
-	// walk is bounded by is built by 20260913000000 and verified by 20260914000000.
-	position := map[string]int{}
-	for i, mig := range m.Sorted() {
-		position[mig.Name] = i
-	}
-	for _, index := range []string{"20260913000000", "20260914000000"} {
-		if p, ok := position[index]; !ok || p > position[version] {
-			t.Errorf("%s (position %d, present %v) must sort before %s (position %d): the backfill's cursor walk is an index scan on the index it builds",
-				index, p, ok, version, position[version])
-		}
+		t.Errorf("the embedded migrations carry %v; the recipient digest is not a migration", leftover)
 	}
 }
 
-// TestRecipientEmailDigestFoldsCaseAndWhitespaceOnly: the stored format. The
-// digest is the SHA-256 of the address trimmed and lower-cased -- nothing else --
-// and an address that cannot be a mailbox has none. campaigns.EmailDigest is the
+// TestRecipientEmailDigestFoldsCaseAndWhitespaceOnly: the lookup key. The digest
+// is the SHA-256 of the address trimmed and lower-cased -- nothing else -- and an
+// address that cannot be a mailbox has none. campaigns.EmailDigest is the
 // original; component/campaigns holds the two together
-// (TestRecipientDigestMigrationMatchesEmailDigest).
+// (TestRecipientDigestBackfillMatchesEmailDigest).
 func TestRecipientEmailDigestFoldsCaseAndWhitespaceOnly(t *testing.T) {
 	const person = "143b53b0840f6e1fcf8537a38513b59a9f326c72f577f17d1da67393eff1d413" // sha256("person@example.test")
 	for _, spelling := range []string{"person@example.test", "PERSON@EXAMPLE.TEST", "  Person@Example.Test\n", "\tperson@EXAMPLE.test "} {
@@ -87,39 +67,59 @@ func TestRecipientEmailDigestFoldsCaseAndWhitespaceOnly(t *testing.T) {
 	}
 }
 
-// TestTheBackfillDefersInsteadOfBeingCutOff: an attempt with no time left, or
-// one that was cancelled, ends BETWEEN statements with the deferral -- not with
-// a context error, which the runner reads as "a statement may still be running"
-// and keeps its migration lock for until an operator clears it
-// (migrationMayStillBeRunning; the readiness collapse's memql#5604). No
-// database is reached: the check comes before the first statement.
-func TestTheBackfillDefersInsteadOfBeingCutOff(t *testing.T) {
-	for name, ctx := range map[string]func() (context.Context, context.CancelFunc){
-		"a deadline too near for one step": func() (context.Context, context.CancelFunc) {
-			return context.WithTimeout(context.Background(), time.Second)
-		},
-		"an attempt already cancelled": func() (context.Context, context.CancelFunc) {
-			c, cancel := context.WithCancel(context.Background())
-			cancel()
-			return c, func() {}
-		},
-		"an attempt already out of time": func() (context.Context, context.CancelFunc) {
-			return context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
-		},
+// TestRecipientEmailStampHashesAnyText: the stamp is what addRecipient writes for
+// whatever text it was given, so a recipient the sweep fills in is the recipient
+// addRecipient would have written. For an address it is the lookup key; for text
+// that is not one it is still the hash of the folded text, which no lookup asks
+// for, and it is what takes a scrubbed or malformed recipient out of the rows
+// without a digest.
+func TestRecipientEmailStampHashesAnyText(t *testing.T) {
+	sha := func(s string) string {
+		sum := sha256.Sum256([]byte(s))
+		return hex.EncodeToString(sum[:])
+	}
+	for text, folded := range map[string]string{
+		"":                     "",
+		"   ":                  "",
+		"no-at-sign":           "no-at-sign",
+		" No-At-Sign\n":        "no-at-sign",
+		"a b@c.test":           "a b@c.test",
+		"trailing@":            "trailing@",
+		" Person@Example.TEST": "person@example.test",
+		"ÄBC@x.test":           "äbc@x.test",
 	} {
-		t.Run(name, func(t *testing.T) {
-			c, cancel := ctx()
-			defer cancel()
-			report, err := backfillRecipientEmailDigests(c, newStubBun(), nil, recipientEmailDigestBatch)
-			if !errors.Is(err, ErrMigrationDeferred) {
-				t.Fatalf("an attempt with no time left must defer, got %v", err)
-			}
-			if migrationMayStillBeRunning(err) {
-				t.Fatalf("the runner would keep its migration lock over a run with nothing in flight: %v", err)
-			}
-			if report.Stamped != 0 || report.Batches != 0 {
-				t.Errorf("a deferred attempt that never started stamped %+v", report)
-			}
-		})
+		if got, want := RecipientEmailStamp(text), sha(folded); got != want {
+			t.Errorf("RecipientEmailStamp(%q) = %q, want the SHA-256 of %q: %q", text, got, folded, want)
+		}
+	}
+	for _, addr := range []string{"person@example.test", " Person+News@Example.TEST ", "ÄBC@x.test"} {
+		if got, want := RecipientEmailDigest(addr), RecipientEmailStamp(addr); got != want || got == "" {
+			t.Errorf("an address is looked up by the digest it was stamped with: digest %q, stamp %q for %q", got, want, addr)
+		}
+	}
+	// Two different texts never share a digest, so a stamp of text that is not an
+	// address cannot answer for an address.
+	if RecipientEmailStamp("person") == RecipientEmailStamp("person@example.test") {
+		t.Error("distinct texts share a stamp")
+	}
+}
+
+// TestTheSweepStopsBetweenStepsWhenCancelled: a pass whose context is already
+// cancelled ends before its first statement with an error that wraps the
+// context's, which the worker reads as a node shutting down. No database is
+// reached: the check comes before the first step.
+func TestTheSweepStopsBetweenStepsWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	report, err := backfillRecipientEmailDigests(ctx, newStubBun(), nil, recipientEmailDigestBatch)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled pass must end with the context's error, got %v", err)
+	}
+	if report.Stamped != 0 || report.Batches != 0 {
+		t.Errorf("a pass that never started stamped %+v", report)
+	}
+	if _, err := backfillRecipientEmailDigests(context.Background(), newStubBun(), nil, 0); err == nil {
+		t.Error("a batch size of 0 was accepted: the walk would examine nothing and stop at once, reporting a clean pass")
 	}
 }

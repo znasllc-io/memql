@@ -16,15 +16,14 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
-	"github.com/uptrace/bun/migrate"
 )
 
-// THE RECIPIENT DIGEST BACKFILL, AGAINST A REAL DATABASE (memql#6022, F9).
+// THE RECIPIENT DIGEST SWEEP, AGAINST A REAL DATABASE (memql#6022, F9).
 //
 // Each case gets a scratch schema (migrationLockDB) holding a "MemoryNodes" with
 // the real table's columns, its primary key and its latest-row index -- a
 // hypertable in one-day chunks when TimescaleDB is installed -- and pools whose
-// search_path is that schema. The backfill's unqualified names land there and
+// search_path is that schema. The sweep's unqualified names land there and
 // never on the shared table, where other packages' tests write recipients: it
 // stamps every recipient it finds, so run on the shared table it would append
 // versions to rows that are not this test's.
@@ -36,8 +35,7 @@ type recipientDigestFixture struct {
 	admin  *bun.DB
 	schema string
 	dsn    string
-	// base is when the newest seeded version could have been written; the
-	// backfill's versions are stamped after it.
+	// base is when the newest seeded version could have been written.
 	base time.Time
 }
 
@@ -167,15 +165,25 @@ func (f *recipientDigestFixture) seedMany(prefix string, n int) {
 	}
 }
 
-func migrationProvenance() map[string]any {
-	return map[string]any{"kind": "migration", "name": recipientEmailDigestMigrationName}
+func sweepProvenance() map[string]any {
+	return map[string]any{"kind": "system", "name": recipientEmailDigestProvenanceName}
+}
+
+// sweptVersions counts the versions the sweep appended to the ids matching the
+// pattern.
+func (f *recipientDigestFixture) sweptVersions(idPattern string) int {
+	f.t.Helper()
+	return f.count(`SELECT count(*) FROM "MemoryNodes" WHERE id LIKE ? AND provenance @> ?::jsonb`,
+		idPattern, `{"kind":"system","name":"`+recipientEmailDigestProvenanceName+`"}`)
 }
 
 // TestRecipientDigestBackfillStampsTheNewestVersionOfEachRecipient: one new
-// version per recipient whose NEWEST version has a usable address and no digest,
-// the newest version copied whole with the digest added and nothing else
-// changed, over several batches; every other row exactly as it was; a second
-// run finds nothing to do.
+// version per recipient whose NEWEST version has no digest, the newest version
+// copied whole with the digest added and nothing else changed, over several
+// batches; every other row exactly as it was; a second pass finds nothing to do.
+// A recipient that holds text that is not an address (a scrubbed one, a malformed
+// import) is stamped like any other, with the digest of its text, which is what
+// takes it out of the rows a signup has to compare.
 func TestRecipientDigestBackfillStampsTheNewestVersionOfEachRecipient(t *testing.T) {
 	f := newRecipientDigestFixture(t)
 	const concept = recipientEmailDigestConcept
@@ -192,6 +200,9 @@ func TestRecipientDigestBackfillStampsTheNewestVersionOfEachRecipient(t *testing
 	const day = 24 * time.Hour
 	// Ten recipients, ids in the order the walk takes them.
 	rcp := func(n int) string { return recipientID(fmt.Sprintf("rcp-%02d", n)) }
+	// An address full of what a statement is built from: quotes, a backslash, a
+	// placeholder character and braces are all legal in a local part.
+	const awkward = `Q"uote\back?slash{brace}'@Example.TEST`
 	f.seed(concept, rcp(1), time.Hour, person(" Alpha@Example.TEST "))
 	f.seed(concept, rcp(2), 3*day, with(person("old@example.test"), map[string]any{"emailDigest": RecipientEmailDigest("old@example.test")}))
 	f.seed(concept, rcp(2), time.Hour, person("beta@example.test")) // the address changed; the newest has no digest
@@ -203,9 +214,6 @@ func TestRecipientDigestBackfillStampsTheNewestVersionOfEachRecipient(t *testing
 	f.seed(concept, rcp(7), time.Hour, person("Epsilon+tag@Example.TEST"))
 	f.seed(concept, rcp(8), time.Hour, person("ÄBC@x.test"))
 	f.seed(concept, rcp(9), time.Hour, with(person("zeta@example.test"), map[string]any{"emailDigest": ""})) // an empty digest is none
-	// An address full of what a statement is built from: quotes, a backslash, a
-	// placeholder character and braces are all legal in a local part.
-	const awkward = `Q"uote\back?slash{brace}'@Example.TEST`
 	f.seed(concept, rcp(10), time.Hour, person(awkward))
 	// Rows that are not recipients: a row of another concept under the id of the
 	// first recipient, NEWER than it (so by id alone it is that id's newest
@@ -229,9 +237,14 @@ func TestRecipientDigestBackfillStampsTheNewestVersionOfEachRecipient(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	stamped := map[string]string{rcp(1): "alpha@example.test", rcp(2): "beta@example.test", rcp(7): "epsilon+tag@example.test", rcp(8): "äbc@x.test", rcp(9): "zeta@example.test", rcp(10): `q"uote\back?slash{brace}'@example.test`}
-	if report.Stamped != len(stamped) || report.Unusable != 2 || report.Changed != 0 {
-		t.Errorf("report %+v, want %d stamped, 2 unusable (rcp-04, rcp-05) and none changed", report, len(stamped))
+	// The text each stamped recipient holds; the stamp is of the text, as
+	// addRecipient stamps it.
+	stamped := map[string]string{
+		rcp(1): " Alpha@Example.TEST ", rcp(2): "beta@example.test", rcp(4): "no-at-sign", rcp(5): "",
+		rcp(7): "Epsilon+tag@Example.TEST", rcp(8): "ÄBC@x.test", rcp(9): "zeta@example.test", rcp(10): awkward,
+	}
+	if report.Stamped != len(stamped) || report.NotAddresses != 2 || report.Changed != 0 {
+		t.Errorf("report %+v, want %d stamped, 2 of them not addresses (rcp-04, rcp-05) and none changed", report, len(stamped))
 	}
 	// Ten ids in batches of two: five full batches, and the walk ends on the
 	// first batch that is not full -- here an empty one.
@@ -239,7 +252,7 @@ func TestRecipientDigestBackfillStampsTheNewestVersionOfEachRecipient(t *testing
 		t.Errorf("%d batches, want %d: the walk is bounded by the batch size, not by one pass over the table", report.Batches, want)
 	}
 
-	for id, mailbox := range stamped {
+	for id, text := range stamped {
 		old := before[id]
 		now := f.versions(concept, id)
 		if len(now) != len(old)+1 {
@@ -248,7 +261,7 @@ func TestRecipientDigestBackfillStampsTheNewestVersionOfEachRecipient(t *testing
 		}
 		for i := range old { // everything that was there is still there, untouched
 			if !reflect.DeepEqual(now[i+1], old[i]) {
-				t.Errorf("%s: version %d changed: the backfill appends, it does not rewrite", id, i)
+				t.Errorf("%s: version %d changed: the sweep appends, it does not rewrite", id, i)
 			}
 		}
 		newest := now[0]
@@ -256,24 +269,25 @@ func TestRecipientDigestBackfillStampsTheNewestVersionOfEachRecipient(t *testing
 		for k, v := range old[0].Payload {
 			wantPayload[k] = v
 		}
-		wantPayload["emailDigest"] = RecipientEmailDigest(mailbox)
+		wantPayload["emailDigest"] = RecipientEmailStamp(text)
 		if !reflect.DeepEqual(newest.Payload, wantPayload) {
 			t.Errorf("%s: newest payload\n  %v\nwant the previous newest plus the digest\n  %v", id, newest.Payload, wantPayload)
 		}
-		if !newest.At.After(old[0].At) {
-			t.Errorf("%s: the new version (%s) is not after the version it copies (%s), so a read would not see it", id, newest.At, old[0].At)
+		if want := old[0].At.Add(time.Microsecond); !newest.At.Equal(want) {
+			t.Errorf("%s: the new version is at %s, want %s: one microsecond after the version it copies, so it is the newest and a write that lands later stays newer",
+				id, newest.At.Format(time.RFC3339Nano), want.Format(time.RFC3339Nano))
 		}
 		if newest.CreatedBy != old[0].CreatedBy || newest.Type != old[0].Type ||
 			!reflect.DeepEqual(newest.Schema, old[0].Schema) || !reflect.DeepEqual(newest.Metadata, old[0].Metadata) {
 			t.Errorf("%s: the new version does not copy createdBy, type, schema and metadata from the one it follows: %+v vs %+v", id, newest, old[0])
 		}
-		if !reflect.DeepEqual(newest.Provenance, migrationProvenance()) {
-			t.Errorf("%s: provenance %v, want %v: the down direction finds its versions by it", id, newest.Provenance, migrationProvenance())
+		if !reflect.DeepEqual(newest.Provenance, sweepProvenance()) {
+			t.Errorf("%s: provenance %v, want %v", id, newest.Provenance, sweepProvenance())
 		}
 	}
-	for _, id := range []string{rcp(3), rcp(4), rcp(5), rcp(6)} {
+	for _, id := range []string{rcp(3), rcp(6)} {
 		if now := f.versions(concept, id); !reflect.DeepEqual(now, before[id]) {
-			t.Errorf("%s was written to although it needed nothing: %d versions, was %d", id, len(now), len(before[id]))
+			t.Errorf("%s was written to although it already carried a digest: %d versions, was %d", id, len(now), len(before[id]))
 		}
 	}
 	for _, b := range bystanders {
@@ -281,17 +295,66 @@ func TestRecipientDigestBackfillStampsTheNewestVersionOfEachRecipient(t *testing
 			t.Errorf("%s %s is not a recipient and was written to", b[0], b[1])
 		}
 	}
+	if left := f.count(`SELECT count(*) FROM (SELECT DISTINCT ON (id) id, payload FROM "MemoryNodes" WHERE concept = ? ORDER BY id, "createdAt" DESC) newest
+	 WHERE COALESCE(payload->>'emailDigest', '') = ''`, concept); left != 0 {
+		t.Errorf("%d recipients still have no digest after the sweep: each is a row every signup has to compare", left)
+	}
 
 	again, err := backfillRecipientEmailDigests(context.Background(), f.db, nil, batch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Stamped != 0 || again.Unusable != 2 {
-		t.Errorf("second run %+v, want nothing stamped: the first run left every usable recipient with a digest", again)
+	if again.Stamped != 0 || again.NotAddresses != 0 || again.Changed != 0 {
+		t.Errorf("second pass %+v, want nothing stamped: the first left every recipient with a digest", again)
 	}
 	// Twelve versions were seeded (rcp-02 and rcp-06 have two), and one was appended per stamped recipient.
 	if total := f.count(`SELECT count(*) FROM "MemoryNodes" WHERE concept = ?`, concept); total != 12+len(stamped) {
-		t.Errorf("the table holds %d recipient versions after two runs, want %d", total, 12+len(stamped))
+		t.Errorf("the table holds %d recipient versions after two passes, want %d", total, 12+len(stamped))
+	}
+}
+
+// TestAWriteThatLandsDuringAPassStaysTheNewestVersion: the swept version sorts
+// one microsecond after the version it copied, not at the clock's now. A hand
+// unsubscribe (or a bounce) that commits while the statement runs was read-merged
+// from the version BEFORE the stamp, so it carries no digest and a createdAt of its
+// own; had the sweep stamped its version at the clock it would sort AFTER that
+// write and shadow it, and the opt-out would stop being the row every read
+// returns. As it is the write stays the newest, and the next pass stamps it.
+func TestAWriteThatLandsDuringAPassStaysTheNewestVersion(t *testing.T) {
+	f := newRecipientDigestFixture(t)
+	const concept = recipientEmailDigestConcept
+	id := recipientID("landed")
+	person := func(status string) map[string]any {
+		return map[string]any{"ownerUserId": "u1", "audienceId": "a1", "email": "landed@example.test", "subscriptionStatus": status}
+	}
+	source := f.seed(concept, id, time.Hour, person("subscribed"))
+
+	if _, err := backfillRecipientEmailDigests(context.Background(), f.db, nil, 10); err != nil {
+		t.Fatal(err)
+	}
+	// What the engine writes for the opt-out that raced the pass: the payload it
+	// read before the stamp, a status change, and a createdAt later than the
+	// source by far more than the pass added.
+	raw, _ := json.Marshal(person("unsubscribed"))
+	if _, err := f.db.ExecContext(context.Background(),
+		`INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", schema, payload, metadata, type, concept, provenance)
+		 VALUES (?, ?, 'digest-test', '{"v":1}'::jsonb, ?::jsonb, '{"m":1}'::jsonb, 'node', ?, '{"kind":"mutation","name":"setRecipientSubscription"}'::jsonb)`,
+		id, source.Add(time.Millisecond), string(raw), concept); err != nil {
+		t.Fatal(err)
+	}
+	versions := f.versions(concept, id)
+	if len(versions) != 3 || versions[0].Payload["subscriptionStatus"] != "unsubscribed" || versions[0].Provenance["name"] != "setRecipientSubscription" {
+		t.Fatalf("the write that landed after the sweep is not the newest version: %+v", versions)
+	}
+
+	// The next pass finds the opt-out without a digest and stamps it, keeping it.
+	next, err := backfillRecipientEmailDigests(context.Background(), f.db, nil, 10)
+	if err != nil || next.Stamped != 1 {
+		t.Fatalf("the next pass: %+v, %v; want the opt-out stamped", next, err)
+	}
+	versions = f.versions(concept, id)
+	if len(versions) != 4 || versions[0].Payload["subscriptionStatus"] != "unsubscribed" || versions[0].Payload["emailDigest"] != RecipientEmailDigest("landed@example.test") {
+		t.Errorf("after the next pass the newest version is %+v; want the opt-out, now carrying the digest", versions[0])
 	}
 }
 
@@ -339,7 +402,7 @@ func TestRecipientDigestBackfillRunsOnceWhenTwoReplicasRunIt(t *testing.T) {
 		if twice := f.count(`SELECT count(*) FROM (SELECT id FROM "MemoryNodes" WHERE id LIKE ? GROUP BY id HAVING count(*) <> 2) x`, recipientID(prefix)+"-%"); twice != 0 {
 			t.Errorf("round %d: %d recipients do not have exactly the original version and one stamped one", round, twice)
 		}
-		if wrong := f.count(`SELECT count(*) FROM "MemoryNodes" m WHERE id LIKE ? AND provenance->>'kind' = 'migration'
+		if wrong := f.count(`SELECT count(*) FROM "MemoryNodes" m WHERE id LIKE ? AND provenance->>'kind' = 'system'
 		   AND payload->>'emailDigest' IS DISTINCT FROM encode(sha256(convert_to(lower(btrim(payload->>'email')), 'UTF8')), 'hex')`, recipientID(prefix)+"-%"); wrong != 0 {
 			t.Errorf("round %d: %d stamped versions carry a digest that is not the SHA-256 of their trimmed, lower-cased address", round, wrong)
 		}
@@ -373,10 +436,10 @@ func (w *batchWatcher) AfterQuery(_ context.Context, e *bun.QueryEvent) {
 	}
 }
 
-// TestRecipientDigestBackfillResumesAfterBeingInterrupted: an attempt that is
-// cancelled between two batches ends with the deferral -- the committed batches
-// stand, nothing is half done, the runner is not told a statement may still be
-// running -- and the next attempt stamps exactly the rest.
+// TestRecipientDigestBackfillResumesAfterBeingInterrupted: a pass that is
+// cancelled between two batches ends with the context's error -- a node shutting
+// down, which the worker does not report as a failure -- the committed batches
+// stand, nothing is half done, and the next pass stamps exactly the rest.
 func TestRecipientDigestBackfillResumesAfterBeingInterrupted(t *testing.T) {
 	f := newRecipientDigestFixture(t)
 	const rows, batch = 25, 5
@@ -385,17 +448,14 @@ func TestRecipientDigestBackfillResumesAfterBeingInterrupted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	first, err := backfillRecipientEmailDigests(ctx, f.db.WithQueryHook(&batchWatcher{cancelAfter: 2, cancel: cancel}), nil, batch)
-	if !errors.Is(err, ErrMigrationDeferred) {
-		t.Fatalf("an attempt cancelled between batches must defer, got %v", err)
-	}
-	if migrationMayStillBeRunning(err) {
-		t.Fatalf("the runner would keep its migration lock over a run with nothing in flight: %v", err)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("a pass cancelled between batches must end with the context's error, got %v", err)
 	}
 	if first.Batches != 2 || first.Stamped != 2*batch {
-		t.Fatalf("first attempt %+v, want exactly the two batches that committed, %d recipients", first, 2*batch)
+		t.Fatalf("first pass %+v, want exactly the two batches that committed, %d recipients", first, 2*batch)
 	}
-	if got := f.count(`SELECT count(*) FROM "MemoryNodes" WHERE id LIKE 'v1:campaigns:recipient:resume-%' AND provenance->>'kind' = 'migration'`); got != 2*batch {
-		t.Fatalf("%d recipients were stamped by the interrupted attempt, want %d", got, 2*batch)
+	if got := f.sweptVersions("v1:campaigns:recipient:resume-%"); got != 2*batch {
+		t.Fatalf("%d recipients were stamped by the interrupted pass, want %d", got, 2*batch)
 	}
 
 	second, err := backfillRecipientEmailDigests(context.Background(), f.db, nil, batch)
@@ -403,7 +463,7 @@ func TestRecipientDigestBackfillResumesAfterBeingInterrupted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if second.Stamped != rows-2*batch {
-		t.Errorf("second attempt stamped %d, want the %d the first left", second.Stamped, rows-2*batch)
+		t.Errorf("second pass stamped %d, want the %d the first left", second.Stamped, rows-2*batch)
 	}
 	if twice := f.count(`SELECT count(*) FROM (SELECT id FROM "MemoryNodes" WHERE id LIKE 'v1:campaigns:recipient:resume-%' GROUP BY id HAVING count(*) <> 2) x`); twice != 0 {
 		t.Errorf("%d recipients are not the original version plus exactly one stamped one", twice)
@@ -488,110 +548,5 @@ func TestRecipientDigestBackfillLeavesARowThatChangedUnderIt(t *testing.T) {
 	}
 	if v := f.versions(concept, rcp(3)); len(v) != 2 || v[0].Provenance["name"] != "racing-writer" || v[0].Payload["email"] != "moved3@example.test" {
 		t.Errorf("race-3 was stamped from its old address: %d versions, newest %v", len(v), v[0].Payload)
-	}
-}
-
-// TestRecipientDigestBackfillRevertDeletesOnlyWhatItAppended: the down direction
-// removes the versions this migration wrote, found by provenance, and leaves
-// every other version of every row -- another migration's included -- as it was.
-func TestRecipientDigestBackfillRevertDeletesOnlyWhatItAppended(t *testing.T) {
-	f := newRecipientDigestFixture(t)
-	const concept = recipientEmailDigestConcept
-	f.seedMany("revert", 12)
-	// A version another migration wrote to a recipient, and the row it follows.
-	f.seed(concept, recipientID("other-migration"), 2*time.Hour, map[string]any{"email": "someone@example.test"})
-	if _, err := f.db.ExecContext(context.Background(),
-		`INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", schema, payload, metadata, type, concept, provenance)
-		 VALUES (?, ?, 'digest-test', '{}'::jsonb, '{"email":"someone@example.test","touched":true}'::jsonb, '{}'::jsonb, 'node', ?,
-		         '{"kind":"migration","name":"20260912000000_site_owner_restamp"}'::jsonb)`, recipientID("other-migration"), f.base.Add(-time.Hour), concept); err != nil {
-		t.Fatal(err)
-	}
-	before := f.count(`SELECT count(*) FROM "MemoryNodes"`)
-
-	if _, err := backfillRecipientEmailDigests(context.Background(), f.db, nil, 5); err != nil {
-		t.Fatal(err)
-	}
-	stamped := f.count(`SELECT count(*) FROM "MemoryNodes" WHERE provenance @> ?::jsonb`, `{"kind":"migration","name":"`+recipientEmailDigestMigrationName+`"}`)
-	if stamped != 13 { // 12 + the other-migration row's newest version, which has an address and no digest
-		t.Fatalf("the backfill stamped %d versions, want 13", stamped)
-	}
-
-	if err := RevertRecipientEmailDigests(context.Background(), f.db, nil); err != nil {
-		t.Fatal(err)
-	}
-	if after := f.count(`SELECT count(*) FROM "MemoryNodes"`); after != before {
-		t.Errorf("after the down the table holds %d versions, want the %d it held before the up", after, before)
-	}
-	if left := f.count(`SELECT count(*) FROM "MemoryNodes" WHERE provenance @> ?::jsonb`, `{"kind":"migration","name":"`+recipientEmailDigestMigrationName+`"}`); left != 0 {
-		t.Errorf("the down left %d versions this migration appended", left)
-	}
-	if kept := f.count(`SELECT count(*) FROM "MemoryNodes" WHERE provenance->>'name' = '20260912000000_site_owner_restamp'`); kept != 1 {
-		t.Errorf("the down removed another migration's version: %d of 1 remain", kept)
-	}
-
-	// Up again after a down stamps everything again: nothing about the first run
-	// is remembered anywhere but in the rows.
-	again, err := backfillRecipientEmailDigests(context.Background(), f.db, nil, 5)
-	if err != nil || again.Stamped != 13 {
-		t.Errorf("up after down: %+v, %v; want 13 stamped", again, err)
-	}
-}
-
-// TestTheRecipientDigestMigrationRunsOnceWhenTwoReplicasBoot: the registered
-// migration, as the runner runs it, on two replicas that boot together. bun's
-// migration lock lets one run it and sends the other away to try again on its
-// next tick, where it finds the migration applied; the rows end as one run left
-// them.
-func TestTheRecipientDigestMigrationRunsOnceWhenTwoReplicasBoot(t *testing.T) {
-	f := newRecipientDigestFixture(t)
-	const rows = 150
-	f.seedMany("boot", rows)
-
-	all := migrate.NewMigrations()
-	registerTimescaleMigrations(all, nil)
-	only := migrate.NewMigrations()
-	for _, mig := range all.Sorted() {
-		if mig.Name == "20261011000000" {
-			only.Add(mig)
-		}
-	}
-	if len(only.Sorted()) != 1 {
-		t.Fatalf("the registered set carries %d migrations named 20261011000000, want 1", len(only.Sorted()))
-	}
-
-	type replica struct {
-		runner *Database
-		db     *bun.DB
-	}
-	replicas := []replica{{lockedMigrationRunner(t, only), f.db}, {lockedMigrationRunner(t, only), f.replica()}}
-	start := make(chan struct{})
-	var wg sync.WaitGroup
-	for _, r := range replicas {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			r.runner.runMigrations(context.Background(), r.db)
-		}()
-	}
-	close(start)
-	wg.Wait()
-	for i, r := range replicas {
-		if r.runner.migrationsPending() { // refused by the other's lock: the next tick
-			r.runner.runMigrations(context.Background(), r.db)
-		}
-		if err := r.runner.MigrationError(); err != nil {
-			t.Fatalf("replica %d after its retry: %v", i, err)
-		}
-	}
-
-	if n := f.count(`SELECT count(*) FROM bun_migrations WHERE name = '20261011000000'`); n != 1 {
-		t.Errorf("the migration is recorded %d times, want once", n)
-	}
-	if twice := f.count(`SELECT count(*) FROM (SELECT id FROM "MemoryNodes" WHERE id LIKE 'v1:campaigns:recipient:boot-%' GROUP BY id HAVING count(*) <> 2) x`); twice != 0 {
-		t.Errorf("%d recipients are not the original version plus exactly one stamped one", twice)
-	}
-	if stamped := f.count(`SELECT count(*) FROM "MemoryNodes" WHERE id LIKE 'v1:campaigns:recipient:boot-%' AND provenance @> ?::jsonb`, `{"kind":"migration","name":"`+recipientEmailDigestMigrationName+`"}`); stamped != rows {
-		t.Errorf("%d recipients were stamped, want %d", stamped, rows)
 	}
 }

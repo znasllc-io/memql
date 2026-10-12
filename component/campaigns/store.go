@@ -1234,9 +1234,14 @@ func (s *Store) RecipientByID(ctx context.Context, recipientID string) (Recipien
 // before it believes the match. MailboxMembers does.
 //
 // This does not see rows that carry no digest (RecipientsWithoutDigestInAudience
-// is the other half) and is not a keyed lookup in the database's sense: the
-// engine filters the audience's recipient versions on the digest, so the cost
-// grows with the cluster's recipients until an index serves it.
+// is the other half), and it is NOT a keyed read in the database's sense. The
+// engine collapses every current recipient version in the cluster to its newest
+// before it applies a payload filter, so the cost grows with the cluster's
+// recipients, not with the audience: about a second at 200,000. A partial
+// expression index on (audienceId, emailDigest) was tried and does not help --
+// the plan is the same with it, because the filter sits above that collapse and
+// cannot use it -- so none ships; an index would pay only once the engine pushes a
+// payload filter into the collapse.
 //
 // A digest of "" matches NOTHING and is not sent: EmailDigest answers "" for an
 // address that cannot be a mailbox, and as a filter value "" would select every

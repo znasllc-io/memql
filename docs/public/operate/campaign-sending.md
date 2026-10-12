@@ -294,12 +294,35 @@ normalized address and audience, even across deployables and worker replicas.
 An address already in the audience is found by its digest, the SHA-256 of the
 trimmed, lower-cased address that every recipient added through the engine
 carries, instead of by reading the whole audience. A recipient written before
-the digest existed has none until a backfill reaches it, so the rows without a
-digest are checked by their address as well. Any row for the mailbox that has
-unsubscribed, bounced or complained keeps the form from enrolling it again or
-sending it a welcome, including a row opted out by hand and a row beside a
-duplicate for the same mailbox. The lookup is not an index read: the cost of
-each signup grows with the number of recipients in the cluster.
+the digest existed has none until the digest sweep reaches it, so the rows
+without a digest are checked by their address as well. Any row for the mailbox
+that has unsubscribed, bounced or complained keeps the form from enrolling it
+again or sending it a welcome, including a row opted out by hand and a row
+beside a duplicate for the same mailbox. The lookup is not an index read: the
+cost of each signup grows with the number of recipients in the cluster.
+
+**Rolling out the digest.** The digest is put on existing recipients by a sweep
+in the campaigns worker, not by a migration. A recipient record refuses a field
+it does not declare, so a replica still running the previous release cannot
+update a recipient that carries a digest: an unsubscribe it receives answers the
+retry page, a bounce or complaint it handles cannot be applied to the recipient,
+and a by-hand change through it errors, until that replica is gone. A migration
+would run before the new replicas start and stamp every recipient while the
+previous release is still serving, so the sweep runs ten minutes after each node
+starts and hourly after that, when a rollout is normally over. The ten minutes is
+a guess, not a check: a rollout that outlasts it is swept while an old replica
+still serves, and the recipients that pass reaches cannot be updated by that
+replica until it is gone. New recipients carry the digest from the first request
+of the new release, and rolling back to a release before the digest leaves them
+in the same state, so roll forward instead. A signup always reads one page of the
+audience's recipients that have no digest as well; once the sweep has been through
+that page is empty. While an audience holds a full page of them the signup reads
+the whole audience, and an email rule that sends to an address on a row declines
+to fire, saying so in its refusals, because it cannot tell whether the address is
+already a member. The sweep logs "put the address digest on recipients written
+without one" with a count when it stamps anything; a pass over recipients that
+all carry a digest writes nothing.
+
 Consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and
 published welcome content. Editing the template later does not rewrite that

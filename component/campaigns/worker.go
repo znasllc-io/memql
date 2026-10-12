@@ -150,6 +150,16 @@ type Worker struct {
 	// deployment that has sent nothing still has a ladder to start.
 	activeIdentities map[string]bool
 
+	// digestSweep is the sweep of recipients written without an address digest
+	// (digest_sweep.go), installed by the application before Start. Nil means the
+	// worker never sweeps. digestSweepFirst and digestSweepEvery are the schedule;
+	// zero means the defaults, and only a test sets them. sweepDoneCh is closed
+	// when the sweep goroutine has returned; nil when none was started.
+	digestSweep      RecipientDigestSweep
+	digestSweepFirst time.Duration
+	digestSweepEvery time.Duration
+	sweepDoneCh      chan struct{}
+
 	cancel      context.CancelFunc
 	running     atomic.Bool
 	startOnce   sync.Once
@@ -255,11 +265,19 @@ func (w *Worker) Start(_ context.Context) {
 				"identity", w.cfg.SendingIdentity, "steps", w.cfg.WarmupSteps)
 		}
 		runCtx, cancel := context.WithCancel(context.Background())
+		var sweepDone chan struct{}
+		if w.digestSweep != nil {
+			sweepDone = make(chan struct{})
+		}
 		w.mu.Lock()
 		w.cancel = cancel
+		w.sweepDoneCh = sweepDone
 		w.mu.Unlock()
 		w.running.Store(true)
 		go w.loop(runCtx)
+		if sweepDone != nil {
+			go w.digestSweepLoop(runCtx, sweepDone)
+		}
 	})
 }
 
@@ -269,10 +287,14 @@ func (w *Worker) Stop(_ context.Context) {
 		w.mu.Lock()
 		cancel := w.cancel
 		w.cancel = nil
+		sweepDone := w.sweepDoneCh
 		w.mu.Unlock()
 		if cancel != nil {
 			cancel()
 			<-w.doneCh
+			if sweepDone != nil {
+				<-sweepDone
+			}
 		}
 		w.running.Store(false)
 	})

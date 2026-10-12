@@ -76,16 +76,18 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 	// it trusts an index it did not see built, and builds per chunk only on a
 	// hypertable (memql#5252); the readiness collapse deletes in bounded,
 	// committed batches, which a .sql file can only write as one statement
-	// (memql#5604); the recipient digest backfill hashes each address with the
-	// engine's own folding, which Postgres's lower() and btrim() are not, in
-	// bounded batches that take turns across replicas (memql#6022).
+	// (memql#5604).
+	//
+	// The recipient email digest is NOT among them (memql#6022): it adds a field
+	// the previous release's replicas cannot write, so it is filled in by a sweep
+	// the campaigns worker runs after a rollout (recipient_email_digest.go), never
+	// by a migration that would run before one.
 	registerSiteOwnerRestamp(m, logger)
 	registerMemoryNodesConceptIndex(m, logger)
 	registerMemoryNodesConceptIndexVerified(m, logger)
 	registerModuleReadinessHistoryCollapse(m, logger)
 	registerWorkRecoveryIndex(m, logger)
 	registerWorkJournalLookupIndex(m, logger)
-	registerRecipientEmailDigest(m, logger)
 }
 
 func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {

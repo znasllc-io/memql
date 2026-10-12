@@ -28,9 +28,10 @@ import (
 // signup that fails to find the member who is there, and a second membership
 // for a mailbox that already has one.
 
-// TestRecipientDigestMigrationMatchesEmailDigest: the backfill's digest is the
-// one this package looks members up by.
-func TestRecipientDigestMigrationMatchesEmailDigest(t *testing.T) {
+// TestRecipientDigestBackfillMatchesEmailDigest: the backfill's digest is the
+// one this package looks members up by, and what it stamps is what addRecipient
+// stamps.
+func TestRecipientDigestBackfillMatchesEmailDigest(t *testing.T) {
 	usable := 0
 	for _, addr := range []string{
 		" Foo@Example.COM ", "ÄBC@x.test", "no-at-sign", "a b@c.test",
@@ -44,6 +45,10 @@ func TestRecipientDigestMigrationMatchesEmailDigest(t *testing.T) {
 		}
 		if want != "" {
 			usable++
+			// For an address the key it is looked up by is the stamp it is written with.
+			if stamp := database.RecipientEmailStamp(addr); stamp != want {
+				t.Errorf("RecipientEmailStamp(%q) = %q, EmailDigest = %q: the sweep would stamp a row with a digest its own lookup never asks for", addr, stamp, want)
+			}
 		}
 	}
 	// The instrument can move: an implementation answering "" for everything
@@ -69,9 +74,7 @@ func TestAddRecipientStampsTheDigestTheGoFunctionComputes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the stamp expression does not parse: %v", err)
 	}
-	// Addresses either side can use. Text that cannot be a mailbox is stamped by
-	// the mutation with a digest of whatever it was given and has none in
-	// EmailDigest; nothing ever looks that stamp up, so it is not compared.
+	// Addresses either side can use: the stamp is the lookup key.
 	for _, addr := range []string{" Foo@Example.TEST ", "ÄBC@x.test", "person@example.test", "Person+News@Example.Test", "\u00a0nbsp@example.test\u00a0"} {
 		v, err := memql.EvalExpr(context.Background(), expr, memql.MapScope{"args": map[string]any{"email": addr}}, memql.EvalOptions{})
 		if err != nil {
@@ -79,6 +82,23 @@ func TestAddRecipientStampsTheDigestTheGoFunctionComputes(t *testing.T) {
 		}
 		if got, want := v, EmailDigest(addr); got != want || want == "" {
 			t.Errorf("addRecipient stamps %v for %q, EmailDigest says %q", got, addr, want)
+		}
+	}
+	// Text that cannot be a mailbox is stamped by the mutation with the digest of
+	// whatever it was given, and has none in EmailDigest because nothing looks it
+	// up. The sweep stamps it the same way (a scrubbed recipient holds "", a
+	// malformed import holds whatever it held), so the rows the sweep fills in are
+	// the rows addRecipient would have written.
+	for _, text := range []string{"", "   ", "no-at-sign", " No-At-Sign\n", "a b@c.test", "@leading", "trailing@", "line\nbreak@example.test", "ÄBC", "\u00a0nbsp\u00a0"} {
+		v, err := memql.EvalExpr(context.Background(), expr, memql.MapScope{"args": map[string]any{"email": text}}, memql.EvalOptions{})
+		if err != nil {
+			t.Fatalf("evaluating the stamp for %q: %v", text, err)
+		}
+		if got, want := v, database.RecipientEmailStamp(text); got != want {
+			t.Errorf("addRecipient stamps %v for the text %q, the sweep would stamp %q", got, text, want)
+		}
+		if EmailDigest(text) != "" {
+			t.Errorf("EmailDigest(%q) = %q: this list is of texts that are not addresses", text, EmailDigest(text))
 		}
 	}
 }

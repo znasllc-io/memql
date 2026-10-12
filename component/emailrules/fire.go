@@ -363,7 +363,7 @@ func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, ev
 	}
 	if !complete {
 		out.Refusals = append(out.Refusals, fmt.Sprintf(
-			"could not tell whether %q is already in the audience: older recipients are still being indexed. Nothing was sent; make the change again in a few minutes",
+			"could not tell whether %q is already in the audience: older recipients are still being indexed. Nothing was sent; make the change again later",
 			rule.RecipientField))
 		return nil
 	}

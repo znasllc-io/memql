@@ -233,6 +233,12 @@ func (a *App) engineAndBus() {
 		a.Logger,
 		a.semanticCacheDBGetter(),
 	)
+	// memql#6022: the sweep that puts the address digest on recipients written
+	// without one. It runs from the worker, ten minutes after this node boots and
+	// hourly after that -- NOT from a migration, which would run before the
+	// rollout, while replicas of the previous release (which cannot write a
+	// recipient that carries the field) are still serving.
+	campaignWorker.SetRecipientDigestSweep(a.campaignRecipientDigestSweep)
 	a.Dependencies = append(a.Dependencies, campaignWorker)
 	if err := a.engine.RegisterIntegration(campaignWorker); err != nil {
 		a.fatal("failed to register campaigns integration", "error", err)

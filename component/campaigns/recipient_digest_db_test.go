@@ -167,12 +167,72 @@ func TestAddRecipientStampsTheMailboxDigest(t *testing.T) {
 	}
 }
 
+// sweepThese runs the digest sweep over a COPY of the named recipients in a
+// scratch schema, then appends what the sweep stamped to the shared table, and
+// says how many versions that was.
+//
+// The sweep is cluster-wide: it stamps every recipient without a digest that it
+// finds. Run on the shared table it would append versions to rows that belong to
+// other tests in the middle of what they are asserting -- this package's own
+// consent cases plant digest-less rows on purpose. In a scratch schema it reaches
+// the rows given and no others, and the engine still reads the result from the
+// shared table, which is the half of the contract this package owns: that what the
+// sweep writes is what a lookup finds and an update accepts.
+func sweepThese(t *testing.T, db *bun.DB, recipientIDs ...string) int {
+	t.Helper()
+	ctx := context.Background()
+	schema := fmt.Sprintf("digest_sweep_%d", time.Now().UnixNano())
+	exec := func(on *bun.DB, query string, args ...any) {
+		t.Helper()
+		if _, err := on.ExecContext(ctx, query, args...); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+	}
+	exec(db, `CREATE SCHEMA `+schema)
+	t.Cleanup(func() {
+		if _, err := db.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+schema+` CASCADE`); err != nil {
+			t.Logf("dropping the scratch schema %s: %v", schema, err)
+		}
+	})
+	// The shared table's columns, defaults, primary key and indexes -- not its
+	// triggers -- so the sweep's ON CONFLICT and its latest-row index are the real ones.
+	exec(db, `CREATE TABLE `+schema+`."MemoryNodes" (LIKE "MemoryNodes" INCLUDING DEFAULTS INCLUDING CONSTRAINTS INCLUDING INDEXES)`)
+	canonical := make([]string, 0, len(recipientIDs))
+	for _, id := range recipientIDs {
+		canonical = append(canonical, canonicalIDFor(recipientConcept, id))
+	}
+	exec(db, `INSERT INTO `+schema+`."MemoryNodes" SELECT * FROM "MemoryNodes" WHERE concept = ? AND id IN (?)`, recipientConcept, bun.In(canonical))
+
+	versions := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM `+schema+`."MemoryNodes"`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	copied := versions()
+
+	scratch := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()),
+		pgdriver.WithConnParams(map[string]any{"search_path": schema}))), pgdialect.New())
+	defer scratch.Close()
+	if _, err := database.BackfillRecipientEmailDigests(ctx, scratch, quietLogger()); err != nil {
+		t.Fatal(err)
+	}
+	// Only the versions the sweep appended go back: the copies of what was already
+	// there are in the shared table, and are left alone.
+	exec(db, `INSERT INTO "MemoryNodes" SELECT * FROM `+schema+`."MemoryNodes" WHERE provenance->>'kind' = 'system' AND provenance->>'name' = ?
+		ON CONFLICT (id, "createdAt") DO NOTHING`, "reconcile:campaigns-recipient-digest")
+	return versions() - copied
+}
+
 // TestRecipientDigestBackfill: a recipient written before the column existed --
 // planted here with a raw insert as its owner, which stamps nothing -- gains the
-// digest as one new version, and a second run leaves it alone.
+// digest as one new version, the engine then finds it by that digest and can
+// update it, and a second pass leaves it alone.
 //
-// The backfill is cluster-wide, so what it reports is every row it stamped in
-// the shared database, not just this one; the assertions are about this row.
+// The sweep runs over a copy of this one row in a scratch schema (sweepThese), not
+// over the shared table.
 func TestRecipientDigestBackfill(t *testing.T) {
 	d := newDigestTenant(t, "digest-backfill")
 	eng, db, owner, store := d.engine, d.db, d.owner, d.store
@@ -189,31 +249,49 @@ func TestRecipientDigestBackfill(t *testing.T) {
 	if n, _ := versionsOf(t, db, recipient); n != 1 {
 		t.Fatalf("the planted row has %d versions, want 1", n)
 	}
-
-	stamped, err := database.BackfillRecipientEmailDigests(context.Background(), db, quietLogger())
-	if err != nil {
-		t.Fatal(err)
+	// Until the sweep has been through, the row is found by the other half of the lookup.
+	fresh := memql.ContextWithFreshRead(owner)
+	if byDigest, err := store.RecipientsInAudienceByDigest(fresh, d.audience, EmailDigest("backfill@example.test")); err != nil || len(byDigest) != 0 {
+		t.Fatalf("a row with no digest was found by digest: %v %v", byDigest, err)
 	}
-	if stamped < 1 {
-		t.Errorf("the backfill reports %d rows stamped; this test planted one", stamped)
+	if members, err := store.MailboxMembers(fresh, d.audience, "backfill@example.test"); err != nil || len(members) != 1 || members[0].ID != recipient {
+		t.Fatalf("a row with no digest was not found by comparing addresses: %v %v", members, err)
+	}
+
+	if stamped := sweepThese(t, db, recipient); stamped != 1 {
+		t.Errorf("the sweep stamped %d versions of the one recipient it was given", stamped)
 	}
 	row := storedRecipient(t, store, owner, recipient)
 	if got, want := str(row, "emailDigest"), EmailDigest("backfill@example.test"); want == "" || got != want {
 		t.Errorf("emailDigest = %q, want %q", got, want)
 	}
 	if str(row, "email") != " Backfill@Example.TEST " || str(row, "subscriptionStatus") != "subscribed" {
-		t.Errorf("the backfill changed more than the digest: %v", row)
+		t.Errorf("the sweep changed more than the digest: %v", row)
 	}
 	versions, provenance := versionsOf(t, db, recipient)
-	if versions != 2 || !strings.Contains(provenance, `"migration"`) || !strings.Contains(provenance, "20261011000000_recipient_email_digest") {
-		t.Errorf("after the backfill: %d versions, newest provenance %s; want the original plus one migration version", versions, provenance)
+	if versions != 2 || !strings.Contains(provenance, `"system"`) || !strings.Contains(provenance, "reconcile:campaigns-recipient-digest") {
+		t.Errorf("after the sweep: %d versions, newest provenance %s; want the original plus one version from the sweep", versions, provenance)
 	}
 
-	if _, err := database.BackfillRecipientEmailDigests(context.Background(), db, quietLogger()); err != nil {
-		t.Fatal(err)
+	// The engine reads what the sweep wrote as it reads what addRecipient wrote:
+	// the row is found by its digest, and it takes an update (the concept is
+	// closed, and a payload it does not recognise would be refused).
+	byDigest, err := store.RecipientsInAudienceByDigest(fresh, d.audience, EmailDigest("backfill@example.test"))
+	if err != nil || len(byDigest) != 1 || byDigest[0].ID != recipient {
+		t.Fatalf("the swept row is not found by its digest: %v %v", byDigest, err)
 	}
-	if n, _ := versionsOf(t, db, recipient); n != 2 {
-		t.Errorf("a second backfill left %d versions of the row, want 2: it appended to a row that was already stamped", n)
+	if err := store.SetRecipientSubscription(owner, recipient, "unsubscribed", time.Now()); err != nil {
+		t.Fatalf("the swept row refused an update: %v", err)
+	}
+	if got := str(storedRecipient(t, store, owner, recipient), "emailDigest"); got != EmailDigest("backfill@example.test") {
+		t.Errorf("an update dropped the digest the sweep put on the row: %q", got)
+	}
+
+	if stamped := sweepThese(t, db, recipient); stamped != 0 {
+		t.Errorf("a second pass appended %d versions: it stamped a row that already carried the digest", stamped)
+	}
+	if n, _ := versionsOf(t, db, recipient); n != 3 {
+		t.Errorf("the row has %d versions, want 3: the original, the sweep's, and the update", n)
 	}
 }
 
