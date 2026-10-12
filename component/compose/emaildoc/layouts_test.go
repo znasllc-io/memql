@@ -342,7 +342,8 @@ func TestBuiltinRenderIssuesAreOnlyPlaceholdersAndLinks(t *testing.T) {
 // the Article's highlight had a line height of half its size, and at 375 pixels
 // "before." was written over "decision". A built-in layout's highlight keeps
 // the room its lines need, whether they are rows of their own or the lines of
-// one that wraps.
+// one that wraps. (A highlight that names no line height gets 1.4 times its
+// size from the renderer; TestHighlightDefaultLineHeightLeavesRoomForItsLines.)
 func TestBuiltinHighlightsLeaveRoomForTheirLines(t *testing.T) {
 	highlights := 0
 	for _, info := range Layouts() {

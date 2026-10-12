@@ -326,7 +326,12 @@ func (r *renderer) highlight(b Block, pad [4]float64) error {
 	size := highlightSize(b)
 	lineHeight := b.LineHeight
 	if lineHeight == 0 {
-		lineHeight = round2(size * 0.5)
+		// 1.4 times the size, which a button's text uses too. Each line is a
+		// span on the highlight colour, and a span's background fills the
+		// font's whole content area (about 1.15 times its size, up to 1.2 in
+		// other fonts), so a line height under that draws a statement that
+		// wraps over itself. The default was half the size.
+		lineHeight = round2(size * 1.4)
 	}
 	gap := 16.0
 	if b.Gap != nil {

@@ -513,10 +513,10 @@ func TestComputedLengthsAreRounded(t *testing.T) {
 		{"heading line height from 28", Block{Type: "heading", Text: "x"}, []string{"line-height:30.8px;mso-line-height-alt:30.8px"}},
 		{"heading line height from 26.7", Block{Type: "heading", Text: "x", Size: 26.7}, []string{"line-height:29.37px;mso-line-height-alt:29.37px"}},
 		{"heading line height from 37.3", Block{Type: "heading", Text: "x", Size: 37.3}, []string{"line-height:41.03px;"}},
-		{"highlight line height from 18", Block{Type: "highlight", Text: "x"}, []string{"line-height:9px;mso-line-height-alt:9px"}},
+		{"highlight line height from 18", Block{Type: "highlight", Text: "x"}, []string{"line-height:25.2px;mso-line-height-alt:25.2px"}},
 		{"a list's line height is the text's", Block{Type: "text", Text: "- x", LineHeight: 30}, []string{"line-height:30px;mso-line-height-alt:30px;font-size:0"}},
 		{"a list's own line height", Block{Type: "text", Text: "x\n\n- y", LineHeight: 30, ListLineHeight: 17.64}, []string{"line-height:30px;mso-line-height-alt:30px\">x<", "line-height:17.64px;mso-line-height-alt:17.64px;font-size:0"}},
-		{"highlight line height from 17.35", Block{Type: "highlight", Text: "x", Size: 17.35}, []string{"line-height:8.68px;"}},
+		{"highlight line height from 17.35", Block{Type: "highlight", Text: "x", Size: 17.35}, []string{"line-height:24.29px;"}},
 		{"button 20", Block{Type: "button", Label: "x", Href: "https://example.com"}, []string{"height:50px;width:300px;", "border-radius:25px;", "line-height:28px;"}},
 		{"button 20.2", Block{Type: "button", Label: "x", Href: "https://example.com", Size: 20.2}, []string{"height:51px;width:300px;", "border-radius:25px;", "line-height:28.3px;"}},
 		{"button 21.1 with 12 above and below", Block{Type: "button", Label: "x", Href: "https://example.com", Size: 21.1, PaddingY: 12, Width: 316}, []string{"height:54px;width:316px;", "border-radius:26px;", "line-height:29.5px;", "padding-top:12px;padding-bottom:12px;"}},
@@ -535,6 +535,39 @@ func TestComputedLengthsAreRounded(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A highlight that names no line height has to be legible when it wraps. Its
+// text is a span on the highlight colour, and a span's background fills the
+// font's whole content area, about 1.15 times its size in common fonts and up
+// to 1.2 in others. A line height under that draws a wrapped statement over
+// itself: the default was half the size, and a statement of two lines on a
+// phone was one line written across the other. The built-in layouts name their
+// own line heights (TestBuiltinHighlightsLeaveRoomForTheirLines); this is the
+// floor for every highlight that does not.
+func TestHighlightDefaultLineHeightLeavesRoomForItsLines(t *testing.T) {
+	for _, size := range []float64{0, 10, 12, 14.5, 17.35, 18, 24, 40, 64} {
+		b := Block{ID: "h", Type: "highlight", Text: "x", Size: size}
+		r, err := Render(context.Background(), oneBlock(b), nil, RenderOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := regexp.MustCompile(`line-height:([0-9.]+)px;mso-line-height-alt:([0-9.]+)px`).FindStringSubmatch(r.HTML)
+		if m == nil {
+			t.Fatalf("size %g: no line height in the highlight:\n%s", size, r.HTML)
+		}
+		got, err := strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shown := highlightSize(b)
+		if got < 1.2*shown {
+			t.Errorf("size %g: a default line height of %gpx is under 1.2 times the text (%.2fpx), so wrapped lines draw over each other", size, got, 1.2*shown)
+		}
+		if m[1] != m[2] {
+			t.Errorf("size %g: Outlook's line height %spx differs from %spx", size, m[2], m[1])
+		}
 	}
 }
 
