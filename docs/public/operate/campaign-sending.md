@@ -292,14 +292,14 @@ complained-about or suppressed addresses are not silently resubscribed.
 Repeated submissions converge on one signup and one intended welcome per
 normalized address and audience, even across deployables and worker replicas.
 An address already in the audience is found by its digest, the SHA-256 of the
-trimmed, lower-cased address that every recipient added through the engine
-carries, instead of by reading the whole audience. A recipient written before
-the digest existed has none until the digest sweep reaches it, so the rows
-without a digest are checked by their address as well. Any row for the mailbox
-that has unsubscribed, bounced or complained keeps the form from enrolling it
-again or sending it a welcome, including a row opted out by hand and a row
-beside a duplicate for the same mailbox. The lookup is not an index read: the
-cost of each signup grows with the number of recipients in the cluster.
+trimmed, lower-cased address, which the engine puts on each recipient it adds,
+instead of by reading the whole audience. A recipient written before the digest
+existed has none until the digest sweep reaches it, so the rows without a digest
+are checked by their address as well. Any row for the mailbox that has
+unsubscribed, bounced or complained keeps the form from enrolling it again or
+sending it a welcome, including a row opted out by hand and a row beside a
+duplicate for the same mailbox. The lookup is not an index read: the cost of
+each signup grows with the number of recipients in the cluster.
 
 **Rolling out the digest.** The digest is put on existing recipients by a sweep
 in the campaigns worker, not by a migration. A recipient record refuses a field
@@ -309,26 +309,30 @@ retry page, a bounce or complaint it handles cannot be applied to the recipient,
 and a by-hand change through it errors, until that replica is gone. A migration
 would run before the new replicas start and stamp every recipient while the
 previous release is still serving, so the sweep runs ten minutes after each node
-starts and hourly after that, when a rollout is normally over. The ten minutes is
-a guess, not a check: a rollout that outlasts it is swept while an old replica
-still serves, and the recipients that pass reaches cannot be updated by that
-replica until it is gone. New recipients carry the digest from the first request
-of the new release, and rolling back to a release before the digest leaves them
-in the same state, so roll forward instead. A signup always reads one page of the
-audience's recipients that have no digest as well; once the sweep has been through
-that page is empty. While an audience holds a full page of them (50), which is
-every audience of 50 or more recipients between a rollout and the first sweep,
-the signup reads the audience page by page (500 recipients a page, about two
-seconds a page with 200,000 recipients in the cluster) and stops at the first row
-for the address that opted out. That is the cost the digest removed, so it stops
-after ten pages: in an audience of more than 5,000 recipients it does not start
-(the audience's size says it cannot rule an opt-out out), and the form asks the
-visitor to try again later at once. All of this is read before the signup takes
-its locks, so a slow read delays only that visitor. An email rule that
-sends to an address on a row has no such read, and declines to fire and says so
-in its refusals. The sweep logs "put the address digest on recipients written
-without one" with a count when it stamps anything; a pass over recipients that
-all carry a digest writes nothing.
+starts and hourly after that, when a rollout is normally over. It runs whether or
+not campaign sending is enabled on the node (MEMQL_CAMPAIGNS_ENABLED), because
+signups and email rules write recipients either way. The ten minutes is a guess,
+not a check: a rollout that outlasts it is swept while an old replica still
+serves, and the recipients that pass reaches cannot be updated by that replica
+until it is gone. New recipients carry the digest from the first request of the
+new release, and rolling back to a release before the digest leaves them in the
+same state, so roll forward instead. Replicas sweep side by side without waiting
+for each other: a pass that finds a batch's lock taken skips the batch, tries it
+once more at its end, and leaves what is still held for the next pass.
+
+Until the sweep has been through, a signup always reads one page of the
+audience's recipients that have no digest as well, and once it has that page is
+empty. While an audience holds a full page of them (50), which is every audience
+of 50 or more recipients between a rollout and the first sweep, the signup reads
+the audience page by page (500 recipients a page, about two seconds a page with
+200,000 recipients in the cluster) and stops at the first row for the address
+that opted out. That is the cost the digest removed, so it stops after ten pages:
+in an audience of more than 5,000 recipients it does not start (the audience's
+size says it cannot rule an opt-out out), and the form asks the visitor to try
+again later at once. An email rule that sends to an address on a row has no such
+read, and declines to fire and says so in its refusals. The sweep logs "put the
+address digest on recipients written without one" with a count when it stamps
+anything; a pass over recipients that all carry a digest writes nothing.
 
 **What a signup holds.** A signup serialises its writes with two advisory locks,
 the storefront's and then the audience's, taken together in one transaction on

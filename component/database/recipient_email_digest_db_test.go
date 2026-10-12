@@ -359,10 +359,12 @@ func TestAWriteThatLandsDuringAPassStaysTheNewestVersion(t *testing.T) {
 }
 
 // TestRecipientDigestBackfillRunsOnceWhenTwoReplicasRunIt: two replicas, each
-// with its own connections, walk the same rows at the same time. The batches
-// take turns -- each is taken under one advisory lock, and its candidates are
-// read after the lock -- so every recipient is stamped exactly once between
-// them: one new version each, not one apiece.
+// with its own connections, walk the same rows at the same time. A batch is taken
+// by whichever tries its lock first; the other skips it (and tries it once more at
+// the end of its pass), so a pass can leave a batch behind, and the next pass takes
+// it. Whatever the interleaving, every recipient ends with exactly one new version:
+// the replicas never stamp one twice, and between them and the pass after they
+// stamp each once.
 func TestRecipientDigestBackfillRunsOnceWhenTwoReplicasRunIt(t *testing.T) {
 	f := newRecipientDigestFixture(t)
 	const (
@@ -371,6 +373,7 @@ func TestRecipientDigestBackfillRunsOnceWhenTwoReplicasRunIt(t *testing.T) {
 		rounds = 3
 	)
 	other := f.replica()
+	skipped := 0
 	for round := 0; round < rounds; round++ {
 		prefix := fmt.Sprintf("round%d", round)
 		f.seedMany(prefix, rows)
@@ -394,10 +397,16 @@ func TestRecipientDigestBackfillRunsOnceWhenTwoReplicasRunIt(t *testing.T) {
 				t.Fatalf("replica %d: %v", i, err)
 			}
 		}
+		// What a skipped batch left, the next pass takes.
+		rest, err := backfillRecipientEmailDigests(context.Background(), f.db, nil, batch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		skipped += reports[0].Skipped + reports[1].Skipped
 
-		if got := reports[0].Stamped + reports[1].Stamped; got != rows {
-			t.Errorf("round %d: the two replicas stamped %d versions between them (%d and %d), want %d: a recipient was stamped twice, or not at all",
-				round, got, reports[0].Stamped, reports[1].Stamped, rows)
+		if got := reports[0].Stamped + reports[1].Stamped + rest.Stamped; got != rows {
+			t.Errorf("round %d: the two replicas and the pass after them stamped %d versions (%d, %d and %d), want %d: a recipient was stamped twice, or not at all",
+				round, got, reports[0].Stamped, reports[1].Stamped, rest.Stamped, rows)
 		}
 		if twice := f.count(`SELECT count(*) FROM (SELECT id FROM "MemoryNodes" WHERE id LIKE ? GROUP BY id HAVING count(*) <> 2) x`, recipientID(prefix)+"-%"); twice != 0 {
 			t.Errorf("round %d: %d recipients do not have exactly the original version and one stamped one", round, twice)
@@ -406,8 +415,10 @@ func TestRecipientDigestBackfillRunsOnceWhenTwoReplicasRunIt(t *testing.T) {
 		   AND payload->>'emailDigest' IS DISTINCT FROM encode(sha256(convert_to(lower(btrim(payload->>'email')), 'UTF8')), 'hex')`, recipientID(prefix)+"-%"); wrong != 0 {
 			t.Errorf("round %d: %d stamped versions carry a digest that is not the SHA-256 of their trimmed, lower-cased address", round, wrong)
 		}
-		t.Logf("round %d: replica 0 stamped %d, replica 1 stamped %d", round, reports[0].Stamped, reports[1].Stamped)
+		t.Logf("round %d: replica 0 stamped %d (skipped %d), replica 1 stamped %d (skipped %d), the pass after stamped %d",
+			round, reports[0].Stamped, reports[0].Skipped, reports[1].Stamped, reports[1].Skipped, rest.Stamped)
 	}
+	t.Logf("%d batches were left to a later pass over %d rounds", skipped, rounds)
 }
 
 // batchWatcher cancels a run's context after a chosen number of its
@@ -548,5 +559,93 @@ func TestRecipientDigestBackfillLeavesARowThatChangedUnderIt(t *testing.T) {
 	}
 	if v := f.versions(concept, rcp(3)); len(v) != 2 || v[0].Provenance["name"] != "racing-writer" || v[0].Payload["email"] != "moved3@example.test" {
 		t.Errorf("race-3 was stamped from its old address: %d versions, newest %v", len(v), v[0].Payload)
+	}
+}
+
+// TestAPassNeverWaitsForABatchAnotherReplicaHolds: another replica is stamping a
+// batch -- it holds the sweep's lock -- and this pass tries the lock and moves on
+// instead of waiting for it. A wait is a pool connection held idle in a
+// transaction for as long as the other replica takes, on a pool of four, and it
+// ends in a statement timeout that is not a failure of anything. The batches it
+// could not take are left for the next pass (or the other replica, which is
+// stamping them), and nothing is warned about: it is the walk working as designed.
+func TestAPassNeverWaitsForABatchAnotherReplicaHolds(t *testing.T) {
+	f := newRecipientDigestFixture(t)
+	const rows, batch = 12, 4
+	f.seedMany("held", rows)
+
+	other := f.replica()
+	holder, err := other.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(context.Background(), `SELECT pg_advisory_xact_lock(?)`, recipientEmailDigestLockKey); err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback()
+
+	started := time.Now()
+	held, err := backfillRecipientEmailDigests(context.Background(), f.db, nil, batch)
+	if err != nil {
+		t.Fatalf("a pass over batches another replica holds failed: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Errorf("the pass took %s: it waited for the lock", elapsed)
+	}
+	if held.Stamped != 0 || held.Skipped != 3 {
+		t.Errorf("report %+v, want nothing stamped and the three batches skipped", held)
+	}
+	if got := f.sweptVersions("v1:campaigns:recipient:held-%"); got != 0 {
+		t.Errorf("%d recipients were stamped under a lock another replica held", got)
+	}
+	if waiting := f.count(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`); waiting != 0 {
+		t.Errorf("%d advisory-lock requests are left on the server", waiting)
+	}
+	if inUse := f.db.Stats().InUse; inUse != 0 {
+		t.Errorf("%d connections are still held by the pass", inUse)
+	}
+
+	// The other replica lets go; the next pass takes what was left.
+	_ = holder.Rollback()
+	next, err := backfillRecipientEmailDigests(context.Background(), f.db, nil, batch)
+	if err != nil || next.Stamped != rows || next.Skipped != 0 {
+		t.Errorf("the next pass: %+v, %v; want the %d recipients stamped and nothing skipped", next, err, rows)
+	}
+}
+
+// TestASkippedBatchGetsOneMoreTryBeforeThePassEnds: the replica that held a batch
+// is usually done within a moment. A pass that skipped it tries once more at its
+// end, so the batch is not left for the next pass an hour away when it can be
+// taken now.
+func TestASkippedBatchGetsOneMoreTryBeforeThePassEnds(t *testing.T) {
+	f := newRecipientDigestFixture(t)
+	const rows, batch = 12, 4
+	f.seedMany("again", rows)
+
+	other := f.replica()
+	holder, err := other.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.ExecContext(context.Background(), `SELECT pg_advisory_xact_lock(?)`, recipientEmailDigestLockKey); err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback()
+	// The other replica lets go while this pass is still walking.
+	go func() {
+		time.Sleep(60 * time.Millisecond)
+		_ = holder.Rollback()
+	}()
+
+	pause := recipientEmailDigestRetryPause
+	recipientEmailDigestRetryPause = 300 * time.Millisecond
+	defer func() { recipientEmailDigestRetryPause = pause }()
+
+	report, err := backfillRecipientEmailDigests(context.Background(), f.db, nil, batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Stamped != rows || report.Skipped != 0 {
+		t.Errorf("report %+v, want all %d stamped by the retry and nothing left skipped", report, rows)
 	}
 }

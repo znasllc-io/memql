@@ -21,6 +21,13 @@ import (
 // transaction, safe to run on every replica at once. Its header says what it does
 // to the rows and why it is not a migration.
 //
+// WHERE IT RUNS. Wherever recipients can be written: on every node that has the
+// worker, whether or not the campaign drain is on there (MEMQL_CAMPAIGNS_ENABLED)
+// and whether or not the drain's engine is wired. A signup, an email rule and the
+// portal write recipients on a node that never sends a campaign, and a recipient
+// written without a digest during a rollout is as slow to find there as anywhere.
+// The sweep needs only the database, which the application hands it.
+//
 // WHEN IT RUNS. Ten minutes after the worker starts, and hourly after that.
 //
 //   - NOT in the pre-deploy migration Job. A recipient that carries emailDigest
@@ -36,11 +43,14 @@ import (
 //     finished, which a one-per-hour claim cannot promise: the claim would go to
 //     whichever replica's timer fired first, possibly before the rollout ended,
 //     and leave the rows the old release wrote until the next hour. Replicas take
-//     turns batch by batch under the pass's advisory lock, and a replica that
-//     finds the work done reads and writes nothing.
+//     turns batch by batch: a pass TRIES each batch's advisory lock and skips a
+//     batch another replica holds rather than wait for it, so it never holds a
+//     pool connection idle behind someone else's work (and does not warn about it);
+//     it tries the batches it skipped once more at its end, and the next pass takes
+//     any that are left. A replica that finds the work done writes nothing.
 //   - Hourly after that, for the rows a straggler or a raw write leaves behind.
-//     A pass over recipients that all carry a digest writes nothing, and reads the
-//     newest version of each in batches of 500 ids.
+//     A pass over recipients that all carry a digest writes nothing; it reads the
+//     newest version of each, in batches of 500 ids.
 //
 // The sweep never blocks the drain: it runs on its own goroutine, and the worker's
 // Stop waits for it (an in-flight batch is bounded by a few seconds).

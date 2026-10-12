@@ -241,55 +241,75 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 	}
 }
 
-// Start launches the drain loop. Idempotent; a no-op when disabled or
-// unwired.
+// Start launches the drain loop and, when the application installed one, the
+// digest sweep. Idempotent.
+//
+// The two are independent. The drain is off when campaigns are disabled
+// (MEMQL_CAMPAIGNS_ENABLED=false) or the engine is not wired; the sweep is not,
+// because recipients are written on a node whether or not it sends campaigns --
+// a signup, an email rule, the portal -- and a recipient written without a digest
+// (during a rollout) is found by the slower path until the sweep has filled it in.
 func (w *Worker) Start(_ context.Context) {
 	w.startOnce.Do(func() {
 		defer close(w.readyCh)
-		if !w.cfg.Enabled {
-			w.logger.Info("campaigns worker: disabled (MEMQL_CAMPAIGNS_ENABLED=false)")
-			close(w.doneCh)
-			return
-		}
-		if w.store == nil || w.store.engine == nil {
-			w.logger.Warn("campaigns worker: no engine wired; not starting")
-			close(w.doneCh)
-			return
-		}
-		// A loud, ONE-TIME warning rather than a refusal to start. The
-		// worker still has work to do without an unsubscribe secret --
-		// draining a paused or cancelled job to its terminal status -- and
-		// the actual refusal lives at campaignStartSend, where it can be
-		// reported to the operator who pressed the button instead of
-		// buried in a boot log.
-		if reason := w.cfg.RequireUnsubscribe(); reason != "" {
-			w.logger.Warn("campaigns worker: one-click unsubscribe is NOT configured, so no campaign can be started", "reason", reason)
-		}
-		// Said once, loudly: a malformed ladder leaves the ramp OFF, and an
-		// operator who configured warming and got none should learn it here
-		// rather than by watching a rate that never moves.
-		if w.cfg.WarmupStepsError != "" {
-			w.logger.Warn("campaigns worker: MEMQL_CAMPAIGNS_WARMUP_STEPS is malformed, so the warming ramp is DISABLED",
-				"error", w.cfg.WarmupStepsError)
-		} else if w.cfg.WarmupEnabled {
-			w.logger.Info("campaigns worker: warming ramp enabled",
-				"identity", w.cfg.SendingIdentity, "steps", w.cfg.WarmupSteps)
-		}
 		runCtx, cancel := context.WithCancel(context.Background())
 		var sweepDone chan struct{}
 		if w.digestSweep != nil {
 			sweepDone = make(chan struct{})
+		}
+		drain := w.drainWanted()
+		if !drain {
+			close(w.doneCh)
+		}
+		if !drain && sweepDone == nil {
+			cancel()
+			return
 		}
 		w.mu.Lock()
 		w.cancel = cancel
 		w.sweepDoneCh = sweepDone
 		w.mu.Unlock()
 		w.running.Store(true)
-		go w.loop(runCtx)
+		if drain {
+			go w.loop(runCtx)
+		}
 		if sweepDone != nil {
 			go w.digestSweepLoop(runCtx, sweepDone)
 		}
 	})
+}
+
+// drainWanted says whether the drain loop should run on this node, and says why
+// when it should not.
+func (w *Worker) drainWanted() bool {
+	if !w.cfg.Enabled {
+		w.logger.Info("campaigns worker: disabled (MEMQL_CAMPAIGNS_ENABLED=false)")
+		return false
+	}
+	if w.store == nil || w.store.engine == nil {
+		w.logger.Warn("campaigns worker: no engine wired; not starting")
+		return false
+	}
+	// A loud, ONE-TIME warning rather than a refusal to start. The
+	// worker still has work to do without an unsubscribe secret --
+	// draining a paused or cancelled job to its terminal status -- and
+	// the actual refusal lives at campaignStartSend, where it can be
+	// reported to the operator who pressed the button instead of
+	// buried in a boot log.
+	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
+		w.logger.Warn("campaigns worker: one-click unsubscribe is NOT configured, so no campaign can be started", "reason", reason)
+	}
+	// Said once, loudly: a malformed ladder leaves the ramp OFF, and an
+	// operator who configured warming and got none should learn it here
+	// rather than by watching a rate that never moves.
+	if w.cfg.WarmupStepsError != "" {
+		w.logger.Warn("campaigns worker: MEMQL_CAMPAIGNS_WARMUP_STEPS is malformed, so the warming ramp is DISABLED",
+			"error", w.cfg.WarmupStepsError)
+	} else if w.cfg.WarmupEnabled {
+		w.logger.Info("campaigns worker: warming ramp enabled",
+			"identity", w.cfg.SendingIdentity, "steps", w.cfg.WarmupSteps)
+	}
+	return true
 }
 
 // Stop cancels the loop.

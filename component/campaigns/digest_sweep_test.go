@@ -225,3 +225,72 @@ func TestAWorkerWithoutASweepStartsNoSweepGoroutine(t *testing.T) {
 	w.SweepRecipientDigests(context.Background()) // a no-op, not a nil call
 	w.Stop(context.Background())
 }
+
+// TestTheSweepRunsWhereverRecipientsCanBeWritten: signups and email rules write
+// recipients -- digest-less ones, during a rollout -- on a node whether or not the
+// campaign drain is on there, so the sweep that fills them in does not depend on
+// MEMQL_CAMPAIGNS_ENABLED, nor on the drain's engine being wired.
+func TestTheSweepRunsWhereverRecipientsCanBeWritten(t *testing.T) {
+	for name, set := range map[string]func(w *Worker){
+		"campaigns disabled": func(w *Worker) { w.cfg.Enabled = false },
+		"no engine wired":    func(w *Worker) { w.store = NewStore(nil) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var calls atomic.Int64
+			w, rec := sweepingWorker(t, time.Millisecond, 10*time.Millisecond, func(context.Context) (int, error) {
+				calls.Add(1)
+				return 0, nil
+			})
+			set(w)
+			w.Start(context.Background())
+			eventually(t, "a sweep", func() bool { return calls.Load() >= 2 })
+			w.Stop(context.Background())
+
+			after := calls.Load()
+			time.Sleep(60 * time.Millisecond)
+			if n := calls.Load(); n != after {
+				t.Errorf("the sweep ran %d more times after Stop returned", n-after)
+			}
+			for _, line := range strings.Split(rec.String(), "\n") {
+				if strings.Contains(line, "digest sweep") && strings.Contains(line, "level=WARN") {
+					t.Errorf("the sweep was warned about: %s", line)
+				}
+			}
+			if w.IsRunning() {
+				t.Error("the worker reports it is running after Stop")
+			}
+		})
+	}
+}
+
+// TestADisabledDrainDoesNotStartTheDrain: only the sweep runs on such a node. No
+// drain tick reads the send jobs.
+func TestADisabledDrainDoesNotStartTheDrain(t *testing.T) {
+	var reads atomic.Int64
+	engine := readCountingEngine{reads: &reads}
+	w := newTestWorker(t, engine, &recordingSender{})
+	w.cfg.Enabled = false
+	w.cfg.Poll = 5 * time.Millisecond
+	w.cfg.StartupDelay = 0
+	var sweeps atomic.Int64
+	w.digestSweepFirst, w.digestSweepEvery = time.Millisecond, 10*time.Millisecond
+	w.SetRecipientDigestSweep(func(context.Context) (int, error) { sweeps.Add(1); return 0, nil })
+	w.Start(context.Background())
+	eventually(t, "a sweep", func() bool { return sweeps.Load() >= 1 })
+	time.Sleep(60 * time.Millisecond)
+	w.Stop(context.Background())
+	if n := reads.Load(); n != 0 {
+		t.Errorf("a worker with campaigns disabled read %d times: its drain ran", n)
+	}
+}
+
+// readCountingEngine counts every read it is asked.
+type readCountingEngine struct{ reads *atomic.Int64 }
+
+func (e readCountingEngine) Execute(context.Context, string) (any, error) {
+	e.reads.Add(1)
+	return map[string]any{"output": []any{}}, nil
+}
+func (readCountingEngine) OrganizationCapable(context.Context, string, string, string) bool {
+	return false
+}

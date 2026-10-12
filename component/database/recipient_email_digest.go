@@ -115,12 +115,22 @@ import (
 // ===========================================================================
 // SAFE TO RUN ON TWO REPLICAS AT ONCE, AND EVERY PASS IS CHEAP WHEN IDLE
 // ===========================================================================
-// Every batch takes one advisory lock for its transaction and reads its
-// candidates AFTER holding it, and the insert re-checks, in the same statement,
-// that the newest version still has no digest and still has the address that was
-// hashed. Two passes therefore take turns batch by batch, and the second finds the
-// first's work already stamped; each recipient ends with exactly one new version,
-// however many passes ran. Nothing is cached: every read is of the table.
+// Every batch TRIES one advisory lock for its transaction and reads its candidates
+// after it has the lock, and the insert re-checks, in the same statement, that the
+// newest version still has no digest and still has the address that was hashed. A
+// pass that finds the lock taken -- another replica is stamping a batch -- does not
+// wait: a wait is a pool connection held idle in a transaction for as long as the
+// other replica takes (a pool is four connections), and it ends in a statement
+// timeout that is not a failure of anything. It skips the batch, goes on to the next,
+// tries the skipped ones once more at the end of its pass, and leaves the rest for
+// the next pass or for the replica that holds them; a skip is not a warning.
+//
+// The lock is about not doing the work twice, not about doing it correctly. A new
+// version is stamped exactly one microsecond after the one it copies, so two
+// replicas that stamp the same recipient insert the same (id, "createdAt") and the
+// second is a no-op by the primary key. Each recipient ends with exactly one new
+// version, however many passes ran, whether or not any of them held the lock.
+// Nothing is cached: every read is of the table.
 //
 // A pass over recipients that all carry a digest writes nothing. It reads the
 // newest version of every recipient in the cluster, recipientEmailDigestBatch ids
@@ -193,7 +203,14 @@ type recipientEmailDigestReport struct {
 	Changed int
 	// Batches is how many transactions the walk ran.
 	Batches int
+	// Skipped is how many batches another replica held the lock for, and were still
+	// held when this pass tried them again at its end: they are left for the next pass.
+	Skipped int
 }
+
+// recipientEmailDigestRetryPause is how long a pass waits, at its end, before it
+// tries again the batches another replica held. A variable so a test can lengthen it.
+var recipientEmailDigestRetryPause = 100 * time.Millisecond
 
 // RecipientEmailStamp is the digest addRecipient stamps on a recipient and this
 // sweep gives the ones that have none: the SHA-256, as lower-case hex, of the text
@@ -303,6 +320,7 @@ func backfillRecipientEmailDigests(ctx context.Context, db *bun.DB, logger *slog
 	}
 	logger.Log(ctx, level, "recipient email digest sweep: done",
 		"stamped", w.report.Stamped, "notAddresses", w.report.NotAddresses, "changedUnderIt", w.report.Changed,
+		"batchesHeldByAnotherReplica", w.report.Skipped,
 		"batches", w.report.Batches, "duration", time.Since(w.started).Round(time.Millisecond).String())
 	return w.report, nil
 }
@@ -324,44 +342,83 @@ type recipientEmailDigestCandidate struct {
 
 func (w *recipientEmailDigestWalk) run(ctx context.Context) error {
 	cursor := ""
+	var held []string // the cursors of batches another replica held
 	for {
-		// The one place the pass's own context is read: between steps, so a
-		// cancelled pass stops with nothing in flight.
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("recipient email digest sweep: stopped after %d recipients stamped; the next pass walks again from the start: %w",
-				w.report.Stamped, err)
+		if err := w.alive(ctx); err != nil {
+			return err
 		}
-		last, examined, err := w.step(ctx, cursor)
+		last, examined, skipped, err := w.step(ctx, cursor)
 		if err != nil {
-			return fmt.Errorf("recipient email digest sweep: the batch after %q failed, after %d recipients stamped by this pass "+
-				"(every committed batch stands and the next pass walks again): %w", cursor, w.report.Stamped, err)
+			return w.failed(err, cursor)
 		}
 		w.report.Batches++
+		if skipped && examined > 0 { // a held batch with nothing in it has nothing to leave behind
+			held = append(held, cursor)
+		}
 		if examined < w.batch {
-			return nil // a page that is not full is the last
+			break // a page that is not full is the last
 		}
 		cursor = last
 	}
+
+	// One more try at each batch another replica held. It is usually done by now.
+	if len(held) > 0 {
+		select {
+		case <-ctx.Done():
+		case <-time.After(recipientEmailDigestRetryPause):
+		}
+	}
+	for _, cursor := range held {
+		if err := w.alive(ctx); err != nil {
+			return err
+		}
+		_, _, skipped, err := w.step(ctx, cursor)
+		if err != nil {
+			return w.failed(err, cursor)
+		}
+		if skipped {
+			w.report.Skipped++
+		}
+	}
+	return nil
+}
+
+// alive is the one place the pass's own context is read: between steps, so a
+// cancelled pass stops with nothing in flight.
+func (w *recipientEmailDigestWalk) alive(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("recipient email digest sweep: stopped after %d recipients stamped; the next pass walks again from the start: %w",
+			w.report.Stamped, err)
+	}
+	return nil
+}
+
+func (w *recipientEmailDigestWalk) failed(err error, cursor string) error {
+	return fmt.Errorf("recipient email digest sweep: the batch after %q failed, after %d recipients stamped by this pass "+
+		"(every committed batch stands and the next pass walks again): %w", cursor, w.report.Stamped, err)
 }
 
 // step runs one batch in its own transaction on a context of its own. It
-// returns the last id it examined and how many ids that was.
-func (w *recipientEmailDigestWalk) step(ctx context.Context, cursor string) (last string, examined int, err error) {
+// returns the last id it examined, how many ids that was, and whether another
+// replica held the batch's lock, in which case nothing was written.
+func (w *recipientEmailDigestWalk) step(ctx context.Context, cursor string) (last string, examined int, skipped bool, err error) {
 	stepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recipientEmailDigestStepTimeout)
 	defer cancel()
 	var stamped, notAddresses, changed int
 	err = w.db.RunInTx(stepCtx, nil, func(ctx context.Context, tx bun.Tx) error {
-		stamped, notAddresses, changed = 0, 0, 0
-		// The statement bound first, so the wait for the lock is under it too.
+		stamped, notAddresses, changed, skipped = 0, 0, 0, false
 		if _, err := tx.ExecContext(ctx, `SELECT set_config('statement_timeout', ?, true)`,
 			strconv.FormatInt(recipientEmailDigestStatementTimeout.Milliseconds(), 10)); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(?)`, recipientEmailDigestLockKey); err != nil {
+		// TRY the lock; never wait for it (see the header).
+		var locked bool
+		if err := tx.QueryRowContext(ctx, `SELECT pg_try_advisory_xact_lock(?)`, recipientEmailDigestLockKey).Scan(&locked); err != nil {
 			return err
 		}
-		// The candidates are read AFTER the lock: a pass that waited for it sees
-		// what the pass it waited for committed.
+		// The candidates are read AFTER the lock when this pass has it, so it sees
+		// what the replica that held it before committed. Without it they are read
+		// only to know where the batch ends, so the walk can go on past it.
 		candidates, err := w.candidates(ctx, tx, cursor)
 		if err != nil {
 			return err
@@ -369,6 +426,10 @@ func (w *recipientEmailDigestWalk) step(ctx context.Context, cursor string) (las
 		examined = len(candidates)
 		if examined > 0 {
 			last = candidates[examined-1].id
+		}
+		if !locked {
+			skipped = true
+			return nil
 		}
 		type wanted struct {
 			ID     string `json:"id"`
@@ -406,12 +467,12 @@ func (w *recipientEmailDigestWalk) step(ctx context.Context, cursor string) (las
 		return nil
 	})
 	if err != nil {
-		return "", 0, err
+		return "", 0, false, err
 	}
 	w.report.Stamped += stamped
 	w.report.NotAddresses += notAddresses
 	w.report.Changed += changed
-	return last, examined, nil
+	return last, examined, skipped, nil
 }
 
 // candidates reads the page after cursor and closes the rows before anything
