@@ -28,6 +28,7 @@ package proving
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"math"
@@ -71,6 +72,14 @@ type engineLifecycle struct {
 	db     *bun.DB
 	logger *slog.Logger
 
+	// gates is the pool the work spine's write gates run on -- a person's
+	// decision on an approval, a step run again -- as a node's are on its
+	// database's gate pool (component/database, gate_pool.go; memql#6022).
+	// The spine has no other: a gate never takes a connection of the pool its
+	// holder works on, so without this every lifecycle that decides anything
+	// stops at its first decision.
+	gates *sql.DB
+
 	// The work spine as a node materializes it, registered on the engine the
 	// first time a lifecycle opens (procedure_harness_steps.go workActs), and
 	// the switch that routes its log to the lifecycle running now.
@@ -82,10 +91,16 @@ type engineLifecycle struct {
 
 // NewEngineLifecycle is the harness cmd/memql-bench installs on the Runner.
 // db is the engine's own database handle: the work spine's version history
-// reads it directly, as it does on a node.
-func NewEngineLifecycle(e *memqlengine.MemQLEngine, db *bun.DB, logger *slog.Logger) LifecycleHarness {
-	return &engineLifecycle{e: e, db: db, logger: logger, workLog: &logSwitch{fallback: logger}}
+// reads it directly, as it does on a node. gates is the pool the spine's write
+// gates run on (database.NewGatePool over the same database, as a node's
+// Database opens its GateDB): a lifecycle's decisions -- a promotion approved, a
+// step run again -- each take one, and none is taken on db.
+func NewEngineLifecycle(e *memqlengine.MemQLEngine, db *bun.DB, gates *sql.DB, logger *slog.Logger) LifecycleHarness {
+	return &engineLifecycle{e: e, db: db, gates: gates, logger: logger, workLog: &logSwitch{fallback: logger}}
 }
+
+// gatePool is the spine's gate pool, for SetGateDB and PluginContext.GateDB.
+func (h *engineLifecycle) gatePool() *sql.DB { return h.gates }
 
 // Open writes the ladder's values the run is to climb under, proves the
 // OWNER reads them back -- the runner reads the policy as the owner, and a
@@ -98,6 +113,11 @@ func (h *engineLifecycle) Open(ctx context.Context, owner string, overlay work.L
 	owner = strings.TrimSpace(owner)
 	if owner == "" {
 		return nil, fmt.Errorf("proving: a lifecycle needs an owner; every row it writes is somebody's")
+	}
+	if h.gates == nil {
+		return nil, fmt.Errorf("proving: the learned-procedure harness was given no write-gate pool (NewEngineLifecycle's gates; " +
+			"cmd/memql-bench opens one with database.NewGatePool), so the first decision a lifecycle makes -- a step run again, " +
+			"a promotion approved -- would be refused with \"shared write coordination is unavailable\"")
 	}
 	// Before anything is written: a harness that cannot be the platform must
 	// not leave the ladder's row on this run's values, and Close runs only
@@ -125,7 +145,9 @@ func (h *engineLifecycle) Open(ctx context.Context, owner string, overlay work.L
 
 	log := newWarningLog(h.logger)
 	h.workLog.set(log)
-	spine := &engineSpine{e: h.e, wi: workspine.New(h.e, log.logger(), func() *bun.DB { return h.db }), acts: acts, log: log.logger()}
+	wi := workspine.New(h.e, log.logger(), func() *bun.DB { return h.db })
+	wi.SetGateDB(h.gatePool)
+	spine := &engineSpine{e: h.e, wi: wi, acts: acts, log: log.logger()}
 	return &LifecyclePlatform{
 		Recorder: workspine.NewSessionWriter(h.e, log.logger()),
 		Spine:    spine,
