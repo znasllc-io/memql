@@ -9,6 +9,7 @@ import (
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	skillgraph "github.com/znasllc-io/memql/component/skills"
+	"github.com/znasllc-io/memql/core/librarykey"
 )
 
 // store.go -- the engine-backed reads and writes behind the composition.
@@ -151,6 +152,13 @@ func (s *EngineStore) ReadArtifact(ctx context.Context, artifactID string) (Scri
 	blobURL := stringField(rows[0], "blobUrl")
 	if blobURL == "" {
 		return ScriptBytes{}, fmt.Errorf("the file behind artifact %s names no stored bytes", artifactID)
+	}
+	// The row is the caller's; the KEY must be too. These bytes are run on a
+	// machine, and a row naming somebody else's object (one a client wrote
+	// before createLibraryFile was @serverOnly) would run their script for
+	// the caller.
+	if err := librarykey.Check(blobURL, stringField(rows[0], "ownerUserId"), ""); err != nil {
+		return ScriptBytes{}, fmt.Errorf("the file behind artifact %s is not stored in its owner's Library: %w", artifactID, err)
 	}
 	body, err := s.fetcher.DownloadStreamURL(ctx, blobURL)
 	if err != nil {

@@ -149,6 +149,7 @@ func rowsOf(row map[string]any) *memql.ExecuteResult {
 type publishMemStore struct {
 	mu      sync.Mutex
 	objects map[string][]byte
+	gets    []string // every key read, in order
 }
 
 func newPublishMemStore() *publishMemStore {
@@ -158,6 +159,7 @@ func newPublishMemStore() *publishMemStore {
 func (m *publishMemStore) Get(_ context.Context, key string) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.gets = append(m.gets, key)
 	data, ok := m.objects[key]
 	if !ok {
 		return nil, fmt.Errorf("no object at %q", key)
@@ -573,6 +575,28 @@ func TestSitePublishFromArtifact_MissingBytesAreRefused(t *testing.T) {
 	f := newPublishFixture(t, "spa", nil) // nothing at the blob key
 	_, err := f.run(t)
 	wantRefusal(t, err, reasonBundleUnreadable)
+}
+
+// A row the caller owns whose key names ANOTHER person's object -- the row a
+// client could write before createLibraryFile was @serverOnly. Publishing it
+// would serve somebody else's bytes publicly as the caller's site, so the key
+// is refused before it is read, and nothing is published.
+func TestSitePublishFromArtifact_AKeyOutsideTheOwnersLibraryIsRefused(t *testing.T) {
+	f := newPublishFixture(t, "spa", zipOf(t, goodBundle()))
+	foreign := "library/someone-else/file-9/dist.zip"
+	f.store.objects[foreign] = zipOf(t, goodBundle())
+	f.engine.files[fixtureFileId]["blobUrl"] = foreign
+
+	_, err := f.run(t)
+	wantRefusal(t, err, reasonBundleUnreadable)
+	if len(f.store.gets) != 0 {
+		t.Fatalf("storage was asked for %q before the refusal", f.store.gets)
+	}
+	for _, key := range f.store.keys() {
+		if strings.HasPrefix(key, "sites/") {
+			t.Fatalf("a refused publish still wrote %q", key)
+		}
+	}
 }
 
 func TestSitePublishFromArtifact_UnconfiguredStorageIsRefused(t *testing.T) {

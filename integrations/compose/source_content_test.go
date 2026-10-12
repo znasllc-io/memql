@@ -121,7 +121,7 @@ func TestCaptureRequiresExplicitOptInAndReadableFile(t *testing.T) {
 	reader := &referenceReader{data: referencePNG(t)}
 	i := &Integration{}
 	i.SetSourceDownloader(reader)
-	source := []Resolved{{Ref: SourceRef{Kind: KindLibraryFile, Ref: "file"}, Rows: []map[string]any{{"name": "reference.png", "blobUrl": "stored-object"}}}}
+	source := []Resolved{{Ref: SourceRef{Kind: KindLibraryFile, Ref: "file"}, Rows: []map[string]any{{"name": "reference.png", "blobUrl": "library/u-alice/file/reference.png", "ownerUserId": "u-alice"}}}}
 	if err := i.captureSourceContents(context.Background(), source); err != nil || reader.calls != 0 {
 		t.Fatal("merely selecting metadata downloaded file content")
 	}
@@ -154,7 +154,7 @@ func TestEmailReferencesSurviveDispatchToAnotherReplica(t *testing.T) {
 	png := referencePNG(t)
 	reader := &referenceReader{data: png}
 	i.SetSourceDownloader(reader)
-	e.files["reference"] = map[string]any{"name": "example.png", "blobUrl": "stored-object", "sha256": (pure.Result{Bytes: png}).SHA256()}
+	e.files["reference"] = map[string]any{"name": "example.png", "blobUrl": "library/u-alice/reference/example.png", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: png}).SHA256()}
 	opener := &directMaterializeGoal{}
 	i.SetGoalOpener(opener)
 	args := materializeArgs{Name: "Client welcome", Statement: "Use our supplied example", OutputKind: "email_template", Format: pure.FormatJSON, AccountIds: []string{"client"}, Sources: []SourceRef{{Kind: KindLibraryFile, Ref: "reference", Label: "Visual example", Content: true, IncludeImages: true}}}
@@ -207,7 +207,7 @@ func TestTemplateCapturesActualContentsAndRefusesMissingOrChangedBytes(t *testin
 	e := newMaterializeEngine(t)
 	i := New(e, nil)
 	data := []byte("# Template\n{{content}}")
-	e.files["template"] = map[string]any{"name": "template.md", "blobUrl": "stored-template", "sha256": (pure.Result{Bytes: data}).SHA256(), "summary": "This is only metadata"}
+	e.files["template"] = map[string]any{"name": "template.md", "blobUrl": "library/u-alice/template/template.md", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256(), "summary": "This is only metadata"}
 	ctx := materializeContext()
 	if _, err := i.templateBody(ctx, "template"); err == nil {
 		t.Fatal("template silently fell back to metadata")
@@ -220,5 +220,35 @@ func TestTemplateCapturesActualContentsAndRefusesMissingOrChangedBytes(t *testin
 	i.SetSourceDownloader(&referenceReader{data: []byte("changed")})
 	if _, err := i.templateBody(ctx, "template"); err == nil {
 		t.Fatal("changed template silently accepted")
+	}
+}
+
+// A reference's bytes and a template's are read with the node's storage
+// credential, so the row's key is held to its owner's own library/{owner}/
+// prefix before storage is asked -- the row being the caller's says nothing
+// about whose object its blobUrl names.
+func TestReferenceAndTemplateReadsRefuseAKeyOutsideTheOwnersLibrary(t *testing.T) {
+	foreign := "https://acct.blob.core.windows.net/memql-library/library/u-bob/f-1/brief.md"
+	reader := &referenceReader{data: []byte("# Bob's brief")}
+	i := &Integration{}
+	i.SetSourceDownloader(reader)
+	source := []Resolved{{Ref: SourceRef{Kind: KindLibraryFile, Ref: "file", Label: "Brief", Content: true},
+		Rows: []map[string]any{{"name": "brief.md", "blobUrl": foreign, "ownerUserId": "v1:identity:user:u-alice"}}}}
+	if err := i.captureSourceContents(context.Background(), source); err == nil {
+		t.Fatal("a reference naming another owner's key was read")
+	}
+	if reader.calls != 0 {
+		t.Fatalf("storage was asked %d time(s) before the refusal", reader.calls)
+	}
+
+	e := newMaterializeEngine(t)
+	ti := New(e, nil)
+	ti.SetSourceDownloader(reader)
+	e.files["template"] = map[string]any{"name": "template.md", "blobUrl": foreign, "ownerUserId": "u-alice"}
+	if _, err := ti.templateBody(materializeContext(), "template"); err == nil {
+		t.Fatal("a template naming another owner's key was read")
+	}
+	if reader.calls != 0 {
+		t.Fatalf("storage was asked %d time(s) before the refusal", reader.calls)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/librarykey"
 )
 
 // store.go -- the engine seam, and the two actor rules the Materializer
@@ -188,8 +189,23 @@ func (s *store) recordRecipeRun(ctx context.Context, args map[string]any) error 
 	return s.writeInternal(ctx, "mutation "+call("recordComposeRecipeRun", args))
 }
 
+// createLibraryFile files the output. @serverOnly, because blobUrl is a
+// storage path the node's credential reads back: a client that could author it
+// could point a row it owns at somebody else's object. So it runs through the
+// one stamp site -- after the key is held to the CALLER's own
+// library/{owner}/ prefix, which is what makes stamping this request-derived
+// write safe. storeBytes composes the key from the caller's own id; the check
+// is what keeps that true for anything that reaches here later.
 func (s *store) createLibraryFile(ctx context.Context, args map[string]any) error {
-	return s.write(ctx, "mutation "+call("createLibraryFile", args))
+	owner := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+		owner = ac.UserId
+	}
+	blobUrl, _ := args["blobUrl"].(string)
+	if err := librarykey.Check(blobUrl, owner, ""); err != nil {
+		return fmt.Errorf("compose: refusing to file an output whose key is not the caller's own: %w", err)
+	}
+	return s.writeInternal(ctx, "mutation "+call("createLibraryFile", args))
 }
 
 func (s *store) setLibraryFileReady(ctx context.Context, fileId, summary string) error {

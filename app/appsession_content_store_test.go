@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/server"
 	workerservice "github.com/znasllc-io/memql/component/worker"
@@ -29,7 +30,7 @@ type fakeContentEngine struct {
 	err      error
 }
 
-func (f *fakeContentEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
+func (f *fakeContentEngine) Execute(ctx context.Context, q string) (*memqlengine.ExecuteResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.queries = append(f.queries, q)
@@ -47,6 +48,10 @@ func (f *fakeContentEngine) Execute(_ context.Context, q string) (*memqlengine.E
 	// A create: remember the digest so the next identical content dedups,
 	// the way the real query would.
 	if strings.HasPrefix(q, "mutation createLibraryFile") {
+		// @serverOnly, as the engine holds it: an unstamped create is refused.
+		if !auth.OriginFromContext(ctx).IsInternal() {
+			return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", "createLibraryFile")
+		}
 		if f.byDigest == nil {
 			f.byDigest = map[string]string{}
 		}
