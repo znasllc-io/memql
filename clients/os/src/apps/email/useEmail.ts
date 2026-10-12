@@ -1,3 +1,4 @@
+import { countQueries, type FlowStep } from "./automations/flowModel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getRowByConceptAndId,
@@ -125,7 +126,12 @@ export function useRuleFeed(): LiveCollectionHandle<Row> {
     connection.query.emailRules({}, pageOf(cursor, signal)));
 }
 
+export function useJourneyFeed(): LiveCollectionHandle<Row> {
+  return useListFeed("campaigns:journeys", "v1:campaigns:journey", (connection, cursor, signal) => connection.query.journeys({}, pageOf(cursor, signal)));
+}
+
 export interface EmailFeeds {
+  journeys: LiveCollectionHandle<Row>;
   campaigns: LiveCollectionHandle<Row>;
   audiences: LiveCollectionHandle<Row>;
   templates: LiveCollectionHandle<Row>;
@@ -142,6 +148,7 @@ export function useEmailFeeds(): EmailFeeds {
     templates: useTemplateFeed(),
     senders: useSenderFeed(),
     rules: useRuleFeed(),
+    journeys: useJourneyFeed(),
   };
 }
 
@@ -182,7 +189,7 @@ interface Composition {
 }
 
 /** `read` for each id, a few at a time. */
-async function readEach<T>(ids: readonly string[], read: (id: string) => Promise<T>, signal: AbortSignal): Promise<T[]> {
+async function readEach<T, I = string>(ids: readonly I[], read: (id: I) => Promise<T>, signal: AbortSignal): Promise<T[]> {
   const answers: T[] = [];
   let next = 0;
   let failed = false;
@@ -1291,3 +1298,33 @@ export function useArtifactTitle(artifactId: string): Reading<string> {
   return useReading<string>("", read, [read]);
 }
 
+
+/** Enrollment rows are intentionally not broadcast. Count while visible. */
+export function useEnrollmentCounts(journeyId: string, steps: readonly FlowStep[]) {
+  const connection = useOsConnection();
+  const signature = JSON.stringify(countQueries(journeyId, steps));
+  const read = useMemo(() => !connection || !journeyId ? null : async (signal: AbortSignal) => {
+    const queries = JSON.parse(signature) as ReturnType<typeof countQueries>;
+    return readEach(queries, async item => ({ ...item, figure: countFigure((await connection.query.journeyEnrollmentCounts(item.args, { signal })).count()) }), signal);
+  }, [connection, journeyId, signature]);
+  return useReading<Array<ReturnType<typeof countQueries>[number] & { figure: Figure }>>([], read, [read]);
+}
+export function useConfirmTemplates(steps: readonly FlowStep[], templates?: readonly Row[]) {
+  const connection = useOsConnection();
+  const signature = [...new Set(steps.filter(s => s.kind === "confirm").map(s => s.templateId).filter(Boolean))].sort().join("\n");
+  const revisions = templates?.map(row => `${row.id}:${row.createdAt}`).join("|") ?? "";
+  const read = useMemo(() => !connection ? null : async (signal: AbortSignal) => new Map(await readEach(signature ? signature.split("\n") : [], async templateId => {
+    const row = (await connection.query.templateById({ templateId }, { signal })).rows()[0];
+    const record = row ? templateRecordFromRow(row) : null;
+    return [templateId, !!record && `${record.textBody} ${record.htmlBody}`.includes("{{confirmUrl}}") ] as const;
+  }, signal)), [connection, signature, revisions]);
+  return useReading<ReadonlyMap<string, boolean>>(new Map(), read, [read]);
+}
+
+/** Per-journey enrollment totals are ordinary reads, refreshed only while visible. */
+export function useJourneyTotals(ids: readonly string[]) {
+  const connection = useOsConnection();
+  const signature = [...ids].sort().join("\n");
+  const read = useMemo(() => !connection ? null : async (signal: AbortSignal) => new Map(await readEach(signature ? signature.split("\n") : [], async journeyId => [journeyId, countFigure((await connection.query.journeyEnrollmentCounts({ journeyId }, { signal })).count())] as const, signal)), [connection, signature]);
+  return useReading<ReadonlyMap<string, Figure>>(new Map(), read, [read]);
+}

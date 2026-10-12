@@ -16,9 +16,7 @@ import {
   figureOf,
   formatFigure,
   formatRate,
-  insertAt,
   isPublished,
-  mergeTagsFor,
   rateOf,
   recipientFromRow,
   ruleFingerprint,
@@ -321,67 +319,6 @@ describe("engagement rates", () => {
     expect(formatRate(0.4)).toBe("40%");
     expect(formatRate(0.043)).toBe("4.3%");
     expect(formatRate(0)).toBe("0%");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Merge tags
-// ---------------------------------------------------------------------------
-
-describe("merge tags", () => {
-  it("offers the four base tags with no sample, and no fields.*", () => {
-    const tags = mergeTagsFor({ recipient: null, campaignName: "", accountName: "" });
-    expect(tags.map((t) => t.tag)).toEqual([
-      "{{displayName}}",
-      "{{email}}",
-      "{{campaignName}}",
-      "{{accountName}}",
-    ]);
-    expect(tags.every((t) => t.preview === "")).toBe(true);
-  });
-
-  it("DISCOVERS fields.* from a real recipient -- nothing else can", () => {
-    // `{{fields.company}}` exists because somebody's CSV had a `company`
-    // column. No list in this repo could know that, which is the whole reason
-    // the strip samples a recipient instead of documenting a set.
-    const recipient = recipientFromRow(
-      recipientRow({ id: "r1", fields: { company: "Acme Corp", plan: "gold" } }),
-    );
-    const tags = mergeTagsFor({ recipient, campaignName: "August", accountName: "Acme" });
-    expect(tags.map((t) => t.tag)).toContain("{{fields.company}}");
-    expect(tags.find((t) => t.tag === "{{fields.company}}")?.preview).toBe("Acme Corp");
-    expect(tags.find((t) => t.tag === "{{fields.company}}")?.fromImport).toBe(true);
-  });
-
-  it("shows what each base tag renders to for the sampled person", () => {
-    const recipient = recipientFromRow(recipientRow({ id: "r1", displayName: "Dana" }));
-    const tags = mergeTagsFor({ recipient, campaignName: "August", accountName: "Acme" });
-    expect(tags.find((t) => t.tag === "{{displayName}}")?.preview).toBe("Dana");
-    expect(tags.find((t) => t.tag === "{{email}}")?.preview).toBe("dana@acme.com");
-    expect(tags.find((t) => t.tag === "{{campaignName}}")?.preview).toBe("August");
-  });
-
-  it("keeps a fields key whose value is empty -- present-but-blank is the case a spell check misses", () => {
-    const recipient = recipientFromRow(recipientRow({ id: "r1", fields: { company: "" } }));
-    const tags = mergeTagsFor({ recipient, campaignName: "", accountName: "" });
-    expect(tags.map((t) => t.tag)).toContain("{{fields.company}}");
-    expect(tags.find((t) => t.tag === "{{fields.company}}")?.preview).toBe("");
-  });
-
-  it("inserts at the cursor and leaves the cursor AFTER the tag", () => {
-    const out = insertAt("Hello , welcome", "{{displayName}}", 6, 6);
-    expect(out.body).toBe("Hello {{displayName}}, welcome");
-    expect(out.cursor).toBe(6 + "{{displayName}}".length);
-  });
-
-  it("replaces a selection rather than pushing it aside", () => {
-    const out = insertAt("Hello NAME,", "{{displayName}}", 6, 10);
-    expect(out.body).toBe("Hello {{displayName}},");
-  });
-
-  it("clamps an out-of-range selection instead of throwing the click away", () => {
-    const out = insertAt("Hi", "{{email}}", 99, 200);
-    expect(out.body).toBe("Hi{{email}}");
   });
 });
 

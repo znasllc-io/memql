@@ -96,6 +96,7 @@ export function LiveList<T>({
       {snapshot.state === "seeding" && snapshot.rows.length === 0
         ? <RecordListSkeleton label="Loading from the cluster" />
         : stateLine ? <Caption>{stateLine}</Caption> : null}
+      {snapshot.truncated ? <Caption>Some records aren’t shown because this list reached its limit.</Caption> : null}
       {snapshot.error ? (errorContent ?? <p className="os-ask-error">{snapshot.error}</p>) : null}
     </div>
   );

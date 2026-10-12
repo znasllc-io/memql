@@ -54,6 +54,8 @@ export interface LiveSnapshot<T> {
   // Bumped on every observable change. A binding compares this rather than
   // deep-equalling rows.
   version: number;
+  /** A paged seed stopped at its safety limit with a cursor still outstanding. */
+  truncated?: boolean;
 }
 
 export interface SeedPage<T> {
@@ -209,6 +211,7 @@ export class LiveCollection<T = Row> {
   private order: string[] = [];
   private state: LiveState = "seeding";
   private errorText = "";
+  private truncated = false;
   private versionValue = 0;
   private readonly listeners = new Set<() => void>();
   private cachedSnapshot: LiveSnapshot<T> | null = null;
@@ -254,6 +257,7 @@ export class LiveCollection<T = Row> {
         state: this.state,
         error: this.errorText,
         version: this.versionValue,
+        truncated: this.truncated,
       };
     }
     return this.cachedSnapshot;
@@ -400,6 +404,7 @@ export class LiveCollection<T = Row> {
       // REPLACE, not merge. The read is the authority on membership: a row
       // the seed no longer returns is a row that left the set, and merging
       // would keep it on screen forever.
+      this.truncated = paged && cursor !== "";
       this.rowsById = collected;
       this.order = seenOrder;
       // ...THEN REPLAY what arrived while it read, through the same rules a

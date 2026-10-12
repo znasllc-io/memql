@@ -1,3 +1,4 @@
+import type { FlowStep, Trigger } from "./automations/flowModel";
 import { useMemo } from "react";
 import { rowObject, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -941,100 +942,6 @@ export function renderFromRow(row: Row): EmailRender {
 }
 
 // ---------------------------------------------------------------------------
-// Merge tags
-// ---------------------------------------------------------------------------
-
-/**
- * The closed set of tags that are not per-recipient data.
- *
- * CLOSED, and the renderer is a `strings.NewReplacer` over exactly these plus
- * the recipient's own `fields` keys -- a value is substituted and never
- * evaluated. So this list is not documentation that can go stale: a tag
- * outside it renders as its own literal text into somebody's inbox.
- */
-export const BASE_MERGE_TAGS = [
-  "{{displayName}}",
-  "{{email}}",
-  "{{campaignName}}",
-  "{{accountName}}",
-] as const;
-
-export interface MergeTag {
-  /** The tag exactly as it is typed into a body. */
-  tag: string;
-  /** What it resolves to for the sampled recipient, "" when nothing sampled. */
-  preview: string;
-  /** True for `{{fields.*}}`, which exist only because an import carried the
-   *  column. That distinction is how somebody discovers `fields.*` at all. */
-  fromImport: boolean;
-}
-
-export interface MergeSample {
-  recipient: RecipientRow | null;
-  campaignName: string;
-  accountName: string;
-}
-
-/**
- * The tags available here, each showing what it renders to.
- *
- * THIS IS DOCUMENTATION THAT CANNOT GO STALE, which is the reason it is built
- * from a real recipient rather than written down. `{{fields.company}}` exists
- * because somebody's CSV had a `company` column; no list in this repo could
- * know that, and an operator has no other way to learn it. Showing the
- * resolved value beside the tag also catches the case a spelling check cannot:
- * a column that is present but empty for the person you sampled.
- *
- * A tag with no sample keeps its place and shows no preview. The tag is still
- * insertable -- the value simply is not known here yet, which is different
- * from the tag not existing.
- */
-export function mergeTagsFor(sample: MergeSample): MergeTag[] {
-  const recipient = sample.recipient;
-  const base: MergeTag[] = [
-    {
-      tag: "{{displayName}}",
-      preview: recipient?.displayName ?? "",
-      fromImport: false,
-    },
-    { tag: "{{email}}", preview: recipient?.email ?? "", fromImport: false },
-    { tag: "{{campaignName}}", preview: sample.campaignName, fromImport: false },
-    { tag: "{{accountName}}", preview: sample.accountName, fromImport: false },
-  ];
-  const fields = Object.keys(recipient?.fields ?? {})
-    .sort((a, b) => a.localeCompare(b))
-    .map((key) => ({
-      tag: `{{fields.${key}}}`,
-      preview: recipient?.fields[key] ?? "",
-      fromImport: true,
-    }));
-  return [...base, ...fields];
-}
-
-/**
- * Insert `tag` into `body` at the cursor, returning the new body and where
- * the cursor should land.
- *
- * THE CURSOR GOES AFTER THE TAG, not to the end and not back to the start. A
- * person clicking a chip is mid-sentence, and either alternative makes the
- * next keystroke land somewhere they were not.
- *
- * An out-of-range selection (a field that has never been focused reports 0,
- * and a stale one can report past the end) is clamped rather than refused:
- * inserting at the end is a reasonable answer to "we do not know where you
- * were", and throwing away the click is not.
- */
-export function insertAt(body: string, tag: string, start: number, end: number): {
-  body: string;
-  cursor: number;
-} {
-  const from = Math.min(Math.max(0, start), body.length);
-  const to = Math.min(Math.max(from, end), body.length);
-  const next = body.slice(0, from) + tag + body.slice(to);
-  return { body: next, cursor: from + tag.length };
-}
-
-// ---------------------------------------------------------------------------
 // Sender identities
 // ---------------------------------------------------------------------------
 
@@ -1476,3 +1383,13 @@ export function nameOfTemplate(templates: TemplateRow[], id: string): string {
 export function labelOfSender(senders: SenderIdentityRow[], id: string): string {
   return senders.find((s) => s.id === id)?.address ?? "";
 }
+
+export interface JourneyRow {
+  id: string; accountId: string; ownerUserId: string; name: string; description: string;
+  trigger: Trigger; steps: FlowStep[]; status: string; activatedAt: string; lastError: string; createdAt: string;
+}
+export function journeyFromRow(row: Row): JourneyRow {
+  const flat = flatten(row);
+  return { id: rowString(flat, "id"), accountId: rowString(flat, "accountId"), ownerUserId: rowString(flat, "ownerUserId"), name: rowString(flat, "name"), description: rowString(flat, "description"), trigger: (flat.trigger && typeof flat.trigger === "object" ? flat.trigger : { kind: "joined", audienceId: "" }) as Trigger, steps: Array.isArray(flat.steps) ? flat.steps as FlowStep[] : [], status: rowString(flat, "status"), activatedAt: rowString(flat, "activatedAt"), lastError: rowString(flat, "lastError"), createdAt: rowString(flat, "createdAt") };
+}
+export function journeyFingerprint(journey: JourneyRow): string { return JSON.stringify([journey.name, journey.description, journey.status, journey.trigger, journey.steps, journey.lastError]); }

@@ -1,3 +1,6 @@
+import type { FlowStep, Trigger } from "./automations/flowModel";
+import { wireSteps } from "./automations/flowModel";
+import type { Issue } from "./automations/issues";
 import { useCallback, useRef, useState } from "react";
 import { newShortId, refusalSentence, type Connection, type Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -525,23 +528,10 @@ export function useTestSend(): TestSendState {
   };
 }
 
-/**
- * Pull the unresolved-tag list out of a test-send reply.
- *
- * TWO SPELLINGS ARE READ, and neither is guessed at: the builtin's own
- * description says it "returns the list of merge tags it could not resolve"
- * without naming the key, so both the obvious ones are read and anything that
- * is not a list of strings is treated as "it said nothing" -- which renders as
- * a clean test rather than as an error about a reply we did not understand.
- */
+/** Pull the documented unresolved-tag list out of a test-send reply. */
 export function unresolvedTagsFrom(row: Row | null): string[] {
-  if (row === null) return [];
-  const flat = flatten(row);
-  for (const key of ["unresolved", "unresolvedTags"]) {
-    const v = flat[key];
-    if (Array.isArray(v)) return v.filter((m): m is string => typeof m === "string");
-  }
-  return [];
+  const value = row ? flatten(row).unresolvedTags : undefined;
+  return Array.isArray(value) ? value.filter((tag): tag is string => typeof tag === "string") : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -549,15 +539,16 @@ export function unresolvedTagsFrom(row: Row | null): string[] {
 // ---------------------------------------------------------------------------
 
 export interface CreateAudienceState extends WriteState {
-  create: (facts: { name: string; description: string; accountId: string }) => Promise<string>;
+  create: (facts: { audienceId?: string; name: string; description: string; accountId: string; confirmation?: "none" | "required" }) => Promise<string>;
 }
 
 export function useCreateAudience(): CreateAudienceState {
   const { busy, error, reset, call } = useWrite(
-    async (query, facts: { name: string; description: string; accountId: string }) => {
-      const audienceId = newShortId();
+    async (query, facts: { audienceId?: string; name: string; description: string; accountId: string; confirmation?: "none" | "required" }) => {
+      const audienceId = facts.audienceId ?? newShortId();
       await query.createAudience({
         audienceId,
+        confirmation: facts.confirmation ?? "none",
         name: facts.name.trim(),
         description: omitBlank(facts.description),
         accountId: facts.accountId.trim(),
@@ -581,13 +572,21 @@ export function useArchiveAudience(): ArchiveAudienceState {
   return { busy, error, reset, archive: call };
 }
 
+export function useAudienceLifecycle() {
+  return useWrite(async (query, audienceId: string, action: "restore" | "confirmation", confirmation: "none" | "required") => {
+    if (action === "restore") await query.restoreAudience({ audienceId });
+    else await query.setAudienceConfirmation({ audienceId, confirmation });
+    return true;
+  }, false);
+}
+
 export interface AddRecipientState extends WriteState {
-  add: (audience: Pick<AudienceRow, "id" | "accountId">, email: string, displayName: string) => Promise<boolean>;
+  add: (audience: Pick<AudienceRow, "id" | "accountId">, email: string, displayName: string, subscriptionStatus?: "pending" | "subscribed") => Promise<boolean>;
 }
 
 export function useAddRecipient(): AddRecipientState {
   const { busy, error, reset, call } = useWrite(
-    async (query, audience: Pick<AudienceRow, "id" | "accountId">, email: string, displayName: string) => {
+    async (query, audience: Pick<AudienceRow, "id" | "accountId">, email: string, displayName: string, subscriptionStatus?: "pending" | "subscribed") => {
       await query.addRecipient({
         recipientId: newShortId(),
         audienceId: audience.id,
@@ -595,6 +594,7 @@ export function useAddRecipient(): AddRecipientState {
         email: email.trim(),
         displayName: omitBlank(displayName),
         source: "manual",
+        subscriptionStatus: subscriptionStatus ?? "subscribed",
       });
       return true;
     },
@@ -1008,12 +1008,11 @@ function modeFields(facts: RuleFacts) {
 }
 
 export interface CreateRuleState extends WriteState {
-  create: (facts: RuleFacts) => Promise<string>;
+  create: (facts: RuleFacts, emailRuleId?: string) => Promise<string>;
 }
 
 export function useCreateRule(): CreateRuleState {
-  const { busy, error, reset, call } = useWrite(async (query, facts: RuleFacts) => {
-    const emailRuleId = newShortId();
+  const { busy, error, reset, call } = useWrite(async (query, facts: RuleFacts, emailRuleId: string = newShortId()) => {
     await query.createEmailRule({
       emailRuleId,
       name: facts.name.trim(),
@@ -1179,4 +1178,19 @@ export function useRetryNewsletterWelcome() {
   return useWrite(async (query, args: Parameters<Connection["query"]["campaignRetryNewsletterWelcome"]>[0]) => {
     await query.campaignRetryNewsletterWelcome(args); return true;
   }, false);
+}
+
+export interface JourneyDraft { journeyId: string; accountId: string; name: string; description?: string; trigger: Trigger; steps: readonly FlowStep[]; expectedRevision?: string }
+export interface JourneyReceipt { revision: string; issues: Issue[] }
+export function useJourneyWrites() {
+  const save = useWrite(async (query, draft: JourneyDraft): Promise<JourneyReceipt> => {
+    const row = flatten((await query.campaignSaveJourney({ ...draft, steps: wireSteps(draft.steps) })).rows()[0] ?? {});
+    return { revision: typeof row.revision === "string" ? row.revision : "", issues: Array.isArray(row.issues) ? row.issues as Issue[] : [] };
+  }, null);
+  const setState = useWrite(async (query, journeyId: string, action: "activate" | "pause" | "archive", expectedRevision: string): Promise<JourneyReceipt> => {
+    const row = flatten((await query.campaignSetJourneyState({ journeyId, action, expectedRevision })).rows()[0] ?? {});
+    return { revision: typeof row.revision === "string" ? row.revision : "", issues: Array.isArray(row.issues) ? row.issues as Issue[] : [] };
+  }, null);
+  const describe = useWrite(async (query, accountId: string, sentence: string) => flatten((await query.campaignDescribeJourney({ accountId, sentence })).rows()[0] ?? {}), null);
+  return { save, setState, describe };
 }

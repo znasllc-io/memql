@@ -1230,3 +1230,21 @@ test("onGap gives a hand-rolled consumer the same continuity signal", async () =
   assert.equal(gaps, 3, "unsubscribed");
   store.dispose();
 });
+
+
+test("a capped paged seed reports incomplete membership and a complete reseed clears it", async () => {
+  const store = new LiveStore(hostWith(new FakeSubscriptions()).host);
+  let complete = false;
+  const handle = store.collection<Row>("cap", {
+    concept: "c", maxPages: 2,
+    seed: async (cursor) => ({ rows: [{ id: cursor || "first" }], nextCursor: complete ? "" : cursor + "next" }),
+  });
+  await settle();
+  assert.equal(handle.value.snapshot.rows.length, 2);
+  assert.equal(handle.value.snapshot.truncated, true);
+  complete = true;
+  handle.value.reseed();
+  await settle();
+  assert.equal(handle.value.snapshot.truncated, false);
+  store.dispose();
+});

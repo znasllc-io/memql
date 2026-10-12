@@ -121,6 +121,7 @@ describe("the Logs section", () => {
         Concepts.CAMPAIGNS_TEMPLATE,
         Concepts.CAMPAIGNS_SENDER_IDENTITY,
         Concepts.CAMPAIGNS_EMAIL_RULE,
+        "v1:campaigns:journey",
         Concepts.CAMPAIGNS_SEND_JOB,
         Concepts.CAMPAIGNS_DELIVERY,
         Concepts.EMAIL_CAPTURED_MESSAGE,

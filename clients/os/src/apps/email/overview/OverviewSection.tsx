@@ -1,3 +1,4 @@
+import { journeyFromRow } from "../rows";
 import { useMemo } from "react";
 import { Send } from "lucide-react";
 import type { LiveSnapshot, Row } from "@znasllc-io/memql-sdk-core/client";
@@ -96,9 +97,9 @@ export function OverviewSection({ feeds }: { feeds: EmailFeeds }) {
     audiencesSettled: answered(feeds.audiences.snapshot),
     audiencesError: audiencesStory.refusal,
     activeAutomations: {
-      count: rules.filter((rule) => rule.status === "active").length,
-      settled: answered(feeds.rules.snapshot),
-      error: rulesStory.refusal,
+      count: rules.filter((rule) => rule.status === "active").length + feeds.journeys.snapshot.rows.map(journeyFromRow).filter(row => row.status === "active").length,
+      settled: answered(feeds.rules.snapshot) && answered(feeds.journeys.snapshot),
+      error: rulesStory.refusal || story(feeds.journeys.snapshot).refusal,
     },
     now,
   };

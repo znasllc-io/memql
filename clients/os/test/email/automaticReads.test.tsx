@@ -343,9 +343,16 @@ describe("every reading that keeps itself fresh", () => {
     win.section("audiences");
     fireEvent.click(await screen.findByText("Newsletter"));
     await screen.findByText("one@acme.com");
-    await waitFor(() => expect(conn.query.newsletterWelcomesForAudience).toHaveBeenCalled());
     await settle();
     return { conn, ...win };
+  }
+
+  async function signupFormPage() {
+    const page = await audiencePage();
+    fireEvent.click(await screen.findByText("Unavailable deployable"));
+    await waitFor(() => expect(page.conn.query.newsletterWelcomesForAudience).toHaveBeenCalled());
+    await settle();
+    return page;
   }
 
   const READINGS = [
@@ -356,7 +363,7 @@ describe("every reading that keeps itself fresh", () => {
     // The same reading as the campaign's, kept fresh by the test's own page as well.
     ["a campaign's test runs, from one test's page", testRunPage, (c: Conn) => c.query.campaignTestRuns.mock.calls.length],
     ["an audience's roster", audiencePage, (c: Conn) => c.query.recipientsForAudience.mock.calls.length],
-    ["a signup form's welcomes", audiencePage, (c: Conn) => c.query.newsletterWelcomesForAudience.mock.calls.length],
+    ["a signup form's welcomes", signupFormPage, (c: Conn) => c.query.newsletterWelcomesForAudience.mock.calls.length],
   ] as const;
 
   it.each(READINGS)("%s reads every five seconds while it is seen, and nothing once its pane is parked", async (_name, open, count) => {

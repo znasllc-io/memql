@@ -560,6 +560,7 @@ const email: OsAppManifest = {
     { section: "campaigns", idField: "campaignId", query: "campaigns.campaigns", labels: ["name"] },
     { section: "audiences", idField: "audienceId", query: "campaigns.audiences", labels: ["name", "description"] },
     { section: "templates", idField: "templateId", query: "campaigns.templates", labels: ["name", "subject"] },
+    { section: "automations", idField: "journeyId", query: "campaigns.journeys", labels: ["name", "description"] },
   ],
   needs: EMAIL_REQUIRES,
   wants: EMAIL_WANTS,

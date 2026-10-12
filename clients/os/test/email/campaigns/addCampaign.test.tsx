@@ -304,7 +304,7 @@ describe("Add a campaign", () => {
     press("Add an audience");
     expect(win.navigate).toHaveBeenCalledWith("audiences", { fromContent: true });
     // The Audiences tab starts its own Add.
-    expect(await screen.findByRole("heading", { level: 3, name: "New audience" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 3, name: "Add an audience" })).toBeTruthy();
 
     // The audience the person adds arrives on the live feed...
     act(() => conn.subscriptions.emit(AUDIENCE, audienceRow({ id: "a-new", name: "Launch list" }), "NODE_CREATED"));

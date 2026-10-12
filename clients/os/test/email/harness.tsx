@@ -112,6 +112,9 @@ export interface FakeSeed {
   templates?: Row[];
   senderIdentities?: Row[];
   emailRules?: Row[];
+  journeys?: Row[];
+  enrollmentCounts?: Record<string, number>;
+  proposal?: Row;
   /** Pass an Error to make the on-demand read REFUSE, which is the
    *  interesting case: a refusal is not a zero. */
   deliveriesForCampaign?: Row[] | Error;
@@ -265,10 +268,17 @@ export function fakeConnection(seed: FakeSeed = {}) {
       templates: reader(seed.templates),
       senderIdentities: reader(seed.senderIdentities),
       emailRules: reader(seed.emailRules),
+      journeys: reader(seed.journeys),
+      journeyById: reader(seed.journeys, (row, args) => row.id === args.journeyId),
+      journeyEnrollmentCounts: vi.fn(async (args: Record<string, unknown>, _opts?: unknown) => rowsResult([{ count: seed.enrollmentCounts?.[`${args.stepId ?? ""}:${args.status ?? ""}`] ?? 0, atLeast: false }])),
+      campaignSaveJourney: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ revision: "2026-10-12T00:00:00Z", issues: [] }])),
+      campaignSetJourneyState: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ revision: "2026-10-12T00:01:00Z", issues: [] }])),
+      campaignDescribeJourney: vi.fn(async (_args: Record<string, unknown>) => rowsResult([seed.proposal ?? { proposal: { name: "Welcome series", trigger: { kind: "joined", audienceId: "a1" }, steps: [{ id: "send1", kind: "send", templateId: "t1", senderIdentityId: "s1" }] }, explanation: "Welcome new subscribers.", issues: [] }])),
 
       // The on-demand reads.
       deliveriesForCampaign: reader(seed.deliveriesForCampaign),
       recipientsForAudience: reader(seed.recipientsForAudience),
+      audienceRosterSize: reader([{ count: Array.isArray(seed.recipientsForAudience) ? seed.recipientsForAudience.length : 0, atLeast: false }]),
       audienceSubscriberCount: vi.fn(async (args: { audienceId?: string }, _opts?: unknown) => {
         const answer = seed.subscriberCounts?.[args.audienceId ?? ""];
         if (answer instanceof Error) throw answer;
@@ -363,6 +373,8 @@ export function fakeConnection(seed: FakeSeed = {}) {
       campaignTestSend: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       campaignImportRecipients: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       createAudience: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
+      restoreAudience: reader([]),
+      setAudienceConfirmation: reader([]),
       archiveAudience: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       addRecipient: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       setRecipientSubscription: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),

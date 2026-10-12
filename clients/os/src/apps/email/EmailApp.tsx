@@ -7,10 +7,10 @@ import type { UploadProvider } from "../../items/upload";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import { accessAdmits, type OsAppProps } from "../../system/registry";
 import { AccountOptionsProvider } from "../accounts/tie";
-import { AudiencesSection } from "./AudiencesSection";
+import { AudiencesSection } from "./audiences/AudiencesSection";
 import { CampaignsSection } from "./campaigns/CampaignsSection";
 import { OverviewSection } from "./overview/OverviewSection";
-import { RulesSection } from "./RulesSection";
+import { AutomationsSection } from "./automations/AutomationsSection";
 import { TemplatesSection } from "./templates/TemplatesSection";
 import { useCampaignWrites } from "./actions";
 import {
@@ -88,6 +88,7 @@ const EMAIL_LOG_CONCEPTS = [
   Concepts.CAMPAIGNS_TEMPLATE,
   Concepts.CAMPAIGNS_SENDER_IDENTITY,
   Concepts.CAMPAIGNS_EMAIL_RULE,
+  "v1:campaigns:journey",
   Concepts.CAMPAIGNS_SEND_JOB,
   Concepts.CAMPAIGNS_DELIVERY,
   Concepts.EMAIL_CAPTURED_MESSAGE,
@@ -99,6 +100,7 @@ const RECORD_INTENTS: readonly { idField: string; section: OpenSection }[] = [
   { idField: "campaignId", section: "campaigns" },
   { idField: "audienceId", section: "audiences" },
   { idField: "templateId", section: "templates" },
+  { idField: "journeyId", section: "automations" },
 ];
 
 type EmailAppProps = OsAppProps & { store?: EmailSettingsStore; uploads?: UploadProvider };
@@ -257,7 +259,7 @@ function EmailSections({
       case "templates":
         return <TemplatesSection feeds={feeds} includeArchived={settings.includeArchived} openRequest={requests.templates} />;
       case "automations":
-        return <RulesSection feeds={feeds} writes={writes} includeArchived={settings.includeArchived} openRequest={requests.automations} />;
+        return <AutomationsSection feeds={feeds} writes={writes} includeArchived={settings.includeArchived} openRequest={requests.automations} />;
       default:
         return (
           <CampaignsSection

@@ -1,3 +1,4 @@
+import { versionOrder } from "@znasllc-io/memql-sdk-core/client";
 // The rows a goal's world is made of, and the node identities drawn from them.
 //
 // ===========================================================================
@@ -525,7 +526,7 @@ export function latestAttempts(steps: readonly StepRow[]): Map<string, StepRow> 
 
 function wins(candidate: StepRow, held: StepRow): boolean {
   if (candidate.attempt !== held.attempt) return candidate.attempt > held.attempt;
-  if (candidate.createdAt !== held.createdAt) return candidate.createdAt > held.createdAt;
+  if (versionOrder(candidate.createdAt, held.createdAt) !== 0) return (versionOrder(candidate.createdAt, held.createdAt) ?? 0) > 0;
   return candidate.id > held.id;
 }
 
@@ -604,7 +605,7 @@ export function artifactsOfRun(world: GoalWorld, runId: string): ArtifactRow[] {
   return world.artifacts
     .filter((artifact) => artifact.runId === runId)
     .sort((a, b) =>
-      a.createdAt !== b.createdAt ? (a.createdAt < b.createdAt ? -1 : 1) : a.id < b.id ? -1 : 1,
+      (versionOrder(a.createdAt, b.createdAt) ?? 0) || a.id.localeCompare(b.id),
     );
 }
 

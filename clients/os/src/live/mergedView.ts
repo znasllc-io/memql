@@ -76,6 +76,7 @@ function mergedView<U>(
         // Summed, so a change in ANY feed is a change to this view. The
         // arrival cue re-folds on a version change and nothing else.
         version: snapshots.reduce((sum, s) => sum + s.version, 0),
+        truncated: snapshots.some((s) => s.truncated),
       };
       return cached;
     },

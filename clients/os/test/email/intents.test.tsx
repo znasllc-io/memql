@@ -18,9 +18,9 @@ const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { EmailApp, useOpenRecord, useOpenSettings } = await import("../../src/apps/email/EmailApp");
 const { EmailNavigationContext, recordNamed, useEmailRequests, useOpenInbox } = await import("../../src/apps/email/openRequest");
 const { LocalEmailSettingsStore } = await import("../../src/apps/email/settings");
-const { AudiencesSection } = await import("../../src/apps/email/AudiencesSection");
+const { AudiencesSection } = await import("../../src/apps/email/audiences/AudiencesSection");
 const { CampaignsSection } = await import("../../src/apps/email/campaigns/CampaignsSection");
-const { RulesSection } = await import("../../src/apps/email/RulesSection");
+const { AutomationsSection } = await import("../../src/apps/email/automations/AutomationsSection");
 const { TemplatesSection } = await import("../../src/apps/email/templates/TemplatesSection");
 const { useCampaignWrites } = await import("../../src/apps/email/actions");
 const { campaignFromRow } = await import("../../src/apps/email/rows");
@@ -502,7 +502,7 @@ describe("a section given an open request", () => {
       case "templates":
         return <TemplatesSection feeds={feeds} includeArchived={false} openRequest={request} />;
       case "automations":
-        return <RulesSection feeds={feeds} writes={writes} includeArchived={false} openRequest={request} />;
+        return <AutomationsSection feeds={feeds} writes={writes} includeArchived={false} openRequest={request} />;
     }
   }
 
@@ -514,9 +514,9 @@ describe("a section given an open request", () => {
 
   it.each([
     ["campaigns", "Add a campaign", "Campaigns"],
-    ["audiences", "New audience", "Audiences"],
+    ["audiences", "Add an audience", "Audiences"],
     ["templates", "Create new template", "Templates"],
-    ["automations", "New rule", "Automations"],
+    ["automations", "Add an automation", "Automations"],
   ] as const)("starts the %s Add flow", async (name, adding, list) => {
     const { request } = mountSection(name);
     expect(await heading(list)).toBeTruthy();
@@ -568,14 +568,14 @@ describe("a section given an open request", () => {
     await heading("Audiences");
 
     request({ add: true, revision: 1 });
-    expect(await heading("New audience")).toBeTruthy();
+    expect(await heading("Add an audience")).toBeTruthy();
 
     request({ id: "x1", revision: 2 });
     expect(await heading("Newsletter")).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 3, name: "New audience" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 3, name: "Add an audience" })).toBeNull();
 
     request({ add: true, revision: 3 });
-    expect(await heading("New audience")).toBeTruthy();
+    expect(await heading("Add an audience")).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 3, name: "Newsletter" })).toBeNull();
 
     // Going back from the Add lands on the list, not on the page it replaced.
