@@ -151,6 +151,7 @@ shape sendJob sendJobFull {
 /// most identifying thing in it.
 @row
 shape suppression suppressionFull {
+  liftedAt
   row.id
   accountId
   emailDigest

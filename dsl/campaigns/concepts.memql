@@ -391,6 +391,7 @@ concept sendJob {
 @displayCard(primary="domain", secondary="reason", tertiary="suppressedAt", status="reason")
 @rowAuthz(clusterOwner)
 concept suppression {
+  liftedAt datetime @description("When the recipient subscribed again from preferences; a lifted organization opt-out no longer blocks sends.")
   accountId         string  @description("Organization whose mail is blocked. Absent on existing cluster-wide safety suppressions.")
   emailDigest       string  @description("SHA-256 of the normalized mailbox for organization-scoped rows. No plaintext address is stored.")
   reason            enum("unsubscribed", "hard_bounce", "complaint", "manual")!  @description("Why this address may never be mailed again. 'unsubscribed' is the recipient's own choice, via the RFC 8058 one-click header or the link in the body. 'hard_bounce' and 'complaint' are the provider's verdict and are kept apart because they mean different things to a review -- a bounce is a dead address, a complaint is a reputational event. 'manual' is an operator adding one by hand.")

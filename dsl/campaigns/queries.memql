@@ -714,3 +714,12 @@ query campaign campaignTestRuns {
   paginate 50
   shape campaignFull
 }
+
+/// The stored message revision named by an authenticated view-in-browser token.
+@actor
+query template templateAtRevision {
+ args { templateId string!, revision datetime! }
+ asOf args.revision ?? latest
+ filter row => row.id == args.templateId
+ shape templateFull
+}
