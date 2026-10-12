@@ -362,12 +362,15 @@ waited six seconds for its locks, or for a connection of the gate pool, answers
 "Too many signups at once. Try again in a moment." and writes nothing; at 200,000
 recipients that is more than a couple of new subscribers to one audience at the
 same moment. A signup that gets its locks but is under them for more than thirty
-seconds is stopped before it writes and gives the same answer; consent is written
-first and keyed by the signup, so asking again is safe at every step. If
-PostgreSQL ends the gate's session (an administrator, a failover) the signup finds
-out before it writes and writes nothing. A pod whose gate connections are all
-held (four signups, welcomes or other gates at the same moment) makes the next
-signup wait for one, up to the same six seconds, and then give the same answer.
+seconds starts no further write and gives the same answer; a write already under
+way when its time runs out, or when the visitor leaves, is waited for (up to ten
+seconds, past the database's own eight-second limit on a statement) and commits
+while the locks are still held, never after them. Consent is written first and
+keyed by the signup, so asking again is safe at every step. If PostgreSQL ends the
+gate's session (an administrator, a failover) the signup finds out before its next
+write and makes none. A pod whose gate connections are all held (four signups,
+welcomes or other gates at the same moment) makes the next signup wait for one, up
+to the same six seconds, and then give the same answer.
 
 Consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and

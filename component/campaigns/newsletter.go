@@ -289,14 +289,18 @@ func (w *Worker) signupSettled(ctx context.Context, row map[string]any, signupID
 // only after minutes idle, so the work under the locks keeps the whole request pool and
 // the locks are not ended under a signup that is still working. Even so the phase under
 // them is bounded (signupLockedPhase) and the gate is asked, before each write, whether
-// the locks are still held. What runs under them is kept to a handful of reads and the
-// writes, and never a roster walk. For a mailbox about to be added two of those reads
-// are the expensive ones: the engine answers any recipient read, the keyed one and the
-// count alike, from every current recipient in the cluster, so each costs seconds at
-// 200,000 recipients, and a new subscriber holds the locks for the pair. The single-row
-// reads and the writes are milliseconds. A signup that cannot take the locks in time, or
-// runs out of its time under them, answers signupsBusy having written nothing it had not
-// written already; consent is written first, keyed by the signup, so asking again is safe.
+// the locks are still held; a write, once started, is not cut by the phase's end or the
+// visitor's leaving, and commits while the locks are held (detachedWrite), which is why
+// the locks' transaction does not end with the request either. What runs under them is
+// kept to a handful of reads and the writes, and never a roster walk. For a mailbox
+// about to be added two of those reads are the expensive ones: the engine answers any
+// recipient read, the keyed one and the count alike, from every current recipient in
+// the cluster, so each costs seconds at 200,000 recipients, and a new subscriber holds
+// the locks for the pair. The single-row reads and the writes are milliseconds. A
+// signup that cannot take the locks in time, or runs out of its time under them,
+// answers signupsBusy having started no write after its time was up -- any write it
+// made committed under the locks; consent is written first, keyed by the signup, so
+// asking again is safe.
 func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
 	address := NormalizeEmail(argString(args, "email"))
@@ -368,7 +372,14 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	// 2. The locks, in one transaction on one connection, site then audience: the
 	// same order everywhere, so no two flows can each hold the lock the other wants.
 	// All forms pointing at one audience share the audience lock and one welcome key.
-	hold, err := w.newsletterGate(ctx, newsletterLock("site", siteID), newsletterLock("audience", audienceID))
+	//
+	// They live until Release, below, and nothing else ends them: a visitor who
+	// leaves mid-write must not roll back the transaction that holds them while the
+	// write goes on (writes are detached, step 3). A request already over takes none.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	hold, err := w.newsletterGate(context.WithoutCancel(ctx), newsletterLock("site", siteID), newsletterLock("audience", audienceID))
 	if errors.Is(err, memql.ErrWriteGateBusy) {
 		// The cause is the pod's and the person cannot act on it; the sentence is what
 		// they can.
@@ -381,9 +392,10 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	}
 	defer hold.Release()
 
-	// 3. Under the locks, for at most signupLockedPhase. Past it the phase is over
-	// before it writes anything: its context ends, every read and write under the
-	// locks ends with it, and the person is told to try again.
+	// 3. Under the locks, for at most signupLockedPhase. Past it the phase is over:
+	// its context ends, every read under the locks ends with it, no write starts,
+	// and the person is told to try again. A write already under way when it ends
+	// is waited for (write, below) and commits while the locks are held.
 	locked, endPhase := context.WithTimeout(ctx, signupLockedPhase)
 	defer endPhase()
 	fail := func(err error) ([]memorynodes.MemoryNode, error) {
@@ -409,6 +421,20 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		w.logger.Warn("campaigns: a signup's locks were gone, or its time under them was up, before it wrote, so it was not taken",
 			"site", siteID, "audience", audienceID, "error", err)
 		return signupsBusy
+	}
+	// write makes one write the locks protect: immediately after asking the gate
+	// whether they are still held, on a context the phase's deadline cannot cut
+	// mid-flight (detachedWrite). It commits while the locks are held -- they are
+	// given back only after it returns -- or it does not start.
+	write := func(do func(context.Context) error) error {
+		if err := stillHeld(); err != nil {
+			return err
+		}
+		if err := detachedWrite(locked, do); err != nil {
+			_, err = fail(err)
+			return err
+		}
+		return nil
 	}
 	row, err = w.subscribeBinding(locked, args, siteID)
 	if err != nil {
@@ -463,11 +489,10 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	}
 	requestedAt := w.nowUTC()
 	if consent == nil {
-		if err = stillHeld(); err != nil {
+		if err = write(func(ctx context.Context) error {
+			return w.store.RecordConsent(ctx, ConsentGrant, ConsentRecord{EventID: eventID, EmailDigest: EmailDigest(address), Source: "signup", AccountID: bare(str(row, "accountId")), OccurredAt: requestedAt})
+		}); err != nil {
 			return nil, err
-		}
-		if err = w.store.RecordConsent(locked, ConsentGrant, ConsentRecord{EventID: eventID, EmailDigest: EmailDigest(address), Source: "signup", AccountID: bare(str(row, "accountId")), OccurredAt: requestedAt}); err != nil {
-			return fail(err)
 		}
 	} else {
 		requestedAt = templateTime(consent["occurredAt"])
@@ -475,11 +500,10 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	recipientID := member.ID
 	if !found {
 		recipientID = sha256Hex("newsletter-recipient\x00" + signupID)
-		if err = stillHeld(); err != nil {
+		if err = write(func(ctx context.Context) error {
+			return w.store.AddRecipient(ctx, recipientID, audienceID, address, name, "signup", bare(str(row, "accountId")), nil)
+		}); err != nil {
 			return nil, err
-		}
-		if err = w.store.AddRecipient(locked, recipientID, audienceID, address, name, "signup", bare(str(row, "accountId")), nil); err != nil {
-			return fail(err)
 		}
 	}
 	encodedSnapshot, err := json.Marshal(snapshot)
@@ -497,11 +521,8 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		"consentRevision": templateTime(row["createdAt"]).Format(time.RFC3339Nano),
 		"requestedAt":     requestedAt.Format(time.RFC3339Nano), "templateId": snapshot.ID, "templateSnapshot": frozen, "senderIdentityId": bare(str(row, "senderIdentityId")),
 	}
-	if err = stillHeld(); err != nil {
+	if err = write(func(ctx context.Context) error { return w.newsletterWrite(ctx, "recordNewsletterSignup", values) }); err != nil {
 		return nil, err
-	}
-	if err = w.newsletterWrite(locked, "recordNewsletterSignup", values); err != nil {
-		return fail(err)
 	}
 	return accepted()
 }
