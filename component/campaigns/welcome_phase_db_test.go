@@ -58,11 +58,13 @@ func TestAWelcomeWhoseTimeRunsOutBeforeItsSendBeginsStaysPending(t *testing.T) {
 			receiptID := welcomeReceiptID(signup)
 			actual := n.worker.store.engine
 			var held atomic.Bool
-			engine := &slowWhileHeld{Engine: actual, held: &held, prefix: slow, delay: 2 * time.Second}
+			// The phase leaves the reads before the slowed one ample time (a shared
+			// database may be slow), and the slowed one outlasts it.
+			engine := &slowWhileHeld{Engine: actual, held: &held, prefix: slow, delay: 5 * time.Second}
 			n.worker.store.engine = engine
 			restoreGate := heldGate(n, &held)
 			margin, sendTimeout := welcomePhaseMargin, n.worker.cfg.SendTimeout
-			welcomePhaseMargin, n.worker.cfg.SendTimeout = 300*time.Millisecond, 100*time.Millisecond
+			welcomePhaseMargin, n.worker.cfg.SendTimeout = 1500*time.Millisecond, 100*time.Millisecond
 			system := n.worker.systemActorContext(context.Background())
 
 			err := n.worker.sendNewsletterWelcome(context.Background(), system, signup)
@@ -153,10 +155,12 @@ func TestAWelcomeWhoseTransportIsBusyStaysPendingAndGoesOutOnTheNextPass(t *test
 func TestAWelcomeWhoseSendBeganIsEndedByItEvenPastItsPhase(t *testing.T) {
 	n := newEmptyNewsletter(t, "welcome-slow-send")
 	signup := pendingWelcome(t, n)
+	// The send must begin inside the phase (the reads before it have ample time on
+	// a shared database) and end after it.
 	margin, sendTimeout := welcomePhaseMargin, n.worker.cfg.SendTimeout
-	welcomePhaseMargin, n.worker.cfg.SendTimeout = 300*time.Millisecond, 100*time.Millisecond
+	welcomePhaseMargin, n.worker.cfg.SendTimeout = 2*time.Second, 100*time.Millisecond
 	defer func() { welcomePhaseMargin, n.worker.cfg.SendTimeout = margin, sendTimeout }()
-	n.sender.fail = func(int) error { time.Sleep(time.Second); return nil } // accepted, late
+	n.sender.fail = func(int) error { time.Sleep(3 * time.Second); return nil } // accepted, late
 	defer func() { n.sender.fail = nil }()
 
 	err := n.worker.sendNewsletterWelcome(context.Background(), n.worker.systemActorContext(context.Background()), signup)

@@ -86,11 +86,13 @@ func (n *digestNewsletter) audienceLockHeld(t *testing.T) func() bool {
 func TestASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks(t *testing.T) {
 	n := newEmptyNewsletter(t, "phase-straddle")
 	actual := n.worker.store.engine
-	engine := &straddlingWrite{Engine: actual, prefix: "mutation recordConsentGrant", delay: 800 * time.Millisecond, locked: n.audienceLockHeld(t)}
+	// The phase leaves the reads before the write ample time (a shared database may
+	// be slow), and the write outlasts it.
+	engine := &straddlingWrite{Engine: actual, prefix: "mutation recordConsentGrant", delay: 3 * time.Second, locked: n.audienceLockHeld(t)}
 	n.worker.store.engine = engine
 	defer func() { n.worker.store.engine = actual }()
 	limit := signupLockedPhase
-	signupLockedPhase = 400 * time.Millisecond
+	signupLockedPhase = 2 * time.Second
 	defer func() { signupLockedPhase = limit }()
 
 	n.args["email"] = consentMailbox
