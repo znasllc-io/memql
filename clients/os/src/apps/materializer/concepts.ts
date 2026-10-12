@@ -15,8 +15,8 @@ import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 // NAME in it is the mistake the Fleet app made once and printed on the
 // page as operator-facing copy.
 
-/** The app id. It stays `materializer` while the namespace is `compose`. */
-export const MATERIALIZER_APP_ID = "materializer";
+/** The app id. It stays `materializer` while the namespace is `compose`. Written once, where a sender finds it. */
+export { MATERIALIZER_APP_ID } from "../../items/materialize";
 
 export const COMPOSITION_CONCEPT: string = Concepts.COMPOSE_COMPOSITION;
 export const TEMPLATE_CONCEPT: string = Concepts.COMPOSE_COMPOSE_TEMPLATE;

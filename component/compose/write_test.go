@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -454,5 +455,167 @@ func TestSourceSummaryPluralisesAndSorts(t *testing.T) {
 	p := fixtureProvenance()
 	if got, want := p.SourceSummary(), "2 rows, 1 file"; got != want {
 		t.Fatalf("SourceSummary() = %q, want %q", got, want)
+	}
+}
+
+// TestRenderBlankWritesTheEmptyDocumentForEachBlankFormat pins the bytes of
+// a blank file, because each one is a promise to a reader. Markdown is
+// exactly one newline: the editor shows its empty-document page only when
+// the source is empty, so a front-matter block (what Render writes) would
+// make a "blank" file open as a document that already has content.
+func TestRenderBlankWritesTheEmptyDocumentForEachBlankFormat(t *testing.T) {
+	cases := map[Format]string{
+		FormatMarkdown: "\n",
+		FormatText:     "",
+		FormatCSV:      "",
+		FormatJSON:     "{}\n",
+		FormatHTML:     "<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>Notes</title></head><body></body></html>\n",
+	}
+	for format, want := range cases {
+		t.Run(string(format), func(t *testing.T) {
+			res, err := RenderBlank(format, "Notes")
+			if err != nil {
+				t.Fatalf("RenderBlank(%s): %v", format, err)
+			}
+			if string(res.Bytes) != want {
+				t.Fatalf("RenderBlank(%s) = %q, want %q", format, res.Bytes, want)
+			}
+			// A blank file carries no provenance of its own: its history is
+			// the composition row, and a block of metadata is the opposite of
+			// blank.
+			if res.Embedded {
+				t.Fatalf("RenderBlank(%s) claims embedded provenance in a file with none", format)
+			}
+			// An unexplained "not embedded" reads as a failure (the rule
+			// TestEveryFormatAnswersProvenance holds Render to), and the format's
+			// own sentence would be wrong here: markdown has a place for
+			// provenance, this file just was not given any.
+			if want := "Created blank. Its history is kept on its composition, not in the file."; res.Note != want {
+				t.Fatalf("RenderBlank(%s).Note = %q, want %q", format, res.Note, want)
+			}
+		})
+	}
+}
+
+// Every format Formats() offers either has a blank document or is refused
+// with the one sentence a person reads. Running over the table rather than
+// over two names means a format added later cannot silently fall into
+// neither.
+func TestRenderBlankAnswersEveryFormatWithADocumentOrTheRefusal(t *testing.T) {
+	for _, f := range Formats() {
+		t.Run(string(f), func(t *testing.T) {
+			res, err := RenderBlank(f, "Notes")
+			switch f {
+			case FormatDOCX, FormatPDF:
+				if !errors.Is(err, ErrBlankFormat) {
+					t.Fatalf("RenderBlank(%s) = %v, want ErrBlankFormat: those formats have no useful empty document", f, err)
+				}
+				if len(res.Bytes) != 0 {
+					t.Fatalf("RenderBlank(%s) refused and still produced %d bytes", f, len(res.Bytes))
+				}
+			default:
+				if err != nil {
+					t.Fatalf("RenderBlank(%s): %v", f, err)
+				}
+			}
+		})
+	}
+	if _, err := RenderBlank(Format("audio"), "Notes"); !errors.Is(err, ErrBlankFormat) {
+		t.Fatalf("an unknown format must be refused rather than written as an empty file: %v", err)
+	}
+}
+
+func TestBlankFormatRefusalIsTheSentenceAPersonReads(t *testing.T) {
+	const want = "A blank file can be Markdown, text, HTML, CSV or JSON."
+	if ErrBlankFormat.Error() != want {
+		t.Fatalf("ErrBlankFormat = %q, want %q", ErrBlankFormat.Error(), want)
+	}
+}
+
+// The title is a person's free text and it lands inside an element, so it is
+// escaped for that context. The reachable positive is checked too: a writer
+// that dropped the title would pass the "no raw markup" half alone.
+func TestRenderBlankHTMLEscapesTheTitle(t *testing.T) {
+	res, err := RenderBlank(FormatHTML, `A "quoted" </title><script>alert(1)</script> & more`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(res.Bytes)
+	for _, leak := range []string{"</title><script>", "<script>", "alert(1)</script>"} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("%q reached the blank page unescaped:\n%s", leak, out)
+		}
+	}
+	for _, want := range []string{"&lt;/title&gt;", "&amp; more", "&#34;quoted&#34;", "</head><body></body></html>"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in the escaped blank page:\n%s", want, out)
+		}
+	}
+}
+
+// A recipe marked Blank renders its format's empty document, whatever draft it
+// holds. The mark has to travel with the recipe through the JSON snapshot a
+// resumed run restores, which is why this round-trips it: a flag only the first
+// run knew would hand a sibling replica a recipe that renders as a document.
+func TestRenderRecipeBytesRendersABlankRecipeAsItsEmptyDocument(t *testing.T) {
+	recipe := RenderRecipe{
+		Name:       "Notes",
+		Format:     FormatMarkdown,
+		Draft:      Draft{Title: "Notes", Body: "words that must not appear"},
+		Provenance: fixtureProvenance(),
+		Blank:      true,
+	}
+	res, err := RenderRecipeBytes(recipe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(res.Bytes) != "\n" || res.Embedded {
+		t.Fatalf("a blank recipe rendered %q (embedded=%v), want a single newline", res.Bytes, res.Embedded)
+	}
+
+	raw, err := json.Marshal(recipe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored RenderRecipe
+	if err := json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	again, err := RenderRecipeBytes(restored)
+	if err != nil || string(again.Bytes) != "\n" {
+		t.Fatalf("a blank recipe restored from its snapshot rendered %q (err %v), want a single newline", again.Bytes, err)
+	}
+
+	// The same recipe without the mark is an ordinary document: front matter and
+	// a heading. Nothing about Blank may leak into a recipe that is not.
+	recipe.Blank = false
+	ordinary, err := RenderRecipeBytes(recipe)
+	if err != nil || !strings.HasPrefix(string(ordinary.Bytes), "---\n") || !strings.Contains(string(ordinary.Bytes), "words that must not appear") {
+		t.Fatalf("an unmarked recipe stopped rendering its draft: %q (err %v)", ordinary.Bytes, err)
+	}
+}
+
+// Blank is omitted when false, so a recipe that is not blank serialises as it
+// always has: the saved snapshots and the recipe.json in every source package
+// already filed keep their bytes (and the hashes recorded for them).
+func TestRenderRecipeJSONOmitsBlankUnlessSet(t *testing.T) {
+	plain, err := json.Marshal(RenderRecipe{Name: "Notes", Format: FormatMarkdown})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(plain)), "blank") {
+		t.Fatalf("an ordinary recipe gained a field: %s", plain)
+	}
+	marked, err := json.Marshal(RenderRecipe{Name: "Notes", Format: FormatMarkdown, Blank: true})
+	if err != nil || !strings.Contains(string(marked), `"blank":true`) {
+		t.Fatalf("a blank recipe does not record that it is: %s (err %v)", marked, err)
+	}
+}
+
+// A blank docx or pdf is refused wherever it is asked for, including from a
+// recipe, rather than rendered as something else.
+func TestRenderRecipeBytesRefusesABlankDocx(t *testing.T) {
+	if _, err := RenderRecipeBytes(RenderRecipe{Name: "Notes", Format: FormatDOCX, Blank: true}); !errors.Is(err, ErrBlankFormat) {
+		t.Fatalf("a blank docx recipe = %v, want ErrBlankFormat", err)
 	}
 }

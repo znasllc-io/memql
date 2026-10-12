@@ -161,6 +161,13 @@ func (s *store) libraryFileById(ctx context.Context, id string) (map[string]any,
 	return one(s.query(ctx, "query "+call("libraryFileById", map[string]any{"fileId": id})))
 }
 
+// libraryFolderById is the caller's folder, and nil when it is not theirs or was
+// deleted. An archived folder IS answered (its row says archived): the Library
+// keeps naming a folder somebody put away, so the caller reads that off the row.
+func (s *store) libraryFolderById(ctx context.Context, id string) (map[string]any, error) {
+	return one(s.query(ctx, "query "+call("libraryFolderById", map[string]any{"folderId": id})))
+}
+
 // ---------------------------------------------------------------------------
 // Writes
 // ---------------------------------------------------------------------------

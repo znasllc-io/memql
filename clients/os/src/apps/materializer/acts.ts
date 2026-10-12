@@ -1,4 +1,4 @@
-import type { CompositionRow } from "./rows";
+import { recipeKeeps, type CompositionRow, type SourceRow } from "./rows";
 import { isRunning, statusWord } from "./words";
 
 // acts.ts -- DESIGN.md rule 12, as a PURE function so the table is what
@@ -19,6 +19,12 @@ export interface ActSpec {
   id: ActId;
   label: string;
   tone?: "default" | "primary" | "quiet" | "danger";
+  /**
+   * Drawn as a label rather than a button. Two buttons side by side ask to be
+   * weighed against each other, and the way back to another app is not an
+   * alternative to anything done here: it is a way out of the page.
+   */
+  text?: boolean;
 }
 
 export type ActId =
@@ -30,7 +36,8 @@ export type ActId =
   | "saveRecipe"
   | "archive"
   | "restore"
-  | "startOver";
+  | "startOver"
+  | "returnToApp";
 
 /** The composer's own state, before anything has been written. */
 export interface DraftState {
@@ -52,8 +59,19 @@ export interface DraftState {
  * stating: re-materializing would open a second composition against the
  * same sources and produce a second file, and nothing on the page would
  * say which one was the deliverable.
+ *
+ * `backTo` is the name of the app that sent the person here to make this
+ * file, and is given only when they can go back to it. The way back is an
+ * act of a FINISHED file, offered beside the one that opens it: before there
+ * is a file there is nothing to come back from, and a composition that failed
+ * or was stopped is not the errand the other app sent them on.
+ *
+ * `sources` are the composition's own (what its record says it was made from).
+ * A recipe keeps the brief and the sources it can select again, and a recipe
+ * run refuses one with neither, so Save as recipe is offered only where there
+ * is one or the other: never on a blank file.
  */
-export function actsFor(c: CompositionRow | null, draft: DraftState): ActSpec[] {
+export function actsFor(c: CompositionRow | null, draft: DraftState, backTo?: string, sources: SourceRow[] = []): ActSpec[] {
   // No composition yet: this is the compose form, and the only act is to
   // run it. It is ABSENT rather than disabled while there is nothing to
   // compose from, so the bar's state line is what explains the wait.
@@ -99,7 +117,12 @@ export function actsFor(c: CompositionRow | null, draft: DraftState): ActSpec[] 
         acts.push({ id: "openDeployables", label: "Deploy it", tone: "primary" });
         break;
       }
-      if (!c.recipeId) acts.push({ id: "saveRecipe", label: "Save as recipe", tone: "default" });
+      // ABSENT WHERE THE RECIPE COULD NOT RUN: with no brief and nothing a
+      // recipe selects again (a blank file; rows picked one by one), the saved
+      // recipe would be refused the first time it ran.
+      if (!c.recipeId && (c.statement.trim() !== "" || sources.some(recipeKeeps))) {
+        acts.push({ id: "saveRecipe", label: "Save as recipe", tone: "default" });
+      }
       if (c.outputFileId) acts.push({ id: "openFile", label: "Open the file", tone: "primary" });
       break;
     case "failed":
@@ -117,6 +140,18 @@ export function actsFor(c: CompositionRow | null, draft: DraftState): ActSpec[] 
     default:
       acts.push({ id: "archive", label: "Archive", tone: "quiet" });
       break;
+  }
+  if (backTo !== undefined && c.status === "ready") {
+    // In front of the primary act, which stays last.
+    acts.splice(Math.max(acts.length - 1, 0), 0, { id: "returnToApp", label: `Back to ${backTo}`, tone: "quiet", text: true });
+    // THE BAR HOLDS THREE, and the one that gives way is Archive: housekeeping,
+    // and the act somebody who has just made a file reaches for least. It is NOT
+    // offered anywhere else meanwhile (the Materialized list's rows carry no acts),
+    // so this is Archive absent for as long as the trip is live. It comes back the
+    // moment the person presses Compose another, which ends the trip: from then on
+    // this composition offers Archive wherever it is opened.
+    const archive = acts.findIndex((a) => a.id === "archive");
+    if (acts.length > 3 && archive >= 0) acts.splice(archive, 1);
   }
   return acts.slice(0, 3);
 }

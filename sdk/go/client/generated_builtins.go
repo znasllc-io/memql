@@ -979,9 +979,9 @@ func ComposeCancelBuild(args ComposeCancelArgs) string {
 
 // ComposeMaterialize -- Start a Materializer work run using the known materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row.
 type ComposeMaterializeArgs struct {
-	// What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is.
+	// What to call it, and the filename stem of the output. A name with a slash is refused (folderId chooses where it is filed), and one trailing extension that already names the format is dropped, because the extension is added when the file is filed: Plan.md is filed as Plan.md, never Plan.md.md.
 	Name string
-	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on.
+	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind, and no source that is not a Library file) is created EMPTY outside a work run, and the statement stays on its composition: the caller hands it to the Library's revision workflow, as the person (the SDK's handOffDescription), which writes the document. That workflow reads Markdown and images and cannot read the graph, so a concept_row or query source keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement.
 	Statement string
 	// markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.
 	Format string
@@ -995,7 +995,7 @@ type ComposeMaterializeArgs struct {
 	SectionKeys []string
 	// v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through.
 	TemplateId string
-	// v1:library:folder to file the output into. Empty means the Library root.
+	// v1:library:folder to file the output into. Empty means the Library root. A folder you cannot read, or one in the Bin, is refused before anything is written.
 	FolderId string
 	// Optional account tags -- a record of who the work is for, never a visibility scope.
 	AccountIds []string
@@ -1005,6 +1005,8 @@ type ComposeMaterializeArgs struct {
 	RecipeId string
 	// {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.
 	Ceilings map[string]any
+	// Caller-chosen id for this request. Repeating it returns the same composition instead of starting another, so a double click makes one file.
+	RequestId string
 }
 
 // ComposeMaterialize calls the engine builtin composeMaterialize.
@@ -1099,6 +1101,13 @@ func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
 		}
 		b.WriteString("ceilings: ")
 		b.WriteString(renderMemQLValue(args.Ceilings))
+	}
+	if args.RequestId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requestId: ")
+		b.WriteString(quoteMemQL(args.RequestId))
 	}
 	b.WriteString(")")
 	return b.String()

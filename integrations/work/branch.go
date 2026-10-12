@@ -57,12 +57,11 @@ func (i *Integration) handleBranchRun(ctx context.Context, args map[string]any, 
 	if err := source.requireExecutable(); err != nil {
 		return nil, err
 	}
-	if err := source.requireTopLevel(stepKey); err != nil {
+	versions, err := i.readActVersions(ctx, &source)
+	if err != nil {
 		return nil, err
 	}
-
-	versions, err := i.readVersions(ctx, source.id, source.order)
-	if err != nil {
+	if err := source.requireTopLevel(stepKey); err != nil {
 		return nil, err
 	}
 	sourceHead := headOf(source, versions)

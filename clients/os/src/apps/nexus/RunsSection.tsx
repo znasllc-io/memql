@@ -226,6 +226,8 @@ export function RunMarks({ runs }: { runs: readonly RunRow[] }) {
 }
 
 function conversationOf(row: Row): string {
-  const input = flatten(row).input as { conversation?: { id?: string } } | undefined;
-  return input?.conversation?.id ?? "";
+  const flat = flatten(row);
+  const conversation = flat.conversation as { id?: string } | undefined;
+  const input = flat.input as { conversation?: { id?: string } } | undefined;
+  return conversation?.id ?? input?.conversation?.id ?? "";
 }

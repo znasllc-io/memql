@@ -16,7 +16,9 @@ automation composeMaterializeWorkflow {
   if recovered { return }
   builtin composeReadTemplate()
   input := builtin composeWorkflowFacts()
-  if input.savedRecipe {
+  if input.isBlank {
+    builtin composeBlankDraft()
+  } else if input.savedRecipe {
     builtin composeRestoreDraft()
   } else if input.hasSections {
     builtin composeRequireDraft()
