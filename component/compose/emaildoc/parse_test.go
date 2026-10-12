@@ -516,6 +516,191 @@ func TestParseAcceptsTheLimits(t *testing.T) {
 	}
 }
 
+func TestParseBoundsTextBlocks(t *testing.T) {
+	// Reading Markdown costs memory in proportion to its paragraphs and list
+	// items, so a text block may have at most 2,000 lines; a list item is one
+	// line. A line break at the very end starts no new line.
+	block := func(s string) string { return `{"id":"t","type":"text","text":` + jsonString(s) + `}` }
+	textBlock := func(s string) string { return layoutJSON(block(s)) }
+	const tooLong = `block "t": This text block is too long. Split it into smaller blocks.`
+	expectRefused(t, []refusal{
+		{"2,001 list items", textBlock(strings.Repeat("- a\n", 2001)), tooLong},
+		{"2,001 lines", textBlock(strings.Repeat("a\n", 2000) + "a"), tooLong},
+		{"2,001 lines, most of them blank", textBlock("a" + strings.Repeat("\n", 2000) + "b"), tooLong},
+		{"2,001 lines ended by carriage returns", textBlock(strings.Repeat("a\r", 2001)), tooLong},
+		{"2,001 numbered items in a section", layoutJSON(`{"id":"s","type":"section","blocks":[` + block(strings.Repeat("1. a\n", 2001)) + `]}`), tooLong},
+	})
+	for name, s := range map[string]string{
+		"2,000 list items":                   strings.Repeat("- a\n", 2000),
+		"2,000 lines":                        strings.Repeat("a\n", 1999) + "a",
+		"2,000 lines ended by CRLF":          strings.Repeat("a\r\n", 2000),
+		"2,000 lines, the last one blank":    strings.Repeat("a\n", 1999) + "\n",
+		"one long line of 1,000,000 letters": strings.Repeat("a", 1_000_000),
+	} {
+		if _, err := Parse([]byte(textBlock(s))); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// The block is refused before its Markdown is read. Decoding the 1.2 MB
+	// of JSON costs about 33 MB; reading the 300,000 list items would cost
+	// about 90 MB more.
+	huge := []byte(textBlock(strings.Repeat("- a\n", 300_000)))
+	var err error
+	if allocated := allocatedBy(func() { _, err = Parse(huge) }); err == nil || allocated > 64<<20 {
+		t.Fatalf("want a refusal without reading the list, got %v after %d bytes", err, allocated)
+	}
+}
+
+const tooMuchFormatting = "This email has too much formatted text. Shorten it or split it into more emails."
+
+// textBlocks is a layout of one text block per text, with ids t0, t1, ...
+func textBlocks(texts ...string) string {
+	var blocks []string
+	for n, text := range texts {
+		blocks = append(blocks, fmt.Sprintf(`{"id":"t%d","type":"text","text":%s}`, n, jsonString(text)))
+	}
+	return layoutJSON(strings.Join(blocks, ","))
+}
+
+func TestParseBoundsFormattedTextPerEmail(t *testing.T) {
+	// Reading Markdown costs memory in proportion to its lines and its
+	// inline marks, so an email may have at most 5,000 lines of text blocks
+	// and 10,000 inline marks (runs of "*", "_" or backticks, each "[" and
+	// each "("), all its text blocks together, wherever they sit.
+	items := func(n int) string { return strings.Repeat("- a\n", n) }
+	runs := func(n int) string { return strings.Repeat("*a* ", n) } // two marks each
+	inSection := func(text string) string {
+		return `{"id":"s","type":"section","blocks":[{"id":"u","type":"text","text":` + jsonString(text) + `}]}`
+	}
+	inColumn := func(text string) string {
+		return `{"id":"c","type":"columns","columns":[{"width":100,"blocks":[{"id":"v","type":"text","text":` + jsonString(text) + `}]}]}`
+	}
+	for _, c := range []struct {
+		name string
+		doc  string
+		ok   bool
+	}{
+		{"5,000 lines", textBlocks(items(2000), items(2000), items(1000)), true},
+		{"5,001 lines", textBlocks(items(2000), items(2000), items(1001)), false},
+		{"5,001 lines, some in a section and a column", layoutJSON(strings.Join([]string{`{"id":"t","type":"text","text":` + jsonString(items(2000)) + `}`, inSection(items(2000)), inColumn(items(1001))}, ",")), false},
+		{"10,000 marks", textBlocks(runs(5000)), true},
+		{"10,001 marks", textBlocks(runs(5000) + "["), false},
+		{"10,001 marks over blocks", textBlocks(runs(2000), runs(2000), runs(1000)+"_"), false},
+		{"10,001 marks, some in a section and a column", layoutJSON(strings.Join([]string{`{"id":"t","type":"text","text":` + jsonString(runs(4000)) + `}`, inSection(runs(500)), inColumn(runs(500) + "`")}, ",")), false},
+		// A run of marks counts once, however long; an escaped mark is text.
+		{"long runs count once", textBlocks(strings.Repeat("***a*** ", 5000)), true},
+		{"runs of every kind", textBlocks(strings.Repeat("_a_ ", 1000) + strings.Repeat("``a`` ", 1000) + strings.Repeat("[a] ", 1000) + strings.Repeat("**a** ", 2500)), true},
+		{"runs of every kind and one more", textBlocks(strings.Repeat("_a_ ", 1000) + strings.Repeat("``a`` ", 1000) + strings.Repeat("[a] ", 1000) + strings.Repeat("**a** ", 2500) + "_"), false},
+		{"escaped marks are text", textBlocks(strings.Repeat(`\*a\* \[ \(`, 5000) + runs(5000)), true},
+		// An open parenthesis is a mark: the reader pairs each one it meets.
+		{"10,000 open parentheses", textBlocks(strings.Repeat("(", 10_000)), true},
+		{"10,001 open parentheses", textBlocks("](" + strings.Repeat("(", 10_000)), false},
+		{"10,001 marks with an open parenthesis", textBlocks(runs(5000) + "("), false},
+		{"closing parentheses are not marks", textBlocks(strings.Repeat("(", 5000) + strings.Repeat(")", 50_000) + runs(2500)), true},
+		// Other blocks' words are not Markdown.
+		{"headings are not counted", layoutJSON(`{"id":"h","type":"heading","text":` + jsonString(runs(6000)+items(6000)) + `}`), true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Parse([]byte(c.doc))
+			if c.ok && err != nil {
+				t.Fatalf("want it accepted, got %v", err)
+			}
+			if !c.ok && (err == nil || err.Error() != tooMuchFormatting) {
+				t.Fatalf("want %q, got %v", tooMuchFormatting, err)
+			}
+		})
+	}
+	// The Markdown of an email over the budget is never read (this cost
+	// 742 MiB to read before the budget; the refusals measure 14 to 33 MiB,
+	// all of it decoding the JSON, and the bound is about 2x that), and the
+	// Markdown of one within it is still checked, its problems named by block
+	// in document order.
+	for _, c := range []struct {
+		name string
+		doc  []byte
+	}{
+		{"one paragraph of 500,000 emphasis runs", []byte(textBlocks(runs(500_000)))},
+		{"200 blocks of 2,000 list items", []byte(textBlocks(func() []string {
+			var texts []string
+			for n := 0; n < 200; n++ {
+				texts = append(texts, items(2000))
+			}
+			return texts
+		}()...))},
+		{"50 blocks of one line of 10,000 emphasis runs", []byte(textBlocks(func() []string {
+			var texts []string
+			for n := 0; n < 50; n++ {
+				texts = append(texts, runs(10_000))
+			}
+			return texts
+		}()...))},
+	} {
+		var err error
+		if allocated := allocatedBy(func() { _, err = Parse(c.doc) }); err == nil || err.Error() != tooMuchFormatting || allocated > 64<<20 {
+			t.Errorf("%s: want %q without reading the Markdown, got %v after %d bytes", c.name, tooMuchFormatting, err, allocated)
+		}
+	}
+	if _, err := Parse([]byte(textBlocks("fine", "[x](javascript:1)", "[](https://example.com)"))); err == nil || !strings.HasPrefix(err.Error(), `block "t1": a link must be`) {
+		t.Fatalf("want the first Markdown problem, of t1, got %v", err)
+	}
+}
+
+func TestParseRefusesInvalidUTF8(t *testing.T) {
+	// Reading JSON turns each byte that is not UTF-8 into U+FFFD, three bytes,
+	// so a 2 MiB document of them would be a 6 MiB paragraph (239 MiB to read
+	// and write, measured). Parse refuses the file before it reads any of it.
+	const notUTF8 = "This email file isn't valid UTF-8. Save it as UTF-8 and try again."
+	pre, post, _ := strings.Cut(layoutJSON(`{"id":"t","type":"text","text":"@@@"}`), "@@@")
+	for _, c := range []struct{ name, text string }{
+		{"2 MiB of 0xff", strings.Repeat("\xff", MaxBytes-len(pre)-len(post))},
+		{"2 MiB of 0xff after ](", "](" + strings.Repeat("\xff", MaxBytes-len(pre)-len(post)-2)},
+		{"an overlong lead byte", "a\xc0\xafb"},
+		{"a lone continuation byte", "a\x80"},
+		{"a sequence cut short", "a\xe2\x80"},
+		{"a surrogate", "\xed\xa0\x80"},
+	} {
+		doc := []byte(pre + c.text + post)
+		var err error
+		if allocated := allocatedBy(func() { _, err = Parse(doc) }); err == nil || err.Error() != notUTF8 || allocated > 1<<20 {
+			t.Errorf("%s: want %q before reading anything, got %v after %d bytes", c.name, notUTF8, err, allocated)
+		}
+	}
+	for _, doc := range []string{
+		"{\"subject\":\"x\xff\",\"textBody\":\"y\",\"htmlBody\":\"\"}",
+		"{\"subject\":\"x\",\"textBody\":\"y\",\"htmlBody\":\"<p>\xff</p>\"}",
+	} {
+		if _, err := Parse([]byte(doc)); err == nil || err.Error() != notUTF8 {
+			t.Errorf("custom %q: want %q, got %v", doc, notUTF8, err)
+		}
+	}
+	if _, err := Parse([]byte(layoutJSON(`{"id":"t","type":"text","text":"é 日 😀 é"}`))); err != nil {
+		t.Fatalf("UTF-8 of every width is fine: %v", err)
+	}
+}
+
+func TestParseCostDoesNotDependOnHTMLCharacters(t *testing.T) {
+	// Reading a block writes its values out again as JSON once; written with
+	// HTML escaping, each "<", ">" and "&" would take six bytes for one, and
+	// a document of them would cost three times as much to read (160 MiB
+	// against 50 for 2 MiB of text, measured).
+	whole := func(letter string) []byte {
+		room := MaxBytes - len(layoutJSON(`{"id":"t","type":"text","text":""}`))
+		return []byte(layoutJSON(`{"id":"t","type":"text","text":"` + strings.Repeat(letter, room) + `"}`))
+	}
+	plain, html := whole("a"), whole("&")
+	var err error
+	costs := map[string]uint64{}
+	for name, doc := range map[string][]byte{"plain": plain, "html": html} {
+		costs[name] = allocatedBy(func() { _, err = Parse(doc) })
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	if costs["html"] > costs["plain"]*3/2 {
+		t.Fatalf("2 MiB of & cost %d bytes to read, 2 MiB of letters %d", costs["html"], costs["plain"])
+	}
+}
+
 func TestParseKeepsRolesAndZeroValuesAsWritten(t *testing.T) {
 	d, err := Parse([]byte(layoutJSON(`{"id":"a","type":"heading","role":"content","text":"x"},{"id":"b","type":"heading","text":"y"},{"id":"c","type":"footer","separator":"","gap":0}`)))
 	if err != nil {

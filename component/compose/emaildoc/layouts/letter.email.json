@@ -1,0 +1,260 @@
+{
+  "subject": "A note from our founder",
+  "preheader": "Why we started, and what comes next.",
+  "layout": "builtin:letter",
+  "theme": {
+    "page": "#eef0f3",
+    "canvas": "#ffffff",
+    "primary": "#1f5f8b",
+    "secondary": "#5b8fb9",
+    "accent": "#d2322d",
+    "tint": "#f6f4ef",
+    "text": "#1c1c1c",
+    "muted": "#696e77",
+    "headingFont": "Georgia",
+    "bodyFont": "Arial"
+  },
+  "blocks": [
+    {
+      "id": "logo",
+      "type": "image",
+      "role": "brand",
+      "padding": [
+        24,
+        24,
+        16,
+        24
+      ],
+      "alt": "Your logo",
+      "width": 241,
+      "height": 136
+    },
+    {
+      "id": "letter",
+      "type": "section",
+      "role": "content",
+      "background": "canvas",
+      "maxWidth": 502,
+      "blocks": [
+        {
+          "id": "headline",
+          "type": "heading",
+          "role": "content",
+          "text": "Thanks for joining us",
+          "size": 37.3,
+          "lineHeight": 37.3,
+          "color": "primary",
+          "italic": true,
+          "weight": 400,
+          "font": "heading",
+          "letterSpacing": "-0.032em"
+        },
+        {
+          "id": "body",
+          "type": "text",
+          "role": "content",
+          "text": "I'm ***Sam Rivera***, and I started Acme to make everyday routines a little lighter.\n\nPeople kept telling me the same thing: it's the small daily jobs that wear you down.\n\nSo we built **Acme**: simple tools, made with care, that each do one job well.\n\nWe also made **Ace**, a friendly guide that turns routines into small wins.\n\nEvery week I'll share practical tips, behind-the-scenes stories and ideas you can try right away.\n\nThanks for joining us. There's plenty more to come.",
+          "size": 13.3,
+          "lineHeight": 16,
+          "color": "text",
+          "align": "center"
+        }
+      ]
+    },
+    {
+      "id": "cta",
+      "type": "button",
+      "role": "content",
+      "size": 21.1,
+      "color": "primary",
+      "width": 316,
+      "label": "Read our story",
+      "paddingY": 12
+    },
+    {
+      "id": "signature",
+      "type": "columns",
+      "role": "brand",
+      "padding": [
+        0,
+        0,
+        16,
+        0
+      ],
+      "background": "secondary",
+      "maxWidth": 600,
+      "columns": [
+        {
+          "width": 56,
+          "blocks": [
+            {
+              "id": "signature-photo",
+              "type": "image",
+              "alt": "Founder photo",
+              "width": 204,
+              "height": 214
+            }
+          ]
+        },
+        {
+          "width": 41.33,
+          "blocks": [
+            {
+              "id": "signature-space",
+              "type": "spacer",
+              "height": 74.65
+            },
+            {
+              "id": "signature-name",
+              "type": "image",
+              "alt": "Founder signature",
+              "width": 184,
+              "height": 32
+            },
+            {
+              "id": "signature-title",
+              "type": "text",
+              "text": "Founder of Acme",
+              "size": 14,
+              "lineHeight": 16,
+              "align": "center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rule-1",
+      "type": "divider",
+      "role": "brand"
+    },
+    {
+      "id": "promo",
+      "type": "columns",
+      "role": "brand",
+      "maxWidth": 552,
+      "columns": [
+        {
+          "width": 50.28,
+          "blocks": [
+            {
+              "id": "promo-space",
+              "type": "spacer",
+              "height": 56
+            },
+            {
+              "id": "promo-title",
+              "type": "heading",
+              "text": "Stay in touch!",
+              "size": 40,
+              "lineHeight": 40,
+              "color": "primary",
+              "weight": 700,
+              "letterSpacing": "-0.032em"
+            },
+            {
+              "id": "promo-text",
+              "type": "text",
+              "text": "We share one useful idea every week.",
+              "size": 18.7,
+              "lineHeight": 18.7,
+              "align": "center"
+            }
+          ]
+        },
+        {
+          "width": 46.82,
+          "blocks": [
+            {
+              "id": "promo-picture",
+              "type": "image",
+              "alt": "Our guide",
+              "width": 193,
+              "height": 210
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "follow",
+      "type": "heading",
+      "role": "brand",
+      "text": "Follow us",
+      "size": 20,
+      "lineHeight": 20,
+      "color": "primary",
+      "italic": true,
+      "weight": 700,
+      "letterSpacing": "-0.032em"
+    },
+    {
+      "id": "social",
+      "type": "social",
+      "role": "brand",
+      "links": [
+        {
+          "network": "Instagram",
+          "href": ""
+        },
+        {
+          "network": "YouTube",
+          "href": ""
+        },
+        {
+          "network": "LinkedIn",
+          "href": ""
+        }
+      ]
+    },
+    {
+      "id": "rule-2",
+      "type": "divider",
+      "role": "brand"
+    },
+    {
+      "id": "footer",
+      "type": "footer",
+      "role": "brand",
+      "size": 14.7,
+      "lineHeight": 22.4,
+      "color": "muted",
+      "linkColor": "primary",
+      "background": "white",
+      "font": "base",
+      "letterSpacing": "-0.025em",
+      "inset": [
+        20.47555319531862,
+        24,
+        20.47555319531862,
+        24
+      ],
+      "maxWidth": 552,
+      "cellPadding": 13,
+      "links": [
+        {
+          "label": "Contact us",
+          "href": ""
+        },
+        {
+          "label": "Manage preferences",
+          "href": "{{preferencesUrl}}"
+        },
+        {
+          "label": "Unsubscribe",
+          "href": "{{unsubscribeUrl}}"
+        },
+        {
+          "label": "View in browser",
+          "href": "{{viewUrl}}"
+        }
+      ],
+      "lines": [
+        "ACME",
+        "123 Example Street, Springfield",
+        "You're receiving this email because you signed up for updates from Acme.",
+        "© 2026 Acme"
+      ]
+    }
+  ]
+}

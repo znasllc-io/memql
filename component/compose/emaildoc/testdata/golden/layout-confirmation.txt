@@ -1,0 +1,16 @@
+Welcome aboard!
+
+You'll get our best ideas and updates, straight to your inbox.
+
+Confirm my address: {{confirmUrl}}
+
+If you didn't sign up, you can ignore this email.
+
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+ACME
+123 Example Street, Springfield
+You're receiving this email because you signed up for updates from Acme.
+© 2026 Acme

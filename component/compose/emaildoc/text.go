@@ -9,23 +9,31 @@ import (
 )
 
 // layoutText is the plain-text part of a layout. Each block that has words
-// gives one or more chunks, and the chunks are joined by a blank line:
+// gives one or more chunks, in document order (the blocks of a section, then
+// of each column in turn, where the container is), and the chunks are joined
+// by a blank line:
 //
 //   - a heading and a highlight, as written;
 //   - each paragraph of a text block, without its emphasis markers and with
 //     each link as "label (address)", and each list, one "- item" or
 //     "N. item" line per item;
 //   - a button, as "Label: address" (only the label while it has no link);
+//   - a social block, its title as a heading, then its links, one
+//     "Network: address" line each (only the network while it has no link);
+//   - a footer, its links as "Label: address" lines (only the label while it
+//     has no link), then its lines;
 //   - an html block, the text a reader sees in it.
 //
-// Pictures, dividers and spacers have no words. The part ends with one
+// Pictures, dividers and spacers have no words. A link whose address breaks
+// the link rule is its words alone, as in the HTML. The part ends with one
 // newline, and is empty when no block has words. Merge tags stay as written,
 // to be filled like the rest of the part.
 func layoutText(blocks []Block) string {
 	var chunks []string
-	for _, b := range blocks {
+	walkBlocks(blocks, func(b Block) bool {
 		chunks = appendText(chunks, b)
-	}
+		return true
+	})
 	if len(chunks) == 0 {
 		return ""
 	}
@@ -47,17 +55,39 @@ func appendText(chunks []string, b Block) []string {
 			add(elementText(element))
 		}
 	case typeButton:
-		if b.Href == "" {
-			add(b.Label)
-		} else {
-			add(b.Label + ": " + b.Href)
+		add(linkLine(b.Label, b.Href))
+	case typeSocial:
+		add(oneNewline(b.Title))
+		lines := make([]string, len(b.Links))
+		for i, link := range b.Links {
+			lines[i] = linkLine(link.Network, link.Href)
 		}
+		add(strings.Join(lines, "\n"))
+	case typeFooter:
+		lines := make([]string, 0, len(b.Links)+len(b.Lines))
+		for _, link := range b.Links {
+			lines = append(lines, linkLine(link.Label, link.Href))
+		}
+		for _, line := range b.Lines {
+			lines = append(lines, oneNewline(line))
+		}
+		add(strings.Join(lines, "\n"))
 	case typeHTML:
 		if normalized, err := safeMarkup(b.HTML); err == nil {
 			add(markupText(normalized))
 		}
 	}
 	return chunks
+}
+
+// linkLine is a link as a line of the text part: "Label: address", or the
+// label alone while it has no address (or one that breaks the link rule).
+func linkLine(label, href string) string {
+	label = oneNewline(label)
+	if href = checkedHref(href); href == "" {
+		return label
+	}
+	return label + ": " + href
 }
 
 // elementText is a paragraph, or a list with an item on each line.
@@ -82,7 +112,11 @@ func inlineText(runs []mdInline) string {
 	for _, run := range runs {
 		switch run.Kind {
 		case mdLink:
-			b.WriteString(run.Text + " (" + run.URL + ")")
+			if href := checkedHref(run.URL); href != "" {
+				b.WriteString(run.Text + " (" + href + ")")
+			} else {
+				b.WriteString(run.Text)
+			}
 		case mdBreak:
 			b.WriteByte('\n')
 		default:

@@ -12,13 +12,21 @@
 //     hand-written HTML with its plain-text alternative, as email templates
 //     were before layouts.
 //
-// Parse is the only way in. It refuses anything it does not understand (an
-// unknown key, a colour that is not a theme colour, a link that is not a web
-// address, markup outside the allowlist) with a sentence that names the block
-// and the problem, so nothing unchecked ever reaches the renderer. JSON writes
-// the file back: one canonical byte form, so a document that is parsed and
-// written again is byte for byte what it was. Render writes the email: its HTML
-// and plain-text parts, and the issues that keep it from being sent as it is.
+// Parse is the way in. It refuses anything it does not understand (an unknown
+// key, a colour that is not a theme colour, a link that is not a web address,
+// markup outside the allowlist) with a sentence that names the block and the
+// problem. JSON writes the file back: one canonical byte form, so a document
+// that is parsed and written again is byte for byte what it was. Render writes
+// the email: its HTML and plain-text parts, and the issues that keep it from
+// being sent as it is. Render expects a document Parse returned. Given one
+// built any other way it promises only what its own comment says (no markup,
+// style, link or picture source a block was not meant to have, and no part
+// past MaxRenderBytes); values Parse would refuse are otherwise written as
+// they are.
+//
+// Layouts and Layout hand out the four built-in layouts, ready-made documents
+// in a neutral example brand to start an email from. Layouts says what they
+// hold and what they leave to whoever uses them.
 //
 // This package lives in the component/compose module. It may import only what
 // that module already requires plus the parent package, and the parent must
