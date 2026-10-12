@@ -92,9 +92,17 @@ const (
 )
 
 // newsletterGateWait is how long the newsletter's gate waits for its locks, in
-// total; zero is memql's default (6 s, under the pool's 8 s statement_timeout and
-// pgdriver's 10 s read deadline). A variable only so a test can shorten it.
+// total; zero is memql's default (6 s, under pgdriver's 10 s read deadline). A
+// variable only so a test can shorten it.
 var newsletterGateWait time.Duration
+
+// gateHold is an open write gate: the transaction holding the newsletter's locks.
+// The holder gives them up when it is done, and can ask whether they are still
+// held (memql.GateHold) before it writes what they exist to protect.
+type gateHold interface {
+	Release()
+	Verify(context.Context) error
+}
 
 // ExecutionClaimer is the cross-replica claim gate (the automations
 // ClusterExecutionGuard satisfies it). Nil leaves a single-replica
@@ -114,8 +122,9 @@ type Worker struct {
 	singleSendGate func(context.Context, string) (func(), error)
 	seriesGate     func(context.Context, string) (func(), error)
 	// newsletterGate takes the newsletter's locks for the keys it is given, in the
-	// order given, in ONE transaction on ONE connection (memql.AcquireWriteGates).
-	newsletterGate func(context.Context, ...string) (func(), error)
+	// order given, in ONE transaction on ONE connection of the gate pool
+	// (memql.AcquireGateHold).
+	newsletterGate func(context.Context, ...string) (gateHold, error)
 	store          *Store
 	claimer        ExecutionClaimer
 	resolve        func() email.Sender
@@ -200,7 +209,7 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 			}
 			return memql.AcquireWriteGate(ctx, db, "campaign-test:"+key)
 		},
-		newsletterGate: func(ctx context.Context, keys ...string) (func(), error) {
+		newsletterGate: func(ctx context.Context, keys ...string) (gateHold, error) {
 			var db *sql.DB
 			if len(gateDB) > 0 && gateDB[0] != nil {
 				db = gateDB[0]()
@@ -209,7 +218,11 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 			for i, key := range keys {
 				prefixed[i] = "campaign-newsletter:" + key
 			}
-			return memql.AcquireWriteGatesWithin(ctx, db, newsletterGateWait, prefixed...)
+			hold, err := memql.AcquireGateHold(ctx, db, newsletterGateWait, prefixed...)
+			if err != nil {
+				return nil, err
+			}
+			return hold, nil
 		},
 		seriesGate: func(ctx context.Context, key string) (func(), error) {
 			var db *sql.DB

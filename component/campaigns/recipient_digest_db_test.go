@@ -372,11 +372,17 @@ func newEmptyNewsletter(t *testing.T, name string) *digestNewsletter {
 }
 
 // newGatedWorker is a worker on an engine, with the gates the application wires:
-// they hold their locks on the engine's own pool.
+// they hold their locks on a pool of their own (the Database component's gate
+// pool), not on the engine's.
 func newGatedWorker(t *testing.T, eng *memql.MemQLEngine, db *bun.DB, sender *recordingSender) *Worker {
 	t.Helper()
 	worker := newTestWorker(t, deliveryDBEngine{eng}, sender)
-	wired := NewWorker(deliveryDBEngine{eng}, nil, nil, quietLogger(), func() *sql.DB { return db.DB })
+	gates, err := database.NewGatePool(dbtest.DSN(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gates.Close() })
+	wired := NewWorker(deliveryDBEngine{eng}, nil, nil, quietLogger(), func() *sql.DB { return gates })
 	worker.newsletterGate, worker.templateGate, worker.singleSendGate = wired.newsletterGate, wired.templateGate, wired.singleSendGate
 	return worker
 }

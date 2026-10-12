@@ -127,11 +127,12 @@ func TestASlowMailboxReadDoesNotBlockASecondSignupOnTheSameStorefront(t *testing
 	}
 }
 
-// TestFourSignupsOnFourStorefrontsCompleteOnAFourConnectionPool: the deployed pool
-// is four connections. Each signup holds the connection of its lock transaction for
-// as long as it works, and what it does meanwhile needs a connection of its own, so
-// signups that all hold a lock at once leave none for each other's work. Four
-// storefronts is the whole pool.
+// TestFourSignupsOnFourStorefrontsCompleteOnAFourConnectionPool: the deployed
+// request pool is four connections, and what a signup does under its locks needs a
+// connection of it. The locks are held on the gate pool's connections, not the
+// request pool's, so four signups that all hold locks at once still find a request
+// connection each. (With the locks on the request pool, four storefronts is the whole
+// pool: every signup holds one and starves the others' reads until its deadline.)
 func TestFourSignupsOnFourStorefrontsCompleteOnAFourConnectionPool(t *testing.T) {
 	worker, stores := newStorefronts(t, "gate-four", 4)
 	stores[0].db.DB.SetMaxOpenConns(4)
@@ -589,15 +590,13 @@ func TestNothingSlowRunsWhileASignupHoldsItsLocks(t *testing.T) {
 	watcher := &lockWatcher{Engine: n.worker.store.engine}
 	gate := n.worker.newsletterGate
 	n.worker.store.engine = watcher
-	n.worker.newsletterGate = func(ctx context.Context, keys ...string) (func(), error) {
-		release, err := gate(ctx, keys...)
-		if err == nil {
-			watcher.held.Store(true)
+	n.worker.newsletterGate = func(ctx context.Context, keys ...string) (gateHold, error) {
+		hold, err := gate(ctx, keys...)
+		if err != nil {
+			return nil, err
 		}
-		return func() {
-			watcher.held.Store(false)
-			release()
-		}, err
+		watcher.held.Store(true)
+		return watchedHold{gateHold: hold, released: func() { watcher.held.Store(false) }}, nil
 	}
 	defer func() { n.worker.store.engine, n.worker.newsletterGate = watcher.Engine, gate }()
 
@@ -630,4 +629,15 @@ func TestNothingSlowRunsWhileASignupHoldsItsLocks(t *testing.T) {
 			t.Errorf("%s was not asked under the locks; asked: %v", want, asked)
 		}
 	}
+}
+
+// watchedHold is a gate hold that says when it is released.
+type watchedHold struct {
+	gateHold
+	released func()
+}
+
+func (h watchedHold) Release() {
+	h.released()
+	h.gateHold.Release()
 }

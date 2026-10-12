@@ -43,9 +43,18 @@ type visitorMessage string
 func (m visitorMessage) Error() string { return string(m) }
 
 // signupsBusy is what a person gets when the pod could not take the storefront's
-// locks in time (memql.ErrWriteGateBusy): nothing was written, and asking again is
-// the right thing to do.
+// locks in time (memql.ErrWriteGateBusy), or took them and ran out of time under
+// them: nothing was written, and asking again is the right thing to do.
 const signupsBusy = visitorMessage("Too many signups at once. Try again in a moment.")
+
+// signupLockedPhase is the most a signup may spend under its locks. The gate's
+// session may sit idle in its transaction for minutes (component/database,
+// gate_pool.go), and this keeps every phase far inside that: the locks are never
+// ended under a holder that is still working. Past it the phase's context ends,
+// every read and write under the locks ends with it, nothing is written that was
+// not written already, and the person gets signupsBusy. A variable only so a test
+// can shorten it.
+var signupLockedPhase = 30 * time.Second
 
 func newsletterSignupID(audience, address string) string {
 	return sha256Hex("newsletter-signup\x00" + bare(audience) + "\x00" + NormalizeEmail(address))
@@ -73,11 +82,11 @@ func (w *Worker) handleConfigureNewsletter(ctx context.Context, args map[string]
 	if !templateIDPattern.MatchString(siteID) || callerUserID(ctx) == "" || w.newsletterGate == nil {
 		return nil, fmt.Errorf("select a deployable while connected to the cluster")
 	}
-	release, err := w.newsletterGate(ctx, "site:"+siteID)
+	hold, err := w.newsletterGate(ctx, "site:"+siteID)
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	defer hold.Release()
 	site, err := w.newsletterRow(ctx, "siteById", "siteId", siteID)
 	if err != nil {
 		return nil, err
@@ -327,7 +336,7 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	// 2. The locks, in one transaction on one connection, site then audience: the
 	// same order everywhere, so no two flows can each hold the lock the other wants.
 	// All forms pointing at one audience share the audience lock and one welcome key.
-	release, err := w.newsletterGate(ctx, "site:"+siteID, "audience:"+audienceID)
+	hold, err := w.newsletterGate(ctx, "site:"+siteID, "audience:"+audienceID)
 	if errors.Is(err, memql.ErrWriteGateBusy) {
 		// The cause is the pod's and the person cannot act on it; the sentence is what
 		// they can.
@@ -338,18 +347,46 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	defer hold.Release()
 
-	// 3. Under the locks.
-	row, err = w.subscribeBinding(ctx, args, siteID)
-	if err != nil {
+	// 3. Under the locks, for at most signupLockedPhase. Past it the phase is over
+	// before it writes anything: its context ends, every read and write under the
+	// locks ends with it, and the person is told to try again.
+	locked, endPhase := context.WithTimeout(ctx, signupLockedPhase)
+	defer endPhase()
+	fail := func(err error) ([]memorynodes.MemoryNode, error) {
+		if ctx.Err() == nil && locked.Err() != nil {
+			w.logger.Warn("campaigns: a signup ran past its time under the storefront's locks, so it was not taken",
+				"site", siteID, "audience", audienceID, "limit", signupLockedPhase.String())
+			return nil, signupsBusy
+		}
 		return nil, err
+	}
+	// Immediately before a write the locks protect: PostgreSQL may have ended the
+	// gate's session (an idle limit, an administrator, a failover) and the locks with
+	// it, without a word to this holder. It asks, and a signup whose locks are gone,
+	// or whose time is up, writes nothing. Consent-first ordering makes a retry safe.
+	stillHeld := func() error {
+		err := hold.Verify(locked)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		w.logger.Warn("campaigns: a signup's locks were gone, or its time under them was up, before it wrote, so it was not taken",
+			"site", siteID, "audience", audienceID, "error", err)
+		return signupsBusy
+	}
+	row, err = w.subscribeBinding(locked, args, siteID)
+	if err != nil {
+		return fail(err)
 	}
 	if bare(str(row, "audienceId")) != audienceID {
 		return nil, fmt.Errorf("the signup form changed; refresh it before subscribing")
 	}
-	if settled, err := w.signupSettled(ctx, row, signupID, address); err != nil {
-		return nil, err
+	if settled, err := w.signupSettled(locked, row, signupID, address); err != nil {
+		return fail(err)
 	} else if settled {
 		return accepted()
 	}
@@ -364,9 +401,9 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		//  - that the audience has room: N signups can all have counted the same size.
 		//
 		// Both come before the consent is written, so a refused signup leaves nothing.
-		fresh, err := w.store.RecipientsInAudienceByDigest(ctx, audienceID, EmailDigest(address))
+		fresh, err := w.store.RecipientsInAudienceByDigest(locked, audienceID, EmailDigest(address))
 		if err != nil {
-			return nil, err
+			return fail(err)
 		}
 		if held := holdingMailbox(fresh, address); len(held) > 0 {
 			member, found, optedOut = mailboxVerdict(held)
@@ -375,9 +412,9 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 			}
 		}
 		if !found {
-			size, err := w.store.RosterSize(ctx, audienceID)
+			size, err := w.store.RosterSize(locked, audienceID)
 			if err != nil {
-				return nil, err
+				return fail(err)
 			}
 			if size >= w.cfg.MaxAudience {
 				return nil, fmt.Errorf("this newsletter cannot accept more subscribers right now")
@@ -388,14 +425,17 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	// no unconsented recipient can become sendable. Its stable event key is
 	// checked on retry, so replay cannot turn an old grant into a new grant.
 	eventID := sha256Hex("newsletter-consent\x00" + signupID)
-	consent, err := w.newsletterRow(ctx, "newsletterConsentById", "eventId", eventID)
+	consent, err := w.newsletterRow(locked, "newsletterConsentById", "eventId", eventID)
 	if err != nil {
-		return nil, err
+		return fail(err)
 	}
 	requestedAt := w.nowUTC()
 	if consent == nil {
-		if err = w.store.RecordConsent(ctx, ConsentGrant, ConsentRecord{EventID: eventID, EmailDigest: EmailDigest(address), Source: "signup", AccountID: bare(str(row, "accountId")), OccurredAt: requestedAt}); err != nil {
+		if err = stillHeld(); err != nil {
 			return nil, err
+		}
+		if err = w.store.RecordConsent(locked, ConsentGrant, ConsentRecord{EventID: eventID, EmailDigest: EmailDigest(address), Source: "signup", AccountID: bare(str(row, "accountId")), OccurredAt: requestedAt}); err != nil {
+			return fail(err)
 		}
 	} else {
 		requestedAt = templateTime(consent["occurredAt"])
@@ -403,8 +443,11 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	recipientID := member.ID
 	if !found {
 		recipientID = sha256Hex("newsletter-recipient\x00" + signupID)
-		if err = w.store.AddRecipient(ctx, recipientID, audienceID, address, name, "signup", bare(str(row, "accountId")), nil); err != nil {
+		if err = stillHeld(); err != nil {
 			return nil, err
+		}
+		if err = w.store.AddRecipient(locked, recipientID, audienceID, address, name, "signup", bare(str(row, "accountId")), nil); err != nil {
+			return fail(err)
 		}
 	}
 	encodedSnapshot, err := json.Marshal(snapshot)
@@ -422,8 +465,11 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		"consentRevision": templateTime(row["createdAt"]).Format(time.RFC3339Nano),
 		"requestedAt":     requestedAt.Format(time.RFC3339Nano), "templateId": snapshot.ID, "templateSnapshot": frozen, "senderIdentityId": bare(str(row, "senderIdentityId")),
 	}
-	if err = w.newsletterWrite(ctx, "recordNewsletterSignup", values); err != nil {
+	if err = stillHeld(); err != nil {
 		return nil, err
+	}
+	if err = w.newsletterWrite(locked, "recordNewsletterSignup", values); err != nil {
+		return fail(err)
 	}
 	return accepted()
 }
@@ -467,11 +513,11 @@ func (w *Worker) drainNewsletterWelcomes(ctx, systemCtx context.Context) {
 
 func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned map[string]any) error {
 	// Site then audience, in one transaction on one connection, as a signup takes them.
-	release, err := w.newsletterGate(ctx, "site:"+bare(str(scanned, "siteId")), "audience:"+bare(str(scanned, "audienceId")))
+	hold, err := w.newsletterGate(ctx, "site:"+bare(str(scanned, "siteId")), "audience:"+bare(str(scanned, "audienceId")))
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer hold.Release()
 	systemCtx = memql.ContextWithFreshRead(auth.ContextWithInternalOrigin(systemCtx))
 	row, err := w.newsletterRow(systemCtx, "newsletterSignupById", "signupId", bare(str(scanned, "id")))
 	if err != nil || row == nil || str(row, "status") != "pending" {
@@ -525,11 +571,11 @@ func (w *Worker) handleRetryNewsletterWelcome(ctx context.Context, args map[stri
 	if err = w.requireSendAuthority(ctx, str(row, "accountId")); err != nil {
 		return nil, err
 	}
-	release, err := w.newsletterGate(ctx, "audience:"+bare(str(row, "audienceId")))
+	hold, err := w.newsletterGate(ctx, "audience:"+bare(str(row, "audienceId")))
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	defer hold.Release()
 	row, err = w.newsletterRow(ctx, "newsletterSignupById", "signupId", bare(argString(args, "signupId")))
 	if err != nil {
 		return nil, err

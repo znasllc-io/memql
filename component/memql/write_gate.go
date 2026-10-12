@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -60,6 +61,12 @@ var ErrWriteGateBusy = errors.New("shared write coordination is busy; try again"
 // given ends idle transactions sooner than a gated phase can be trusted to
 // finish -- the request pool, 60 s. See the header.
 var ErrWriteGatePoolUnsuitable = errors.New("write gates need a pool whose sessions may sit idle in a transaction for minutes, not the request pool")
+
+// ErrWriteGateLost is what a held gate answers when its locks are no longer
+// held: PostgreSQL ended its session (an idle limit, an administrator, a failover)
+// and the advisory locks went with it without a word to the holder. A holder asks
+// (GateHold.Verify) before it writes, and does not write.
+var ErrWriteGateLost = errors.New("a write gate's lock is no longer held; nothing was written")
 
 // writeGateWait is how long a write gate waits, in total, for a connection of the
 // gate pool and its locks. It is below pgdriver's read deadline (10 s), the
@@ -121,6 +128,28 @@ func AcquireWriteGates(ctx context.Context, db *sql.DB, keys ...string) (func(),
 // (see the header): a longer one is enforced by the client's timer, which cannot
 // tell the server to stop waiting. The caller's own deadline shortens it further.
 func AcquireWriteGatesWithin(ctx context.Context, db *sql.DB, wait time.Duration, keys ...string) (func(), error) {
+	hold, err := AcquireGateHold(ctx, db, wait, keys...)
+	if err != nil {
+		return nil, err
+	}
+	return hold.Release, nil
+}
+
+// GateHold is an open write gate: the transaction holding its advisory locks.
+type GateHold struct {
+	tx    *sql.Tx
+	conn  *sql.Conn
+	keys  []string
+	taken time.Time
+	once  sync.Once
+	done  atomic.Bool
+}
+
+// AcquireGateHold takes the locks like AcquireWriteGatesWithin and returns the
+// open gate, which can say whether its locks are still held (Verify) as well as
+// give them up (Release). A holder whose writes must not happen without the lock
+// verifies immediately before them.
+func AcquireGateHold(ctx context.Context, db *sql.DB, wait time.Duration, keys ...string) (*GateHold, error) {
 	if db == nil {
 		return nil, fmt.Errorf("shared write coordination is unavailable")
 	}
@@ -161,38 +190,74 @@ func AcquireWriteGatesWithin(ctx context.Context, db *sql.DB, wait time.Duration
 		_ = conn.Close()
 		return nil, err
 	}
-	taken := time.Now()
-	var once sync.Once
-	release := func() {
-		once.Do(func() {
-			if held := time.Since(taken); held > gateHeldTooLong {
-				slog.Warn("a write gate was held long enough that PostgreSQL may have ended it: a gate session is ended at its idle_in_transaction_session_timeout and the advisory lock goes with it, without a word to the holder",
-					"held", held.Round(time.Second).String(), "keys", keys)
-			}
-			_ = tx.Rollback()
-			_ = conn.Close()
-		})
-	}
+	hold := &GateHold{tx: tx, conn: conn, keys: append([]string(nil), keys...), taken: time.Now()}
 
 	lockCtx, cancelLock := context.WithDeadline(ctx, serverDeadline.Add(writeGateGrace))
 	defer cancelLock()
 	for _, key := range keys {
 		remaining := time.Until(serverDeadline)
 		if remaining <= 0 {
-			release()
+			hold.Release()
 			return nil, ErrWriteGateBusy
 		}
 		// The server enforces what is left of the wait (see the header).
 		if _, err = tx.ExecContext(lockCtx, "SELECT set_config('lock_timeout', $1, true)", strconv.FormatInt(max(1, remaining.Milliseconds()), 10)); err != nil {
-			release()
+			hold.Release()
 			return nil, gateWaitError(ctx, err)
 		}
 		if _, err = tx.ExecContext(lockCtx, "SELECT pg_advisory_xact_lock(1296387409, hashtext($1))", key); err != nil {
-			release()
+			hold.Release()
 			return nil, gateWaitError(ctx, err)
 		}
 	}
-	return release, nil
+	return hold, nil
+}
+
+// Release gives the locks up and returns the connection to the gate pool. Safe to
+// call more than once, and on a gate that was never opened.
+func (h *GateHold) Release() {
+	if h == nil || h.tx == nil {
+		return
+	}
+	h.once.Do(func() {
+		h.done.Store(true)
+		if held := time.Since(h.taken); held > gateHeldTooLong {
+			slog.Warn("a write gate was held long enough that PostgreSQL may have ended it: a gate session is ended at its idle_in_transaction_session_timeout and the advisory lock goes with it, without a word to the holder",
+				"held", held.Round(time.Second).String(), "keys", h.keys)
+		}
+		_ = h.tx.Rollback()
+		_ = h.conn.Close()
+	})
+}
+
+// Verify reports whether this gate's session still holds every one of its locks.
+// It runs on the gate's own transaction: a session PostgreSQL ended (its idle
+// limit, an administrator, a failover) answers with an error or without the locks,
+// and the answer is ErrWriteGateLost. A holder calls it immediately before a write
+// that the lock exists to protect. A caller whose own context is done gets that
+// error back, not a lost lock.
+func (h *GateHold) Verify(ctx context.Context) error {
+	if h == nil || h.tx == nil || h.done.Load() {
+		return ErrWriteGateLost
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, key := range h.keys {
+		var held bool
+		err := h.tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND granted
+			AND pid = pg_backend_pid() AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid)`, key).Scan(&held)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("%w (%v)", ErrWriteGateLost, err)
+		}
+		if !held {
+			return ErrWriteGateLost
+		}
+	}
+	return nil
 }
 
 // checkGatePool refuses a pool whose sessions are ended too soon for a gate, once

@@ -570,3 +570,79 @@ func TestAGateHeldTooLongSaysSo(t *testing.T) {
 		t.Errorf("a gate held past its limit did not say so: %q", logged.String())
 	}
 }
+
+// gateBackend is the backend process that holds the gate's advisory lock for the
+// key, found the way an operator would: from pg_locks.
+func gateBackend(t *testing.T, db *sql.DB, key string) int {
+	t.Helper()
+	var pid int
+	if err := db.QueryRow(`SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted
+		AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid`, key).Scan(&pid); err != nil {
+		t.Fatalf("no session holds the lock for %q: %v", key, err)
+	}
+	return pid
+}
+
+// TestAHeldGateVerifiesWhileItsSessionLives: a holder can ask, before it writes,
+// whether the locks it was given are still held.
+func TestAHeldGateVerifiesWhileItsSessionLives(t *testing.T) {
+	pool := deployedGatePool(t, 2)
+	hold, err := AcquireGateHold(context.Background(), pool, 0, gateKey(t, "site"), gateKey(t, "audience"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hold.Verify(context.Background()); err != nil {
+		t.Fatalf("a live gate failed its verification: %v", err)
+	}
+	hold.Release()
+	if err := hold.Verify(context.Background()); !errors.Is(err, ErrWriteGateLost) {
+		t.Fatalf("a released gate verified as %v, want ErrWriteGateLost", err)
+	}
+	hold.Release() // a second release is harmless
+}
+
+// TestAHeldGateWhoseSessionWasEndedFailsItsVerification: PostgreSQL ends a session
+// for reasons of its own -- an idle limit, an administrator, a failover -- and the
+// advisory lock goes with it without a word to the holder. The holder finds out
+// by asking, before it writes, and does not write.
+func TestAHeldGateWhoseSessionWasEndedFailsItsVerification(t *testing.T) {
+	pool, other := deployedGatePool(t, 2), gateDB(t, 0)
+	key := gateKey(t, "ended")
+	hold, err := AcquireGateHold(context.Background(), pool, 0, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold.Release()
+	pid := gateBackend(t, other, key)
+
+	if _, err := other.Exec("SELECT pg_terminate_backend($1)", pid); err != nil {
+		t.Fatal(err)
+	}
+	// The server drops the lock; the holder has not been told.
+	deadline := time.Now().Add(3 * time.Second)
+	for lockedElsewhere(t, other, key) {
+		if time.Now().After(deadline) {
+			t.Fatal("the terminated session still holds the lock")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if err := hold.Verify(context.Background()); !errors.Is(err, ErrWriteGateLost) {
+		t.Fatalf("a gate whose session was ended verified as %v, want ErrWriteGateLost", err)
+	}
+}
+
+// TestAVerificationPastTheCallersDeadlineIsTheCallers: not a lost lock.
+func TestAVerificationPastTheCallersDeadlineIsTheCallers(t *testing.T) {
+	pool := deployedGatePool(t, 2)
+	hold, err := AcquireGateHold(context.Background(), pool, 0, gateKey(t, "late"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer hold.Release()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := hold.Verify(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a verification on a cancelled context answered %v, want the context's error", err)
+	}
+}
