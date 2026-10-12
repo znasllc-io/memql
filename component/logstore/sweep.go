@@ -125,7 +125,7 @@ type Report struct {
 	// from; zero means every row of the run went by DELETE. A drop reports
 	// chunks, not rows, so the rows inside a dropped chunk are counted in
 	// RowsDeleted at the count their day archived.
-	ChunksDropped int64 `json:"chunks_dropped"`
+	ChunksDropped int64 `json:"chunksDropped"`
 }
 
 // RestoreReport is what one restore answers.

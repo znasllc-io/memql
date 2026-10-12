@@ -111,15 +111,20 @@ leader (a Postgres advisory lock, so exactly one replica runs it) and calls
    `MEMQL_LOGS_ARCHIVE_CONTAINER` (default: the cluster's
    `MEMQL_AZURE_BLOB_CONTAINER`) -- one JSON object per line, the concept's
    field names, gzip;
-2. only once every node type of that day is uploaded, that day's rows are
-   deleted.
+2. only once every node type of that day is uploaded, the day's chunk is
+   dropped whole (`drop_chunks` bounded to the day), which gives its disk
+   back at once and never decompresses a compressed chunk. Only rows that no
+   chunk lying wholly inside the day holds -- a plain table, or a chunk that
+   straddles midnight -- are deleted instead, in batches.
 
 **No archive, no delete.** A cluster with no object storage configured keeps
 its lines, and the sweep says so in its own log line every night (search for
 component `logs`, level `warn`). Set a container, and the next run catches
-up. The run's one INFO line carries days archived, rows archived and rows
-deleted; `memql_logs_archived_total` and `memql_logs_deleted_total` carry the
-same figures for alerting. An owner may run the sweep by hand with
+up. The run's one INFO line carries days archived, rows archived, rows
+deleted and chunks dropped (`chunksDropped` in the builtin's reply); a
+dropped day's rows count as deleted at what the day archived.
+`memql_logs_archived_total` and `memql_logs_deleted_total` carry the same row
+figures for alerting. An owner may run the sweep by hand with
 `builtin logsSweep()`; a second sweep while one runs answers `skipped`.
 
 ### Bringing a day back

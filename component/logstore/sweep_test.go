@@ -470,7 +470,8 @@ func TestSweepDropsArchivedDayChunk(t *testing.T) {
 		t.Errorf("day 2 dropped before its upload: %v", journal)
 	}
 
-	// The reply a caller reads carries the count as chunks_dropped.
+	// The reply a caller reads carries the count as chunksDropped, camelCase
+	// like every other field of the reply.
 	body, err := json.Marshal(rep)
 	if err != nil {
 		t.Fatalf("marshal report: %v", err)
@@ -479,8 +480,11 @@ func TestSweepDropsArchivedDayChunk(t *testing.T) {
 	if err := json.Unmarshal(body, &reply); err != nil {
 		t.Fatalf("unmarshal report: %v", err)
 	}
-	if reply["chunks_dropped"] != float64(2) {
-		t.Errorf("report JSON lacks chunks_dropped=2: %s", body)
+	if reply["chunksDropped"] != float64(2) {
+		t.Errorf("report JSON lacks chunksDropped=2: %s", body)
+	}
+	if _, snake := reply["chunks_dropped"]; snake {
+		t.Errorf("report JSON still carries the snake_case chunks_dropped: %s", body)
 	}
 }
 
