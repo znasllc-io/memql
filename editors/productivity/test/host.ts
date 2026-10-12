@@ -63,7 +63,8 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand("vscode.open", newEmailURI);
   const pageInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
   check(pageInput instanceof vscode.TabInputCustom && pageInput.viewType === "memql.productivity.newEmail", "New email selector did not open its page.");
-  check((await tools.newEmailReady(newEmailURI)).state === "Not connected to cluster.example", "New email did not report the disconnected cluster.");
+  const newEmail = await tools.newEmailReady(newEmailURI);
+  check(newEmail.state === "Not connected to cluster.example", `New email did not report the disconnected cluster (${JSON.stringify(newEmail)}).`);
   const markdownURI = vscode.Uri.joinPath(root, "host-review.md");
   await vscode.workspace.fs.writeFile(markdownURI, new TextEncoder().encode("# Markdown review\n\nA **rendered** passage.\n"));
   await vscode.commands.executeCommand("vscode.openWith", markdownURI, "memql.productivity.markdown");

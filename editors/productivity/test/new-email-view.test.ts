@@ -119,7 +119,7 @@ test("choosing a layout and a name makes it ready; a description adds Write it",
   f.act(C.start).click();
   assert.deepEqual(f.posted("start"), [{ type: "start", layoutId: "builtin:article", name: "Autumn welcome" }]);
   // The page reports each state it shows, once.
-  assert.deepEqual(f.posted("shown").map(m => m.state), [C.loading, C.chooseLayout, C.nameIt, C.ready]);
+  assert.deepEqual(f.posted("shown").map(m => [m.state, m.loading]), [[C.loading, true], [C.chooseLayout, false], [C.nameIt, false], [C.ready, false]]);
   f.dom.window.close();
 });
 
