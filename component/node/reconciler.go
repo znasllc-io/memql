@@ -95,6 +95,13 @@ type TopologyReconciler struct {
 	readinessPurger    readinessRowPurger
 	lastReadinessPurge time.Time
 
+	// Status-history hygiene (the 2026-10-11 storage incident). statusPurger is
+	// nil in production and built from dbGetter on first use; a test injects a
+	// fake. lastStatusHistoryPurge paces the continuous purge of superseded
+	// heartbeat versions exactly as lastReadinessPurge paces its sibling.
+	statusPurger           statusHistoryPurger
+	lastStatusHistoryPurge time.Time
+
 	now func() time.Time
 }
 
@@ -228,6 +235,10 @@ func (r *TopologyReconciler) tick(ctx context.Context) {
 	// readiness rows removed by retire's own purge, so the sweep that follows
 	// finds only what the cron backstop retired and what older engines left.
 	r.sweepReadinessRowsOfStoppedNodes(ctx)
+	// Last, so this tick's retirement and readiness sweep never wait behind it.
+	// It is the one sweep that can keep the tick busy: while a backlog drains it
+	// runs for statusHistoryRunBudget plus the statement in flight.
+	r.sweepStatusHistory(ctx)
 }
 
 // ensureLeader acquires the advisory lock (non-leader) or keepalives it

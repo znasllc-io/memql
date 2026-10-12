@@ -159,6 +159,15 @@ var (
 		},
 		[]string{"path"},
 	)
+	statusHistoryVersionsPurged = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: "status_history",
+			Name:      "versions_purged_total",
+			Help:      "BFF NODES ONLY, and of those only the ONE holding the topology-reconciler lease -- every other node and node type exports this at a constant 0. Superseded versions hard-deleted from the three heartbeat concepts, labelled by `concept`: v1:worker:registration, v1:cluster:node and v1:platform:moduleReadiness. A version goes when a newer version of the same id exists and it is more than an hour old; the latest version of an id is never touched. A version count, not a row count. These concepts append a full new version on every heartbeat (a machine every 15 s, a node every 60 s) and nothing used to remove one: 738,626 superseded registration versions for 13 machines were part of what filled a 32Gi database volume on 2026-10-11. THE HEALTHY SHAPE IS A STEADY, NON-ZERO RATE: every running node restates its own v1:cluster:node row each minute, so there is always something superseded to remove, and the rate settles at what the heartbeats wrote an hour earlier. A burst on the first runs after an upgrade is the old backlog being cleared, a bounded amount per ten-minute pass. Alert on the OTHER direction: no BFF node moving this counter for more than an hour on a running cluster means the purge is not running (no leader, or every statement failing -- the Warn line `status history purge failed` names the concept and the error) and the table is growing by the heartbeats again.",
+		},
+		[]string{"concept"},
+	)
 	aiFederationExchanges = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -241,6 +250,7 @@ func init() {
 		subscriptionRowsDenied,
 		authActivityPruned,
 		moduleReadinessRowsPurged,
+		statusHistoryVersionsPurged,
 		siteTrafficWritten,
 		siteTrafficDropped,
 		aiFederationExchanges,
@@ -318,6 +328,14 @@ func init() {
 	// it is meant to watch for.
 	siteTrafficDropped.WithLabelValues(SiteTrafficDropQueueFull).Add(0)
 	siteTrafficDropped.WithLabelValues(SiteTrafficDropWriteFailed).Add(0)
+	// The status-history series exist at 0 from boot, for the reason the
+	// federation outcomes do: the Help string tells an operator to alert on a
+	// counter that stops moving, and a rule over a series that does not exist
+	// yet evaluates to no data rather than to zero -- which is exactly the state
+	// of a purge that has never once run.
+	for _, concept := range StatusHistoryConcepts() {
+		statusHistoryVersionsPurged.WithLabelValues(concept).Add(0)
+	}
 }
 
 // The two reasons a served request goes unrecorded (epic memql#4906). A
@@ -573,6 +591,46 @@ func ModuleReadinessRowsPurged(path string, n int64) {
 func ModuleReadinessRowsPurgedValue(path string) float64 {
 	var m dto.Metric
 	c, err := moduleReadinessRowsPurged.GetMetricWithLabelValues(path)
+	if err != nil {
+		return 0
+	}
+	if err := c.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetCounter().GetValue()
+}
+
+// StatusHistoryConcepts is the closed set of values the `concept` label of
+// memql_status_history_versions_purged_total takes: the status concepts whose
+// superseded versions the topology reconciler purges. component/node holds the
+// same list (statusHistoryConcepts in status_history_purge.go) and is tested
+// against this one, so a series is never missing at 0 and never an orphan.
+func StatusHistoryConcepts() []string {
+	return []string{"v1:worker:registration", "v1:cluster:node", "v1:platform:moduleReadiness"}
+}
+
+// StatusHistoryVersionsPurged records superseded versions hard-deleted from
+// one of the status concepts by the topology reconciler's continuous purge
+// (component/node/status_history_purge.go).
+//
+// LABELLED BY CONCEPT, because the three concepts are written at different
+// rates and by different writers (a machine's registration every 15 s, a node's
+// own row every 60 s, a readiness verdict on change and at least every ten
+// minutes), so a sum of them cannot say which heartbeat is producing the
+// history. Closed at StatusHistoryConcepts, so the cardinality is fixed.
+// Counted per batch, as each lands, rather than once per sweep: a batch that
+// committed is gone from the table whether or not the next one fails.
+func StatusHistoryVersionsPurged(concept string, n int64) {
+	if n <= 0 {
+		return
+	}
+	statusHistoryVersionsPurged.WithLabelValues(concept).Add(float64(n))
+}
+
+// StatusHistoryVersionsPurgedValue returns one concept's count, for tests.
+func StatusHistoryVersionsPurgedValue(concept string) float64 {
+	var m dto.Metric
+	c, err := statusHistoryVersionsPurged.GetMetricWithLabelValues(concept)
 	if err != nil {
 		return 0
 	}
