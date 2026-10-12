@@ -233,6 +233,15 @@ builtin emailLayouts {
   includeArchived  bool
 }
 
+@description("Render an email document for preview: pictures you can read are embedded, sample merge values are applied, and {subject, html, text, issues} comes back. Never saves or sends anything.")
+@sdk
+@executor("integration.campaigns.renderEmail")
+builtin emailRender {
+  document   object!  @description("The *.email.json document, in layout or custom mode.")
+  accountId  string!  @description("The organization the email is for. You need read access to its data.")
+  sample     object   @description("Sample values: displayName, email, accountName, campaignName, and fields (an object of column values).")
+}
+
 @description("Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.")
 @sdk
 @executor("integration.campaigns.configureSeries")

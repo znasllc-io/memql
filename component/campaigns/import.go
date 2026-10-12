@@ -90,9 +90,15 @@ const (
 
 // blobReader is the read half of object storage. Its own narrow interface
 // rather than a dependency on component/edge's BlobClient, because this
-// package needs exactly one method and a test substitutes an in-memory map.
+// package needs two methods and a test substitutes an in-memory map.
+//
+// DownloadWithLimit is for a reader that knows the most it can use (a picture
+// in an email is at most a megabyte): an object over the limit is an error and
+// is never read into memory, which Download's own ceiling is too high to
+// promise.
 type blobReader interface {
 	Download(ctx context.Context, container, objectName string) ([]byte, error)
+	DownloadWithLimit(ctx context.Context, container, objectName string, maxBytes int64) ([]byte, error)
 }
 
 // importResult is the reply. Counts plus a bounded sample, so the operator's
@@ -490,15 +496,35 @@ func plausibleAddress(normalized string) bool {
 // blob storage at all. Unconfigured storage is therefore a per-call refusal,
 // not a boot failure.
 func (w *Worker) readBlob(ctx context.Context, blobURL string) ([]byte, error) {
-	key := blobStorageKey(blobURL)
-	if key == "" {
-		return nil, errors.New("the file row records no storage location")
-	}
-	reader, container, err := w.objectStore(ctx)
+	reader, container, key, err := w.blobTarget(ctx, blobURL)
 	if err != nil {
 		return nil, err
 	}
 	return reader.Download(ctx, container, key)
+}
+
+// readBlobUpTo is readBlob for a reader with a ceiling: a file of more than
+// maxBytes is an error, and no more than maxBytes (and one byte) is ever held.
+func (w *Worker) readBlobUpTo(ctx context.Context, blobURL string, maxBytes int64) ([]byte, error) {
+	reader, container, key, err := w.blobTarget(ctx, blobURL)
+	if err != nil {
+		return nil, err
+	}
+	return reader.DownloadWithLimit(ctx, container, key, maxBytes)
+}
+
+// blobTarget is where a file row's bytes are: the storage, its container and
+// the container-relative key.
+func (w *Worker) blobTarget(ctx context.Context, blobURL string) (blobReader, string, string, error) {
+	key := blobStorageKey(blobURL)
+	if key == "" {
+		return nil, "", "", errors.New("the file row records no storage location")
+	}
+	reader, container, err := w.objectStore(ctx)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return reader, container, key, nil
 }
 
 func (w *Worker) objectStore(ctx context.Context) (blobReader, string, error) {

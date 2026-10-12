@@ -1278,6 +1278,34 @@ QueryClient.prototype.emailLayouts = function (this: QueryClient, args: EmailLay
   return this.executeNamed("emailLayouts", buildEmailLayouts(args), opts);
 };
 
+/** Render an email document for preview: pictures you can read are embedded, sample merge values are applied, and {subject, html, text, issues} comes back. Never saves or sends anything. */
+export interface EmailRenderArgs {
+  /** The *.email.json document, in layout or custom mode. */
+  document: Record<string, unknown>;
+  /** The organization the email is for. You need read access to its data. */
+  accountId: string;
+  /** Sample values: displayName, email, accountName, campaignName, and fields (an object of column values). */
+  sample?: Record<string, unknown>;
+}
+
+export function buildEmailRender(args: EmailRenderArgs): string {
+  const parts: string[] = [];
+  parts.push("document: " + renderMemQLValue(args.document));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.sample !== undefined) parts.push("sample: " + renderMemQLValue(args.sample));
+  return "builtin emailRender(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailRender(args: EmailRenderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailRender = function (this: QueryClient, args: EmailRenderArgs = {} as EmailRenderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailRender", buildEmailRender(args), opts);
+};
+
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */
 export interface FleetModelProbeArgs {
   /** v1:worker:registration.id of the machine to measure on. It must be one of the caller's own; another user's id answers exactly as a made-up one does. */
