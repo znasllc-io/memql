@@ -1553,3 +1553,42 @@ mutation delivery settleDeferredSingleSend {
  stamp { id: args.deliveryId, createdAt: args.versionTime }
  }
 }
+
+/// Authenticated provider receipt, correlated under the original transport lock.
+/// actor.userId cannot rewrite attribution after revocation; this updates only the existing delivery outcome.
+@actor
+@serverOnly
+mutation delivery recordProviderDelivery {
+  args {
+    deliveryId string!
+    providerStatus enum("delivered", "bounced", "suppressed", "quarantined", "filtered-spam", "expanded", "failed")!
+    providerAt datetime!
+    sentAt datetime
+    providerCountersPending bool
+    versionTime datetime!
+  }
+  update {
+    accept { providerStatus, providerAt, sentAt, providerCountersPending }
+    stamp { id: args.deliveryId, status: "sent", lastError: "", skipReason: "", createdAt: args.versionTime }
+  }
+}
+
+/// Mandatory audit from an authenticated, correlated provider report. The engine
+/// copies ownership from the original delivery; actor.userId is the provider service.
+@actor
+@serverOnly
+mutation consentEvent recordProviderBounce {
+  args {
+    eventId string!
+    emailDigest string!
+    ownerUserId string!
+    accountId string!
+    recipientId string!
+    campaignId string
+    occurredAt datetime!
+  }
+  insert {
+    accept { emailDigest, ownerUserId, accountId, recipientId, campaignId, occurredAt }
+    stamp { id: args.eventId, kind: "bounce", source: "provider" }
+  }
+}

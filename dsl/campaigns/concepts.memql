@@ -290,6 +290,9 @@ concept campaign {
 @displayCard(primary="email", secondary="campaignId", tertiary="sentAt", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept delivery {
+  providerStatus enum("delivered", "bounced", "suppressed", "quarantined", "filtered-spam", "expanded", "failed") @description("Authenticated ACS recipient delivery outcome; absent until a matching report arrives. Transport acceptance is still status=sent.")
+  providerCountersPending bool @description("Internal durable reconciliation marker when provider evidence repairs an uncertain campaign acceptance.")
+  providerAt datetime @description("The provider delivery attempt time, distinct from transport acceptance.")
   ownerUserId        string!  @description("v1:identity:user.id that owns this delivery record -- the owner of the campaign, mirrored so the row is gated without a join. The per-row authz key.")
   accountId    string   @description("The v1:accounts:account this delivery is for, COPIED from its campaign at write (epic memql#5165, section J). Denormalized rather than joined for the reason ownerUserId above is: the account grant is a filter conjunct the engine ANDs into every read, and a conjunct that needs a join is one that cannot be pushed down. Missing current attribution is repaired only when its parent already names an organization; explicit attribution and historical versions are preserved.")
   campaignId         string   @description("v1:campaigns:campaign.id this delivery belongs to. Absent for single-recipient rule sends, whose parent is emailRuleId.")

@@ -177,6 +177,12 @@ func (p *OperationPoller) Start(_ context.Context) {
 				case <-ticker.C:
 					if i := p.resolve(); i != nil {
 						pass, cancel := context.WithTimeout(ctx, 25*time.Second)
+						feedbackErr := i.PollFeedbackConnections(pass)
+						if feedbackErr != nil {
+							p.logger.Warn("Azure email feedback setup delayed", "error", feedbackErr)
+						}
+						cancel()
+						pass, cancel = context.WithTimeout(ctx, 25*time.Second)
 						err := i.PollOperations(pass)
 						cancel()
 						if err != nil && ctx.Err() == nil {

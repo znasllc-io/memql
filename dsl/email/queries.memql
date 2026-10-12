@@ -63,3 +63,39 @@ query sendOperation emailRecentSendOperations {
   paginate 25
   shape emailSendOperationStored
 }
+
+/// Internal authenticated event correlation. actor.userId cannot represent a provider report; only the integration service resolves the sealed original receipt.
+@actor
+@serverOnly
+@cache(0)
+query sendOperation emailSendOperationByProviderId {
+  args {
+    accountId string!
+    providerMessageId string!
+  }
+  filter row => actor.isClusterOwner == true && row.accountId == args.accountId && row.providerMessageId == args.providerMessageId
+  shape emailSendOperationStored
+}
+
+/// Internal bounded classification of old sealed state. actor.userId cannot own a shared transport; the receiver service only adds scheduling metadata under the original lock.
+@actor
+@serverOnly
+@cache(0)
+query connectionState emailUnindexedConnections {
+ filter row => actor.isClusterOwner == true && (row.purpose == nil || row.purpose == "")
+ sort "row.id", "asc"
+ paginate 50
+ shape emailConnectionIndex
+}
+
+/// Internal subscription reconciliation for every ready organization, including imported and installed senders. actor.userId cannot represent shared transport maintenance.
+@actor
+@serverOnly
+@cache(0)
+query connectionState emailReadyFeedbackOrganizations {
+ args { dueBefore datetime! }
+ filter row => actor.isClusterOwner == true && row.purpose == "azure-organization-ready" && row.nextAttemptAt <= args.dueBefore
+ sort "nextAttemptAt", "asc"
+ paginate 50
+ shape emailConnectionIndex
+}

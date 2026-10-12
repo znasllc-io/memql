@@ -27,12 +27,13 @@ const acsEmailAPIVersion = "2025-09-01"
 // display names. Neither a caller's From header nor a different organization's
 // connection can enlarge that set.
 type ACSConfig struct {
-	AccountID string            `json:"accountId"`
-	Endpoint  string            `json:"endpoint"`
-	AccessKey string            `json:"accessKey"`
-	Senders   map[string]string `json:"senders"`
-	Default   string            `json:"defaultSender"`
-	ReplyTo   string            `json:"replyTo,omitempty"`
+	AccountID  string            `json:"accountId"`
+	ResourceID string            `json:"resourceId,omitempty"`
+	Endpoint   string            `json:"endpoint"`
+	AccessKey  string            `json:"accessKey"`
+	Senders    map[string]string `json:"senders"`
+	Default    string            `json:"defaultSender"`
+	ReplyTo    string            `json:"replyTo,omitempty"`
 }
 
 // ACSSender uses ACS's outbound Email API. A successful call means Azure
@@ -146,7 +147,7 @@ func (s *ACSSender) Send(ctx context.Context, msg Message, as SendAs) error {
 	if len(body) > 10<<20 {
 		return permanentSendRefusal("email exceeds the Azure message size limit")
 	}
-	return s.submitOnce(ctx, msg.IntentID, body)
+	return s.submitOnce(withACSMessage(ctx, msg, address), msg.IntentID, body)
 }
 
 func (s *ACSSender) post(ctx context.Context, operationID string, body []byte) error {
@@ -296,6 +297,10 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 		}
 	} else {
 		op = acsOperation{ID: id.NewShortId(), AccountID: s.cfg.AccountID, Endpoint: s.cfg.Endpoint, Digest: digest, Intent: intent}
+		op.ResourceID = s.cfg.ResourceID
+		if message, ok := ctx.Value(acsMessageKey{}).(acsMessageIdentity); ok {
+			op.DeliveryID, op.RecipientDigest, op.SenderDigest = message.DeliveryID, message.RecipientDigest, message.SenderDigest
+		}
 	}
 	op.Status, op.Detail, op.SubmittedAt, op.NextPollAt = "submitting", "", s.now().UTC(), s.now().UTC().Add(15*time.Second)
 	_, err = s.operations.write(ctx, key, op, prior)

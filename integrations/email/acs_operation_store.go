@@ -17,9 +17,13 @@ import (
 // Content and credentials are deliberately absent. The digest binds a retry to
 // the encoded message without retaining a second copy of its private contents.
 type acsOperation struct {
-	ID, AccountID, Endpoint, Digest, Intent string
-	Status, Detail                          string
-	SubmittedAt, CheckedAt, NextPollAt      time.Time
+	ID, AccountID, Endpoint, Digest, Intent               string
+	ResourceID, DeliveryID, RecipientDigest, SenderDigest string
+	DeliveryStatus                                        string
+	DeliveryAt                                            time.Time
+	DeliveryEvents                                        map[string]time.Time
+	Status, Detail                                        string
+	SubmittedAt, CheckedAt, NextPollAt                    time.Time
 }
 
 type acsOperationStore interface {
@@ -92,7 +96,8 @@ func (s *storedACSOperations) write(ctx context.Context, key string, operation a
 	version := memql.VersionTimeAfter(prior, now)
 	call, err := langparser.RenderCall("storeEmailSendOperation", map[string]any{
 		"id": key, "accountId": operation.AccountID, "status": operation.Status,
-		"nextPollAt": operation.NextPollAt.Format(time.RFC3339Nano), "encryptedValue": sealed, "versionTime": version.Format(time.RFC3339Nano),
+		"providerMessageId": operation.ID,
+		"nextPollAt":        operation.NextPollAt.Format(time.RFC3339Nano), "encryptedValue": sealed, "versionTime": version.Format(time.RFC3339Nano),
 	})
 	if err == nil {
 		_, err = s.connection.engine.Execute(auth.ContextWithInternalOrigin(emailStateContext(ctx)), "mutation "+call)
@@ -115,7 +120,7 @@ func (s *storedACSOperations) recent(ctx context.Context, account string) ([]map
 			return nil, err
 		}
 		if found && op.AccountID == account {
-			out = append(out, map[string]any{"operationId": op.ID, "status": op.Status, "detail": op.Detail, "submittedAt": op.SubmittedAt, "checkedAt": op.CheckedAt})
+			out = append(out, map[string]any{"operationId": op.ID, "status": op.Status, "detail": op.Detail, "submittedAt": op.SubmittedAt, "checkedAt": op.CheckedAt, "deliveryStatus": op.DeliveryStatus, "deliveryAt": op.DeliveryAt})
 		}
 	}
 	return out, nil

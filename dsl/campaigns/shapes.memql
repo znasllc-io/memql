@@ -139,6 +139,8 @@ shape campaign campaignFull {
 /// query binding it gates on the caller.
 @row
 shape delivery deliveryFull {
+  providerStatus
+  providerAt
   row.id
   ownerUserId
   accountId
@@ -478,4 +480,9 @@ shape recipient recipientEnrollmentRef {
  joinedAt
  confirmedAt
  row.createdAt
+}
+
+@row
+shape consentEvent providerConsentIdentity {
+ row.id
 }

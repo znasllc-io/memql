@@ -12,6 +12,9 @@ concept capturedMessage {
 // @no-displayCard: Private encrypted connection state has no human-facing identity; the gated setup capability supplies its display fields.
 @rowAuthz(clusterOwner)
 concept connectionState {
+  purpose string
+  accountId string
+  nextAttemptAt datetime
   encryptedValue string!
 }
 
@@ -21,6 +24,7 @@ concept connectionState {
 @rowAuthz(clusterOwner)
 concept sendOperation {
   accountId string!
+  providerMessageId string @description("Opaque ACS operation/message identity used to correlate authenticated delivery reports. Content and mailboxes remain absent.")
   status string!
   nextPollAt datetime!
   encryptedValue string!

@@ -79,6 +79,16 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 	}
 	action := argString(args, "action")
 	options, _ := args["options"].(map[string]any)
+	if action == "feedback" {
+		if argString(options, "planId") == "" {
+			return nil, fmt.Errorf("reopen the email connection before enabling feedback")
+		}
+		result, err := a.ensureDeliveryFeedback(ctx, account, argString(options, "planId"))
+		if err != nil {
+			return nil, err
+		}
+		return configureResult(result)
+	}
 	if action == "exportPackage" {
 		organization, _ := rows[0]["domain"].(string)
 		if strings.TrimSpace(organization) == "" {
@@ -125,6 +135,14 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 		})
 		if err != nil {
 			return nil, err
+		}
+		if action == "sender" {
+			feedback, feedbackErr := a.ensureDeliveryFeedback(ctx, account, argString(output, "planId"))
+			if feedbackErr != nil {
+				output["deliveryFeedback"] = "pending"
+			} else {
+				output["deliveryFeedback"] = feedback["deliveryFeedback"]
+			}
 		}
 		return configureResult(output)
 	}

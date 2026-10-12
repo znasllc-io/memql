@@ -29,7 +29,8 @@ func (a *azureSetup) connectionAction(ctx context.Context, account, action strin
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"status": "ok", "operations": rows, "deliveryFeedback": "not-configured"}, nil
+		status, err := a.feedbackStatus(ctx, account)
+		return map[string]any{"status": "ok", "operations": rows, "deliveryFeedback": status}, err
 	}
 	if action == "status" {
 		found, _, err := a.store.read(ctx, "organization:"+account, &connection)

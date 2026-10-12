@@ -167,8 +167,19 @@ func (w *Worker) campaignStats(ctx context.Context, campaign Campaign) (campaign
 		return nil, err
 	}
 
+	providerCounts := map[string]int{}
+	for _, status := range []string{"delivered", "bounced", "suppressed", "quarantined", "filtered-spam", "expanded", "failed"} {
+		count, err := w.store.count(ctx, call("query", "campaignProviderDeliveryCount", arg{"campaignId", campaign.ID}, arg{"providerStatus", status}))
+		if err != nil {
+			return nil, err
+		}
+		providerCounts[status] = count
+	}
+	providerFailed := providerCounts["bounced"] + providerCounts["suppressed"] + providerCounts["quarantined"] + providerCounts["filtered-spam"] + providerCounts["failed"]
+	deliverySummary := map[string]any{"confirmed": providerCounts["delivered"], "failed": providerFailed, "expanded": providerCounts["expanded"], "unconfirmed": max(0, sent-providerCounts["delivered"]-providerFailed-providerCounts["expanded"])}
 	out := campaignStatsResult{
 		"campaignId": campaign.ID,
+		"delivery":   deliverySummary,
 		"recipients": recipients,
 		"pending":    pending,
 		"sent":       sent,
@@ -198,6 +209,15 @@ func (w *Worker) campaignStats(ctx context.Context, campaign Campaign) (campaign
 		switch {
 		case strings.HasPrefix(query, "query audienceRosterSize"):
 			atLeast["recipients"] = true
+		case strings.HasPrefix(query, "query campaignProviderDeliveryCount"):
+			switch {
+			case strings.Contains(query, `providerStatus: "delivered"`):
+				atLeast["delivery.confirmed"] = true
+			case strings.Contains(query, `providerStatus: "expanded"`):
+				atLeast["delivery.expanded"] = true
+			default:
+				atLeast["delivery.failed"] = true
+			}
 		case strings.HasPrefix(query, "query campaignDeliveryCountByStatus"):
 			for _, status := range []string{"pending", "sent", "failed", "skipped"} {
 				if strings.Contains(query, `status: "`+status+`"`) {
@@ -233,6 +253,9 @@ func (w *Worker) campaignStats(ctx context.Context, campaign Campaign) (campaign
 	}
 	if atLeast["skipped.total"] || atLeast["skipped.suppressed"] || atLeast["skipped.unsubscribed"] {
 		delete(out["skipped"].(map[string]any), "other")
+	}
+	if atLeast["sent"] || atLeast["delivery.confirmed"] || atLeast["delivery.failed"] || atLeast["delivery.expanded"] {
+		delete(deliverySummary, "unconfirmed")
 	}
 	return out, nil
 }

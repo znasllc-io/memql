@@ -794,9 +794,16 @@ func (w *Worker) processRecipient(
 	}
 
 	msg.IntentID = "campaign:" + bare(campaign.ID) + ":recipient:" + bare(r.ID)
-	sendCtx, cancel := context.WithTimeout(ctx, w.cfg.SendTimeout)
-	err = w.deliver(sendCtx, msg, identity.SendAs)
-	cancel()
+	msg.DeliveryID = deliveryRowID(campaign.ID, r.ID)
+	reserved, release, reserveErr := w.reserveDelivery(ctx, msg, identity.SendAs)
+	if reserveErr != nil {
+		err = reserveErr
+	} else {
+		defer release() // Provider feedback waits until the delivery ledger is written.
+		sendCtx, cancel := context.WithTimeout(reserved, w.cfg.SendTimeout)
+		err = w.deliver(sendCtx, msg, identity.SendAs)
+		cancel()
+	}
 	// A lock that was busy is nothing attempted: the message was never judged and
 	// no attempt is spent on it. It is handled as the pause a provider asks for --
 	// the delivery stays retryable and the job waits a moment, so the rest of the

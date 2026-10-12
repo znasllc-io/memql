@@ -276,7 +276,7 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 		return empty, "", err
 	}
 	address := strings.ToLower(username + "@" + plan.Domain)
-	cfg := ACSConfig{AccountID: account, Endpoint: "https://" + service.Properties.HostName, AccessKey: keys.PrimaryKey, Senders: map[string]string{address: name}, Default: address, ReplyTo: replyTo}
+	cfg := ACSConfig{AccountID: account, ResourceID: plan.communicationPath(), Endpoint: "https://" + service.Properties.HostName, AccessKey: keys.PrimaryKey, Senders: map[string]string{address: name}, Default: address, ReplyTo: replyTo}
 	usernames, err := a.list(ctx, azureVersion(plan.domainPath()+"/senderUsernames"), token)
 	if err != nil {
 		return empty, "", err

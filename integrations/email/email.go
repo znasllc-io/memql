@@ -145,8 +145,11 @@ type Message struct {
 	// IntentID is a stable internal delivery identity, never an email header.
 	// A transport can reconcile a lost response without submitting it again.
 	IntentID string
-	To       string
-	Subject  string
+	// DeliveryID binds authenticated provider feedback to the campaign ledger.
+	// It is internal metadata, never an email header or provider argument.
+	DeliveryID string
+	To         string
+	Subject    string
 	// TextBody is the plain-text alternative. Required.
 	TextBody string
 	// HTMLBody is optional; when set the message goes out as

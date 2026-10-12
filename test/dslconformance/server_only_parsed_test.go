@@ -173,6 +173,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		{Path: "email/queries.memql", Name: "emailSendOperationByProviderId"}:                                                            true,
+		{Path: "email/queries.memql", Name: "emailUnindexedConnections", "emailReadyFeedbackOrganizations", "indexEmailConnectionState"}: true,
+		{Path: "campaigns/queries.memql", Name: "providerDeliveryById"}:                                                                  true,
+		{Path: "campaigns/queries.memql", Name: "providerConsentById"}:                                                                   true,
+		{Path: "campaigns/mutations.memql", Name: "recordProviderDelivery"}:                                                              true,
+		{Path: "campaigns/mutations.memql", Name: "recordProviderBounce"}:                                                                true,
 		// Durable email automation coordination; public callers use gated capabilities.
 		{Path: "campaigns/queries.memql", Name: "deferredSingleSendById"}:         true,
 		{Path: "campaigns/mutations.memql", Name: "settleDeferredSingleSend"}:     true,
