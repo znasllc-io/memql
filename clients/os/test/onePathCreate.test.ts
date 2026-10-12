@@ -7,10 +7,16 @@ import { describe, expect, it } from "vitest";
 // records what was asked for, what it was made from and which run made it. Uploading bytes the
 // person already has is the one other way in, and only the modules in ALLOWED do it.
 //
-// That is two rules, so the allowlist can only ever say "this module uploads":
-//   1. No file under src names the Materializer's own constructs. The SDK helper is their one
-//      caller and it lives outside src, so this rule has no allowlist.
-//   2. No file outside ALLOWED uploads.
+// Three rules, and only the third has an allowlist, so an entry can only ever say "this module
+// uploads":
+//   1. No file under src names a construct that makes a file or a document (RAW_CONSTRUCTS).
+//   2. No file builds a File out of nothing (FABRICATED_FILE).
+//   3. No file outside ALLOWED uploads.
+// Every rule reads every file whole, and no part of a file is exempt.
+//
+// Outside the invariant on purpose: a new version or a branch of a document that already exists
+// (appendDocumentVersion, libraryForkDocumentVersion) is an edit, and edits stay on the Library
+// revision workflow.
 //
 // REACHABLE POSITIVES, as in test/files/onePath.test.ts: an empty offender list says something
 // about the tree only if the scan reaches the tree and the patterns match real code. So the
@@ -19,15 +25,25 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = join(__dirname, "..", "src");
 
-// Rule 1: the Materializer's raw constructs, however they are reached.
+// Rule 1. The SDK's helpers call composeMaterialize and are its one caller; createLibraryFile,
+// createArtifact and createGeneratedOutput are raw writes that nothing in a client has any
+// business with (the server's upload routes call createLibraryFile). Each is matched in the three
+// ways it can be reached:
 //   query.composeMaterialize({ ... })         a call
 //   executeNamed("composeMaterialize", ...)   the quoted name
 //   buildComposeMaterialize({ ... })          the generated call builder
-// createLibraryFile is the Library's raw file write: the server's upload routes call it, a client never does.
-const RAW_CONSTRUCT =
-  /\b(?:composeMaterialize|createLibraryFile)\s*\(|["'`](?:composeMaterialize|createLibraryFile)["'`]|\bbuild(?:ComposeMaterialize|CreateLibraryFile)\s*\(/;
+const RAW_CONSTRUCTS = ["composeMaterialize", "createLibraryFile", "createArtifact", "createGeneratedOutput"];
+const builder = (name: string) => `build${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+const RAW_CONSTRUCT = new RegExp(
+  RAW_CONSTRUCTS.flatMap((name) => [`\\b${name}\\s*\\(`, `["'\`]${name}["'\`]`, `\\b${builder(name)}\\s*\\(`]).join("|"),
+);
 
-// Rule 2: putting a file the person already has into the Library.
+// Rule 2. A File the person picked, dropped or pasted arrives from the browser; the only way to
+// make one up is the constructor, so nothing under src may call it. Without this, an allowlisted
+// uploader could send provider.upload(new File(["\n"], "Untitled.md")) and pass.
+const FABRICATED_FILE = /\bnew\s+File\s*\(/;
+
+// Rule 3: putting a file the person already has into the Library.
 //   uploads.upload(file)    the edge upload port, UploadProvider.upload (items/upload.ts)
 //   ports.uploadFile(file)  the folder-upload port (apps/files/uploadTree.ts)
 //   createFile(...)         what the editors call their upload wrapper; no OS module has one
@@ -59,7 +75,10 @@ describe("one creation path", () => {
     for (const rel of FILES) {
       const text = source(rel);
       if (RAW_CONSTRUCT.test(text)) {
-        offenders.push(`${rel} names a Materializer construct: use startMaterialize`);
+        offenders.push(`${rel} names a raw file-creating construct: use startMaterialize`);
+      }
+      if (FABRICATED_FILE.test(text)) {
+        offenders.push(`${rel} builds a File: bytes the person did not hand over are not an upload, use startMaterialize`);
       }
       if (UPLOAD.test(text) && !(rel in ALLOWED)) {
         offenders.push(`${rel} uploads a file: add it to ALLOWED if it sends bytes the person picked, else use startMaterialize`);
@@ -86,14 +105,13 @@ describe("one creation path", () => {
   });
 
   it("catches a planted violation", () => {
-    for (const line of [
-      "await query.composeMaterialize({ name })",
-      "connection.query.createLibraryFile({})",
-      'await query.executeNamed("composeMaterialize", call)',
-      "const call = buildCreateLibraryFile(args)",
-    ]) {
-      expect(RAW_CONSTRUCT.test(line), line).toBe(true);
+    for (const name of RAW_CONSTRUCTS) {
+      expect(RAW_CONSTRUCT.test(`await query.${name}({ name })`), `${name} as a call`).toBe(true);
+      expect(RAW_CONSTRUCT.test(`await query.executeNamed("${name}", call)`), `${name} by its quoted name`).toBe(true);
+      expect(RAW_CONSTRUCT.test(`const call = ${builder(name)}(args)`), `${name} through its builder`).toBe(true);
     }
+    expect(FABRICATED_FILE.test('provider.upload(new File(["\\n"], "Untitled.md"))')).toBe(true);
+    expect(FABRICATED_FILE.test("const file = new  File (parts, name)")).toBe(true);
     for (const line of [
       'await uploads.upload(new File(["\\n"], "New.md")).done',
       "await ports.uploadFile(file, folderId)",
@@ -109,10 +127,14 @@ describe("one creation path", () => {
       "const made = await materialize(ports, request)",
       "await followComposition(ports, compositionId)",
       "await query.createLibraryFolder({ folderId, name })",
+      "await query.executeNamed('libraryForkDocumentVersion', buildLibraryForkDocumentVersion(args))",
       "uploadFiles(files, folderId)",
       "uploadTree(walked.files, destinationFolderId, label)",
+      "const reader = new FileReader()",
+      'const blob = new Blob([text], { type: "text/plain" })',
     ]) {
       expect(RAW_CONSTRUCT.test(line), line).toBe(false);
+      expect(FABRICATED_FILE.test(line), line).toBe(false);
       expect(UPLOAD.test(line), line).toBe(false);
     }
   });
