@@ -525,11 +525,15 @@ func (s *session) readLoop() error {
 		}
 
 		// Measured as the server will measure it, which is not the size of the text
-		// above (see withinServerCap). A request the server would not take fails by
-		// itself here, as one over the frame limit does.
+		// above (see withinServerCap), and as the server will receive it: with the
+		// request id the bridge gives an executeQuery that came without one, which can
+		// be as long as the message id. A request the server would not take fails by
+		// itself here, as one over the frame limit does, named by the ids it was sent
+		// with.
+		messageID, requestID := clientMsg.GetMessageId(), clientMsg.GetExecuteQuery().GetRequestId()
+		assignRequestId(clientMsg)
 		if size, ok := withinServerCap(clientMsg, s.serverBytes); !ok {
-			messageID := clientMsg.GetMessageId()
-			s.refuseRequest(messageID, clientMsg.GetExecuteQuery().GetRequestId(), int64(size), int64(s.serverBytes))
+			s.refuseRequest(messageID, requestID, int64(size), int64(s.serverBytes))
 			continue
 		}
 
@@ -700,15 +704,7 @@ func (s *session) forwardClientMessage(msg *memqlv1.MemqlClientMessage) error {
 	}
 	switch payload := msg.GetPayload().(type) {
 	case *memqlv1.MemqlClientMessage_ExecuteQuery:
-		requestId := normalizeRequestId(msg.GetMessageId(), payload.ExecuteQuery.GetRequestId())
-		if requestId == "" {
-			requestId = id.NewShortId()
-		}
-		// Ensure the forwarded message always has a requestId set so server responses
-		// correlate to the ID we track locally.
-		if strings.TrimSpace(payload.ExecuteQuery.GetRequestId()) == "" {
-			payload.ExecuteQuery.RequestId = requestId
-		}
+		requestId := assignRequestId(msg)
 
 		// If this request is already pending or in-flight, ignore duplicates.
 		if !s.markPending(requestId) {
@@ -1083,6 +1079,26 @@ func metadataFromRequest(r *http.Request) metadata.MD {
 		md.Append("authorization", "Bearer "+token)
 	}
 	return md
+}
+
+// assignRequestId gives an executeQuery the id the bridge tracks it by and returns
+// it: its own request id, or else its message id, or else a new id. One it gives is
+// written into the request, so that the server's answers carry the id the bridge is
+// waiting for; it is part of what the server receives. A message that is not an
+// executeQuery has none. Calling it again changes nothing.
+func assignRequestId(msg *memqlv1.MemqlClientMessage) string {
+	exec := msg.GetExecuteQuery()
+	if exec == nil {
+		return ""
+	}
+	requestId := normalizeRequestId(msg.GetMessageId(), exec.GetRequestId())
+	if requestId == "" {
+		requestId = id.NewShortId()
+	}
+	if strings.TrimSpace(exec.GetRequestId()) == "" {
+		exec.RequestId = requestId
+	}
+	return requestId
 }
 
 func normalizeRequestId(messageId, requestId string) string {

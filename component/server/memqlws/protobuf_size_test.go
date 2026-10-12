@@ -79,6 +79,82 @@ func TestARequestOverTheServersCapAsProtocolBuffersIsRefusedByItself(t *testing.
 	require.Equal(t, next, result["requestId"])
 }
 
+// The bridge gives an executeQuery that came without a request id one of its own,
+// the message id, before it forwards it, so the server receives the request with
+// that id in it: a tag, a length and the id more than was sent, 38 bytes for a
+// uuid. A request is measured with the id in it. Measured as it was sent, one
+// within those bytes of the cap passed the bridge and ended the session at the
+// server's Recv.
+func TestARequestIsMeasuredWithTheIdTheBridgeGivesIt(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	svc := &stubMemqlService{}
+	conn := dialBridge(t, ctx, startBridgeWith(t, Options{}, svc, bridgeSetup{serverCap: testServerCap}))
+
+	// Exactly at the cap as it was sent, with no request id: the id takes it over.
+	messageID := uuid.NewString()
+	query := queryForEncodedSize(t, messageID, "", testServerCap)
+	require.NoError(t, conn.Write(ctx, websocket.MessageText, []byte(executeQueryWithoutRequestId(messageID, query))))
+	frame := readFrame(t, ctx, conn)
+	refusal, ok := frame["queryError"].(map[string]any)
+	require.True(t, ok, "a request the bridge's id took over the cap was not refused: %v", frame)
+	require.Equal(t, messageID, frame["correlateTo"])
+	require.Equal(t, messageID, refusal["requestId"], "a request with no request id is named by its message id")
+	metadata := refusal["error"].(map[string]any)["metadata"].(map[string]any)
+	require.Equal(t, "REQUEST_TOO_LARGE", metadata["code"])
+	withId := proto.Size(executeQueryMessage(messageID, messageID, query))
+	require.Equal(t, testServerCap+2+len(messageID), withId)
+	require.Equal(t, strconv.Itoa(withId), metadata["sizeBytes"], "the size is the request's with the id in it")
+	require.Empty(t, receivedQueries(svc), "the server must never see a request the bridge refused")
+
+	// Exactly at the cap with the id in it: taken whole, and answered by that id.
+	messageID = uuid.NewString()
+	query = queryForEncodedSize(t, messageID, messageID, testServerCap)
+	require.NoError(t, conn.Write(ctx, websocket.MessageText, []byte(executeQueryWithoutRequestId(messageID, query))))
+	frame = readFrame(t, ctx, conn)
+	result, ok := frame["queryResult"].(map[string]any)
+	require.True(t, ok, "a request exactly at the cap with its id was not taken: %v", frame)
+	require.Equal(t, messageID, result["requestId"])
+	require.Equal(t, []string{query}, receivedQueries(svc), "the server must receive the request whole")
+}
+
+// executeQueryWithoutRequestId is an executeQuery as a client writes it that
+// leaves the request id to the bridge.
+func executeQueryWithoutRequestId(messageID, query string) string {
+	return `{"executeQuery":{"query":"` + query + `"},"messageId":"` + messageID + `"}`
+}
+
+func executeQueryMessage(messageID, requestID, query string) *memqlv1.MemqlClientMessage {
+	return &memqlv1.MemqlClientMessage{
+		MessageId: messageID,
+		Payload: &memqlv1.MemqlClientMessage_ExecuteQuery{
+			ExecuteQuery: &memqlv1.ExecuteQueryMsg{RequestId: requestID, Query: query},
+		},
+	}
+}
+
+// queryForEncodedSize is a query of q's that makes an executeQuery with these ids
+// exactly size bytes as protocol buffers.
+func queryForEncodedSize(t *testing.T, messageID, requestID string, size int) string {
+	t.Helper()
+	query := ""
+	// A length prefix can grow by a byte as the query does, so the size is approached
+	// and then corrected.
+	for range 4 {
+		got := proto.Size(executeQueryMessage(messageID, requestID, query))
+		switch {
+		case got == size:
+			return query
+		case got < size:
+			query += strings.Repeat("q", size-got)
+		default:
+			query = query[:len(query)-(got-size)]
+		}
+	}
+	t.Fatalf("no query of q's makes the request %d bytes", size)
+	return ""
+}
+
 // encodedSizeOf is the size of a request's protocol buffers encoding, which is
 // what the server measures.
 func encodedSizeOf(t *testing.T, text string) int {
