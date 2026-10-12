@@ -42,7 +42,10 @@ export function MakeWizard({ draft, onDraft, facts, names, open, onOpen, ingredi
   const change = (patch: Partial<MakeDraft>) => onDraft({ ...draft, ...patch });
   function show(step: MakeStepId) {
     if (making || starting) return;
-    if (step === "from" || step === "describe") change({ passed: { ...draft.passed, [step]: true } });
+    const passed = { ...draft.passed };
+    if (open === "from" || open === "describe") passed[open] = true;
+    if (step === "from" || step === "describe") passed[step] = true;
+    change({passed});
     onOpen(step);
   }
   function next() {
@@ -70,7 +73,7 @@ export function MakeWizard({ draft, onDraft, facts, names, open, onOpen, ingredi
           onChange={folderId => { change({ folderId }); const after = steps[steps.indexOf("folder") + 1]; if (after) onOpen(after); }} /></>;
       case "organization": return <AccountPicker id="mz-organization" label="Organization" value={draft.accountId} accounts={accounts}
         required={draft.fileKind.kind === "emailTemplate"} emptyLabel="No organization" onChange={accountId => change({ accountId })} />;
-      case "file": return <div className="os-mz-file-result"><FilePlus size={32} aria-hidden /><strong>{filedName(draft)}</strong><span>{names.folder(draft.folderId) || (draft.folderId ? "Unavailable folder" : "Library")}</span></div>;
+      case "file": return <div className="mz-file-result"><FilePlus size={32} aria-hidden /><strong>{filedName(draft)}</strong><span>{names.folder(draft.folderId) || (draft.folderId ? "Unavailable folder" : "Library")}</span></div>;
     }
   };
   const stopList: Stop[] = steps.map(step => ({ id: step, ...MAKE_STEPS[step], state: step === "file" ? (making ? "current" : "ahead") : stepState(step, draft, facts),
@@ -82,9 +85,9 @@ export function MakeWizard({ draft, onDraft, facts, names, open, onOpen, ingredi
   const handlers = { cancel: onCancel, next, make: onMake, setUpInference: onSetUpInference, stop: onStop, leave: onLeave };
   const labels = { cancel: "Cancel", next: "Next", make: "Make the file", setUpInference: "Set up Inference", stop: "Stop", leave: "Leave" };
   const acts: Act[] = (starting ? [] : floorActs({ draft, facts, open, making: !!making, canSetUpInference })).map(id => ({ label: labels[id], onAct: handlers[id], text: id === "cancel" || id === "stop", tone: id === "cancel" || id === "stop" ? "quiet" : "primary" }));
-  return <Wizard icon={<FilePlus />} title={making || starting ? "Making a file" : "Make a file"} label="Make a file" className="os-mz-make"
+  return <Wizard icon={<FilePlus />} title={making || starting ? "Making a file" : "Make a file"} label="Make a file" className="mz-make"
     breadcrumbs={[{ label: "Materialized", onSelect: making ? onLeave : onCancel }, { label: "Make" }]}
     steps={stopList} open={making ? "file" : open} onOpen={step => show(step as MakeStepId)} status={status} acts={acts}
-    notices={<>{refusal ? <Notice tone="error" sentence="The file was not made." detail={refusal} /> : null}
+    notices={<>{refusal ? <Notice tone="error" sentence={making ? "The file could not be stopped." : "The file was not made."} detail={refusal} /> : null}
       {!canSetUpInference && blocker(draft, facts)?.reason === "inference" && inferenceElsewhere ? <Notice tone="info" sentence={inferenceElsewhere} /> : null}</>} />;
 }

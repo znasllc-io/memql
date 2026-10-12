@@ -56,6 +56,7 @@
 export const MATERIALIZER_APP_ID = "materializer";
 
 /** The section that composes a new file (and the one that opens on a composition). */
+export const MATERIALIZER_MADE_SECTION = "materialized";
 export const MATERIALIZER_COMPOSE_SECTION = "composer";
 
 /** The kinds of file the Materializer writes, in the order it offers them. */

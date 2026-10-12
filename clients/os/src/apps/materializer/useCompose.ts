@@ -128,20 +128,6 @@ export function useTemplates(): LiveCollectionHandle<Row> {
   }));
 }
 
-/** Readable file names for template binding. The artifact index owns archive
- * state; ZIPs remain downloads and are never offered as template shells. */
-export function useTemplateFiles(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("compose:template-files", connection => ({
-    concept: Concepts.LIBRARY_ARTIFACT,
-    seed: async (cursor, signal) => {
-      const result = await connection.query.libraryArtifactsByLens({ lens: "artifact" }, { signal, ...(cursor ? { cursor } : {}) });
-      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
-    },
-    reread: async (rowId, signal) =>
-      (await getRowByConceptAndId(connection.query, Concepts.LIBRARY_ARTIFACT, rowId, { signal }) as Row) ?? null,
-  }));
-}
-
 /** Every recipe this caller owns, every page. */
 export function useRecipes(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("compose:recipes", (connection) => ({
@@ -222,7 +208,7 @@ export interface ComposablesState {
   reread: () => void;
 }
 
-export function useComposableConcepts(includeUnmarked: boolean): ComposablesState {
+export function useComposableConcepts(includeUnmarked: boolean, enabled = true): ComposablesState {
   const connection = useOsConnection();
   const [concepts, setConcepts] = useState<ComposableConcept[]>([]);
   const [loading, setLoading] = useState(false);
@@ -235,7 +221,7 @@ export function useComposableConcepts(includeUnmarked: boolean): ComposablesStat
 
   useEffect(() => {
     const query = connection?.query ?? null;
-    if (query === null) return;
+    if (!enabled || query === null) return;
     let cancelled = false;
     setLoading(true);
     setError("");
@@ -262,7 +248,7 @@ export function useComposableConcepts(includeUnmarked: boolean): ComposablesStat
     };
     // `includeUnmarked` is a DIFFERENT READING and re-baselines, which is
     // what keying on it expresses.
-  }, [connection, includeUnmarked, nonce]);
+  }, [connection, includeUnmarked, nonce, enabled]);
 
   return { concepts, loading, error, readAt, registryAvailable, reread };
 }
@@ -285,7 +271,7 @@ function conceptsFromReply(reply: Row | null): ComposableConcept[] {
 }
 
 // ---------------------------------------------------------------------------
-// Resolving a source list, for the Sources column's live count
+// Resolving a source list, for the ingredient tray
 // ---------------------------------------------------------------------------
 
 export interface ResolvedSource {

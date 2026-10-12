@@ -11153,82 +11153,6 @@ a.os-button {
   }
 }
 
-/* --- materializer (epic memql#4977) -----------------------------------
- *
- * ONE CONTIGUOUS BLOCK, under one comment, so a conflict with a sibling
- * epic touching this file is a clean take-both.
- *
- * EVERY COLOUR HERE IS A TOKEN. A theme pack carries colour and wallpaper
- * values, so a literal in this block would be a surface a pack cannot
- * restyle -- and the accent, warn and error hues carry fixed meanings in
- * this shell (live/primary/yes-here, warn, error) that this app has no
- * business adding a fourth to. The one axis this app introduces is INK
- * WEIGHT, which survives greyscale and every pack.
- */
-
-.os-mz {
-  display: grid;
-  grid-template-rows: auto 1fr auto auto;
-  gap: 12px;
-  min-height: 0;
-  height: 100%;
-}
-
-/* THE COLUMNS ARE THE COMPOSITION'S OWN STRUCTURE: what goes in, what it
- * is, what comes out. The middle is fluid because it holds prose; the
- * outer two are fixed-measure because they hold controls. */
-.os-mz-columns {
-  display: grid;
-  grid-template-columns: 15rem minmax(0, 1fr) 15rem;
-  gap: 16px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.os-mz-col {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-/* A composition is a brief and its output settings. File content belongs
- * in the editor, so these columns remain sized to their controls. */
-.os-mz-columns {
-  align-content: start;
-  overflow-y: auto;
-}
-
-.os-mz-columns[data-settled="true"] .os-mz-col {
-  overflow-y: visible;
-}
-
-.os-mz-col-brief {
-  min-width: 0;
-}
-
-/* What is wrong with the name as it is typed, directly under the field. The
- * error hue is the shell's for a refusal beside the control that caused it,
- * which is what this is: the same refusal, before the round trip. */
-.os-mz-name-problem {
-  margin: 0;
-  font-size: var(--os-text-sm);
-  color: var(--os-error);
-}
-
-.os-mz-statement {
-  margin: 0;
-  font-size: var(--os-text-md);
-  line-height: 1.6;
-  color: var(--os-ink);
-  /* Under 80 characters, so a statement reads as a sentence rather than
-   * as a banner. */
-  max-width: 60ch;
-}
-
 /* ---- the sources picker ---- */
 
 .os-mz-concepts,
@@ -15557,15 +15481,13 @@ button.os-cluster-mesh-peer:focus-visible {
 /* Full-height app panes own their body spacing and scrolling. The window
  * supplies a definite, unpadded rectangle; no negative height compensation.
  * Retained hidden panes must not change the active page's layout. */
-.os-window-content:has(:is(.os-deploy-pane, .os-cluster-pane, .os-action-pane, .os-mz, .os-nexus-goals, .os-nexus-list, .os-nexus-approvals, .os-nexus-run, .os-nexus-goalview, .os-nexus-automations):not([hidden] *)) {
+.os-window-content:has(:is(.os-deploy-pane, .os-cluster-pane, .os-action-pane, .os-nexus-goals, .os-nexus-list, .os-nexus-approvals, .os-nexus-run, .os-nexus-goalview, .os-nexus-automations):not([hidden] *)) {
   padding: 0;
   overflow: hidden;
 }
 .os-action-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
 .os-action-body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; padding: 18px 20px; }
 .os-action-body > * { flex-shrink: 0; }
-.os-mz { padding: 18px 20px 0; }
-.os-mz > .os-actbar { margin-inline: -20px; }
 .os-actbar-acts:empty { display: none; }
 .os-actbar-acts .os-button { max-width: 100%; height: auto; min-height: var(--os-control-h); white-space: normal; overflow-wrap: anywhere; }
 @container os-window (max-width: 420px) {
@@ -16311,15 +16233,3 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-backup-schedule .os-field { flex: 1; min-width: 120px; }
 
 /* Materializer: picked inputs are tangible; the rest uses the shared wizard. */
-.os-mz-list-host { height: 100%; min-height: 0; }
-.os-mz-list-host[hidden] { display: none; }
-.os-mz-ingredients { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.os-mz-picked { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 8px; padding: 0; margin: 0; list-style: none; }
-.os-mz-ingredient { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--os-line); border-radius: var(--os-radius); animation: os-mz-picked-arrive 160ms ease-out both; }
-.os-mz-ingredient > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
-.os-mz-ingredient strong { font-size: var(--os-text-sm); font-weight: 500; }
-.os-mz-ingredient small { color: var(--os-muted); font-size: var(--os-text-xs); }
-.os-mz-file-result { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; overflow-wrap: anywhere; }
-.os-mz-file-result > span { color: var(--os-muted); }
-@keyframes os-mz-picked-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-@media (prefers-reduced-motion: reduce) { .os-mz-ingredient { animation: none; } }

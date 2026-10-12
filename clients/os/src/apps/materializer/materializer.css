@@ -1,0 +1,19 @@
+.mz-list-host { height: 100%; min-height: 0; }
+.mz-list-host[hidden] { display: none; }
+.mz-ingredients { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.mz-picked { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 8px; padding: 0; margin: 0; list-style: none; }
+.mz-ingredient { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--os-line); border-radius: var(--os-radius); animation: mz-picked-arrive 160ms ease-out both; }
+.mz-ingredient > span { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
+.mz-ingredient strong { font-size: var(--os-text-sm); font-weight: 500; }
+.mz-ingredient small { color: var(--os-muted); font-size: var(--os-text-xs); }
+.mz-file-result { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; overflow-wrap: anywhere; }
+.mz-file-result > span { color: var(--os-muted); }
+@keyframes mz-picked-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .mz-ingredient { animation: none; } }
+
+.mz-list-section { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.mz-rowmark { display: inline-flex; align-items: center; gap: 6px; color: var(--os-muted); }
+.mz-rowmark-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mz-mark { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.mz-mark[data-mark="filled"] { background: currentColor; }
+.mz-mark[data-mark="hollow"] { border: 1px solid currentColor; }

@@ -82,6 +82,7 @@ export interface MakeDraft {
   fileKind: FileKind;
   /** "" for no template. */
   templateId: string;
+  layoutId?: string;
   ingredients: Ingredient[];
   /** What the person described, as typed. */
   statement: string;
@@ -283,6 +284,7 @@ export function draftFromComposition(c: CompositionRow, sources: readonly Source
   return {
     fileKind: kindOfComposition(c),
     templateId: c.templateId,
+    ...(c.layoutId ? { layoutId:c.layoutId } : {}),
     ingredients: distinct(sources, isIngredientKind),
     statement: c.statement,
     name: c.name,
@@ -332,7 +334,7 @@ export function keepUsableTemplate(draft: MakeDraft, facts: MakeFacts): MakeDraf
  */
 export function withKind(draft: MakeDraft, kind: FileKind, facts: MakeFacts): MakeDraft {
   const leavingEmailTemplate = draft.fileKind.kind === "emailTemplate" && kind.kind !== "emailTemplate";
-  return keepUsableTemplate({ ...draft, fileKind: kind, accountId: leavingEmailTemplate ? "" : draft.accountId }, facts);
+  return keepUsableTemplate({ ...draft, fileKind: kind, ...(leavingEmailTemplate ? { layoutId:undefined } : {}), accountId: leavingEmailTemplate ? "" : draft.accountId }, facts);
 }
 
 /**
@@ -540,7 +542,7 @@ export function requestOf(draft: MakeDraft): Omit<MaterializeRequest, "requestId
   if (draft.ingredients.length > 0) request.sources = draft.ingredients.map(sourceOf);
   if (draft.templateId !== "") request.templateId = draft.templateId;
   if (draft.folderId !== "") request.folderId = draft.folderId;
-  if (kind.kind === "emailTemplate") request.outputKind = "email_template";
+  if (kind.kind === "emailTemplate") { request.outputKind = "email_template"; if (draft.layoutId) request.layoutId = draft.layoutId; }
   if (draft.accountId !== "") request.accountIds = [draft.accountId];
   if (kind.kind === "package") request.deployableKind = kind.deployableKind;
   return request;

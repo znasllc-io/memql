@@ -1,3 +1,4 @@
+import "./materializer.css";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { refusalSentence, rowNumber, rowString, sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 import { useAuthSource } from "../../auth/context";
@@ -12,12 +13,14 @@ import { folderFromRow } from "../files/rows";
 import { useAccountOptions } from "../accounts/tie";
 import { useDefaultOrganization } from "../accounts/organization";
 import { accountName } from "../accounts/rows";
-import { Caption, Check, ContentSkeleton, Head, Notice, Panel, Select, SetupGroup, listCount, moduleActFor, useReach } from "../../kit";
+import { ContentSkeleton, Notice, listCount, moduleActFor, useReach } from "../../kit";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import { useOsIfPresent } from "../../chrome/state";
 import { appById, canOpen, type OsAppProps } from "../../system/registry";
 import { useSession } from "../../chrome/access";
 import { MaterializedSection } from "./MaterializedSection";
+import { SettingsSection } from "./SettingsSection";
+import { RecipesSection } from "./RecipesSection";
 import { TemplatesSection } from "./TemplatesSection";
 import { CompositionPage } from "./CompositionPage";
 import { MakeWizard } from "./MakeWizard";
@@ -27,10 +30,10 @@ import { DEPLOY_APP_ID, DEPLOY_APP_SECTION, GOAL_APP_ID, GOAL_APP_SECTION, goalI
 import { useCompositionActs, useMaterialize, useRecipeActs, useTemplateActs, recipeFacts } from "./actions";
 import { useDescriptionHandOff, useFilesEntries } from "./descriptionHandOff";
 import { reserveEditor, useEditorOpening } from "./editorOpening";
-import { compositionFromRow, modelsOf, recipeFromRow, recipeKeeps, sourcesOf, templateFromRow } from "./rows";
-import { DEFAULT_MATERIALIZER_SETTINGS, LocalMaterializerSettingsStore, MATERIALIZER_SECTIONS, type MaterializerSettings, type MaterializerSettingsStore, MATERIALIZER_REQUIRES, MATERIALIZER_WANTS } from "./settings";
+import { compositionFromRow, modelsOf, recipeKeeps, sourcesOf, templateFromRow } from "./rows";
+import { LocalMaterializerSettingsStore, MATERIALIZER_SECTIONS, type MaterializerSettings, type MaterializerSettingsStore } from "./settings";
 import { useCompositions, useRecipes, useTemplates, useFolders, useLibraryFiles, useComposableConcepts, useResolvedSources } from "./useCompose";
-import { FORMATS, formatWord, isRunning, madeCaption } from "./words";
+import { isRunning, madeCaption } from "./words";
 import { draftFromComposition, draftFromSetup, keepUsableTemplate, openingStep, pathOf, requestOf, type MakeDraft, type MakeFacts, type MakeStepId } from "./make";
 import { fileLookup, fileOptions } from "./ingredientFiles";
 
@@ -59,17 +62,17 @@ export function MaterializerApp({ sectionId, navigate, askContext, intent, consu
   const currentSection = useRef(sectionId); currentSection.current = sectionId;
   const cancelHandoff = useRef<(() => void) | null>(null);
   useEffect(() => () => cancelHandoff.current?.(), []);
-  const libraryFiles = useLibraryFiles(sectionId === "composer" || sectionId === "templates");
+  const [templateFilesNeeded, setTemplateFilesNeeded] = useState(false);
+  const libraryFiles = useLibraryFiles(sectionId === "composer" || templateFilesNeeded);
   const folders = useFolders(sectionId === "composer" || !!openId || sectionId === "recipes");
   const folderRows = useMemo(() => folders.snapshot.rows.map(folderFromRow), [folders.snapshot]);
   const templateRows = useMemo(() => templates.snapshot.rows.map(templateFromRow), [templates.snapshot]);
-  const recipeRows = useMemo(() => recipes.snapshot.rows.map(recipeFromRow), [recipes.snapshot]);
   const verdict = readiness?.loaded ? readiness.of("ai") : null;
   const facts: MakeFacts = { templates: templateRows, templatesLoaded: listCount(templates.snapshot) !== undefined,
-    inference: verdict?.state === "configured" ? true : verdict?.state === "unconfigured" || verdict?.state === "partial" ? false : null,
+    inference: !verdict || verdict.state === "unknown" ? null : verdict.state === "unconfigured" ? false : true,
     files: fileLookup(libraryFiles.snapshot.rows) };
   const inferenceAct = moduleActFor({ id: "ai", verdict, sectionsOf: reach.sectionsOf, canOpenWindows: reach.canOpenWindows });
-  const records = useComposableConcepts(settings.showUnmarkedConcepts);
+  const records = useComposableConcepts(settings.showUnmarkedConcepts, sectionId === "composer");
   const resolved = useResolvedSources(sectionId === "composer" ? draft.ingredients : []);
   const openRaw = compositions.snapshot.rows.find(row => sameEntityId(rowString(row,"id"), openId));
   const open = openRaw ? compositionFromRow(openRaw) : null;
@@ -116,6 +119,12 @@ export function MaterializerApp({ sectionId, navigate, askContext, intent, consu
       setDraft(draftFromComposition(c, sourcesOf(row!))); setMaking({ id, since: Date.parse(c.createdAt) || Date.now() }); navigate("composer");
     } else { setMaking(null); navigate("materialized"); }
   }
+  useEffect(() => {
+    if (sectionId !== "materialized" || !open || !isRunning(open.status)) return;
+    setDraft(draftFromComposition(open, sources));
+    setMaking({id:open.id,since:Date.parse(open.createdAt)||Date.now()});
+    navigate("composer");
+  }, [sectionId, open?.id, open?.status]);
   const handled = useRef("");
   useEffect(() => {
     if (!intent || handled.current === intent.id) return;
@@ -140,7 +149,7 @@ export function MaterializerApp({ sectionId, navigate, askContext, intent, consu
 
   function leave() {
     generation.current++; setMaking(null); setDraft(draftFromSetup(null,defaultFormat)); setOpenId(""); materialize.reset();
-    const to = returnTo; setReturnTo(undefined); navigate("materialized");
+    const to = returnTo ?? (making && returnFor?.id === making.id ? returnFor.to : undefined); setReturnTo(undefined); navigate("materialized");
     if (to && os && canOpen(os.registry,to.appId)) os.actions.openApp(to.appId,to.sectionId);
   }
   function make() {
@@ -193,8 +202,8 @@ export function MaterializerApp({ sectionId, navigate, askContext, intent, consu
   const run = makingRaw ? compositions.runOf(rowString(makingRaw,"runId")) : undefined;
   const runStart = run ? Date.parse(rowString(run,"startedAt")) : NaN;
   return <>
-    <div hidden={sectionId !== "materialized" || !!openId} className="os-mz-list-host">
-      <MaterializedSection source={compositions.source} showArchived={settings.showArchived} selectedId={openId} onSelect={showComposition}
+    <div hidden={sectionId !== "materialized" || !!openId} className="mz-list-host">
+      <MaterializedSection onRetry={compositions.reseed} source={compositions.source} showArchived={settings.showArchived} selectedId={openId} onSelect={showComposition}
         error={sectionId === "materialized" && !openId ? compositionActs.error : ""} onMake={() => beginSetup(null)} navigation={sectionId === "materialized" && !openId} />
     </div>
     {sectionId === "materialized" && openId ? open ? <CompositionPage composition={open} sources={sources} models={models}
@@ -210,13 +219,17 @@ export function MaterializerApp({ sectionId, navigate, askContext, intent, consu
       folders={folderOptions(folderRows)} foldersLoaded={listCount(folders.snapshot) !== undefined} foldersError={folders.snapshot.error || ""} accounts={accounts}
       refusal={materialize.error || compositionActs.error} starting={materialize.busy} making={making ? { since: Number.isFinite(runStart) ? runStart : making.since,
         detail: rowString(makingRaw ?? {},"status") === "composing" ? "Composing" : rowString(makingRaw ?? {},"status") === "rendering" ? "Writing the file" : "Starting" } : undefined}
-      canSetUpInference={inferenceAct.kind === "open"} inferenceElsewhere="Inference is set up in Settings. Ask an owner or developer to configure it."
+      canSetUpInference={inferenceAct.kind === "open"} inferenceElsewhere="An owner or developer can set it up."
       onMake={make} onCancel={leave} onStop={stop} onLeave={leave} onSetUpInference={() => { if (inferenceAct.kind === "open") reach.open(inferenceAct.app,inferenceAct.section); }} /> : null}
-    {sectionId === "templates" ? <TemplatesSection accounts={accounts} templates={templateRows} recipes={recipeRows} templatesAvailable={listCount(templates.snapshot) !== undefined} recipesAvailable={listCount(recipes.snapshot) !== undefined}
-      busy={templateActs.busy || recipeActs.busy} error={templateActs.error || recipeActs.error} showArchived={settings.showArchived} onCreateTemplate={templateActs.create}
-      onArchiveTemplate={id => void templateActs.archive(id)} onRestoreTemplate={id => void templateActs.restore(id)}
-      onRunRecipe={id => { void recipeActs.runRecipe(id,"").then(id => { if(id) showComposition(id); }); }} onArchiveRecipe={id => void recipeActs.archive(id)} onRestoreRecipe={id => void recipeActs.restore(id)} /> : null}
-    {sectionId === "settings" ? <MaterializerSettingsSection settings={settings} update={update} /> : null}
+    {sectionId === "templates" ? <TemplatesSection source={templates.source} accounts={accounts} files={libraryFiles.snapshot.rows}
+      filesLoading={listCount(libraryFiles.snapshot) === undefined} filesError={libraryFiles.snapshot.error || ""}
+      busy={templateActs.busy} error={templateActs.error} showArchived={settings.showArchived} onCreateTemplate={templateActs.create}
+      onFilesNeeded={setTemplateFilesNeeded} onRetry={templates.reseed} onReset={templateActs.reset}
+      onArchiveTemplate={id => void templateActs.archive(id)} onRestoreTemplate={id => void templateActs.restore(id)} /> : null}
+    {sectionId === "recipes" ? <RecipesSection source={recipes.source} showArchived={settings.showArchived} busy={recipeActs.busy} error={recipeActs.error}
+      names={names} onRetry={recipes.reseed} onReset={recipeActs.reset} onArchive={id=>void recipeActs.archive(id)} onRestore={id=>void recipeActs.restore(id)}
+      onRun={recipe=>{void recipeActs.runRecipe(recipe.id,"").then(id=>{if(!id)return; setDraft({...draftFromSetup({format:COMPOSE_FORMATS.find(f=>f===recipe.format)||"markdown",folderId:recipe.folderId},defaultFormat),name:recipe.name,statement:recipe.description});setMaking({id,since:Date.now()});setOpenId(id);navigate("composer");});}}/>:null}
+    {sectionId === "settings" ? <SettingsSection settings={settings} update={update} /> : null}
     {sectionId === "logs" ? <AppLogsSection app={MATERIALIZER_APP_ID} subjectConcepts={MATERIALIZER_LOG_CONCEPTS} intent={intent} consumeIntent={consumeIntent} /> : null}
   </>;
 }
@@ -224,120 +237,4 @@ export function MaterializerApp({ sectionId, navigate, askContext, intent, consu
 function instructionFor(payload: Record<string,unknown>): { compositionId: string } | { setup: ComposeSetup } | null {
   if (typeof payload.compositionId === "string" && payload.compositionId.trim()) return { compositionId: payload.compositionId };
   const setup = readComposeIntent(payload); return setup ? { setup } : null;
-}
-function MaterializerSettingsSection({
-  settings,
-  update,
-}: {
-  settings: MaterializerSettings;
-  update: (patch: Partial<MaterializerSettings>) => void;
-}) {
-  const { readiness } = useSession();
-  return (
-    <div className="os-settings">
-      <Head title="Materializer settings" />
-      {/* THE SET UP GROUP sits above the preferences on purpose: it is the
-          reason a person was sent here from an unconfigured surface, and the
-          first thing they need is what to configure and where. Rule 4 puts
-          micro-preferences in Settings; it never said they come first. */}
-      <SetupGroup
-        app="Materializer"
-        requires={MATERIALIZER_REQUIRES}
-        wants={MATERIALIZER_WANTS}
-        readiness={readiness}
-      />
-      <Panel label="Materializer settings">
-        <fieldset className="os-field-group">
-          <legend>Open the Materializer on</legend>
-          <div className="os-choice-row" role="radiogroup" aria-label="Default section">
-            {MATERIALIZER_SECTIONS.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                role="radio"
-                aria-checked={settings.defaultSection === section.id}
-                className="os-choice"
-                onClick={() => update({ defaultSection: section.id })}
-              >
-                {section.name}
-              </button>
-            ))}
-          </div>
-          <p className="os-caption">
-            Applies the next time a Materializer window opens; it does not move the window you are
-            looking at.
-          </p>
-        </fieldset>
-
-        <fieldset className="os-field-group">
-          <legend>Start on</legend>
-          <Select
-            id="mz-default-format"
-            value={settings.defaultFormat}
-            onChange={(defaultFormat) => update({ defaultFormat })}
-            label="Kind of file to start on"
-          >
-            {FORMATS.map((f) => (
-              <option key={f} value={f}>
-                {formatWord(f)}
-              </option>
-            ))}
-          </Select>
-          <p className="os-caption">
-            The kind of file the Target column starts on. Change it per composition whenever you
-            like — this only decides where it begins.
-          </p>
-        </fieldset>
-
-        <fieldset className="os-field-group">
-          <legend>Archived</legend>
-          <Check
-            checked={settings.showArchived}
-            onChange={(showArchived) => update({ showArchived })}
-          >
-            List archived compositions, templates and recipes
-          </Check>
-          <p className="os-caption">
-            Off by default: archiving something is how you say you are done with it. Archiving a
-            record never touches the file it names — the file is an ordinary Library row with its
-            own place in the Bin.
-          </p>
-        </fieldset>
-
-        <fieldset className="os-field-group">
-          <legend>What you can compose from</legend>
-          <Check
-            checked={settings.showUnmarkedConcepts}
-            onChange={(showUnmarkedConcepts) => update({ showUnmarkedConcepts })}
-          >
-            Offer every concept, not only the marked ones
-          </Check>
-          <p className="os-caption">
-            A concept is marked in the DSL as worth composing from, and the marked ones are what
-            Sources offers. Unmarked is not forbidden — turning this on lists the rest after them,
-            saying which they are.
-          </p>
-        </fieldset>
-
-        {/* THE ABSENT CONTROL, WITH AN ACCOUNT OF ITSELF. Somebody who
-            opens settings in an app that spends model calls looks for a
-            budget field. There is none, and an absent control with
-            nothing said about it reads as something nobody got round to
-            building. */}
-        <fieldset className="os-field-group">
-          <legend>Spending</legend>
-          <p className="os-caption">
-            Not set here. A materialization is a goal, and a goal's ceilings — tokens, cost, wall
-            clock, retries — are set when the goal is accepted. One step of a materialization
-            reaches a model at all, and a repeat of one already done reaches none.
-          </p>
-        </fieldset>
-      </Panel>
-      <Caption>
-        These are kept in this browser, separately from your desktop, so an app learning a checkbox
-        can never cost you your desks. The defaults are{" "}
-        {DEFAULT_MATERIALIZER_SETTINGS.defaultSection} with archived hidden.
-      </Caption>
-    </div>
-  );
 }

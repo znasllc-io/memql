@@ -47,7 +47,7 @@ export function CompositionPage({ composition: c, sources, models, filedIn, temp
         <PageFact label="Made from">{sources.length ? sources.map(s => s.label || s.ref).join(", ") : "Nothing"}</PageFact>
         <PageFact label="Description">{c.statement || "None"}</PageFact>
         {c.templateId ? <PageFact label="Template">{templateName || "Unavailable template"}</PageFact> : null}
-        <PageFact label="Made by"><span className="os-mz-rowmark"><span className="os-mz-mark" data-mark={models.length ? "filled" : "hollow"} aria-hidden />{models.length ? modelsPhrase(models) : "No model"}</span>
+        <PageFact label="Made by"><span className="mz-rowmark"><span className="mz-mark" data-mark={models.length ? "filled" : "hollow"} aria-hidden />{models.length ? modelsPhrase(models) : "No model"}</span>
           {canOpenRun ? <Button tone="quiet" onClick={onOpenRun}>Open the run</Button> : null}</PageFact>
         {provenance ? <PageFact label="Provenance">{provenance}</PageFact> : null}
         {c.accountIds.length ? <PageFact label="Organization">{organizationName || "Unavailable organization"}</PageFact> : null}
@@ -56,7 +56,7 @@ export function CompositionPage({ composition: c, sources, models, filedIn, temp
       {caption ? <Caption>{caption}</Caption> : null}
       {error ? <Notice tone="error" sentence={error} /> : null}
       {notices.map((notice, i) => <Notice key={i} tone="info" {...notice} />)}
-      <p className="os-sr-only os-mz-announce" role="status" aria-live="polite" aria-atomic="true">{notices.flatMap(n => [n.sentence, n.detail, n.next]).filter(Boolean).join(" ")}</p>
+      <p className="os-sr-only mz-announce" role="status" aria-live="polite" aria-atomic="true">{notices.flatMap(n => [n.sentence, n.detail, n.next]).filter(Boolean).join(" ")}</p>
     </div>
     <ActionBar state={state.word} detail={state.detail} acts={acts.map(act => ({ ...act, tone: act.tone === "primary" ? "primary" : "quiet", busy, onAct: () => onAct(act.id) }))} />
   </div>;

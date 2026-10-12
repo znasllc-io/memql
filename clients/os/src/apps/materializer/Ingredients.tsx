@@ -23,11 +23,11 @@ export function Ingredients({ picked, onChange, files, filesLoading, filesError,
   const offeredRecords = records.concepts.filter(c => c.list && (!query || `${c.as} ${c.description}`.toLowerCase().includes(query))).sort((a,b) => Number(b.marked)-Number(a.marked));
   const selected = (kind: Ingredient["kind"], ref: string) => picked.some(item => item.kind === kind && item.ref === ref);
   const toggle = (item: Ingredient) => onChange(selected(item.kind, item.ref) ? picked.filter(p => p.kind !== item.kind || p.ref !== item.ref) : [...picked, item]);
-  return <div className="os-mz-ingredients">
-    {picked.length ? <ul className="os-mz-picked" aria-label="Picked things">{picked.map(item => {
+  return <div className="mz-ingredients">
+    {picked.length ? <ul className="mz-picked" aria-label="Picked things">{picked.map(item => {
       const count = resolved.sources.find(s => s.kind === item.kind && s.ref === item.ref);
       const fact = item.kind === "library_file" ? files.find(f => f.id === item.ref)?.kind || "File" : count ? count.problem || `${count.count} ${count.count === 1 ? "row" : "rows"}` : "—";
-      return <li key={`${item.kind}:${item.ref}`} className="os-mz-ingredient">
+      return <li key={`${item.kind}:${item.ref}`} className="mz-ingredient">
         {item.kind === "library_file" ? <File size={18} aria-hidden /> : <Database size={18} aria-hidden />}
         <span><strong>{item.label || item.ref}</strong><small>{fact}</small></span>
         <IconButton label={`Remove ${item.label || item.ref}`} onClick={() => toggle(item)}><X size={16} /></IconButton>
@@ -45,8 +45,8 @@ export function Ingredients({ picked, onChange, files, filesLoading, filesError,
     {records.loading && !records.concepts.length ? <RecordListSkeleton label="Reading record types" /> : null}
     {records.error ? <><Notice tone="error" sentence={records.error} /><Button tone="quiet" onClick={records.reread}>Try again</Button></> : null}
     {!records.loading && !records.registryAvailable ? <Notice tone="info" sentence="This node cannot read the record types, so none are offered." /> : null}
-    <RecordList label="Records to pick">{offeredRecords.map(record => <RecordRow key={record.id} name={record.as || record.id} secondary={record.description} selected={selected("query", record.list)}
-      onOpen={() => toggle({ kind: "query", ref: record.list, label: record.as || record.id })}>{!record.marked ? <Chip>Unmarked</Chip> : null}</RecordRow>)}</RecordList>
+    <RecordList label="Records to pick">{offeredRecords.map(record => <RecordRow key={record.id} name={record.as || record.id} secondary={record.description} selected={selected("query", `query ${record.list}()`)}
+      onOpen={() => toggle({ kind: "query", ref: `query ${record.list}()`, label: record.as || record.id })}>{!record.marked ? <Chip>Unmarked</Chip> : null}</RecordRow>)}</RecordList>
     {!filesLoading && !records.loading && !filesError && !records.error && !offeredFiles.length && !offeredRecords.length ? <p className="os-caption">{query ? "No matches. Clear the search to see everything." : "Nothing to pick yet. Files you upload in Files appear here."}</p> : null}
   </div>;
 }

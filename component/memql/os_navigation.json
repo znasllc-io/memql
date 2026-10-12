@@ -333,16 +333,20 @@
     "requires": "app:materializer",
     "sections": [
       {
-        "id": "composer",
-        "name": "Compose"
-      },
-      {
         "id": "materialized",
         "name": "Materialized"
       },
       {
+        "id": "composer",
+        "name": "Make a file"
+      },
+      {
         "id": "templates",
         "name": "Templates"
+      },
+      {
+        "id": "recipes",
+        "name": "Recipes"
       },
       {
         "id": "logs",

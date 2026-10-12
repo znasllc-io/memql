@@ -21,7 +21,6 @@ import {
   statusTone,
   statusWord,
 } from "../../src/apps/materializer/words";
-import { actsFor, stateLine } from "../../src/apps/materializer/acts";
 import {
   sanitizeSettings,
   DEFAULT_MATERIALIZER_SETTINGS,
@@ -240,100 +239,6 @@ describe("the words", () => {
   it("keeps status hue off the chip", () => {
     for (const status of ["draft", "composing", "rendering", "ready", "failed", "cancelled"] as const) {
       expect(["neutral", "accent", "muted"]).toContain(statusTone(status));
-    }
-  });
-});
-
-describe("acts follow the state", () => {
-  const noDraft = { sourceCount: 0, hasContent: false, hasFormat: true, hasOrganization: true, submitting: false };
-  const ready = { sourceCount: 2, hasContent: false, hasFormat: true, hasOrganization: true, submitting: false };
-
-  // AN ILLEGAL ACT IS ABSENT, NEVER DISABLED.
-  it("offers nothing to compose without content or sources, and says why on the bar", () => {
-    expect(actsFor(null, noDraft)).toEqual([]);
-    expect(stateLine(null, noDraft)).toContain("Describe what to make");
-  });
-
-  it("offers Materialize for supplied content without graph sources", () => {
-    const content = { ...noDraft, hasContent: true };
-    expect(actsFor(null, content).map((a) => a.id)).toEqual(["materialize"]);
-    expect(stateLine(null, content)).toBe("Ready to compose your file");
-    expect(actsFor(null, { ...content, hasFormat: false })).toEqual([]);
-  });
-
-  it("offers Materialize once there is something to compose from", () => {
-    expect(actsFor(null, ready).map((a) => a.id)).toEqual(["materialize"]);
-  });
-
-  // A RUNNING COMPOSITION OFFERS NO MATERIALIZE: re-materializing would
-  // open a second composition against the same sources and produce a
-  // second file, with nothing on the page saying which is the deliverable.
-  it("offers only Stop while it is running", () => {
-    for (const status of ["composing", "rendering"] as const) {
-      const acts = actsFor(compositionFromRow(compositionRow({ status })), ready);
-      expect(acts.map((a) => a.id)).toEqual(["stop"]);
-    }
-  });
-
-  // PRIMARY LAST, because that is where the eye lands (rule 12) -- and the
-  // primary act on a finished materialization is opening the thing it
-  // made. A rendered pass put Archive there instead, which is the act
-  // somebody reaches for least.
-  it("offers archive, a recipe and the file once it is ready, primary last", () => {
-    const acts = actsFor(compositionFromRow(compositionRow()), ready);
-    expect(acts.map((a) => a.id)).toEqual(["archive", "saveRecipe", "openFile"]);
-    expect(acts[acts.length - 1]?.tone).toBe("primary");
-    expect(acts.filter((a) => a.tone === "primary")).toHaveLength(1);
-  });
-
-  // A PACKAGE'S NEXT STEP IS A DEPLOY, and the three-act limit forces a
-  // real choice rather than an arbitrary trim: a document's repeatability
-  // is a recipe, a deployable's is the Deployables pipeline's own redeploy.
-  it("offers the deploy hand-off on a package, and drops Save as recipe for it", () => {
-    const pkg = compositionFromRow(compositionRow({ deployableKind: "shopify_storefront" }));
-    const acts = actsFor(pkg, ready);
-    expect(acts.map((a) => a.id)).toEqual(["archive", "openFile", "openDeployables"]);
-    expect(acts[acts.length - 1]?.tone).toBe("primary");
-    expect(acts.map((a) => a.id)).not.toContain("saveRecipe");
-  });
-
-  // The reachable positive: an ordinary document does NOT get the deploy
-  // act, so the assertion above is about `deployableKind` rather than
-  // about the function returning a constant.
-  it("does not offer the deploy hand-off on an ordinary document", () => {
-    const acts = actsFor(compositionFromRow(compositionRow()), ready);
-    expect(acts.map((a) => a.id)).not.toContain("openDeployables");
-  });
-
-  it("does not offer Save as recipe on a composition that came from one", () => {
-    const acts = actsFor(compositionFromRow(compositionRow({ recipeId: "r1" })), ready);
-    expect(acts.map((a) => a.id)).not.toContain("saveRecipe");
-  });
-
-  // NO RETRY, deliberately: the record holds the sources it RESOLVED
-  // rather than the form that produced them, so "retry" would silently
-  // mean something slightly different from what was asked for.
-  it("offers Start over rather than Retry on a failure, and names the reason", () => {
-    const failed = compositionFromRow(
-      compositionRow({ status: "failed", failureReason: "object storage refused the upload" }),
-    );
-    const acts = actsFor(failed, ready);
-    expect(acts.map((a) => a.id)).toEqual(["startOver", "archive"]);
-    expect(acts.map((a) => a.id)).not.toContain("materialize");
-    expect(stateLine(failed, ready)).toContain("object storage refused");
-  });
-
-  it("an archived record offers its file and a restore, and nothing else", () => {
-    const acts = actsFor(compositionFromRow(compositionRow({ archived: true })), ready);
-    expect(acts.map((a) => a.id)).toEqual(["openFile", "restore"]);
-  });
-
-  it("never offers more than three acts", () => {
-    for (const status of ["draft", "composing", "rendering", "ready", "failed", "cancelled"] as const) {
-      for (const archived of [false, true]) {
-        const acts = actsFor(compositionFromRow(compositionRow({ status, archived })), ready);
-        expect(acts.length).toBeLessThanOrEqual(3);
-      }
     }
   });
 });

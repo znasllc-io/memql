@@ -224,6 +224,7 @@ export interface NewRecipeFacts {
   description: string;
   format: string;
   templateId: string;
+  layoutId?: string;
   folderId: string;
   sourceSelectors: SelectorRow[];
   accountIds: string[];
@@ -236,6 +237,7 @@ export function recipeFacts(composition: CompositionRow, sources: SourceRow[]): 
   return {
     name: composition.name, description: composition.statement, format: composition.format,
     templateId: composition.templateId, folderId: composition.folderId,
+    ...(composition.layoutId ? { layoutId:composition.layoutId } : {}),
     accountIds: composition.accountIds, outputKind: composition.outputKind,
     sourceSelectors: sources.filter(recipeKeeps).map(source => ({
       kind: source.kind === "query" ? "concept_query" : source.kind, selector: source.ref, label: source.label,
@@ -249,6 +251,9 @@ export function useCompositionActs(): CompositionActsState {
   const connection = useOsConnection();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const recipeAsk = useRef<{ key: string; id: string } | null>(null);
+  const recipePending = useRef<Promise<string> | null>(null);
 
   const run = useCallback(
     async <T,>(fn: (query: NonNullable<typeof connection>["query"]) => Promise<T>, fallback: T): Promise<T> => {
@@ -291,13 +296,16 @@ export function useCompositionActs(): CompositionActsState {
         await query.restoreComposition({ compositionId });
       }, undefined);
     },
-    saveRecipe: async (facts) =>
-      run(async (query) => {
+    saveRecipe: (facts) => {
+      if (recipePending.current) return recipePending.current;
+      const key = JSON.stringify(facts);
+      if (recipeAsk.current?.key !== key) recipeAsk.current = { key, id: newId() };
+      const recipeId = recipeAsk.current.id;
+      const pending = run(async (query) => {
         // THE ID IS THE CLIENT'S because `createComposeRecipe` takes one:
         // an insert{} stamps `id: args.recipeId`, so a retried call
         // re-versions the same row instead of appending a duplicate to
         // somebody's recipe list.
-        const recipeId = newId();
         await query.createComposeRecipe({
           recipeId,
           name: facts.name.trim(),
@@ -306,11 +314,16 @@ export function useCompositionActs(): CompositionActsState {
           ...(facts.outputKind ? { outputKind: facts.outputKind } : {}),
           ...(facts.description.trim() ? { description: facts.description.trim() } : {}),
           ...(facts.templateId ? { templateId: facts.templateId } : {}),
+          ...(facts.layoutId ? { layoutId: facts.layoutId } : {}),
           ...(facts.folderId ? { folderId: facts.folderId } : {}),
           ...(facts.sourceSelectors.length > 0 ? { sourceSelectors: facts.sourceSelectors.map(source => ({ ...source })) } : {}),
         });
+        recipeAsk.current = null;
         return recipeId;
-      }, ""),
+      }, "").finally(() => { recipePending.current = null; });
+      recipePending.current = pending;
+      return pending;
+    },
   };
 }
 
@@ -337,6 +350,9 @@ export function useTemplateActs(): TemplateActsState {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const ask = useRef<{ key: string; id: string } | null>(null);
+  const inFlight = useRef<Promise<string> | null>(null);
+
   const create = useCallback(
     async (facts: NewTemplateFacts): Promise<string> => {
       const query = connection?.query ?? null;
@@ -351,7 +367,9 @@ export function useTemplateActs(): TemplateActsState {
       setBusy(true);
       setError("");
       try {
-        const templateId = newId();
+        const key = JSON.stringify(facts);
+        if (ask.current?.key !== key) ask.current = { key, id: newId() };
+        const templateId = ask.current.id;
         await query.createComposeTemplate({
           templateId,
           name: facts.name.trim(),
@@ -360,6 +378,7 @@ export function useTemplateActs(): TemplateActsState {
           format: facts.format,
           ...(facts.description.trim() ? { description: facts.description.trim() } : {}),
         });
+        ask.current = null;
         return templateId;
       } catch (err) {
         setError(describe(err));
@@ -395,8 +414,13 @@ export function useTemplateActs(): TemplateActsState {
   return {
     busy,
     error,
-    reset: () => setError(""),
-    create,
+    reset: () => { ask.current = null; setError(""); },
+    create: facts => {
+      if (inFlight.current) return inFlight.current;
+      const pending = create(facts).finally(() => { inFlight.current = null; });
+      inFlight.current = pending;
+      return pending;
+    },
     archive: (templateId) => flip(templateId, false),
     restore: (templateId) => flip(templateId, true),
   };
@@ -416,6 +440,7 @@ export function useRecipeActs(): RecipeActsState {
   const connection = useOsConnection();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const pending = useRef<Promise<string>|null>(null);
 
   const call = useCallback(
     async <T,>(fn: (query: NonNullable<typeof connection>["query"]) => Promise<T>, fallback: T): Promise<T> => {
@@ -442,15 +467,19 @@ export function useRecipeActs(): RecipeActsState {
     busy,
     error,
     reset: () => setError(""),
-    runRecipe: (recipeId, name) =>
-      call(async (query) => {
+    runRecipe: (recipeId, name) => {
+      if (pending.current) return pending.current;
+      pending.current = call(async (query) => {
         const result = await query.composeRunRecipe({
           recipeId,
           ...(name.trim() ? { name: name.trim() } : {}),
         });
         const reply = result.rows()[0] ?? null;
-        return typeof reply?.["compositionId"] === "string" ? (reply["compositionId"] as string) : "";
-      }, ""),
+        if (typeof reply?.["compositionId"] !== "string" || !reply["compositionId"]) throw new Error("The cluster did not confirm which file it is making.");
+        return reply["compositionId"] as string;
+      }, "").finally(()=>{pending.current=null;});
+      return pending.current;
+    },
     archive: async (recipeId) => {
       await call(async (query) => {
         await query.archiveComposeRecipe({ recipeId });
