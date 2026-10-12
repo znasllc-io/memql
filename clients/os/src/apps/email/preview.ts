@@ -8,10 +8,11 @@
 // network. Three layers say so, each enough on its own for what it covers:
 //
 //   - this sanitizer keeps only elements and attributes that draw, strips
-//     scripts, handlers, forms, `meta`, `base` and `link`, keeps a picture only
-//     when it is a raster carried in the email itself, and drops every CSS
-//     declaration and rule that would load something (`url(`, `@import`,
-//     `image-set(`, `expression(`, `behavior`, `-moz-binding`);
+//     scripts, handlers, forms, `meta`, `base` and `link` (and SVG and MathML
+//     whole), keeps a picture only when it is a raster carried in the email
+//     itself, and drops every CSS declaration and rule that would load
+//     something (`url(`, `@import`, the image functions that take a bare
+//     string, `expression(`, and the `behavior` and `-moz-binding` properties);
 //   - the document it writes opens with a Content-Security-Policy that allows
 //     inline styles and `data:` pictures and nothing else;
 //   - the frame is sandboxed without scripts and without its origin
@@ -33,6 +34,11 @@ const KEEP = new Set([
  * Elements that go WITH what they hold: they run, load, take input or stand for
  * another document. Anything neither kept nor here (`o:p`, `label`, `summary`)
  * gives way to its content, so an unknown wrapper never costs the words in it.
+ *
+ * Names are compared in upper case: an SVG or MathML element keeps its own
+ * lower-case name in an HTML document (`svg`, and a `script` inside it), and
+ * one that slipped past as unknown would be unwrapped, leaving its script as
+ * visible text.
  */
 const DROP = new Set([
   "APPLET", "AREA", "AUDIO", "BASE", "BGSOUND", "BUTTON", "CANVAS", "DATALIST", "DIALOG", "EMBED", "FENCEDFRAME", "FORM",
@@ -81,11 +87,12 @@ export function emailPreview(html: string): string {
 
   for (const comment of commentsIn(doc.body)) comment.remove();
   for (const element of [...doc.body.querySelectorAll("*")]) {
-    if (DROP.has(element.tagName)) {
+    const tag = element.tagName.toUpperCase();
+    if (DROP.has(tag)) {
       element.remove();
       continue;
     }
-    if (!KEEP.has(element.tagName)) {
+    if (!KEEP.has(tag)) {
       element.replaceWith(...element.childNodes);
       continue;
     }
@@ -129,11 +136,12 @@ function keepAttributes(element: Element): void {
       else element.setAttribute(attribute.name, style);
     }
   }
-  if (element.tagName === "IMG") {
+  const tag = element.tagName.toUpperCase();
+  if (tag === "IMG") {
     if (src.length <= MAX_RASTER && RASTER.test(src)) element.setAttribute("src", src);
     else element.remove();
   }
-  if (element.tagName === "A" && /^https?:\/\//i.test(href)) {
+  if (tag === "A" && /^https?:\/\//i.test(href)) {
     element.setAttribute("href", href);
     element.setAttribute("target", "_blank");
     element.setAttribute("rel", "noopener noreferrer");
@@ -152,8 +160,21 @@ function keepAttributes(element: Element): void {
 // Whether an item loads something is asked of its text with comments taken out
 // and escapes read, so neither `u\72 l(` nor `ur/**/l(` is a way past it.
 
-/** What makes a declaration or a rule fetch: a URL, an import, an image set, script, a binding. */
-const LOADS = /url\(|src\(|image-set\(|image\(|@import|expression\(|behavior|binding|javascript:/;
+/**
+ * What makes a declaration or a rule fetch or run: a URL, an import, an image
+ * function that takes a bare string or another element (`image-set(`,
+ * `image(`, `cross-fade(` and their prefixed forms, `element(`, `paint(`,
+ * `src(`), script.
+ */
+const LOADS = /url\(|src\(|image-set\(|image\(|cross-fade\(|element\(|paint\(|@import|expression\(|javascript:/;
+
+/**
+ * The properties that load script whatever their value says: IE's `behavior`
+ * (and its `-ms-` and `*` hack spellings) and Firefox's `-moz-binding`. Asked
+ * of a declaration's property name, so a selector or a value that only says the
+ * word (`.behavior-note`, a font named Behavior) keeps its rule.
+ */
+const LOADING_PROPERTY = /^[*_]?(?:(?:-ms-)?behavior|-moz-binding):/;
 
 /** A style attribute's declarations, without any that would load something. "" when none is left. */
 export function sanitizeDeclarations(css: string): string {
@@ -193,7 +214,8 @@ export function sanitizeStylesheet(css: string): string {
 
 /** Whether an item's text, comments out and escapes read, names anything that loads. */
 function loads(text: string): boolean {
-  return LOADS.test(unescapeCss(withoutComments(text)).toLowerCase().replace(/\s+/g, ""));
+  const read = unescapeCss(withoutComments(text)).toLowerCase().replace(/\s+/g, "");
+  return LOADS.test(read) || LOADING_PROPERTY.test(read);
 }
 
 /**

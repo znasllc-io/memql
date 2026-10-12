@@ -96,6 +96,61 @@ describe("email preview isolation", () => {
     expect(doc.querySelector("p:last-child")?.textContent).toBe("End");
   });
 
+  it("drops SVG and MathML whole, with every script and word in them", () => {
+    // Their elements keep lower-case names in an HTML document, so a set of
+    // upper-case names misses them, and an unwrapped <svg><script> leaves its
+    // script as visible text.
+    const result = emailPreview(
+      '<body><svg width="10"><script>alert(1)</script><text>svg words</text></svg>' +
+        '<math><mi>x</mi><script>alert(2)</script></math><p>After</p></body>',
+    );
+    const doc = new DOMParser().parseFromString(result, "text/html");
+    expect(result).not.toContain("alert(");
+    expect(result).not.toContain("svg words");
+    expect(doc.querySelectorAll("svg, math, script")).toHaveLength(0);
+    expect(doc.querySelector("p")?.textContent).toBe("After");
+  });
+
+  it("drops image functions that take a bare string, whatever their prefix", () => {
+    const result = emailPreview(
+      '<html><head><style>' +
+        '.a{background:-webkit-cross-fade("https://track.test/a.png","https://track.test/b.png",50%);color:red}' +
+        '.b{background-image:cross-fade(50% "https://track.test/c.png",white);margin:0}' +
+        '.c{background:-webkit-image-set("https://track.test/d.png" 1x);padding:1px}' +
+        '.d{background:image("https://track.test/e.png");border:0}' +
+        '.e{background:-moz-element(#banner);top:0}' +
+        '</style></head><body>' +
+        '<p style="background:-webkit-cross-fade(&quot;https://track.test/f.png&quot;,&quot;https://track.test/g.png&quot;,50%);color:#2b2b2b">Hi</p>' +
+        '</body></html>',
+    );
+    const doc = new DOMParser().parseFromString(result, "text/html");
+    expect(result).not.toContain("track.test");
+    const css = [...doc.querySelectorAll("style")].map((style) => style.textContent).join("");
+    for (const kept of [".a{color:red}", ".b{margin:0}", ".c{padding:1px}", ".d{border:0}", ".e{top:0}"]) expect(css).toContain(kept);
+    expect(doc.querySelector("p")?.getAttribute("style")).toBe("color:#2b2b2b");
+  });
+
+  it("drops behavior and -moz-binding as properties, and keeps a rule that only says the word", () => {
+    const result = emailPreview(
+      '<html><head><style>' +
+        '.behavior-note{color:blue}.binding{margin:0}' +
+        '.y{behavior:url(x.htc);-moz-binding:url(#b);-ms-behavior:url(y.htc);color:red}.z{*behavior:expression(x);width:1px}' +
+        // A value that names no URL: only the property says it loads.
+        '.w{behavior:#default#VML;height:2px}.v{-moz-binding:none;left:0}' +
+        '</style></head><body><p class="behavior-note" style="font-family:Behavior Sans;color:#2b2b2b">Hi</p></body></html>',
+    );
+    const doc = new DOMParser().parseFromString(result, "text/html");
+    const css = [...doc.querySelectorAll("style")].map((style) => style.textContent).join("");
+    expect(css).toContain(".behavior-note{color:blue}");
+    expect(css).toContain(".binding{margin:0}");
+    expect(css).toContain(".y{color:red}");
+    expect(css).toContain(".z{width:1px}");
+    expect(css).toContain(".w{height:2px}");
+    expect(css).toContain(".v{left:0}");
+    expect(css).not.toMatch(/htc|#b\)|expression|VML|binding:/);
+    expect(doc.querySelector("p")?.getAttribute("style")).toBe("font-family:Behavior Sans;color:#2b2b2b");
+  });
+
   it("removes meta refresh, base and link", () => {
     const result = emailPreview(
       '<html><head><meta http-equiv="refresh" content="0;url=https://evil.test/"><base href="https://evil.test/">' +
