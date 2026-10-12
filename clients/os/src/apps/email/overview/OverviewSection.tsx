@@ -75,7 +75,9 @@ export function OverviewSection({ feeds }: { feeds: EmailFeeds }) {
   const rules = useMemo(() => ruleRows.map(emailRuleFromRow).filter((rule) => rule.id !== ""), [ruleRows]);
 
   // The breakdowns of the campaigns a rate can be made of, and the subscribers
-  // of the audiences that can be mailed. Both are the engine's exact counts.
+  // of the audiences that can be mailed, both counted by the engine. A
+  // subscriber count that reached its window comes back a floor and is drawn as
+  // one; a breakdown cannot say so yet (figures.ts, "Open / Click rate").
   const wanted = useMemo(() => statsWanted(campaigns, now).map((campaign) => campaign.id), [campaigns, now]);
   const { stats, reload: reloadStats } = useCampaignStatsFor(wanted);
   const { counts, refusals: countRefusals, reload: reloadCounts } = useSubscriberCounts(activeAudiences);

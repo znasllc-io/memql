@@ -116,7 +116,7 @@ export async function getRowByConceptAndId(
  * The engine's `count` directive (memql#1730) computes this server-side through
  * the same pipeline a normal query uses -- deduped, latest-version,
  * post-filtered, and under the caller's own per-row authz -- and returns a
- * `{count: N}` envelope instead of materializing rows. A raw SQL COUNT(*) would
+ * `{count: N, atLeast: B}` envelope instead of materializing rows. A raw SQL COUNT(*) would
  * over-count under the time-series versioning model (many versions per id) and
  * skip the in-process folds, which is why this is a directive rather than a
  * cheaper query.
@@ -130,6 +130,11 @@ export async function getRowByConceptAndId(
  * The count is PER-CALLER by construction. A reader's count is the rows a
  * reader may see, and that is the correct number to show the person looking at
  * it; do not reach for a privileged count to make it look bigger.
+ *
+ * THE NUMBER ALONE. A count stops at the engine's window (5,000 by default) and
+ * says so with `atLeast`, which this answer does not carry: past the window it
+ * is the window. A surface that shows the figure runs its count query and reads
+ * `Result.count()`, which keeps the two together (memql#6033).
  */
 export async function countConcept(
   query: QueryClient,
@@ -145,7 +150,7 @@ export async function countConcept(
     opts,
   );
 
-  // The engine sets ResultMeta.count AND returns a {count: N} output row. Read
+  // The engine sets ResultMeta.count AND returns a {count: N, atLeast: B} output row. Read
   // the meta first (it is the typed field), and fall back to the row for a
   // node that answered with only the envelope.
   const meta = result.meta();

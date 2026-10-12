@@ -732,7 +732,14 @@ export function useAudienceRecipients(audienceId: string): Reading<Row[]> {
  * COMPUTED SERVER-SIDE, and that is the point of the builtin: the portal
  * counted a capped page of delivery rows in the browser, which under-reported
  * every campaign past the page bound and did so silently. Every bucket that
- * can be an exact COUNT is one here, at any audience size.
+ * can be a `count` is one here.
+ *
+ * A COUNT STOPS AT THE ENGINE'S WINDOW (5,000 by default), and the breakdown
+ * does not say yet when one did: the engine marks such a count `atLeast`, but
+ * the campaigns store reads only the number (component/campaigns/store.go), so
+ * a bucket past the window arrives as the window, a floor drawn as a number.
+ * Carrying the floor through campaignStats is engine work carried to the
+ * automations track (memql#6033); this reads it as it comes until then.
  *
  * It is refreshed while it is seen, including after a send finishes because
  * opens, clicks and unsubscribes can arrive later. The main bar also receives
@@ -991,7 +998,10 @@ const NO_COUNTS: ReadonlyMap<string, Figure> = new Map();
  *   - NOT READ YET is `absent("unread")` -- every audience asked about starts
  *     there, and a zero would be this window claiming an empty list;
  *   - a number is `measured`, zero included: a list the engine counted and
- *     found empty is genuinely zero;
+ *     found empty is genuinely zero. A count that reached the engine's window
+ *     (5,000 by default, and configurable) is measured AS A FLOOR (`atLeast`,
+ *     from `Result.count()`): the list holds that many or more, and every
+ *     surface says "5,000 or more", never 5,000;
  *   - a refusal or a failure is `absent("failed", <the engine's sentence>)`,
  *     for THAT audience alone -- one list the caller may not count does not
  *     take the others' numbers with it. When the audience has been counted

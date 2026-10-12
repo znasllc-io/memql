@@ -70,10 +70,15 @@ export function SendBar({ campaign }: { campaign: CampaignRow }) {
           ))}
       </div>
 
-      {/* THE LEGEND CARRIES THE EXACT FIGURES, because a proportion is not a
-          number and an operator reporting on a send needs both. Every slice
-          appears, including the ones at zero: "no failures" is a reading
-          somebody wants, and an omitted row is silence about it. */}
+      {/* THE LEGEND CARRIES THE FIGURES, because a proportion is not a number
+          and an operator reporting on a send needs both. Every slice appears,
+          including the ones at zero: "no failures" is a reading somebody
+          wants, and an omitted row is silence about it. The whole they divide
+          is the campaign's frozen `recipientCount`, which the send counts
+          through the engine's `count` and records without its floor: past the
+          window (5,000 by default) it is the window rather than the audience.
+          Carrying the floor through the send is engine work carried to the
+          automations track (memql#6033). */}
       <ul className="os-send-legend" aria-label="What happened to this audience">
         {breakdown.segments.map((segment) => (
           <li key={segment.key} className="os-send-legend-item">

@@ -1126,9 +1126,11 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	}
 
 	// #1730: aggregate count directive. The query was authored with a
-	// `count` clause (no shape), so return a self-describing {count: N}
-	// envelope computed server-side instead of materializing rows. The
-	// count reflects the deduped, latest-version, post-filtered set --
+	// `count` clause (no shape), so return a self-describing
+	// {count: N, atLeast: B} envelope computed server-side instead of
+	// materializing rows (atLeast: the read stopped at the window, see
+	// executeCountPlan). The count reflects the deduped, latest-version,
+	// post-filtered set --
 	// the same pipeline normal queries use -- because a raw SQL COUNT(*)
 	// would over-count under the time-series versioning model (multiple
 	// versions per id) and skip the in-process post-filter / actor folds.
@@ -1406,8 +1408,13 @@ func planIsUnbound(plan *QueryPlan) bool {
 // exactly 5,000 -- and the window is configurable, so a caller cannot guess
 // the ceiling either. The read now asks for one row past the window: finding
 // it means the set is larger, and the answer is the window with atLeast
-// true ("this many or more"). Within the window the count is exact and
-// atLeast is false.
+// true ("this many or more"). Otherwise atLeast is false, and the count is
+// exact when the filter runs as ONE read whose rows are all kept. It can fall
+// short of the set with atLeast false where it does not: an && the engine
+// cannot compile into one SQL filter is read side by side, each side stopping
+// at window+1, and intersected here; and rows the read returned can be dropped
+// after it (the per-row authorization and staging gates in
+// evaluateExpressionSet), so a read that found window+1 rows can count fewer.
 func (e *MemQLEngine) executeCountPlan(ctx context.Context, plan *QueryPlan, timestamp *time.Time, sorter *compiledSort, startTime time.Time) (*ExecuteResult, error) {
 	if plan.Root == nil {
 		return nil, ErrEmptyQuery

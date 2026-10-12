@@ -219,9 +219,9 @@ type CountAnswer struct {
 }
 
 // Count reads the aggregate a `count` query answers (memql#6033): how many
-// rows matched, and whether that is the whole number. The engine reads a
-// count up to its window (5,000 by default, and configurable) and one row
-// past it, so a larger set answers the window with AtLeast true -- "this
+// rows matched, and whether the engine stopped at its window. The engine
+// reads a count up to its window (5,000 by default, and configurable) and one
+// row past it, so a larger set answers the window with AtLeast true -- "this
 // many or more". Read the signal rather than comparing the figure with a
 // window a client cannot know. ok is false when the result is not a count.
 func (r *Result) Count() (CountAnswer, bool) {

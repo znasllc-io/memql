@@ -16,15 +16,27 @@ import { WORDS } from "../words";
 // WHERE EACH NUMBER COMES FROM
 // ===========================================================================
 //   Sent, 30 days       the campaigns' own `sentCount`, over those started in the
-//                       window. The counters are the drain worker's exact
+//                       window. The counters are the drain worker's own
 //                       tallies, and the campaigns feed walks every page.
-//   Open / Click rate   the engine's `campaignStats` (exact counts, computed
+//   Open / Click rate   the engine's `campaignStats` (counts computed
 //                       server-side -- never a client's tally of a capped page of
 //                       deliveries): unique openers (clickers) over what was
 //                       SENT, summed across the campaigns that counted them.
+//                       NOT EXACT PAST THE ENGINE'S WINDOW, and not yet able to
+//                       say so: campaignStats counts through `count`, which
+//                       stops at the window (5,000 by default) and marks that
+//                       with `atLeast`, but the campaigns store reads only the
+//                       number (component/campaigns/store.go), so a campaign
+//                       with more openers than the window reports the window
+//                       and the rate reads low. Carrying the floor through
+//                       campaignStats is engine work carried to the automations
+//                       track (memql#6033); until it lands nothing here can tell
+//                       a floor from a count, so these are drawn as they come.
 //   Subscriptions       the engine's `audienceSubscriberCount` per active audience,
 //                       added up: a person on two audiences is two subscriptions,
-//                       so it is not called subscribers.
+//                       so it is not called subscribers. A count that reached
+//                       the engine's window is a floor, and so is a sum with one
+//                       in it ("5,086 or more").
 //   Active automations  the rules that are On.
 //
 // A RATE IS OF WHAT WAS SENT, over the campaigns that asked to be counted. A
