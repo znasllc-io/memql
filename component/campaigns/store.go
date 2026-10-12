@@ -213,6 +213,14 @@ type Template struct {
 	HTMLBody  string `json:"htmlBody"`
 	Status    string `json:"status"`
 	Revision  string `json:"revision"`
+
+	// ExpectsHTML says the template was written to have an HTML part: it is a
+	// layout email, or custom HTML. Its HTMLBody is then empty only when it was
+	// too large to send, which a draft stores without HTML. A template saved
+	// before documents, and a text email written as a document, expect none and
+	// are plain text by design. It is read from the stored row and never
+	// written into a send job's copy of the template.
+	ExpectsHTML bool `json:"-"`
 }
 
 // Recipient is one address in the audience roster.
@@ -445,7 +453,31 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 		TextBody:  str(r, "textBody"),
 		HTMLBody:  str(r, "htmlBody"),
 		Status:    str(r, "status"),
+
+		ExpectsHTML: templateExpectsHTML(r),
 	}, true, nil
+}
+
+// lacksItsHTML says that the template was written to have an HTML part and has
+// none: a draft too large to send. Nothing that builds a message from it should
+// go on as if it were plain text.
+func (t Template) lacksItsHTML() bool {
+	return t.ExpectsHTML && strings.TrimSpace(t.HTMLBody) == ""
+}
+
+// templateExpectsHTML says whether a stored template was written to have an
+// HTML part: a layout is named, or its document is a layout email (it has
+// blocks) or custom HTML (it carries some). A template with neither is plain
+// text, however it was saved.
+func templateExpectsHTML(row map[string]any) bool {
+	if str(row, "layoutId") != "" {
+		return true
+	}
+	document, _ := row["document"].(map[string]any)
+	if _, layout := document["blocks"]; layout {
+		return true
+	}
+	return strings.TrimSpace(str(document, "htmlBody")) != ""
 }
 
 // RosterPage reads ONE PAGE of the audience, suppressed members included --

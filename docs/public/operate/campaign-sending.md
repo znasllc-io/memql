@@ -218,6 +218,8 @@ An email that is saved with `email_too_large` is kept without its HTML part. It
 could never be sent, so there is nothing worth storing: the document and the
 issue are kept, and `emailRender` writes the email out whenever an editor asks
 for a preview. Saving it again after it has been made smaller stores the HTML.
+For the same reason a test send of such a draft is refused with that sentence;
+it would otherwise go out as plain text and look like a test of the email.
 
 ### One template per organization and file
 

@@ -841,3 +841,54 @@ func TestAPreTakenDerivedTemplateIDIsASentence(t *testing.T) {
 		t.Errorf("the id has %d versions, want the other organization's one (%s)", rows, taken.Revision)
 	}
 }
+
+// What a test send reads to refuse a draft that is too large to send is
+// decided by the stored row, so it is read here from rows the real engine
+// stores, through the same Store method a send uses (TemplateByID): a draft
+// that is too large has a document and no HTML; one that fits has both; a text
+// email, written as a document, has a document and no HTML by design and must
+// not be mistaken for the first.
+func TestAStoredDraftTooLargeToSendIsToldFromATextEmail(t *testing.T) {
+	w := newLayoutWorld(t)
+	account := w.suffix + "-org"
+	w.createOrganization(t, account, "Large client")
+	fresh := func() context.Context { return memql.ContextWithFreshRead(w.owner) }
+
+	tooLarge := readyConfirmation(t)
+	// Each "<" is four bytes of HTML: a file of about 1.1 MiB is an email of more than 4 MiB.
+	setBlock(t, tooLarge, "note", func(b map[string]any) { b["text"] = strings.Repeat("<", 1150<<10) })
+	textEmail := map[string]any{"subject": "Hello", "textBody": "Hello there.", "htmlBody": ""}
+
+	for _, c := range []struct {
+		name        string
+		id          string
+		content     map[string]any
+		wantIssue   bool
+		wantHTML    bool // the stored template has an HTML part
+		wantExpects bool
+		wantLacks   bool
+	}{
+		{"an email too large to send", "large", tooLarge, true, false, true, true},
+		{"an email that fits", "fits", readyConfirmation(t), false, true, true, false},
+		{"a text email written as a document", "text", textEmail, false, false, false, false},
+	} {
+		nodes, err := w.workers[0].handleSaveTemplate(w.owner, map[string]any{
+			"templateId": w.suffix + "-" + c.id, "accountId": account, "name": c.name, "content": c.content, "expectedRevision": "", "action": "save",
+		}, 0)
+		if err != nil {
+			t.Fatalf("%s: save: %v", c.name, err)
+		}
+		saved := decodeSaved(t, nodes)
+		if saved.hasIssue(emaildoc.IssueEmailTooLarge, "") != c.wantIssue {
+			t.Fatalf("%s: issues = %+v, want email_too_large %v", c.name, saved.Issues, c.wantIssue)
+		}
+		tmpl, found, err := w.workers[1].store.TemplateByID(fresh(), w.suffix+"-"+c.id)
+		if err != nil || !found {
+			t.Fatalf("%s: TemplateByID: %v %v", c.name, found, err)
+		}
+		if (tmpl.HTMLBody != "") != c.wantHTML || tmpl.ExpectsHTML != c.wantExpects || tmpl.lacksItsHTML() != c.wantLacks {
+			t.Errorf("%s: html %d bytes, expects HTML %v, lacks its HTML %v; want html %v, expects %v, lacks %v",
+				c.name, len(tmpl.HTMLBody), tmpl.ExpectsHTML, tmpl.lacksItsHTML(), c.wantHTML, c.wantExpects, c.wantLacks)
+		}
+	}
+}
