@@ -359,7 +359,7 @@ test("a failed act shows one notice above the bar until the next act", () => {
   assert.equal(notice.getAttribute("role"), "alert");
   assert.ok(notice.classList.contains("notice"));
   assert.match(notice.textContent ?? "", /Couldn’t publish the email/);
-  assert.equal(notice.querySelector("summary")?.textContent, "Details");
+  assert.equal(notice.querySelector("summary")?.textContent, "Show details");
   assert.equal(notice.querySelector("code")?.textContent, "tools-4f7c2a");
   notice.querySelector<HTMLButtonElement>("details button")!.click();
   assert.deepEqual(f.messages.at(-1), { type: "copyProblemReference", reference: "tools-4f7c2a" });
@@ -480,7 +480,7 @@ test("a render failure keeps the last preview dimmed with the problem", () => {
   assert.equal(f.visible("preview-notice"), true);
   assert.equal(f.el("preview-notice").getAttribute("role"), "alert");
   assert.equal(f.el("preview-notice").firstChild?.textContent, budget, "the engine's sentence, verbatim");
-  assert.equal(f.el("preview-notice").querySelector("summary")?.textContent, "Details");
+  assert.equal(f.el("preview-notice").querySelector("summary")?.textContent, "Show details");
   assert.equal(f.el("preview-notice").querySelector("code")?.textContent, "tools-77aa01");
   // An older answer never replaces a newer one.
   f.send({ type: "render", seq: 1, html: rendered, text: "Hi", subject: "Hello", issues: [] });

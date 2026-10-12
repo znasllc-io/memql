@@ -183,7 +183,7 @@ test("a failure keeps the form filled and shows the problem with its reference",
   assert.equal(notice.getAttribute("role"), "alert");
   assert.ok(notice.classList.contains("notice"));
   assert.match(notice.textContent ?? "", /The AI couldn’t finish/);
-  assert.equal(notice.querySelector("summary")?.textContent, "Details");
+  assert.equal(notice.querySelector("summary")?.textContent, "Show details");
   assert.equal(notice.querySelector("code")?.textContent, "tools-4f7c2a");
   notice.querySelector<HTMLButtonElement>("details button")!.click();
   assert.deepEqual(f.messages.at(-1), { type: "copyProblemReference", reference: "tools-4f7c2a" });

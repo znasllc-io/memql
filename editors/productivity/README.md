@@ -285,9 +285,9 @@ revision currently supports Markdown; email composition uses separate controls.
 
 
 Unexpected errors throughout Productivity Tools use a short message and a
-troubleshooting reference. In a notification, **Show details** opens the
-**MemQL Productivity Tools** Output channel, which holds the reference; in a
-panel, **Details** shows it beside **Copy reference**. Search that reference
+troubleshooting reference. **Show details** reveals it: in a notification it
+opens the **MemQL Productivity Tools** Output channel, which holds the reference;
+in a panel it shows the reference beside **Copy reference**. Search that reference
 in **MemQL OS → Logs** to find the technical error and related backend events.
 Logs access keeps its existing permissions. File-save errors include the
 reference in the native VS Code notification. When offline or when cluster
