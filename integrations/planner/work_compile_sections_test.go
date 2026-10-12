@@ -57,6 +57,13 @@ func argOf(q, name string) string {
 	return ""
 }
 
+// WriteAuthoredConstruct records the member-construct write as the call the
+// planner used to send (memql#6022).
+func (e *sectionCatalogEngine) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	_, err := e.Execute(ctx, constructCall(c))
+	return err
+}
+
 func (e *sectionCatalogEngine) Execute(ctx context.Context, q string) (any, error) {
 	for _, name := range []string{"cataloguedConstructsForGoalSignature", "cataloguedConstructsForOwner", "authoringConstructsForBundle", "authoringBundleById", "workDescriptionGuidance"} {
 		if !strings.Contains(q, name+"(") {

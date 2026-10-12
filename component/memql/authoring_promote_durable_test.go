@@ -31,7 +31,16 @@ type fakePromoteStore struct {
 }
 
 func (s *fakePromoteStore) CreatePromoteBundle(_ context.Context, bundleId, title, summary string) error {
-	s.bundles = append(s.bundles, AuthoringBundleRow{Id: bundleId, Title: title, Summary: summary, Status: BundleActive})
+	s.bundles = append(s.bundles, AuthoringBundleRow{Id: bundleId, Title: title, Summary: summary, Status: BundleDraft})
+	return nil
+}
+
+func (s *fakePromoteStore) ActivatePromoteBundle(_ context.Context, bundleId string) error {
+	for i := range s.bundles {
+		if s.bundles[i].Id == bundleId {
+			s.bundles[i].Status = BundleActive
+		}
+	}
 	return nil
 }
 

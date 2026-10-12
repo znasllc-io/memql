@@ -1483,43 +1483,6 @@ QueryClient.prototype.createAuthoringBundle = function (this: QueryClient, args:
   return this.executeNamed("createAuthoringBundle", buildCreateAuthoringBundle(args), opts);
 };
 
-/** Create an authored construct (the .memql source for one concept / automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle. */
-// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["createAuthoringConstruct"] in generated_concepts.ts).
-export interface CreateAuthoringConstructArgs {
-  constructId: string;
-  bundleId: string;
-  // Enum: concept | automation | logic | shape | spec | trait | policy | mutation | query | prompt
-  kind: string;
-  name: string;
-  targetNamespace: string;
-  source: string;
-  origin?: string;
-  grammarVersion?: string;
-}
-
-export function buildCreateAuthoringConstruct(args: CreateAuthoringConstructArgs): string {
-  const parts: string[] = [];
-  parts.push("constructId: " + renderMemQLValue(args.constructId));
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("kind: " + renderMemQLValue(args.kind));
-  parts.push("name: " + renderMemQLValue(args.name));
-  parts.push("targetNamespace: " + renderMemQLValue(args.targetNamespace));
-  parts.push("source: " + renderMemQLValue(args.source));
-  if (args.origin !== undefined) parts.push("origin: " + renderMemQLValue(args.origin));
-  if (args.grammarVersion !== undefined) parts.push("grammarVersion: " + renderMemQLValue(args.grammarVersion));
-  return "mutation createAuthoringConstruct(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createAuthoringConstruct(args: CreateAuthoringConstructArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createAuthoringConstruct = function (this: QueryClient, args: CreateAuthoringConstructArgs = {} as CreateAuthoringConstructArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createAuthoringConstruct", buildCreateAuthoringConstruct(args), opts);
-};
-
 /** Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex hash of the badge/device id. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createBadgeIdentity"] in generated_concepts.ts).
 export interface CreateBadgeIdentityArgs {

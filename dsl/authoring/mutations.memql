@@ -36,8 +36,16 @@ mutation bundle createAuthoringBundle {
 
 /// Create an authored construct (the .memql source for one concept / automation / logic / shape /
 /// spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped
-/// from actor.userId; status starts draft and follows the bundle.
+/// from actor.userId; status starts draft and follows the bundle. @serverOnly (memql#6022): an
+/// active bundle arms every construct it holds, so the constructs are what its gates saw -- written
+/// by the server pipelines that run those gates, under internal origin, and only while the bundle
+/// reads draft. SCOPING TO actor.userId IS NOT THE FIX: the construct and the bundle are already the
+/// owner's, and the owner is exactly who the gates stand in front of; what must not be
+/// caller-writable is a construct joining a bundle the gates did not see it in. A raw insert() or
+/// update() never consults this annotation, so membership and content are also held at the write
+/// chokepoint: component/memql/authoring_construct_write_guard.go.
 @actor
+@serverOnly
 mutation construct createAuthoringConstruct {
   args {
     constructId      string!

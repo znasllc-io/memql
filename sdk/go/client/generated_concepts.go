@@ -437,7 +437,6 @@ var BoundConcepts = map[string]string{
 	"createAuthCode":                                   "v1:identity:authCode",
 	"createAuthSession":                                "v1:identity:authSession",
 	"createAuthoringBundle":                            "v1:authoring:bundle",
-	"createAuthoringConstruct":                         "v1:authoring:construct",
 	"createBadgeIdentity":                              "v1:identity:identity",
 	"createBookingHours":                               "v1:calendar:bookingHours",
 	"createCalendarEvent":                              "v1:calendar:calendarEvent",

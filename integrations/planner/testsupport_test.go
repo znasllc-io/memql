@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/memql"
 	workintegration "github.com/znasllc-io/memql/integrations/work"
 )
 
@@ -40,6 +41,31 @@ type fakeEngine struct {
 	// toolResult is returned from InvokeAIChatWithFilteredTools.
 	toolResult string
 	toolErr    error
+}
+
+// constructCall is the createAuthoringConstruct call the planner sent through
+// Execute before the write moved onto the engine's construct writer
+// (memql#6022). A fake renders a writer call back into it, so the tests that
+// read the recorded calls see the member construct exactly as before.
+func constructCall(c memql.AuthoredConstructInput) string {
+	args := map[string]any{
+		"constructId":     c.ConstructId,
+		"bundleId":        c.BundleId,
+		"kind":            c.Kind,
+		"name":            c.Name,
+		"targetNamespace": c.TargetNamespace,
+		"source":          c.Source,
+	}
+	if c.Origin != "" {
+		args["origin"] = c.Origin
+	}
+	return "createAuthoringConstruct(" + encodeArgs(args) + ")"
+}
+
+// WriteAuthoredConstruct records the write the way the planner used to send it.
+func (f *fakeEngine) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	_, err := f.Execute(ctx, constructCall(c))
+	return err
 }
 
 func (f *fakeEngine) Execute(_ context.Context, query string) (any, error) {

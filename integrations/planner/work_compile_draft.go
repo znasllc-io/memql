@@ -254,8 +254,13 @@ func (l *PlannerAgentLoop) persistWorkDraft(ctx context.Context, req CompileRequ
 	}
 	for _, construct := range bundle.Constructs {
 		constructId := id.NewShortId()
-		if err := write("createAuthoringConstruct", map[string]any{"constructId": constructId, "bundleId": bundleId, "kind": construct.Kind, "name": construct.Name, "targetNamespace": authoredTargetNamespace, "source": construct.Source}); err != nil {
-			return out, fmt.Errorf("work compile: persist %s/%s: %w", construct.Kind, construct.Name, err)
+		// createAuthoringConstruct is @serverOnly (memql#6022): the engine
+		// writes the member, while the bundle above is still a draft.
+		if err := writeAuthoredConstruct(ownerActorContext(ctx, req.OwnerUserId), l.engine, memql.AuthoredConstructInput{
+			ConstructId: constructId, BundleId: bundleId, Kind: construct.Kind, Name: construct.Name,
+			TargetNamespace: authoredTargetNamespace, Source: construct.Source,
+		}); err != nil {
+			return out, fmt.Errorf("work compile: persist %s/%s: %w", construct.Kind, construct.Name, &draftPersistenceError{err: err})
 		}
 		if construct.Kind == "automation" && construct.Name == bundle.AutomationName {
 			out.ConstructId = "v1:authoring:construct:" + constructId

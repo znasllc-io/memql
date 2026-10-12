@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 type acknowledgementTestEngine struct {
@@ -23,6 +25,13 @@ func (e *acknowledgementTestEngine) InvokeAI(ctx context.Context, name string, d
 		return e.repair, e.repairErr
 	}
 	return response, err
+}
+
+// WriteAuthoredConstruct records the member-construct write as the call the
+// planner used to send (memql#6022).
+func (e *acknowledgementTestEngine) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	_, err := e.Execute(ctx, constructCall(c))
+	return err
 }
 
 func (e *acknowledgementTestEngine) Execute(ctx context.Context, q string) (any, error) {

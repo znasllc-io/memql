@@ -34,6 +34,12 @@ type draftDBCompiler struct {
 	calls  int
 }
 
+// WriteAuthoredConstruct is the engine's own writer: the database decides
+// whether the member construct may join its bundle (memql#6022).
+func (e *draftDBCompiler) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	return e.engine.WriteAuthoredConstruct(ctx, c)
+}
+
 func (e *draftDBCompiler) Execute(ctx context.Context, q string) (any, error) {
 	return e.engine.Execute(ctx, q)
 }

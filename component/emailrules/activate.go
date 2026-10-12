@@ -306,11 +306,15 @@ func (a *Activator) verifyReadable(ctx context.Context, rule Rule) error {
 	return nil
 }
 
+// writeBundle writes the bundle, as a draft, then its one construct. The
+// construct write is @serverOnly (memql#6022) -- an active bundle arms every
+// construct it holds, so only the pipeline that runs the gates writes one, and
+// only while the bundle is a draft -- so it stamps internal origin, inline.
 func (a *Activator) writeBundle(ctx context.Context, bundleID string, rule Rule, state RuleState, source string) error {
 	if err := a.store.CreateBundle(ctx, bundleID, BundleTitleFor(rule), summaryFor(rule), state.BundleID, a.nextVersion(ctx, state)); err != nil {
 		return err
 	}
-	return a.store.CreateConstruct(ctx, constructIDFor(bundleID), bundleID, ConstructNameFor(rule.ID), "campaigns", source)
+	return a.store.CreateConstruct(auth.ContextWithInternalOrigin(ctx), constructIDFor(bundleID), bundleID, ConstructNameFor(rule.ID), "campaigns", source)
 }
 
 // The three writes below reach @serverOnly or gate mutations, so they stamp

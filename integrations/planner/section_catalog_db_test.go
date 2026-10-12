@@ -58,6 +58,12 @@ type sectionCatalogBridge struct {
 	calls  int
 }
 
+// WriteAuthoredConstruct is the engine's own writer: the database decides
+// whether the member construct may join its bundle (memql#6022).
+func (b *sectionCatalogBridge) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	return b.engine.WriteAuthoredConstruct(ctx, c)
+}
+
 func (b *sectionCatalogBridge) Execute(ctx context.Context, q string) (any, error) {
 	if strings.Contains(q, "assistantAgentForUser(") {
 		return []map[string]any{{"id": sectionCatalogAgent}}, nil

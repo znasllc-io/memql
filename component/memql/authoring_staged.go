@@ -242,6 +242,9 @@ func (e *MemQLEngine) stageConstructDurableWithStore(ctx context.Context, store 
 	if err := store.CreatePromoteConstruct(persistCtx, constructId, bundleId, c.Kind, c.Name, promoteTargetNamespace(c), c.Source, c.Origin, ConstructStaged); err != nil {
 		return fmt.Errorf("authoring: persist staged construct: %w", err)
 	}
+	if err := store.ActivatePromoteBundle(persistCtx, bundleId); err != nil {
+		return fmt.Errorf("authoring: activate staged bundle: %w", err)
+	}
 
 	if e.Component != nil && e.Logger != nil {
 		e.Logger.Info("authored construct staged (durable, owner-scoped; not shared and not broadcast)",

@@ -330,6 +330,13 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// chokepoint too (component/memql/authoring_bundle_activation_write_guard.go).
 		{Path: "authoring/mutations.memql", Name: "activateAuthoringBundle"}:  true,
 		{Path: "authoring/mutations.memql", Name: "setAuthoringBundleStatus"}: true,
+		// The same argument for a bundle's MEMBERS: an active bundle arms every
+		// construct it holds, so a construct joining a bundle is a claim that
+		// the bundle's gates saw it. The pipelines that run the gates write
+		// them, under internal origin, while the bundle reads draft; the write
+		// guard holds raw writes to the same rule
+		// (component/memql/authoring_construct_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "createAuthoringConstruct"}: true,
 
 		// epic memql#4966. workRunsInFlight is the wait-and-abandon sweep's
 		// read. (A2 briefly carried a closeWorkGoal beside it; epic A3's

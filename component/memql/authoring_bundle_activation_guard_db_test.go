@@ -54,9 +54,11 @@ func TestAClientCannotGetAnUngatedBundleArmed(t *testing.T) {
 		automation = "ungated" + camel(name)
 		mustExecute(t, eng, client, fmt.Sprintf(`mutation createAuthoringBundle(bundleId: %s, title: %s)`,
 			languageParser.QuoteString(bundleId), languageParser.QuoteString("An ungated bundle")))
-		mustExecute(t, eng, client, fmt.Sprintf(`mutation createAuthoringConstruct(constructId: %s, bundleId: %s, kind: "automation", name: %s, targetNamespace: "campaigns", source: %s)`,
-			languageParser.QuoteString("v1:authoring:construct:ungated-"+name+"-"+run), languageParser.QuoteString(bundleId),
-			languageParser.QuoteString(automation), languageParser.QuoteString("automation "+automation+" { }")))
+		// The construct is the gate-running pipeline's write (memql#6022):
+		// a client may not add one even to its own draft.
+		if err := serverWritesConstruct(eng, client, "v1:authoring:construct:ungated-"+name+"-"+run, bundleId, automation); err != nil {
+			t.Fatalf("setup: the bundle's construct: %v", err)
+		}
 		return bundleId, automation
 	}
 
@@ -95,8 +97,6 @@ func TestAClientCannotGetAnUngatedBundleArmed(t *testing.T) {
 	t.Run("raw-insert-of-a-new-active-bundle", func(t *testing.T) {
 		bundleId := bundleConceptID + ":ungated-new-" + run
 		ungated = append(ungated, bundleId)
-		mustExecute(t, eng, client, fmt.Sprintf(`mutation createAuthoringConstruct(constructId: %s, bundleId: %s, kind: "automation", name: "ungatedNew", targetNamespace: "campaigns", source: "automation ungatedNew { }")`,
-			languageParser.QuoteString("v1:authoring:construct:ungated-new-"+run), languageParser.QuoteString(bundleId)))
 		payload, _ := json.Marshal(map[string]any{"title": "Born active", "status": "active", "version": 1})
 		if _, err := eng.Execute(client, fmt.Sprintf(`insert("%s", id="%s", payload=%s)`, bundleConceptID, bundleId, payload)); err == nil {
 			t.Errorf("a client's raw insert of a new active bundle was accepted")

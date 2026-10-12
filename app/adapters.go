@@ -39,6 +39,16 @@ func (a *CognitionEngineAdapter) Execute(ctx context.Context, query string) (any
 	return converted, nil
 }
 
+// WriteAuthoredConstruct hands the planner's member-construct writes to the
+// engine's one writer of them: createAuthoringConstruct is @serverOnly
+// (memql#6022), and the planner does not stamp internal origin.
+func (a *CognitionEngineAdapter) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	if a == nil || a.Engine == nil {
+		return fmt.Errorf("memql engine not configured")
+	}
+	return a.Engine.WriteAuthoredConstruct(ctx, c)
+}
+
 func (a *CognitionEngineAdapter) RegisterIntegration(provider memql.IntegrationProvider) error {
 	if a == nil || a.Engine == nil {
 		return fmt.Errorf("memql engine not configured")

@@ -12,6 +12,11 @@ import (
 // through this seam; without it every call is a comment line.
 var _ planner.ToolCallSpeller = (*CognitionEngineAdapter)(nil)
 
+// The planner's member-construct writes go through the engine's writer
+// (createAuthoringConstruct is @serverOnly, memql#6022); without it the
+// capture and the work compile could not persist a construct at all.
+var _ planner.AuthoredConstructWriter = (*CognitionEngineAdapter)(nil)
+
 // setupPlannerIntegration creates and registers the planner
 // integration on a planner-tagged binary. The integration owns
 // Plan / Task lifecycle: subscribes to graph.node.updated events

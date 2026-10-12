@@ -134,8 +134,9 @@ func TestAPauseNeverOverwritesARetireWrittenElsewhere(t *testing.T) {
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
 	mustExecute(t, eng, ctx, fmt.Sprintf(`mutation createAuthoringBundle(bundleId:%s, title:%s)`,
 		languageParser.QuoteString(bundleId), languageParser.QuoteString("A bundle retired while it tripped")))
-	mustExecute(t, eng, ctx, fmt.Sprintf(`mutation createAuthoringConstruct(constructId: %s, bundleId: %s, kind: "automation", name: "autoFencedPause", targetNamespace: "campaigns", source: "automation autoFencedPause { }")`,
-		languageParser.QuoteString("v1:authoring:construct:fenced-pause-"+run), languageParser.QuoteString(bundleId)))
+	if err := serverWritesConstruct(eng, ctx, "v1:authoring:construct:fenced-pause-"+run, bundleId, "autoFencedPause"); err != nil {
+		t.Fatalf("setup: the bundle's construct: %v", err)
+	}
 	activation := &engineActivationStore{engine: eng}
 	if err := activation.SetBundleActive(ctx, bundleId); err != nil {
 		t.Fatalf("activate the bundle: %v", err)

@@ -119,7 +119,7 @@ func TestCompileSectionsDB_ACataloguedSectionRunsFromTheDraft(t *testing.T) {
 		arg := []string{"month", "invoiceSummary"}[n]
 		bundleId, constructId := "sections-bundle-"+name, "sections-"+name
 		write(false, "createAuthoringBundle", map[string]any{"bundleId": bundleId, "title": name})
-		write(false, "createAuthoringConstruct", map[string]any{"constructId": constructId, "bundleId": bundleId, "kind": "automation",
+		write(true, "createAuthoringConstruct", map[string]any{"constructId": constructId, "bundleId": bundleId, "kind": "automation", // @serverOnly: the pipeline's write while the bundle is a draft
 			"name": name, "targetNamespace": authoredTargetNamespace, "source": catalogSource(name, "Answer a section.", arg)})
 		write(false, "setConstructStatus", map[string]any{"constructId": constructId, "status": "active"})
 		write(true, "activateAuthoringBundle", map[string]any{"bundleId": bundleId}) // @serverOnly: the gated activation's write

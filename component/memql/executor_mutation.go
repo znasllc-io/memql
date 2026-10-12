@@ -1183,6 +1183,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+	// A BUNDLE'S MEMBERS are what its gates saw (memql#6022): a construct
+	// joins a bundle, or changes what it arms, only as the server's write
+	// into its owner's bundle before that bundle has passed its dry run.
+	// Here, beside the sharing guard and for its reason: it judges the
+	// OWNER, which is final only after the stamps above -- a raw insert's
+	// owner is stamped there. Before canonicalization, so it compares owners
+	// and bundle ids tolerantly. See authoring_construct_write_guard.go.
+	if conceptMeta.Name == memorynodes.ConceptAuthoringConstruct {
+		if err := e.validateConstructMembership(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 	if conceptMeta.Name == conceptWorkRun {
 		if err := validateWorkSpineImmutable(ctx, organizationPrior, payload); err != nil {
 			return nil, meta, err

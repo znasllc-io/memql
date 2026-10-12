@@ -451,6 +451,13 @@ type spineMeteredEngine struct {
 	scope *spineScope
 }
 
+// WriteAuthoredConstruct passes a member-construct write through to the
+// metered engine: writing is not a model call, and an embedded Engine does not
+// carry the optional writer (memql#6022).
+func (e *spineMeteredEngine) WriteAuthoredConstruct(ctx context.Context, c memql.AuthoredConstructInput) error {
+	return writeAuthoredConstruct(ctx, e.Engine, c)
+}
+
 func (e *spineMeteredEngine) InvokeAI(ctx context.Context, name string, data map[string]any) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

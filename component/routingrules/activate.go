@@ -188,7 +188,11 @@ func (a *Activator) writeBundle(ctx context.Context, bundleId string, f Form, so
 	}); err != nil {
 		return err
 	}
-	return a.render(ctx, "createAuthoringConstruct", map[string]any{
+	// @serverOnly (memql#6022): an active bundle arms every construct it
+	// holds, so only the pipeline that runs the gates writes one, and only
+	// while the bundle is a draft. Stamped inline, like the two gate writes
+	// below.
+	return a.render(auth.ContextWithInternalOrigin(ctx), "createAuthoringConstruct", map[string]any{
 		"constructId":     constructIdFor(bundleId),
 		"bundleId":        bundleId,
 		"kind":            "rule",

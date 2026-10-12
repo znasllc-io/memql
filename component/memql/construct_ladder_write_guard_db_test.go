@@ -265,8 +265,11 @@ func TestConstructLadderWriteGuard_TheSameWritesWithInternalOriginLand(t *testin
 
 	// A new row, carrying the whole ladder. Internal-origin Go states the
 	// owner itself (the raw insert's owner stamp is for the untrusted path).
+	// Its bundle exists first, as a draft: a construct joins only a bundle
+	// that is already there, before its gates run (memql#6022).
 	name := "internal_" + strings.ReplaceAll(suffix, "-", "_")
 	id := constructConceptID + ":" + name
+	runMutation(t, rowAuthzCallerCtx(owner), eng, "createAuthoringBundle", map[string]any{"bundleId": "bundle-" + name, "title": "Ladder " + name})
 	payload := wholeConstruct(name)
 	payload["ownerUserId"] = owner
 	for field, value := range plantedLadderValues {
@@ -294,11 +297,11 @@ func TestConstructLadderWriteGuard_TheSameWritesWithInternalOriginLand(t *testin
 }
 
 // THE NEGATIVE CONTROL: an owner's write that leaves the ladder as it is --
-// renaming their construct, re-sending the stored ladder values unchanged
-// beside a rename the way a client re-sends the row it read, and retiring it
-// through the mutation the OS calls -- passes, and the ladder survives it. A
-// guard keyed on the PRESENCE of a field rather than on a change to it would
-// refuse the second.
+// writing one of their construct's own fields, re-sending the stored ladder
+// values unchanged beside it the way a client re-sends the row it read, and
+// retiring it through the mutation the OS calls -- passes, and the ladder
+// survives it. A guard keyed on the PRESENCE of a field rather than on a
+// change to it would refuse the second.
 func TestConstructLadderWriteGuard_AnOwnersWriteThatLeavesTheLadderAlonePasses(t *testing.T) {
 	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := context.Background()
@@ -306,12 +309,16 @@ func TestConstructLadderWriteGuard_AnOwnersWriteThatLeavesTheLadderAlonePasses(t
 	owner := "ladder-owner-writes-" + suffix
 	rowID := seedLearnedProcedure(t, eng, owner, "lo-"+suffix)
 	stored := latestPayload(t, ctx, db, constructConceptID, rowID)
-	renamed := "renamed_" + strings.ReplaceAll(suffix, "-", "_")
+	// What the owner writes is NOT the construct's membership: since memql#6022
+	// a construct's bundle, kind, name, source, namespace and origin change only
+	// as the gate-running pipeline's write (authoring_construct_write_guard.go),
+	// so the owner's own fields here are its catalog match text.
+	described := "described_" + strings.ReplaceAll(suffix, "-", "_")
 
-	_, err := eng.Execute(rowAuthzCallerCtx(owner), rawConstructInsert(t, rowID, map[string]any{"name": renamed}))
-	require.NoError(t, err, "the owner's rename of their learned construct was refused")
+	_, err := eng.Execute(rowAuthzCallerCtx(owner), rawConstructInsert(t, rowID, map[string]any{"catalogMatchText": described}))
+	require.NoError(t, err, "the owner's write of their learned construct's own field was refused")
 
-	resent := map[string]any{"name": renamed + "_again"}
+	resent := map[string]any{"catalogMatchText": described + "_again"}
 	for _, field := range append(sortedFieldNames(plantedLadderValues), sortedFieldNames(plantedLearnedEvidence)...) {
 		if v, ok := stored[field]; ok {
 			resent[field] = v
@@ -327,7 +334,7 @@ func TestConstructLadderWriteGuard_AnOwnersWriteThatLeavesTheLadderAlonePasses(t
 
 	got := latestPayload(t, ctx, db, constructConceptID, rowID)
 	require.Equal(t, "retired", got["status"])
-	require.Equal(t, renamed+"_again", got["name"])
+	require.Equal(t, described+"_again", got["catalogMatchText"])
 	for _, field := range append(sortedFieldNames(plantedLadderValues), sortedFieldNames(plantedLearnedEvidence)...) {
 		require.Equal(t, stored[field], got[field], "the owner's write moved %s", field)
 	}

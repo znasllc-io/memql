@@ -60,7 +60,18 @@ type sharedAuthoringDB struct {
 func (s *sharedAuthoringDB) CreatePromoteBundle(_ context.Context, bundleId, title, summary string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.bundles = append(s.bundles, AuthoringBundleRow{Id: bundleId, Title: title, Summary: summary, Status: BundleActive})
+	s.bundles = append(s.bundles, AuthoringBundleRow{Id: bundleId, Title: title, Summary: summary, Status: BundleDraft})
+	return nil
+}
+
+func (s *sharedAuthoringDB) ActivatePromoteBundle(_ context.Context, bundleId string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.bundles {
+		if s.bundles[i].Id == bundleId {
+			s.bundles[i].Status = BundleActive
+		}
+	}
 	return nil
 }
 
