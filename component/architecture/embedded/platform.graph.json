@@ -16,6 +16,8 @@
 {"id":"automation:bootstrapCluster","kind":"automation","label":"bootstrapCluster","attrs":{"origin":"cluster/automations.memql","stratum":"0","trigger":"system.startup","writes":"v1:cluster:cluster,v1:cluster:database,v1:cluster:identityProvider"}},
 {"id":"automation:bringUpInstance","kind":"automation","label":"bringUpInstance","attrs":{"origin":"deployment/automations.memql","stratum":"0","trigger":"instance.bringUpRequested"}},
 {"id":"automation:campaignDrainWorkflow","kind":"automation","label":"campaignDrainWorkflow","attrs":{"origin":"campaigns/automations.memql","stratum":"0","template":"true"}},
+{"id":"automation:campaignJourneyDrainWorkflow","kind":"automation","label":"campaignJourneyDrainWorkflow","attrs":{"origin":"campaigns/automations.memql","stratum":"0","template":"true"}},
+{"id":"automation:campaignJourneyProposalWorkflow","kind":"automation","label":"campaignJourneyProposalWorkflow","attrs":{"origin":"campaigns/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:campaignJourneyStepWorkflow","kind":"automation","label":"campaignJourneyStepWorkflow","attrs":{"origin":"campaigns/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:campaignSelectedPageWorkflow","kind":"automation","label":"campaignSelectedPageWorkflow","attrs":{"origin":"campaigns/automations.memql","stratum":"0","template":"true"}},
 {"id":"automation:campaignWarmupDecision","kind":"automation","label":"campaignWarmupDecision","attrs":{"origin":"campaigns/automations.memql","stratum":"0","template":"true"}},

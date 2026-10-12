@@ -1296,6 +1296,7 @@ mutation audience setAudienceConfirmation {
 }
 
 /// Confirmation is written only by the token-authenticated email page.
+/// actor.userId scoping cannot prove possession of a mailed token; the handler verifies it before borrowing the recorded owner.
 @actor
 @serverOnly
 mutation recipient confirmRecipientSubscription {
@@ -1307,6 +1308,7 @@ mutation recipient confirmRecipientSubscription {
 }
 
 /// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
 @actor
 @serverOnly
 mutation journey createJourney {
@@ -1326,6 +1328,7 @@ mutation journey createJourney {
 }
 
 /// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
 @actor
 @serverOnly
 mutation journey updateJourney {
@@ -1344,6 +1347,7 @@ mutation journey updateJourney {
 }
 
 /// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
 @actor
 @serverOnly
 mutation journey setJourneyStatus {
@@ -1361,6 +1365,7 @@ mutation journey setJourneyStatus {
 }
 
 /// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
 @actor
 @serverOnly
 mutation journey recordJourneyDrain {
@@ -1377,6 +1382,7 @@ mutation journey recordJourneyDrain {
 }
 
 /// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
 @actor
 @serverOnly
 @createOnly("ownerUserId", "accountId", "journeyId", "recipientId", "emailDigest", "stepId", "stepIndex", "nextAt", "status", "exitReason", "enrolledAt", "triggeredAt", "completedAt", "lastError", "attempts")
@@ -1398,6 +1404,7 @@ mutation journeyEnrollment enrollJourneyRecipient {
 }
 
 /// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
 @actor
 @serverOnly
 mutation journeyEnrollment advanceJourneyEnrollment {
@@ -1420,6 +1427,7 @@ mutation journeyEnrollment advanceJourneyEnrollment {
 }
 
 /// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
 @actor
 @serverOnly
 mutation journeyEnrollment nudgeJourneyEnrollment {
@@ -1432,4 +1440,18 @@ mutation journeyEnrollment nudgeJourneyEnrollment {
  accept { nextAt }
  stamp { id: args.enrollmentId, createdAt: args.versionTime }
  }
+}
+
+/// Renewed opt-in starts a new membership; it never reuses an old journey receipt.
+/// actor.userId cannot prove the renewed opt-in or mailbox lock; the server verifies both before borrowing the recorded owner.
+@actor
+@serverOnly
+mutation recipient restartRecipientMembership {
+ args {
+ recipientId string!
+ subscriptionStatus enum("pending", "subscribed")!
+ joinedAt datetime!
+ confirmedAt string
+ }
+ update { accept { subscriptionStatus, joinedAt, confirmedAt } stamp { id: args.recipientId, ownerUserId: actor.userId } }
 }

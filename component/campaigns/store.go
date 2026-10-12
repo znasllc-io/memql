@@ -533,28 +533,62 @@ const rosterWalkCap = 100000
 // the memql#3460 lesson in one line: measuring a bounded page and calling it
 // a total is how the 5000 ceiling came to be load-bearing.
 func (s *Store) RosterSize(ctx context.Context, audienceID string) (int, error) {
-	return s.count(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+	n, bounded, err := s.countValue(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+	if err != nil || !bounded {
+		return n, err
+	}
+	// A bounded count cannot authorize a whole-audience send or capacity write.
+	// Walk fresh cursor pages to an exact cardinality rather than materializing it.
+	total, cursor := 0, ""
+	seen := map[string]bool{}
+	for {
+		page, next, err := s.RosterPage(memql.ContextWithFreshRead(ctx), audienceID, cursor)
+		if err != nil {
+			return 0, err
+		}
+		total += len(page)
+		if next == "" {
+			return total, nil
+		}
+		if seen[next] {
+			return 0, fmt.Errorf("audience count pagination repeated a cursor")
+		}
+		seen[next] = true
+		cursor = next
+	}
+
 }
 
 // count issues a `count` query and lifts the aggregate off the result.
 //
-// Every stats bucket that CAN go through here does, and the reason is the
-// memql#3460 lesson generalized: a count is exact at any audience size, while
-// the length of a bounded read is a truncation wearing a number's clothes.
+// Every stats bucket that CAN go through here does. The engine marks a count
+// as atLeast when its source reaches the read window; callers retain that
+// completeness signal rather than treating a bounded result as exact.
 // The portal counted a capped page of delivery rows client-side and
 // under-reported every campaign past the bound, silently, which is what
 // campaignStats replaces.
+type countObservationKey struct{}
+type countObservation struct{ bounded map[string]bool }
+
 func (s *Store) count(ctx context.Context, q string) (int, error) {
+	n, _, err := s.countValue(ctx, q)
+	return n, err
+}
+func (s *Store) countValue(ctx context.Context, q string) (int, bool, error) {
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
-		return 0, fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
+		return 0, false, fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
 	for _, row := range memql.MaterializeRows(res) {
 		if _, ok := row["count"]; ok {
-			return integer(row, "count"), nil
+			bounded, _ := row["atLeast"].(bool)
+			if observation, ok := ctx.Value(countObservationKey{}).(*countObservation); ok {
+				observation.bounded[q] = bounded
+			}
+			return integer(row, "count"), bounded, nil
 		}
 	}
-	return 0, nil
+	return 0, false, fmt.Errorf("campaigns: %s returned no count", firstWords(q))
 }
 
 // DeliveryCountByStatus is the exact number of this campaign's deliveries in
@@ -1420,14 +1454,13 @@ func (s *Store) rows(ctx context.Context, q string) ([]map[string]any, error) {
 // it and there should not be -- a cursor spelled into a query string would be
 // a caller-supplied scan position on an owned-tier read.
 func (s *Store) rowsPage(ctx context.Context, cursor, q string) ([]map[string]any, string, error) {
-	if cursor != "" {
-		ctx = memql.ContextWithCursor(ctx, cursor)
-	}
+	ctx = memql.ContextWithCursor(ctx, cursor)
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, "", fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
-	return memql.MaterializeRows(res), memql.ResultCursor(res), nil
+	next, err := memql.ResultPageCursor(res)
+	return memql.MaterializeRows(res), next, err
 }
 
 func (s *Store) exec(ctx context.Context, q string) error {
@@ -1796,4 +1829,17 @@ func (s *Store) AudienceByID(ctx context.Context, id string) (Audience, bool, er
 }
 func (s *Store) ConfirmRecipient(ctx context.Context, id string, at time.Time) error {
 	return s.execServerOnly(ctx, call("mutation", "confirmRecipientSubscription", arg{"recipientId", bare(id)}, arg{"confirmedAt", at.UTC().Format(time.RFC3339Nano)}))
+}
+
+// RejoinRecipient starts a new membership after an explicit renewed opt-in.
+// Its caller holds the shared recipient and mailbox gates and has checked consent.
+func (s *Store) RejoinRecipient(ctx context.Context, id, status string, at time.Time) error {
+	if status != "pending" && status != "subscribed" {
+		return fmt.Errorf("invalid renewed subscription status")
+	}
+	confirmed := ""
+	if status == "subscribed" {
+		confirmed = at.UTC().Format(time.RFC3339Nano)
+	}
+	return s.execServerOnly(ctx, call("mutation", "restartRecipientMembership", arg{"recipientId", bare(id)}, arg{"subscriptionStatus", status}, arg{"joinedAt", at.UTC().Format(time.RFC3339Nano)}, arg{"confirmedAt", confirmed}))
 }

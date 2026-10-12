@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"fmt"
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"time"
@@ -35,7 +36,21 @@ func (w *Worker) retryDeferredSends(ctx, systemCtx context.Context) {
 			for _, key := range []string{"templateId", "recipientId", "senderIdentityId", "emailRuleId", "requestId"} {
 				args[key] = str(row, key)
 			}
-			_, err := w.sendToRecipientOnce(actor, args, singleSend{deferWhenLimited: true})
+			opts := singleSend{deferWhenLimited: true}
+			receipt, ok, err := singleSendReceiptFor(actor, args, opts)
+			if err != nil || !ok {
+				return fmt.Errorf("deferred send identity is invalid")
+			}
+			if w.singleSendGate == nil {
+				return fmt.Errorf("send coordination is unavailable")
+			}
+			hold, err := w.singleSendGate(context.WithoutCancel(ctx), receipt.id)
+			if err != nil {
+				return err
+			}
+			defer hold.Release()
+			receipt.hold = hold
+			_, err = w.sendToRecipientHeld(actor, args, receipt, opts)
 			if err == nil || isUndecided(err) || memql.IsWriteGateBusy(err) {
 				return err
 			}
@@ -48,7 +63,12 @@ func (w *Worker) retryDeferredSends(ctx, systemCtx context.Context) {
 			if !found {
 				return err
 			}
-			return w.recordLoneDelivery(actor, args, Campaign{AccountID: str(row, "accountId"), TemplateID: str(row, "templateId"), SenderIdentityID: str(row, "senderIdentityId")}, recipient, str(row, "emailRuleId"), Delivery{Status: "failed", LastError: err.Error()})
+			if verifyErr := hold.Verify(ctx); verifyErr != nil {
+				return verifyErr
+			}
+			return detachedWrite(actor, func(write context.Context) error {
+				return w.recordLoneDelivery(write, args, Campaign{AccountID: str(row, "accountId"), TemplateID: str(row, "templateId"), SenderIdentityID: str(row, "senderIdentityId")}, recipient, str(row, "emailRuleId"), Delivery{Status: "failed", LastError: err.Error()})
+			})
 		})
 		if next == "" || next == cursor {
 			return

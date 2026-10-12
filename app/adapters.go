@@ -420,3 +420,8 @@ func (a *CognitionEngineAdapter) SaveWorkContinuation(ctx context.Context, messa
 func (a *CognitionEngineAdapter) RestoreWorkContinuation(ctx context.Context, messages []common.ChatMessage) ([]common.ChatMessage, error) {
 	return a.Engine.RestoreWorkContinuation(ctx, messages)
 }
+
+// InvokeAIStructured keeps model routing and strict output validation at the engine seam.
+func (a *CampaignsEngineAdapter) InvokeAIStructured(ctx context.Context, templateID string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
+	return a.Engine.InvokeAIStructured(ctx, templateID, data, schemaName, schema, strict)
+}
