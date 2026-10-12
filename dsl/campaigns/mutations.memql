@@ -1349,6 +1349,8 @@ mutation campaign createCampaignTestRun {
 }
 
 /// Recipient-authorized preferences action. The handler permits only organization opt-outs.
+/// actor.userId scoping cannot prove possession of the mailed preferences token or renewed consent.
+/// The handler verifies both under shared locks and derives the organization/digest; global safety suppressions remain unchanged.
 @serverOnly
 mutation suppression liftOrganizationSuppression {
  args {
