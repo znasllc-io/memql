@@ -285,7 +285,7 @@ multiplies with its services.
 
 | Overlay value | `local` | `cloud` | `cloud-entry` |
 |---|---|---|---|
-| Steps at once | 1 | 2 | 1 |
+| Steps at once | 6 | 2 | 1 |
 | Each container's request | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk | 250m CPU, 512Mi, 1Gi of disk |
 | Each container's limit | 2 CPU, 4Gi, 20Gi of disk | 2 CPU, 4Gi, 8Gi of disk | 2 CPU, 4Gi, 8Gi of disk |
 | The workspace's size limit | 20Gi | 8Gi | 8Gi |
@@ -300,12 +300,14 @@ constraint still applies. A missing matching node leaves work waiting; it does
 not send the build to serving nodes. A malformed pool value refuses execution.
 The unset setting preserves Linux placement without a pool constraint.
 
-Provision the nodes before enabling this setting. An existing local-path cache
-remains bound to its original node; changing placement does not migrate it.
-All local k3d nodes share one Docker VM's CPU, memory and disk. The local
-one-Job ceiling applies across Workbench replicas; additional virtual nodes
-do not increase physical capacity. An isolation probe on a selected pool does
-not establish enforcement on every node in that pool.
+Provision the nodes before enabling this setting. The local overlay sets
+`builds`, and `make up` creates that node
+([The pipeline build node](reproduce-the-cloud-locally.md#the-pipeline-build-node)).
+An existing local-path cache remains bound to its original node; changing
+placement does not migrate it. All local k3d nodes share one Docker VM's CPU,
+memory and disk. The local six-Job ceiling applies across Workbench replicas;
+additional virtual nodes do not increase physical capacity. An isolation probe
+on a selected pool does not establish enforcement on every node in that pool.
 
 **Disk** is ephemeral storage. A container's own files outside any volume, and
 its logs, count against its limit; every emptyDir counts against the sum of the
@@ -1102,12 +1104,21 @@ ceiling, so a cluster that runs this package composes
 `components/pipelines-long-runs` (8 hours); the local overlay does.
 `memql_package_manifest_test.go` holds three of its copies to their originals
 -- `select.dbGated` to `scripts/ci/db-gated-packages.sh`, the gate packages to
-`ci.yml`'s `GATE_PACKAGES`, the Postgres service to `ci.yml`'s db-tests service
--- and `memql_pipeline_portable_coverage_test.go` holds the commands of the
-portable lanes (the SDK, view-kit, conformance and proving lanes, the tag builds
-and tests, the cluster-e2e build and the Bash image). Nothing holds the rest:
-the bucket globs, the shard counts and the fuzz targets are hand copies of
-`ci.yml`, and a change there is made here too.
+`ci.yml`'s `GATE_PACKAGES`, the Postgres service's image and credentials to
+`ci.yml`'s db-tests service -- and `memql_pipeline_portable_coverage_test.go`
+holds the commands of the portable lanes (the SDK, view-kit, conformance and
+proving lanes, the tag builds and tests, the cluster-e2e build and the Bash
+image). Nothing holds the rest: the bucket globs, the shard counts and the fuzz
+targets are hand copies of `ci.yml`, and a change there is made here too. The
+Postgres sidecar differs from `ci.yml`'s on purpose: it runs without fsync,
+synchronous commit or full-page writes, because a throwaway database never
+needs to survive a crash, and a commit then never waits on the disk the run's
+builds share.
+
+On a local cluster whose build node has 16 CPUs and 40 GB of a 24-core amd64
+workstation, a manual run, which selects every package, takes about 5 hours 30
+minutes: the full-history secret scan about 3 hours 25 minutes, `codeql-go`
+about 90 minutes, and the stages a pull request runs about 40 minutes.
 
 What a run of it costs, and where it falls short of `ci.yml`: every step clones
 the commit on its own (10 to 76 seconds a step for this repository, measured on

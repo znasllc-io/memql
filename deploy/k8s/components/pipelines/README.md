@@ -73,7 +73,7 @@ can run.
 | Cache access mode | `ReadWriteOnce` | `ReadWriteMany` | `ReadWriteMany` |
 | Cache size | 20Gi | 100Gi | 50Gi |
 | Cache marked `binds-on-first-use` | yes | no | no |
-| Steps at once | 1 | 2 | 1 |
+| Steps at once | 6 | 2 | 1 |
 | Container limit | 2 CPU / 4Gi | 2 CPU / 4Gi | 2 CPU / 4Gi |
 | Container request | 250m / 512Mi | 250m / 512Mi | 250m / 512Mi |
 | Container disk limit / request (`ephemeral-storage`) | 20Gi / 1Gi | 8Gi / 1Gi | 8Gi / 1Gi |
