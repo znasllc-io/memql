@@ -60,6 +60,10 @@ not change, the design.
    file delivery, an agent's `composeFile`) says what to write in its statement
    and has no client to hand the description on, so it keeps the composer.
 
+   Which Markdown requests are described now follows
+   [Materializer app D31](2026-10-12-materializer-app-design.md): each picked file's
+   type and individual size must also be accepted by the revision workflow.
+
    **Only Library files travel with a description.** The revision workflow reads
    Markdown and images and cannot read the graph, so a Markdown request is a
    described request only when every source is a `library_file` (or there are

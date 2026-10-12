@@ -21,7 +21,7 @@ import { fileHeadFromRow, type VersionEntry } from "./versions";
 import { useOsConnection } from "../../live/connection";
 import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
-import { MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION } from "../../items/materialize";
+import { MATERIALIZER_APP_ID, MATERIALIZER_MADE_SECTION } from "../../items/materialize";
 import {
   downloadArtifact,
   OVER_LIMIT_SENTENCE,
@@ -326,7 +326,7 @@ export function Inspector({
                     type="button"
                     className="os-link"
                     onClick={() =>
-                      actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, {
+                      actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_MADE_SECTION, {
                         compositionId: composition.id,
                       })
                     }

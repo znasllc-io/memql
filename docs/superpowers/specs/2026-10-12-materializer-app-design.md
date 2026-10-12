@@ -1,7 +1,7 @@
 # The Materializer app: mix things, describe it, get the file
 
 - **Date:** 2026-10-12
-- **Status:** design for sub-projects 4 (memql#6034) and 5 (memql#6035); not built yet
+- **Status:** built for sub-projects 4 (memql#6034) and 5 (memql#6035); integrated visual and cluster verification remain in the completion task
 - **Branch:** `epic/materializer-app`, cut from `origin/main` at `386e5af39`, which contains sub-project 1 (memql#6051)
 - **Program:** sub-projects 4 and 5 of 5 in epic memql#6022
 - **Builds on:** `2026-10-11-materializer-front-door-design.md` (sub-project 1). Its section 4 (the starting setup), amendments 5 to 11 and its guard test "one creation path" are binding here, with one change: which Markdown requests are described (its amendment 5) follows D31 below, in the server and the SDK alike.

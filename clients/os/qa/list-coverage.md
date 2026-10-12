@@ -27,7 +27,7 @@ answer does display zero.
 | Users | People, groups and roles; memberships, invitations, standing managers, role holders and sessions |
 | Email | Email, audiences, senders, templates and rules; audience recipients and delivery ledger |
 | Training | Files/teaching worklist, domains and domain chunks; existing domain disclosure preserved |
-| Materializer | Compositions, templates, recipes and recorded composition sources |
+| Materializer | Compositions, templates, recipes, and the From tray’s Library files and record types |
 | Cluster | Agents and standing grants; audit events; modules and per-node readiness; connector coverage, origin health and dead letters; standalone automations, relationships and stopped chains |
 | Concepts | Grouped registry and browsed rows, preserving filters, paging and row inspection |
 | Nexus | Goals, runs, approvals, automation catalog, goal run lists and journal records |
