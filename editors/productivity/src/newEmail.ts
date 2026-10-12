@@ -15,7 +15,6 @@ import { EMAIL_COPY } from "./emailCopy.js";
 import { reportProblem, UserInputError } from "./problems.js";
 
 const H = EMAIL_COPY.host;
-const VIEW = "memql.productivity.newEmail";
 const PENDING = "memql.newEmail.pending:", DRAFT = "memql.newEmail.draft:", ORGANIZATION = "memql.newEmail.organization:";
 const allowed = /\.(png|jpe?g|gif|zip|txt|md|markdown|html?|css|json|csv|svg)$/i;
 const kind = (name: string): Reference["kind"] => /\.(png|jpe?g|gif)$/i.test(name) ? "picture" : /\.zip$/i.test(name) ? "bundle" : "file";

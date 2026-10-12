@@ -416,11 +416,14 @@ automation reviseLibraryDocument {
  preparedImages := builtin libraryRevisionPreparedImages(requestId: args.requestId, sourceRunId: imageSourceRun)
 
  // The edit protocol is constrained JSON, not free-form model reasoning.
+ // A blank destination is an insertion. Attached references can inform the
+ // new content but cannot supply a before range in the saved destination.
+ blankDestination := trim(captured.content) == ""
  revisionSchema := {
   type: "object", additionalProperties: false, required: ["edits", "summary"],
-  properties: {edits: {type: "array", minItems: preparedImages.references == "[]" ? 0 : 1, maxItems: 100, items: {
+  properties: {edits: {type: "array", minItems: preparedImages.references == "[]" ? 0 : 1, maxItems: blankDestination ? 1 : 100, items: {
    type: "object", additionalProperties: false, required: ["before", "after", "reason", "commentIds"],
-   properties: {before: {type: "string"}, after: {type: "string"}, reason: {type: "string", maxLength: 400}, commentIds: {type: "array", items: {type: "string"}}}
+   properties: {before: blankDestination ? {type: "string", enum: [""]} : {type: "string"}, after: {type: "string"}, reason: {type: "string", maxLength: 400}, commentIds: {type: "array", items: {type: "string"}}}
   }}, summary: {type: "string", maxLength: 300}}
  }
  // Review the human requests and their anchors, not a second copy of the old
@@ -470,12 +473,14 @@ automation reviseLibraryDocument {
   }
   amendmentVerdict := amendmentAssessment
   analysis := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
+   blankDestination: blankDestination,
    reviewNotes: amendmentVerdict.details, preparedImages: preparedImages.references,
    document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.amendment.instruction,
    previous: captured.amendment.edits, evidence: combinedEvidence + "\nImage acquisition limitations: " + imageLimitations
   })
  } else {
   analysis := builtin ai(templateId: "libraryRevisionPassages", progress: true, responseSchema: revisionSchema, data: {
+   blankDestination: blankDestination,
    preparedImages: preparedImages.references,
    document: captured.content, passages: captured.passagesJSON, references: references.references, instruction: captured.instruction, evidence: combinedEvidence + "\nImage acquisition limitations: " + imageLimitations
   })
@@ -525,12 +530,14 @@ automation reviseLibraryDocument {
   repairDirection := "The previous response did not complete the request. Required corrections: " + repairFeedback + "\nProduce the actual edits now. A section rewrite is supported: use one exact replacement per affected paragraph or heading, or replace the requested section as a block. Include all prepared images using their exact references. Reuse the supplied evidence; no new research or image generation is needed."
   if captured.amendment != nil {
    repaired := builtin ai(templateId: "libraryRevisionItem", progress: true, responseSchema: revisionSchema, data: {
+    blankDestination: blankDestination,
     recovery: repairDirection + "\nCorrect this latest incomplete response while preserving its valid corrections:\n" + analysis.reply, reviewNotes: amendmentVerdict.details, preparedImages: preparedImages.references,
     document: captured.content, passages: captured.passagesJSON, references: references.references,
     instruction: captured.amendment.instruction, previous: captured.amendment.edits, evidence: combinedEvidence
    })
   } else {
    repaired := builtin ai(templateId: "libraryRevisionPassages", progress: true, responseSchema: revisionSchema, data: {
+    blankDestination: blankDestination,
     recovery: repairDirection + "\nCorrect this latest incomplete response while preserving its valid corrections:\n" + analysis.reply, preparedImages: preparedImages.references,
     document: captured.content, passages: captured.passagesJSON, references: references.references,
     instruction: captured.instruction, evidence: combinedEvidence

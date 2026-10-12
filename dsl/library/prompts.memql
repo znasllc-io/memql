@@ -2,6 +2,7 @@
 @level("strong")
 @templateFile("prompts/libraryRevisionPassages.tmpl")
 prompt libraryRevisionPassages {
+ blankDestination bool
  recovery string
  preparedImages string
  references string
@@ -15,6 +16,7 @@ prompt libraryRevisionPassages {
 @level("strong")
 @templateFile("prompts/libraryRevisionItem.tmpl")
 prompt libraryRevisionItem {
+ blankDestination bool
  recovery string
  preparedImages string
  references string

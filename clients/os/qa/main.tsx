@@ -7,7 +7,7 @@ import { EmailApp } from "../src/apps/email/EmailApp";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
 import { LocalEmailSettingsStore } from "../src/apps/email/settings";
 import { audienceRow as campaignAudience, campaignRow as emailCampaign, deliveryRow as emailDelivery, fakeConnection as campaignConnection, pagedResult as emailPage, rowsResult, ruleRow as emailRule, senderRow as campaignSender, templateRow as emailTemplate, withSession as campaignSession } from "../test/email/harness";
-import { useEmailFeeds, useSignupFormFeed } from "../src/apps/email/useEmail";
+import { useEmailFeeds } from "../src/apps/email/useEmail";
 import { EmailNavigationContext } from "../src/apps/email/openRequest";
 import { OverviewSection } from "../src/apps/email/overview/OverviewSection";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
