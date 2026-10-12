@@ -103,7 +103,17 @@ func (w *Worker) handleConfigureSeries(ctx context.Context, args map[string]any,
 			return nil, fmt.Errorf("choose the first send date and time")
 		}
 		next["name"], next["definition"], next["intervalWeeks"], next["timeZone"], next["anchorAt"] = campaign.Name, seriesDefinition(campaign), weeks, zone, anchor.UTC().Format(time.RFC3339Nano)
+		// SAVING NEVER CHANGES WHETHER IT RUNS (memql#6033). A save says what the
+		// series repeats and how often. A new series runs -- saving the first one
+		// is starting to repeat -- and an existing one keeps its status: paused
+		// stays paused, and one the scheduler stopped stays stopped, with its
+		// reason, until somebody resumes it. The OS saves the series from an Edit
+		// page that is offered for all three, so writing "active" here restarted
+		// a series nobody had asked to restart.
 		next["status"] = "active"
+		if kept := str(prior, "status"); prior != nil && kept != "" {
+			next["status"] = kept
+		}
 		next["nextAt"] = next["anchorAt"]
 		if prior != nil && sameSeriesConfiguration(prior, next) {
 			return seriesReceipt(prior)
@@ -141,9 +151,13 @@ func (w *Worker) handleConfigureSeries(ctx context.Context, args map[string]any,
 		}
 	}
 	next["createdAt"] = memql.VersionTimeAfter(revision, w.nowUTC()).Format(time.RFC3339Nano)
+	// A stopped series keeps saying why it stopped; every other write clears it.
 	next["lastError"] = ""
+	if str(next, "status") == "blocked" {
+		next["lastError"] = str(prior, "lastError")
+	}
 	values := []arg{{"seriesId", str(next, "id")}, {"versionTime", str(next, "createdAt")}}
-	for _, key := range []string{"accountId", "sourceCampaignId", "name", "definition", "intervalWeeks", "timeZone", "anchorAt", "nextAt", "status", "lastCampaignId", "lastOccurrenceAt"} {
+	for _, key := range []string{"accountId", "sourceCampaignId", "name", "definition", "intervalWeeks", "timeZone", "anchorAt", "nextAt", "status", "lastCampaignId", "lastOccurrenceAt", "lastError"} {
 		if value, ok := next[key]; ok && value != nil {
 			values = append(values, arg{key, value})
 		}
