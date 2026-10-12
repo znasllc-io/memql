@@ -169,24 +169,13 @@ func (w *Worker) newsletterPreflight(ctx context.Context, row map[string]any, se
 	return template, w.validateCampaignOrganization(ctx, campaign, template)
 }
 
-// The browser supplies only personal details and an affirmative choice. The
-// carrier stamps site/store/owner; this capability re-reads their binding.
-func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	ctx = memql.ContextWithFreshRead(ctx)
-	address := NormalizeEmail(argString(args, "email"))
-	name := strings.TrimSpace(argString(args, "displayName"))
-	if !plausibleAddress(address) || len(address) > 320 || len(name) > 120 || strings.IndexFunc(name, unicode.IsControl) >= 0 || argString(args, "consent") != "yes" {
-		return nil, fmt.Errorf("enter an email address and agree to receive the newsletter")
-	}
-	siteID := bare(argString(args, "siteId"))
-	if w.newsletterGate == nil {
-		return nil, fmt.Errorf("signup coordination is unavailable")
-	}
-	release, err := w.newsletterGate(ctx, "site:"+siteID)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
+// subscribeBinding reads the storefront's newsletter binding and checks it against
+// the form that was posted: enabled, owned by the caller, the store the form
+// names, and the revision the visitor saw. It returns the newsletter row, whose
+// audience is the one the signup is for. Two single-row reads and a capability
+// check, so it runs twice -- before the locks, to learn the audience, and under
+// them, where the binding must be exactly what the form was built from.
+func (w *Worker) subscribeBinding(ctx context.Context, args map[string]any, siteID string) (map[string]any, error) {
 	row, err := w.newsletterRow(ctx, "newsletterForSite", "siteId", siteID)
 	if err != nil {
 		return nil, err
@@ -204,28 +193,72 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	if err = w.requireSendAuthority(ctx, str(row, "accountId")); err != nil {
 		return nil, err
 	}
-	audienceID := bare(str(row, "audienceId"))
-	// All forms pointing at one audience share the lock and one welcome key.
-	releaseAudience, err := w.newsletterGate(ctx, "audience:"+audienceID)
-	if err != nil {
-		return nil, err
-	}
-	defer releaseAudience()
-	signupID := newsletterSignupID(audienceID, address)
+	return row, nil
+}
+
+// signupSettled reports whether a signup has nothing left to write: this address
+// has already signed up to the audience, or it is on the organization's
+// suppression list (a repeated opt-in never clears either). Two single-row reads.
+func (w *Worker) signupSettled(ctx context.Context, row map[string]any, signupID, address string) (bool, error) {
 	existing, err := w.newsletterRow(ctx, "newsletterSignupById", "signupId", signupID)
-	if err != nil {
-		return nil, err
+	if err != nil || existing != nil {
+		return existing != nil, err
+	}
+	if _, suppressed, err := w.store.SuppressionForSend(w.systemActorContext(ctx), str(row, "accountId"), EmailDigest(address)); err != nil {
+		return false, err
+	} else if suppressed {
+		return true, nil
+	}
+	return false, nil
+}
+
+// The browser supplies only personal details and an affirmative choice. The
+// carrier stamps site/store/owner; this capability re-reads their binding.
+//
+// THE ORDER IS THE DESIGN (memql#6022, F9 fix round 2). A signup serialises its
+// writes with two advisory locks, and each lock is a transaction that holds a
+// connection of the pod's pool -- four in the deployed configuration -- until the
+// signup returns. Everything slow therefore happens BEFORE the locks and nothing
+// slow after them:
+//
+//  1. no locks: the form, the binding (it names the audience), the answers that
+//     need no lock (a signup already taken, a suppressed address), the mailbox --
+//     the rows it holds by digest, the rows without one, the roster fallback --, the
+//     audience's size for its ceiling, and the welcome template;
+//  2. the locks, site then audience;
+//  3. under them, only what must be exact when the write happens -- the binding
+//     again (the form must still be the one the visitor saw), the signup row and the
+//     suppression list, all single-row reads -- and then the three writes.
+//
+// What the mailbox read decided can go stale before the write, by a row for the
+// same address that some other path adds meanwhile. The signup row is the key for
+// one address on one audience, so two signups for it still make one, and the window
+// is the one a hand unsubscribe has always had: no lock of the newsletter stops it.
+func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	ctx = memql.ContextWithFreshRead(ctx)
+	address := NormalizeEmail(argString(args, "email"))
+	name := strings.TrimSpace(argString(args, "displayName"))
+	if !plausibleAddress(address) || len(address) > 320 || len(name) > 120 || strings.IndexFunc(name, unicode.IsControl) >= 0 || argString(args, "consent") != "yes" {
+		return nil, fmt.Errorf("enter an email address and agree to receive the newsletter")
+	}
+	siteID := bare(argString(args, "siteId"))
+	if w.newsletterGate == nil {
+		return nil, fmt.Errorf("signup coordination is unavailable")
 	}
 	accepted := func() ([]memorynodes.MemoryNode, error) {
 		return resultNode("campaignSubscription", map[string]any{"accepted": true})
 	}
-	if existing != nil {
-		return accepted()
-	}
-	// Repeated opt-ins never clear any existing suppression or recipient state.
-	if _, suppressed, err := w.store.SuppressionForSend(w.systemActorContext(ctx), str(row, "accountId"), EmailDigest(address)); err != nil {
+
+	// 1. Before any lock.
+	row, err := w.subscribeBinding(ctx, args, siteID)
+	if err != nil {
 		return nil, err
-	} else if suppressed {
+	}
+	audienceID := bare(str(row, "audienceId"))
+	signupID := newsletterSignupID(audienceID, address)
+	if settled, err := w.signupSettled(ctx, row, signupID, address); err != nil {
+		return nil, err
+	} else if settled {
 		return accepted()
 	}
 	// The rows the mailbox holds are found by the digest of the address and, for
@@ -263,6 +296,33 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	snapshot, err := w.newsletterPreflight(ctx, row, true)
 	if err != nil {
 		return nil, err
+	}
+
+	// 2. The locks. All forms pointing at one audience share the audience lock and
+	// one welcome key.
+	releaseSite, err := w.newsletterGate(ctx, "site:"+siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseSite()
+	releaseAudience, err := w.newsletterGate(ctx, "audience:"+audienceID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseAudience()
+
+	// 3. Under the locks.
+	row, err = w.subscribeBinding(ctx, args, siteID)
+	if err != nil {
+		return nil, err
+	}
+	if bare(str(row, "audienceId")) != audienceID {
+		return nil, fmt.Errorf("the signup form changed; refresh it before subscribing")
+	}
+	if settled, err := w.signupSettled(ctx, row, signupID, address); err != nil {
+		return nil, err
+	} else if settled {
+		return accepted()
 	}
 	// Consent lands first, by address digest. If enrollment fails afterwards,
 	// no unconsented recipient can become sendable. Its stable event key is

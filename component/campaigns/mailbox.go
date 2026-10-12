@@ -29,6 +29,10 @@ const (
 	// recipientsWithoutDigestInAudience: one page of the audience's rows that
 	// carry no digest. A read that returns this many may have left more behind.
 	digestLessWindow = 50
+
+	// rosterPageRows mirrors the `paginate` on audienceRosterForSend: the rows one
+	// page of the roster walk reads.
+	rosterPageRows = 500
 )
 
 // mailboxRosterScanPages is the most pages of the roster (500 rows each) that
@@ -69,10 +73,11 @@ var ErrMailboxUndecidable = errors.New("campaigns: cannot rule out an earlier op
 //     read, as the signup always did, and the answer comes from the audience. This
 //     is the cost of the transition and it ends when the sweep has been through:
 //     afterwards the page is nearly empty. The roster is not read at all when steps
-//     1 and 2 already found a row that opted out, and the walk stops as soon as it
-//     meets one (nothing further can change the answer). It gives up with
-//     ErrMailboxUndecidable after mailboxRosterScanPages pages without having seen
-//     the end of the audience.
+//     1 and 2 already found a row that opted out, nor when the audience's size (one
+//     count) says it is bigger than the walk will read; otherwise the walk stops as
+//     soon as it meets a row that opted out (nothing further can change the answer).
+//     It gives up with ErrMailboxUndecidable after mailboxRosterScanPages pages
+//     without having seen the end of the audience.
 //
 // Every read here decides a write, so the caller's ctx must be a fresh read.
 func (s *Store) MailboxMembers(ctx context.Context, audienceID, address string) ([]Recipient, error) {
@@ -111,6 +116,15 @@ func (s *Store) MailboxMembers(ctx context.Context, audienceID, address string) 
 // goes on: Store.Roster would return what it had read and call it the audience,
 // which is how an opt-out beyond its cap is missed.
 func (s *Store) mailboxFromRoster(ctx context.Context, audienceID, want string) ([]Recipient, error) {
+	// An audience larger than the walk will read can only end in "cannot tell", and
+	// getting there costs the walk's pages at seconds each. Its size is one count.
+	size, err := s.RosterSize(ctx, audienceID)
+	if err != nil {
+		return nil, err
+	}
+	if reach := mailboxRosterScanPages * rosterPageRows; size > reach {
+		return nil, fmt.Errorf("%w: the audience holds %d recipients, more than the %d the walk will read, and some of its rows have no digest yet", ErrMailboxUndecidable, size, reach)
+	}
 	var held []Recipient
 	cursor := ""
 	for pages := 1; ; pages++ {

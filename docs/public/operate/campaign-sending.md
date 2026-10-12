@@ -321,8 +321,10 @@ every audience of 50 or more recipients between a rollout and the first sweep,
 the signup reads the audience page by page (500 recipients a page, about two
 seconds a page with 200,000 recipients in the cluster) and stops at the first row
 for the address that opted out. That is the cost the digest removed, so it stops
-after ten pages: in an audience of more than 5,000 recipients it cannot rule an
-opt-out out, and the form asks the visitor to try again later. An email rule that
+after ten pages: in an audience of more than 5,000 recipients it does not start
+(the audience's size says it cannot rule an opt-out out), and the form asks the
+visitor to try again later at once. All of this is read before the signup takes
+its locks, so a slow read delays only that visitor. An email rule that
 sends to an address on a row has no such read, and declines to fire and says so
 in its refusals. The sweep logs "put the address digest on recipients written
 without one" with a count when it stamps anything; a pass over recipients that

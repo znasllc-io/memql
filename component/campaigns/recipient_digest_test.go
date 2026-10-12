@@ -114,6 +114,8 @@ type mailboxEngine struct {
 	roster        []map[string]any
 	// rosterPageSize pages the roster, as the engine does; zero answers it in one page.
 	rosterPageSize int
+	// rosterSize is what the count of the roster says; zero means the roster's length.
+	rosterSize int
 }
 
 // rosterEnvelope answers one page of the roster for the cursor it arrived with.
@@ -150,6 +152,12 @@ func (e *mailboxEngine) Execute(ctx context.Context, q string) (any, error) {
 		rows = e.withoutDigest
 	case strings.HasPrefix(q, "query audienceRosterForSend"):
 		return e.rosterEnvelope(memql.CursorFromContext(ctx)), nil
+	case strings.HasPrefix(q, "query audienceRosterSize"):
+		size := e.rosterSize
+		if size == 0 {
+			size = len(e.roster)
+		}
+		return map[string]any{"output": []any{map[string]any{"count": size}}}, nil
 	}
 	out := make([]any, 0, len(rows))
 	for _, r := range rows {
@@ -291,6 +299,39 @@ func rosterOf(n int, at map[int]map[string]any) []map[string]any {
 		roster = append(roster, mailboxRow(fmt.Sprintf("other-%02d", i), fmt.Sprintf("other%02d@example.test", i), "subscribed"))
 	}
 	return roster
+}
+
+// TestMailboxMembersAnswersAnAudienceBeyondTheWalkWithoutWalkingIt: the walk reads
+// at most mailboxRosterScanPages pages, so an audience bigger than that cannot end
+// any other way than "cannot tell" -- and the audience's size is one count.
+func TestMailboxMembersAnswersAnAudienceBeyondTheWalkWithoutWalkingIt(t *testing.T) {
+	limit := mailboxRosterScanPages
+	mailboxRosterScanPages = 2
+	defer func() { mailboxRosterScanPages = limit }()
+
+	for _, tc := range []struct {
+		name        string
+		size        int
+		undecidable bool
+	}{
+		{"one past what the walk reads", 2*rosterPageRows + 1, true},
+		{"far past it", 1000000, true},
+		{"exactly what it reads", 2 * rosterPageRows, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &mailboxEngine{withoutDigest: fullPageOfStrangers(), roster: rosterOf(6, nil), rosterSize: tc.size}
+			_, err := NewStore(engine).MailboxMembers(context.Background(), "aud-1", "member@example.test")
+			if tc.undecidable != errors.Is(err, ErrMailboxUndecidable) {
+				t.Fatalf("size %d: error %v, want undecidable = %v", tc.size, err, tc.undecidable)
+			}
+			if sizes := engine.called("query audienceRosterSize"); sizes != 1 {
+				t.Errorf("the audience was counted %d times, want once", sizes)
+			}
+			if pages := engine.called("query audienceRosterForSend"); tc.undecidable && pages != 0 {
+				t.Errorf("the roster was walked for %d pages although the count already said it cannot be searched to the end", pages)
+			}
+		})
+	}
 }
 
 // TestMailboxMembersDoesNotReadTheRosterWhenAnOptOutIsAlreadyInHand: a row that
@@ -438,7 +479,7 @@ func TestMailboxVerdict(t *testing.T) {
 // queries they mirror are one number. digestLessWindow decides when a page is full.
 func TestTheReadWindowsMirrorTheirQueries(t *testing.T) {
 	queries := campaignsDSL(t, "queries.memql")
-	for name, want := range map[string]int{"recipientInAudienceByDigest": digestWindow, "recipientsWithoutDigestInAudience": digestLessWindow} {
+	for name, want := range map[string]int{"recipientInAudienceByDigest": digestWindow, "recipientsWithoutDigestInAudience": digestLessWindow, "audienceRosterForSend": rosterPageRows} {
 		i := strings.Index(queries, "query recipient "+name+" {")
 		if i < 0 {
 			t.Fatalf("query %s is not in queries.memql", name)

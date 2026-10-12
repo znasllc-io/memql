@@ -92,6 +92,13 @@ type digestTenant struct {
 func newDigestTenant(t *testing.T, name string) *digestTenant {
 	t.Helper()
 	eng, db := digestDBEngine(t)
+	return newDigestTenantOn(t, eng, db, name)
+}
+
+// newDigestTenantOn is a tenant on an engine the test already booted, for the
+// cases that put several tenants on one pod's engine and pool.
+func newDigestTenantOn(t *testing.T, eng *memql.MemQLEngine, db *bun.DB, name string) *digestTenant {
+	t.Helper()
 	started := time.Now()
 	suffix := fmt.Sprintf("%s-%d", name, started.UnixNano())
 	forgetWhenDone(t, db, started, suffix)
@@ -359,12 +366,26 @@ type digestNewsletter struct {
 func newEmptyNewsletter(t *testing.T, name string) *digestNewsletter {
 	t.Helper()
 	d := newDigestTenant(t, name)
-	template, identity, site := d.suffix+"-tpl", d.suffix+"-sender", d.suffix+"-site"
-
 	sender := &recordingSender{}
-	worker := newTestWorker(t, deliveryDBEngine{d.engine}, sender)
-	wired := NewWorker(deliveryDBEngine{d.engine}, nil, nil, quietLogger(), func() *sql.DB { return d.db.DB })
+	worker := newGatedWorker(t, d.engine, d.db, sender)
+	return setUpStorefront(t, d, worker, sender)
+}
+
+// newGatedWorker is a worker on an engine, with the gates the application wires:
+// they hold their locks on the engine's own pool.
+func newGatedWorker(t *testing.T, eng *memql.MemQLEngine, db *bun.DB, sender *recordingSender) *Worker {
+	t.Helper()
+	worker := newTestWorker(t, deliveryDBEngine{eng}, sender)
+	wired := NewWorker(deliveryDBEngine{eng}, nil, nil, quietLogger(), func() *sql.DB { return db.DB })
 	worker.newsletterGate, worker.templateGate, worker.singleSendGate = wired.newsletterGate, wired.templateGate, wired.singleSendGate
+	return worker
+}
+
+// setUpStorefront gives the tenant a sender, a published welcome template, a site
+// and a newsletter bound to the tenant's audience, all through the worker.
+func setUpStorefront(t *testing.T, d *digestTenant, worker *Worker, sender *recordingSender) *digestNewsletter {
+	t.Helper()
+	template, identity, site := d.suffix+"-tpl", d.suffix+"-sender", d.suffix+"-site"
 
 	d.execute(t, d.owner, call("mutation", "createSenderIdentity", arg{"senderIdentityId", identity}, arg{"accountId", d.org}, arg{"address", "hello@client.test"}, arg{"fromName", "Client"}))
 	templateArgs := map[string]any{"templateId": template, "accountId": d.org, "name": "Welcome", "content": map[string]any{"subject": "Welcome", "textBody": "Thanks for subscribing", "htmlBody": "<p>Welcome</p>"}}
@@ -401,10 +422,7 @@ func newDigestNewsletter(t *testing.T, name string) *digestNewsletter {
 func (n *digestNewsletter) replica(t *testing.T) *Worker {
 	t.Helper()
 	eng, db := digestDBEngine(t)
-	worker := newTestWorker(t, deliveryDBEngine{eng}, &recordingSender{})
-	wired := NewWorker(deliveryDBEngine{eng}, nil, nil, quietLogger(), func() *sql.DB { return db.DB })
-	worker.newsletterGate, worker.templateGate, worker.singleSendGate = wired.newsletterGate, wired.templateGate, wired.singleSendGate
-	return worker
+	return newGatedWorker(t, eng, db, &recordingSender{})
 }
 
 // roster reads the audience through the tenant's own store, not the worker's:
