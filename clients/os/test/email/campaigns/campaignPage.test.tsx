@@ -532,6 +532,35 @@ describe("what happened when it went out", () => {
     expect(barDetail()).toBe("no email sender is registered on this node");
   });
 
+  it("says each number once: the breakdown holds only what the band's legend does not", async () => {
+    const conn = seed({
+      campaigns: [draft({ id: "c1", status: "sending", recipientCount: 100, sentCount: 40, skippedCount: 10, failedCount: 5, startedAt: "2031-10-14T16:00:00Z" })],
+      campaignStats: [STATS],
+    });
+    mountWindow(conn);
+    await openCampaign();
+
+    // The legend beneath the band already says how many were sent, skipped,
+    // failed and not yet sent; the breakdown says what it does not.
+    const legend = within(screen.getByRole("region", { name: "Results" })).getByRole("list", { name: "What happened to this audience" });
+    expect(within(legend).getAllByRole("listitem").map((item) => item.querySelector(".os-send-legend-label")?.textContent)).toEqual(["Sent", "Skipped", "Failed", "Not yet sent"]);
+    const breakdown = screen.getByRole("region", { name: "Breakdown" });
+    await waitFor(() => expect(breakdown.querySelectorAll("dt").length).toBeGreaterThan(0));
+    expect([...breakdown.querySelectorAll("dt")].map((term) => term.textContent)).toEqual([
+      "Recipients",
+      "Skipped: on the do-not-mail list",
+      "Skipped: unsubscribed",
+      "Skipped: some other reason",
+      "Hard bounces",
+      "Spam reports",
+      "Unsubscribed from this",
+    ]);
+    expect(fact("Recipients", breakdown).textContent).toBe("100");
+    expect(fact("Skipped: unsubscribed", breakdown).textContent).toBe("3");
+    expect(fact("Skipped: some other reason", breakdown).textContent).toBe("1");
+    expect(within(breakdown).getAllByText(/Soft bounces/)).toHaveLength(1);
+  });
+
   it("says opens and clicks were not counted when neither was asked for", async () => {
     const conn = seed({
       campaigns: [draft({ id: "c1", status: "sent", trackOpens: false, trackClicks: false, recipientCount: 10, sentCount: 10 })],

@@ -105,7 +105,16 @@ function StatFact({ label, figure }: { label: string; figure: Figure }) {
   return <Fact label={label} value={count(figure)} title={figure.absentBecause || undefined} />;
 }
 
-/** The server's own count of every outcome, refreshed while it is seen: opens and unsubscribes arrive after a send ends. */
+/**
+ * What the band's legend does not say, refreshed while it is seen: bounces,
+ * spam reports and unsubscribes arrive after a send ends.
+ *
+ * EACH NUMBER IS SAID ONCE. How many were sent, skipped, failed and not yet
+ * sent is the legend's, right above; a second copy here would be a second
+ * place to read it and, between two refreshes, a second answer. The breakdown
+ * keeps the whole (Recipients), why people were skipped, and what happened
+ * after delivery.
+ */
 export function Breakdown({ stats }: { stats: Reading<CampaignStats | null> }) {
   const value = stats.value;
   // Answered with no breakdown at all: there is nothing to show, and a box of
@@ -121,10 +130,6 @@ export function Breakdown({ stats }: { stats: Reading<CampaignStats | null> }) {
         <>
           <Facts>
             <StatFact label="Recipients" figure={value.recipients} />
-            <StatFact label="Sent" figure={value.sent} />
-            <StatFact label="Not yet sent" figure={value.pending} />
-            <StatFact label="Failed" figure={value.failed} />
-            <StatFact label="Skipped" figure={value.skipped} />
             <StatFact label="Skipped: on the do-not-mail list" figure={value.skippedSuppressed} />
             <StatFact label="Skipped: unsubscribed" figure={value.skippedUnsubscribed} />
             <StatFact label="Skipped: some other reason" figure={value.skippedOther} />
