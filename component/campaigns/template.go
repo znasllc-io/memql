@@ -285,12 +285,18 @@ func (w *Worker) saveUnderLocks(ctx context.Context, req templateRequest, render
 	return w.changeTemplate(ctx, req, rows[0], rendered)
 }
 
-// lockTemplate takes one of the template gates. A gate that cannot be taken
-// (the pool cancels a statement that has waited eight seconds for it, or the
-// caller stops waiting) is a sentence that says what to do; the cause is logged.
+// lockTemplate takes one of the template gates. A wait for it that ended without
+// the lock (the pool cancels a statement that has waited eight seconds, a lock
+// timeout, or the caller stops waiting: memql.ErrWriteGateBusy) is a sentence that
+// says what to do; the cause is logged. A gate that fails for any other reason (no
+// coordination configured, a transaction that cannot begin, a lost connection) is
+// not somebody else's save, and comes back as the engine reported it.
 func (w *Worker) lockTemplate(ctx context.Context, key string) (func(), error) {
 	release, err := w.templateGate(ctx, key)
 	if err != nil {
+		if !errors.Is(err, memql.ErrWriteGateBusy) {
+			return nil, err
+		}
 		if w.logger != nil {
 			w.logger.Warn("campaigns: a template gate could not be taken", "gate", key, "error", err)
 		}

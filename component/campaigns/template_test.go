@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1143,7 +1144,8 @@ func (g *lockingGates) acquire(ctx context.Context, key string) (func(), error) 
 			case <-wait:
 				continue
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				// A wait that ended without the lock, as AcquireWriteGate reports it.
+				return nil, fmt.Errorf("%w: %w", memql.ErrWriteGateBusy, ctx.Err())
 			}
 		}
 		release := make(chan struct{})
@@ -1298,7 +1300,8 @@ func TestASaveDuringASlowRenderCannotPassTheSameRevision(t *testing.T) {
 // error text for a person to read: it says what happened and what to do.
 func TestAGateThatCannotBeTakenIsASentence(t *testing.T) {
 	const sentence = "Someone else is saving this template. Try again in a moment."
-	timeout := errors.New("pq: canceling statement due to statement timeout")
+	// What AcquireWriteGate returns when the pool cancels the statement that waits.
+	timeout := fmt.Errorf("%w: ERROR: canceling statement due to statement timeout (SQLSTATE=57014)", memql.ErrWriteGateBusy)
 
 	t.Run("the first lock", func(t *testing.T) {
 		tw := newTemplateWorld(t)
@@ -1353,6 +1356,141 @@ func TestAGateThatCannotBeTakenIsASentence(t *testing.T) {
 			t.Fatalf("error = %v, want %q", err, sentence)
 		}
 	})
+}
+
+// The organization and the permission are looked at again under the locks. A
+// save looks at them before its render (so that somebody who may not costs no
+// render), and the render can take a long time, so what was true then may not be
+// when the save decides. Archive and restore render nothing and have no look
+// before the locks at all, so the look under them is the only one they get.
+func TestTheOrganizationAndPermissionAreCheckedAgainUnderTheLocks(t *testing.T) {
+	const organizationClosed = "organization is not active or accessible"
+	setStatus := func(tw *templateWorld, status string) {
+		tw.engine.fakeEngine.mu.Lock()
+		defer tw.engine.fakeEngine.mu.Unlock()
+		tw.engine.accounts[templateOrg]["status"] = status
+	}
+	requireNoWrite := func(t *testing.T, tw *templateWorld, before int) {
+		t.Helper()
+		if got := len(tw.engine.writes()); got != before {
+			t.Errorf("writes = %d, want the %d there were: the call was refused", got, before)
+		}
+		if _, held := tw.gate.snapshot(); held != 0 {
+			t.Errorf("%d locks still held", held)
+		}
+	}
+
+	t.Run("archive in an organization that has been archived", func(t *testing.T) {
+		tw := newTemplateWorld(t)
+		tw.engine.stateful = true
+		first := tw.saved(saveTemplateArgs(readyConfirmation(t)))
+		before := len(tw.engine.writes())
+		setStatus(tw, "archived")
+		if _, err := tw.save(saveTemplateArgs(nil, revised(first.Revision, "archive"))); err == nil || err.Error() != organizationClosed {
+			t.Fatalf("archiving in an archived organization: %v, want %q", err, organizationClosed)
+		}
+		requireNoWrite(t, tw, before)
+	})
+
+	t.Run("restore in an organization that has been archived", func(t *testing.T) {
+		tw := newTemplateWorld(t)
+		tw.engine.stateful = true
+		first := tw.saved(saveTemplateArgs(readyConfirmation(t)))
+		away := tw.saved(saveTemplateArgs(nil, revised(first.Revision, "archive")))
+		before := len(tw.engine.writes())
+		setStatus(tw, "archived")
+		if _, err := tw.save(saveTemplateArgs(nil, revised(away.Revision, "restore"))); err == nil || err.Error() != organizationClosed {
+			t.Fatalf("restoring in an archived organization: %v, want %q", err, organizationClosed)
+		}
+		requireNoWrite(t, tw, before)
+	})
+
+	t.Run("an organization archived while the email was rendering", func(t *testing.T) {
+		tw := newTemplateWorld(t)
+		parked := tw.parkTheRender()
+		done := make(chan error, 1)
+		go func() {
+			_, err := tw.save(saveTemplateArgs(slowDocument(t)))
+			done <- err
+		}()
+		select {
+		case <-parked.entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the render never read the picture")
+		}
+		setStatus(tw, "archived")
+		close(parked.release)
+		if err := <-done; err == nil || err.Error() != organizationClosed {
+			t.Fatalf("a save into an organization archived during its render: %v, want %q", err, organizationClosed)
+		}
+		requireNoWrite(t, tw, 0)
+	})
+
+	t.Run("permission withdrawn while the email was rendering", func(t *testing.T) {
+		tw := newTemplateWorld(t)
+		var withdrawn atomic.Bool
+		tw.engine.capable = func(string, string, string) bool { return !withdrawn.Load() }
+		parked := tw.parkTheRender()
+		done := make(chan error, 1)
+		go func() {
+			_, err := tw.save(saveTemplateArgs(slowDocument(t)))
+			done <- err
+		}()
+		select {
+		case <-parked.entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the render never read the picture")
+		}
+		withdrawn.Store(true)
+		close(parked.release)
+		if err := <-done; err == nil || err.Error() != templateNeeds {
+			t.Fatalf("a save by somebody whose permission went during the render: %v, want %q", err, templateNeeds)
+		}
+		requireNoWrite(t, tw, 0)
+	})
+}
+
+// The sentence says somebody else is saving, so it is said only when that is
+// what happened: the wait for the lock ended. A gate that fails for any other
+// reason (no coordination configured, a transaction that cannot begin, a lost
+// connection) is not somebody else's save, and telling a person to try again in a
+// moment would send them to retry something that cannot work. Those come back as
+// the engine reported them.
+func TestAGateThatFailsForAnotherReasonIsNotSomeoneElsesSave(t *testing.T) {
+	for name, failure := range map[string]error{
+		"no coordination":                   errors.New("shared write coordination is unavailable"),
+		"a transaction that cannot begin":   errors.New("sql: database is closed"),
+		"a connection lost while waiting":   errors.New("FATAL: terminating connection due to administrator command (SQLSTATE=57P01)"),
+		"a failure that mentions a timeout": errors.New("dial tcp 10.0.0.1:5432: connect: connection timed out"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			for position, args := range map[string]func(map[string]any){
+				"the first lock":                   func(map[string]any) {},
+				"the template's lock after file's": func(a map[string]any) { a["sourceArtifactId"] = templateSource },
+			} {
+				tw := newTemplateWorld(t)
+				gates := newLockingGates()
+				taken := 0
+				tw.w.templateGate = func(ctx context.Context, key string) (func(), error) {
+					taken++
+					if taken == 1 && position == "the first lock" || taken == 2 {
+						return nil, failure
+					}
+					return gates.acquire(ctx, key)
+				}
+				_, err := tw.save(saveTemplateArgs(readyConfirmation(t), args))
+				if err == nil || err.Error() != failure.Error() {
+					t.Errorf("%s: error = %v, want the gate's own: %q", position, err, failure)
+				}
+				if held := gates.holding(); len(held) != 0 {
+					t.Errorf("%s: a lock was kept: %v", position, held)
+				}
+				if len(tw.engine.writes()) != 0 {
+					t.Errorf("%s: wrote without the lock", position)
+				}
+			}
+		})
+	}
 }
 
 // The write guard refuses a create over a row that is another organization's
@@ -1669,9 +1807,13 @@ func TestTemplateWritesAreServerOnlyAndReadsAreFresh(t *testing.T) {
 	if _, held := tw.gate.snapshot(); held != 0 {
 		t.Errorf("%d gates still held", held)
 	}
-	tw.gate.err = fmt.Errorf("gate unavailable")
+	tw.gate.err = fmt.Errorf("%w: lock wait ended", memql.ErrWriteGateBusy)
 	if _, err := tw.save(saveTemplateArgs(doc)); err == nil || err.Error() != "Someone else is saving this template. Try again in a moment." {
-		t.Errorf("a gate that cannot be taken: %v", err)
+		t.Errorf("a gate whose wait ended: %v", err)
+	}
+	tw.gate.err = fmt.Errorf("gate unavailable")
+	if _, err := tw.save(saveTemplateArgs(doc)); err == nil || err.Error() != "gate unavailable" {
+		t.Errorf("a gate that failed for another reason: %v", err)
 	}
 	tw.w.templateGate = nil
 	if _, err := tw.save(saveTemplateArgs(doc)); err == nil || err.Error() != "template write coordination is unavailable" {
