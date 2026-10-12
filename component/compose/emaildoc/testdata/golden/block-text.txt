@@ -1,0 +1,17 @@
+Hello {{displayName}},
+thanks for joining us.
+
+- Fast setup
+- Friendly help
+
+1. Pick a plan
+2. Read the guide (https://example.com/guide?a=1&b=2)
+
+See you soon.
+
+Lead line
+
+- First point
+- Second point
+
+Write to us (mailto:hello@example.com).

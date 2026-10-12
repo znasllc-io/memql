@@ -33,6 +33,7 @@ shape recipient recipientFull {
   accountId
   audienceId
   email
+  emailDigest
   displayName
   subscriptionStatus
   unsubscribedAt
@@ -41,8 +42,35 @@ shape recipient recipientFull {
   row.createdAt
 }
 
-/// Full template projection: the authored content plus its lifecycle. Backs the template list, the
-/// template editor and the campaign editor's preview.
+/// Template summary: what a list shows of a template, and nothing of what it holds. It carries no
+/// body and no document, which can weigh megabytes each (a query answer is one message, and a list
+/// holds up to fifty), so a list never outgrows the browser's receive limit. Backs the template list
+/// and the campaign editor's template picker; a template is read whole with templateById.
+@row
+shape template templateSummary {
+  row.id
+  ownerUserId
+  name
+  subject
+  status
+  accountId
+  layoutId
+  preheader
+  sourceArtifactId
+  row.createdAt
+}
+
+/// A template named and dated: which template, and at which revision (createdAt). Backs the lookup of
+/// the template published from a file.
+@row
+shape template templateRef {
+  row.id
+  row.createdAt
+}
+
+/// Full template projection: the authored content plus its lifecycle, the document and the bodies a
+/// send uses. Backs templateById, the template editor's read and the revision check
+/// campaignSaveTemplate makes before it writes. Lists use templateSummary instead.
 @row
 shape template templateFull {
   row.id
@@ -53,6 +81,25 @@ shape template templateFull {
   htmlBody
   status
   accountId
+  document
+  layoutId
+  preheader
+  sourceArtifactId
+  row.createdAt
+}
+
+/// Full email-layout projection: the saved document and its lifecycle. Backs the layout picker
+/// (emailLayouts) and the revision check campaignSaveLayout makes before it writes.
+@row
+shape emailLayout emailLayoutFull {
+  row.id
+  ownerUserId
+  accountId
+  name
+  description
+  document
+  sourceArtifactId
+  status
   row.createdAt
 }
 

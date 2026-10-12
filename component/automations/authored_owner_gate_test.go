@@ -15,6 +15,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -123,12 +124,13 @@ func TestOwnerGate_EmptyOwnerNeverOwned(t *testing.T) {
 // --- gate wired into the scheduler ---
 
 // TestOwnerGate_SchedulerFiresOnlyOnOwningNode: two schedulers model two nodes
-// over the same event bus + the same 2-node membership. For a given owner,
-// exactly ONE node's scheduler fires the authored automation -- so it runs
-// once cluster-wide, not once per replica.
+// with the same 2-node membership, each with the same owner's SCHEDULED
+// automation armed. A cron entry ticks on both; for a given owner exactly ONE
+// node's scheduler runs it -- so it runs once cluster-wide, not once per
+// replica. (Event triggers are not gated: they fire on the node where their
+// event happened -- authored_origin_firing_test.go.)
 func TestOwnerGate_SchedulerFiresOnlyOnOwningNode(t *testing.T) {
 	loadConceptsForAuthored(t)
-	bus := events.NewBus()
 	const owner = "v1:identity:user:alice"
 
 	nodes := []string{"nodeA", "nodeB"}
@@ -140,15 +142,16 @@ func TestOwnerGate_SchedulerFiresOnlyOnOwningNode(t *testing.T) {
 	owningNode := probe.AssignedNode(owner)
 
 	type nodeRig struct {
-		id    string
-		sched *automations.AuthoredScheduler
-		runs  *int32mu
+		id   string
+		runs *int32mu
 	}
 	var rigs []nodeRig
 	for _, n := range nodes {
 		counter := &int32mu{}
 		gate := automations.NewAuthoredOwnerGate(n, membership)
 		loader := automations.NewLoader(automations.LoaderOptions{Registry: concept.DefaultRegistry()})
+		bus := events.NewBus()
+		defer bus.Close()
 		s, err := automations.NewAuthoredScheduler(automations.AuthoredSchedulerOptions{
 			Loader:    loader,
 			EventBus:  bus,
@@ -159,27 +162,27 @@ func TestOwnerGate_SchedulerFiresOnlyOnOwningNode(t *testing.T) {
 			t.Fatalf("NewAuthoredScheduler(%s): %v", n, err)
 		}
 		defer s.Stop()
-		// Both nodes activate the SAME owner's authored automation (each node
-		// runs the authored scheduler and subscribes the trigger).
-		if err := s.Activate(authoredAutomationConstruct(owner, "aliceOnUserCreate", eventAutomationSrc("aliceOnUserCreate"))); err != nil {
+		// Both nodes arm the SAME owner's schedule (each node runs the
+		// authored scheduler, so each node's cron ticks).
+		if err := s.Activate(authoredAutomationConstruct(owner, "everySecondSweep", everySecondSrc)); err != nil {
 			t.Fatalf("activate on %s: %v", n, err)
 		}
-		rigs = append(rigs, nodeRig{id: n, sched: s, runs: counter})
+		rigs = append(rigs, nodeRig{id: n, runs: counter})
 	}
 
-	// One event reaches both nodes' subscriptions; only the owning node runs it.
-	bus.PublishSync(events.NewEvent("graph.node.created.v1:identity:user", events.KindNodeCreated, map[string]any{"id": "bob"}))
-
+	var owning *int32mu
 	for _, r := range rigs {
-		got := r.runs.get()
 		if r.id == owningNode {
-			if got != 1 {
-				t.Errorf("owning node %s should fire exactly once, got %d", r.id, got)
-			}
-		} else {
-			if got != 0 {
-				t.Errorf("non-owning node %s must NOT fire (leader-gated), got %d", r.id, got)
-			}
+			owning = r.runs
+		}
+	}
+	if !eventuallyTrue(3*time.Second, func() bool { return owning.get() >= 1 }) {
+		t.Fatalf("owning node %s never ran the schedule", owningNode)
+	}
+	time.Sleep(1100 * time.Millisecond) // one more tick on every node
+	for _, r := range rigs {
+		if r.id != owningNode && r.runs.get() != 0 {
+			t.Errorf("non-owning node %s must NOT run the schedule (leader-gated), got %d", r.id, r.runs.get())
 		}
 	}
 }

@@ -139,6 +139,12 @@ var piiProjectionAccepted = map[string]string{
 	"campaigns/queries.memql audienceRosterForSend":         "recipient organization membership plus app permission enforced before pagination and again on each row; worker borrowed authority resolves current user role and grants.",
 	"campaigns/queries.memql deliveriesForCampaign":         "delivery organization membership plus app permission enforced by the engine.",
 	"campaigns/queries.memql recipientById":                 "recipient organization membership plus app permission enforced by the engine.",
+	"campaigns/queries.memql recipientInAudienceByDigest":   "recipient organization membership plus app permission enforced by the engine; the digest narrows the read to one mailbox in one audience.",
+
+	// The other half of the digest lookup, in its own alignment section so the
+	// longer name does not reflow every line above it.
+	"campaigns/queries.memql recipientsWithoutDigestInAudience": "recipient organization membership plus app permission enforced by the engine; one bounded page of one audience's rows that have no digest yet.",
+
 	"campaigns/queries.memql recipientsForAudience":         "recipient organization membership plus app permission enforced by the engine.",
 	"campaigns/queries.memql sendableRecipientsForAudience": "recipient organization membership plus app permission enforced by the engine.",
 	// This gate flags userDisplayById where the #2840 gate also landed on it,

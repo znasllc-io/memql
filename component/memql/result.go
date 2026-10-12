@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 
@@ -242,7 +243,9 @@ func (r *ExecuteResult) ToAPIResult() (*memqlv1.GraphBundle, []*structpb.Value, 
 		}
 		return r.maybeClearBundle(bundle), data, nil
 	default:
-		raw, err := json.Marshal(typed)
+		// Plain JSON, for the reason marshalPlainJSON gives: a builtin's node set
+		// comes through here and is read again on the next lines.
+		raw, err := marshalPlainJSON(typed)
 		if err != nil {
 			return bundle, data, err
 		}
@@ -274,6 +277,32 @@ func (r *ExecuteResult) ToAPIResult() (*memqlv1.GraphBundle, []*structpb.Value, 
 		}
 		return r.maybeClearBundle(bundle), data, nil
 	}
+}
+
+// marshalPlainJSON writes v as JSON for a place that reads it again at once
+// (json.Unmarshal into plain values), with nothing escaped that JSON does not
+// need escaped.
+//
+// encoding/json escapes each "<", ">" and "&" as six bytes by default, a
+// safeguard for JSON placed inside HTML, and it does so to the bytes of a
+// json.RawMessage too: a builtin's answer is a memorynodes.MemoryNode whose
+// Payload is bytes the builtin already wrote, so an answer that carried an email
+// cost a multiple of its size to marshal (343 MiB for 8.3 MB of "<", where the
+// same size of letters took 23) for text that is read back as it was.
+//
+// A MarshalJSON method on the node would not do it: json.Marshal compacts what a
+// method returns with its own escaping, so the escapes come back. It is the
+// Encoder that is told, which is why each place that marshals a node set calls
+// this.
+func marshalPlainJSON(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(v); err != nil {
+		return nil, err
+	}
+	// Encode ends what it writes with a newline.
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // maybeClearBundle returns nil if shape was used without includeBundle flag,

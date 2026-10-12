@@ -20,4 +20,7 @@ const (
 	LatestRowIndexRebuilt    = latestRowIndexRebuilt
 )
 
-var EnsureWorkJournalLookupIndex = ensureWorkJournalLookupIndex
+var (
+	EnsureWorkJournalLookupIndex   = ensureWorkJournalLookupIndex
+	EnsureEmailDigestLookupIndexes = ensureEmailDigestLookupIndexes
+)

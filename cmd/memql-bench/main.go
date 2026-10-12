@@ -32,6 +32,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
@@ -181,7 +182,7 @@ func doRun(c *capability.Capability) int {
 		return code
 	}
 
-	eng, db, closeDB, code := openEngine(c)
+	eng, db, gates, closeDB, code := openEngine(c)
 	if code != capability.ExitOK {
 		return code
 	}
@@ -197,7 +198,7 @@ func doRun(c *capability.Capability) int {
 		// ladder and replay runner against this engine; without it every
 		// lifecycle scenario refuses to run rather than publishing a figure
 		// nothing drove.
-		Lifecycle: proving.NewEngineLifecycle(eng, db, logger),
+		Lifecycle: proving.NewEngineLifecycle(eng, db, gates, logger),
 	}
 
 	c.Step("running %d scenarios on both arms", len(corpus.Scenarios))
@@ -272,7 +273,7 @@ func doGate(c *capability.Capability) int {
 	if code != capability.ExitOK {
 		return code
 	}
-	eng, db, closeDB, code := openEngine(c)
+	eng, db, gates, closeDB, code := openEngine(c)
 	if code != capability.ExitOK {
 		return code
 	}
@@ -288,7 +289,7 @@ func doGate(c *capability.Capability) int {
 		// ladder and replay runner against this engine; without it every
 		// lifecycle scenario refuses to run rather than publishing a figure
 		// nothing drove.
-		Lifecycle: proving.NewEngineLifecycle(eng, db, logger),
+		Lifecycle: proving.NewEngineLifecycle(eng, db, gates, logger),
 	}
 	result, err := r.Run(context.Background(), corpus)
 	if err != nil {
@@ -465,11 +466,15 @@ func gitCommit() string {
 // openEngine opens the database, migrates it, and opens an engine over it. The
 // database handle is answered beside the engine because the learned-procedure
 // harness hands it to the work spine's plug-in, whose version-history read
-// queries it directly -- as it does on a node.
-func openEngine(c *capability.Capability) (*memqlengine.MemQLEngine, *bun.DB, func(), int) {
+// queries it directly -- as it does on a node. So is the WRITE-GATE POOL, the
+// connections a node's database opens for write gates and nothing else
+// (component/database, gate_pool.go; memql#6022): the work spine takes its
+// decision gates there and nowhere else, so a lifecycle that decides anything
+// -- a step run again, a promotion approved -- needs it.
+func openEngine(c *capability.Capability) (*memqlengine.MemQLEngine, *bun.DB, *sql.DB, func(), int) {
 	dsn := c.Param("dsn", os.Getenv("MEMQL_DATABASE_DSN"))
 	if dsn == "" {
-		return nil, nil, nil, c.Fail(capability.ExitPrerequisite,
+		return nil, nil, nil, nil, c.Fail(capability.ExitPrerequisite,
 			"no database: pass --dsn or set MEMQL_DATABASE_DSN. The proving suite runs against a real Postgres with "+
 				"TimescaleDB on purpose -- a speed claim that excluded the database would be measuring a different product")
 	}
@@ -487,7 +492,7 @@ func openEngine(c *capability.Capability) (*memqlengine.MemQLEngine, *bun.DB, fu
 	// the write happens here rather than next to the flag: everything below
 	// this line must see one DSN.
 	if err := os.Setenv(dsnEnv, dsn); err != nil {
-		return nil, nil, nil, c.Fail(capability.ExitOpFailed, "publishing the resolved DSN: %v", err)
+		return nil, nil, nil, nil, c.Fail(capability.ExitOpFailed, "publishing the resolved DSN: %v", err)
 	}
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	// One context for the ping AND the migration. A migration on a fresh
@@ -499,7 +504,7 @@ func openEngine(c *capability.Capability) (*memqlengine.MemQLEngine, *bun.DB, fu
 	defer cancelPing()
 	if err := db.PingContext(pingCtx); err != nil {
 		_ = db.Close()
-		return nil, nil, nil, c.Fail(capability.ExitPrerequisite, "the database at the configured DSN is unreachable: %v", err)
+		return nil, nil, nil, nil, c.Fail(capability.ExitPrerequisite, "the database at the configured DSN is unreachable: %v", err)
 	}
 	// MIGRATE BEFORE OPENING THE ENGINE. The suite must work against a FRESH
 	// Postgres, and CI gives it exactly that: a service container created for
@@ -519,7 +524,7 @@ func openEngine(c *capability.Capability) (*memqlengine.MemQLEngine, *bun.DB, fu
 	reachable, merr := dbtest.EnsureSchema(ctx)
 	if merr != nil {
 		_ = db.Close()
-		return nil, nil, nil, c.Fail(capability.ExitPrerequisite, "migrating the database: %v", merr)
+		return nil, nil, nil, nil, c.Fail(capability.ExitPrerequisite, "migrating the database: %v", merr)
 	}
 	if !reachable {
 		// EnsureSchema answers (false, nil) when it could not reach a
@@ -533,25 +538,33 @@ func openEngine(c *capability.Capability) (*memqlengine.MemQLEngine, *bun.DB, fu
 		// proves THIS process can open the DSN; this proves the migration
 		// step actually ran against it.
 		_ = db.Close()
-		return nil, nil, nil, c.Fail(capability.ExitPrerequisite,
+		return nil, nil, nil, nil, c.Fail(capability.ExitPrerequisite,
 			"the database at %s could not be migrated because it was unreachable from the migration step; "+
 				"the schema is absent, so no figure this run produced would mean anything", redactDSN(dsn))
 	}
 	if _, err := memqlengine.LoadUnifiedConcepts(nil); err != nil {
 		_ = db.Close()
-		return nil, nil, nil, c.Fail(capability.ExitOpFailed, "loading concepts: %v", err)
+		return nil, nil, nil, nil, c.Fail(capability.ExitOpFailed, "loading concepts: %v", err)
 	}
 	eng, err := memqlengine.New(db)
 	if err != nil {
 		_ = db.Close()
-		return nil, nil, nil, c.Fail(capability.ExitOpFailed, "opening the engine: %v", err)
+		return nil, nil, nil, nil, c.Fail(capability.ExitOpFailed, "opening the engine: %v", err)
 	}
 	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	if err := eng.Init(memorynodes.DefaultRegistry()); err != nil {
 		_ = db.Close()
-		return nil, nil, nil, c.Fail(capability.ExitOpFailed, "initialising the engine: %v", err)
+		return nil, nil, nil, nil, c.Fail(capability.ExitOpFailed, "initialising the engine: %v", err)
 	}
-	return eng, db, func() { _ = db.Close() }, capability.ExitOK
+	// Shaped as a node's database shapes its own (a gate session may sit idle in
+	// its transaction for minutes and carries no statement timeout), at the
+	// deployed size.
+	gates, err := database.NewGatePool(dsn, 0)
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, nil, nil, c.Fail(capability.ExitOpFailed, "opening the write-gate pool: %v", err)
+	}
+	return eng, db, gates, func() { _ = gates.Close(); _ = db.Close() }, capability.ExitOK
 }
 
 func publish(c *capability.Capability, s scorecard.Scorecard) ([]string, error) {

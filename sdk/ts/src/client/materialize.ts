@@ -125,7 +125,13 @@ import { rowNumber, rowString, type Row } from "./types.js";
 export type MaterializeExecute = (name: string, call: string) => Promise<Record<string, unknown>[]>;
 export type MaterializeFormat = "markdown" | "html" | "txt" | "csv" | "json" | "docx" | "pdf";
 export interface MaterializeSource { kind: "concept_row" | "library_file" | "query"; ref: string; label: string; content?: boolean; includeImages?: boolean }
-export interface MaterializeRequest { name: string; format: MaterializeFormat; requestId: string; statement?: string; sources?: MaterializeSource[]; templateId?: string; folderId?: string; outputKind?: "email_template"; accountIds?: string[]; recipeId?: string; deployableKind?: string }
+/**
+ * What a person asked for. `layoutId` is the layout an email template is
+ * written into (`outputKind: "email_template"`), as the email layout picker
+ * (the emailLayouts builtin) lists it: an opaque id this module passes on
+ * untouched. Left out, the cluster writes the email into its Article layout.
+ */
+export interface MaterializeRequest { name: string; format: MaterializeFormat; requestId: string; statement?: string; sources?: MaterializeSource[]; templateId?: string; folderId?: string; outputKind?: "email_template"; layoutId?: string; accountIds?: string[]; recipeId?: string; deployableKind?: string }
 /**
  * What the helpers need from their caller. `signal` stops the follow and
  * cancels the composition; `onStatus` hears every poll's status; `intervalMs`
@@ -286,6 +292,7 @@ export async function startMaterialize(execute: MaterializeExecute, request: Mat
   if (has(request.templateId)) args.templateId = request.templateId;
   if (has(request.folderId)) args.folderId = request.folderId;
   if (has(request.outputKind)) args.outputKind = request.outputKind;
+  if (has(request.layoutId)) args.layoutId = request.layoutId;
   if (request.accountIds?.length) args.accountIds = [...request.accountIds];
   if (has(request.recipeId)) args.recipeId = request.recipeId;
   if (has(request.deployableKind)) args.deployableKind = request.deployableKind;

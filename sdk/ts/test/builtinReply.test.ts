@@ -18,6 +18,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { Result } from "../src/client/types.js";
+import parityFixtures from "./fixtures/builtinReply.json" with { type: "json" };
+
+// The Go SDK's builtin_reply_test.go reads these same wire replies and rows.
+for (const fixture of parityFixtures) {
+  test(`rows() -- Go/TS parity: ${fixture.name}`, () => {
+    const result = new Result(fixture.result as never);
+    assert.deepEqual(result.rows(), fixture.rows);
+    assert.deepEqual(result.single(), fixture.rows[0]);
+  });
+}
 
 // Verbatim from a production bff answering `builtin logsTail(limit: 2)` on
 // 2026-09-03 (ids and the dedupKey shortened). The handler's slice was

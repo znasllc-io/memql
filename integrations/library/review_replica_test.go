@@ -41,7 +41,7 @@ func TestReviewCommentsAcrossReplicasAndDocumentRevisions(t *testing.T) {
 		if err = engine.Init(memorynodes.DefaultRegistry()); err != nil {
 			t.Fatal(err)
 		}
-		return NewIntegration(engine, func() *sql.DB { return db.DB }), engine
+		return NewIntegration(engine, replicaGatePool(t)), engine
 	}
 	first, engine := open()
 	second, _ := open()

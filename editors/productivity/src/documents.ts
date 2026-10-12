@@ -5,17 +5,37 @@ import {
   buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment, buildLibraryRequestDocumentRevision, buildLibraryDocumentRevisionStatus, buildDecideApproval,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
+import { writeEmail } from "./emailDocument.js";
 
-export interface Resource { domain: string; kind: "artifacts" | "templates"; id: string; name: string }
+/** A "new-email" resource is a page, not a file: its id is the organization (a bare account id) it opens for and its name is the tab title. */
+export interface Resource { domain: string; kind: "artifacts" | "templates" | "new-email"; id: string; name: string }
 export function resourceFrom(uri: string): Resource {
   const parsed = new URL(uri);
   const segments = parsed.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   if (parsed.protocol !== "memql-file:" || parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash ||
-      !parsed.hostname || segments.length !== 3 || !["artifacts", "templates"].includes(segments[0]) || !/^[\w-]{1,160}$/.test(segments[1])) {
+      !parsed.hostname || segments.length !== 3 || !["artifacts", "templates", "new-email"].includes(segments[0]) || !/^[\w-]{1,160}$/.test(segments[1])) {
     throw new UserInputError("Invalid MemQL file link.");
   }
-  if (!segments[2] || /[\\/\u0000-\u001f]/.test(segments[2])) throw new UserInputError("Invalid file name.");
+  if (segments[0] === "new-email" && (!/^\/new-email\/[A-Za-z0-9_-]{1,160}\/[^/]+$/.test(parsed.pathname) || !/^[A-Za-z0-9.-]+$/.test(parsed.host) || /^memql-file:\/\/[^/]*:/.test(uri))) throw new UserInputError("Invalid MemQL file link.");
+  if (!segments[2] || /[\\/\u0000-\u001f\u007f]/.test(segments[2])) throw new UserInputError("Invalid file name.");
   return { domain: parsed.hostname.toLowerCase(), kind: segments[0] as Resource["kind"], id: segments[1], name: segments[2] };
+}
+/** Why a New email link is never read, saved or written: the page it opens has no bytes. */
+export const NEW_EMAIL_IS_A_PAGE = "A New email link opens a page, not a file.";
+/**
+ * The link that opens the New email page for one organization (a bare account id): three path segments
+ * and no query, so it fits the grammar every validator enforces. clients/os/src/items/editorPreference.ts
+ * builds this same string, byte for byte; change the link in both places or in neither.
+ */
+export function newEmailResource(domain: string, accountId: string): string {
+  const host = domain.toLowerCase();
+  const link = `memql-file://${host}/new-email/${accountId}/${encodeURIComponent("New email")}`;
+  let parsed: Resource | undefined;
+  try { parsed = resourceFrom(link); } catch { /* not a link; refused below */ }
+  // The id is checked as written (resourceFrom decodes, so "%61" would read as "a"), and the host must
+  // come back as given: a slash in it would have reshaped the link.
+  if (!/^[A-Za-z0-9.-]+$/.test(domain) || !/^[\w-]{1,160}$/.test(accountId) || parsed?.domain !== host) throw new UserInputError("Invalid MemQL file link.");
+  return link;
 }
 export function isZip(name: string, mime = "", bytes?: Uint8Array): boolean {
   return /\.zip$/i.test(name) || /^(application\/zip|application\/x-zip-compressed)(;|$)/i.test(mime) ||
@@ -25,8 +45,17 @@ export interface OpenDocument {
   resource: Resource; lease: ConnectionLease; content: Uint8Array; mime: string;
   sourceId: string; kind: string; version: number; revision?: string;
   template?: { name: string; accountId: string; status: string };
+  /** The organizations a Library file is labelled with (artifacts only; empty when it has none). */
+  accountIds?: string[];
 }
 const text = (row: Record<string, unknown>, field: string) => typeof row[field] === "string" ? row[field] as string : "";
+/** What a template opens as: its document when it has one, else the custom email its bodies make, written as every email file is. */
+function templateText(row: Record<string, unknown>): string {
+  const document = row.document;
+  if (document && typeof document === "object" && !Array.isArray(document)) return writeEmail(document as Record<string, unknown>);
+  const preheader = text(row, "preheader");
+  return writeEmail({ subject: text(row, "subject"), ...(preheader ? { preheader } : {}), textBody: text(row, "textBody"), htmlBody: text(row, "htmlBody") });
+}
 
 export class Documents {
   constructor(private readonly api: EditorConnectionAPI) {}
@@ -49,6 +78,7 @@ export class Documents {
   }
   async read(uri: string, openedLease?: ConnectionLease): Promise<OpenDocument> {
     const resource = resourceFrom(uri);
+    if (resource.kind === "new-email") throw new Error(NEW_EMAIL_IS_A_PAGE);
     const lease = openedLease ?? await this.api.connect(resource.domain);
     if (lease.domain !== resource.domain) throw new UserInputError("This file belongs to another cluster.");
     if (resource.kind === "templates") {
@@ -56,7 +86,7 @@ export class Documents {
       if (!row) throw new UserInputError("Template not found or unavailable to your organization.");
       const revision = text(row, "createdAt");
       if (!revision) throw new Error("The cluster did not return the template revision.");
-      const content = new TextEncoder().encode(JSON.stringify({ subject: text(row,"subject"), textBody: text(row,"textBody"), htmlBody: text(row,"htmlBody") }, null, 2) + "\n");
+      const content = new TextEncoder().encode(templateText(row));
       return { resource, lease, content, mime: "application/json", sourceId: resource.id, kind: "campaign_template", version: 0, revision,
         template: { name: text(row,"name"), accountId: text(row,"accountId"), status: text(row,"status") } };
     }
@@ -64,6 +94,7 @@ export class Documents {
     if (!artifact || artifact.archived) throw new UserInputError("File not found or unavailable to your account.");
     const sourceId = text(artifact, "sourceConceptRef");
     const kind = text(artifact, "kind");
+    const accountIds = Array.isArray(artifact.accountIds) ? artifact.accountIds.filter((id): id is string => typeof id === "string") : [];
     let mime = text(artifact, "mimeType");
     let version = 0;
     let revision: string | undefined;
@@ -87,7 +118,7 @@ export class Documents {
     } else {
       content = await this.api.readBytes(lease, resource.id);
     }
-    return { resource, lease, sourceId, kind, content, mime, version, revision };
+    return { resource, lease, sourceId, kind, content, mime, version, revision, accountIds };
   }
   async history(document: OpenDocument, beforeVersion?: number): Promise<Record<string, unknown>> {
     const rows = await this.api.execute(document.lease, "libraryDocumentHistory", buildLibraryDocumentHistory({artifactId:document.resource.id,beforeVersion}));
@@ -126,8 +157,8 @@ export class Documents {
     if (!rows[0]) throw new Error("The cluster did not return document feedback.");
     return rows[0];
   }
-  async transcribe(document:OpenDocument,audio:ReadableStream<Uint8Array>,signal:AbortSignal,onPartial:(text:string)=>void):Promise<string>{
-    return this.api.transcribe(document.lease,audio,signal,onPartial);
+  async transcribe(lease:ConnectionLease,audio:ReadableStream<Uint8Array>,signal:AbortSignal,onPartial:(text:string)=>void):Promise<string>{
+    return this.api.transcribe(lease,audio,signal,onPartial);
   }
   async cancelRevision(document:OpenDocument,requestId:string):Promise<void>{
     const status=await this.revision(document,requestId);
@@ -168,6 +199,7 @@ export class Documents {
     if (result.resumeError) throw new UserInputError("Your decision was saved, but the job could not start. Retry to recover the same job.");
   }
   async save(document: OpenDocument, content: Uint8Array): Promise<void> {
+    if (document.resource.kind === "new-email") throw new Error(NEW_EMAIL_IS_A_PAGE);
     if (isZip(document.resource.name, document.mime, document.content)) throw new UserInputError("ZIP files are downloads; they cannot be edited or extracted here.");
     if (document.kind === "campaign_template" && document.template) {
       const result = (await this.api.execute(document.lease, "campaignSaveTemplate", buildCampaignSaveTemplate({

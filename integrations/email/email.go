@@ -26,6 +26,26 @@ type Sender interface {
 	Send(ctx context.Context, msg Message, as SendAs) error
 }
 
+// Reserver is implemented by a Sender that must take a lock of its own before it
+// can begin delivering a message, and whose lock can be refused for being busy
+// (memql#6022).
+//
+// A caller that records "an attempt has begun" before it hands the message over --
+// the marketing lane's single-send receipt does, and replay never sends a message
+// whose receipt says an attempt began -- reserves FIRST. A refusal then means
+// nothing was attempted, and the caller may try again later. The same refusal after
+// the record would leave a message that replay will never send again and that never
+// went out.
+//
+// Reserve takes what the sender needs for msg and returns the context to Send with
+// and the function that gives the reservation back, which the caller calls when the
+// delivery is over, whatever its outcome. A Send whose context carries no
+// reservation takes what it needs itself. A sender with nothing to reserve does not
+// implement it.
+type Reserver interface {
+	Reserve(ctx context.Context, msg Message, as SendAs) (context.Context, func(), error)
+}
+
 // SendAs names the mailbox a message leaves from (design D5, memql#4821).
 //
 // The ZERO VALUE means "the configured default sender", which is what every

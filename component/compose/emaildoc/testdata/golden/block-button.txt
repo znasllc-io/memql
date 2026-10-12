@@ -1,0 +1,3 @@
+Read the story: https://example.com/story
+
+Confirm & go: {{confirmUrl}}

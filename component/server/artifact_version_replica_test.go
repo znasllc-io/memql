@@ -13,6 +13,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -48,7 +49,13 @@ func TestFileVersionConflictAcrossReplicas(t *testing.T) {
 		if err = e.Init(memorynodes.DefaultRegistry()); err != nil {
 			t.Fatal(err)
 		}
-		return NewEngineLibraryStore(replicaFileExecutor{e}, func() *sql.DB { return db.DB })
+		// The replica's write-gate pool, as its database opens one (memql#6022).
+		gates, err := database.NewGatePool(dbtest.DSN(), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = gates.Close() })
+		return NewEngineLibraryStore(replicaFileExecutor{e}, func() *sql.DB { return gates })
 	}
 	a, b := open(), open()
 	marker := fmt.Sprintf("file-edit-%d", time.Now().UnixNano())

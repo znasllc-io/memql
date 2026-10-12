@@ -294,6 +294,56 @@ func BundleFromAuthoringDemoteTopic(topic string) (string, bool) {
 	return bundleId, true
 }
 
+// TopicAuthoringArmForBundle returns the dedicated authoring-arm topic for the
+// given bundle id (memql#6022, F1). Example:
+// TopicAuthoringArmForBundle("emr0a1b") returns "authoring.arm.emr0a1b".
+// Activating a bundle emits it on a broadcast channel ONLY the authoring-arm
+// subscriber consumes; a single `authoring.arm.*` routing rule forwards it to
+// every node, so every replica arms the bundle with no restart. Bundle ids
+// carry colon, hyphen and hex segments, never dots, so the whole remainder
+// after the prefix is the bundle id.
+func TopicAuthoringArmForBundle(bundleId string) string {
+	return BuildTopicWithConcept(TopicAuthoringArm, bundleId)
+}
+
+// BundleFromAuthoringArmTopic extracts the bundle id from an
+// authoring.arm.{bundleId} topic, the inverse of TopicAuthoringArmForBundle.
+// Returns the bundle id and true on a match; "" and false otherwise.
+func BundleFromAuthoringArmTopic(topic string) (string, bool) {
+	return bundleFromTopic(TopicAuthoringArm, topic)
+}
+
+// TopicAuthoringDisarmForBundle returns the dedicated authoring-disarm topic for
+// the given bundle id (memql#6022, F1), the inverse of
+// TopicAuthoringArmForBundle: retiring an active bundle emits
+// authoring.disarm.<bundleId>, and a single `authoring.disarm.*` routing rule
+// forwards it to every node, so every replica disarms the bundle.
+func TopicAuthoringDisarmForBundle(bundleId string) string {
+	return BuildTopicWithConcept(TopicAuthoringDisarm, bundleId)
+}
+
+// BundleFromAuthoringDisarmTopic extracts the bundle id from an
+// authoring.disarm.{bundleId} topic, the inverse of
+// TopicAuthoringDisarmForBundle. Returns the bundle id and true on a match; ""
+// and false otherwise.
+func BundleFromAuthoringDisarmTopic(topic string) (string, bool) {
+	return bundleFromTopic(TopicAuthoringDisarm, topic)
+}
+
+// bundleFromTopic is the shared inverse of the per-bundle broadcast topics: the
+// non-empty remainder after base + ".".
+func bundleFromTopic(base, topic string) (string, bool) {
+	prefix := base + "."
+	if !strings.HasPrefix(topic, prefix) {
+		return "", false
+	}
+	bundleId := strings.TrimSpace(topic[len(prefix):])
+	if bundleId == "" {
+		return "", false
+	}
+	return bundleId, true
+}
+
 // TopicProvidersReloadFor returns the dedicated providers-reload topic for one
 // Apply (epic memql#4440). TopicProvidersReloadFor("r-7f3a") returns
 // "providers.reload.r-7f3a".

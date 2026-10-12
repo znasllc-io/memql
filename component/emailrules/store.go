@@ -132,14 +132,53 @@ func (s *Store) RuleStateByID(ctx context.Context, ruleID string) (RuleState, bo
 	if len(rows) == 0 {
 		return RuleState{}, false, nil
 	}
-	r := rows[0]
+	return ruleStateFromRow(rows[0]), true, nil
+}
+
+// RuleOfBundle names the rule a generated bundle was built for, and the
+// bundle's status, read under the caller's own actor. The bundle's dry-run
+// report records the rule (RecordDryRun), and the bundle id is derived from
+// the bundle's owner, that rule and the bundle's version (bundleIDFor) -- so
+// the id is re-derived from what the row says, and a bundle whose row names a
+// rule that does not derive it names none. A bundle armed before ids carried
+// their owner is derived without it (legacyBundleIDFor), and is the rule's
+// too.
+func (s *Store) RuleOfBundle(ctx context.Context, bundleID string) (ruleID, status string, ok bool, err error) {
+	rows, err := s.rows(ctx, call("query", "authoringBundleById", arg{"bundleId", memql.BareShortId(bundleID)}))
+	if err != nil || len(rows) == 0 {
+		return "", "", false, err
+	}
+	report, _ := rows[0]["dryRunReport"].(map[string]any)
+	ruleID = strings.TrimSpace(str(report, "rule"))
+	if ruleID == "" {
+		return "", "", false, nil
+	}
+	version, id := integer(rows[0], "version"), memql.BareShortId(bundleID)
+	if bundleIDFor(str(rows[0], "ownerUserId"), ruleID, version) != id && legacyBundleIDFor(ruleID, version) != id {
+		return "", "", false, nil
+	}
+	return ruleID, str(rows[0], "status"), true, nil
+}
+
+// BundleStatus reads an authoring bundle's status under the caller's own
+// actor. found is false when the bundle is not readable as the caller.
+func (s *Store) BundleStatus(ctx context.Context, bundleID string) (status string, found bool, err error) {
+	rows, err := s.rows(ctx, call("query", "authoringBundleById", arg{"bundleId", memql.BareShortId(bundleID)}))
+	if err != nil || len(rows) == 0 {
+		return "", false, err
+	}
+	return str(rows[0], "status"), true, nil
+}
+
+func ruleStateFromRow(r map[string]any) RuleState {
 	return RuleState{
 		Status:        str(r, "status"),
 		BundleID:      str(r, "bundleId"),
 		ConstructName: str(r, "constructName"),
 		LastError:     str(r, "lastError"),
 		FiredCount:    integer(r, "firedCount"),
-	}, true, nil
+		VersionAt:     rowTime(r, "createdAt"),
+	}
 }
 
 // RuleState is the generated half of the row.
@@ -149,7 +188,15 @@ type RuleState struct {
 	ConstructName string
 	LastError     string
 	FiredCount    int
+	// VersionAt is the createdAt of the version read: the witness a record
+	// conditional on this read is fenced on (memql.ContextWithRowVersionFence).
+	// Zero when the read did not carry one.
+	VersionAt time.Time
 }
+
+// RuleConcept is the email rule's concept id: what a write conditional on
+// the rule row is fenced on.
+const RuleConcept = "v1:campaigns:emailRule"
 
 func ruleFromRow(r map[string]any) Rule {
 	return Rule{
@@ -239,6 +286,9 @@ func (s *Store) RecordFiring(ctx context.Context, ruleID string, firedCount int,
 // The authoring pipeline's four writes
 // ---------------------------------------------------------------------------
 
+// CreateBundle writes a rule's bundle as a draft. createAuthoringBundle is
+// @serverOnly (memql#6022), so the caller stamps internal origin -- see
+// Activator.writeBundle, where it is done inline at the one call.
 func (s *Store) CreateBundle(ctx context.Context, bundleID, title, summary, supersedes string, version int) error {
 	args := []arg{
 		{"bundleId", bundleID},
@@ -359,6 +409,49 @@ func (s *Store) RecipientsForAudience(ctx context.Context, audienceID string) ([
 		arg{"audienceId", memql.BareShortId(audienceID)}))
 }
 
+// MailboxMembers returns every row of the rule's audience that holds the mailbox
+// on the triggering row, in any subscription state, oldest first within each
+// source -- and whether it can be sure that is all of them.
+//
+// A row is found by the digest of the address (a read of the audience's rows that
+// carry it) or, for the rows that carry no digest at all, by comparing its
+// address (a page of them). Each row's OWN address is compared before the row is
+// believed: a digest is a key, and a raw write can set one that is not its row's.
+// This replaces a read that listed only the audience's subscribed members and
+// stopped at the first hundred: it never saw anyone who had unsubscribed (so they
+// were enrolled again as subscribed), and a mailbox beyond the hundred was enrolled
+// a second time.
+//
+// complete is false when EITHER page is full: there may be an opted-out row
+// beyond it, so the caller must not treat the page as the whole mailbox. The
+// campaigns package can fall back to the roster for rows without a digest; a
+// rule has no roster read, so it refuses the firing and says why.
+//
+// Every read here decides a write, so the caller's ctx must be a fresh read.
+func (s *Store) MailboxMembers(ctx context.Context, audienceID, address string) (members []map[string]any, complete bool, err error) {
+	want, digest := normalizeAddress(address), addressDigest(address)
+	if want == "" || digest == "" {
+		return nil, true, nil
+	}
+	audience := memql.BareShortId(audienceID)
+	stamped, err := s.rows(ctx, call("query", "recipientInAudienceByDigest", arg{"audienceId", audience}, arg{"emailDigest", digest}))
+	if err != nil {
+		return nil, false, err
+	}
+	unstamped, err := s.rows(ctx, call("query", "recipientsWithoutDigestInAudience", arg{"audienceId", audience}))
+	if err != nil {
+		return nil, false, err
+	}
+	for _, rows := range [][]map[string]any{stamped, unstamped} {
+		for _, r := range rows {
+			if normalizeAddress(str(r, "email")) == want {
+				members = append(members, r)
+			}
+		}
+	}
+	return members, len(stamped) < digestWindow && len(unstamped) < digestLessWindow, nil
+}
+
 // TemplateByID reads the copy both lanes send.
 func (s *Store) TemplateByID(ctx context.Context, templateID string) (map[string]any, bool, error) {
 	rows, err := s.rows(ctx, call("query", "templateById", arg{"templateId", memql.BareShortId(templateID)}))
@@ -420,14 +513,25 @@ func (s *Store) SendToRecipient(ctx context.Context, templateID, recipientID, se
 // AddRecipient enrols a row-derived address into the rule's audience, so it
 // gains a membership, a subscription state and a working unsubscribe. `signup`
 // is the honest source value: a product flow added it.
-func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName string) error {
-	return s.exec(ctx, call("mutation", "addRecipient",
-		arg{"recipientId", recipientID},
-		arg{"audienceId", memql.BareShortId(audienceID)},
-		arg{"email", email},
-		arg{"displayName", displayName},
-		arg{"source", "signup"},
-	))
+//
+// accountID is the rule's organization, as a BARE id -- the caller bare-ifies it
+// once, because BareShortId is not idempotent (memql#2981). A recipient is an
+// organization-scoped row and the send refuses one outside the campaign's
+// organization, so an address enrolled without it is a recipient the very next
+// step would refuse. A rule that names no organization (one that predates
+// organizations) leaves it off the call, and addRecipient stamps "".
+func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, accountID string) error {
+	args := []arg{
+		{"recipientId", recipientID},
+		{"audienceId", memql.BareShortId(audienceID)},
+		{"email", email},
+		{"displayName", displayName},
+		{"source", "signup"},
+	}
+	if accountID != "" {
+		args = append(args, arg{"accountId", accountID})
+	}
+	return s.exec(ctx, call("mutation", "addRecipient", args...))
 }
 
 // UsersInRoles reads the cluster people the operational lane mails.

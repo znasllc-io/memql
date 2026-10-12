@@ -199,16 +199,48 @@ builtin emailRuleFire {
   event        object   @description("The whole triggering event envelope, forwarded by the generated statement. Carries the row payload, which is where a row_address rule reads its recipient from -- reading the field off the EVENT rather than re-reading the row is what keeps the rule working on a concept whose rows the author's own envelope could not read back.")
 }
 
-@description("Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.")
+@description("Save an organization email template with an exact revision precondition. content is the email document (a *.email.json file): a layout document made of blocks, or custom HTML with its plain-text body. The server renders it and stores the subject, the text and HTML parts and the document, and answers {templateId, revision, status, saved, issues}. issues are what keeps the email from being sent as it is: a missing picture or link, a picture the caller cannot read, a missing unsubscribe link, an email that is too large. Saving works with issues and returns the template to draft. Publishing requires the exact saved revision and the exact saved content, and is refused while any issue remains. Archive and restore require only the exact revision; the content in the call is ignored, and restore returns a template to draft. Empty expectedRevision creates a draft. With sourceArtifactId (the Library file the email is written in) there is one template per organization and file: the template already published from that file is updated whatever templateId says, and the first save creates it, so templateId may be left empty. This never sends mail.")
 @sdk
 @executor("integration.campaigns.saveTemplate")
 builtin campaignSaveTemplate {
-  templateId string! @description("Stable caller-generated template ID; reuse on an uncertain creation response.")
+  templateId string @description("Stable caller-generated template ID; reuse on an uncertain creation response. May be empty only when sourceArtifactId is given.")
   accountId string! @description("Owning organization; immutable after creation.")
   name string! @description("Template name.")
-  content object! @description("The reviewed email file: subject, textBody, htmlBody.")
-  expectedRevision string! @description("Exact createdAt from templateById; empty only when creating.")
-  action string @description("save (default), publish, or archive. Publishing is an explicit human action.")
+  content object! @description("The email document: a layout document {subject, preheader, layout, theme, blocks} or custom HTML {subject, preheader, textBody, htmlBody}. Ignored when archiving or restoring.")
+  sourceArtifactId string @description("The Library file the email is written in. Keeps one template per organization and file; see above.")
+  expectedRevision string! @description("Exact createdAt from templateById or templateForSource; empty only when creating.")
+  action string @description("save (default), publish, archive or restore. Publishing is an explicit human action.")
+}
+
+@description("Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision.")
+@sdk
+@executor("integration.campaigns.saveLayout")
+builtin campaignSaveLayout {
+  layoutId          string!  @description("Stable caller-generated layout id; reuse it on an uncertain creation response.")
+  accountId         string!  @description("Owning organization; immutable after creation.")
+  name              string   @description("Required when saving.")
+  description       string
+  document          object   @description("The layout-mode email document. Required when saving.")
+  sourceArtifactId  string   @description("The Library file the layout comes from.")
+  expectedRevision  string!  @description("Exact createdAt from emailLayoutById; empty only when creating.")
+  action            string   @description("save (default), archive or restore.")
+}
+
+@description("The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId.")
+@sdk
+@executor("integration.campaigns.emailLayouts")
+builtin emailLayouts {
+  accountId        string!
+  includeArchived  bool
+}
+
+@description("Render an email document for preview: pictures you can read are embedded, sample merge values are applied, and {subject, html, text, issues} comes back. Never saves or sends anything.")
+@sdk
+@executor("integration.campaigns.renderEmail")
+builtin emailRender {
+  document   object!  @description("The *.email.json document, in layout or custom mode.")
+  accountId  string!  @description("The organization the email is for. You need read access to its data.")
+  sample     object   @description("Sample values: displayName, email, accountName, campaignName, and fields (an object of column values).")
 }
 
 @description("Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.")

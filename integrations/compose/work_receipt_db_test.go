@@ -66,7 +66,7 @@ func TestProduceArtifactDBRequiresAnActualFileReceipt(t *testing.T) {
 				}
 				return "Done", nil
 			}))
-			_, runId, err := work.New(e, e.Logger).OpenDirectGoal(ctx, work.DirectGoal{OwnerUserId: owner, Statement: "Save report", AutomationName: "produceArtifact", Input: map[string]any{"agentId": "agent", "goal": "Save report"}})
+			_, runId, err := gatedWork(t, e).OpenDirectGoal(ctx, work.DirectGoal{OwnerUserId: owner, Statement: "Save report", AutomationName: "produceArtifact", Input: map[string]any{"agentId": "agent", "goal": "Save report"}})
 			if err != nil {
 				t.Fatal(err)
 			}

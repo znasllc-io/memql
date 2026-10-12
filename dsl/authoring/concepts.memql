@@ -27,8 +27,12 @@ use work.concepts.{ run }
 /// closure passes Gate 1 (isolated compile+bind), Gate 2 (tiered behavioral dry-run), and Gate 3
 /// (user approval) together, then activates together into the sandboxed authored-construct runtime
 /// (#959). Never part of the core engine Init() path, so a malformed bundle can never brick the
-/// cluster. Member constructs are v1:authoring:construct rows pointing back via bundleId.
+/// cluster. Member constructs are v1:authoring:construct rows pointing back via bundleId. Owned rows
+/// (memql#6022): the owner or a cluster owner reads and writes a bundle, nobody else -- a bundle
+/// that reads active is armed on every replica, so another writer must not be able to retire,
+/// pause, rewrite or take one over.
 @displayCard(primary="title", secondary="status", tertiary="responsibilityId", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner)
 concept bundle {
   ownerUserId         string! @description("v1:identity:user.id who owns this bundle (the Responsibility author). Per-row authz owner; server-stamped from actor.userId at create, never caller-supplied. Authored automations run under THIS user's authz envelope -- no privilege escalation.")
   responsibilityId    string  @description("v1:planner:responsibility.id this bundle was compiled from, when authored via the Responsibility intake path. Empty for bundles authored directly. Links the human-facing standing directive to its compiled artifact.")
@@ -57,9 +61,9 @@ concept bundle {
 /// fit (compose-first, author-the-gap); reused constructs are recorded on the bundle's
 /// reusedConstructRefs instead. After a bundle activates, a construct can be promoted into the
 /// per-owner reusable catalog (catalogued=true) so later bundles compose it -- the catalog match
-/// key lives in catalogKey (#957).
+/// key lives in catalogKey (#957). Owned rows, like the bundle they belong to (memql#6022).
 @displayCard(primary="name", secondary="kind", tertiary="bundleId", status="status")
-@rowAuthz(owner="ownerUserId")
+@rowAuthz(owner="ownerUserId", clusterOwner)
 concept construct {
   ownerUserId       string! @description("v1:identity:user.id who owns this construct (same as the parent bundle's owner). Per-row authz owner; server-stamped from actor.userId at create.")
   bundleId          string! @description("v1:authoring:bundle.id this construct belongs to. Every authored construct is a member of exactly one bundle.")

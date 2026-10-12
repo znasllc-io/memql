@@ -245,3 +245,65 @@ func TestTestSendConsumesTheRateBucket(t *testing.T) {
 		t.Errorf("sent %d messages, want 1", sender.count())
 	}
 }
+
+// A draft too large to send keeps its document and no HTML (the editor renders
+// it on demand). A test send builds its message from the stored parts, and
+// renderMessage writes an HTML part only when there is HTML, so without a
+// refusal the test of such a draft would go out as plain text and look like a
+// test of the email. It is refused with the sentence the editor already showed
+// for it.
+func TestTestSendRefusesADraftTooLargeToSend(t *testing.T) {
+	layoutDocument := map[string]any{
+		"subject": "Hello", "layout": "builtin:letter",
+		"blocks": []any{map[string]any{"id": "intro", "type": "text", "text": "Hi"}},
+	}
+	for name, row := range map[string]map[string]any{
+		"a layout email":                      {"document": layoutDocument, "layoutId": "builtin:letter"},
+		"a layout email begun from no layout": {"document": map[string]any{"subject": "Hello", "blocks": []any{map[string]any{"id": "intro", "type": "text", "text": "Hi"}}}},
+		"custom HTML":                         {"document": map[string]any{"subject": "Hello", "textBody": "Hi", "htmlBody": "<p>Hi</p>"}},
+		"a layout named and no document":      {"layoutId": "org:acme-letter"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := testSendFixture()
+			engine.template["htmlBody"] = ""
+			for key, value := range row {
+				engine.template[key] = value
+			}
+			w, sender := testSendWorker(t, engine)
+
+			_, err := w.handleTestSend(importCtx(), map[string]any{"campaignId": testCampaign, "to": "operator@example.test"}, 0)
+			if err == nil || err.Error() != tooLargeToSend {
+				t.Fatalf("error = %v, want %q", err, tooLargeToSend)
+			}
+			if sender.count() != 0 {
+				t.Errorf("%d messages went out for a draft with no HTML to send", sender.count())
+			}
+		})
+	}
+}
+
+// An email with no HTML part by design is not too large, and still goes out as
+// the plain text it is: one saved before documents existed, and a text email
+// written as a document (custom mode with an empty htmlBody).
+func TestTestSendStillSendsAPlainTextEmail(t *testing.T) {
+	for name, row := range map[string]map[string]any{
+		"saved before documents":     {},
+		"a text email as a document": {"document": map[string]any{"subject": "Hello", "textBody": "Hi", "htmlBody": ""}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			engine := testSendFixture()
+			engine.template["htmlBody"] = ""
+			for key, value := range row {
+				engine.template[key] = value
+			}
+			w, sender := testSendWorker(t, engine)
+
+			if _, err := w.handleTestSend(importCtx(), map[string]any{"campaignId": testCampaign, "to": "operator@example.test"}, 0); err != nil {
+				t.Fatalf("a plain text email was refused: %v", err)
+			}
+			if sender.count() != 1 || sender.sent[0].HTMLBody != "" || sender.sent[0].TextBody == "" {
+				t.Errorf("sent %d messages; want one plain text message, got %+v", sender.count(), sender.sent)
+			}
+		})
+	}
+}

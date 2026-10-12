@@ -32,6 +32,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	pure "github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	work "github.com/znasllc-io/memql/integrations/work"
@@ -75,10 +76,12 @@ type GoalOpener interface {
 // and the only one.
 //
 // NIL IS AN ANSWER HERE TOO, and a useful one: with no composer wired, a
-// materialization whose caller supplied a draft still works end to end,
+// ordinary materialization whose caller supplied a draft still works end to end,
 // which is what lets the whole render/stamp/file tail be exercised on a
 // node with no provider configured. A materialization with NEITHER a
-// composer nor a draft is refused, naming which.
+// composer nor a draft is refused, naming which. Email templates instead keep
+// their chosen layout: blank emails need no composer, while described emails
+// require one and never accept a caller-supplied document as the generated draft.
 type Composer interface {
 	Compose(ctx context.Context, req ComposeRequest) (ComposeReply, error)
 }
@@ -97,11 +100,21 @@ type ComposeRequest struct {
 	TemplateBody string
 	// Draft is what the person had already written, when they had.
 	Draft string
+	// EmailLayout is the layout an email template is written into. The
+	// composer writes only its content blocks and answers with EmailContent;
+	// the layout itself, its brand blocks above all, is the server's to keep.
+	// Set for every email template, and nil for everything else.
+	EmailLayout *emaildoc.Document
 }
 
 // ComposeReply is what the reasoning step produced.
 type ComposeReply struct {
 	Draft pure.Draft
+	// EmailContent is what the composer wrote into an email's layout: the
+	// subject, the preheader and the content blocks by id. The server merges it
+	// (emaildoc.Merge) and refuses what is aimed outside the content blocks.
+	// Set by a composer asked for an email, instead of Draft.
+	EmailContent *emaildoc.Content
 	// Models is every model that contributed to THIS call. A list for
 	// the reason the concept field is one: a composer that made two
 	// calls to two providers reports two entries.
@@ -256,12 +269,14 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "execute", Description: "Execute the persisted materialization belonging to the current work run.", Handler: i.handleExecute, ArgsSchema: map[string]string{"compositionId": "string (required) -- the composition this run owns"}},
 		{
 			Name:        "materialize",
-			Description: "Compose the named sources into a file of the chosen format and file it in the Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia=\"materializer\" and that goal's first run, then dispatches the known materializeFile template. A request with nothing to compose from (no statement, draft, sections, sources, template or recipe) files an empty Markdown, text, HTML, CSV or JSON document without a model call. So does a Markdown request that only describes the document (a statement, with no draft, sections, template, recipe, output kind or deployable kind, whose sources, if any, are all Library files the Library can attach to a review comment: a .md file up to 32 KiB, or a PNG, JPEG, GIF or WebP picture up to 8 MiB) outside a work run: the statement stays on the composition for the caller to hand, with those files, to the Library's revision workflow, as the person, which writes the document. That workflow cannot read the graph or a file it cannot attach, so a request with a concept_row or query source, or a Library file the Library cannot attach, keeps the composer, which reads it, as does any request inside a work run. The path is decided on the sources' rows before any content is read. A folderId the caller cannot read, or one that has been archived, is refused before anything is written. So is a templateId that has been archived or that makes another format than the request's (a template that names no format fits any). Returns {compositionId, goalId, runId, format}; the composition reports progress and its outputFileId.",
+			Description: "Compose the named sources into a file of the chosen format and file it in the Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia=\"materializer\" and that goal's first run, then dispatches the known materializeFile template. A request with nothing to compose from (no statement, draft, sections, sources, template or recipe) files an empty Markdown, text, HTML, CSV or JSON document without a model call. So does a Markdown request that only describes the document (a statement, with no draft, sections, template, recipe, output kind or deployable kind, whose sources, if any, are all Library files the Library can attach to a review comment: a .md file up to 32 KiB, or a PNG, JPEG, GIF or WebP picture up to 8 MiB) outside a work run: the statement stays on the composition for the caller to hand, with those files, to the Library's revision workflow, as the person, which writes the document. That workflow cannot read the graph or a file it cannot attach, so a request with a concept_row or query source, or a Library file the Library cannot attach, keeps the composer, which reads it, as does any request inside a work run. The path is decided on the sources' rows before any content is read. An email template (outputKind email_template) is written into a layout (layoutId, builtin:article when empty): with no statement, draft, sections, sources, template or recipe it files the layout itself without a model call, and otherwise the composer writes only the layout's content blocks. A folderId the caller cannot read, or one that has been archived, is refused before anything is written. So is a templateId that has been archived or that makes another format than the request's (a template that names no format fits any). Returns {compositionId, goalId, runId, format}; the composition reports progress and its outputFileId.",
 			Handler:     i.handleMaterialize,
 			ArgsSchema: map[string]string{
 				"name":           "string (required) -- what to call it, and the filename stem",
 				"statement":      "string -- what you asked for, in your own words",
 				"format":         "string (required) -- markdown | html | txt | csv | json | docx | pdf",
+				"outputKind":     "string -- email_template writes a .email.json email document into a layout; requires format json and one accountIds entry",
+				"layoutId":       "string -- the layout an email template is written into: builtin:<name> or org:<id>, as emailLayouts lists it; empty means builtin:article",
 				"sources":        "[]object -- {kind, ref, label}; kind is concept_row | library_file | query",
 				"draft":          "string -- a draft to start from; empty means the compose step writes it",
 				"templateId":     "string -- v1:compose:template to render through",

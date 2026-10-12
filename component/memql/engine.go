@@ -242,6 +242,11 @@ type MemQLEngine struct {
 	// app; this one is reached from the engine's own promote path, which has no
 	// deps bundle to carry it.
 	authoredAudit AuthoredAuditSink
+	// arming is this node's half of the authored arm/disarm broadcast
+	// (memql#6022, F1): the live authored-runtime deps a peer's activation is
+	// armed into, and the lock that applies one broadcast at a time. Wired
+	// via SetAuthoredRuntimeDeps; see authoring_arm_propagate.go.
+	arming authoredArming
 	// loadReport is the structured account of the DSL load pass built by
 	// Init (epic #2351 / S2, memql#2357): every unified loader's skipped
 	// constructs + the S5 uniqueness-gate duplicates. Init refuses to boot
@@ -2068,6 +2073,19 @@ func (e *MemQLEngine) run(ctx context.Context, markStarted func()) error {
 	// demoted bundle's constructs from this node's shared registry on receipt,
 	// so a demote on node A takes effect on node B within seconds (no restart).
 	e.StartAuthoringDemoteSubscriber(ctx)
+
+	// memql#6022 (F1): wire LIVE cross-node ARMING of authored bundles. An
+	// activation on any node broadcasts authoring.arm.<bundleId> and a retire
+	// broadcasts authoring.disarm.<bundleId>; this subscriber reads the bundle
+	// from the shared DB and arms or disarms it in this node's authored
+	// registry and scheduler, so an email rule activated on node A fires on
+	// whichever node its triggering write lands. Broadcasts are best effort,
+	// so it also reconciles against the database -- now, and every few
+	// minutes -- which covers a dropped broadcast and anything sent before
+	// this subscription.
+	// Inert until app/ hands the engine the authored runtime
+	// (SetAuthoredRuntimeDeps).
+	e.StartAuthoringArmSubscriber(ctx)
 
 	markStarted()
 

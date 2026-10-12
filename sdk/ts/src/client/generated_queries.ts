@@ -3370,6 +3370,52 @@ QueryClient.prototype.dueResponsibilities = function (this: QueryClient, args: D
   return this.executeNamed("dueResponsibilities", buildDueResponsibilities(args), opts);
 };
 
+/** One email layout by id, for the organization's members. Backs the revision check campaignSaveLayout makes and the editors that open a saved layout. The id is not a capability: the concept's account tier answers a layout outside the caller's organizations as not found. */
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutById"] in generated_concepts.ts).
+export interface EmailLayoutByIdArgs {
+  layoutId: string;
+}
+
+export function buildEmailLayoutById(args: EmailLayoutByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  return "query emailLayoutById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailLayoutById(args: EmailLayoutByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailLayoutById = function (this: QueryClient, args: EmailLayoutByIdArgs = {} as EmailLayoutByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailLayoutById", buildEmailLayoutById(args), opts);
+};
+
+/** An organization's email layouts, newest first. Backs the layout picker (through the emailLayouts builtin) and the Email app's Templates section. status narrows to active or archived layouts; omit it to see both. */
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutsForAccount"] in generated_concepts.ts).
+export interface EmailLayoutsForAccountArgs {
+  accountId: string;
+  status?: string;
+}
+
+export function buildEmailLayoutsForAccount(args: EmailLayoutsForAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query emailLayoutsForAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailLayoutsForAccount(args: EmailLayoutsForAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailLayoutsForAccount = function (this: QueryClient, args: EmailLayoutsForAccountArgs = {} as EmailLayoutsForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailLayoutsForAccount", buildEmailLayoutsForAccount(args), opts);
+};
+
 /** One event-email rule by id. */
 // Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRuleById"] in generated_concepts.ts).
 export interface EmailRuleByIdArgs {
@@ -7098,6 +7144,30 @@ QueryClient.prototype.recipientById = function (this: QueryClient, args: Recipie
   return this.executeNamed("recipientById", buildRecipientById(args), opts);
 };
 
+/** The memberships for one mailbox in one audience, by address digest. Organization-authorized. The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a signup or a row-address rule finds a page of the rows a mailbox holds without walking the roster. Matches are in any subscription state, oldest first: the same mailbox can hold more than one row (a manual add beside an earlier row, a race), and one can have opted out while another has not. A FULL page cannot rule out another opted-out row beyond it; the caller must refuse rather than assume it saw every membership. A row carries a digest only if it was written by addRecipient or filled in by the digest sweep, so a mailbox can also hold rows this does not return: recipientsWithoutDigestInAudience is the other half. The caller checks each row's own address before it believes the key; a raw write can set a digest that is not its address's. */
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientInAudienceByDigest"] in generated_concepts.ts).
+export interface RecipientInAudienceByDigestArgs {
+  audienceId: string;
+  emailDigest: string;
+}
+
+export function buildRecipientInAudienceByDigest(args: RecipientInAudienceByDigestArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  parts.push("emailDigest: " + renderMemQLValue(args.emailDigest));
+  return "query recipientInAudienceByDigest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recipientInAudienceByDigest(args: RecipientInAudienceByDigestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recipientInAudienceByDigest = function (this: QueryClient, args: RecipientInAudienceByDigestArgs = {} as RecipientInAudienceByDigestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recipientInAudienceByDigest", buildRecipientInAudienceByDigest(args), opts);
+};
+
 /** Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the caller conjunct is doubly load-bearing here. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsForAudience"] in generated_concepts.ts).
 export interface RecipientsForAudienceArgs {
@@ -7118,6 +7188,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.recipientsForAudience = function (this: QueryClient, args: RecipientsForAudienceArgs = {} as RecipientsForAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recipientsForAudience", buildRecipientsForAudience(args), opts);
+};
+
+/** One page of the rows of an audience that carry no address digest, oldest first. Organization-authorized. Those are the rows written before the digest existed, by a replica still running the previous release, or by a raw write, until the digest sweep fills them in. A lookup by digest cannot see them, so a signup or a row-address rule reads this page too and compares each row's address; a FULL page proves nothing about the rows beyond it and the caller must not read it as "no such row". */
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsWithoutDigestInAudience"] in generated_concepts.ts).
+export interface RecipientsWithoutDigestInAudienceArgs {
+  audienceId: string;
+}
+
+export function buildRecipientsWithoutDigestInAudience(args: RecipientsWithoutDigestInAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "query recipientsWithoutDigestInAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recipientsWithoutDigestInAudience(args: RecipientsWithoutDigestInAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recipientsWithoutDigestInAudience = function (this: QueryClient, args: RecipientsWithoutDigestInAudienceArgs = {} as RecipientsWithoutDigestInAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recipientsWithoutDigestInAudience", buildRecipientsWithoutDigestInAudience(args), opts);
 };
 
 /** Returns active data records. Optional filters: partitionId, recordType, validationState, importSource */
@@ -11734,7 +11826,31 @@ QueryClient.prototype.templateById = function (this: QueryClient, args: Template
   return this.executeNamed("templateById", buildTemplateById(args), opts);
 };
 
-/** The caller's templates, newest first. Backs the template list and the campaign editor's template picker. Owned. */
+/** The template an organization published from one Library file, for campaignSaveTemplate and the editors that open a file: publishing a file again updates this template, so there is one per organization and file. It answers the template's id and its revision (createdAt) and nothing of its content, which templateById reads. Newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers a template outside the caller's organizations as not found, so the file id is not a way into somebody else's templates. Owned. */
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateForSource"] in generated_concepts.ts).
+export interface TemplateForSourceArgs {
+  accountId: string;
+  sourceArtifactId: string;
+}
+
+export function buildTemplateForSource(args: TemplateForSourceArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
+  return "query templateForSource(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    templateForSource(args: TemplateForSourceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.templateForSource = function (this: QueryClient, args: TemplateForSourceArgs = {} as TemplateForSourceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("templateForSource", buildTemplateForSource(args), opts);
+};
+
+/** The caller's templates, newest first, as summaries: no body and no document. Backs the template list and the campaign editor's template picker; a template's content is read with templateById. Owned. */
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templates"] in generated_concepts.ts).
 export interface TemplatesArgs {
   status?: string;

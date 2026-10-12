@@ -42,29 +42,7 @@ func AcknowledgeAttentionBuild(args AcknowledgeAttentionArgs) string {
 	return b.String()
 }
 
-// ActivateAuthoringBundle -- Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via setConstructStatus.
-//
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["activateAuthoringBundle"] in generated_concepts.go).
-type ActivateAuthoringBundleArgs struct {
-	BundleId string
-}
-
-// ActivateAuthoringBundle calls the engine mutation activateAuthoringBundle.
-func (qc *QueryClient) ActivateAuthoringBundle(ctx context.Context, args ActivateAuthoringBundleArgs) (*Result, error) {
-	call := ActivateAuthoringBundleBuild(args)
-	return qc.executeNamed(ctx, "activateAuthoringBundle", call)
-}
-
-func ActivateAuthoringBundleBuild(args ActivateAuthoringBundleArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation activateAuthoringBundle(")
-	b.WriteString("bundleId: ")
-	b.WriteString(quoteMemQL(args.BundleId))
-	b.WriteString(")")
-	return b.String()
-}
-
-// AddRecipient -- Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert.
+// AddRecipient -- Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest) so the membership can be found by it (recipientInAudienceByDigest).
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.go).
 type AddRecipientArgs struct {
@@ -2340,151 +2318,6 @@ func CreateAuthSessionBuild(args CreateAuthSessionArgs) string {
 	return b.String()
 }
 
-// CreateAuthoringBundle -- Create a draft authoring bundle -- the atomic unit a Responsibility compiles into. ownerUserId is stamped from actor.userId. Members are added via createAuthoringConstruct; reused (composed) constructs are recorded on reusedConstructRefs.
-//
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["createAuthoringBundle"] in generated_concepts.go).
-type CreateAuthoringBundleArgs struct {
-	BundleId            string
-	Title               string
-	Summary             string
-	ResponsibilityId    string
-	SourceRunId         string
-	Version             int
-	SupersedesBundleId  string
-	ReusedConstructRefs []map[string]any
-}
-
-// CreateAuthoringBundle calls the engine mutation createAuthoringBundle.
-func (qc *QueryClient) CreateAuthoringBundle(ctx context.Context, args CreateAuthoringBundleArgs) (*Result, error) {
-	call := CreateAuthoringBundleBuild(args)
-	return qc.executeNamed(ctx, "createAuthoringBundle", call)
-}
-
-func CreateAuthoringBundleBuild(args CreateAuthoringBundleArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createAuthoringBundle(")
-	b.WriteString("bundleId: ")
-	b.WriteString(quoteMemQL(args.BundleId))
-	if b.Len() > 31 {
-		b.WriteString(", ")
-	}
-	b.WriteString("title: ")
-	b.WriteString(quoteMemQL(args.Title))
-	if args.Summary != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("summary: ")
-		b.WriteString(quoteMemQL(args.Summary))
-	}
-	if args.ResponsibilityId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("responsibilityId: ")
-		b.WriteString(quoteMemQL(args.ResponsibilityId))
-	}
-	if args.SourceRunId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("sourceRunId: ")
-		b.WriteString(quoteMemQL(args.SourceRunId))
-	}
-	if args.Version != 0 {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("version: ")
-		b.WriteString(fmt.Sprintf("%v", args.Version))
-	}
-	if args.SupersedesBundleId != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("supersedesBundleId: ")
-		b.WriteString(quoteMemQL(args.SupersedesBundleId))
-	}
-	if args.ReusedConstructRefs != nil {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("reusedConstructRefs: ")
-		b.WriteString(renderMemQLValue(args.ReusedConstructRefs))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// CreateAuthoringConstruct -- Create an authored construct (the .memql source for one concept / automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle.
-//
-// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["createAuthoringConstruct"] in generated_concepts.go).
-type CreateAuthoringConstructArgs struct {
-	ConstructId string
-	BundleId    string
-	// Enum: concept | automation | logic | shape | spec | trait | policy | mutation | query | prompt
-	Kind            string
-	Name            string
-	TargetNamespace string
-	Source          string
-	Origin          string
-	GrammarVersion  string
-}
-
-// CreateAuthoringConstruct calls the engine mutation createAuthoringConstruct.
-func (qc *QueryClient) CreateAuthoringConstruct(ctx context.Context, args CreateAuthoringConstructArgs) (*Result, error) {
-	call := CreateAuthoringConstructBuild(args)
-	return qc.executeNamed(ctx, "createAuthoringConstruct", call)
-}
-
-func CreateAuthoringConstructBuild(args CreateAuthoringConstructArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation createAuthoringConstruct(")
-	b.WriteString("constructId: ")
-	b.WriteString(quoteMemQL(args.ConstructId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("bundleId: ")
-	b.WriteString(quoteMemQL(args.BundleId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("kind: ")
-	b.WriteString(quoteMemQL(args.Kind))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("name: ")
-	b.WriteString(quoteMemQL(args.Name))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("targetNamespace: ")
-	b.WriteString(quoteMemQL(args.TargetNamespace))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("source: ")
-	b.WriteString(quoteMemQL(args.Source))
-	if args.Origin != "" {
-		if b.Len() > 34 {
-			b.WriteString(", ")
-		}
-		b.WriteString("origin: ")
-		b.WriteString(quoteMemQL(args.Origin))
-	}
-	if args.GrammarVersion != "" {
-		if b.Len() > 34 {
-			b.WriteString(", ")
-		}
-		b.WriteString("grammarVersion: ")
-		b.WriteString(quoteMemQL(args.GrammarVersion))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // CreateBadgeIdentity -- Register a badge identity (shared-terminal operator credential). Stores only the SHA-256 hex hash of the badge/device id.
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createBadgeIdentity"] in generated_concepts.go).
@@ -3142,6 +2975,7 @@ type CreateComposeRecipeArgs struct {
 	TemplateId      string
 	Format          string
 	OutputKind      string
+	LayoutId        string
 	FolderId        string
 	AccountIds      []string
 }
@@ -3194,6 +3028,13 @@ func CreateComposeRecipeBuild(args CreateComposeRecipeArgs) string {
 		}
 		b.WriteString("outputKind: ")
 		b.WriteString(quoteMemQL(args.OutputKind))
+	}
+	if args.LayoutId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("layoutId: ")
+		b.WriteString(quoteMemQL(args.LayoutId))
 	}
 	if args.FolderId != "" {
 		if b.Len() > 29 {
@@ -8482,92 +8323,6 @@ func RecordApprovalDecisionBuild(args RecordApprovalDecisionArgs) string {
 	return b.String()
 }
 
-// RecordBundleDryRun -- Record the Gate 2 (tiered behavioral dry-run, #958) result on a bundle and transition status. status is dryRunPassed on success or failed otherwise; dryRunReport carries the trace + side-effect manifest + cost estimate (the Gate 3 approval artifact).
-//
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["recordBundleDryRun"] in generated_concepts.go).
-type RecordBundleDryRunArgs struct {
-	BundleId string
-	// Enum: dryRunPassed | failed
-	Status        string
-	DryRunReport  map[string]any
-	FailureReason string
-}
-
-// RecordBundleDryRun calls the engine mutation recordBundleDryRun.
-func (qc *QueryClient) RecordBundleDryRun(ctx context.Context, args RecordBundleDryRunArgs) (*Result, error) {
-	call := RecordBundleDryRunBuild(args)
-	return qc.executeNamed(ctx, "recordBundleDryRun", call)
-}
-
-func RecordBundleDryRunBuild(args RecordBundleDryRunArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation recordBundleDryRun(")
-	b.WriteString("bundleId: ")
-	b.WriteString(quoteMemQL(args.BundleId))
-	if b.Len() > 28 {
-		b.WriteString(", ")
-	}
-	b.WriteString("status: ")
-	b.WriteString(quoteMemQL(args.Status))
-	if b.Len() > 28 {
-		b.WriteString(", ")
-	}
-	b.WriteString("dryRunReport: ")
-	b.WriteString(renderMemQLValue(args.DryRunReport))
-	if args.FailureReason != "" {
-		if b.Len() > 28 {
-			b.WriteString(", ")
-		}
-		b.WriteString("failureReason: ")
-		b.WriteString(quoteMemQL(args.FailureReason))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// RecordBundleValidation -- Record the Gate 1 (isolated compile+bind, #956) result on a bundle and transition status. status is validated on success or failed on a binding error; validationReport carries the structured diagnostics; failureReason carries the headline on failure. Re-stamps ownerUserId (keeps the row owned + satisfies per-row authz).
-//
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["recordBundleValidation"] in generated_concepts.go).
-type RecordBundleValidationArgs struct {
-	BundleId string
-	// Enum: validated | failed
-	Status           string
-	ValidationReport map[string]any
-	FailureReason    string
-}
-
-// RecordBundleValidation calls the engine mutation recordBundleValidation.
-func (qc *QueryClient) RecordBundleValidation(ctx context.Context, args RecordBundleValidationArgs) (*Result, error) {
-	call := RecordBundleValidationBuild(args)
-	return qc.executeNamed(ctx, "recordBundleValidation", call)
-}
-
-func RecordBundleValidationBuild(args RecordBundleValidationArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation recordBundleValidation(")
-	b.WriteString("bundleId: ")
-	b.WriteString(quoteMemQL(args.BundleId))
-	if b.Len() > 32 {
-		b.WriteString(", ")
-	}
-	b.WriteString("status: ")
-	b.WriteString(quoteMemQL(args.Status))
-	if b.Len() > 32 {
-		b.WriteString(", ")
-	}
-	b.WriteString("validationReport: ")
-	b.WriteString(renderMemQLValue(args.ValidationReport))
-	if args.FailureReason != "" {
-		if b.Len() > 32 {
-			b.WriteString(", ")
-		}
-		b.WriteString("failureReason: ")
-		b.WriteString(quoteMemQL(args.FailureReason))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // RecordConsentBounce -- Append a provider bounce event. Append-only.
 //
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["recordConsentBounce"] in generated_concepts.go).
@@ -11187,43 +10942,6 @@ func SetAuthoredAutomationsEnabledBuild(args SetAuthoredAutomationsEnabledArgs) 
 	return b.String()
 }
 
-// SetAuthoringBundleStatus -- Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by retireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.
-//
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["setAuthoringBundleStatus"] in generated_concepts.go).
-type SetAuthoringBundleStatusArgs struct {
-	BundleId string
-	// Enum: draft | paused | active | failed
-	Status        string
-	FailureReason string
-}
-
-// SetAuthoringBundleStatus calls the engine mutation setAuthoringBundleStatus.
-func (qc *QueryClient) SetAuthoringBundleStatus(ctx context.Context, args SetAuthoringBundleStatusArgs) (*Result, error) {
-	call := SetAuthoringBundleStatusBuild(args)
-	return qc.executeNamed(ctx, "setAuthoringBundleStatus", call)
-}
-
-func SetAuthoringBundleStatusBuild(args SetAuthoringBundleStatusArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation setAuthoringBundleStatus(")
-	b.WriteString("bundleId: ")
-	b.WriteString(quoteMemQL(args.BundleId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("status: ")
-	b.WriteString(quoteMemQL(args.Status))
-	if args.FailureReason != "" {
-		if b.Len() > 34 {
-			b.WriteString(", ")
-		}
-		b.WriteString("failureReason: ")
-		b.WriteString(quoteMemQL(args.FailureReason))
-	}
-	b.WriteString(")")
-	return b.String()
-}
-
 // SetBookingHours -- Flip the published flag (and optional hours) without a deploy.
 //
 // Bound concept: v1:calendar:bookingHours (machine-readable: BoundConcepts["setBookingHours"] in generated_concepts.go).
@@ -13374,6 +13092,7 @@ type UpdateComposeRecipeArgs struct {
 	TemplateId      string
 	Format          string
 	OutputKind      string
+	LayoutId        string
 	FolderId        string
 	AccountIds      []string
 }
@@ -13430,6 +13149,13 @@ func UpdateComposeRecipeBuild(args UpdateComposeRecipeArgs) string {
 		}
 		b.WriteString("outputKind: ")
 		b.WriteString(quoteMemQL(args.OutputKind))
+	}
+	if args.LayoutId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("layoutId: ")
+		b.WriteString(quoteMemQL(args.LayoutId))
 	}
 	if args.FolderId != "" {
 		if b.Len() > 29 {

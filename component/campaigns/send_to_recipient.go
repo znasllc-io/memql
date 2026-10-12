@@ -209,9 +209,22 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	}
 	// Record the attempt before contacting the transport. After this point a
 	// timeout or a node loss is uncertain, and replay must never send it again.
+	//
+	// So everything that can be refused for being BUSY comes first. A transport that
+	// must take a lock of its own before it can begin (Azure's send receipt) is asked
+	// for it here, before the record: a refusal then means nothing was attempted, no
+	// receipt exists, and the caller may try again later. The same refusal after the
+	// record would leave a receipt saying an attempt began, which replay never sends
+	// again, for a message that never went out.
 	if receipt != nil {
 		msg.IntentID = "campaign-single:" + receipt.id
 		receipt.accountID = campaign.AccountID
+		reserved, giveBack, err := w.reserveDelivery(ctx, msg, identity.SendAs)
+		if err != nil {
+			return nil, fmt.Errorf("campaigns.sendToRecipient: %w", err)
+		}
+		defer giveBack()
+		ctx = reserved
 		if err := w.saveSingleSendReceipt(ctx, receipt, "attempting", nil); err != nil {
 			return nil, err
 		}

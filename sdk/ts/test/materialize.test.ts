@@ -503,14 +503,31 @@ test("startMaterialize carries every field the request declares", async () => {
   const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
   await startMaterialize(f.execute, {
     name: "Welcome", format: "json", requestId: "req-0002", statement: "A welcome email", outputKind: "email_template",
+    layoutId: "builtin:letter",
     sources: [{ kind: "library_file", ref: "f9", label: "Brand notes", content: true }], templateId: "t1", folderId: "fold1",
     accountIds: ["acct1"], recipeId: "rc1", deployableKind: "spa",
   });
   assert.equal(f.calls[0]?.call, buildComposeMaterialize({
     name: "Welcome", format: "json", requestId: "req-0002", statement: "A welcome email", outputKind: "email_template",
+    layoutId: "builtin:letter",
     sources: [{ kind: "library_file", ref: "f9", label: "Brand notes", content: true }], templateId: "t1", folderId: "fold1",
     accountIds: ["acct1"], recipeId: "rc1", deployableKind: "spa",
   }));
+});
+
+test("startMaterialize sends the layout an email is written into, as the id the picker gave it", async () => {
+  // Layout ids are opaque: what the picker listed is what is sent, untouched.
+  for (const layoutId of ["builtin:confirmation", "org:layout-7"]) {
+    const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
+    await startMaterialize(f.execute, { name: "Welcome", format: "json", requestId: "req-0009", outputKind: "email_template", accountIds: ["acct1"], layoutId });
+    const call = f.named("composeMaterialize")[0]?.call ?? "";
+    assert.ok(call.includes(`layoutId: "${layoutId}"`), `the layout did not reach composeMaterialize: ${call}`);
+    assert.equal(call, buildComposeMaterialize({ name: "Welcome", format: "json", requestId: "req-0009", outputKind: "email_template", accountIds: ["acct1"], layoutId }));
+  }
+  // A layout left empty is not sent, so the cluster takes its default (the Article).
+  const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
+  await startMaterialize(f.execute, { name: "Welcome", format: "json", requestId: "req-0010", outputKind: "email_template", accountIds: ["acct1"], layoutId: "  " });
+  assert.ok(!(f.calls[0]?.call ?? "").includes("layoutId"), f.calls[0]?.call);
 });
 
 test("startMaterialize never forwards a field the request type does not declare", async () => {

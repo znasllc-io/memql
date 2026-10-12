@@ -17,7 +17,7 @@ async function main() {
     if (process.argv.includes("--desktop")) {
       const { runTests, downloadAndUnzipVSCode } = require(path.join(core, "node_modules/@vscode/test-electron"));
       const version = process.env.MEMQL_VSCODE_VERSION || "stable";
-      let executable = await downloadAndUnzipVSCode({ version });
+      let executable = process.env.MEMQL_VSCODE_EXECUTABLE || await downloadAndUnzipVSCode({ version });
       if (process.platform === "darwin" && !fs.existsSync(executable)) {
         const contents = path.dirname(path.dirname(executable));
         const name = cp.execFileSync("/usr/libexec/PlistBuddy", ["-c", "Print CFBundleExecutable", path.join(contents,"Info.plist")],{encoding:"utf8"}).trim();

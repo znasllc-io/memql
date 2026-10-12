@@ -1,6 +1,8 @@
 node_modules/
 out/
 dist-test/
+# The gallery's emails, pages and captures (npm run gallery / gallery:shoot).
+dist-gallery/
 *.vsix
 .vscode-test*/
 LICENSE

@@ -213,6 +213,14 @@ type Template struct {
 	HTMLBody  string `json:"htmlBody"`
 	Status    string `json:"status"`
 	Revision  string `json:"revision"`
+
+	// ExpectsHTML says the template was written to have an HTML part: it is a
+	// layout email, or custom HTML. Its HTMLBody is then empty only when it was
+	// too large to send, which a draft stores without HTML. A template saved
+	// before documents, and a text email written as a document, expect none and
+	// are plain text by design. It is read from the stored row and never
+	// written into a send job's copy of the template.
+	ExpectsHTML bool `json:"-"`
 }
 
 // Recipient is one address in the audience roster.
@@ -445,7 +453,31 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 		TextBody:  str(r, "textBody"),
 		HTMLBody:  str(r, "htmlBody"),
 		Status:    str(r, "status"),
+
+		ExpectsHTML: templateExpectsHTML(r),
 	}, true, nil
+}
+
+// lacksItsHTML says that the template was written to have an HTML part and has
+// none: a draft too large to send. Nothing that builds a message from it should
+// go on as if it were plain text.
+func (t Template) lacksItsHTML() bool {
+	return t.ExpectsHTML && strings.TrimSpace(t.HTMLBody) == ""
+}
+
+// templateExpectsHTML says whether a stored template was written to have an
+// HTML part: a layout is named, or its document is a layout email (it has
+// blocks) or custom HTML (it carries some). A template with neither is plain
+// text, however it was saved.
+func templateExpectsHTML(row map[string]any) bool {
+	if str(row, "layoutId") != "" {
+		return true
+	}
+	document, _ := row["document"].(map[string]any)
+	if _, layout := document["blocks"]; layout {
+		return true
+	}
+	return strings.TrimSpace(str(document, "htmlBody")) != ""
 }
 
 // RosterPage reads ONE PAGE of the audience, suppressed members included --
@@ -491,7 +523,9 @@ func recipientFromRow(r map[string]any) Recipient {
 // Roster reads the whole audience by walking every page. OWNED tier.
 //
 // Retained for the callers that genuinely want the set rather than a batch:
-// the unsubscribe endpoint resolving one recipient, and tests. THE SEND PATH
+// the recipient import, which de-duplicates a whole file against the whole
+// audience, and tests. A caller that wants ONE member by address does not
+// belong here -- that is RecipientInAudienceByDigest (memql#6022). THE SEND PATH
 // DOES NOT USE IT -- it walks RosterPage, because materializing a
 // hundred-thousand-address audience once per batch is the shape memql#3460
 // removed. maxRows bounds it so "the whole audience" cannot become an
@@ -1217,6 +1251,70 @@ func (s *Store) RecipientByID(ctx context.Context, recipientID string) (Recipien
 		return Recipient{}, false, err
 	}
 	return recipientFromRow(rows[0]), true, nil
+}
+
+// RecipientsInAudienceByDigest returns the memberships of one audience that
+// carry the digest of one address (EmailDigest, which addRecipient stamps on
+// every recipient it writes as emailDigest), oldest first and in ANY
+// subscription state. OWNED tier: organization-authorized, like every read of a
+// recipient.
+//
+// EVERY match comes back, not the first. A mailbox can hold more than one row (a
+// manual add beside an earlier row, a race), one of them can have opted out by
+// hand while another has not, and a caller that looked at one row would act for
+// the mailbox on the strength of the wrong one. A form refuses when ANY of them
+// is not subscribed (memql#6022).
+//
+// The digest is a KEY, not proof: a raw write can set a digest that is not the
+// digest of the row's own address, so a caller compares each row's address
+// before it believes the match. MailboxMembers does.
+//
+// Rows that carry no digest are checked by RecipientsWithoutDigestInAudience.
+// A full page returns ErrMailboxUndecidable: an opted-out duplicate may follow
+// it. The page bounds the result, not the number of rows the planner examines.
+//
+// A digest of "" matches NOTHING and is not sent: EmailDigest answers "" for an
+// address that cannot be a mailbox, and as a filter value "" would select every
+// row that has no digest at all.
+func (s *Store) RecipientsInAudienceByDigest(ctx context.Context, audienceID, digest string) ([]Recipient, error) {
+	if digest == "" {
+		return nil, nil
+	}
+	rows, err := s.rows(ctx, call("query", "recipientInAudienceByDigest", arg{"audienceId", audienceID}, arg{"emailDigest", digest}))
+	if err != nil {
+		return nil, err
+	}
+	// A full page can hide an opted-out duplicate. This read also runs under
+	// the signup lock, so refuse an incomplete answer instead of walking more
+	// pages while holding the lock.
+	if len(rows) >= digestWindow {
+		return nil, fmt.Errorf("%w: the mailbox filled the digest lookup's %d-row window", ErrMailboxUndecidable, digestWindow)
+	}
+	return recipientsFromRows(rows), nil
+}
+
+// RecipientsWithoutDigestInAudience returns ONE PAGE (digestLessWindow rows,
+// oldest first) of the audience's recipients that carry no digest, in any
+// subscription state. OWNED tier.
+//
+// Those are the rows written before the digest existed, by a replica still on
+// the previous release, or by a raw write, until the digest sweep fills them in.
+// A lookup by digest cannot see them. A page that is FULL proves nothing about
+// the rows beyond it; MailboxMembers does not read it as "no such row".
+func (s *Store) RecipientsWithoutDigestInAudience(ctx context.Context, audienceID string) ([]Recipient, error) {
+	rows, err := s.rows(ctx, call("query", "recipientsWithoutDigestInAudience", arg{"audienceId", audienceID}))
+	if err != nil {
+		return nil, err
+	}
+	return recipientsFromRows(rows), nil
+}
+
+func recipientsFromRows(rows []map[string]any) []Recipient {
+	out := make([]Recipient, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, recipientFromRow(r))
+	}
+	return out
 }
 
 // --- plumbing -----------------------------------------------------------

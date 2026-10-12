@@ -6,7 +6,7 @@ export function renderProblem(target: HTMLElement, problem: Problem, post: (valu
   if (!problem.reference) return;
   const details = document.createElement("details"); details.className = "problem-details";
   details.style.marginTop = "8px"; details.style.color = "var(--vscode-descriptionForeground)";
-  const summary = document.createElement("summary"); summary.textContent = "Details";
+  const summary = document.createElement("summary"); summary.textContent = "Show details";
   const reference = document.createElement("code"); reference.textContent = problem.reference;
   reference.style.overflowWrap = "anywhere";
   const hint = document.createElement("p"); hint.textContent = "Search this reference in MemQL OS → Logs. If offline, open the MemQL Productivity Tools output in VS Code.";

@@ -7,7 +7,7 @@ connecting to MemQL adds shared state, authorization, and execution.
 | Product | Responsibility | Offline | Connected |
 |---|---|---|---|
 | **MemQL** (`vscode/`) | Cluster lifecycle, connections, authentication, and development | MemQL language support, local source editing | Install a local cluster where the editor host supports it; select and sign in to a cluster; inspect, author, and run MemQL constructs |
-| **MemQL Productivity Tools** | Documents, campaign templates, PDFs, and review | View and edit supported local files; compose templates | Open and save MemQL files with revisions; create and edit campaign templates; store comments and suggestions; request human approval before starting work to apply suggestions |
+| **MemQL Productivity Tools** | Documents, emails, PDFs, and review | View and edit supported local files; edit emails in Source | Open and save MemQL files with revisions; write, design and publish emails; store comments and suggestions; request human approval before starting work to apply suggestions |
 
 The existing extension owns the selected cluster and its authenticated
 connection. Productivity Tools consumes that connection through a versioned

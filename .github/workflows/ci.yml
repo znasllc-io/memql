@@ -621,6 +621,20 @@ jobs:
               # is a db-gated tree, so db-tests, which gates on this bucket, is the lane that
               # runs the Go half; a change to the table alone must reach it.
               - 'integrations/compose/testdata/**'
+              # The email document package (memql#6032): its four built-in
+              # layouts (layouts/*.email.json, embedded by layouts.go) and the
+              # golden renders its tests compare byte for byte
+              # (testdata/golden/*). Neither is Go, and the package reads them
+              # by go:embed and by joined path elements rather than by name, so
+              # the coverage guard's mention-scan found nothing and offered the
+              # exemption -- which would be wrong: deleting a golden, or
+              # changing a layout, reds the package's tests (both were run). A
+              # layout is part of the package's own build and a golden is a
+              # test input, so go-tests selects the package for either; it is
+              # not db-gated and the gate-inputs step does not run it, which
+              # makes `go` the bucket that reaches it. Written as the package's
+              # tree so a new embedded or fixture tree cannot slip back out.
+              - 'component/compose/emaildoc/**'
             # The embedded DSL tree.
             dsl:
               - 'dsl/**'
@@ -679,6 +693,11 @@ jobs:
               # extension's tests read directly. Also in `gates`, because the
               # Go half reads the same file -- see the note there.
               - 'test/fixtures/**'
+              # The email document engine. The editor mirrors its rules, and
+              # its tests read the engine's own testdata (the Markdown link
+              # verdicts in testdata/markdown-links.json), so an engine-only
+              # change must run the mirror's tests too.
+              - 'component/compose/emaildoc/**'
             # The `clients/` category -- surfaces built on the platform, of
             # which this repo carries exactly one, the MemQL OS shell
             # (memql#4705). It absorbed the retired `portal` bucket whole in

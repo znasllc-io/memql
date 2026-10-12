@@ -169,6 +169,22 @@ func (s *store) libraryFolderById(ctx context.Context, id string) (map[string]an
 	return one(s.query(ctx, "query "+call("libraryFolderById", map[string]any{"folderId": id})))
 }
 
+// emailLayoutById is an organization email layout, by its bare id, and nil when
+// the caller cannot read it: the organization boundary answers a layout of an
+// organization they are not in exactly as it answers one that does not exist.
+// An archived layout IS answered (its row says so), as the Email app keeps it
+// readable for the emails made from it.
+func (s *store) emailLayoutById(ctx context.Context, id string) (map[string]any, error) {
+	return one(s.query(ctx, "query "+call("emailLayoutById", map[string]any{"layoutId": id})))
+}
+
+// libraryArtifactForFile is the caller's own Library artifact for a file, and
+// nil when they have none: the query is held to the artifact's owner, so even a
+// file they can read has no artifact here unless it is theirs.
+func (s *store) libraryArtifactForFile(ctx context.Context, fileId string) (map[string]any, error) {
+	return one(s.query(ctx, "query "+call("libraryArtifactForFile", map[string]any{"fileId": fileId})))
+}
+
 // ---------------------------------------------------------------------------
 // Writes
 // ---------------------------------------------------------------------------

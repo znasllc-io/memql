@@ -139,6 +139,14 @@ func TestEveryRenderedCallParses(t *testing.T) {
 		}},
 		{"deliveryLedgerForCampaign", func() error { _, err := store.Ledger(ctx, awkward); return err }},
 		{"recipientById", func() error { _, _, err := store.RecipientByID(ctx, awkward); return err }},
+		{"recipientInAudienceByDigest", func() error {
+			_, err := store.RecipientsInAudienceByDigest(ctx, awkward, strings.Repeat("a", 64))
+			return err
+		}},
+		{"recipientsWithoutDigestInAudience", func() error {
+			_, err := store.RecipientsWithoutDigestInAudience(ctx, awkward)
+			return err
+		}},
 
 		// identity + accounts (memql#4821, #4822)
 		{"senderIdentityById", func() error { _, _, err := store.SenderIdentityByID(ctx, awkward); return err }},
@@ -246,6 +254,16 @@ func TestEveryRenderedCallParses(t *testing.T) {
 				Status: "sent", SentAt: now, Attempts: 1, EmailRuleID: awkward,
 			})
 		}},
+
+		// organization email layouts: both reads, and the list both ways (the
+		// status argument renders only when archived layouts are not wanted).
+		{"emailLayoutById", func() error { _, _, err := store.EmailLayoutByID(ctx, awkward); return err }},
+		{"emailLayoutsForAccount (active)", func() error { _, err := store.EmailLayoutsForAccount(ctx, awkward, false); return err }},
+		{"emailLayoutsForAccount (archived too)", func() error { _, err := store.EmailLayoutsForAccount(ctx, awkward, true); return err }},
+
+		// the template an organization published from one Library file; both
+		// ids are the caller's, so both are awkward.
+		{"templateForSource", func() error { _, _, err := store.TemplateForSource(ctx, awkward, awkward); return err }},
 	}
 
 	before := 0

@@ -133,6 +133,13 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     one surface, and the person had to know which was which.
     Account and organization details use this footer too: state on the left,
     Back/Disconnect on the right; Cancel/confirmation stay on that same edge.
+    A bar whose actions or wizard step change holds presses for 400 ms
+    (`CONFIRM_SETTLE_MS`). This prevents a double-click from confirming a
+    question it just opened, discarding changes after Keep, resuming after
+    Pause, or skipping a wizard step. The guard belongs to `ActionBar`;
+    `Wizard` supplies its open step as the bar's `scope`. Initial actions
+    and unchanged actions accept clicks immediately. An empty bar remembers
+    its last actions, so removing them during a write does not bypass the hold.
     Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them

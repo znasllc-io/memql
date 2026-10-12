@@ -11,12 +11,13 @@ package memql
 // user approves (optionally after a full-sandbox-live staging pass), and the
 // bundle ACTIVATES:
 //
-//   1. status dryRunPassed -> active (activateAuthoringBundle), member
-//      constructs draft -> active (setConstructStatus).
-//   2. its constructs register into the owner-scoped authored runtime
+//   1. its constructs register into the owner-scoped authored runtime
 //      (AuthoredRuntimeRegistry, #959) so they resolve + fire live; the
 //      automation construct is handed to the authored scheduler via an
 //      injected register hook (wired to AuthoredScheduler.Activate in app/).
+//   2. member constructs draft -> active (setConstructStatus), and LAST the
+//      bundle dryRunPassed -> active (activateAuthoringBundle): a refused
+//      activation is undone and leaves its bundle inactive (memql#6022).
 //   3. its NET-NEW dependency constructs promote into the owner's reusable
 //      catalog (PromoteConstructToCatalog, #957) so later bundles compose them.
 //   4. an activation audit event is emitted (#identity audit path).
@@ -64,6 +65,10 @@ type AuthoringBundleRow struct {
 	Version            int                `json:"version"`
 	SupersedesBundleId string             `json:"supersedesBundleId"`
 	DryRunReport       BundleDryRunReport `json:"dryRunReport"`
+	// CreatedAt is the version of the row that was read -- the witness a
+	// write conditional on that read is fenced on (ContextWithRowVersionFence).
+	// Zero when the read did not carry one.
+	CreatedAt time.Time `json:"-"`
 }
 
 // AuthoringConstructRow is the parsed v1:authoring:construct projection: the
@@ -299,6 +304,11 @@ type AuthoredAuditSink interface {
 // not linked on this binary (the registry registration still happens, so the
 // construct resolves -- it just won't be scheduled). Returns an error so a
 // compile failure in the just-activated automation surfaces.
+//
+// A hook that returns an error must leave whatever it had scheduled under the
+// construct's (owner, name) in place, as AuthoredScheduler.Activate does: the
+// arming code registers a newer version over a held one and keeps the held
+// one firing when the newer one is refused on this node (armOver).
 type AuthoredRegisterHook func(c *AuthoredConstruct) error
 
 // AuthoredDeregisterHook tears down one retired automation's scheduler entry.

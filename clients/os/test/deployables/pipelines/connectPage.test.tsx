@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -16,6 +16,7 @@ import { useConnectFlow, type ConnectFlow } from "../../../src/apps/deployables/
 import { pipelineFromRow, type PipelineRow } from "../../../src/apps/deployables/pipelines/rows";
 import type { Breadcrumb } from "../../../src/kit/Breadcrumbs";
 import { MachinesProvider, WORKER_REGISTRATION_CONCEPT } from "../../../src/live/machines";
+import { readTheBar } from "../../readTheBar";
 import { chooseOption, selectedLabel } from "../../selectControl";
 import { click, emit, fakeConnection, rowsResult, withSession, type FakeConnection, type FakeSeed } from "../harness";
 import { PACKAGE_ID, SHA_A, VIEWER, packageRow, pipelineRow } from "./fixtures";
@@ -177,6 +178,12 @@ function act_(label: string): HTMLElement {
   return within(floor()).getByRole("button", { name: label });
 }
 
+/** Presses one of the floor's acts once it has been read: the floor changes as each step opens and each read lands, and a bar that has just changed takes no press for a moment. */
+async function press(label: string): Promise<void> {
+  await readTheBar();
+  await click(act_(label));
+}
+
 function noAct(label: string): boolean {
   return within(floor()).queryByRole("button", { name: label }) === null;
 }
@@ -219,6 +226,11 @@ function chosen(): string {
 describe("Connect pipeline", () => {
   beforeEach(() => {
     h.connection = null;
+    // A fake Date, so reading the floor costs nothing: the reads run on real timers.
+    vi.useFakeTimers({ toFake: ["Date"] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("reads memql-package.yaml on the way in, and shows its stages in Repository before anything is confirmed", async () => {
@@ -285,7 +297,7 @@ describe("Connect pipeline", () => {
 
     // The manifest is fixed and pushed; reading again finds its stages.
     seed.pipelinePreview = previewRow();
-    await click(act_("Read again"));
+    await press("Read again");
     expect(await screen.findByText("go-tests, 4 shards")).toBeTruthy();
     expect(connection.callsNamed("pipelinesPreview")).toHaveLength(2);
     expect(screen.queryByText("This repository declares no pipeline")).toBeNull();
@@ -298,14 +310,14 @@ describe("Connect pipeline", () => {
     expect(screen.getByText("the network went away")).toBeTruthy();
     expect(floorWord()).toBe("Not read");
     delete seed.pipelinePreviewError;
-    await click(act_("Read again"));
+    await press("Read again");
     expect(await screen.findByText("go-tests, 4 shards")).toBeTruthy();
   });
 
   it("offers your fleet only when a machine of yours allows pipelines", async () => {
     mount(connectionFor({ pipelinePreview: previewRow() }, { machines: [ALLOWED] }));
     await screen.findByText("go-tests, 4 shards");
-    await click(act_("Continue"));
+    await press("Continue");
 
     await waitFor(() => expect(choiceNames()).toEqual(["Cluster", "Cluster and your fleet"]));
     // Nothing needs a machine, so the cluster is SUGGESTED -- in words, with
@@ -338,7 +350,7 @@ describe("Connect pipeline", () => {
       ),
     );
     await screen.findByText("go-tests, 4 shards");
-    await click(act_("Continue"));
+    await press("Continue");
 
     // NOTHING TO CHOOSE: the cluster is the one answer, so Compute answered
     // itself and the page went on to Confirm.
@@ -381,7 +393,7 @@ describe("Connect pipeline", () => {
     const connection = connectionFor({ pipelinePreview: previewRow({ suggestedDelivery: "poll" }) });
     mount(connection, { onDone, flowRef });
     await screen.findByText("go-tests, 4 shards");
-    await click(act_("Continue"));
+    await press("Continue");
 
     await waitFor(() => expect(selectedLabel(screen.getByLabelText("How changes arrive"))).toBe("Polling"));
     expect(screen.getByText("This cluster asks GitHub every minute. Merge queue and release runs need a webhook.")).toBeTruthy();
@@ -394,7 +406,7 @@ describe("Connect pipeline", () => {
     // Nothing is written until the act.
     expect(connection.callsNamed("pipelinesConnect")).toEqual([]);
 
-    await click(act_("Connect pipeline"));
+    await press("Connect pipeline");
     await waitFor(() =>
       expect(connection.callsNamed("pipelinesConnect")).toEqual([
         `builtin pipelinesConnect(packageId: "${PACKAGE_ID}", delivery: "poll", compute: "cluster", secretNames: ["VERIFY_TOKEN"])`,
@@ -405,7 +417,7 @@ describe("Connect pipeline", () => {
     expect(screen.queryByLabelText("How changes arrive")).toBeNull();
     expect(fact("How changes arrive")).toBe("Polling");
 
-    await click(act_("Done"));
+    await press("Done");
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(flowRef.current?.packageId).toBe("");
   });
@@ -414,10 +426,10 @@ describe("Connect pipeline", () => {
     const connection = connectionFor({ pipelinePreview: previewRow({ suggestedDelivery: "webhook" }) });
     mount(connection);
     await screen.findByText("go-tests, 4 shards");
-    await click(act_("Continue"));
+    await press("Continue");
     await waitFor(() => expect(selectedLabel(screen.getByLabelText("How changes arrive"))).toBe("Webhook"));
     chooseOption(screen.getByLabelText("How changes arrive"), "Polling");
-    await click(act_("Connect pipeline"));
+    await press("Connect pipeline");
     await waitFor(() => expect(connection.callsNamed("pipelinesConnect")[0]).toContain(`delivery: "poll"`));
   });
 
@@ -429,8 +441,8 @@ describe("Connect pipeline", () => {
     });
     mount(connection);
     await screen.findByText("go-tests, 4 shards");
-    await click(act_("Continue"));
-    await click(act_("Connect pipeline"));
+    await press("Continue");
+    await press("Connect pipeline");
 
     expect(await screen.findByText("A step needs a fleet machine, and this pipeline runs on the cluster only")).toBeTruthy();
     expect(screen.getByText(/the owner has not consented to the fleet/)).toBeTruthy();
@@ -443,8 +455,8 @@ describe("Connect pipeline", () => {
   it("lands a refusal about the grant at Repository, where reading again is the way forward", async () => {
     mount(connectionFor({ pipelinePreview: previewRow(), pipelinesConnectError: "credential_revoked: the GitHub connection this source uses was revoked" }));
     await screen.findByText("go-tests, 4 shards");
-    await click(act_("Continue"));
-    await click(act_("Connect pipeline"));
+    await press("Continue");
+    await press("Connect pipeline");
 
     expect(await screen.findByText("This source's credential was revoked")).toBeTruthy();
     expect(railLine("Repository").getAttribute("aria-expanded")).toBe("true");
@@ -457,13 +469,13 @@ describe("Connect pipeline", () => {
     const connection = connectionFor(seed);
     mount(connection);
     await screen.findByText("go-tests, 4 shards");
-    await click(act_("Continue"));
-    await click(act_("Connect pipeline"));
+    await press("Continue");
+    await press("Connect pipeline");
 
     expect(await screen.findByText("The pipeline was not connected.")).toBeTruthy();
     expect(screen.getByText("the network went away")).toBeTruthy();
     delete seed.pipelinesConnectError;
-    await click(act_("Connect pipeline"));
+    await press("Connect pipeline");
     await waitFor(() => expect(floorWord()).toBe("Connected"));
     expect(connection.callsNamed("pipelinesConnect")).toHaveLength(2);
   });
@@ -474,7 +486,7 @@ describe("Connect pipeline", () => {
     const connection = connectionFor({ pipelinePreview: previewRow() }, { machines: [ALLOWED] });
     const view = mount(connection, { onBack, flowRef });
     await screen.findByText("go-tests, 4 shards");
-    await click(act_("Continue"));
+    await press("Continue");
     await waitFor(() => expect(choiceNames()).toHaveLength(2));
     await click(choice("Cluster and your fleet"));
     chooseOption(screen.getByLabelText("How changes arrive"), "Polling");
@@ -500,7 +512,7 @@ describe("Connect pipeline", () => {
     // Coming back is not asking again.
     expect(connection.callsNamed("pipelinesPreview")).toHaveLength(1);
 
-    await click(act_("Connect pipeline"));
+    await press("Connect pipeline");
     await waitFor(() =>
       expect(connection.callsNamed("pipelinesConnect")).toEqual([
         `builtin pipelinesConnect(packageId: "${PACKAGE_ID}", delivery: "poll", compute: "cluster_and_fleet", secretNames: ["VERIFY_TOKEN"])`,
@@ -514,7 +526,7 @@ describe("Connect pipeline", () => {
     const connection = connectionFor({ pipelinePreview: previewRow() });
     mount(connection, { onBack, flowRef });
     await screen.findByText("go-tests, 4 shards");
-    await click(act_("Cancel"));
+    await press("Cancel");
     expect(onBack).toHaveBeenCalledTimes(1);
     expect(flowRef.current?.packageId).toBe("");
     expect(connection.callsNamed("pipelinesConnect")).toEqual([]);
@@ -527,13 +539,13 @@ describe("Connect pipeline", () => {
 
     expect(await screen.findByRole("heading", { name: "Change pipeline" })).toBeTruthy();
     await screen.findByText("go-tests, 4 shards");
-    await click(act_("Continue"));
+    await press("Continue");
 
     // Prefilled: Compute is answered, and Confirm opens on the pipeline's own delivery.
     await waitFor(() => expect(fact("Where steps run")).toBe("Cluster and your fleet"));
     expect(selectedLabel(screen.getByLabelText("How changes arrive"))).toBe("Polling");
     expect(floorWord()).toBe("Ready to save");
-    await click(act_("Save changes"));
+    await press("Save changes");
     await waitFor(() =>
       expect(connection.callsNamed("pipelinesConnect")).toEqual([
         `builtin pipelinesConnect(packageId: "${PACKAGE_ID}", delivery: "poll", compute: "cluster_and_fleet", secretNames: ["VERIFY_TOKEN"])`,

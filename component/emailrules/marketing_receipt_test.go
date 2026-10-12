@@ -18,6 +18,11 @@ func (e *marketingReceiptEngine) Execute(_ context.Context, q string) (any, erro
 		return rowsEnvelope([]map[string]any{e.rule}), nil
 	case strings.HasPrefix(q, "query sendableRecipientsForAudience"):
 		return rowsEnvelope([]map[string]any{{"id": "recipient1", "email": "reader@example.com"}}), nil
+	case strings.HasPrefix(q, "query recipientInAudienceByDigest"):
+		// The row-address mode finds its member by the digest of the address.
+		return rowsEnvelope([]map[string]any{{"id": "recipient1", "email": "reader@example.com"}}), nil
+	case strings.HasPrefix(q, "query recipientsWithoutDigestInAudience"):
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "builtin campaignSendToRecipient"):
 		e.sends = append(e.sends, q)
 		if e.result == nil {

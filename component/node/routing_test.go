@@ -471,3 +471,18 @@ func TestNewsletterConfigurationReachesOtherReplicas(t *testing.T) {
 		}
 	}
 }
+
+// TestAuthoringArmAndDisarmBroadcastToEveryNode: an activated authored bundle
+// arms on every replica and a retired one disarms on every replica
+// (memql#6022, F1). Each replica runs its own authored scheduler, so the
+// broadcast must reach every node, not one node type. Without these rules
+// default-deny keeps both on the node that handled the activation, which is
+// the bug: the other replicas learned of a rule at their next boot.
+func TestAuthoringArmAndDisarmBroadcastToEveryNode(t *testing.T) {
+	for _, topic := range []string{"authoring.arm.b-1", "authoring.disarm.b-1"} {
+		forward, broadcast, target := ForwardDecisionFor(topic)
+		if !forward || !broadcast || target != "" {
+			t.Fatalf("%s must broadcast to every node: forward=%v broadcast=%v target=%q", topic, forward, broadcast, target)
+		}
+	}
+}

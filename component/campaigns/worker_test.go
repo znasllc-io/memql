@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -94,6 +95,19 @@ type fakeEngine struct {
 	// consumer is sendToRecipient resolving which audience a rule mails.
 	emailRules map[string]map[string]any
 
+	// emailLayouts backs emailLayoutById and emailLayoutsForAccount (the
+	// organization layouts), keyed by bare id. Absent means "not visible to
+	// this caller", which is the answer the real queries give a person
+	// outside the organization.
+	emailLayouts map[string]map[string]any
+
+	// templateBySource backs templateForSource, the template published from one
+	// Library file, keyed "accountId|sourceArtifactId" with both as the query
+	// is called (bare). Absent means "no template for that file in that
+	// organization", which is also what the real query says of a template the
+	// caller cannot see.
+	templateBySource map[string]map[string]any
+
 	// libraryArtifacts / libraryFiles back the CSV import's two owner-gated
 	// reads (memql#4822), keyed by bare id. Absent means "not visible to
 	// this caller", which is the same answer the real queries give and is
@@ -128,6 +142,11 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 		return rowsEnvelope([]map[string]any{e.campaign}), nil
 	case strings.HasPrefix(q, "query templateById"):
 		return rowsEnvelope([]map[string]any{e.template}), nil
+	case strings.HasPrefix(q, "query templateForSource"):
+		if row, ok := e.templateBySource[argOf(q, "accountId")+"|"+argOf(q, "sourceArtifactId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query audienceRosterForSend"):
 		// PAGED, because the send walks it (memql#3460). A fake that
 		// returned the whole roster at once would make every paging test
@@ -190,6 +209,30 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 			return rowsEnvelope([]map[string]any{row}), nil
 		}
 		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query emailLayoutById"):
+		if row, ok := e.emailLayouts[argOf(q, "layoutId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query emailLayoutsForAccount"):
+		// Narrowed by organization and, when the call names one, by status --
+		// the two arguments the real query filters on. Ordered by id so a test
+		// can name the order it expects.
+		ids := make([]string, 0, len(e.emailLayouts))
+		for id := range e.emailLayouts {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		account, status := argOf(q, "accountId"), argOf(q, "status")
+		var rows []map[string]any
+		for _, id := range ids {
+			row := e.emailLayouts[id]
+			if bare(str(row, "accountId")) != bare(account) || (status != "" && str(row, "status") != status) {
+				continue
+			}
+			rows = append(rows, row)
+		}
+		return rowsEnvelope(rows), nil
 	case strings.HasPrefix(q, "query audiences("):
 		rows := make([]map[string]any, 0, 1)
 		if len(e.roster) > 0 {
@@ -1011,6 +1054,98 @@ func TestCompletionStampsBothRows(t *testing.T) {
 	}
 	if !jobDone || !campaignSent {
 		t.Errorf("completion did not stamp both rows: jobCompleted=%v campaignSent=%v", jobDone, campaignSent)
+	}
+}
+
+// TestAFailedJobMarksItsCampaignFailed is the failure-side twin of
+// TestCompletionStampsBothRows (memql#6022). A send job that went terminal
+// `failed` used to leave its campaign reading `sending` for good: the operator,
+// who reads the campaign and never the clusterOwner-tier job, saw a send still
+// in flight behind a job nothing would ever drain again. So the failure and its
+// reason land on the campaign too, under the campaign OWNER'S actor -- the same
+// borrowed identity the completion write uses, and not the engine's own.
+//
+// The template read answering nothing is the cheapest real refusal that
+// reaches failJob after the owner has been established.
+func TestAFailedJobMarksItsCampaignFailed(t *testing.T) {
+	engine := &fakeEngine{
+		jobs:     []map[string]any{jobRow()},
+		campaign: campaignRow(),
+		// No template: templateById answers empty, which is the "template is
+		// not readable" refusal.
+		roster: []map[string]any{recipientRow("r-1", "a@example.test", "subscribed")},
+	}
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+	frozen := time.Date(2026, 8, 14, 9, 0, 0, 0, time.UTC)
+	atClock(w, frozen)
+
+	w.DrainOnce(context.Background())
+
+	if sender.count() != 0 {
+		t.Fatalf("sent %d messages for a job whose template could not be read", sender.count())
+	}
+	if !wroteContaining(engine, "mutation updateSendJob", `status: "failed"`) {
+		t.Fatal("the job was not failed, so this test is not reaching the path it is about")
+	}
+
+	progress := engine.mutations("updateCampaignProgress")
+	if len(progress) != 1 {
+		t.Fatalf("want exactly one campaign write for the failed job, got %d: %+v", len(progress), progress)
+	}
+	// Asserted over the whole rendered call rather than through argOf: the
+	// reason is a sentence, and the point is that the OPERATOR can read it.
+	for _, want := range []string{
+		`campaignId: "` + testCampaign + `"`,
+		`status: "failed"`,
+		`lastError: "template is not readable; refusing to send"`,
+		`completedAt: "` + frozen.Format(time.RFC3339) + `"`,
+	} {
+		if !strings.Contains(progress[0].query, want) {
+			t.Errorf("campaign write is missing %s:\n%s", want, progress[0].query)
+		}
+	}
+	if progress[0].actorID != testOwner {
+		t.Errorf("campaign failure written under actor %q, want the campaign owner %q -- an owned-tier "+
+			"write under any other identity is refused or lands on a row the owner cannot read",
+			progress[0].actorID, testOwner)
+	}
+	if progress[0].isOwner {
+		t.Error("the campaign failure ran as a CLUSTER OWNER. The worker borrows exactly the campaign " +
+			"owner's authority for owned-tier rows; anything more means the owner tier bounds nothing")
+	}
+}
+
+// TestAJobWithNoOwnerFailsWithoutWritingTheCampaign is the other side of the
+// same write. The campaign is an OWNED-tier row, so reaching it takes the
+// owner's identity -- and a job that names no owner has none to borrow. The job
+// still fails (that is the clusterOwner-tier row, written under the engine's own
+// identity), but the worker must not fall through to writing the campaign as
+// somebody else: ownerActorContext returns its context UNCHANGED for a blank
+// owner, which is the engine's system identity, and that is exactly the
+// attribution this refuses to make.
+func TestAJobWithNoOwnerFailsWithoutWritingTheCampaign(t *testing.T) {
+	job := jobRow()
+	job["campaignOwnerUserId"] = ""
+	engine := &fakeEngine{
+		jobs:     []map[string]any{job},
+		campaign: campaignRow(),
+		template: templateRow(),
+		roster:   []map[string]any{recipientRow("r-1", "a@example.test", "subscribed")},
+	}
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	w.DrainOnce(context.Background())
+
+	if sender.count() != 0 {
+		t.Fatalf("sent %d messages for a job with no owner to run the send under", sender.count())
+	}
+	if !wroteContaining(engine, "mutation updateSendJob", `status: "failed"`) {
+		t.Fatal("a job with no campaign owner was not failed")
+	}
+	if progress := engine.mutations("updateCampaignProgress"); len(progress) != 0 {
+		t.Errorf("the campaign was written for a job with no owner, under %q: %+v", progress[0].actorID, progress)
 	}
 }
 

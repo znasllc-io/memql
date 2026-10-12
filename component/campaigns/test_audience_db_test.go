@@ -45,7 +45,7 @@ func TestAudienceRunsUseNormalWorkerAcrossReplicas(t *testing.T) {
 		}
 		engines[n] = e
 		workers[n] = newTestWorker(t, deliveryDBEngine{e}, sender)
-		wired := NewWorker(deliveryDBEngine{e}, nil, nil, quietLogger(), func() *sql.DB { return db.DB })
+		wired := NewWorker(deliveryDBEngine{e}, nil, nil, quietLogger(), gatePoolFor(t))
 		workers[n].testGate, workers[n].templateGate, workers[n].seriesGate = wired.testGate, wired.templateGate, wired.seriesGate
 		if err := e.RegisterIntegration(workers[n]); err != nil {
 			t.Fatal(err)

@@ -3388,6 +3388,58 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	return b.String()
 }
 
+// EmailLayoutById -- One email layout by id, for the organization's members. Backs the revision check campaignSaveLayout makes and the editors that open a saved layout. The id is not a capability: the concept's account tier answers a layout outside the caller's organizations as not found.
+//
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutById"] in generated_concepts.go).
+type EmailLayoutByIdArgs struct {
+	LayoutId string
+}
+
+// EmailLayoutById calls the engine query emailLayoutById.
+func (qc *QueryClient) EmailLayoutById(ctx context.Context, args EmailLayoutByIdArgs) (*Result, error) {
+	call := EmailLayoutByIdBuild(args)
+	return qc.executeNamed(ctx, "emailLayoutById", call)
+}
+
+func EmailLayoutByIdBuild(args EmailLayoutByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailLayoutById(")
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailLayoutsForAccount -- An organization's email layouts, newest first. Backs the layout picker (through the emailLayouts builtin) and the Email app's Templates section. status narrows to active or archived layouts; omit it to see both.
+//
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutsForAccount"] in generated_concepts.go).
+type EmailLayoutsForAccountArgs struct {
+	AccountId string
+	Status    string
+}
+
+// EmailLayoutsForAccount calls the engine query emailLayoutsForAccount.
+func (qc *QueryClient) EmailLayoutsForAccount(ctx context.Context, args EmailLayoutsForAccountArgs) (*Result, error) {
+	call := EmailLayoutsForAccountBuild(args)
+	return qc.executeNamed(ctx, "emailLayoutsForAccount", call)
+}
+
+func EmailLayoutsForAccountBuild(args EmailLayoutsForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailLayoutsForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Status != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // EmailRuleById -- One event-email rule by id.
 //
 // Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRuleById"] in generated_concepts.go).
@@ -7157,6 +7209,34 @@ func RecipientByIdBuild(args RecipientByIdArgs) string {
 	return b.String()
 }
 
+// RecipientInAudienceByDigest -- The memberships for one mailbox in one audience, by address digest. Organization-authorized. The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a signup or a row-address rule finds a page of the rows a mailbox holds without walking the roster. Matches are in any subscription state, oldest first: the same mailbox can hold more than one row (a manual add beside an earlier row, a race), and one can have opted out while another has not. A FULL page cannot rule out another opted-out row beyond it; the caller must refuse rather than assume it saw every membership. A row carries a digest only if it was written by addRecipient or filled in by the digest sweep, so a mailbox can also hold rows this does not return: recipientsWithoutDigestInAudience is the other half. The caller checks each row's own address before it believes the key; a raw write can set a digest that is not its address's.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientInAudienceByDigest"] in generated_concepts.go).
+type RecipientInAudienceByDigestArgs struct {
+	AudienceId  string
+	EmailDigest string
+}
+
+// RecipientInAudienceByDigest calls the engine query recipientInAudienceByDigest.
+func (qc *QueryClient) RecipientInAudienceByDigest(ctx context.Context, args RecipientInAudienceByDigestArgs) (*Result, error) {
+	call := RecipientInAudienceByDigestBuild(args)
+	return qc.executeNamed(ctx, "recipientInAudienceByDigest", call)
+}
+
+func RecipientInAudienceByDigestBuild(args RecipientInAudienceByDigestArgs) string {
+	var b strings.Builder
+	b.WriteString("query recipientInAudienceByDigest(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RecipientsForAudience -- Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the caller conjunct is doubly load-bearing here.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsForAudience"] in generated_concepts.go).
@@ -7173,6 +7253,28 @@ func (qc *QueryClient) RecipientsForAudience(ctx context.Context, args Recipient
 func RecipientsForAudienceBuild(args RecipientsForAudienceArgs) string {
 	var b strings.Builder
 	b.WriteString("query recipientsForAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecipientsWithoutDigestInAudience -- One page of the rows of an audience that carry no address digest, oldest first. Organization-authorized. Those are the rows written before the digest existed, by a replica still running the previous release, or by a raw write, until the digest sweep fills them in. A lookup by digest cannot see them, so a signup or a row-address rule reads this page too and compares each row's address; a FULL page proves nothing about the rows beyond it and the caller must not read it as "no such row".
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsWithoutDigestInAudience"] in generated_concepts.go).
+type RecipientsWithoutDigestInAudienceArgs struct {
+	AudienceId string
+}
+
+// RecipientsWithoutDigestInAudience calls the engine query recipientsWithoutDigestInAudience.
+func (qc *QueryClient) RecipientsWithoutDigestInAudience(ctx context.Context, args RecipientsWithoutDigestInAudienceArgs) (*Result, error) {
+	call := RecipientsWithoutDigestInAudienceBuild(args)
+	return qc.executeNamed(ctx, "recipientsWithoutDigestInAudience", call)
+}
+
+func RecipientsWithoutDigestInAudienceBuild(args RecipientsWithoutDigestInAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("query recipientsWithoutDigestInAudience(")
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
 	b.WriteString(")")
@@ -12381,7 +12483,35 @@ func TemplateByIdBuild(args TemplateByIdArgs) string {
 	return b.String()
 }
 
-// Templates -- The caller's templates, newest first. Backs the template list and the campaign editor's template picker. Owned.
+// TemplateForSource -- The template an organization published from one Library file, for campaignSaveTemplate and the editors that open a file: publishing a file again updates this template, so there is one per organization and file. It answers the template's id and its revision (createdAt) and nothing of its content, which templateById reads. Newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers a template outside the caller's organizations as not found, so the file id is not a way into somebody else's templates. Owned.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateForSource"] in generated_concepts.go).
+type TemplateForSourceArgs struct {
+	AccountId        string
+	SourceArtifactId string
+}
+
+// TemplateForSource calls the engine query templateForSource.
+func (qc *QueryClient) TemplateForSource(ctx context.Context, args TemplateForSourceArgs) (*Result, error) {
+	call := TemplateForSourceBuild(args)
+	return qc.executeNamed(ctx, "templateForSource", call)
+}
+
+func TemplateForSourceBuild(args TemplateForSourceArgs) string {
+	var b strings.Builder
+	b.WriteString("query templateForSource(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sourceArtifactId: ")
+	b.WriteString(quoteMemQL(args.SourceArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// Templates -- The caller's templates, newest first, as summaries: no body and no document. Backs the template list and the campaign editor's template picker; a template's content is read with templateById. Owned.
 //
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templates"] in generated_concepts.go).
 type TemplatesArgs struct {

@@ -338,11 +338,19 @@ var tierDecidesTheRead = map[string]string{
 	"deliveriesForCampaign":         "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"deliveriesForRecipients":       "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"deliveryLedgerForCampaign":     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"emailLayoutById":               "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"emailLayoutsForAccount":        "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"emailRuleById":                 "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"emailRules":                    "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"packagesByRepoUrl":             "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"packagesTrackingRepos":         "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"recipientById":                 "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"recipientInAudienceByDigest":   "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+
+	// The other half of the digest lookup, in its own alignment section so the
+	// longer name does not reflow every line above it.
+	"recipientsWithoutDigestInAudience": "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+
 	"recipientsForAudience":         "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"sendableRecipientsForAudience": "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"senderIdentities":              "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
@@ -350,6 +358,7 @@ var tierDecidesTheRead = map[string]string{
 	"senderIdentityById":            "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"siteByHostname":                "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"templateById":                  "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"templateForSource":             "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"templates":                     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 
 	// The four store reads (Connect Shopify, decision D3, design record

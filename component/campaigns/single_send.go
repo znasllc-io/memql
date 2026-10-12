@@ -29,19 +29,25 @@ func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any,
 	return w.sendToRecipientOnce(ctx, args, nil, "")
 }
 
-// snapshot is accepted only from an internal durable welcome, never wire args.
-func (w *Worker) sendToRecipientOnce(ctx context.Context, args map[string]any, snapshot *Template, expectedEmailDigest string) ([]memorynodes.MemoryNode, error) {
-	ctx = memql.ContextWithFreshRead(ctx)
+// singleSendReceiptID is the identity of one single send's receipt, and of the lock
+// that serialises it: the caller and the stable request identifier. A flow that
+// knows both before it starts can name the lock up front and take it together with
+// the others it needs (the newsletter welcome does).
+func singleSendReceiptID(owner, requestID string) string {
+	return sha256Hex("campaign-single-send\x00" + owner + "\x00" + requestID)
+}
+
+// singleSendReceiptFor validates a single send's identity and derives its receipt.
+// ok is false for a send with no request identifier, which has no receipt and no
+// lock and is made as often as it is asked for.
+func singleSendReceiptFor(ctx context.Context, args map[string]any, snapshot *Template, expectedEmailDigest string) (receipt *singleSendReceipt, ok bool, err error) {
 	requestID := argString(args, "requestId")
 	if requestID == "" {
-		return w.sendToRecipient(ctx, args, nil, snapshot, expectedEmailDigest)
+		return nil, false, nil
 	}
 	owner := callerUserID(ctx)
 	if owner == "" || !singleSendRequestID.MatchString(requestID) {
-		return nil, fmt.Errorf("campaigns.sendToRecipient: a signed-in caller and a stable request identifier are required")
-	}
-	if w.singleSendGate == nil {
-		return nil, fmt.Errorf("campaigns.sendToRecipient: send coordination is unavailable")
+		return nil, false, fmt.Errorf("campaigns.sendToRecipient: a signed-in caller and a stable request identifier are required")
 	}
 	values := map[string]string{}
 	for _, key := range []string{"templateId", "recipientId", "senderIdentityId", "emailRuleId"} {
@@ -54,12 +60,42 @@ func (w *Worker) sendToRecipientOnce(ctx context.Context, args map[string]any, s
 		values["emailDigest"] = expectedEmailDigest
 	}
 	encoded, _ := json.Marshal(values)
-	receipt := &singleSendReceipt{id: sha256Hex("campaign-single-send\x00" + owner + "\x00" + requestID), fingerprint: sha256Hex(string(encoded))}
-	release, err := w.singleSendGate(ctx, receipt.id)
+	return &singleSendReceipt{id: singleSendReceiptID(owner, requestID), fingerprint: sha256Hex(string(encoded))}, true, nil
+}
+
+// snapshot is accepted only from an internal durable welcome, never wire args.
+func (w *Worker) sendToRecipientOnce(ctx context.Context, args map[string]any, snapshot *Template, expectedEmailDigest string) ([]memorynodes.MemoryNode, error) {
+	ctx = memql.ContextWithFreshRead(ctx)
+	receipt, ok, err := singleSendReceiptFor(ctx, args, snapshot, expectedEmailDigest)
 	if err != nil {
 		return nil, err
 	}
+	if !ok {
+		return w.sendToRecipient(ctx, args, nil, snapshot, expectedEmailDigest)
+	}
+	if w.singleSendGate == nil {
+		return nil, fmt.Errorf("campaigns.sendToRecipient: send coordination is unavailable")
+	}
+	release, err := w.singleSendGate(ctx, receipt.id)
+	if err != nil {
+		// Nothing was attempted: no receipt exists. A busy lock is "try later" to
+		// every caller that sends mail, never a verdict on the message.
+		return nil, err
+	}
 	defer release()
+	return w.sendToRecipientHeld(ctx, args, snapshot, expectedEmailDigest, receipt)
+}
+
+// sendToRecipientHeld is sendToRecipientOnce for a caller that already holds the
+// receipt's lock (singleSendLock of receipt.id), taken together with the others it
+// needed. It does not take it again: a second transaction asking for a lock the
+// first holds would wait for it.
+func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, snapshot *Template, expectedEmailDigest string, receipt *singleSendReceipt) ([]memorynodes.MemoryNode, error) {
+	ctx = memql.ContextWithFreshRead(ctx)
+	values := map[string]string{}
+	for _, key := range []string{"templateId", "recipientId", "senderIdentityId", "emailRuleId"} {
+		values[key] = memql.BareShortId(strings.TrimSpace(argString(args, key)))
+	}
 	rows, err := w.store.rows(auth.ContextWithInternalOrigin(ctx), call("query", "campaignSingleSendById", arg{"receiptId", receipt.id}))
 	if err != nil {
 		return nil, err
