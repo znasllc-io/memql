@@ -50,6 +50,10 @@ type bridgeSetup struct {
 	// bridge measures a request against (default: the real one, 32 MiB). A small
 	// cap tries the measure without building requests of 32 MiB.
 	serverCap int
+	// anonymous is a session that has not signed in: the upgrade carries no
+	// identity, as the auth middleware leaves a request it verified no credential
+	// on. The bridge takes it only with public reads enabled.
+	anonymous bool
 }
 
 func startBridgeWith(t *testing.T, opts Options, svc *stubMemqlService, setup bridgeSetup) string {
@@ -74,6 +78,10 @@ func startBridgeWith(t *testing.T, opts Options, svc *stubMemqlService, setup br
 	require.NoError(t, err)
 	handler.serverMessageBytes = serverCap
 	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if setup.anonymous {
+			handler.ServeHTTP(w, r)
+			return
+		}
 		claims := map[string]any{"role": "admin", "sub": "tester"}
 		handler.ServeHTTP(w, r.WithContext(auth.ContextWithClaims(r.Context(), claims)))
 	}))

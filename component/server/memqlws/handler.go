@@ -55,6 +55,14 @@ const (
 	defaultLocalErrorInterval  = 50 * time.Millisecond
 )
 
+// anonymousMaxMessageBytes is the largest request taken from a session that has not
+// signed in (public reads): the bridge's limit before it took requests as large as
+// the server's cap, which template saves need. What a stranger may do, public-tier
+// reads and graph subscriptions, needs nothing near it, and a stranger's request is
+// what the bridge reads and holds for someone it does not know. A smaller limit an
+// operator set holds for it too.
+const anonymousMaxMessageBytes int64 = 5 << 20
+
 // Options configure the WebSocket bridge.
 type Options struct {
 	Logger                *slog.Logger
@@ -148,6 +156,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	identity, err := auth.UserIdentityFromContext(r.Context())
+	// signedIn is whether the upgrade carries an identity, which the auth middleware
+	// puts on a request whose credential it verified. A session without one is a
+	// stranger's (public reads, below), and keeps the small frame limit.
+	signedIn := err == nil
 	if err != nil {
 		// PUBLIC READS (epic memql#4541, D4). The 401 below is what makes a
 		// hosted site unable to serve a visitor who has not signed in --
@@ -224,7 +236,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn.SetReadLimit(readLimit(h.maxMessageBytes))
+	frameLimit := h.maxMessageBytes
+	if !signedIn {
+		frameLimit = min(frameLimit, anonymousMaxMessageBytes)
+	}
+	conn.SetReadLimit(readLimit(frameLimit))
 	session := newSession(sessionConfig{
 		ctx:          ctx,
 		logger:       h.logger,
@@ -232,7 +248,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		stream:       stream,
 		principal:    identity.Subject,
 		maxActive:    h.maxConcurrentRequests,
-		maxBytes:     h.maxMessageBytes,
+		maxBytes:     frameLimit,
 		serverBytes:  h.serverMessageBytes,
 		writeLimit:   h.writeTimeout,
 		pingInterval: h.pingInterval,
