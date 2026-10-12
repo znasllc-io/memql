@@ -1,413 +1,230 @@
-import { useAccountOptions } from "../accounts/tie";
-import { recipeFacts } from "./actions";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { refusalSentence, rowNumber, rowString, sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 import { useAuthSource } from "../../auth/context";
 import { useOsConnection } from "../../live/connection";
-import { MATERIALIZER_COMPOSE_SECTION, readComposeIntent, type ComposeSetup } from "../../items/materialize";
+import { COMPOSE_FORMATS, MATERIALIZER_COMPOSE_SECTION, readComposeIntent, type ComposeSetup } from "../../items/materialize";
 import { openCheckedArtifact } from "../../items/openFile";
+import { readEditorPreference } from "../../items/editorPreference";
 import { browserHandoffPorts, VSCODE_NO_ANSWER_MESSAGE, type HandoffPorts } from "../../items/vscode";
+import { folderOptions } from "../../items/FolderSelect";
 import { downloadArtifact } from "../files/actions/download";
-import { listCount } from "../../kit/RecordRow";
-import { useEffect, useMemo, useRef, useState } from "react";
-
-import { Caption, Check, Head, Panel, Select, SetupGroup } from "../../kit";
+import { folderFromRow } from "../files/rows";
+import { useAccountOptions } from "../accounts/tie";
+import { useDefaultOrganization } from "../accounts/organization";
+import { accountName } from "../accounts/rows";
+import { Caption, Check, ContentSkeleton, Head, Notice, Panel, Select, SetupGroup, listCount, moduleActFor, useReach } from "../../kit";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import { useOsIfPresent } from "../../chrome/state";
 import { appById, canOpen, type OsAppProps } from "../../system/registry";
-import { ComposerSection } from "./ComposerSection";
+import { useSession } from "../../chrome/access";
 import { MaterializedSection } from "./MaterializedSection";
 import { TemplatesSection } from "./TemplatesSection";
+import { CompositionPage } from "./CompositionPage";
+import { MakeWizard } from "./MakeWizard";
+import { pageActs, type ActId } from "./acts";
 import { MATERIALIZER_APP_ID, MATERIALIZER_LOG_CONCEPTS } from "./concepts";
-import {
-  DEPLOY_APP_ID,
-  DEPLOY_APP_SECTION,
-  GOAL_APP_ID,
-  GOAL_APP_SECTION,
-  goalIntent,
-} from "./handoff";
-import {
-  useCompositionActs,
-  useMaterialize,
-  useRecipeActs,
-  useTemplateActs,
-} from "./actions";
-import { useDescriptionHandOff } from "./descriptionHandOff";
-import {
-  compositionFromRow,
-  modelsOf,
-  recipeFromRow,
-  sourcesOf,
-  templateFromRow,
-  type CompositionRow,
-  type ModelRow,
-  type RecipeRow,
-  type SourceRow,
-  type TemplateRow,
-} from "./rows";
-import {
-  DEFAULT_MATERIALIZER_SETTINGS,
-  LocalMaterializerSettingsStore,
-  MATERIALIZER_SECTIONS,
-  type MaterializerSettings,
-  type MaterializerSettingsStore, MATERIALIZER_REQUIRES, MATERIALIZER_WANTS } from "./settings";
-import { useCompositions, useRecipes, useTemplates } from "./useCompose";
-import { FORMATS, formatWord } from "./words";
-import { useSession } from "../../chrome/access";
+import { DEPLOY_APP_ID, DEPLOY_APP_SECTION, GOAL_APP_ID, GOAL_APP_SECTION, goalIntent } from "./handoff";
+import { useCompositionActs, useMaterialize, useRecipeActs, useTemplateActs, recipeFacts } from "./actions";
+import { useDescriptionHandOff, useFilesEntries } from "./descriptionHandOff";
+import { reserveEditor, useEditorOpening } from "./editorOpening";
+import { compositionFromRow, modelsOf, recipeFromRow, recipeKeeps, sourcesOf, templateFromRow } from "./rows";
+import { DEFAULT_MATERIALIZER_SETTINGS, LocalMaterializerSettingsStore, MATERIALIZER_SECTIONS, type MaterializerSettings, type MaterializerSettingsStore, MATERIALIZER_REQUIRES, MATERIALIZER_WANTS } from "./settings";
+import { useCompositions, useRecipes, useTemplates, useFolders, useLibraryFiles, useComposableConcepts, useResolvedSources } from "./useCompose";
+import { FORMATS, formatWord, isRunning, madeCaption } from "./words";
+import { draftFromComposition, draftFromSetup, keepUsableTemplate, openingStep, pathOf, requestOf, type MakeDraft, type MakeFacts, type MakeStepId } from "./make";
+import { fileLookup, fileOptions } from "./ingredientFiles";
 
-// THE MATERIALIZER: where a person and the model compose data from the
-// memory graph into a file (epic memql#4977, design record
-// docs/superpowers/specs/2026-09-05-compose-materializer-design.md).
-//
-// ===========================================================================
-// THREE FEEDS AT THE ROOT, ONE PER CONCEPT
-// ===========================================================================
-// Compositions, templates and recipes are retained here and passed down,
-// so the Composer's template picker and the Templates section cannot
-// disagree about what the cluster holds. The rule is per CONCEPT rather
-// than per app, so three feeds is not three copies of one thing.
-//
-// ===========================================================================
-// THE SELECTION IS THE APP'S, NOT A SECTION'S
-// ===========================================================================
-// Following a composition from the list into the composer crosses
-// sections, and a selection held inside a section would be lost on the
-// way. So the id lives here and both sections are told what is open.
-
-export function MaterializerApp({
-  sectionId,
-  navigate,
-  askContext,
-  intent,
-  consumeIntent,
-  store,
-  handoffPorts = browserHandoffPorts,
-}: OsAppProps & { store?: MaterializerSettingsStore; handoffPorts?: HandoffPorts }) {
-  // Injectable for tests, which is the whole reason the parameter exists
-  // -- nothing in the shell passes one.
+export function MaterializerApp({ sectionId, navigate, askContext, intent, consumeIntent, store, handoffPorts = browserHandoffPorts }: OsAppProps & { store?: MaterializerSettingsStore; handoffPorts?: HandoffPorts }) {
   const settingsStore = useMemo(() => store ?? new LocalMaterializerSettingsStore(), [store]);
   const [settings, setSettings] = useState<MaterializerSettings>(() => settingsStore.load());
-
-  const compositions = useCompositions();
-  const templates = useTemplates();
-  const recipes = useRecipes();
-  const accounts = useAccountOptions();
-
-  const materialize = useMaterialize();
-  // A Markdown file asked for by describing it is filed empty; once its file is
-  // ready this window hands the description to the Library, as the person.
-  const descriptions = useDescriptionHandOff(materialize.described, compositions.snapshot.rows);
-  const compositionActs = useCompositionActs();
-  const templateActs = useTemplateActs();
-  const recipeActs = useRecipeActs();
-  // THE SHELL, OR NULL. The only thing this app asks the shell for is
-  // handing off to another app for a goal or deployable. Output files
-  // open in the selected editor; ZIPs use the existing download path. Reaching for `useOs` here would
-  // make the whole app unmountable without a desktop, which costs every
-  // one of its tests a shell it does not otherwise need.
-  const os = useOsIfPresent();
-  const { config } = useSession();
-  const connection = useOsConnection();
-  const authSource = useAuthSource();
+  const defaultFormat = COMPOSE_FORMATS.find(format => format === settings.defaultFormat) ?? "markdown";
+  const compositions = useCompositions(), templates = useTemplates(), recipes = useRecipes();
+  const accounts = useAccountOptions(), defaultAccount = useDefaultOrganization(accounts);
+  const materialize = useMaterialize(), compositionActs = useCompositionActs(), templateActs = useTemplateActs(), recipeActs = useRecipeActs();
+  const os = useOsIfPresent(), reach = useReach();
+  const { config, readiness } = useSession();
+  const connection = useOsConnection(), authSource = useAuthSource();
+  const [openId, setOpenId] = useState("");
+  const [draft, setDraft] = useState<MakeDraft>(() => draftFromSetup(null, defaultFormat));
+  const [step, setStep] = useState<MakeStepId>("from");
+  const [making, setMaking] = useState<{ id: string; since: number } | null>(null);
+  const [returnTo, setReturnTo] = useState<ComposeSetup["returnTo"]>();
+  const [returnFor, setReturnFor] = useState<{ id: string; to: NonNullable<ComposeSetup["returnTo"]> } | null>(null);
+  const [madeHere, setMadeHere] = useState<string[]>([]);
+  const [stopped, setStopped] = useState<ReadonlySet<string>>(new Set());
+  const [saved, setSaved] = useState<ReadonlySet<string>>(new Set());
+  const [tabRefusals, setTabRefusals] = useState<Record<string, string>>({});
   const [openError, setOpenError] = useState("");
+  const generation = useRef(0), starting = useRef(false);
+  const currentSection = useRef(sectionId); currentSection.current = sectionId;
   const cancelHandoff = useRef<(() => void) | null>(null);
   useEffect(() => () => cancelHandoff.current?.(), []);
+  const libraryFiles = useLibraryFiles(sectionId === "composer" || sectionId === "templates");
+  const folders = useFolders(sectionId === "composer" || !!openId || sectionId === "recipes");
+  const folderRows = useMemo(() => folders.snapshot.rows.map(folderFromRow), [folders.snapshot]);
+  const templateRows = useMemo(() => templates.snapshot.rows.map(templateFromRow), [templates.snapshot]);
+  const recipeRows = useMemo(() => recipes.snapshot.rows.map(recipeFromRow), [recipes.snapshot]);
+  const verdict = readiness?.loaded ? readiness.of("ai") : null;
+  const facts: MakeFacts = { templates: templateRows, templatesLoaded: listCount(templates.snapshot) !== undefined,
+    inference: verdict?.state === "configured" ? true : verdict?.state === "unconfigured" || verdict?.state === "partial" ? false : null,
+    files: fileLookup(libraryFiles.snapshot.rows) };
+  const inferenceAct = moduleActFor({ id: "ai", verdict, sectionsOf: reach.sectionsOf, canOpenWindows: reach.canOpenWindows });
+  const records = useComposableConcepts(settings.showUnmarkedConcepts);
+  const resolved = useResolvedSources(sectionId === "composer" ? draft.ingredients : []);
+  const openRaw = compositions.snapshot.rows.find(row => sameEntityId(rowString(row,"id"), openId));
+  const open = openRaw ? compositionFromRow(openRaw) : null;
+  const sources = openRaw ? sourcesOf(openRaw) : [], models = openRaw ? modelsOf(openRaw) : [];
+  const entryFileIds = compositions.snapshot.rows.filter(row => madeHere.some(id => sameEntityId(id, rowString(row,"id"))))
+    .map(row => rowString(row,"outputFileId")).filter(Boolean);
+  const entries = useFilesEntries(entryFileIds);
+  const descriptions = useDescriptionHandOff(materialize.described, compositions.snapshot.rows, stopped, entries);
+  const editor = useEditorOpening({ domain: config.domain, compositions: compositions.snapshot.rows, entries, outcomes: descriptions, described: materialize.described });
+  const description = descriptions.find(outcome => sameEntityId(outcome.compositionId, openId));
+  const describedHere = materialize.described.some(file => sameEntityId(file.compositionId, openId));
+  const backTo = open && returnFor && sameEntityId(open.id, returnFor.id) && os && canOpen(os.registry, returnFor.to.appId) ? appById(os.registry, returnFor.to.appId)?.name : undefined;
+  const folderName = (id: string): string | null | undefined => !id ? "Library" : folderRows.find(folder => sameEntityId(folder.id, id))?.name ?? (listCount(folders.snapshot) === undefined ? undefined : null);
+  const names = { folder: folderName, template: (id: string) => templateRows.find(t => sameEntityId(t.id,id))?.name || "Unavailable template", account: (id: string) => { const account = accounts.find(a => sameEntityId(a.id,id)); return account ? accountName(account) : "Unavailable organization"; } };
 
-  const openFile = (fileId: string, title: string) => {
-    cancelHandoff.current?.();
-    setOpenError("");
-    void openCheckedArtifact({
-      domain: config.domain, title, ports: handoffPorts,
-      onNoAnswer: () => setOpenError(VSCODE_NO_ANSWER_MESSAGE),
-      load: async () => {
-        if (!connection) throw new Error("Connect to the cluster before opening this file.");
-        const [artifactResult, fileResult] = await Promise.all([
-          connection.query.libraryArtifactForFile({ fileId }),
-          connection.query.libraryFileById({ fileId }),
-        ]);
-        const artifact = artifactResult.rows()[0], file = fileResult.rows()[0];
-        if (!artifact || !file) throw new Error("This file is not available in your Library yet. Try opening it again.");
-        return { artifactId: rowString(artifact, "id"), name: rowString(file, "name") || title,
-          mimeType: rowString(file, "mimeType"), fileId, sizeBytes: rowNumber(file, "size") };
-      },
-      download: file => downloadArtifact({ artifactId: file.artifactId!, name: file.name, fileId,
-        readFile: async () => file, bearer: () => authSource.bearer() }),
-    }).then(cancel => { cancelHandoff.current = cancel; })
-      // A refusal of one of the reads is shown as the cluster's sentence alone.
-      .catch((error: unknown) => setOpenError(error instanceof Error ? refusalSentence(error) : "The file could not be opened."));
-  };
-
-  const [openCompositionId, setOpenCompositionId] = useState("");
-
-  // THE STARTING SETUP ANOTHER APP OPENED THE COMPOSER WITH, until the composer
-  // has taken it. It waits here only because the composer may not be on screen
-  // yet (the window can be on another section); once the composer has applied it
-  // -- format, sources, folder and way back, together, into the form -- the app
-  // lets go, and the form is where it lives and dies. That is the one rule for a
-  // remount, an abandoned form and the first file alike.
-  const [setup, setSetup] = useState<ComposeSetup | null>(null);
-  // WHERE THE PERSON GOES BACK TO, for the file the form just made. It comes up
-  // with that form's facts, belongs to that composition and no other, and ends
-  // when they start another file.
-  const [returnFor, setReturnFor] = useState<{ compositionId: string; appId: string; sectionId: string } | null>(null);
-
-  const compositionRows = useMemo(
-    () => compositions.snapshot.rows.filter((r) => compositionFromRow(r).id !== ""),
-    [compositions.snapshot],
-  );
-  const templateRows: TemplateRow[] = useMemo(
-    () => templates.snapshot.rows.map(templateFromRow).filter((t) => t.id !== ""),
-    [templates.snapshot],
-  );
-  const recipeRows: RecipeRow[] = useMemo(
-    () => recipes.snapshot.rows.map(recipeFromRow).filter((r) => r.id !== ""),
-    [recipes.snapshot],
-  );
-
-  // The open composition is read out of the feed the list already holds
-  // rather than through a second by-id read -- one source of truth for the
-  // row that decides which acts the bar offers.
-  const openRaw = useMemo(
-    () => compositionRows.find((r) => idTail(compositionFromRow(r).id) === idTail(openCompositionId)) ?? null,
-    [compositionRows, openCompositionId],
-  );
-  const open: CompositionRow | null = openRaw ? compositionFromRow(openRaw) : null;
-  const openSources: SourceRow[] = openRaw ? sourcesOf(openRaw) : [];
-  const openModels: ModelRow[] = openRaw ? modelsOf(openRaw) : [];
-
-  // THE WAY BACK, only where it goes somewhere: for the file made from that
-  // setup, in a shell that holds the app, which this person can open. `openApp`
-  // does nothing for an app the registry lacks or the person may not open, and
-  // a control that does nothing is worse than one that is not there.
-  const backTo =
-    returnFor !== null && open !== null && sameEntityId(open.id, returnFor.compositionId) && os !== null && canOpen(os.registry, returnFor.appId)
-      ? appById(os.registry, returnFor.appId)?.name
-      : undefined;
-  const description = open !== null ? descriptions.find((outcome) => sameEntityId(outcome.compositionId, open.id)) : undefined;
-  // Whether this window asked for the open file by describing it: it then knows
-  // more than the row does about what the file is (see madeCaption).
-  const describedHere = open !== null && materialize.described.some((file) => sameEntityId(file.compositionId, open.id));
-
-  function openComposition(id: string) {
-    if (id.trim() === "") return;
-    setOpenCompositionId(id);
-    askContext(`materializer composition:${idTail(id)}`);
-    navigate("composer");
+  function begin(next: MakeDraft, to?: ComposeSetup["returnTo"]) {
+    generation.current++; materialize.reset(); compositionActs.reset(); setOpenError("");
+    const usable = keepUsableTemplate(next, facts);
+    setDraft(usable); setStep(openingStep(usable, facts)); setMaking(null); setOpenId(""); setReturnFor(null); setReturnTo(to);
+    navigate(MATERIALIZER_COMPOSE_SECTION);
   }
-
-  // A STANDING OPEN INSTRUCTION, id-matched on consumption so acting on a
-  // stale render can never eat a newer one. The payload names one of the two
-  // things this app can open -- a composition, or a setup to compose from;
-  // anything else is left alone rather than guessed at, which keeps an
-  // unrelated opener from moving somebody's window.
+  function beginSetup(setup: ComposeSetup | null) {
+    const next = draftFromSetup(setup, defaultFormat);
+    if (next.fileKind.kind === "emailTemplate") next.accountId = defaultAccount;
+    begin(next, setup?.returnTo);
+  }
+  useEffect(() => { setDraft(previous => keepUsableTemplate(previous, facts)); }, [templates.snapshot, draft.fileKind]);
+  useEffect(() => {
+    if (draft.fileKind.kind === "emailTemplate" && !draft.accountId && defaultAccount) setDraft(previous => ({ ...previous, accountId: defaultAccount }));
+  }, [defaultAccount]);
+  const previousSection = useRef(sectionId);
+  useEffect(() => {
+    if (previousSection.current === "composer" && sectionId !== "composer") {
+      generation.current++;
+      setDraft(draftFromSetup(null,defaultFormat)); setStep("from"); setReturnTo(undefined); setMaking(null);
+    }
+    previousSection.current = sectionId;
+  }, [sectionId]);
+  function showComposition(id: string) {
+    setOpenId(id); setOpenError(""); compositionActs.reset(); askContext(`materializer composition:${id}`);
+    const row = compositions.snapshot.rows.find(row => sameEntityId(rowString(row,"id"),id));
+    const c = row ? compositionFromRow(row) : null;
+    if (c && isRunning(c.status)) {
+      setDraft(draftFromComposition(c, sourcesOf(row!))); setMaking({ id, since: Date.parse(c.createdAt) || Date.now() }); navigate("composer");
+    } else { setMaking(null); navigate("materialized"); }
+  }
   const handled = useRef("");
   useEffect(() => {
-    if (intent === undefined || intent.id === handled.current) return;
-    const asked = instructionFor(intent.payload);
-    if (asked === null) return;
-    if ("setup" in asked) {
-      const start = asked.setup;
-      handled.current = intent.id;
-      // A new file, from a form with nothing open on it -- and not the trip
-      // that began with an earlier one.
-      setOpenCompositionId("");
-      setReturnFor(null);
-      setSetup(start);
-      navigate(MATERIALIZER_COMPOSE_SECTION);
-      consumeIntent?.(intent.id);
-      return;
-    }
+    if (!intent || handled.current === intent.id) return;
+    const instruction = instructionFor(intent.payload); if (!instruction) return;
     handled.current = intent.id;
-    setOpenCompositionId(asked.compositionId);
-    // The section the opener asked for is respected: a Files row's "open
-    // in Materializer" wants the composer, and a link into the list wants
-    // the list. Defaulting to one would move somebody who said where they
-    // wanted to be.
-    navigate(sectionId === "materialized" ? "materialized" : "composer");
+    if ("setup" in instruction) beginSetup(instruction.setup); else showComposition(instruction.compositionId);
     consumeIntent?.(intent.id);
   }, [intent]);
-
-  function update(patch: Partial<MaterializerSettings>) {
-    const next = { ...settings, ...patch, version: 1 as const };
-    setSettings(next);
-    settingsStore.save(next);
-  }
-
-  // THE DEFAULT-SECTION PREFERENCE, APPLIED ONCE PER WINDOW -- the pattern
-  // every app since Fleet uses. The shell opens an app on its manifest's
-  // FIRST section, so an app-level "open me here" can only be the app
-  // navigating itself on first render, and it applies ONLY when the window
-  // opened on the shell's default: a window opened on a named section was
-  // opened by somebody who said where they wanted to be.
   const applied = useRef(false);
   useEffect(() => {
-    if (applied.current) return;
-    applied.current = true;
-    // A WINDOW OPENED FOR AN INSTRUCTION WAS OPENED WHERE ITS SENDER ASKED. The
-    // preference is for a window nobody asked anything of, and by section alone
-    // the two cannot be told apart: Compose is both the shell's default and the
-    // one a sender names. So a pending instruction THIS APP ACTS ON is the sender
-    // speaking, and it wins -- otherwise this runs after the instruction's own
-    // navigation and moves the window off the section it was sent to. One it
-    // leaves standing (addressed to something else) moved nothing, and the
-    // window opens where the person prefers.
-    if (intent !== undefined && instructionFor(intent.payload) !== null) return;
-    const shellDefault = MATERIALIZER_SECTIONS[0]?.id ?? "";
-    if (sectionId !== shellDefault) return;
-    if (settings.defaultSection && settings.defaultSection !== sectionId) {
-      navigate(settings.defaultSection);
-    }
-    // ONCE PER MOUNT, WHICH IS ONCE PER WINDOW.
+    if (applied.current) return; applied.current = true;
+    if (intent && instructionFor(intent.payload)) return;
+    if (sectionId === MATERIALIZER_SECTIONS[0]?.id && settings.defaultSection !== sectionId) navigate(settings.defaultSection);
   }, []);
+  useEffect(() => {
+    if (sectionId !== "composer" || !making) return;
+    const row = compositions.snapshot.rows.find(row => sameEntityId(rowString(row,"id"),making.id));
+    if (!row) return;
+    const c = compositionFromRow(row);
+    if (!isRunning(c.status)) { setOpenId(c.id); setMaking(null); navigate("materialized"); }
+  }, [compositions.snapshot, making, sectionId]);
 
-  if (sectionId === "settings") {
-    return <MaterializerSettingsSection settings={settings} update={update} />;
+  function leave() {
+    generation.current++; setMaking(null); setDraft(draftFromSetup(null,defaultFormat)); setOpenId(""); materialize.reset();
+    const to = returnTo; setReturnTo(undefined); navigate("materialized");
+    if (to && os && canOpen(os.registry,to.appId)) os.actions.openApp(to.appId,to.sectionId);
   }
-  if (sectionId === "logs") {
-    return (
-      <AppLogsSection
-        app={MATERIALIZER_APP_ID}
-        subjectConcepts={MATERIALIZER_LOG_CONCEPTS}
-        intent={intent}
-        consumeIntent={consumeIntent}
-      />
-    );
+  function make() {
+    if (starting.current || making) return;
+    starting.current = true;
+    const heldGeneration = generation.current, to = returnTo, since = Date.now();
+    const reserved = reserveEditor(pathOf(draft,facts),handoffPorts,readEditorPreference());
+    void materialize.start(requestOf(draft),facts.files).then(id => {
+      if (!id) { reserved.reservation?.close(); return; }
+      setMadeHere(previous => [...previous,id]);
+      if (reserved.reservation) editor.hold(id,reserved.reservation);
+      if (reserved.refusal) setTabRefusals(previous => ({ ...previous,[id]: reserved.refusal }));
+      if (generation.current !== heldGeneration || currentSection.current !== "composer") return;
+      setMaking({ id,since }); setOpenId(id); setReturnFor(to ? { id,to } : null); setReturnTo(undefined);
+    }).finally(() => { starting.current = false; });
   }
-  if (sectionId === "templates") {
-    return (
-      <TemplatesSection
-        accounts={accounts}
-        templates={templateRows}
-        recipes={recipeRows}
-        templatesAvailable={listCount(templates.snapshot) !== undefined}
-        recipesAvailable={listCount(recipes.snapshot) !== undefined}
-        busy={templateActs.busy || recipeActs.busy}
-        error={templateActs.error || recipeActs.error}
-        showArchived={settings.showArchived}
-        onCreateTemplate={(facts) => templateActs.create(facts)}
-        onArchiveTemplate={(id) => void templateActs.archive(id)}
-        onRestoreTemplate={(id) => void templateActs.restore(id)}
-        onRunRecipe={(id) => {
-          void recipeActs.runRecipe(id, "").then((compositionId) => {
-            if (compositionId) openComposition(compositionId);
-          });
-        }}
-        onArchiveRecipe={(id) => void recipeActs.archive(id)}
-        onRestoreRecipe={(id) => void recipeActs.restore(id)}
-      />
-    );
+  function stop() {
+    if (!making) return;
+    const id = making.id;
+    editor.release(id);
+    setStopped(previous => new Set([...previous,id]));
+    void compositionActs.stop(id).then(result => {
+      if (result === "refused") setStopped(previous => { const next = new Set(previous); next.delete(id); return next; });
+    });
   }
-  if (sectionId === "materialized") {
-    return (
-      <MaterializedSection
-        source={compositions.source}
-        showArchived={settings.showArchived}
-        selectedId={openCompositionId}
-        onSelect={openComposition}
-        error={compositionActs.error}
-      />
-    );
+  function openFile(fileId: string, title: string) {
+    cancelHandoff.current?.(); setOpenError("");
+    void openCheckedArtifact({ domain: config.domain,title,ports: handoffPorts,onNoAnswer: () => setOpenError(VSCODE_NO_ANSWER_MESSAGE),
+      load: async () => {
+        if (!connection) throw new Error("Connect to the cluster before opening this file.");
+        const [artifactResult,fileResult] = await Promise.all([connection.query.libraryArtifactForFile({ fileId }),connection.query.libraryFileById({ fileId })]);
+        const artifact = artifactResult.rows()[0], file = fileResult.rows()[0];
+        if (!artifact || !file) throw new Error("This file is not available in your Library yet. Try opening it again.");
+        return { artifactId: rowString(artifact,"id"),name: rowString(file,"name") || title,mimeType: rowString(file,"mimeType"),fileId,sizeBytes: rowNumber(file,"size") };
+      },download: file => downloadArtifact({ artifactId: file.artifactId!,name: file.name,fileId,readFile: async () => file,bearer: () => authSource.bearer() }),
+    }).then(cancel => { cancelHandoff.current = cancel; }).catch(error => setOpenError(refusalSentence(error)));
   }
-
-  return (
-    <ComposerSection
-      accounts={accounts}
-      templates={templateRows}
-      composition={open}
-      compositionSources={openSources}
-      compositionAvailable={listCount(compositions.snapshot) !== undefined}
-      compositionModels={openModels}
-      showUnmarkedConcepts={settings.showUnmarkedConcepts}
-      defaultFormat={settings.defaultFormat}
-      busy={materialize.busy || compositionActs.busy}
-      error={openError || materialize.error || compositionActs.error}
-      initial={setup ?? undefined}
-      // Let go of THAT setup. A newer one may have arrived while the composer was
-      // taking this one, and it is not this one's to clear.
-      onApplied={(applied) => setSetup((now) => (now === applied ? null : now))}
-      backTo={backTo}
-      description={description}
-      describedHere={describedHere}
-      onNewComposition={() => {
-        setOpenCompositionId("");
-        setReturnFor(null);
-      }}
-      onMaterialize={({ returnTo, ...request }) =>
-        materialize.materialize(request).then((id) => {
-          if (id === "") return false;
-          setOpenCompositionId(id);
-          // The way back the form carried is kept for the file it made, and
-          // for no other.
-          setReturnFor(returnTo ? { compositionId: id, ...returnTo } : null);
-          return true;
-        })
-      }
-      onAct={(act) => {
-        if (open === null) return;
-        switch (act) {
-          case "stop":
-            void compositionActs.stop(open.id);
-            break;
-          case "archive":
-            void compositionActs.archive(open.id);
-            break;
-          case "restore":
-            void compositionActs.restore(open.id);
-            break;
-          case "openFile":
-            openFile(open.outputFileId, open.name);
-            break;
-          case "openGoal":
-            os?.actions.openApp(GOAL_APP_ID, GOAL_APP_SECTION, goalIntent(open.goalId));
-            break;
-          case "openDeployables":
-            // THE HAND-OFF IS A DESTINATION, NOT A SEEDED FLOW, and the
-            // difference is stated on the page rather than papered over.
-            // Deployables' compose flow takes an artifact at its Source
-            // stop, and seeding it from here would mean this app writing
-            // into another app's flow -- so this opens the list, and the
-            // Target column says the zip is in the Library and Source is
-            // where it goes. A control that claimed to carry the artifact
-            // across and then did not would be worse than one that says
-            // what it does.
-            os?.actions.openApp(DEPLOY_APP_ID, DEPLOY_APP_SECTION, {});
-            break;
-          case "startOver":
-            setOpenCompositionId("");
-            setReturnFor(null);
-            break;
-          case "returnToApp":
-            if (returnFor !== null) os?.actions.openApp(returnFor.appId, returnFor.sectionId);
-            break;
-          case "saveRecipe":
-            void compositionActs.saveRecipe(recipeFacts(open, openSources));
-            break;
-        }
-      }}
-    />
-  );
+  function act(id: ActId) {
+    if (!open) return;
+    if (id === "archive") void compositionActs.archive(open.id);
+    if (id === "restore") void compositionActs.restore(open.id);
+    if (id === "openFile") openFile(open.outputFileId,open.name);
+    if (id === "openDeployables") os?.actions.openApp(DEPLOY_APP_ID,DEPLOY_APP_SECTION,{});
+    if (id === "returnToApp" && returnFor) os?.actions.openApp(returnFor.to.appId,returnFor.to.sectionId);
+    if (id === "startOver") begin(draftFromComposition(open,sources));
+    if (id === "saveRecipe") void compositionActs.saveRecipe(recipeFacts(open,sources)).then(recipe => { if (recipe) setSaved(previous => new Set([...previous,open.id])); });
+  }
+  function update(patch: Partial<MaterializerSettings>) { const next = { ...settings,...patch,version: 1 as const }; setSettings(next); settingsStore.save(next); }
+  const makingRaw = making ? compositions.snapshot.rows.find(row => sameEntityId(rowString(row,"id"),making.id)) : undefined;
+  const run = makingRaw ? compositions.runOf(rowString(makingRaw,"runId")) : undefined;
+  const runStart = run ? Date.parse(rowString(run,"startedAt")) : NaN;
+  return <>
+    <div hidden={sectionId !== "materialized" || !!openId} className="os-mz-list-host">
+      <MaterializedSection source={compositions.source} showArchived={settings.showArchived} selectedId={openId} onSelect={showComposition}
+        error={sectionId === "materialized" && !openId ? compositionActs.error : ""} onMake={() => beginSetup(null)} navigation={sectionId === "materialized" && !openId} />
+    </div>
+    {sectionId === "materialized" && openId ? open ? <CompositionPage composition={open} sources={sources} models={models}
+      filedIn={folderName(open.folderId) ?? (listCount(folders.snapshot) !== undefined ? "Unavailable folder" : undefined)}
+      templateName={names.template(open.templateId)} organizationName={open.accountIds.map(names.account).join(", ")}
+      caption={madeCaption(open,sources,models,describedHere,description)} description={description} recipeSaved={saved.has(open.id)} editorSilent={openError} tabRefusal={tabRefusals[openId]}
+      acts={pageActs(open,{ backTo,recipeCanRun: !!open.statement.trim() || sources.some(recipeKeeps),recipeSaved: saved.has(open.id) })}
+      busy={compositionActs.busy} error={compositionActs.error} canOpenRun={!!open.goalId && !!os && canOpen(os.registry,GOAL_APP_ID)}
+      onAct={act} onOpenRun={() => os?.actions.openApp(GOAL_APP_ID,GOAL_APP_SECTION,goalIntent(open.goalId))} onBack={() => setOpenId("")} />
+      : listCount(compositions.snapshot) === undefined ? <ContentSkeleton label="Reading the file record" /> : <Notice tone="info" sentence="That file record is not available." /> : null}
+    {sectionId === "composer" ? <MakeWizard draft={draft} onDraft={setDraft} facts={facts} names={names} open={step} onOpen={setStep}
+      ingredients={{ files: fileOptions(libraryFiles.snapshot.rows),filesLoading: listCount(libraryFiles.snapshot) === undefined,filesError: libraryFiles.snapshot.error || "",retryFiles: libraryFiles.reseed,records,resolved }}
+      folders={folderOptions(folderRows)} foldersLoaded={listCount(folders.snapshot) !== undefined} foldersError={folders.snapshot.error || ""} accounts={accounts}
+      refusal={materialize.error || compositionActs.error} starting={materialize.busy} making={making ? { since: Number.isFinite(runStart) ? runStart : making.since,
+        detail: rowString(makingRaw ?? {},"status") === "composing" ? "Composing" : rowString(makingRaw ?? {},"status") === "rendering" ? "Writing the file" : "Starting" } : undefined}
+      canSetUpInference={inferenceAct.kind === "open"} inferenceElsewhere="Inference is set up in Settings. Ask an owner or developer to configure it."
+      onMake={make} onCancel={leave} onStop={stop} onLeave={leave} onSetUpInference={() => { if (inferenceAct.kind === "open") reach.open(inferenceAct.app,inferenceAct.section); }} /> : null}
+    {sectionId === "templates" ? <TemplatesSection accounts={accounts} templates={templateRows} recipes={recipeRows} templatesAvailable={listCount(templates.snapshot) !== undefined} recipesAvailable={listCount(recipes.snapshot) !== undefined}
+      busy={templateActs.busy || recipeActs.busy} error={templateActs.error || recipeActs.error} showArchived={settings.showArchived} onCreateTemplate={templateActs.create}
+      onArchiveTemplate={id => void templateActs.archive(id)} onRestoreTemplate={id => void templateActs.restore(id)}
+      onRunRecipe={id => { void recipeActs.runRecipe(id,"").then(id => { if(id) showComposition(id); }); }} onArchiveRecipe={id => void recipeActs.archive(id)} onRestoreRecipe={id => void recipeActs.restore(id)} /> : null}
+    {sectionId === "settings" ? <MaterializerSettingsSection settings={settings} update={update} /> : null}
+    {sectionId === "logs" ? <AppLogsSection app={MATERIALIZER_APP_ID} subjectConcepts={MATERIALIZER_LOG_CONCEPTS} intent={intent} consumeIntent={consumeIntent} /> : null}
+  </>;
 }
 
-/**
- * What a standing instruction asks of this app: a composition to open, a setup
- * to compose from, or null for anything else -- which is left standing for
- * whatever it was meant for, and moves nobody's window. The intent effect and
- * the default-section preference ask the same question here.
- */
-function instructionFor(payload: Record<string, unknown>): { compositionId: string } | { setup: ComposeSetup } | null {
-  const raw = payload["compositionId"];
-  const compositionId = typeof raw === "string" ? raw : "";
-  if (compositionId !== "") return { compositionId };
-  const setup = readComposeIntent(payload);
-  return setup === null ? null : { setup };
+function instructionFor(payload: Record<string,unknown>): { compositionId: string } | { setup: ComposeSetup } | null {
+  if (typeof payload.compositionId === "string" && payload.compositionId.trim()) return { compositionId: payload.compositionId };
+  const setup = readComposeIntent(payload); return setup ? { setup } : null;
 }
-
-/** The tail of a canonical id, for comparing a bare id against a stored one. */
-function idTail(id: string): string {
-  const trimmed = id.trim();
-  const i = trimmed.lastIndexOf(":");
-  return i >= 0 ? trimmed.slice(i + 1) : trimmed;
-}
-
 function MaterializerSettingsSection({
   settings,
   update,

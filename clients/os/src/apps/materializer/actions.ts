@@ -4,12 +4,13 @@ import {
   readDescribedMarkdown,
   refusalSentence,
   startMaterialize,
+  rowBool,
+  type LibraryFileLookup,
   type MaterializeExecute,
   type MaterializeRequest,
   type MaterializeSource,
 } from "@znasllc-io/memql-sdk-core/client";
 
-import type { ComposeSource } from "../../items/materialize";
 import { recipeKeeps, type CompositionRow, type SourceRow, type SelectorRow } from "./rows";
 
 import { useOsConnection } from "../../live/connection";
@@ -60,25 +61,6 @@ const NOT_CONNECTED = "Not connected to the cluster, so nothing was written.";
 // materialize
 // ---------------------------------------------------------------------------
 
-export interface MaterializeFacts {
-  name: string;
-  statement: string;
-  format: string;
-  sources: ComposeSource[];
-  templateId: string;
-  /**
-   * The folder to file into, or "" for the Library root. It comes from another
-   * app's starting setup, since the composer has no folder control. It is sent as
-   * it is: the cluster refuses a folder the person cannot read or that is
-   * archived, and the refusal is shown beside the control as it was worded.
-   */
-  folderId: string;
-  accountIds: string[];
-  deployableKind: string;
-  /** "email_template" for an email template, or "" for an ordinary file. */
-  outputKind: string;
-}
-
 /**
  * A Markdown file asked for by describing it, whose description the Library
  * has not been given yet.
@@ -102,7 +84,7 @@ export interface MaterializeState extends WriteState {
   compositionId: string;
   /** Described Markdown files this window has started, for descriptionHandOff.ts. */
   described: DescribedFile[];
-  materialize: (facts: MaterializeFacts) => Promise<string>;
+  start: (request: Omit<MaterializeRequest, "requestId">, files?: LibraryFileLookup) => Promise<string>;
 }
 
 type Query = NonNullable<ReturnType<typeof useOsConnection>>["query"];
@@ -157,53 +139,20 @@ export function useMaterialize(): MaterializeState {
   const inFlight = useRef<Promise<string> | null>(null);
 
   const start = useCallback(
-    async (facts: MaterializeFacts): Promise<string> => {
+    async (request: Omit<MaterializeRequest, "requestId">, files?: LibraryFileLookup): Promise<string> => {
       const query = connection?.query ?? null;
-      if (query === null) {
-        setError(NOT_CONNECTED);
-        return "";
-      }
-      const format = FORMATS.find((candidate) => candidate === facts.format);
-      if (format === undefined) {
-        setError("Choose what kind of file to make.");
-        return "";
-      }
-      // The one rule a browser can answer, answered here rather than sent: the
-      // SDK's fileNameProblem, the rule and the words the editor's New Markdown
-      // uses. The composer says it beside the Name field as it is typed; this is
-      // the same check for any other caller of the hook. The cluster would
-      // refuse these names too, but a round trip to be told what this form
-      // already knows is a round trip somebody waits for.
-      const problem = fileNameProblem(facts.name, format);
-      if (problem !== undefined) {
-        setError(problem);
-        return "";
-      }
-      const name = facts.name.trim();
-      if (facts.accountIds.length !== 1 || !facts.accountIds[0]?.trim()) {
-        setError("Choose an organization for this file.");
-        return "";
+      if (query === null) { setError(NOT_CONNECTED); return ""; }
+      const format = FORMATS.find(candidate => candidate === request.format);
+      if (!format) { setError("Choose what kind of file to make."); return ""; }
+      const problem = fileNameProblem(request.name, format);
+      if (problem) { setError(problem); return ""; }
+      if (request.outputKind === "email_template" && (request.accountIds?.length !== 1 || !request.accountIds[0]?.trim())) {
+        setError("Choose an organization for this email template."); return "";
       }
       setBusy(true);
       setError("");
       setCompositionId("");
       try {
-        const statement = facts.statement.trim();
-        const folderId = facts.folderId.trim();
-        // AN UNANSWERED OPTIONAL IS OMITTED, never sent empty: an optional
-        // field given "" is a value the engine writes, and "the caller said
-        // nothing" and "the caller said empty" are different statements.
-        const request: Omit<MaterializeRequest, "requestId"> = {
-          name,
-          format,
-          ...(statement ? { statement } : {}),
-          ...(facts.sources.length > 0 ? { sources: facts.sources } : {}),
-          ...(facts.templateId ? { templateId: facts.templateId } : {}),
-          ...(folderId ? { folderId } : {}),
-          ...(facts.outputKind === "email_template" ? { outputKind: "email_template" as const } : {}),
-          ...(facts.accountIds.length > 0 ? { accountIds: facts.accountIds } : {}),
-          ...(facts.deployableKind ? { deployableKind: facts.deployableKind } : {}),
-        };
         // THE KEY IS THE FACTS AS THEY WERE CLAIMED, the folder included, and nothing
         // above rewrites them: a retry of the same form is the same ask whether or
         // not the cluster accepted its folder the first time.
@@ -216,7 +165,7 @@ export function useMaterialize(): MaterializeState {
         // picked file and nothing at all for a request that cannot be described. A refused read is
         // the cluster's sentence and starts nothing, so the same ask can be pressed again.
         const execute = executeOver(query);
-        const isDescribed = await readDescribedMarkdown(execute, request);
+        const isDescribed = await readDescribedMarkdown(execute, request, files);
         const id = await startMaterialize(execute, { ...request, requestId });
         ask.current = null;
         setCompositionId(id);
@@ -234,10 +183,10 @@ export function useMaterialize(): MaterializeState {
     [connection],
   );
 
-  const materialize = useCallback(
-    (facts: MaterializeFacts): Promise<string> => {
+  const submit = useCallback(
+    (request: Omit<MaterializeRequest, "requestId">, files?: LibraryFileLookup): Promise<string> => {
       if (inFlight.current !== null) return inFlight.current;
-      const run = start(facts).finally(() => {
+      const run = start(request, files).finally(() => {
         inFlight.current = null;
       });
       inFlight.current = run;
@@ -251,7 +200,7 @@ export function useMaterialize(): MaterializeState {
     error,
     compositionId,
     described,
-    materialize,
+    start: submit,
     reset: () => {
       ask.current = null;
       setError("");
@@ -264,7 +213,7 @@ export function useMaterialize(): MaterializeState {
 // ---------------------------------------------------------------------------
 
 export interface CompositionActsState extends WriteState {
-  stop: (compositionId: string) => Promise<void>;
+  stop: (compositionId: string) => Promise<"stopped" | "finished" | "refused">;
   archive: (compositionId: string) => Promise<void>;
   restore: (compositionId: string) => Promise<void>;
   saveRecipe: (facts: NewRecipeFacts) => Promise<string>;
@@ -326,11 +275,12 @@ export function useCompositionActs(): CompositionActsState {
     busy,
     error,
     reset: () => setError(""),
-    stop: async (compositionId) => {
-      await run(async (query) => {
-        await query.composeCancel({ compositionId });
-      }, undefined);
-    },
+    stop: async (compositionId) => run(async (query) => {
+      const result = await query.composeCancel({ compositionId, reason: "Stopped by the person" });
+      const row = result.rows()[0];
+      if (!row || typeof row.cancelled !== "boolean") throw new Error("The cluster did not confirm whether the file was stopped.");
+      return rowBool(row, "cancelled") ? "stopped" as const : "finished" as const;
+    }, "refused" as const),
     archive: async (compositionId) => {
       await run(async (query) => {
         await query.archiveComposition({ compositionId });
@@ -394,10 +344,6 @@ export function useTemplateActs(): TemplateActsState {
         setError(NOT_CONNECTED);
         return "";
       }
-      if (facts.accountId.trim() === "") {
-        setError("Choose an organization for this template.");
-        return "";
-      }
       if (facts.name.trim() === "" || facts.fileId.trim() === "") {
         setError("A template needs a name and a file from your Library.");
         return "";
@@ -410,7 +356,7 @@ export function useTemplateActs(): TemplateActsState {
           templateId,
           name: facts.name.trim(),
           fileId: facts.fileId.trim(),
-          accountIds: [facts.accountId],
+          ...(facts.accountId ? { accountIds: [facts.accountId] } : {}),
           format: facts.format,
           ...(facts.description.trim() ? { description: facts.description.trim() } : {}),
         });

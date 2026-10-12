@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 
+import { AddButton } from "../../kit/AddButton";
 import { Head, LiveList, Notice, Refine, RecordRow, listCount, useLiveView, type LiveListSource } from "../../kit";
 import type { Row as SdkRow } from "@znasllc-io/memql-sdk-core/client";
 import { ProvenanceMark } from "./Provenance";
@@ -41,6 +42,8 @@ import { MATERIALIZED_EMPTY, formatWord, statusWord } from "./words";
 // scanning would be the surface saying it twice (rule 7).
 
 export interface MaterializedSectionProps {
+  onMake: () => void;
+  navigation?: boolean;
   source: LiveListSource<SdkRow> | null;
   showArchived: boolean;
   selectedId: string;
@@ -51,6 +54,8 @@ export interface MaterializedSectionProps {
 
 export function MaterializedSection({
   source,
+  onMake,
+  navigation = true,
   showArchived,
   selectedId,
   onSelect,
@@ -86,7 +91,7 @@ export function MaterializedSection({
 
   return (
     <div className="os-mz-list-section">
-      <Head title="Materialized" meta={<CountMeta view={view} showArchived={showArchived} />}>
+      <Head navigation={navigation} title="Materialized" meta={<CountMeta view={view} showArchived={showArchived} />}>
         <Refine search={search} onSearch={setSearch} label="Refine what is listed" chips={chips}>
           <label className="os-mz-refine-format">
             <span>Kind of file</span>
@@ -100,6 +105,7 @@ export function MaterializedSection({
             </select>
           </label>
         </Refine>
+        <AddButton label="Make a file" onClick={onMake} />
       </Head>
 
       {error ? <Notice tone="error" sentence={error} /> : null}

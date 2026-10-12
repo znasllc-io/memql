@@ -464,14 +464,13 @@ describe("creating a file", () => {
     h.connection = conn;
     const { result } = renderHook(() => useMaterialize());
     const facts = {
-      name: "Notes", statement: "A brief", format: "markdown", sources: [], templateId: "",
-      folderId: "", accountIds: ["client-a"], deployableKind: "", outputKind: "",
+      name: "Notes", statement: "A brief", format: "markdown" as const, accountIds: ["client-a"],
     };
     let first!: Promise<string>;
     let second!: Promise<string>;
     act(() => {
-      first = result.current.materialize(facts);
-      second = result.current.materialize(facts);
+      first = result.current.start(facts);
+      second = result.current.start(facts);
     });
     // The press decides the path first (it reads the picked files' rows, and none are picked here), so
     // the request leaves a moment after the press rather than within it: wait for it, then answer.
@@ -487,12 +486,11 @@ describe("creating a file", () => {
     h.connection = conn;
     const { result } = renderHook(() => useMaterialize());
     const facts = {
-      name: "Notes", statement: "A brief", format: "markdown", sources: [], templateId: "",
-      folderId: "", accountIds: ["client-a"], deployableKind: "", outputKind: "",
+      name: "Notes", statement: "A brief", format: "markdown" as const, accountIds: ["client-a"],
     };
-    await act(async () => { await result.current.materialize(facts); });
+    await act(async () => { await result.current.start(facts); });
     act(() => result.current.reset());
-    await act(async () => { await result.current.materialize(facts); });
+    await act(async () => { await result.current.start(facts); });
     expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2);
     expect(sent(conn, 1)["requestId"]).not.toBe(sent(conn, 0)["requestId"]);
   });
