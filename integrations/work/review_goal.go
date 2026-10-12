@@ -43,7 +43,7 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 	}
 	receipt = ReviewGoalIdentity(owner, requestKey)
 	identity := receipt.GoalID
-	gates, err := i.gates()
+	gates, err := i.gatePool()
 	if err != nil {
 		return receipt, err
 	}

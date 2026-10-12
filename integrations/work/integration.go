@@ -73,7 +73,7 @@ type Integration struct {
 
 	// gateDB is the pool this integration's write gates run on (memql#6022):
 	// connections used for nothing else, never the request pool bunDB hands out.
-	// Unset, a gate refuses -- naming the wiring it lacks (gates below) -- rather
+	// Unset, a gate refuses -- naming the wiring it lacks (gatePool below) -- rather
 	// than take a connection the work under it needs.
 	gateDB func() *sql.DB
 
@@ -182,7 +182,7 @@ func New(engine Engine, logger *slog.Logger, database ...func() *bun.DB) *Integr
 		i.bunDB = database[0]
 	}
 	i.decisionGate = func(ctx context.Context, keys ...string) (func(), error) {
-		db, err := i.gates()
+		db, err := i.gatePool()
 		if err != nil {
 			return nil, err
 		}
@@ -233,8 +233,8 @@ func init() {
 // on (memql#6022): the gate pool, not the request pool.
 func (i *Integration) SetGateDB(gate func() *sql.DB) { i.gateDB = gate }
 
-// gates resolves the gate pool, or says which wiring is missing.
-func (i *Integration) gates() (*sql.DB, error) {
+// gatePool resolves the gate pool, or says which wiring is missing.
+func (i *Integration) gatePool() (*sql.DB, error) {
 	var resolve func() *sql.DB
 	if i != nil {
 		resolve = i.gateDB
