@@ -49,7 +49,7 @@ func TestReviewPassageChecksSavedBytesAndBounds(t *testing.T) {
 			stream := &reviewStream{Reader: tc.reader}
 			fetcher := &reviewFetcher{stream: stream, err: tc.err}
 			integration := &Integration{blobFetcher: fetcher}
-			doc := reviewDocument{kind: "file", backing: map[string]any{"blobUrl": "https://configured-store.example/review.md"}}
+			doc := reviewDocument{kind: "file", owner: "u-1", backing: map[string]any{"blobUrl": "https://configured-store.example/memql-library/library/u-1/f-1/review.md"}}
 			anchor := map[string]any{"startLine": 2, "endLine": 3, "sourceQuote": "A paragraph."}
 			err := integration.verifyReviewPassage(context.Background(), doc, anchor)
 			if (err != nil) != tc.wantError {

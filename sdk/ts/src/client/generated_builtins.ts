@@ -805,9 +805,9 @@ QueryClient.prototype.composeCancel = function (this: QueryClient, args: Compose
 
 /** Start a Materializer work run using the known materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row. */
 export interface ComposeMaterializeArgs {
-  /** What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is. */
+  /** What to call it, and the filename stem of the output. A name with a slash is refused (folderId chooses where it is filed), and one trailing extension that already names the format is dropped, because the extension is added when the file is filed: Plan.md is filed as Plan.md, never Plan.md.md. */
   name: string;
-  /** What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. */
+  /** What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind, and no source that is not a Library file) is created EMPTY outside a work run, and the statement stays on its composition: the caller hands it to the Library's revision workflow, as the person (the SDK's handOffDescription), which writes the document. That workflow reads Markdown and images and cannot read the graph, so a concept_row or query source keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement. */
   statement?: string;
   /** markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of. */
   format: string;
@@ -821,7 +821,7 @@ export interface ComposeMaterializeArgs {
   sectionKeys?: string[];
   /** v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through. */
   templateId?: string;
-  /** v1:library:folder to file the output into. Empty means the Library root. */
+  /** v1:library:folder to file the output into. Empty means the Library root. A folder you cannot read, or one in the Bin, is refused before anything is written. */
   folderId?: string;
   /** Optional account tags -- a record of who the work is for, never a visibility scope. */
   accountIds?: string[];
@@ -831,6 +831,8 @@ export interface ComposeMaterializeArgs {
   recipeId?: string;
   /** {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'. */
   ceilings?: Record<string, unknown>;
+  /** Caller-chosen id for this request. Repeating it returns the same composition instead of starting another, so a double click makes one file. */
+  requestId?: string;
 }
 
 export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
@@ -848,6 +850,7 @@ export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
   if (args.deployableKind !== undefined) parts.push("deployableKind: " + renderMemQLValue(args.deployableKind));
   if (args.recipeId !== undefined) parts.push("recipeId: " + renderMemQLValue(args.recipeId));
   if (args.ceilings !== undefined) parts.push("ceilings: " + renderMemQLValue(args.ceilings));
+  if (args.requestId !== undefined) parts.push("requestId: " + renderMemQLValue(args.requestId));
   return "builtin composeMaterialize(" + parts.join(", ") + ")";
 }
 
@@ -2502,7 +2505,7 @@ QueryClient.prototype.logsStatus = function (this: QueryClient, args: LogsStatus
   return this.executeNamed("logsStatus", buildLogsStatus(args), opts);
 };
 
-/** Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then delete that day; at most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, skipped, refused }. */
+/** Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then, once every node type of the day is uploaded, drop the day's chunk whole; only rows no chunk wholly inside the day holds (a plain table, or a chunk that straddles midnight) go by a batched DELETE instead. At most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, chunksDropped, skipped, refused }; a dropped day's rows count in rowsDeleted at what the day archived. */
 export interface LogsSweepArgs {
 }
 

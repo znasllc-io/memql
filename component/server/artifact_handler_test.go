@@ -294,7 +294,13 @@ func (f *fakeLibraryStore) File(ctx context.Context, fileRef string) (*LibraryFi
 	if !f.admits(ctx, fileRef) {
 		return nil, nil
 	}
-	return f.files[fileRef], nil
+	// The real projection always carries ownerUserId; this fake keeps owners
+	// in its admission map, so a seeded row that names none takes it from there.
+	row := f.files[fileRef]
+	if row != nil && row.OwnerUserId == "" {
+		row.OwnerUserId = f.ownerOf[fileRef]
+	}
+	return row, nil
 }
 
 // FileByUploadedFrom scans the fake's own rows for the (machine, path) key
@@ -1271,7 +1277,10 @@ func TestLibraryStoreCallSitesResolveThroughTheRealEngine(t *testing.T) {
 	store := NewEngineLibraryStore(rec)
 	// This test only resolves rendered calls; real cross-replica locking is tested separately.
 	store.versionGate = func(context.Context, string) (func(), error) { return func() {}, nil }
-	ctx := context.Background()
+	// An actor, because createLibraryFile is @serverOnly and its writer
+	// (component/server/libraryfile) refuses a key that is not the creator's
+	// own: every key below is under library/u-1/.
+	ctx := auth.ContextWithUserActor(context.Background(), "u-1")
 
 	// Awkward strings on purpose: an apostrophe, embedded quotes, a
 	// backslash, a newline and a non-ASCII letter all have to survive the

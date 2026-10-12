@@ -236,7 +236,7 @@ func libraryPicture(engine *previewEngine, artifact, mime string, size int) stri
 		"id": "v1:library:artifact:" + artifact, "kind": "file", "sourceConceptRef": "v1:library:file:" + file, "title": artifact,
 	}
 	engine.libraryFiles[file] = map[string]any{
-		"id": "v1:library:file:" + file, "name": artifact, "mimeType": mime, "size": size, "blobUrl": key,
+		"id": "v1:library:file:" + file, "ownerUserId": testOwner, "name": artifact, "mimeType": mime, "size": size, "blobUrl": key,
 	}
 	return key
 }

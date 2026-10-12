@@ -12,6 +12,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/librarykey"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
@@ -167,7 +168,7 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 				"A recipient list is text; a file this size is more often a mis-selected artifact than a list",
 			ref.FileID, ref.Size, importMaxBytes)
 	}
-	raw, err := w.readBlob(ctx, ref.BlobURL)
+	raw, err := w.readBlob(ctx, ref.BlobURL, ref.OwnerUserID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.importRecipients: reading file %q: %w", ref.FileID, err)
 	}
@@ -499,8 +500,8 @@ func plausibleAddress(normalized string) bool {
 // client on nodes that never import or fail construction on a cluster with no
 // blob storage at all. Unconfigured storage is therefore a per-call refusal,
 // not a boot failure.
-func (w *Worker) readBlob(ctx context.Context, blobURL string) ([]byte, error) {
-	reader, container, key, err := w.blobTarget(ctx, blobURL)
+func (w *Worker) readBlob(ctx context.Context, blobURL, owner string) ([]byte, error) {
+	reader, container, key, err := w.blobTarget(ctx, blobURL, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -509,8 +510,8 @@ func (w *Worker) readBlob(ctx context.Context, blobURL string) ([]byte, error) {
 
 // readBlobUpTo is readBlob for a reader with a ceiling: a file of more than
 // maxBytes is an error, and no more than maxBytes (and one byte) is ever held.
-func (w *Worker) readBlobUpTo(ctx context.Context, blobURL string, maxBytes int64) ([]byte, error) {
-	reader, container, key, err := w.blobTarget(ctx, blobURL)
+func (w *Worker) readBlobUpTo(ctx context.Context, blobURL, owner string, maxBytes int64) ([]byte, error) {
+	reader, container, key, err := w.blobTarget(ctx, blobURL, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -518,11 +519,20 @@ func (w *Worker) readBlobUpTo(ctx context.Context, blobURL string, maxBytes int6
 }
 
 // blobTarget is where a file row's bytes are: the storage, its container and
-// the container-relative key.
-func (w *Worker) blobTarget(ctx context.Context, blobURL string) (blobReader, string, string, error) {
+// the container-relative key, once the key is known to be under the row
+// owner's own Library prefix.
+func (w *Worker) blobTarget(ctx context.Context, blobURL, owner string) (blobReader, string, string, error) {
 	key := blobStorageKey(blobURL)
 	if key == "" {
 		return nil, "", "", errors.New("the file row records no storage location")
+	}
+	// The row is the caller's; the KEY must be its owner's too. This reads the
+	// key with the node's credential, so a row naming somebody else's object
+	// (one a client wrote before createLibraryFile was @serverOnly) would turn
+	// their file into the caller's audience or picture. Judged as the exact key
+	// read.
+	if err := librarykey.CheckKey(key, owner); err != nil {
+		return nil, "", "", errors.New("the file is not stored in its owner's Library")
 	}
 	reader, container, err := w.objectStore(ctx)
 	if err != nil {

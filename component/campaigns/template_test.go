@@ -214,7 +214,7 @@ func (tw *templateWorld) addPicture(artifact, mime string, data []byte) {
 		"id": "v1:library:artifact:" + artifact, "kind": "file", "sourceConceptRef": "v1:library:file:file-" + artifact, "title": artifact,
 	}
 	tw.engine.libraryFiles["file-"+artifact] = map[string]any{
-		"id": "v1:library:file:file-" + artifact, "name": artifact, "mimeType": mime, "size": len(data), "blobUrl": key,
+		"id": "v1:library:file:file-" + artifact, "ownerUserId": testOwner, "name": artifact, "mimeType": mime, "size": len(data), "blobUrl": key,
 	}
 	tw.blobs.objects[key] = data
 }

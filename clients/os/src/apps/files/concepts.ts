@@ -14,6 +14,19 @@ export const FILE_CONCEPT = "v1:library:file";
  * The Materializer's record (epic memql#4981, #4983). READ ONLY here: the
  * Materializer app owns this concept, and Files reads it to answer which of
  * its own files were composed and to offer the one handoff back.
+ *
+ * ONE DIRECTION, AND IT IS THE ONLY ONE. Files reads the composition record and
+ * offers one act that hands the person over to the app that owns it ("Open in
+ * Materializer", opened with the names in items/materialize.ts). Nothing in
+ * Files writes a composition, and nothing restates what one is ABOUT -- the
+ * sources, the template, the models that contributed, the provenance. Those are
+ * the record's, and the record is the Materializer's.
+ *
+ * WHICH QUESTION EACH SURFACE ANSWERS, agreed with epic memql#4977 so neither
+ * drifts into the other: the Materializer's Materialized section answers WHAT
+ * WAS MADE, one row per composition; the Files rail's Materializer place
+ * answers WHERE THE FILE IS, one row per output file, an ordinary Library
+ * artifact that opens, downloads, moves and archives like every other one.
  */
 export const COMPOSITION_CONCEPT = "v1:compose:composition";
 

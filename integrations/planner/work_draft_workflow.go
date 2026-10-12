@@ -35,7 +35,7 @@ func synthesizeWorkReasoningBundleInScope(ctx context.Context, req CompileReques
 		return authoringBundle{}, fmt.Errorf("work compile: %d sections exceeds the %d-section execution limit", len(dec.Sections), maxSectionFanout)
 	}
 	if *dec.RequiresFile {
-		s.fileName = strings.TrimSpace(dec.FileName)
+		s.fileName = materializerFileStem(dec.FileName)
 		if s.fileName == "" {
 			return authoringBundle{}, fmt.Errorf("work compile: a file goal requires an explicit fileName from triage")
 		}
@@ -97,6 +97,19 @@ func synthesizeWorkReasoningBundleInScope(ctx context.Context, req CompileReques
 	bundle.Constructs = append(bundle.Constructs, s.children...)
 	carryCatalogSections(&bundle, dec, s.sections)
 	return bundle, nil
+}
+
+// pathSeparators are the characters the Materializer refuses in a file name.
+var pathSeparators = strings.NewReplacer("/", "-", `\`, "-")
+
+// materializerFileStem turns the stem triage chose into a name the Materializer
+// accepts. The Materializer refuses a name that carries a folder path, which is
+// right for a person who typed one and wrong for a stem a model chose: the
+// refusal would arrive only after the drafting steps had already run, and
+// nothing would be left to file. A separator becomes a hyphen, so "reports/Q3"
+// is filed as "reports-Q3".
+func materializerFileStem(chosen string) string {
+	return pathSeparators.Replace(strings.TrimSpace(chosen))
 }
 
 type draftSourceScope struct {

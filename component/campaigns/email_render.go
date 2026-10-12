@@ -372,7 +372,7 @@ func (a artifactImages) read(ctx context.Context, artifactID string) (emaildoc.I
 	if ref.Size > emaildoc.MaxImageBytes {
 		return emaildoc.Image{}, fmt.Errorf("file %q is %d bytes, over the %d a picture in an email may be", ref.FileID, ref.Size, emaildoc.MaxImageBytes)
 	}
-	data, err := a.w.readBlobUpTo(ctx, ref.BlobURL, emaildoc.MaxImageBytes)
+	data, err := a.w.readBlobUpTo(ctx, ref.BlobURL, ref.OwnerUserID, emaildoc.MaxImageBytes)
 	if err != nil {
 		return emaildoc.Image{}, fmt.Errorf("reading file %q: %w", ref.FileID, err)
 	}

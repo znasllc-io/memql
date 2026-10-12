@@ -352,3 +352,5 @@ components:
   # ConfigMap that points the workbench at it. Its objects keep their explicit
   # namespace only because this overlay's namespace transformer is unsetOnly.
   - ../../components/pipelines
+  # The error pages the front door's default-backend annotation names (ingress-nginx only).
+  - ../../components/error-pages

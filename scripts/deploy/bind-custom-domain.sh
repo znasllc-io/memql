@@ -23,6 +23,21 @@
 # new ACME order: cert-manager's own backoff, not the caller's loop, remains
 # what paces Let's Encrypt. `changed` reports whether anything actually moved.
 #
+# THE ERROR PAGES. On 2026-10-11 the whole mesh was down and every host answered
+# ingress-nginx's bare "503 Service Temporarily Unavailable", a client's own
+# domain included. So the Ingress carries the annotation
+# `nginx.ingress.kubernetes.io/default-backend: error-pages`: when the edge has
+# no ready pod, its visitors get the neutral maintenance page (`memql
+# error-pages`) instead. It is the same annotation, under the same rule, as
+# integrations/customdomain's IngressObject -- the edge speaks plain HTTP, which
+# is the only thing the error pages can stand behind -- and custom_domain_test.go
+# holds the two Ingresses equal, since this script and the engine's API
+# substrate write ONE object between them. The Service is looked up in
+# --namespace, so a namespace other than the engine's needs an `error-pages`
+# Deployment AND Service of its own (a Service alone selects no pods there);
+# until it has both, ingress-nginx skips the fallback and the Ingress behaves as
+# it did before.
+#
 # WHAT IT REFUSES, AND WHY THAT IS A REFUSAL RATHER THAN A FAILURE. With no
 # --issuer this cluster has no ACME issuer, and a Certificate with an empty
 # issuerRef is ACCEPTED by the API server and then sits Pending forever with a
@@ -67,6 +82,12 @@ SERVICE="$(cap_param service "edge")"
 PORT="$(cap_param port "8085")"
 WAIT_SECONDS="$(cap_param waitSeconds "15")"
 DRY_RUN="$(cap_bool_str dryRun false)"
+
+# The annotation line that sends the Ingress to the error pages when its Service
+# has no ready endpoints. It is a second spelling of integrations/customdomain's
+# ErrorPagesBackendAnnotation + ": " + ErrorPagesServiceName, and
+# custom_domain_test.go reads it out of this file and holds the two equal.
+readonly ERROR_PAGES_BACKEND='nginx.ingress.kubernetes.io/default-backend: error-pages'
 
 OBJECT_NAME=""
 CHANGED_ANY=false
@@ -150,6 +171,8 @@ metadata:
     app.kubernetes.io/name: custom-domain
     memql/custom-domain-id: "${DOMAIN_ID}"
     memql/custom-domain-siteId: "${SITE_ID}"
+  annotations:
+    ${ERROR_PAGES_BACKEND}
 spec:
   ingressClassName: ${INGRESS_CLASS}
   tls:

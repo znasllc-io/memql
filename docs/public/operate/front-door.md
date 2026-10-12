@@ -809,6 +809,56 @@ model depends on it, and a proposal that routes application traffic through it
 is the port-forward-as-architecture anti-pattern
 [environment-parity.md](environment-parity.md) rejects.
 
+## When a front door has no ready endpoints
+
+Every front-door Ingress whose proxy speaks plain HTTP, bar `mcp-front-door`,
+carries `nginx.ingress.kubernetes.io/default-backend: error-pages`. When the
+Service **that Ingress routes to** has no ready endpoints -- and only then --
+ingress-nginx answers with `memql error-pages` instead of its own bare `503`; a
+Service with a ready pod is untouched. The error pages run in the cloud overlays
+(`cloud` and `cloud-entry` compose `deploy/k8s/components/error-pages`), and the
+page needs a ready `error-pages` pod of its own: with none, ingress-nginx skips the
+fallback and answers its own `503`. It is always a `503` with `Retry-After: 120`:
+the MemQL page on `os.` and `vscode.`, a neutral page with no MemQL name on the
+apex, hosted sites and custom domains, and JSON on `api.<domain>` and for any
+`Accept: application/json`. Entering or leaving the fallback costs a full nginx
+reload, because ingress-nginx's `Location.Equal` compares the location's backend:
+a role whose ready endpoints flap at zero reloads the controller each time, and a
+reload closes long-lived connections controller-wide once
+`worker-shutdown-timeout` has passed.
+
+`api-front-door-grpc` (backend protocol GRPC), `identity-front-door` (HTTPS) and a
+reserved name's `id.` and gRPC Ingresses do **not** carry it: ingress-nginx keeps
+an Ingress's backend protocol for the default backend, and the error pages are
+plain HTTP/1.1, so the proxy would answer `502`. Those hosts keep its own `503`.
+`mcp-front-door` does not carry it either, by choice rather than protocol: mcp is
+disabled by default (`cloud-entry` renders it at 0 replicas), so the page's
+"being updated, back in a few minutes" would be permanent and false there, and
+MCP is a machine surface. `mcp.` keeps ingress-nginx's answer. A local cluster
+(traefik) has neither the pods nor the fallback: traefik ignores the annotation
+and the local overlay renders no `error-pages` objects, so a local Service with
+no ready endpoints gets traefik's own answer. The Service is looked up in the
+Ingress's own namespace, so a `MEMQL_CUSTOM_DOMAIN_NAMESPACE` other than `memql`
+needs an `error-pages` Deployment **and** Service there too -- a Service alone
+selects no pods in that namespace -- or the fallback is skipped.
+
+The engine applies an Ingress only while a binding is issuing, so custom domains
+and doors already live at the upgrade lack the annotation. Add it once, to each
+custom-domain and door Ingress whose `backend-protocol` annotation is absent or
+`HTTP` -- the rule the engine's builders apply, read off each object, since an
+older engine wrote these:
+
+```bash
+NS=memql   # MEMQL_CUSTOM_DOMAIN_NAMESPACE, if you set it
+for sel in app.kubernetes.io/name=custom-domain app.kubernetes.io/name=account-front-door; do
+  kubectl -n "$NS" get ingress -l "$sel" \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.nginx\.ingress\.kubernetes\.io/backend-protocol}{"\n"}{end}' \
+    | awk -F'\t' '$2 == "" || toupper($2) == "HTTP" { print $1 }' \
+    | while read -r ing; do kubectl -n "$NS" annotate ingress "$ing" \
+        nginx.ingress.kubernetes.io/default-backend=error-pages --overwrite; done
+done
+```
+
 ## Verifying a front door
 
 Requires a running cluster, so it belongs on an operator machine or in CI.

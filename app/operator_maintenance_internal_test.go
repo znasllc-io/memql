@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"os"
@@ -110,11 +111,12 @@ func TestOperatorTrigger_FunnelsIntoSameDrainSequence(t *testing.T) {
 
 // TestWaitForShutdownTrigger_OperatorWins asserts the wait multiplexer
 // returns the operator trigger when the operator channel closes before any
-// OS signal (the SIGTERM wait parks forever in this test).
+// OS signal (the SIGTERM wait is cancelled when the operator trigger wins).
 func TestWaitForShutdownTrigger_OperatorWins(t *testing.T) {
 	opDrain := make(chan struct{})
-	parkedSignal := func() os.Signal {
-		select {} // never returns -- simulates no OS signal
+	parkedSignal := func(ctx context.Context) os.Signal {
+		<-ctx.Done()
+		return nil
 	}
 
 	go func() {
@@ -122,7 +124,10 @@ func TestWaitForShutdownTrigger_OperatorWins(t *testing.T) {
 		close(opDrain)
 	}()
 
-	trigger := waitForShutdownTrigger(parkedSignal, opDrain)
+	ctx, triggers, cleanup := watchShutdownTrigger(parkedSignal, opDrain)
+	defer cleanup()
+	trigger := <-triggers
+	assert.ErrorIs(t, ctx.Err(), context.Canceled)
 	assert.Equal(t, "operator", trigger)
 }
 
@@ -130,16 +135,20 @@ func TestWaitForShutdownTrigger_OperatorWins(t *testing.T) {
 // when it fires first (the deploy SIGTERM path is unchanged).
 func TestWaitForShutdownTrigger_SignalWins(t *testing.T) {
 	opDrain := make(chan struct{}) // never closed
-	wait := func() os.Signal { return syscall.SIGTERM }
+	wait := func(context.Context) os.Signal { return syscall.SIGTERM }
 
-	trigger := waitForShutdownTrigger(wait, opDrain)
+	_, triggers, cleanup := watchShutdownTrigger(wait, opDrain)
+	defer cleanup()
+	trigger := <-triggers
 	assert.Equal(t, "signal:terminated", trigger)
 }
 
 // TestWaitForShutdownTrigger_NilOpDrainIsPlainSignal asserts a non-mesh
 // binary (nil operator channel) degenerates to the plain OS-signal wait.
 func TestWaitForShutdownTrigger_NilOpDrainIsPlainSignal(t *testing.T) {
-	wait := func() os.Signal { return syscall.SIGINT }
-	trigger := waitForShutdownTrigger(wait, nil)
+	wait := func(context.Context) os.Signal { return syscall.SIGINT }
+	_, triggers, cleanup := watchShutdownTrigger(wait, nil)
+	defer cleanup()
+	trigger := <-triggers
 	assert.Equal(t, "signal:interrupt", trigger)
 }

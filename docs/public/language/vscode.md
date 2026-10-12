@@ -110,6 +110,23 @@ feedback was synchronized. PDF tools view pages, rotate them, add text, and save
 new revisions. Recovered PDF edits cannot overwrite a newer remote revision;
 Save As preserves a local copy for comparison.
 
+**New Markdown** asks for a name and creates a blank document in the connected
+cluster through the Materializer, so even an empty document has a record of what
+was asked for and which run made it. The progress notification says where the
+creation is ("Saved; waiting for its Files entry" while the Library catches up)
+and can be stopped. Stopping never deletes a file that was already made: it stays
+in Files, and the editor opens it when it is already in Files at the moment you
+stop. The document opens in Review, where its empty page offers **Describe
+document**, which sends your description to the Library's revision workflow as a
+proposal you approve, and **Write in Source**. A name is a file name, not a path,
+and the cluster adds the `.md` extension itself, so `Plan` and `Plan.md` both make
+`Plan.md`. New Markdown and **Create Email from Examples** check a name as you type
+it with the same rule as the OS composer, and say what is wrong: an empty name, a
+slash, a name over 150 characters, or nothing before the extension. Both make
+their files through the same SDK helper the OS uses, the one way a client creates
+a file. Uploading bytes you already have, such as **Markdown: Insert
+Image** and a review attachment, stays an upload.
+
 **Create Email from Examples** starts with an organization and reference images,
 files, or a ZIP of resources, followed by a short brief. MemQL Materializer
 captures the sources, uses its model router for visual understanding and

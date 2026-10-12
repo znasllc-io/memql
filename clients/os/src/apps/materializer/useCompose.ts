@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Concepts, getRowByConceptAndId, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { Concepts, getRowByConceptAndId, refusalSentence, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../live/connection";
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
@@ -192,7 +192,8 @@ export function useComposableConcepts(includeUnmarked: boolean): ComposablesStat
         setReadAt(new Date().toISOString());
       } catch (err) {
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
+        // The cluster's sentence alone, without the call's name or the engine's frame.
+        setError(refusalSentence(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -296,7 +297,8 @@ export function useResolvedSources(sources: { kind: string; ref: string; label: 
           sources: [],
           total: 0,
           loading: false,
-          error: err instanceof Error ? err.message : String(err),
+          // The cluster's sentence alone, without the call's name or the engine's frame.
+          error: refusalSentence(err),
         });
       }
     })();
