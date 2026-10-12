@@ -19,10 +19,14 @@ import (
 // grants. A preview is an act of the person who asks for it, so the proof that
 // matters is the one the fake cannot give: that the person who uploaded a
 // picture sees it, and that nobody else does, not a colleague in the same
-// organization and not the owner of the cluster, because every read ran as the
-// caller. It also runs the builtin as a client calls it, so a mismatch between
-// the DSL declaration and the handler (the executor's name, the arguments, the
-// shape of the answer) fails here.
+// organization and not the owner of the cluster. The owner of the cluster is
+// refused for a reason of the Library's, not of the preview's: its named reads
+// carry an authored ownerUserId == actor.userId conjunct, which keeps even a
+// cluster owner to their own rows (component/memql/library_file_4340_db_test.go),
+// and a preview is owner-only by design, for privacy, as importRecipients is. It
+// also runs the builtin as a client calls it, so a mismatch between the DSL
+// declaration and the handler (the executor's name, the arguments, the shape of
+// the answer) fails here.
 
 func TestEmailRenderBuiltinReadsPicturesAsTheCallerThroughTheEngine(t *testing.T) {
 	w := newLayoutWorld(t)
@@ -60,6 +64,12 @@ func TestEmailRenderBuiltinReadsPicturesAsTheCallerThroughTheEngine(t *testing.T
 
 	doc := layoutDocument(t, "builtin:letter")
 	setBlock(t, doc, "logo", func(b map[string]any) { b["src"] = "artifact:" + artifact })
+	// Merge tags of every kind: the organization's own name (the sample has none
+	// for it), the sample's name, a text field, and a field that is a number and
+	// so no value.
+	setBlock(t, doc, "headline", func(b map[string]any) {
+		b["text"] = "Thanks for joining {{accountName}}, {{displayName}} ({{fields.plan}}, {{fields.seats}})"
+	})
 	previewOn := func(replica int, ctx context.Context, organization string) (map[string]any, error) {
 		rendered, err := langparser.RenderCall("emailRender", map[string]any{
 			"document": doc, "accountId": organization,
@@ -108,8 +118,11 @@ func TestEmailRenderBuiltinReadsPicturesAsTheCallerThroughTheEngine(t *testing.T
 		if row["subject"] != "A note from our founder" {
 			t.Errorf("subject = %v", row["subject"])
 		}
-		if text, _ := row["text"].(string); strings.TrimSpace(text) == "" {
-			t.Error("the plain-text part is empty")
+		// The organization's name is the sample for {{accountName}} through the
+		// real engine too, and a field that is not text is no sample value.
+		text, _ := row["text"].(string)
+		if want := "Thanks for joining Preview client, Ada (pro, {{fields.seats}})"; !strings.Contains(text, want) {
+			t.Errorf("the plain-text part lacks %q:\n%.600s", want, text)
 		}
 	})
 
@@ -133,8 +146,9 @@ func TestEmailRenderBuiltinReadsPicturesAsTheCallerThroughTheEngine(t *testing.T
 	})
 
 	// Nobody else: not a colleague in the same organization, who may preview its
-	// emails, and not the owner of the cluster, who may do almost anything. The
-	// Library says a file is its uploader's, and every read ran as the caller.
+	// emails, and not the owner of the cluster. The Library's named reads scope
+	// even a cluster owner to their own rows (an authored ownerUserId ==
+	// actor.userId conjunct), and a preview is owner-only for privacy.
 	for name, ctx := range map[string]context.Context{"a colleague in the same organization": colleague, "the owner of the cluster": w.owner} {
 		t.Run(name+" does not", func(t *testing.T) {
 			before, _ := blobs.reads()

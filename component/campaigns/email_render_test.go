@@ -10,6 +10,7 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -336,6 +337,39 @@ func preview(t *testing.T, w *Worker, ctx context.Context, doc map[string]any, s
 		t.Fatalf("emailRender: %v", err)
 	}
 	return decodePreview(t, nodes)
+}
+
+// allocatedWhile is the bytes allocated while f runs. The allocation is what a
+// render costs the node, and unlike the time it does not depend on the machine.
+func allocatedWhile(f func()) uint64 {
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	f()
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+// setDuration sets one of the waits of a preview for the length of the test.
+func setDuration(t *testing.T, wait *time.Duration, d time.Duration) {
+	t.Helper()
+	previous := *wait
+	*wait = d
+	t.Cleanup(func() { *wait = previous })
+}
+
+// holdRenderSlots takes n of the process's render slots for the length of the
+// test, as n previews in progress would.
+func holdRenderSlots(t *testing.T, n int) {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		renderSlots <- struct{}{}
+	}
+	t.Cleanup(func() {
+		for i := 0; i < n; i++ {
+			<-renderSlots
+		}
+	})
 }
 
 // neverWrites fails the test if the engine was asked to change anything: a
@@ -977,8 +1011,19 @@ func TestEmailRenderReadsEachPictureOnceAndNoMoreThanItMayCarry(t *testing.T) {
 		if n := len(engine.callsTo("query libraryArtifactById")); n != want {
 			t.Errorf("%d artifacts were looked up, want %d", n, want)
 		}
-		if n := got.count(emaildoc.IssueImageUnavailable); n != 40 {
-			t.Errorf("%d pictures reported as unavailable, want all 40", n)
+		// The nine that were looked for were not found. The other thirty-one were
+		// not looked for, and are not said to be unreadable: the email has more
+		// pictures than it can carry, said once with the sentence for it.
+		if n := got.count(emaildoc.IssueImageUnavailable); n != want {
+			t.Errorf("%d pictures reported as unavailable, want the %d that were looked for: %+v", n, want, got.Issues)
+		}
+		if n := got.count(emaildoc.IssueImagesLimit); n != 1 {
+			t.Errorf("images_limit reported %d times, want once: %+v", n, got.Issues)
+		}
+		for _, issue := range got.Issues {
+			if issue.Code == emaildoc.IssueImagesLimit && issue.Message != "Use up to eight pictures totaling 1 MiB." {
+				t.Errorf("images_limit says %q", issue.Message)
+			}
 		}
 	})
 
@@ -1000,6 +1045,11 @@ func TestEmailRenderReadsEachPictureOnceAndNoMoreThanItMayCarry(t *testing.T) {
 		}
 		if n := strings.Count(got.HTML, "data:image/png;base64,"); n != emaildoc.MaxImages+1 {
 			t.Errorf("%d pictures embedded, want %d", n, emaildoc.MaxImages+1)
+		}
+		// The three past the limit are readable pictures that were not read. They
+		// are not reported as pictures that could not be.
+		if got.has(emaildoc.IssueImageUnavailable, "") {
+			t.Errorf("a picture that was never asked for is reported as unavailable: %+v", got.Issues)
 		}
 	})
 }
@@ -1183,6 +1233,116 @@ func TestEmailRenderGivesBackItsSlotWhenItFails(t *testing.T) {
 	}
 	if len(renderSlots) != 0 {
 		t.Fatalf("%d slots are still held after a cancellation", len(renderSlots))
+	}
+}
+
+// The answer is plain JSON. A text part of "<" written with HTML escaping is six
+// bytes for each, in a payload the engine reads again outside the render slot:
+// the review measured 47.6 MiB and 369 MiB allocated for an email of 1.9 MiB.
+func TestEmailRenderAnswersInPlainJSONWhateverTheMarkup(t *testing.T) {
+	w, _, _ := previewFixture(t)
+	// 130,000 tags of 15 bytes are 1.9 MiB, a file inside the limit, in the
+	// plain-text part. Each is filled with 64 characters: the part is 8.3 MB,
+	// inside what a render writes.
+	doc := customDocument("")
+	doc["textBody"] = strings.Repeat("{{displayName}}", 130000)
+	const textBytes = 130000 * 64
+	run := func(fill string) (payload int, allocated uint64) {
+		var nodes []memorynodes.MemoryNode
+		var err error
+		allocated = allocatedWhile(func() {
+			nodes, err = w.handleRenderEmail(importCtx(), renderArgs(doc, map[string]any{"displayName": strings.Repeat(fill, 64)}), 0)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := decodePreview(t, nodes); len(got.Text) != textBytes || got.HTML != "" {
+			t.Fatalf("the text part has %d bytes, the HTML part %d", len(got.Text), len(got.HTML))
+		}
+		return len(nodes[0].Payload), allocated
+	}
+	run("a") // once to warm up what is built the first time
+	plainPayload, plainAllocated := run("a")
+	markupPayload, markupAllocated := run("<")
+
+	t.Logf("a text part of %d \"<\": payload %d bytes, %d MiB allocated; of letters: payload %d bytes, %d MiB allocated",
+		textBytes, markupPayload, markupAllocated>>20, plainPayload, plainAllocated>>20)
+	if markupPayload > textBytes+4096 || markupPayload > plainPayload+4096 {
+		t.Errorf("the payload of a text part of %d \"<\" is %d bytes (%d for letters): it is escaped", textBytes, markupPayload, plainPayload)
+	}
+	// What it costs to write is what a text of letters costs, give or take: the
+	// review measured five times as much before.
+	if markupAllocated > plainAllocated*13/10 {
+		t.Errorf("a text part of \"<\" allocated %d MiB against %d MiB for letters", markupAllocated>>20, plainAllocated>>20)
+	}
+}
+
+func TestEmailRenderWaitsAtMostTenSecondsForASlot(t *testing.T) {
+	// Waiting under the caller's deadline is not waiting for ever: a stream
+	// statement carries no deadline of its own.
+	if renderSlotWait != 10*time.Second {
+		t.Fatalf("a preview waits %v for a slot, want 10s", renderSlotWait)
+	}
+	setDuration(t, &renderSlotWait, 150*time.Millisecond)
+	w, _, _ := previewFixture(t)
+	holdRenderSlots(t, maxConcurrentRenders)
+
+	start := time.Now()
+	_, err := w.handleRenderEmail(importCtx(), renderArgs(customDocument(""), nil), 0)
+	waited := time.Since(start)
+
+	if err == nil || err.Error() != previewBusy {
+		t.Fatalf("a preview that waited its time: %v, want %q", err, previewBusy)
+	}
+	if waited < 100*time.Millisecond || waited > 5*time.Second {
+		t.Errorf("waited %v for a wait of 150ms", waited)
+	}
+	if len(renderSlots) != maxConcurrentRenders {
+		t.Errorf("%d slots are held, want the %d the test holds", len(renderSlots), maxConcurrentRenders)
+	}
+
+	t.Run("a slot that comes free in time is taken", func(t *testing.T) {
+		setDuration(t, &renderSlotWait, 5*time.Second)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			<-renderSlots
+		}()
+		if _, err := w.handleRenderEmail(importCtx(), renderArgs(customDocument(""), nil), 0); err != nil {
+			t.Fatal(err)
+		}
+		renderSlots <- struct{}{} // the one the test gave up, taken back for its cleanup
+	})
+}
+
+func TestEmailRenderBoundsEachPictureRead(t *testing.T) {
+	// Storage can be slow, and a slow read holds a render slot: a read has its
+	// own time, not the caller's, which a stream statement does not have.
+	if pictureReadTimeout != 10*time.Second {
+		t.Fatalf("a picture read may take %v, want 10s", pictureReadTimeout)
+	}
+	setDuration(t, &pictureReadTimeout, 150*time.Millisecond)
+	w, engine, blobs := previewFixture(t)
+	addPicture(engine, blobs, "slow-1", "image/png", previewPNG(t, 4, 3))
+	addPicture(engine, blobs, "slow-2", "image/png", previewPNG(t, 5, 3))
+	blobs.hold = make(chan struct{}) // storage never answers
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(blobs.hold) }) })
+	doc := customDocument(`<p><img src="artifact:slow-1" alt="One"></p><p><img src="artifact:slow-2" alt="Two"></p>`)
+
+	start := time.Now()
+	got := preview(t, w, importCtx(), doc, nil)
+	waited := time.Since(start)
+
+	// Both pictures are unavailable, the render finished, and the slot is back.
+	if n := got.count(emaildoc.IssueImageUnavailable); n != 2 || strings.Contains(got.HTML, "data:image") {
+		t.Errorf("%d pictures reported as unavailable: %+v", n, got.Issues)
+	}
+	// Each read had its time: two slow ones took two of them, and no more.
+	if waited < 250*time.Millisecond || waited > 5*time.Second {
+		t.Errorf("two slow reads of 150ms each took %v", waited)
+	}
+	if len(renderSlots) != 0 {
+		t.Errorf("%d slots are still held", len(renderSlots))
 	}
 }
 

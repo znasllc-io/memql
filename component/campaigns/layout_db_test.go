@@ -87,8 +87,9 @@ func newLayoutWorld(t *testing.T) *layoutWorld {
 }
 
 // layoutSuffixPattern is the shape of a run's suffix: "layout-" and the clock's
-// nanoseconds. removeLayoutRows refuses anything else.
-var layoutSuffixPattern = regexp.MustCompile(`^layout-[0-9]{10,}$`)
+// nanoseconds, nineteen digits until the year 2286. removeLayoutRows refuses
+// anything else.
+var layoutSuffixPattern = regexp.MustCompile(`^layout-[0-9]{19}$`)
 
 // removeLayoutRows deletes what one run of these tests left in the database:
 // the users, organizations, groups, memberships and layouts it made, and the
@@ -139,6 +140,9 @@ func TestRemoveLayoutRowsRefusesAnythingButARunsSuffix(t *testing.T) {
 		"", "layout-", "layout", "layout-1", "layout-123456789", "x-1791791261136112000",
 		"layout-1791791261136112000-owner", "layout-1791791261136112000%", "layout-1791791261136112000' OR 'a'='a",
 		" layout-1791791261136112000", "LAYOUT-1791791261136112000",
+		// Not the nineteen digits of the clock: a shorter or a longer number is
+		// not a run's.
+		"layout-1234567890", "layout-179179126113611200", "layout-17917912611361120000",
 	} {
 		q := &quietTB{TB: t}
 		removeLayoutRows(q, nil, suffix)
@@ -146,7 +150,7 @@ func TestRemoveLayoutRowsRefusesAnythingButARunsSuffix(t *testing.T) {
 			t.Errorf("suffix %q: reported %v, want one refusal", suffix, q.errors)
 		}
 	}
-	for _, suffix := range []string{"layout-1791791261136112000", "layout-1234567890"} {
+	for _, suffix := range []string{"layout-1791791261136112000", "layout-1000000000000000000", "layout-9223372036854775807"} {
 		if !layoutSuffixPattern.MatchString(suffix) {
 			t.Errorf("%q is the shape of a run's suffix and was refused", suffix)
 		}

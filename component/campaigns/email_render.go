@@ -1,12 +1,11 @@
 package campaigns
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -25,14 +24,22 @@ import (
 // # Whose pictures
 //
 // A document names a picture as artifact:<id>, a Library file. The preview
-// embeds the pictures the CALLER can read and no others: every read on the way
-// to the bytes (the artifact, the file it names, the storage) runs under the
-// caller's own actor, against queries that gate on the file's owner, so an
-// artifact id is not a way to somebody else's upload. A picture the caller
-// cannot read is the same answer as one that does not exist, an
-// image_unavailable issue, and nothing of it is read from storage. The
-// organization is looked at first: someone outside it is refused before
-// anything of the document is read, and someone inside needs to read its data.
+// embeds the pictures the CALLER can read and no others. The artifact and the
+// file row it names are read under the caller's own actor, through the Library's
+// named reads (libraryArtifactById and libraryFileById), which gate on the
+// file's owner and deliberately scope even a cluster owner to their own rows
+// (component/memql/library_file_4340_db_test.go, claim 4). So an artifact id is
+// not a way to somebody else's upload, whoever asks; and a preview is
+// owner-only for the same reason importRecipients is, for privacy. A picture the
+// caller cannot read is the same answer as one that does not exist, an
+// image_unavailable issue, and storage is not asked for it.
+//
+// The bytes are then fetched with the node's own storage credential, which has
+// no notion of a caller, at the blobUrl the file row records: that read trusts a
+// row the caller owns, as the Library's own download route does, and is not
+// itself made as the caller. The organization is looked at first: someone
+// outside it is refused before anything of the document is read, and someone
+// inside needs to read its data.
 //
 // # What it may cost
 //
@@ -45,15 +52,22 @@ import (
 //     refused before the organization is looked up and before the parser reads
 //     any of it;
 //   - a process writes maxConcurrentRenders previews at once, and the rest wait
-//     under their own deadline;
+//     under their own deadline and for at most renderSlotWait, since a
+//     statement on a stream has none;
 //   - a picture is read with a limit of what a picture in an email may be, so a
-//     blob larger than that is never held in memory, whatever its file row says;
+//     blob larger than that is never held in memory, whatever its file row says,
+//     and a read takes at most pictureReadTimeout, so a slow storage cannot hold
+//     a slot for ever;
 //   - a document can name tens of thousands of pictures, and each read is two
 //     queries and a request to storage, so a render reads no more than the
 //     eight an email may carry and the one that shows it carries too many;
 //   - a document can make as many issues, so the list that goes back has each
 //     once and at most maxIssuesPerCode of each kind;
-//   - the sample is a handful of values, not a second document.
+//   - the sample is a handful of values, not a second document;
+//   - the answer is plain JSON (resultNode), where encoding/json's default would
+//     write each "<", ">" and "&" of the email as six bytes: 47.6 MiB for an
+//     email of 1.9 MiB, and the engine and the wire read it again after the slot
+//     is given back.
 //
 // What the renderer refuses as too large (more than MaxRenderBytes once it is
 // written out) goes back as a sentence for a person, not the renderer's error.
@@ -82,15 +96,20 @@ const (
 // renderSlots holds one value for each preview being written in this process.
 var renderSlots = make(chan struct{}, maxConcurrentRenders)
 
+// The waits of a preview. A statement that arrives on a stream carries no
+// deadline, so a preview sets its own: it waits at most renderSlotWait for a
+// slot, and one picture read takes at most pictureReadTimeout. They are
+// variables so that a test can shorten them.
+var (
+	renderSlotWait     = 10 * time.Second
+	pictureReadTimeout = 10 * time.Second
+)
+
 var (
 	errPreviewBusy     = errors.New("Previews are busy right now. Try again in a moment.")
 	errNoPreviewAccess = errors.New("You need read access to this organization's data to preview an email.")
 	errSampleTooLarge  = errors.New("The sample values are too large. Use up to 100 fields of up to 1,000 characters each.")
 	errPreviewTooLarge = fmt.Errorf("This email is larger than %d MiB once it is written out. Shorten it or use fewer pictures.", emaildoc.MaxRenderBytes>>20)
-
-	// errTooManyPictures is what a render is answered when it asks for a picture
-	// past maxPictureReads. It becomes an image_unavailable issue.
-	errTooManyPictures = errors.New("this email names more pictures than a preview reads")
 )
 
 // handleRenderEmail implements integration.campaigns.renderEmail.
@@ -161,17 +180,13 @@ func (w *Worker) handleRenderEmail(ctx context.Context, args map[string]any, _ i
 	})
 }
 
-// encodeDocument writes the document the way its file is written: HTML is left
-// as it is, where a JSON encoder's default writes each "<", ">" and "&" as six
-// bytes and would measure a 1.5 MiB email of them as nine.
+// encodeDocument writes the document the way its file is written, for measuring
+// it and handing it to the parser: HTML is left as it is, where a JSON encoder's
+// default writes each "<", ">" and "&" as six bytes and would measure a 1.5 MiB
+// email of them as nine. Every place that measures a document as a file measures
+// it with this, so that what one accepts the other does not refuse as too large.
 func encodeDocument(document any) ([]byte, error) {
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(document); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+	return plainJSON(document)
 }
 
 // sampleValues flattens the sample a client sends ({displayName, email,
@@ -241,19 +256,26 @@ func sampleText(value any) (text string, kept bool, err error) {
 	return text, strings.TrimSpace(text) != "", nil
 }
 
-// acquireRenderSlot waits for one of the maxConcurrentRenders slots under the
-// caller's own deadline, and returns the function that gives it back. A caller
-// whose deadline passes while it waits is told the previews are busy; one that
-// has gone away is told nothing it will read.
+// acquireRenderSlot waits for one of the maxConcurrentRenders slots, under the
+// caller's own deadline and for no longer than renderSlotWait whatever that is:
+// a statement that arrives on a stream carries no deadline of its own, and a
+// preview that waits for ever holds a connection and a goroutine for nobody. It
+// returns the function that gives the slot back. A caller whose deadline passes
+// while it waits, or that waits the whole time, is told the previews are busy;
+// one that has gone away is told nothing it will read.
 func acquireRenderSlot(ctx context.Context) (func(), error) {
 	if err := ctx.Err(); err != nil {
 		return nil, waitRefusal(err)
 	}
+	wait := time.NewTimer(renderSlotWait)
+	defer wait.Stop()
 	select {
 	case renderSlots <- struct{}{}:
 		return func() { <-renderSlots }, nil
 	case <-ctx.Done():
 		return nil, waitRefusal(ctx.Err())
+	case <-wait.C:
+		return nil, errPreviewBusy
 	}
 }
 
@@ -284,7 +306,11 @@ func previewIssues(all []emaildoc.Issue) []emaildoc.Issue {
 }
 
 // pictureReads lets a render read at most so many pictures. Render asks for a
-// picture once for each different one, from the goroutine that called it.
+// picture once for each different one, from the goroutine that called it. A
+// picture past the limit is answered with emaildoc.ErrTooManyPictures, which the
+// render reports as the email having more pictures than it can carry
+// (images_limit, once) and not as a picture that could not be read: the picture
+// is fine, and the email has too many.
 type pictureReads struct {
 	inner emaildoc.ImageResolver
 	left  int
@@ -292,7 +318,7 @@ type pictureReads struct {
 
 func (p *pictureReads) ResolveImage(ctx context.Context, artifactID string) (emaildoc.Image, error) {
 	if p.left <= 0 {
-		return emaildoc.Image{}, errTooManyPictures
+		return emaildoc.Image{}, emaildoc.ErrTooManyPictures
 	}
 	p.left--
 	return p.inner.ResolveImage(ctx, artifactID)
@@ -310,7 +336,13 @@ type artifactImages struct{ w *Worker }
 // of at most emaildoc.MaxImageBytes, and its bytes are read with that as the
 // limit and checked as sending checks them.
 func (a artifactImages) ResolveImage(ctx context.Context, artifactID string) (emaildoc.Image, error) {
-	image, err := a.read(ctx, artifactID)
+	// A read has its own time, from the first lookup to the last byte of storage:
+	// a slow one does not hold the render, and with it a slot, for ever. The
+	// render's own context is not touched, so a read that runs out of time is a
+	// picture that could not be read and the render goes on.
+	read, cancel := context.WithTimeout(ctx, pictureReadTimeout)
+	defer cancel()
+	image, err := a.read(read, artifactID)
 	if err != nil && ctx.Err() == nil && a.w.logger != nil {
 		a.w.logger.Debug("campaigns: a picture in an email could not be read", "artifact", artifactID, "reason", err)
 	}

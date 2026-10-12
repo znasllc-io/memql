@@ -1,6 +1,7 @@
 package campaigns
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -651,12 +652,29 @@ func argString(args map[string]any, key string) string {
 	return fmt.Sprintf("%v", v)
 }
 
+// plainJSON is v written as JSON with nothing escaped that JSON does not need
+// escaped. encoding/json by default writes each "<", ">" and "&" of a string as
+// six bytes (\u003c), a safeguard for JSON that is placed inside HTML; the
+// answer of a builtin is not, and an answer that carries an email would be
+// several times its size, built inside the work that made it and read again by
+// everything that carries it after.
+func plainJSON(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(v); err != nil {
+		return nil, err
+	}
+	// Encode ends what it writes with a newline.
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
 // resultNode wraps a builtin reply. Synthetic in the strict sense --
 // never persisted, and a `concept` string outside the
 // v{major}:{domain}:{entity} grammar so nothing mistakes it for graph
-// state (the integrationStatus precedent).
+// state (the integrationStatus precedent). The payload is plain JSON.
 func resultNode(kind string, payload map[string]any) ([]memorynodes.MemoryNode, error) {
-	body, err := json.Marshal(payload)
+	body, err := plainJSON(payload)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns: marshal result: %w", err)
 	}
@@ -691,7 +709,7 @@ func resultRows(kind string, rows []map[string]any) ([]memorynodes.MemoryNode, e
 			return nil, fmt.Errorf("campaigns: two %s rows share the id %q", kind, id)
 		}
 		seen[id] = true
-		body, err := json.Marshal(row)
+		body, err := plainJSON(row)
 		if err != nil {
 			return nil, fmt.Errorf("campaigns: marshal %s row %q: %w", kind, id, err)
 		}

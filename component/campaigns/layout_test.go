@@ -328,6 +328,23 @@ func TestSaveLayoutLimitsCountCharactersNotBytes(t *testing.T) {
 	}
 }
 
+// The file is measured as the file it is, as the preview measures it: a layout
+// the preview accepts is not refused when it is saved as larger than a file may
+// be. A default JSON encoder writes each "<" as six bytes, and a 1.5 MiB email
+// of them would be nine.
+func TestSaveLayoutMeasuresTheFileNotItsEscapedForm(t *testing.T) {
+	w, engine, _ := layoutFixture(t)
+	doc := layoutDocument(t, "builtin:letter")
+	setBlock(t, doc, "body", func(b map[string]any) { b["text"] = strings.Repeat("<", emaildoc.MaxBytes*3/4) })
+
+	if _, err := w.handleSaveLayout(importCtx(), saveLayoutArgs(t, func(a map[string]any) { a["document"] = doc }), 0); err != nil {
+		t.Fatalf("a layout of 1.5 MiB was refused: %v", err)
+	}
+	if got := engine.writes(); len(got) != 1 {
+		t.Errorf("writes = %d, want the one", len(got))
+	}
+}
+
 func TestSaveLayoutRequiresOrganizationWrite(t *testing.T) {
 	t.Run("an inactive or unreadable organization", func(t *testing.T) {
 		for name, accounts := range map[string]map[string]map[string]any{

@@ -86,7 +86,9 @@ func (w *Worker) handleSaveLayout(ctx context.Context, args map[string]any, _ in
 		return nil, errors.New("unknown layout action")
 	}
 	if saving {
-		encoded, err := json.Marshal(args["document"])
+		// Measured as the file it is, as a preview measures it: a layout that is
+		// previewed is not refused here as larger than a file may be.
+		encoded, err := encodeDocument(args["document"])
 		if err != nil {
 			return nil, fmt.Errorf("layout: %w", err)
 		}
