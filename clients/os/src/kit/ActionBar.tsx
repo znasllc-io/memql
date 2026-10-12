@@ -169,7 +169,13 @@ export interface ActionBarProps {
   live?: boolean;
   /** At most three. Primary last, because that is where the eye lands. */
   acts?: readonly Act[];
-  /** Drawn beside the acts: the question an ask turns the bar into, or the typed confirmation a delete takes. */
+  /**
+   * Drawn beside the acts: the question an ask turns the bar into, or the typed
+   * confirmation a delete takes. What it draws is part of what the bar offers,
+   * so a change to it holds every press (`CONFIRM_SETTLE_MS`): text that
+   * changes on its own -- a ticking wait, a live figure -- belongs in `meta`,
+   * where it would not keep the bar holding presses.
+   */
   children?: ReactNode;
   /**
    * WHAT THE BAR IS ABOUT, when it moves through several things: a wizard's

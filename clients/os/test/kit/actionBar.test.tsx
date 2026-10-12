@@ -463,6 +463,30 @@ describe("everything pressable in a bar, not only its acts", () => {
     expect(remove).toHaveBeenCalledTimes(1);
   });
 
+  it("notices a change a child made on its own when it happens, not when the bar is next pressed", async () => {
+    // The bar is not rendered again, so only its watcher sees the question
+    // arrive. Without it the change is first noticed by the next press -- which
+    // it then swallows, however long the question has been on screen.
+    const remove = vi.fn();
+    function OwnState() {
+      const [asking, setAsking] = useState(false);
+      return asking ? (
+        <>
+          <span>Remove shop.example.com?</span>
+          <button type="button" onClick={remove}>Remove</button>
+        </>
+      ) : (
+        <button type="button" onClick={() => setAsking(true)}>Remove</button>
+      );
+    }
+    render(<ActionBar state="Serving"><OwnState /></ActionBar>);
+    press("Remove");
+    await act(async () => {});
+    later(1_000);
+    press("Remove");
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
   it("holds a refusal that appears beside unchanged acts: what a bar draws is part of what it offers", () => {
     const run = vi.fn();
     function SaysWhy({ refusal }: { refusal: string }) {

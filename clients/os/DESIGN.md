@@ -146,7 +146,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     first click put there. An ask is the bar's acts (the way out a text
     act, the act itself the button) with the question drawn beside them.
     Every bar, decided in the kit; a bar's first acts, and a bar that did
-    not change, take a press at once.
+    not change, take a press at once. Text that changes on its own (a
+    ticking wait, a live figure) goes in the bar's `meta`, never beside the
+    acts, where every tick would hold the bar's presses again.
     Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them

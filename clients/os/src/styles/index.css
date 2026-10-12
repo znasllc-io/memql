@@ -12177,9 +12177,10 @@ a.os-button {
   padding: 18px 20px;
 }
 
-/* The confirm, in place: the sentence and the two acts on one line. It
- * replaces the acts in the bar rather than sitting beside them, so there is
- * never a moment where the thing being confirmed can also just be pressed. */
+/* A dead letter's confirm, in its row (Origins): the sentence and its two
+ * buttons on one line, in place of the row's Retry and Discard rather than
+ * beside them, so the entry being confirmed cannot also just be pressed. A
+ * bar's confirm is the bar's own acts, with `.os-actbar-confirm` beside them. */
 .os-cluster-confirm {
   display: inline-flex;
   align-items: center;
