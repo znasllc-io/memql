@@ -1081,7 +1081,6 @@
         "consentText",
         "enabled",
         "ownerUserId",
-        "senderIdentityId",
         "siteId",
         "storeId"
       ]
@@ -1121,7 +1120,6 @@
         "ownerUserId",
         "recipientId",
         "requestedAt",
-        "senderIdentityId",
         "siteId",
         "status",
         "storeId",

@@ -64,6 +64,8 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
+	"github.com/znasllc-io/memql/component/campaigns"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/emailrules"
@@ -166,6 +168,12 @@ func newFiringReplica(t *testing.T, dsn string, ownsTheOwner bool) *firingReplic
 		t.Fatal(err)
 	}
 	eng.Logger = logger
+	gates, err := database.NewGatePool(dsn, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gates.Close() })
+
 	if err := eng.Init(memorynodes.DefaultRegistry()); err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +186,9 @@ func newFiringReplica(t *testing.T, dsn string, ownsTheOwner bool) *firingReplic
 	t.Cleanup(r.bus.Close)
 	eng.SetEventBus(r.bus)
 	materializeEmailRules(t, eng, db, logger)
+	if err := eng.RegisterIntegration(campaigns.NewWorker(firingCampaignEngine{eng}, nil, nil, logger, func() *sql.DB { return gates })); err != nil {
+		t.Fatal(err)
+	}
 
 	run := automations.NewAuthoredRunner(automations.AuthoredRunnerOptions{
 		Logger: logger, Engine: eng, EventBus: r.bus,
@@ -318,6 +329,7 @@ func TestAnEmailRuleFiresOnceWhereItsWriteHappened(t *testing.T) {
 	execute(a, ownerCtx, fmt.Sprintf(`mutation createClientAccount(accountId: %s, name: "Firing organization")`, q(org)))
 	execute(a, auth.ContextWithInternalOrigin(ownerCtx), fmt.Sprintf(`mutation createTemplate(versionTime: "2026-10-01T00:00:00Z", templateId: %s, name: "Firing template", subject: %s, textBody: "A todo was added.", accountId: %s)`,
 		q(template), q(subject), q(org)))
+	execute(a, auth.ContextWithInternalOrigin(ownerCtx), fmt.Sprintf(`mutation updateTemplate(versionTime: "2026-10-02T00:00:00Z", templateId: %s, name: "Firing template", subject: %s, textBody: "A todo was added.", htmlBody: "<p>A todo was added.</p>", status: "ready")`, q(template), q(subject)))
 	execute(a, ownerCtx, fmt.Sprintf(`mutation createEmailRule(emailRuleId: %s, name: "Tell me about new todos", triggerConcept: "v1:todos:todo", eventKind: "created", templateId: %s, recipientMode: "cluster_roles", accountId: %s)`,
 		q(rule), q(template), q(org)))
 
@@ -512,4 +524,14 @@ func readRuleRow(t *testing.T, db *bun.DB, rule string) (status, lastError, bund
 		t.Fatalf("read the rule row: %v", err)
 	}
 	return status, lastError, bundleID
+}
+
+// Match the campaigns adapter used at boot; operational sends check real authority.
+type firingCampaignEngine struct{ engine *memql.MemQLEngine }
+
+func (e firingCampaignEngine) Execute(ctx context.Context, q string) (any, error) {
+	return e.engine.Execute(ctx, q)
+}
+func (e firingCampaignEngine) OrganizationCapable(ctx context.Context, account, verb, resource string) bool {
+	return e.engine.OrganizationCapable(ctx, account, verb, resource)
 }
