@@ -883,3 +883,12 @@ query journeyEnrollment recipientJourneyEnrollments {
  paginate 100
  shape journeyEnrollmentFull
 }
+
+/// Internal retry verdict read under the existing request's receipt lock. actor.userId scoping would hide work after authority is revoked; clusterOwner plus internal origin is mandatory.
+@actor
+@serverOnly
+query delivery deferredSingleSendById {
+ args { deliveryId string! }
+ filter row => actor.isClusterOwner == true && row.id == args.deliveryId
+ shape deferredSendRef
+}
