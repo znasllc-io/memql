@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -207,13 +208,25 @@ func TestTemplateSaveRendersDocumentsAndPublishesBySource(t *testing.T) {
 		}
 		return n
 	}
+	// ofTheFile is the template of the file, whole: templateForSource says which
+	// template it is and at which revision, and templateById reads it.
 	ofTheFile := func(replica int, ctx context.Context, accountID string) (map[string]any, bool) {
 		t.Helper()
-		row, found, err := w.workers[replica].store.TemplateForSource(fresh(ctx), accountID, source)
+		ref, found, err := w.workers[replica].store.TemplateForSource(fresh(ctx), accountID, source)
 		if err != nil {
 			t.Fatalf("templateForSource on replica %d: %v", replica, err)
 		}
-		return row, found
+		if !found {
+			return nil, false
+		}
+		rows, err := w.workers[replica].store.rows(fresh(ctx), call("query", "templateById", arg{"templateId", bare(str(ref, "id"))}))
+		if err != nil || len(rows) != 1 {
+			t.Fatalf("templateById on replica %d: %v %v", replica, rows, err)
+		}
+		if templateTime(rows[0]["createdAt"]) != templateTime(ref["createdAt"]) {
+			t.Fatalf("the lookup says revision %v and the template is at %v", ref["createdAt"], rows[0]["createdAt"])
+		}
+		return rows[0], true
 	}
 
 	// Nothing is published from the file yet, here or in the other organization.
@@ -671,5 +684,93 @@ func TestAGateThatTimesOutIsASentenceForAPerson(t *testing.T) {
 	}
 	if waited := time.Since(started); waited < time.Second || waited > 10*time.Second {
 		t.Errorf("waited %v: the pool should cancel the wait at its statement limit (1.5 s here)", waited)
+	}
+}
+
+// The three reads of a template, as a client asks them, against real rows. A list
+// and the lookup of a file's template are answers to questions that need a name, a
+// status and a revision, not the document and the HTML (which can weigh megabytes
+// each, and a query answer is one message): only templateById carries a template
+// whole.
+func TestTemplateListsAreLight(t *testing.T) {
+	w := newLayoutWorld(t)
+	account := w.suffix + "-org"
+	w.createOrganization(t, account, "Light client")
+	source := "art-" + w.suffix
+
+	doc := readyConfirmation(t)
+	// A heavy template: some 600 KiB of text, which is in the document, the text
+	// part and the HTML.
+	setBlock(t, doc, "note", func(b map[string]any) { b["text"] = strings.Repeat("A long paragraph, said slowly. ", 20000) })
+	nodes, err := w.workers[0].handleSaveTemplate(w.owner, map[string]any{
+		"accountId": account, "name": "Heavy email", "content": doc, "sourceArtifactId": source, "expectedRevision": "", "action": "save",
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := decodeSaved(t, nodes)
+	fresh := memql.ContextWithFreshRead(w.owner)
+
+	asKeys := func(row map[string]any) string {
+		keys := make([]string, 0, len(row))
+		for key := range row {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		return strings.Join(keys, ",")
+	}
+	size := func(row map[string]any) int {
+		encoded, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(encoded)
+	}
+
+	// templates: what a list shows.
+	var listed map[string]any
+	for _, row := range memql.MaterializeRows(w.run(t, fresh, "query templates()")) {
+		if bare(str(row, "id")) == saved.TemplateID {
+			listed = row
+		}
+	}
+	if listed == nil {
+		t.Fatal("templates does not list the template")
+	}
+	const listKeys = "accountId,createdAt,id,layoutId,name,ownerUserId,preheader,sourceArtifactId,status,subject"
+	if got := asKeys(listed); got != listKeys {
+		t.Errorf("a templates row has %s, want %s", got, listKeys)
+	}
+	if n := size(listed); n > 4<<10 {
+		t.Errorf("a templates row weighs %d bytes", n)
+	}
+	if listed["layoutId"] != "builtin:confirmation" || str(listed, "name") != "Heavy email" || str(listed, "status") != "draft" || bare(str(listed, "sourceArtifactId")) != source {
+		t.Errorf("the list row does not say what a list shows: %v", listed)
+	}
+
+	// templateForSource: which template, and at which revision.
+	ref, found, err := w.workers[1].store.TemplateForSource(fresh, account, source)
+	if err != nil || !found {
+		t.Fatalf("templateForSource: %v %v", found, err)
+	}
+	if got := asKeys(ref); got != "createdAt,id" {
+		t.Errorf("a templateForSource row has %s, want createdAt,id", got)
+	}
+	if bare(str(ref, "id")) != saved.TemplateID || templateTime(ref["createdAt"]).Format(time.RFC3339Nano) != saved.Revision {
+		t.Errorf("the row is %v, not template %s at %s", ref, saved.TemplateID, saved.Revision)
+	}
+
+	// templateById: the template whole.
+	whole, err := w.workers[1].store.rows(fresh, call("query", "templateById", arg{"templateId", saved.TemplateID}))
+	if err != nil || len(whole) != 1 {
+		t.Fatalf("templateById: %v %v", whole, err)
+	}
+	for _, field := range []string{"document", "htmlBody", "textBody", "subject", "layoutId", "preheader", "sourceArtifactId", "name", "status", "accountId", "ownerUserId"} {
+		if _, ok := whole[0][field]; !ok {
+			t.Errorf("templateById lacks %s", field)
+		}
+	}
+	if n := size(whole[0]); n < 1<<20 {
+		t.Errorf("the template weighs %d bytes: the fixture is not heavy enough to show the difference", n)
 	}
 }

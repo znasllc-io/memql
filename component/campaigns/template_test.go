@@ -1753,6 +1753,80 @@ func TestPublishRefusesAnEmailTooLargeToSend(t *testing.T) {
 	})
 }
 
+// An email past the 2 MiB a send takes can never be sent, and its HTML can be
+// 8 MiB: a template row (and every answer that carries it) would weigh that for
+// nothing. A draft that has the email_too_large issue keeps no HTML. It keeps its
+// document, from which an editor renders it on demand, and says what is wrong in
+// the receipt; saving it again is still a retry, and publishing it is refused.
+func TestADraftTooLargeToSendKeepsNoHTML(t *testing.T) {
+	storedHTML := func(tw *templateWorld, n int) string {
+		_, args := parseRenderedCall(tw.engine.writes()[n].query)
+		html, _ := args["htmlBody"].(string)
+		return html
+	}
+
+	for name, build := range map[string]func(tw *templateWorld) map[string]any{
+		"too much markup": func(tw *templateWorld) map[string]any {
+			doc := readyConfirmation(t)
+			// Each "<" is four bytes of HTML: a file of about 1.1 MiB is an email of more than 4 MiB.
+			setBlock(t, doc, "note", func(b map[string]any) { b["text"] = strings.Repeat("<", 1150<<10) })
+			return doc
+		},
+		"pictures that, embedded, do not fit": func(tw *templateWorld) map[string]any {
+			tw.engine.pictureOwner = testOwner
+			tw.addPicture("art-big", "image/png", noisePNG(t, emaildoc.MaxImageBytes))
+			doc := readyConfirmation(t)
+			for _, id := range []string{"logo", "hero"} {
+				setBlock(t, doc, id, func(b map[string]any) { b["src"] = "artifact:art-big" })
+			}
+			return doc
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			tw := newTemplateWorld(t)
+			tw.engine.stateful = true
+			doc := build(tw)
+
+			first := tw.saved(saveTemplateArgs(doc))
+
+			if !first.hasIssue(emaildoc.IssueEmailTooLarge, "") {
+				t.Fatalf("issues = %+v, want email_too_large", first.Issues)
+			}
+			_, args := parseRenderedCall(tw.engine.writes()[0].query)
+			if html := storedHTML(tw, 0); html != "" {
+				t.Errorf("the draft stored %d bytes of HTML that can never be sent", len(html))
+			}
+			if document, _ := args["document"].(map[string]any); document["blocks"] == nil {
+				t.Errorf("the document, which the HTML is rendered from on demand, is not stored: %v", args["document"])
+			}
+			if text, _ := args["textBody"].(string); text == "" {
+				t.Error("the plain-text part was not stored")
+			}
+
+			// A retry is a retry: the content to store is the same, so nothing is written.
+			if again := tw.saved(saveTemplateArgs(doc)); again.Revision != first.Revision || len(tw.engine.writes()) != 1 {
+				t.Errorf("saving it again wrote another version: %+v", again)
+			}
+			// It cannot be published, and says why.
+			if _, err := tw.save(saveTemplateArgs(doc, revised(first.Revision, "publish"))); err == nil || err.Error() != "fix these before publishing: "+tooLargeToSend {
+				t.Errorf("publishing error = %v", err)
+			}
+			// Archiving writes back what is stored, no HTML.
+			tw.saved(saveTemplateArgs(nil, revised(first.Revision, "archive")))
+			if html := storedHTML(tw, 1); html != "" || len(tw.engine.writes()) != 2 {
+				t.Errorf("archiving a draft that keeps no HTML wrote %d bytes of it (%d writes)", len(html), len(tw.engine.writes()))
+			}
+		})
+	}
+
+	// An email that fits keeps its HTML, as ever.
+	tw := newTemplateWorld(t)
+	tw.saved(saveTemplateArgs(readyConfirmation(t)))
+	if html := storedHTML(tw, 0); !strings.HasPrefix(html, "<!DOCTYPE html") {
+		t.Errorf("an email that fits has HTML %.40q", html)
+	}
+}
+
 // noisePNG is a picture of random pixels, which no compression helps, of at
 // most limit bytes and not much fewer.
 func noisePNG(t *testing.T, limit int) []byte {

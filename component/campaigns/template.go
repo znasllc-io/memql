@@ -67,6 +67,14 @@ import (
 // the Campaigns app, which names only the template, cannot both pass the same
 // revision.
 //
+// # An email too large to send keeps no HTML
+//
+// An email past the 2 MiB a send takes can never be sent, and its HTML can be as
+// much as 8 MiB. A draft that has the email_too_large issue keeps its document
+// (an editor renders it on demand with emailRender) and the issue comes back in
+// the receipt, but it stores no HTML. What is stored is what is compared with, so
+// saving it again is still a retry.
+//
 // # Render first, lock after
 //
 // A render reads nothing a lock protects: only the document and the caller's own
@@ -414,6 +422,16 @@ func (w *Worker) renderTemplate(ctx context.Context, req templateRequest) (*rend
 		name: req.name, subject: req.document.Subject, textBody: result.Text, htmlBody: result.HTML,
 		preheader: req.document.Preheader, layoutID: req.document.Layout, sourceArtifactID: req.sourceID,
 		document: document,
+	}
+	// An email past what a send takes can never be sent, and its HTML can be 8 MiB:
+	// the row, and every answer that carries it, would weigh that for nothing. Such
+	// a draft keeps its document (an editor renders it on demand) and says what is
+	// wrong in the receipt; it keeps no HTML.
+	for _, issue := range result.Issues {
+		if issue.Code == emaildoc.IssueEmailTooLarge {
+			content.htmlBody = ""
+			break
+		}
 	}
 	return &renderedTemplate{content: content, issues: previewIssues(result.Issues)}, nil
 }

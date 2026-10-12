@@ -14,6 +14,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/core/grpclimits"
 	"github.com/znasllc-io/memql/core/id"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -213,7 +214,17 @@ func (h *Handler) openStream(ctx context.Context, r *http.Request) (memqlv1.Memq
 	dialCtx, cancel := context.WithTimeout(ctx, h.dialTimeout)
 	defer cancel()
 
-	conn, err := grpc.DialContext(dialCtx, h.endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock())
+	// The receive limit is the server's send limit, not gRPC's 4 MiB default.
+	// A query answer is one message, so an answer past the default is a read
+	// error on this stream, and a read error ends the whole WebSocket (see
+	// writeLoop): every request in flight on the tab goes with the one that
+	// was too big. The server measures what it is about to send against the
+	// same number and answers an oversize result with a sentence for that one
+	// request, so a message this stream cannot receive is never sent.
+	conn, err := grpc.DialContext(dialCtx, h.endpoint,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(grpclimits.MaxMessageBytes)),
+		grpc.WithBlock())
 	if err != nil {
 		return nil, nil, err
 	}

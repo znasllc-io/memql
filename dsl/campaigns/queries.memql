@@ -63,8 +63,9 @@ query audience audienceById {
   shape   audienceFull
 }
 
-/// The caller's templates, newest first. Backs the template list and the campaign editor's template
-/// picker. Owned.
+/// The caller's templates, newest first, as summaries: no body and no document. Backs the template
+/// list and the campaign editor's template picker; a template's content is read with templateById.
+/// Owned.
 @actor
 query template templates {
   args {
@@ -74,7 +75,7 @@ query template templates {
                 && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  50
-  shape     templateFull
+  shape     templateSummary
 }
 
 /// One template by id, gated to its owner. Backs the template editor and the campaign editor's
@@ -90,9 +91,10 @@ query template templateById {
 
 /// The template an organization published from one Library file, for campaignSaveTemplate and the
 /// editors that open a file: publishing a file again updates this template, so there is one per
-/// organization and file. Newest first and one row, so a stray duplicate can never make a save
-/// ambiguous. The concept's account tier answers a template outside the caller's organizations as
-/// not found, so the file id is not a way into somebody else's templates. Owned.
+/// organization and file. It answers the template's id and its revision (createdAt) and nothing of
+/// its content, which templateById reads. Newest first and one row, so a stray duplicate can never
+/// make a save ambiguous. The concept's account tier answers a template outside the caller's
+/// organizations as not found, so the file id is not a way into somebody else's templates. Owned.
 @actor
 query template templateForSource {
   args {
@@ -103,7 +105,7 @@ query template templateForSource {
                 && row.sourceArtifactId == args.sourceArtifactId
   sort      "row.createdAt", "desc"
   paginate  1
-  shape     templateFull
+  shape     templateRef
 }
 
 /// One email layout by id, for the organization's members. Backs the revision check

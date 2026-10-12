@@ -214,6 +214,11 @@ template that is ready is one that can go out. A document the format refuses, or
 an email too large to write out at all (more than 8 MiB of HTML), cannot be
 saved, and the answer says why.
 
+An email that is saved with `email_too_large` is kept without its HTML part. It
+could never be sent, so there is nothing worth storing: the document and the
+issue are kept, and `emailRender` writes the email out whenever an editor asks
+for a preview. Saving it again after it has been made smaller stores the HTML.
+
 ### One template per organization and file
 
 An editor opens a Library file, so the file says which template it is. Give
@@ -255,6 +260,19 @@ time, the answer is "Someone else is saving this template. Try again in a
 moment." and repeating the same call is safe.
 
 Raw template writes and the underlying create/update mutations are internal.
+
+### Reading templates
+
+A list never carries an email's content. `templates({status?})` answers one
+light row per template, `{id, ownerUserId, name, subject, status, accountId,
+layoutId, preheader, sourceArtifactId, createdAt}`, and `templateForSource`
+answers only the template's `id` and its revision (`createdAt`). The email
+document and its HTML and plain-text parts are read by id with
+`templateById({templateId})`. An email can weigh megabytes, and a list is up to
+fifty of them in one answer, so a client that needs a template's content asks
+for that one template. A list row is enough to archive or restore a template,
+which need only its revision (`createdAt`), but not to edit or publish it: those
+send the content, so the client reads it by id first.
 
 ## Configure Azure once for the cluster
 

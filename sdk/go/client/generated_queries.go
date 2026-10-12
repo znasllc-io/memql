@@ -12433,7 +12433,7 @@ func TemplateByIdBuild(args TemplateByIdArgs) string {
 	return b.String()
 }
 
-// TemplateForSource -- The template an organization published from one Library file, for campaignSaveTemplate and the editors that open a file: publishing a file again updates this template, so there is one per organization and file. Newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers a template outside the caller's organizations as not found, so the file id is not a way into somebody else's templates. Owned.
+// TemplateForSource -- The template an organization published from one Library file, for campaignSaveTemplate and the editors that open a file: publishing a file again updates this template, so there is one per organization and file. It answers the template's id and its revision (createdAt) and nothing of its content, which templateById reads. Newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers a template outside the caller's organizations as not found, so the file id is not a way into somebody else's templates. Owned.
 //
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateForSource"] in generated_concepts.go).
 type TemplateForSourceArgs struct {
@@ -12461,7 +12461,7 @@ func TemplateForSourceBuild(args TemplateForSourceArgs) string {
 	return b.String()
 }
 
-// Templates -- The caller's templates, newest first. Backs the template list and the campaign editor's template picker. Owned.
+// Templates -- The caller's templates, newest first, as summaries: no body and no document. Backs the template list and the campaign editor's template picker; a template's content is read with templateById. Owned.
 //
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templates"] in generated_concepts.go).
 type TemplatesArgs struct {
