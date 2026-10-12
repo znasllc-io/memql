@@ -25,7 +25,7 @@ func renderFixture(displayName string) (text string, html string) {
 		HTMLBody: "<p>Hi {{displayName}}, welcome.</p>",
 	}
 	r := Recipient{ID: "r1", Email: "someone@example.com", DisplayName: displayName}
-	msg, err := renderMessage(c, t, r, "https://example.com/unsubscribe?token=abc", RenderOptions{})
+	msg, err := renderMessage(c, t, r, RenderOptions{Links: MessageLinks{Unsubscribe: "https://example.com/unsubscribe?token=abc"}})
 	if err != nil {
 		panic(err)
 	}
@@ -83,7 +83,7 @@ func TestFooterNeutralisesAJavascriptURL(t *testing.T) {
 	tpl := Template{ID: "t1", Subject: "s", TextBody: "t", HTMLBody: "<p>body</p>"}
 	r := Recipient{ID: "r1", Email: "a@example.com", DisplayName: "Ada"}
 
-	msg, err := renderMessage(c, tpl, r, "javascript:alert(1)", RenderOptions{})
+	msg, err := renderMessage(c, tpl, r, RenderOptions{Links: MessageLinks{Unsubscribe: "javascript:alert(1)"}})
 	if err != nil {
 		t.Fatalf("renderMessage: %v", err)
 	}
@@ -122,6 +122,8 @@ type mergeTagCase struct {
 func mergeTagCases() []mergeTagCase {
 	const attack = `Ben & <script>alert(1)</script>`
 	const attackEscaped = `Ben &amp; &lt;script&gt;alert(1)&lt;/script&gt;`
+	const linkAttack = `https://x.test/p?a=1&b=<2>`
+	const linkAttackEscaped = `https://x.test/p?a=1&amp;b=&lt;2&gt;`
 	return []mergeTagCase{
 		{
 			tag: "{{displayName}}", raw: attack, escaped: attackEscaped,
@@ -155,6 +157,26 @@ func mergeTagCases() []mergeTagCase {
 				r.Fields = map[string]any{"company": attack}
 			},
 		},
+		// The four link tags. A link is built by this package, but it is built
+		// from a configurable origin and it reaches the HTML body, so the same
+		// asymmetry applies: markup characters are escaped in the HTML part
+		// and left alone in the text part.
+		{
+			tag: "{{unsubscribeUrl}}", raw: linkAttack, escaped: linkAttackEscaped,
+			apply: func(_ *Campaign, _ *Recipient, o *RenderOptions) { o.Links.Unsubscribe = linkAttack },
+		},
+		{
+			tag: "{{preferencesUrl}}", raw: linkAttack, escaped: linkAttackEscaped,
+			apply: func(_ *Campaign, _ *Recipient, o *RenderOptions) { o.Links.Preferences = linkAttack },
+		},
+		{
+			tag: "{{viewUrl}}", raw: linkAttack, escaped: linkAttackEscaped,
+			apply: func(_ *Campaign, _ *Recipient, o *RenderOptions) { o.Links.View = linkAttack },
+		},
+		{
+			tag: "{{confirmUrl}}", raw: linkAttack, escaped: linkAttackEscaped,
+			apply: func(_ *Campaign, _ *Recipient, o *RenderOptions) { o.Links.Confirm = linkAttack },
+		},
 	}
 }
 
@@ -162,7 +184,9 @@ func renderTagFixture(t *testing.T, c mergeTagCase) (text string, html string) {
 	t.Helper()
 	campaign := Campaign{ID: "c1", OwnerUserID: "u1", Name: "Spring", FromName: "Acme"}
 	recipient := Recipient{ID: "r1", Email: "someone@example.com", DisplayName: "Ada"}
-	opts := RenderOptions{}
+	// Every message has an unsubscribe link, so a case that is not about it
+	// still renders; a case that is about it replaces this one.
+	opts := RenderOptions{Links: MessageLinks{Unsubscribe: "https://example.com/unsubscribe?token=abc"}}
 	c.apply(&campaign, &recipient, &opts)
 
 	tmpl := Template{
@@ -171,7 +195,7 @@ func renderTagFixture(t *testing.T, c mergeTagCase) (text string, html string) {
 		TextBody: "Text " + c.tag + " end.",
 		HTMLBody: "<p>Html " + c.tag + " end.</p>",
 	}
-	msg, err := renderMessage(campaign, tmpl, recipient, "https://example.com/unsubscribe?token=abc", opts)
+	msg, err := renderMessage(campaign, tmpl, recipient, opts)
 	if err != nil {
 		t.Fatalf("%s: renderMessage: %v", c.tag, err)
 	}
@@ -221,7 +245,7 @@ func TestMergeTagCasesCoverEveryDeclaredTag(t *testing.T) {
 		ID: "r1", Email: "a@example.test", DisplayName: "Ada",
 		Fields: map[string]any{"company": "Acme"},
 	}
-	text, _ := mergeReplacers(campaign, recipient, "Account")
+	text, _ := mergeReplacers(campaign, recipient, "Account", MessageLinks{})
 
 	// Replacer exposes no list, so the declared set is recovered by
 	// substituting a body built from the table and asserting nothing is
@@ -256,7 +280,7 @@ func TestUnknownTagsStayLiteralAndAreReported(t *testing.T) {
 		TextBody: "Your company is {{fields.compnay}} and your plan is {{fields.plan}}.",
 		HTMLBody: "<p>{{fields.compnay}}</p>",
 	}
-	msg, err := renderMessage(campaign, tmpl, recipient, "https://example.test/unsubscribe?token=x", RenderOptions{})
+	msg, err := renderMessage(campaign, tmpl, recipient, RenderOptions{Links: MessageLinks{Unsubscribe: "https://example.test/unsubscribe?token=x"}})
 	if err != nil {
 		t.Fatalf("renderMessage: %v", err)
 	}
@@ -281,7 +305,7 @@ func TestMergeTagsWithAwkwardColumnNames(t *testing.T) {
 		ID: "r1", Email: "a@example.test", DisplayName: "Ada",
 		Fields: map[string]any{"Company Name": "Acme", "2026 spend": "1200", "first-name": "Ada"},
 	}
-	text, _ := mergeReplacers(Campaign{Name: "Spring"}, recipient, "")
+	text, _ := mergeReplacers(Campaign{Name: "Spring"}, recipient, "", MessageLinks{})
 	body := "{{Company Name}} {{fields.Company Name}} {{fields.2026 spend}} {{fields.first-name}}"
 	got := text.Replace(body)
 
@@ -310,7 +334,7 @@ func TestStructuredFieldValuesRenderEmpty(t *testing.T) {
 			"ok":     true,
 		},
 	}
-	text, _ := mergeReplacers(Campaign{}, recipient, "")
+	text, _ := mergeReplacers(Campaign{}, recipient, "", MessageLinks{})
 	got := text.Replace("[{{fields.nested}}][{{fields.list}}][{{fields.count}}][{{fields.ok}}]")
 	if got != "[][][12][true]" {
 		t.Errorf("field value rendering = %q, want [][][12][true] -- structured values render empty, "+

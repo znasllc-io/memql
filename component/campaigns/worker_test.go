@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -917,6 +918,98 @@ func TestUnsubscribeHeadersArePresent(t *testing.T) {
 	}
 	if !strings.Contains(msg.TextBody, "Unsubscribe: https://example.test/unsubscribe?token=") {
 		t.Error("the visible body carries no unsubscribe link; the header serves the provider's UI, a person needs the link")
+	}
+}
+
+// linkTokenIn pulls the token out of the first <prefix>?token=<token> URL in a
+// body, decoded the way a mail client's request would carry it.
+func linkTokenIn(t *testing.T, body, prefix string) string {
+	t.Helper()
+	marker := prefix + "?token="
+	i := strings.Index(body, marker)
+	if i < 0 {
+		t.Fatalf("no %s link in the body:\n%s", prefix, body)
+	}
+	rest := body[i+len(marker):]
+	if j := strings.IndexAny(rest, " \t\r\n\"'<>"); j >= 0 {
+		rest = rest[:j]
+	}
+	token, err := url.QueryUnescape(rest)
+	if err != nil {
+		t.Fatalf("the token in %s does not decode: %v", prefix, err)
+	}
+	return token
+}
+
+// TestCampaignSendsCarryPreferencesAndViewLinks -- every campaign message can
+// point at its preferences page and at itself in a browser, and the view link
+// carries what was SENT, not what the template says by the time somebody
+// clicks it: the template revision the job froze at queue time, and the names
+// the footer and {{campaignName}} showed.
+func TestCampaignSendsCarryPreferencesAndViewLinks(t *testing.T) {
+	const revision = "2026-10-11T09:30:00.123456789Z"
+	job := jobRow()
+	job["templateSnapshot"] = map[string]any{
+		"id": testTemplate, "subject": "Reviewed copy", "status": "ready", "revision": revision,
+		"textBody": "Manage: {{preferencesUrl}}\nView: {{viewUrl}}\n",
+		"htmlBody": `<p><a href="{{preferencesUrl}}">Manage</a> <a href="{{viewUrl}}">View</a></p>`,
+	}
+	campaign := campaignRow()
+	campaign["fromName"] = "Acme News"
+	// The template has moved on since the job was queued.
+	edited := templateRow()
+	edited["textBody"] = "Edited later"
+	engine := &fakeEngine{
+		jobs: []map[string]any{job}, campaign: campaign, template: edited,
+		roster: []map[string]any{recipientRow("r-1", "reader@example.test", "subscribed")},
+	}
+	sender := &recordingSender{}
+	w := newTestWorker(t, engine, sender)
+
+	w.DrainOnce(context.Background())
+
+	if sender.count() != 1 {
+		t.Fatalf("want one message, got %d", sender.count())
+	}
+	msg := sender.sent[0]
+	keys := w.cfg.UnsubscribeKeys()
+	now := time.Now()
+
+	preferences, err := ParseLinkToken(keys, LinkPreferences, linkTokenIn(t, msg.TextBody, "https://example.test"+PreferencesPath), now)
+	if err != nil {
+		t.Fatalf("the preferences link does not verify for its own page: %v", err)
+	}
+	if preferences.OwnerUserID != testOwner || preferences.RecipientID != "r-1" || preferences.CampaignID != testCampaign ||
+		preferences.EmailDigest != EmailDigest("reader@example.test") {
+		t.Errorf("preferences payload = %+v", preferences)
+	}
+
+	view, err := ParseLinkToken(keys, LinkView, linkTokenIn(t, msg.TextBody, "https://example.test"+ViewPath), now)
+	if err != nil {
+		t.Fatalf("the view link does not verify for its own page: %v", err)
+	}
+	if view.RecipientID != "r-1" || view.EmailDigest != EmailDigest("reader@example.test") {
+		t.Errorf("view payload names the wrong person: %+v", view)
+	}
+	if view.TemplateID != testTemplate || view.TemplateRevision != revision {
+		t.Errorf("the view link carries template %q at %q, want the job's frozen snapshot %q at %q",
+			view.TemplateID, view.TemplateRevision, testTemplate, revision)
+	}
+	if view.CampaignName != "August update" || view.SenderName != "Acme News" {
+		t.Errorf("the view link carries campaign %q and sender %q, want what the message showed", view.CampaignName, view.SenderName)
+	}
+
+	// The same two links are in the HTML part, and none of them is tracked.
+	hrefs := anchorHrefs(t, msg.HTMLBody)
+	if len(hrefs) < 2 || !strings.Contains(hrefs[0], PreferencesPath) || !strings.Contains(hrefs[1], ViewPath) {
+		t.Errorf("the HTML part's links = %v", hrefs)
+	}
+	// The footer names the sender, and a campaign send never asks for a confirm link.
+	if !strings.Contains(msg.TextBody, "you subscribed to Acme News.") {
+		t.Errorf("the footer does not name the sender: %s", msg.TextBody)
+	}
+	if strings.Contains(msg.TextBody, ConfirmPath) {
+		t.Errorf("a campaign message carries a confirm link: %s", msg.TextBody)
 	}
 }
 

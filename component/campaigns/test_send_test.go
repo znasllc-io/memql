@@ -3,6 +3,7 @@ package campaigns
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // test_send_test.go -- the one-address preview (memql#4822, design D11).
@@ -133,6 +134,50 @@ func TestTestSendCarriesAnInertUnsubscribeToken(t *testing.T) {
 	}
 	if !strings.Contains(msg.TextBody, "Unsubscribe:") {
 		t.Error("the unsubscribe footer did not render at all; it is most of what a test send is checking")
+	}
+}
+
+// TestTestSendLinksAreInert: all four links render, so the operator sees what
+// the recipient will, and none of them does anything. A real one would name a
+// real recipient and opt somebody out, subscribe somebody or open their
+// message on a curious click.
+func TestTestSendLinksAreInert(t *testing.T) {
+	engine := testSendFixture()
+	engine.template["textBody"] = "U {{unsubscribeUrl}} P {{preferencesUrl}} V {{viewUrl}} C {{confirmUrl}}"
+	engine.template["htmlBody"] = `<p><a href="{{preferencesUrl}}">Manage</a> <a href="{{confirmUrl}}">Confirm</a></p>`
+	w, sender := testSendWorker(t, engine)
+
+	nodes, err := w.handleTestSend(importCtx(), map[string]any{
+		"campaignId": testCampaign, "to": "operator@example.test",
+	}, 0)
+	if err != nil {
+		t.Fatalf("testSend: %v", err)
+	}
+	msg := sender.sent[0]
+
+	for tag, path := range map[string]string{
+		"U": UnsubscribePath, "P": PreferencesPath, "V": ViewPath, "C": ConfirmPath,
+	} {
+		want := tag + " https://example.test" + path + "?token=" + inertUnsubscribeToken
+		if !strings.Contains(msg.TextBody, want) {
+			t.Errorf("the text part is missing %q.\ngot: %s", want, msg.TextBody)
+		}
+	}
+	if hrefs := anchorHrefs(t, msg.HTMLBody); countOf(hrefs, "https://example.test"+PreferencesPath+"?token="+inertUnsubscribeToken) != 1 ||
+		countOf(hrefs, "https://example.test"+ConfirmPath+"?token="+inertUnsubscribeToken) != 1 {
+		t.Errorf("the HTML part's links are not the inert ones: %v", hrefs)
+	}
+	if got := msg.Headers[headerListUnsubscribe]; got != "<https://example.test"+UnsubscribePath+"?token="+inertUnsubscribeToken+">" {
+		t.Errorf("List-Unsubscribe = %q", got)
+	}
+	keys := w.cfg.UnsubscribeKeys()
+	for _, kind := range linkKinds {
+		if _, err := ParseLinkToken(keys, kind, inertUnsubscribeToken, time.Now()); err == nil {
+			t.Errorf("the inert token verifies as a %s token", kind)
+		}
+	}
+	if tags, _ := decodeResult(t, nodes)["unresolvedTags"].([]any); len(tags) != 0 {
+		t.Errorf("a link tag was reported as unresolved: %v", tags)
 	}
 }
 

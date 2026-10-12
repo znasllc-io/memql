@@ -186,10 +186,10 @@ mutation template updateTemplate {
 mutation campaign createCampaign {
   args {
     campaignId   string!
-    name         string!
+    name         string!  @maxLength(200)
     audienceId   string!
     templateId   string!
-    fromName          string
+    fromName          string  @maxLength(100)
     replyTo           string
     scheduledAt       datetime
     accountId         string
@@ -220,10 +220,10 @@ mutation campaign createCampaign {
 mutation campaign updateCampaign {
   args {
     campaignId   string!
-    name         string!
+    name         string!  @maxLength(200)
     audienceId   string!
     templateId   string!
-    fromName          string
+    fromName          string  @maxLength(100)
     replyTo           string
     scheduledAt       datetime
     accountId         string
@@ -793,7 +793,7 @@ mutation senderIdentity createSenderIdentity {
   args {
     senderIdentityId  string!
     address           string!
-    fromName          string!
+    fromName          string!  @maxLength(100)
     replyTo           string
     accountId         string
     notes             string
@@ -816,7 +816,7 @@ mutation senderIdentity updateSenderIdentity {
   args {
     senderIdentityId  string!
     address           string!
-    fromName          string!
+    fromName          string!  @maxLength(100)
     replyTo           string
     accountId         string
     notes             string
@@ -1213,12 +1213,12 @@ mutation campaign createCampaignTestRun {
   args {
     campaignId string!
     testSourceCampaignId string!
-    name string!
+    name string! @maxLength(200)
     accountId string!
     audienceId string!
     templateId string!
     senderIdentityId string
-    fromName string
+    fromName string @maxLength(100)
     replyTo string
     trackOpens bool
     trackClicks bool
