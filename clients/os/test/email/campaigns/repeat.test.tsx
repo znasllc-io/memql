@@ -19,6 +19,7 @@ vi.mock("../../../src/auth/context", () => ({
 const { EmailApp } = await import("../../../src/apps/email/EmailApp");
 const { LocalEmailSettingsStore } = await import("../../../src/apps/email/settings");
 const { audienceRow, campaignRow, fakeConnection, senderRow, templateRow, withSession } = await import("../harness");
+const { seriesSaveNeeded } = await import("../../../src/apps/email/actions");
 
 // A CAMPAIGN THAT REPEATS (memql#6033, Ruling 7c).
 //
@@ -221,5 +222,46 @@ describe("a campaign that repeats", () => {
     await act(async () => conn.subscriptions.emit(CAMPAIGN, campaignRow({ id: "c1", name: "Fortnightly digest", audienceId: "a1", templateId: "t1", senderIdentityId: "s1" })));
     press("Save");
     await waitFor(() => expect(conn.query.campaignConfigureSeries).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: "2027-10-02T09:00:00Z" })));
+  });
+});
+
+describe("what an edit of a repeating campaign saves", () => {
+  it("saves the series only when something it repeats, or how often, changed", () => {
+    // An occurrence is made from what the series captured, never from the
+    // draft: a change to a field it repeats reaches the mail only through a
+    // series save.
+    const repeated = [{ name: "Fortnightly" }, { audienceId: "a2" }, { templateId: "t2" }, { senderIdentityId: "s2" }, { replyTo: "" }, { trackOpens: false }, { trackClicks: false }];
+    for (const changes of repeated) expect(seriesSaveNeeded(changes, false, false)).toBe(true);
+    // How often, or from when; or a save that was refused and is still owed.
+    expect(seriesSaveNeeded({}, true, false)).toBe(true);
+    expect(seriesSaveNeeded({}, false, true)).toBe(true);
+    // The organization is not something a series repeats -- it cannot move to
+    // another -- and nothing changed is nothing to save.
+    expect(seriesSaveNeeded({ accountId: "other" }, false, false)).toBe(false);
+    expect(seriesSaveNeeded({}, false, false)).toBe(false);
+  });
+
+  it("saving a paused repeat's edits keeps it paused: Resume is the only way back", async () => {
+    const paused = { ...series, status: "paused" };
+    const conn = seed({ campaignSeries: [paused] });
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barWord()).toBe("Repeating paused"));
+    expect(barActs()).toEqual(["Edit", "Send a test", "Resume"]);
+    press("Edit");
+    expect(await screen.findByRole("heading", { level: 3, name: "Edit campaign" })).toBeTruthy();
+    chooseOption(screen.getByLabelText("Every"), "3 weeks");
+    press("Save");
+    await waitFor(() =>
+      expect(conn.query.campaignConfigureSeries).toHaveBeenCalledWith(expect.objectContaining({ campaignId: "c1", action: "save", intervalWeeks: 3, expectedRevision: paused.createdAt })),
+    );
+    // The engine keeps a saved series' status, so what comes back is still paused.
+    await act(async () => conn.subscriptions.emit(SERIES, { ...paused, intervalWeeks: 3, createdAt: "2027-10-02T09:00:00Z" }));
+    expect(await screen.findByRole("heading", { level: 3, name: "Weekly digest" })).toBeTruthy();
+    await waitFor(() => expect(barDetail()).toBe("Every 3 weeks"));
+    expect(barWord()).toBe("Repeating paused");
+    expect(barActs()).toEqual(["Edit", "Send a test", "Resume"]);
+    // Nothing but Resume restarts it, and nobody pressed Resume.
+    expect(conn.query.campaignConfigureSeries.mock.calls.map(([args]) => (args as { action: string }).action)).toEqual(["save"]);
   });
 });

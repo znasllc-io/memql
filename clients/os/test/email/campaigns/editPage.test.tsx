@@ -231,6 +231,27 @@ describe("editing a campaign", () => {
     expect(conn.query.updateCampaign).not.toHaveBeenCalled();
   });
 
+  it("does not offer to move a repeating campaign to another organization", async () => {
+    // A series never changes organizations -- the engine refuses it -- so a
+    // move would save the campaign under one and leave its series under the
+    // other. The campaign a series repeats from is edited where it is.
+    installSeededAccess("writer");
+    const conn = seed({
+      accounts: [{ id: "other", name: "Other", status: "active" }, { id: "acme", name: "Acme", status: "active" }],
+      audiences: [audienceRow({ id: "a-acme", accountId: "acme", name: "Acme audience" })],
+      templates: [templateRow({ id: "t-acme", accountId: "acme", name: "Acme copy" })],
+      senderIdentities: [senderRow({ id: "s-acme", accountId: "acme", address: "news@acme.test" })],
+      campaigns: [campaignRow({ id: "c1", name: "Acme newsletter", accountId: "acme", audienceId: "a-acme", templateId: "t-acme", senderIdentityId: "s-acme" })],
+      campaignSeries: [
+        { id: "series", sourceCampaignId: "c1", accountId: "acme", name: "Acme newsletter", status: "active", intervalWeeks: 2, timeZone: ZONE, anchorAt: "2031-10-14T16:00:00Z", nextAt: "2031-10-14T16:00:00Z", createdAt: "2027-10-01T12:00:00Z", lastError: "" },
+      ],
+    });
+    mountWindow(conn, { role: "writer", everyAccount: false, accountIds: ["other", "acme"] });
+    await openEdit("Acme newsletter");
+    expect(screen.getByLabelText("Every")).toBeTruthy();
+    expect(screen.queryByLabelText("Organization")).toBeNull();
+  });
+
   it("choosing Repeat turns Save into Start repeating", async () => {
     const conn = seed();
     mountWindow(conn);

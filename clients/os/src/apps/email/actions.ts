@@ -280,7 +280,8 @@ export interface SeriesControlState extends WriteState {
 }
 
 /**
- * Start, change, pause and resume a campaign that repeats.
+ * Start, change, pause and resume a campaign that repeats -- the one hook every
+ * series write goes through, Add a campaign's Start repeating among them.
  *
  * EVERY CHANGE NAMES THE REVISION IT WAS READ AT, and the engine refuses a
  * stale one ("this recurring campaign changed; reload it before saving") rather
@@ -358,6 +359,25 @@ export interface CampaignChanges {
 }
 
 const OPTIONAL_CHANGES = ["replyTo", "scheduledAt", "accountId", "senderIdentityId", "trackOpens", "trackClicks"] as const;
+
+/**
+ * The campaign fields a series repeats: the engine's `seriesDefinition`, and
+ * the name an occurrence is called by. An occurrence is made from what the
+ * series CAPTURED, never from the draft, so an edit to one of these reaches the
+ * mail only through a series save. The organization is not among them: a
+ * series never moves to another.
+ */
+const SERIES_CAPTURES = ["name", "audienceId", "templateId", "senderIdentityId", "replyTo", "trackOpens", "trackClicks"] as const satisfies readonly (keyof CampaignChanges)[];
+
+/**
+ * Whether an edit of a repeating campaign has to save its series: something
+ * the series repeats changed, or how often it repeats, or a series save that
+ * was refused is still owed. Never to restart it -- a save keeps the series'
+ * status, and only Resume changes that (memql#6033).
+ */
+export function seriesSaveNeeded(changes: CampaignChanges, cadenceChanged: boolean, owed: boolean): boolean {
+  return cadenceChanged || owed || SERIES_CAPTURES.some((key) => changes[key] !== undefined);
+}
 
 export interface EditCampaignState extends WriteState {
   save: (campaign: CampaignRow, changes: CampaignChanges) => Promise<boolean>;
@@ -1041,13 +1061,6 @@ export function useCampaignWrites() {
 }
 
 export type CampaignWrites = ReturnType<typeof useCampaignWrites>;
-
-export function useConfigureSeries() {
-  return useWrite(async (query, args: Parameters<Connection["query"]["campaignConfigureSeries"]>[0]) => {
-    await query.campaignConfigureSeries(args);
-    return true;
-  }, false);
-}
 
 
 export function useConfigureNewsletter() {

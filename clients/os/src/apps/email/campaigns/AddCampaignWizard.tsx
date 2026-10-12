@@ -25,7 +25,7 @@ import { accessAdmits } from "../../../system/registry";
 import { useDefaultOrganization } from "../../accounts/organization";
 import { accountName } from "../../accounts/rows";
 import { useAccountOptionsFeed } from "../../accounts/tie";
-import { useConfigureSeries, useCreateCampaign, useSendControls, useTestSend, useUpdateCampaign, type CampaignFacts } from "../actions";
+import { useCreateCampaign, useSendControls, useSeriesControls, useTestSend, useUpdateCampaign, type CampaignFacts } from "../actions";
 import { toKitActs, type ActSpec } from "../acts";
 import { recordNamed, useOpenInbox, useOpenRecord, useOpenSettings } from "../openRequest";
 import { isOperatorOrganization, organizationName, selectableOrganizations } from "../organizations";
@@ -270,7 +270,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
   const create = useCreateCampaign();
   const update = useUpdateCampaign();
   const controls = useSendControls();
-  const series = useConfigureSeries();
+  const series = useSeriesControls();
   const testSend = useTestSend();
   const [written, setWritten] = useState<CampaignFacts | null>(null);
   // A create whose answer was lost may still have written the draft, and then
@@ -373,7 +373,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
           ? await controls.start(campaignId)
           : when.kind === "schedule"
             ? await controls.schedule(campaignId, instant)
-            : await series.call({ campaignId, action: "save", intervalWeeks: when.weeks, firstSendAt: instant, timeZone: zone });
+            : await series.save({ campaignId, intervalWeeks: when.weeks, firstSendAt: instant, timeZone: zone });
       if (!done) {
         setRefused("send");
         setAsking("");

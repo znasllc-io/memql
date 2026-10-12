@@ -7,7 +7,7 @@ import { absent } from "../../../kit/measure";
 import { AccountPicker } from "../../accounts/AccountPicker";
 import { useDefaultOrganization } from "../../accounts/organization";
 import { useAccountOptionsFeed } from "../../accounts/tie";
-import { useEditCampaign, useSendControls, useSeriesControls, type CampaignChanges } from "../actions";
+import { seriesSaveNeeded, useEditCampaign, useSendControls, useSeriesControls, type CampaignChanges } from "../actions";
 import { toKitActs, type ActSpec } from "../acts";
 import { useOpenSettings } from "../openRequest";
 import { isOperatorOrganization, organizationName, selectableOrganizations } from "../organizations";
@@ -41,15 +41,19 @@ import type { When } from "./wizardModel";
 //
 // SAVE WRITES WHAT CHANGED AND NOTHING ELSE (`useEditCampaign`), so a change
 // somebody else made meanwhile to another field survives. A draft a series
-// repeats from is saved twice over: the campaign, then the series -- an
-// occurrence is made from what the series captured, so the draft's edits reach
-// the mail only through that second save, under the revision it was read at.
+// repeats from is saved twice over when what it repeats changed: the campaign,
+// then the series -- an occurrence is made from what the series captured, so
+// the draft's edits reach the mail only through that second save, under the
+// revision it was read at (`seriesSaveNeeded`). Saving a series never restarts
+// it: a paused or stopped one stays so until somebody resumes it, on its page.
 // When the first lands and the second is refused, the series is still owed:
 // Save stays, and writes only the series.
 //
 // THE ORGANIZATION IS ASKED ONLY WHEN THERE IS A CHOICE, and a campaign from
 // before organizations starts on the person's own. Choosing another clears the
-// audience, template and sender: they were the other organization's.
+// audience, template and sender: they were the other organization's. A
+// campaign a series repeats from is never moved: a series cannot change
+// organizations, so the move would leave the two in different ones.
 
 /** The value the sender choice uses for this cluster's own sender (`senderIdentityId` ""). */
 const CLUSTER_SENDER = ":cluster";
@@ -243,7 +247,9 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
   const save = () =>
     once("save", async () => {
       if (!(await saveCampaign())) return;
-      if (series !== null) {
+      // The series only when something it repeats changed -- and saving it never
+      // restarts it: a paused or stopped series stays so until Resume.
+      if (series !== null && seriesSaveNeeded(changes, seriesChanged, seriesOwed)) {
         if (!(await repeats.save(seriesSave(series.createdAt)))) {
           setSeriesOwed(true);
           setRefused({ write: "series", campaignSaved: campaignChanged || seriesOwed });
@@ -408,7 +414,7 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
         />
         {outcome()}
         <Panel label="Campaign">
-          {choices.length > 1 ? (
+          {choices.length > 1 && series === null ? (
             <div className="email-field">
               <Field label="Organization">
                 <AccountPicker id="email-campaign-edit-organization" label="Organization" required accounts={choices} value={accountId} onChange={pickOrganization} />
