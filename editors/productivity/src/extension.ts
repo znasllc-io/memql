@@ -7,7 +7,7 @@ import { newTemplate } from "./templates.js";
 import { TemplateEditor } from "./templateEditor.js";
 import { TemplatePublisher } from "./templatePublish.js";
 import { TemplateExamples } from "./templateExamples.js";
-import { createMarkdown } from "./newMarkdown.js";
+import { newMarkdown } from "./newMarkdown.js";
 import { MarkdownEditor } from "./markdownEditor.js";
 import { PDFEditor, PDFDocument } from "./pdfEditor.js";
 import { syncDesktopAppearance } from "./themeSync.js";
@@ -125,18 +125,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     vscode.window.registerCustomEditorProvider("memql.productivity.markdown", { resolveCustomTextEditor: (document, panel) => userOperation("open the document", () => markdown.resolveCustomTextEditor(document, panel)) }, { supportsMultipleEditorsPerDocument: true, webviewOptions: { enableFindWidget: false } }),
     vscode.commands.registerCommand("memql.productivity.newMarkdown", async () => {
-      try {
-        const lease = connection.current();
-        if (!lease) throw new UserInputError("Connect to your cluster in MemQL before creating a document.");
-        const name = await vscode.window.showInputBox({ title: "New Markdown document", value: "Untitled.md", prompt: `Save in ${lease.name}. Add content in Source or request it in Review.`,
-          validateInput: value => !value.trim() || /[\\/\u0000-\u001f]/.test(value) || value.length > 150 ? "Enter a file name, without a folder path." : undefined });
-        if (!name) return;
-        const filename = /\.(md|markdown)$/i.test(name) ? name : `${name}.md`;
-        // A new request id for each document asked for: the cluster uses it to recognise a repeat of this one ask.
-        const uri = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Creating ${filename}` },
-          () => createMarkdown(connection, lease, filename, globalThis.crypto.randomUUID()));
-        await markdown.show("review", uri);
-      } catch (error) { void showProblem(error, "create the Markdown document"); }
+      try { await newMarkdown(connection, uri => markdown.show("review", uri)); } catch (error) { void showProblem(error, "create the Markdown document"); }
     }),
     vscode.commands.registerCommand("memql.productivity.markdown.insertImage", insertImage(files, uri => provider.load(uri))),
     ...(["source", "reading", "review", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.markdown.${mode}`, async (uri?: vscode.Uri) => {
