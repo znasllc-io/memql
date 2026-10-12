@@ -12,8 +12,9 @@
 // engine registers a subscription synchronously and runs a read on a
 // goroutine (memql#4536, design D2), so subscribing first and reading second
 // cannot miss a row: anything written during the read arrives as an event and
-// folds onto the seeded answer by id. The reverse order can miss a row
-// forever, and no amount of client care recovers it.
+// folds onto the seeded answer by id -- which is why a seed KEEPS what arrives
+// while it reads and replays it onto its answer (see runSeed). The reverse
+// order can miss a row forever, and no amount of client care recovers it.
 //
 // CONTINUITY IS A STREAM PROPERTY, NOT A COLLECTION PROPERTY. `seq` numbers
 // every notification on the socket and `gap_before` lands on whichever
@@ -110,6 +111,11 @@ export interface LiveCollectionSpec<T = Row> {
   // Return false to keep what is held. Called with `held === undefined` for a
   // row the collection has not seen, where returning false would mean the row
   // can never arrive at all.
+  //
+  // It is also the judge when a seed replays what arrived while it read: the
+  // row the read returned is what is held, so an arrival older than it is
+  // refused rather than rolling it back. Without it the arrival wins -- it
+  // came in after the page that read the row may already have been answered.
   supersedes?: (incoming: T, held: T | undefined) => boolean;
   // CDC verbs. Defaults to all three.
   actions?: GraphAction[];
@@ -154,6 +160,12 @@ function isDeleteKind(kind: string): boolean {
   return kind === "NODE_DELETED";
 }
 
+// One change the stream delivered: a row, or its removal (null).
+interface Arrival<T> {
+  id: string;
+  row: T | null;
+}
+
 export class LiveCollection<T = Row> {
   private rowsById = new Map<string, T>();
   private order: string[] = [];
@@ -164,6 +176,9 @@ export class LiveCollection<T = Row> {
   private cachedSnapshot: LiveSnapshot<T> | null = null;
 
   private unsubscribe: (() => void) | null = null;
+  // What arrived while the running seed read, in arrival order, for it to
+  // replay onto its answer. Null while no seed is reading.
+  private arrivals: Array<Arrival<T>> | null = null;
   private seedAbort: AbortController | null = null;
   private seedPending = false;
   private seedRunning = false;
@@ -296,6 +311,18 @@ export class LiveCollection<T = Row> {
     this.seedAbort = abort;
     if (this.rowsById.size === 0) this.setState("seeding");
 
+    // KEEP WHAT ARRIVES WHILE THIS READS (memql#6033). Every arrival still
+    // folds onto the rows on screen at once -- a list being re-read is still
+    // live -- but those rows are about to be REPLACED by the read's answer,
+    // and a page answered before an arrival is older than it: a `sent` that
+    // lands between page 1 and page 2 would be overwritten by page 1's
+    // `sending` until the next reseed, an insert that sorts onto a page already
+    // read would never be seen, and a delete would come back. So each seed
+    // keeps its own list, from before its first page is asked for until its
+    // answer is installed, and replays it in order onto that answer.
+    const arrivals: Array<Arrival<T>> = [];
+    this.arrivals = arrivals;
+
     const collected = new Map<string, T>();
     const seenOrder: string[] = [];
     const idOf = this.spec.rowId ?? (defaultRowId as (row: T) => string);
@@ -322,6 +349,16 @@ export class LiveCollection<T = Row> {
       // would keep it on screen forever.
       this.rowsById = collected;
       this.order = seenOrder;
+      // ...THEN REPLAY what arrived while it read, in order, through the same
+      // rules a fold follows: a removal removes, a row out of the read's scope
+      // leaves, and `supersedes` judges an arrival against the row the read
+      // returned -- an arrival older than it does not roll it back. Without a
+      // watermark the arrival wins, as any later arrival would.
+      this.arrivals = null;
+      for (const arrival of arrivals) {
+        if (arrival.row === null) this.drop(arrival.id);
+        else this.place(arrival.id, arrival.row);
+      }
       this.errorText = "";
       this.bump();
       this.setState("live");
@@ -332,6 +369,9 @@ export class LiveCollection<T = Row> {
       // "seeding" would be a lie about work in progress.
       this.setState(this.rowsById.size > 0 ? "degraded" : "live");
     } finally {
+      // A seed that failed or was abandoned has nothing to replay onto: what
+      // arrived during it already folded onto the rows on screen.
+      if (this.arrivals === arrivals) this.arrivals = null;
       this.seedRunning = false;
       if (this.seedPending && !this.closed) {
         this.seedPending = false;
@@ -346,7 +386,7 @@ export class LiveCollection<T = Row> {
     if (id === "") return;
 
     if (isDeleteKind(event.kind)) {
-      this.remove(id);
+      this.arrive(id, null);
       return;
     }
 
@@ -362,11 +402,9 @@ export class LiveCollection<T = Row> {
       void reread(id, abort.signal)
         .then((row) => {
           if (this.closed) return;
-          if (row === null) {
-            this.remove(id);
-            return;
-          }
-          this.upsert(id, row);
+          // Arrives when the re-read lands, not when the event did: that is
+          // the moment its answer is known, and a seed reading then keeps it.
+          this.arrive(id, row);
         })
         .catch(() => {
           // Refused, or the stream dropped. Neither is something to render.
@@ -376,28 +414,37 @@ export class LiveCollection<T = Row> {
 
     const payload = event.payload;
     if (!payload) return;
-    this.upsert(id, payload as unknown as T);
+    this.arrive(id, payload as unknown as T);
   }
 
-  private upsert(id: string, row: T): void {
+  // arrive folds one change onto the rows on screen and, while a seed reads,
+  // keeps it for that seed to replay onto its answer (see runSeed).
+  private arrive(id: string, row: T | null): void {
+    this.arrivals?.push({ id, row });
+    if (row === null ? this.drop(id) : this.place(id, row)) this.bump();
+  }
+
+  // place puts `row` under `id` as the fold rules allow, and reports whether
+  // the rows changed. It does not notify: a seed replays many at once.
+  private place(id: string, row: T): boolean {
     if (this.spec.inScope && !this.spec.inScope(row)) {
       // In scope for the SUBSCRIPTION, out of scope for the READ. Removing
       // rather than ignoring matters for the update case: a row that has just
       // left the list's scope must leave the list.
-      this.remove(id);
-      return;
+      return this.drop(id);
     }
     const held = this.rowsById.get(id);
-    if (this.spec.supersedes && !this.spec.supersedes(row, held)) return;
+    if (this.spec.supersedes && !this.spec.supersedes(row, held)) return false;
     if (held === undefined) this.order.push(id);
     this.rowsById.set(id, row);
-    this.bump();
+    return true;
   }
 
-  private remove(id: string): void {
-    if (!this.rowsById.delete(id)) return;
+  // drop removes `id`, and reports whether it was there.
+  private drop(id: string): boolean {
+    if (!this.rowsById.delete(id)) return false;
     this.order = this.order.filter((candidate) => candidate !== id);
-    this.bump();
+    return true;
   }
 
   private setState(next: LiveState): void {

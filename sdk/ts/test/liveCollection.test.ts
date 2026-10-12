@@ -113,6 +113,28 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 5; i++) await tick();
 }
 
+// A walk whose LATER pages wait for the test. What the stream delivers while
+// the walk is between pages is what a seed has to keep: the pages it already
+// read are older than it, and the page it is waiting on may be too.
+function gatedWalk(first: Row[], ...later: Row[][]) {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let waiting = false;
+  const seed: LiveCollectionSpec["seed"] = async (cursor) => {
+    if (cursor === "") return { rows: first, nextCursor: later.length > 0 ? "page-1" : "" };
+    waiting = true;
+    await gate;
+    const at = Number(cursor.slice("page-".length));
+    return { rows: later[at - 1] ?? [], nextCursor: at < later.length ? `page-${at + 1}` : "" };
+  };
+  return { seed, release: () => release(), waiting: () => waiting };
+}
+
+const byId = (rows: readonly Row[]): Record<string, Row> =>
+  Object.fromEntries(rows.map((row) => [String(row["id"]), row]));
+
 // ---------------------------------------------------------------------
 // lifecycle
 // ---------------------------------------------------------------------
@@ -155,6 +177,115 @@ test("the seed walks every page, and folds arrivals during it by id", async () =
 
   subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "c" } }));
   assert.deepEqual(handle.value.snapshot.rows.map((r) => r["id"]), ["a", "b", "c"]);
+  store.dispose();
+});
+
+// ---------------------------------------------------------------------
+// what arrives while a seed reads (memql#6033)
+// ---------------------------------------------------------------------
+
+test("an update, an insert and a delete that arrive between two pages all survive the seed", async () => {
+  // A campaign's `sent` lands between page 1 and page 2. Page 1 was read
+  // before it, so the walk's copy is the older one -- and installing the walk
+  // over what arrived is how a sent campaign went back to Sending until the
+  // next reseed.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const walk = gatedWalk(
+    [{ id: "a", status: "sending" }, { id: "d", status: "draft" }],
+    [{ id: "b", status: "draft" }],
+  );
+  const handle = store.collection<Row>("k", { concept: "c", seed: walk.seed });
+  await settle();
+  assert.equal(walk.waiting(), true, "the walk is waiting on its second page");
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sent" } }));
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "c", status: "draft" } }));
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "d" } }));
+
+  walk.release();
+  await settle();
+  const rows = byId(handle.value.snapshot.rows);
+  assert.deepEqual(Object.keys(rows).sort(), ["a", "b", "c"], "the insert stays and the delete stays deleted");
+  assert.equal(rows["a"]?.["status"], "sent", "the update is not rolled back by the page read before it");
+  assert.equal(handle.value.snapshot.state, "live");
+  store.dispose();
+});
+
+test("an event older than the row the walk read does not roll it back; a newer one wins", async () => {
+  // The two halves of one rule. `b` changes to 5 before the page that reads it
+  // at 7 is asked for: the walk is newer, and replaying the event over it
+  // would roll it back. `a` changes to 2 after the page that read it at 1: the
+  // event is newer, and it wins. The concept's watermark is the judge -- the
+  // same `supersedes` every fold already asks.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const walk = gatedWalk([{ id: "a", version: 1 }], [{ id: "b", version: 7 }]);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: walk.seed,
+    supersedes: (incoming, held) =>
+      held === undefined || Number(incoming["version"] ?? 0) >= Number(held["version"] ?? 0),
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "b", version: 5 } }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", version: 2 } }));
+  walk.release();
+  await settle();
+
+  const rows = byId(handle.value.snapshot.rows);
+  assert.equal(rows["b"]?.["version"], 7, "the older event did not regress what the walk read");
+  assert.equal(rows["a"]?.["version"], 2, "the newer event is not overwritten by the older page");
+  store.dispose();
+});
+
+test("an id-only event whose re-read lands while a seed reads survives the seed", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const walk = gatedWalk([{ id: "a" }], [{ id: "b" }]);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: walk.seed,
+    reread: async (id) => ({ id, name: "resolved" }),
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_CREATED", payloadOmitted: true, payload: { id: "g1" } }));
+  await settle(); // the re-read lands; the walk is still waiting
+  walk.release();
+  await settle();
+
+  assert.equal(byId(handle.value.snapshot.rows)["g1"]?.["name"], "resolved");
+  store.dispose();
+});
+
+test("a reseed keeps folding arrivals onto the rows on screen, and keeps them when it lands", async () => {
+  // Keeping arrivals for the seed's answer must not freeze the screen while
+  // it reads: the operator watching a degraded list still sees what changes.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  let release: () => void = () => {};
+  let reads = 0;
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => {
+      reads++;
+      if (reads > 1) await new Promise<void>((resolve) => { release = resolve; });
+      return { rows: [{ id: "a", status: "scheduled" }], nextCursor: "" };
+    },
+  });
+  await settle();
+
+  handle.value.reseed();
+  await settle();
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sending" } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sending", "shown while the reseed reads");
+
+  release();
+  await settle();
+  assert.equal(reads, 2);
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sending", "and kept when it lands");
   store.dispose();
 });
 
