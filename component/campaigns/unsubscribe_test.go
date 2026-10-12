@@ -28,6 +28,7 @@ func handlerFor(engine Engine) *UnsubscribeHandler {
 		logger: quietLogger(),
 		system: w.systemActorContext,
 		now:    time.Now,
+		gate:   unitEmailGate,
 	}
 }
 

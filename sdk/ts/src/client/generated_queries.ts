@@ -11828,6 +11828,30 @@ QueryClient.prototype.systemActiveAuthoringBundles = function (this: QueryClient
   return this.executeNamed("systemActiveAuthoringBundles", buildSystemActiveAuthoringBundles(args), opts);
 };
 
+/** The stored message revision named by an authenticated view-in-browser token. */
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateAtRevision"] in generated_concepts.ts).
+export interface TemplateAtRevisionArgs {
+  templateId: string;
+  revision: string;
+}
+
+export function buildTemplateAtRevision(args: TemplateAtRevisionArgs): string {
+  const parts: string[] = [];
+  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  parts.push("revision: " + renderMemQLValue(args.revision));
+  return "query templateAtRevision(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    templateAtRevision(args: TemplateAtRevisionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.templateAtRevision = function (this: QueryClient, args: TemplateAtRevisionArgs = {} as TemplateAtRevisionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("templateAtRevision", buildTemplateAtRevision(args), opts);
+};
+
 /** One template by id, gated to its owner. Backs the template editor and the campaign editor's preview. Owned. */
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateById"] in generated_concepts.ts).
 export interface TemplateByIdArgs {

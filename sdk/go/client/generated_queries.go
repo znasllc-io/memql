@@ -12493,6 +12493,34 @@ func SystemActiveAuthoringBundlesBuild(args SystemActiveAuthoringBundlesArgs) st
 	return "query systemActiveAuthoringBundles()"
 }
 
+// TemplateAtRevision -- The stored message revision named by an authenticated view-in-browser token.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateAtRevision"] in generated_concepts.go).
+type TemplateAtRevisionArgs struct {
+	TemplateId string
+	Revision   string
+}
+
+// TemplateAtRevision calls the engine query templateAtRevision.
+func (qc *QueryClient) TemplateAtRevision(ctx context.Context, args TemplateAtRevisionArgs) (*Result, error) {
+	call := TemplateAtRevisionBuild(args)
+	return qc.executeNamed(ctx, "templateAtRevision", call)
+}
+
+func TemplateAtRevisionBuild(args TemplateAtRevisionArgs) string {
+	var b strings.Builder
+	b.WriteString("query templateAtRevision(")
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	if b.Len() > 25 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revision: ")
+	b.WriteString(quoteMemQL(args.Revision))
+	b.WriteString(")")
+	return b.String()
+}
+
 // TemplateById -- One template by id, gated to its owner. Backs the template editor and the campaign editor's preview. Owned.
 //
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateById"] in generated_concepts.go).

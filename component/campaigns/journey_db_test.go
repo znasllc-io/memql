@@ -3,6 +3,8 @@ package campaigns
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -81,12 +83,29 @@ func TestJourneyAcrossIndependentReplicas(t *testing.T) {
 	if got := enrollment(); str(got, "status") != "waiting" || n.sender.count() != 1 {
 		t.Fatalf("first step=%v sends=%d", got, n.sender.count())
 	}
-	if err = n.store.ConfirmRecipient(n.owner, recipient, time.Now()); err != nil {
-		t.Fatal(err)
+	// Follow the actual message on another node: no sender-local state or
+	// direct test-only confirmation call may be required for the journey to run.
+	n.sender.mu.Lock()
+	message := n.sender.sent[0].TextBody
+	n.sender.mu.Unlock()
+	var confirmToken string
+	for _, word := range strings.Fields(message) {
+		if strings.Contains(word, ConfirmPath+"?token=") {
+			address, parseErr := url.Parse(word)
+			if parseErr != nil {
+				t.Fatal(parseErr)
+			}
+			confirmToken = address.Query().Get("token")
+			break
+		}
 	}
-	got := enrollment()
-	if err = n.worker.newsletterWrite(n.system, "nudgeJourneyEnrollment", map[string]any{"enrollmentId": enrollmentID, "nextAt": time.Now().Format(time.RFC3339Nano), "versionTime": memql.VersionTimeAfter(templateTime(got["createdAt"]), time.Now()).Format(time.RFC3339Nano)}); err != nil {
-		t.Fatal(err)
+	if confirmToken == "" {
+		t.Fatal("the confirmation message has no confirm link")
+	}
+	page := NewEmailLinkHandler(deliveryDBEngine{e2}, n.worker.cfg, quietLogger(), gatePoolFor(t))
+	response := pageRequest(page, "POST", ConfirmPath, confirmToken, "")
+	if response.Code != 200 {
+		t.Fatalf("confirmation page: %d %s", response.Code, response.Body.String())
 	}
 	// A tick performs one durable step per selected enrollment. Replaying each
 	// tick on the other node still submits each intended email just once.

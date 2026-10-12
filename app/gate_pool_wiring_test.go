@@ -28,6 +28,7 @@ type gateWiringSite struct {
 }
 
 var gateWiringSites = []gateWiringSite{
+	{"transport_unsubscribe.go", "campaigns.NewUnsubscribeHandler(", "a.gateDBGetter()", "one-click unsubscribe serialization with preferences and journey sending"},
 	{"transport_email_links.go", "campaigns.NewEmailLinkHandler(", "a.gateDBGetter()", "the recipient subscription gate shared with journey sends"},
 	{"engine.go", "campaigns.NewWorker(", "a.gateDBGetter()", "the campaigns worker's newsletter, series, template, test-send and single-send gates"},
 	{"integrations_library.go", "server.NewEngineLibraryStore(", "a.gateDBGetter()", "the image store's file-version gate"},

@@ -1273,9 +1273,14 @@ mutation campaign createCampaignTestRun {
 /// Recipient-authorized preferences action. The handler permits only organization opt-outs.
 @serverOnly
 mutation suppression liftOrganizationSuppression {
- args { suppressionId string!, accountId string!, liftedAt datetime!, versionTime datetime! }
+ args {
+  suppressionId string!
+  accountId string!
+  liftedAt datetime!
+  versionTime datetime!
+ }
  update {
-  accept { liftedAt }
+  accept { accountId, liftedAt }
   stamp { id: args.suppressionId, createdAt: args.versionTime }
  }
 }

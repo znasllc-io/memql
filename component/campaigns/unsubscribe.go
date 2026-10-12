@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"html"
@@ -64,11 +65,12 @@ type UnsubscribeHandler struct {
 	logger *slog.Logger
 	system func(ctx context.Context) context.Context
 	now    func() time.Time
+	gate   emailChoiceGate
 }
 
 // NewUnsubscribeHandler builds the endpoint over the same store and
 // system identity the worker uses.
-func NewUnsubscribeHandler(engine Engine, cfg Config, logger *slog.Logger) *UnsubscribeHandler {
+func NewUnsubscribeHandler(engine Engine, cfg Config, logger *slog.Logger, database func() *sql.DB) *UnsubscribeHandler {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -79,6 +81,7 @@ func NewUnsubscribeHandler(engine Engine, cfg Config, logger *slog.Logger) *Unsu
 		logger: logger.With("component", "campaigns.unsubscribe"),
 		system: w.systemActorContext,
 		now:    time.Now,
+		gate:   newEmailChoiceGate(database),
 	}
 }
 
@@ -138,7 +141,8 @@ func unsubscribeKeyIDOf(token string) string {
 	return parts[1]
 }
 
-func (h *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) {
+func (handler *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) {
+	h := *handler
 	// The token may arrive in the query (what the header URI carries) or
 	// in the form body (what the confirmation page's button posts). Both
 	// are read; the query wins, because that is the one the mail client
@@ -153,6 +157,33 @@ func (h *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) 
 		h.render(rw, http.StatusBadRequest, pageInvalid, "")
 		return
 	}
+
+	// The same recipient/mailbox locks as preferences prevent a concurrent
+	// resubscribe from lifting an opt-out that arrived after its consent read.
+	account, digest := payload.AccountID, payload.EmailDigest
+	if !payload.organizationBound || digest == "" {
+		recipient, _, err := h.store.RecipientByID(memql.ContextWithFreshRead(ownerActorContext(r.Context(), payload.OwnerUserID)), payload.RecipientID)
+		if err == nil {
+			if !payload.organizationBound {
+				account = recipient.AccountID
+			}
+			if digest == "" {
+				digest = EmailDigest(recipient.Email)
+			}
+		}
+	}
+	phase, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	r = r.WithContext(phase)
+	hold, err := h.gate(context.WithoutCancel(phase), payload.RecipientID, account, digest)
+	if err != nil {
+		h.logger.Error("campaigns: unsubscribe coordination unavailable", "error", err)
+		rw.Header().Set("Retry-After", "30")
+		h.render(rw, 503, pageRetry, "")
+		return
+	}
+	defer hold.Release()
+	h.store = NewStore(emailPageGateEngine{Engine: h.store.engine, hold: hold})
 
 	if err := h.suppress(r.Context(), payload); err != nil {
 		h.logger.Error("campaigns: unsubscribe failed after a valid token", "campaign", payload.CampaignID, "error", err)

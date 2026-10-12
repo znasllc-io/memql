@@ -22,7 +22,7 @@ type EmailLinkHandler struct {
 	logger *slog.Logger
 	system func(context.Context) context.Context
 	now    func() time.Time
-	gate   func(context.Context, string) (func(), error)
+	gate   emailChoiceGate
 }
 
 // NewEmailLinkHandler requires the dedicated write-gate pool, never the request
@@ -31,16 +31,11 @@ func NewEmailLinkHandler(engine Engine, cfg Config, logger *slog.Logger, databas
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &EmailLinkHandler{store: NewStore(engine), cfg: cfg, logger: logger.With("component", "campaigns.emailLinks"), system: (&Worker{}).systemActorContext, now: time.Now, gate: func(ctx context.Context, id string) (func(), error) {
-		db, err := memql.ResolveWriteGatePool(database, "email links", "pass database.Database.GateDB to campaigns.NewEmailLinkHandler (tests use database.NewGatePool)")
-		if err != nil {
-			return nil, err
-		}
-		return memql.AcquireWriteGate(ctx, db, "campaign-journey:recipient:"+bare(id))
-	}}
+	return &EmailLinkHandler{store: NewStore(engine), cfg: cfg, logger: logger.With("component", "campaigns.emailLinks"), system: (&Worker{}).systemActorContext, now: time.Now, gate: newEmailChoiceGate(database)}
 }
 
-func (h *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	h := *handler // per-request store: concurrent pages never share a held gate.
 	var kind LinkKind
 	switch {
 	case strings.HasSuffix(r.URL.Path, ConfirmPath):
@@ -85,12 +80,16 @@ func (h *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost {
-		release, err := h.gate(r.Context(), p.RecipientID)
+		phase, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		r = r.WithContext(phase)
+		hold, err := h.gate(context.WithoutCancel(phase), p.RecipientID, p.AccountID, p.EmailDigest)
 		if err != nil {
 			h.retry(rw, err)
 			return
 		}
-		defer release()
+		defer hold.Release()
+		h.store = NewStore(emailPageGateEngine{Engine: h.store.engine, hold: hold})
 	}
 	owner := memql.ContextWithFreshRead(ownerActorContext(r.Context(), p.OwnerUserID))
 	recipient, found, err := h.store.RecipientByID(owner, p.RecipientID)
@@ -116,12 +115,11 @@ func (h *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	system := memql.ContextWithFreshRead(h.system(r.Context()))
-	suppressed, blocked, err := h.store.SuppressionForSend(system, p.AccountID, p.EmailDigest)
+	_, blocked, err := h.store.SuppressionForSend(system, p.AccountID, p.EmailDigest)
 	if err != nil {
 		h.retry(rw, err)
 		return
 	}
-	_ = suppressed
 	if kind == LinkConfirm {
 		if recipient.SubscriptionStatus == "subscribed" && !blocked {
 			if r.Method == http.MethodPost {
@@ -175,12 +173,11 @@ func (h *EmailLinkHandler) nudge(ctx context.Context, p LinkPayload) {
 	}
 }
 func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, owner, system context.Context, p LinkPayload, recipient Recipient, org, token string, blocked bool) {
-	global, globalFound, err := h.store.SuppressionByDigest(system, p.EmailDigest)
+	_, globalFound, err := h.store.SuppressionByDigest(system, p.EmailDigest)
 	if err != nil {
 		h.retry(rw, err)
 		return
 	}
-	_ = global
 	row, err := h.store.organizationSuppression(system, p.AccountID, p.EmailDigest)
 	if err != nil {
 		h.retry(rw, err)
@@ -255,7 +252,7 @@ func (h *EmailLinkHandler) view(rw http.ResponseWriter, ctx, owner context.Conte
 		h.retry(rw, err)
 		return
 	}
-	if !found || !sameOrganization(template.AccountID, p.AccountID) {
+	if !found || !sameOrganization(template.AccountID, p.AccountID) || !parseTime(template.Revision).Equal(parseTime(p.TemplateRevision)) {
 		h.unavailable(rw)
 		return
 	}
@@ -271,7 +268,7 @@ func (h *EmailLinkHandler) view(rw http.ResponseWriter, ctx, owner context.Conte
 		return
 	}
 	emailPageHeaders(rw)
-	rw.Header().Set("Content-Security-Policy", "default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; form-action 'none'; frame-ancestors 'none'")
+	rw.Header().Set("Content-Security-Policy", "default-src 'none'; img-src data: https:; style-src 'unsafe-inline'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-popups allow-top-navigation-by-user-activation")
 	body := msg.HTMLBody
 	if body == "" {
 		body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>` + html.EscapeString(msg.Subject) + `</title><style>pre{white-space:pre-wrap;overflow-wrap:anywhere;font:16px/1.5 system-ui,sans-serif;margin:2rem auto;max-width:42rem;padding:0 1rem}</style></head><body><pre>` + html.EscapeString(msg.TextBody) + `</pre></body></html>`
@@ -304,10 +301,44 @@ func (h *EmailLinkHandler) invalid(rw http.ResponseWriter) {
 	writeEmailPage(rw, 400, "Link not valid", `<h1>This link isn't valid.</h1><p>It may have been changed in transit.</p>`)
 }
 func (h *EmailLinkHandler) unavailable(rw http.ResponseWriter) {
-	writeEmailPage(rw, 404, "Email unavailable", `<h1>This email is no longer available.</h1>`)
+	writeEmailPage(rw, 404, "Email unavailable", `<h1>This email isn't available.</h1>`)
 }
 func (h *EmailLinkHandler) retry(rw http.ResponseWriter, err error) {
 	h.logger.Error("could not complete email page request", "error", err)
 	rw.Header().Set("Retry-After", "30")
 	writeEmailPage(rw, 503, "Please try again", `<h1>Please try again.</h1><p>We couldn't save your choice. Try this link again in a moment.</p>`)
+}
+
+// A lost database session must stop the remaining writes of a multi-row choice.
+// Keeping this wrapper request-local also covers the shared unsubscribe helper.
+type emailPageGateEngine struct {
+	Engine
+	hold gateHold
+}
+
+func (e emailPageGateEngine) Execute(ctx context.Context, query string) (any, error) {
+	if strings.HasPrefix(query, "mutation ") {
+		if err := e.hold.Verify(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return e.Engine.Execute(ctx, query)
+}
+
+type emailChoiceGate func(context.Context, string, string, string) (gateHold, error)
+
+func newEmailChoiceGate(database func() *sql.DB) emailChoiceGate {
+	return func(ctx context.Context, recipientID, accountID, digest string) (gateHold, error) {
+		db, err := memql.ResolveWriteGatePool(database, "email choices", "pass database.Database.GateDB to campaigns.NewEmailLinkHandler/NewUnsubscribeHandler (tests use database.NewGatePool)")
+		if err != nil {
+			return nil, err
+		}
+		keys := []string{"campaign-journey:recipient:" + bare(recipientID)}
+		// Different memberships can name the same mailbox. They share its opt-out,
+		// so all page decisions (including one-click) must serialize on that too.
+		if digest != "" {
+			keys = append(keys, "campaign-email-mailbox:"+organizationSuppressionID(accountID, digest))
+		}
+		return memql.AcquireGateHold(ctx, db, 0, keys...)
+	}
 }
