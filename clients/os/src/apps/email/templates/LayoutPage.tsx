@@ -102,9 +102,11 @@ export function LayoutPage({ layout, layouts, templates, onBack }: {
         return;
       }
       flight.drop();
-      const lost = lifecycle.lost();
-      setOutcome({ act, lost, from });
-      if (lost) void layouts.reload();
+      setOutcome({ act, lost: lifecycle.lost(), from });
+      // Refused or lost, the layout may not be what the page shows -- saved in the
+      // editor since, or changed by the press after all: read the layouts again,
+      // so the next press carries the revision that is stored.
+      void layouts.reload();
     } finally {
       working.current = false;
       setBusyId("");

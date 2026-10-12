@@ -5,7 +5,6 @@ import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
 import {
   campaignName,
-  layoutRecordFromRow,
   type AudienceRow,
   type CampaignRow,
   type LayoutRow,
@@ -837,28 +836,20 @@ export interface LayoutLifecycle extends LifecycleState {
 }
 
 /**
- * Archiving and restoring an organization's layout (Ruling 24). The engine
- * holds the call to the exact revision `emailLayoutById` answers, so the layout
- * is read by its bare id for the call, and its stored name and document go back
- * as they are -- the engine ignores both for these two actions. A built-in
- * layout has no lifecycle and never reaches here.
+ * Archiving and restoring an organization's layout (Ruling 24), held to the
+ * revision the page SHOWS -- the listing's, the one its "Changed" fact reads --
+ * so a layout saved in the editor after the page read it is refused in the
+ * engine's words ("this layout changed; ...") rather than archived unseen. A
+ * revision read at the press would always match, and the check would guard
+ * nothing. The engine reads no name or document for these two, so the name
+ * goes as listed and no document is sent. A built-in layout has no lifecycle
+ * and never reaches here.
  */
 export function useLayoutLifecycle(): LayoutLifecycle {
-  const calling = useRef("");
   const write = useWrite(async (query, layout: LayoutRow, action: "archive" | "restore") => {
     const layoutId = layout.layoutId ?? "";
-    calling.current = "emailLayoutById";
-    const stored = layoutId === "" ? undefined : (await query.emailLayoutById({ layoutId })).rows()[0];
-    if (stored === undefined) throw new Error(WORDS.unavailable.layout);
-    const record = layoutRecordFromRow(stored);
-    const base = {
-      layoutId,
-      accountId: record.accountId || layout.accountId,
-      name: record.name,
-      ...(record.document === null ? {} : { document: record.document }),
-      expectedRevision: record.createdAt,
-    };
-    calling.current = "campaignSaveLayout";
+    if (layoutId === "") throw new Error(WORDS.unavailable.layout);
+    const base = { layoutId, accountId: layout.accountId, name: layout.name, expectedRevision: layout.revision ?? "" };
     const result =
       action === "archive"
         ? await query.campaignSaveLayout({ ...base, action: "archive" })
@@ -868,7 +859,7 @@ export function useLayoutLifecycle(): LayoutLifecycle {
   }, false);
   return {
     busy: write.busy,
-    error: write.error === "" ? "" : refusalSentence(write.error, calling.current),
+    error: write.error === "" ? "" : refusalSentence(write.error, "campaignSaveLayout"),
     lost: write.lost,
     reset: write.reset,
     archive: (layout) => write.call(layout, "archive"),

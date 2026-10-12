@@ -201,8 +201,9 @@ describe("a layout's page", () => {
     expect(await screen.findByRole("list", { name: "Layouts" })).toBeTruthy();
   });
 
-  it("archives and restores an organization layout with its exact revision", async () => {
-    const letter = layoutRow({ layoutId: "l1", name: "Acme letter", revision: "2026-10-03T09:00:00Z" });
+  it("archives and restores an organization layout with the revision its page shows", async () => {
+    // The listing's revision and the row's createdAt are one instant, as the engine writes them.
+    const letter = layoutRow({ layoutId: "l1", name: "Acme letter", revision: "2026-10-03T09:00:00.123456Z" });
     const stored = {
       id: "l1",
       ownerUserId: "v1:identity:user:me",
@@ -228,32 +229,73 @@ describe("a layout's page", () => {
     conn.query.emailLayouts.mockImplementation(async (args: { accountId?: string }) =>
       rowsResult([...BUILT_IN_LAYOUTS, ...(args.accountId === "acme" ? [{ ...letter, status: "archived", revision: "2026-10-04T09:00:00Z" }] : [])]),
     );
+    const readsBefore = conn.query.emailLayoutById.mock.calls.length;
     press("Archive");
     await waitFor(() => expect(conn.query.campaignSaveLayout).toHaveBeenCalledTimes(1));
-    // The bare layout id, its organization, and the revision read by id just now;
-    // the stored name and document go back as they are.
-    expect(conn.query.emailLayoutById).toHaveBeenCalledWith({ layoutId: "l1" }, expect.anything());
+    // The bare layout id, its organization, and the revision the page SHOWED --
+    // never one read at the press, which would match whatever is stored now and
+    // let a change nobody saw through. The engine reads nothing else for these two.
     expect(conn.query.campaignSaveLayout.mock.calls[0]![0]).toEqual({
       layoutId: "l1",
       accountId: "acme",
       name: "Acme letter",
-      document: stored.document,
       expectedRevision: "2026-10-03T09:00:00.123456Z",
       action: "archive",
     });
+    expect(conn.query.emailLayoutById.mock.calls.length).toBe(readsBefore);
     // The page stays, with the layout archived and Restore right there.
     await waitFor(() => expect(barWord()).toBe("Archived"));
     expect(barActs()).toEqual([["Restore", "primary"]]);
 
-    // Somebody saved it meanwhile: the engine's sentence, verbatim, and nothing moves.
-    conn.query.campaignSaveLayout.mockRejectedValueOnce(new Error("campaignSaveLayout: this layout changed; compare the latest revision before saving"));
+    // Restore carries the revision the page shows now: the archive's.
     await readTheBar();
     press("Restore");
     await waitFor(() => expect(conn.query.campaignSaveLayout).toHaveBeenCalledTimes(2));
-    expect(conn.query.campaignSaveLayout.mock.calls[1]![0]).toMatchObject({ layoutId: "l1", accountId: "acme", action: "restore" });
-    expect(await screen.findByText("The layout wasn't restored.")).toBeTruthy();
+    expect(conn.query.campaignSaveLayout.mock.calls[1]![0]).toEqual({
+      layoutId: "l1",
+      accountId: "acme",
+      name: "Acme letter",
+      expectedRevision: "2026-10-04T09:00:00Z",
+      action: "restore",
+    });
+  });
+
+  it("a layout saved since the page was read is refused, and the next press carries its new revision", async () => {
+    // The cluster's layout, which somebody else is about to save in the editor.
+    const held = { revision: "2026-10-03T09:00:00.123456Z", status: "active" };
+    const conn = fakeConnection({ accounts: ORGANIZATIONS, layouts: { acme: [layoutRow({ layoutId: "l1", name: "Acme letter", revision: held.revision })] } });
+    conn.query.emailLayouts.mockImplementation(async (args: { accountId?: string }) =>
+      rowsResult([...BUILT_IN_LAYOUTS, ...(args.accountId === "acme" ? [layoutRow({ layoutId: "l1", name: "Acme letter", ...held })] : [])]),
+    );
+    // As the engine judges it: the exact revision, or its sentence.
+    conn.query.campaignSaveLayout.mockImplementation(async (args: Record<string, unknown>) => {
+      if (args.expectedRevision !== held.revision) throw new Error("campaignSaveLayout: this layout changed; compare the latest revision before saving");
+      held.status = args.action === "archive" ? "archived" : "active";
+      held.revision = "2026-10-05T09:00:00Z";
+      return rowsResult([{ layoutId: "l1", revision: held.revision, status: held.status, saved: true }]);
+    });
+    mount(conn);
+    await openLayouts();
+    fireEvent.click(await within(await screen.findByRole("list", { name: "Layouts" })).findByText("Acme letter"));
+    expect(await screen.findByRole("heading", { level: 3, name: "Acme letter" })).toBeTruthy();
+
+    // Saved in the editor after this page read it.
+    held.revision = "2026-10-04T10:30:00Z";
+    const readings = conn.query.emailLayouts.mock.calls.length;
+    press("Archive");
+    expect(await screen.findByText("The layout wasn't archived.")).toBeTruthy();
     expect(screen.getByText("this layout changed; compare the latest revision before saving")).toBeTruthy();
-    expect(barActs()).toEqual([["Restore", "primary"]]);
+    expect(conn.query.campaignSaveLayout.mock.calls[0]![0]).toMatchObject({ expectedRevision: "2026-10-03T09:00:00.123456Z", action: "archive" });
+    expect(barWord()).toBe("Active");
+    // Refused, it reads the layouts again, so what the page shows is what is stored.
+    await waitFor(() => expect(conn.query.emailLayouts.mock.calls.length).toBeGreaterThan(readings));
+
+    // The person reads the bar again (and the new reading lands) before pressing.
+    await readTheBar();
+    press("Archive");
+    await waitFor(() => expect(conn.query.campaignSaveLayout).toHaveBeenCalledTimes(2));
+    expect(conn.query.campaignSaveLayout.mock.calls[1]![0]).toMatchObject({ expectedRevision: "2026-10-04T10:30:00Z", action: "archive" });
+    await waitFor(() => expect(barWord()).toBe("Archived"));
   });
 
   it("says what a layout was saved from and by whom, without printing an id", async () => {
