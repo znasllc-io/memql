@@ -21,9 +21,12 @@ import (
 // Only a mandatory concept equality makes this bounded. Never extract a
 // constraint from OR, NOT, relationships, or other expression wrappers. ID
 // conjuncts are also safe to push down: an ID never changes across versions.
+// A mandatory equality on a payload field a lookup index serves narrows the
+// enumeration to the ids that index finds (latestLookupKeys).
 func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) *bun.SelectQuery {
 	var concept string
 	var ids []*ComparisonExpression
+	var equalities []payloadEquality
 	var visit func(ExpressionNode)
 	visit = func(expr ExpressionNode) {
 		switch n := expr.(type) {
@@ -33,7 +36,14 @@ func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) 
 				visit(n.Right)
 			}
 		case *ComparisonExpression:
-			if n == nil || len(n.Field.Parts) != 1 {
+			if n == nil {
+				return
+			}
+			if equality, ok := payloadEqualityOf(n); ok {
+				equalities = append(equalities, equality)
+				return
+			}
+			if len(n.Field.Parts) != 1 {
 				return
 			}
 			field, ok := resolveIntrinsicField(n.Field.Parts[0])
@@ -55,14 +65,21 @@ func (e *MemQLEngine) latestScanKeys(expr ExpressionNode, timestamp *time.Time) 
 	if concept == "" {
 		return nil
 	}
-	keys := e.database().NewSelect().Model((*memorynodes.MemoryNode)(nil)).
-		Column("id", "createdAt").DistinctOn("id").
-		Where("concept = ?", concept).OrderExpr(`id ASC, "createdAt" DESC`)
+	idFilters := make([]compiledExpression, 0, len(ids))
 	for _, id := range ids {
 		filter, err := e.compileComparisonExpressionWithContext(id, concept)
 		if err != nil {
 			return nil
 		}
+		idFilters = append(idFilters, filter)
+	}
+	if keys := e.latestLookupKeys(concept, equalities, idFilters, timestamp); keys != nil {
+		return keys
+	}
+	keys := e.database().NewSelect().Model((*memorynodes.MemoryNode)(nil)).
+		Column("id", "createdAt").DistinctOn("id").
+		Where("concept = ?", concept).OrderExpr(`id ASC, "createdAt" DESC`)
+	for _, filter := range idFilters {
 		keys = keys.Where(filter.sql, filter.args...)
 	}
 	if timestamp != nil {
