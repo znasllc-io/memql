@@ -77,24 +77,25 @@ export function useGoals(): LiveCollectionHandle<Row> {
 /**
  * Every run this caller owns, newest first.
  *
- * SEEDED UNFILTERED, and the show-finished preference is a fold over rows
- * already here. Seeding filtered would make the toggle re-run the read and
- * re-baseline every arrival cue, so revealing rows the browser already had
- * would announce them as new -- the Accounts and Files apps both record this,
- * and `workRunsForOwner` takes no arguments anyway.
+ * Page through summaries, retaining the same unfiltered history for every
+ * view. Full inputs, compiled workflows and outputs can be megabytes each.
+ * Re-read events through the same projection so updates cannot put them back
+ * into this app-wide collection. Run steps are still loaded only on opening.
  */
 export function useRuns(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("work:runs", (connection) => ({
     concept: RUN_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.workRunsForOwner({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
+    seed: async (cursor, signal) => {
+      const result = await connection.query.workRunSummariesForOwner(
+        {}, { signal, ...(cursor !== "" ? { cursor } : {}) },
+      );
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
     },
     reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, RUN_CONCEPT, rowId, { signal });
-      return (row as Row) ?? null;
+      const result = await connection.query.workRunSummaryForOwner({ runId: rowId }, { signal });
+      return result.rows()[0] ?? null;
     },
-    paged: false,
+    rereadEveryEvent: true,
   }));
 }
 

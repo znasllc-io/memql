@@ -1,0 +1,24 @@
+# The error pages (storage-growth stability, after the 2026-10-11 outage):
+# `memql error-pages` on the edge image, what a front-door Ingress that names it
+# falls back to when its Service has no ready endpoints, instead of
+# ingress-nginx's bare 503. error-pages.yaml says how a request gets there.
+#
+# A COMPONENT, NOT BASE. Composed by overlays/cloud and overlays/cloud-entry
+# only: the fallback is an ingress-nginx annotation, and the local overlay's
+# traefik ignores it, so local pods would serve nothing. In base they also made
+# every release-image install of a commit depend on an engine subcommand no
+# release has yet: the pods crash-looped and the install never went ready
+# (error-pages.yaml has the detail). Nor is it composed by the tenant template
+# (components/tenant/template), which renders no front door.
+#
+# USAGE (in an ingress-nginx instance overlay):
+#   components:
+#     - ../../components/error-pages
+#
+# The image is acrmemql.azurecr.io/memql-edge, so whatever the overlay's
+# `images:` block does to the edge it does to this Deployment too.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - error-pages.yaml

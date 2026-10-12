@@ -175,9 +175,10 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 	type located struct {
 		revisionReplacement
 		start, end int
+		ordinal    int // Position in the model's answer, before source-order sorting.
 	}
 	replacements := make([]located, 0, len(answer.Edits))
-	for _, edit := range answer.Edits {
+	for index, edit := range answer.Edits {
 		edit.Before = strings.ReplaceAll(edit.Before, "\r\n", "\n")
 		edit.After = strings.ReplaceAll(edit.After, "\r\n", "\n")
 		if (edit.Before == "" && (strings.TrimSpace(normalized) != "" || len(answer.Edits) != 1)) || len(edit.Before) > revisionContentLimit || len(edit.After) > revisionContentLimit || strings.TrimSpace(edit.Reason) == "" || len(edit.Reason) > 4000 || len(edit.CommentIDs) == 0 {
@@ -200,16 +201,21 @@ func buildRevisionProposal(captured map[string]any, response any) (map[string]an
 		if extensionOnly && prefix != beforeEnd {
 			return nil, fmt.Errorf("an extension must add content without replacing existing text; use a separate edit for each insertion")
 		}
-		replacements = append(replacements, located{edit, start, start + len(edit.Before)})
+		replacements = append(replacements, located{edit, start, start + len(edit.Before), index + 1})
 	}
 	sort.SliceStable(replacements, func(a, b int) bool { return replacements[a].start < replacements[b].start })
 	var result strings.Builder
 	cursor := 0
 	edits := make([]any, 0, len(replacements))
-	for _, edit := range replacements {
+	for index, edit := range replacements {
 		start, end := offsets[edit.start], offsets[edit.end]
 		if start < cursor {
-			return nil, fmt.Errorf("the proposed changes overlap; they cannot be applied safely")
+			previous := replacements[index-1]
+			relation := "partially overlaps"
+			if previous.end >= edit.end {
+				relation = "contains"
+			}
+			return nil, fmt.Errorf("the proposed changes overlap; they cannot be applied safely: edit %d's before %s edit %d's before. Return disjoint original-source spans, or combine both changes into one replacement that preserves all intended changes", previous.ordinal, relation, edit.ordinal)
 		}
 		prefix, beforeEnd, afterEnd := revisionChangeBounds(edit.Before, edit.After)
 		changeStart, changeEnd := offsets[edit.start+prefix], offsets[edit.start+beforeEnd]

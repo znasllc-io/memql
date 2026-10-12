@@ -250,7 +250,7 @@ Two consequences worth knowing:
 | **Concepts** | Declared concepts, field definitions, and rows visible to your account |
 | **Cluster** | Readiness, modules, data origins, agents, and the audit trail |
 | **Training** | Training from Library files and reviewing knowledge |
-| **Materializer** | Composing data into a file |
+| **Materializer** | Making a new file from a description, from your data, or both |
 | **Campaigns** | Mail audiences, templates, senders, rules, and sending |
 | **Stores** | Shopify store configuration, health, subscriptions, and mirror state |
 | **Users** | People, roles, invitations, enrolment, and sessions |
@@ -267,6 +267,72 @@ Access is granted by app and section through the engine's access model, not by a
 single universal role floor. The current roster is declared in
 `clients/os/src/apps/registry.tsx`. An app's presence does not grant permission
 to its operations. See [app access](auth/access-model.md).
+
+### Materializer
+
+The Materializer is where a new file comes into being. Every new file is a
+**composition**: a record of what was asked for, what it was made from and which
+run made it. Uploading a file you already have stays an upload and is not a
+composition.
+
+In the OS you choose an organization, name the file, choose its kind, and say what
+you want made, pick what to make it from, or both. The sources you can pick are the
+records of the concepts your cluster marks as composable. **Materialize** is offered
+once there is a description or a source: a name on its own makes nothing here. You
+can also choose a template, or a package kind to deploy the file as. The finished
+file opens in your editor from **Open the file**, and **Compose another** starts a
+clean form.
+
+The name is checked as you type it, with the same rule and words as the editor's
+**New Markdown**: a name with a slash, an empty one, or one that is only the
+file's extension is pointed out beside the Name field, and nothing is sent until
+it can be used. When the cluster refuses something, you read its sentence alone,
+without the call or engine details it arrived in.
+
+What the cluster does with a request, whichever client sends it:
+
+| The request | What is made |
+|---|---|
+| A name and a kind of file, nothing else (the editors' **New Markdown** sends this; the OS composer does not offer it) | A blank Markdown, text, HTML, CSV or JSON file, with no model call. A blank Word or PDF file is refused, because neither has a useful empty document |
+| Markdown, described in words, with no sources or only Library files | A blank Markdown file. The client then hands the description to the Library's revision workflow as the person, the same path as **Describe document** in the editor. The OS composer does this when you describe a Markdown file and pick no sources |
+| Markdown, described in words, from records or a query | A file written by the composer, which reads the records. The revision workflow cannot read the graph, so it does not take this request |
+| A template, another kind of file, an email template or a package | A file written by the composer |
+
+Under what was asked for, the composer says what the file is: "This file was
+created blank." for a blank one; for a described one, "Your description was sent
+to be written. Open the file to review and approve the draft." once it has sent
+it, or "This file was created from a description. Open it to continue." when you
+open one later from **Materialized**. The line that says where the file's
+provenance is kept is the record's own sentence. If the description cannot be
+sent, a notice beside the file says so, with the cluster's reason, and the empty
+file's page still offers **Describe document**.
+
+When a described request names Library files, the revision workflow takes Markdown
+files (up to 32 KiB each) and images (up to 8 MiB each) as references, eight at
+most and within its size totals; each reference that is not attached is named in a
+notice of its own beside the new file ("This reference wasn't attached."), and the
+file is made either way. The OS composer's picker lists records, not Library files, so
+Library files reach it only in a starting setup.
+
+A folder the caller cannot use, because it cannot read it or it is in the Bin, is
+refused before anything is written: "That folder isn't available. Choose another
+folder." The OS composer has no folder control; a folder reaches it only in a
+starting setup.
+
+Another app can open the Materializer with a **starting setup**: a kind of file, a
+folder, sources to make it from (records or Library files), and the app to return to
+when the file exists. The composer opens with those filled in, and you still name the
+file, say what you want and choose an organization. A setup is for one file: the
+first file made from it uses up the folder and the way back, and **Compose another**
+starts clean. No app in the shell sends a setup today.
+
+Every client creates a file through one SDK helper, `materialize`, in
+`@znasllc-io/memql-sdk-core/client`. It starts the composition under a request id
+that belongs to one action, so a double click makes one file; follows it until the
+file has its entry in Files; and, for a described Markdown file, hands the
+description over. The OS follows its own live feed instead of polling and calls
+`startMaterialize` and `handOffDescription` itself. A test in the OS and one in the
+editor extension fail when a file is created any other way.
 
 ### Settings
 

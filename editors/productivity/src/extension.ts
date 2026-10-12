@@ -7,10 +7,12 @@ import { newTemplate } from "./templates.js";
 import { TemplateEditor } from "./templateEditor.js";
 import { TemplatePublisher } from "./templatePublish.js";
 import { TemplateExamples } from "./templateExamples.js";
+import { newMarkdown } from "./newMarkdown.js";
 import { MarkdownEditor } from "./markdownEditor.js";
 import { PDFEditor, PDFDocument } from "./pdfEditor.js";
 import { syncDesktopAppearance } from "./themeSync.js";
-import { imageMarkdown, imageMime, MAX_IMAGE_BYTES, rasterImageName } from "./markdownAssets.js";
+import { imageMime, rasterImageName } from "./markdownAssets.js";
+import { insertImage } from "./insertImage.js";
 
 class MemQLFiles implements vscode.FileSystemProvider {
   readonly changed = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
@@ -123,42 +125,9 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     vscode.window.registerCustomEditorProvider("memql.productivity.markdown", { resolveCustomTextEditor: (document, panel) => userOperation("open the document", () => markdown.resolveCustomTextEditor(document, panel)) }, { supportsMultipleEditorsPerDocument: true, webviewOptions: { enableFindWidget: false } }),
     vscode.commands.registerCommand("memql.productivity.newMarkdown", async () => {
-      try {
-        const lease = connection.current();
-        if (!lease) throw new UserInputError("Connect to your cluster in MemQL before creating a document.");
-        const name = await vscode.window.showInputBox({ title: "New Markdown document", value: "Untitled.md", prompt: `Save in ${lease.name}. Add content in Source or request it in Review.`,
-          validateInput: value => !value.trim() || /[\\/\u0000-\u001f]/.test(value) || value.length > 150 ? "Enter a file name, without a folder path." : undefined });
-        if (!name) return;
-        const filename = /\.(md|markdown)$/i.test(name) ? name : `${name}.md`;
-        const uri = await files.createFile(lease, filename, "text/markdown", new TextEncoder().encode("\n"));
-        await markdown.show("review", vscode.Uri.parse(uri));
-      } catch (error) { void showProblem(error, "create the Markdown document"); }
+      try { await newMarkdown(connection, uri => markdown.show("review", uri)); } catch (error) { void showProblem(error, "create the Markdown document"); }
     }),
-    vscode.commands.registerCommand("memql.productivity.markdown.insertImage", async () => {
-      try {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor || editor.document.languageId !== "markdown" || editor.document.uri.scheme !== "memql-file") throw new UserInputError("Open a MemQL Markdown document in Source to insert an image.");
-        const document = editor.document, version = document.version, selection = editor.selection;
-        const base = await provider.load(document.uri);
-        const selected = await vscode.window.showOpenDialog({ title: "Insert image", openLabel: "Insert image", canSelectMany: false, canSelectFiles: true, canSelectFolders: false,
-          defaultUri: vscode.Uri.file("/"), filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] } });
-        if (!selected?.[0]) return;
-        if ((await vscode.workspace.fs.stat(selected[0])).size > MAX_IMAGE_BYTES) throw new UserInputError("Choose an image smaller than 8 MiB.");
-        const bytes = await vscode.workspace.fs.readFile(selected[0]);
-        const name = selected[0].path.split("/").pop()!;
-        const mime = imageMime(name, bytes);
-        const alt = await vscode.window.showInputBox({ title: "Image description", prompt: "Describe what the image shows for readers using assistive technology.", value: name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ") });
-        if (alt === undefined) return;
-        if (document.isClosed || document.version !== version) throw new UserInputError("The document changed. Insert the image again at the intended position.");
-        const uri = await files.createFile(base.lease, name, mime, bytes);
-        // Upload is durable. If an edit raced it, offer the saved link without
-        // applying a stale selection or uploading a duplicate.
-        if (document.isClosed || document.version !== version || !await editor.edit(edit => edit.replace(selection, imageMarkdown(alt, uri)))) {
-          await vscode.env.clipboard.writeText(imageMarkdown(alt, uri));
-          void vscode.window.showInformationMessage("The image was saved. Its Markdown link is copied; paste it at the intended position in Source.");
-        }
-      } catch (error) { void showProblem(error, "insert the image"); }
-    }),
+    vscode.commands.registerCommand("memql.productivity.markdown.insertImage", insertImage(files, uri => provider.load(uri))),
     ...(["source", "reading", "review", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.markdown.${mode}`, async (uri?: vscode.Uri) => {
       try { await markdown.show(mode, uri); } catch (error) { void showProblem(error, "open the Markdown view"); }
     })),

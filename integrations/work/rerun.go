@@ -67,12 +67,11 @@ func (i *Integration) handleRerunStep(ctx context.Context, args map[string]any, 
 	if err := run.requireExecutable(); err != nil {
 		return nil, err
 	}
-	if err := run.requireTopLevel(stepKey); err != nil {
+	versions, err := i.readActVersions(ctx, &run)
+	if err != nil {
 		return nil, err
 	}
-
-	versions, err := i.readVersions(ctx, run.id, run.order)
-	if err != nil {
+	if err := run.requireTopLevel(stepKey); err != nil {
 		return nil, err
 	}
 	plan, err := work.PlanRerun(run.order, versions.byKey, stepKey)
@@ -129,6 +128,8 @@ func (i *Integration) handleRerunStep(ctx context.Context, args map[string]any, 
 	fields["versionTime"] = rfc(workRowVersionAfter(run.row["createdAt"], now))
 	fields["rerun"] = rerunRequest(rerunReasonRerun, stepKey, override, plan.Versions, snapshot, workspace, requestedBy, now)
 	fields["staleSteps"] = plan.Stale
+	fields["stepOrder"] = run.checkpointOrder()
+	fields["head"] = head.Object()
 	if err := i.store().updateRun(ownerActor(ctx, run.owner), run.id, fields); err != nil {
 		return nil, err
 	}

@@ -11207,6 +11207,15 @@ a.os-button {
   min-width: 0;
 }
 
+/* What is wrong with the name as it is typed, directly under the field. The
+ * error hue is the shell's for a refusal beside the control that caused it,
+ * which is what this is: the same refusal, before the round trip. */
+.os-mz-name-problem {
+  margin: 0;
+  font-size: var(--os-text-sm);
+  color: var(--os-error);
+}
+
 .os-mz-statement {
   margin: 0;
   font-size: var(--os-text-md);

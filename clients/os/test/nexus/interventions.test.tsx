@@ -203,6 +203,31 @@ describe("the bar follows the selection (rule 12)", () => {
     expect(acts()).toEqual([]);
   });
 
+  it.each(["failed", "abandoned", "cancelled", "succeeded"])("allows another attempt after a %s re-run retains its request", async (status) => {
+    const conn = await openRun({
+      runs: [reportRun({ status, rerun: { requestId: "old", reason: "rerun", stepKey: "publish", requestedAt: "t" } })],
+    });
+    expect(acts()).toEqual(["Replay"]);
+    expect(bar().textContent).not.toContain("running publish again");
+    await selectStep("publish");
+    expect(acts()).toEqual(["Branch from here", "Run again"]);
+    expect(within(bar()).getByText("publish")).toBeTruthy();
+    const dialog = await composer("Run again");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
+    await waitFor(() => expect(conn.query.rerunStep).toHaveBeenCalledTimes(1));
+    expect(conn.query.rerunStep.mock.calls[0]?.[0]).toEqual({ runId: RUN, stepKey: "publish" });
+  });
+
+  it("shows the approval pause instead of claiming a parked re-run is running", async () => {
+    await openRun({
+      runs: [reportRun({ status: "waiting", waitingOn: { kind: "approval", subject: "publish" }, finishedAt: "", rerun: { requestId: "old", reason: "rerun", stepKey: "publish", requestedAt: "t" } })],
+      approvals: [approvalRow({ id: "a1", runId: RUN })],
+    });
+    await selectStep("publish");
+    expect(acts()).toEqual(["Answer it"]);
+    expect(bar().textContent).not.toContain("running publish again");
+  });
+
   it("never offers Make current for a version that failed", async () => {
     await openRun({ versions: reportVersions({ v2: { status: "failed" } }) });
     await selectStep("draft");

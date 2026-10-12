@@ -13289,6 +13289,45 @@ func WorkRunForOwnerBuild(args WorkRunForOwnerArgs) string {
 	return b.String()
 }
 
+// WorkRunSummariesForOwner -- The caller's run navigation, in small pages. No execution payloads: long document work otherwise makes a single list response exceed the transport ceiling. This is a projection of the same owner-scoped history, not a template-specific subset. Clients follow its cursor to keep older runs.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummariesForOwner"] in generated_concepts.go).
+type WorkRunSummariesForOwnerArgs struct {
+}
+
+// WorkRunSummariesForOwner calls the engine query workRunSummariesForOwner.
+func (qc *QueryClient) WorkRunSummariesForOwner(ctx context.Context, args WorkRunSummariesForOwnerArgs) (*Result, error) {
+	call := WorkRunSummariesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workRunSummariesForOwner", call)
+}
+
+func WorkRunSummariesForOwnerBuild(args WorkRunSummariesForOwnerArgs) string {
+	_ = args
+	return "query workRunSummariesForOwner()"
+}
+
+// WorkRunSummaryForOwner -- The same projection for live updates. Never fold a full CDC payload into a summary feed: that would gradually restore the retained execution data.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummaryForOwner"] in generated_concepts.go).
+type WorkRunSummaryForOwnerArgs struct {
+	RunId string
+}
+
+// WorkRunSummaryForOwner calls the engine query workRunSummaryForOwner.
+func (qc *QueryClient) WorkRunSummaryForOwner(ctx context.Context, args WorkRunSummaryForOwnerArgs) (*Result, error) {
+	call := WorkRunSummaryForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workRunSummaryForOwner", call)
+}
+
+func WorkRunSummaryForOwnerBuild(args WorkRunSummaryForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query workRunSummaryForOwner(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkRunningRunsForOwner -- The caller's runs that are executing right now. Owned: `row.ownerUserId == actor.userId` binds server-side, so this answers for whoever the actor is and nobody else.
 // SEPARATE FROM workRunsForOwner rather than a narrowing of it, for the reason that one states in its own comment: it is deliberately un-narrowed because two surfaces read it. This is a third question -- "what is in flight for this person" -- asked by the computer-use kill switch (memql#5066), where paging an active person's whole run history to find the few running ones is the wrong read for a control that has to act promptly.
 // BOUNDED AT 500, which is a real limit and not a formality: a person with more than 500 runs executing at once would have some missed. Nothing in the product produces that state -- runs are opened per goal and per analysis -- and an unbounded scan on the path a kill switch takes is the worse failure. The pre-dispatch gate is refusing every new call meanwhile, so a missed run's next worker call is denied regardless.

@@ -201,6 +201,30 @@ query run workRunsForOwner {
   shape   workRunFull
 }
 
+/// The caller's run navigation, in small pages. No execution payloads: long
+/// document work otherwise makes a single list response exceed the transport
+/// ceiling. This is a projection of the same owner-scoped history, not a
+/// template-specific subset. Clients follow its cursor to keep older runs.
+@actor
+query run workRunSummariesForOwner {
+  filter row => row.ownerUserId == actor.userId
+  sort "row.createdAt", "desc"
+  paginate 50
+  shape workRunSummary
+}
+
+/// The same projection for live updates. Never fold a full CDC payload into
+/// a summary feed: that would gradually restore the retained execution data.
+@actor
+query run workRunSummaryForOwner {
+  args {
+    runId string!
+  }
+  filter row => row.id == args.runId && row.ownerUserId == actor.userId
+  paginate 1
+  shape workRunSummary
+}
+
 /// The caller's runs that are executing right now. Owned: `row.ownerUserId == actor.userId` binds
 /// server-side, so this answers for whoever the actor is and nobody else.
 ///

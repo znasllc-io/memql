@@ -111,6 +111,16 @@ var gateInputs = []struct {
 	{"examples/referencepack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"packs/reviewspack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"integrations/integrations.json", ".", "TestEmbeddedFileCountsAreStable"},
+	// The error pages (after the 2026-10-11 outage): component/errorpages embeds
+	// its two templates, the brand mark and the wordmark face, and the inventory
+	// pins all four. Named by a template, which no other `gates` glob covers.
+	{"component/errorpages/maintenance.html.tmpl", ".", "TestEmbeddedFileCountsAreStable"},
+	// The operator page's upgrade backfill for the error pages. Its gate reads
+	// the page and holds the documented command to what the custom-domain and
+	// door builders label and annotate, so it lives beside the builders, in
+	// integrations/customdomain -- a package no other row put in this step. A
+	// `.md`-only change reaches this lane and nothing else.
+	{"docs/public/operate/front-door.md", "integrations/customdomain", "TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel"},
 	// Not embedded either, and the newest of this shape (memql#3326).
 	// clients_allowlist_test.go sweeps `git ls-files clients` from the root
 	// package, so every file under clients/ is a gate input. A new client is

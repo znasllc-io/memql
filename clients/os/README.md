@@ -1576,12 +1576,15 @@ wrong by default.
   is absolute against the list's relative root, never fixed -- the desk plate
   is CSS-transformed and becomes a fixed element's containing block.
 
-## The Materializer, the eleventh app (epic memql#4977)
+## The Materializer, the eleventh app (epic memql#4977), and the one way a file is made (memql#6023)
 
-`src/apps/materializer/` is where a person and the model compose data from
-the memory graph into a file: a report, a spreadsheet, a branded document, a
-package a site is deployed from. Design record:
-[2026-09-05-compose-materializer-design.md](../../docs/superpowers/specs/2026-09-05-compose-materializer-design.md).
+`src/apps/materializer/` is where a person and the model make a file: a report,
+a spreadsheet, a branded document, a package a site is deployed from, or a
+blank document. Design records:
+[2026-09-05-compose-materializer-design.md](../../docs/superpowers/specs/2026-09-05-compose-materializer-design.md)
+for the app and
+[2026-10-11-materializer-front-door-design.md](../../docs/superpowers/specs/2026-10-11-materializer-front-door-design.md)
+for the one-creation-path rule.
 
 **THE APP IS `materializer` AND THE ROWS ARE `v1:compose:*`, and that split is
 the epic's rather than a slip.** `materializer` already names the engine's boot
@@ -1594,23 +1597,24 @@ existed.
 Five things about it are new rules rather than repetitions of the ten apps
 before it.
 
-- **THE COLUMNS ARE THE COMPOSITION'S OWN STRUCTURE, NOT A LAYOUT.** Sources,
-  the draft, the target: what goes in, what it is, what comes out. Three
+- **THE COLUMNS ARE THE COMPOSITION'S OWN STRUCTURE, NOT A LAYOUT.** What goes
+  in, what is asked for, what comes out: Sources, the brief, the Target. Three
   columns is a shape this shell had not used and it earns it because the
   subject genuinely has three parts a person moves between -- not because
   three panels looked balanced. Below a pointer breakpoint they stack in that
   reading order.
 
-  **The draft leads** (design D5, the owner's decision). The obvious build is
-  a chat transcript in the middle with the draft one click away, which is what
-  every AI writing tool does, and it is wrong here for one reason: the FILE is
-  the deliverable, and a surface where the deliverable is never on screen
-  cannot answer "which version am I about to send". It is rule 11 read
-  forward -- a list and its detail never share a scroll column, and a
-  transcript and its draft are that pair.
+  **The file is the deliverable, and this window never shows a second copy of
+  it.** The middle column is the brief -- organization, name, and what the
+  person wants made -- and once a composition exists it reads *what was asked
+  for* and one sentence saying the composed text is in the file. The act that
+  opens the file is on the bar. A copy of the text here would be a second thing
+  that could disagree with the first, and the person's question on a finished
+  composition is "which file did I get", which the file answers and a
+  transcript beside it cannot.
 
 - **THE PROVENANCE CHAIN IS THE ONE DEVICE THIS APP SPENDS ANYTHING ON, and it
-  is drawn in INK RATHER THAN HUE.** One line under the draft reads the whole
+  is drawn in INK RATHER THAN HUE.** One line under the columns reads the whole
   claim -- *from 3 rows, 1 file → through Acme quarterly → by
   anthropic/claude-sonnet-5 → as PDF* -- with a sentence beneath saying whether
   that survives the file leaving the cluster. The direction is drawn because
@@ -1642,7 +1646,9 @@ before it.
   markdown, HTML, docx and PDF embed the record in their own bytes; txt, CSV
   and JSON are written EXACTLY as composed -- no `#` header, no
   `{provenance, rows}` wrapper -- because either would break the spreadsheet
-  or the parser downstream. The app says which it is, in the format's name.
+  or the parser downstream. A blank file carries none either: its history is
+  kept on its composition and the file says nothing about it. The app says
+  which it is, in the format's name.
 
 - **THE SOURCES COLUMN IS THE `@composable` MARK, AND AN UNMARKED CONCEPT IS
   UNMARKED RATHER THAN FORBIDDEN.** `composableConcepts` reads the concept
@@ -1659,14 +1665,143 @@ before it.
   useful statement is "the cluster has this and cannot offer it", which an
   absent row could not make.
 
-- **THE APP ASKS THE SHELL WHETHER IT IS THERE** (`useOsIfPresent`, new in
-  `chrome/state.tsx`). The only thing this app wants from the shell is handing
-  off to another one -- Files for the output, Nexus for the goal -- and both
-  happen on a click. Reaching for `useOs` at an app root makes the whole app
-  unmountable without a desktop, which costs every one of its tests a shell it
-  does not otherwise need; a test that has to build a desktop to assert a
-  sentence is one that stops being written. `useOs` KEEPS ITS THROW for chrome,
-  where a missing provider is a wiring bug worth failing loudly on.
+- **THE APP ASKS THE SHELL WHETHER IT IS THERE** (`useOsIfPresent`, in
+  `chrome/state.tsx`). The only things this app wants from the shell are handing
+  off to another one -- Files for the output, Nexus for the goal, the app that
+  sent the person here for the way back -- and all happen on a click. Reaching
+  for `useOs` at an app root makes the whole app unmountable without a desktop,
+  which costs every one of its tests a shell it does not otherwise need; a test
+  that has to build a desktop to assert a sentence is one that stops being
+  written. `useOs` KEEPS ITS THROW for chrome, where a missing provider is a
+  wiring bug worth failing loudly on.
+
+### One way to make a file
+
+**Every new file is a composition, a blank one included.** Uploading bytes the
+person already has stays an upload (Files, the desk, Training and the Campaigns
+audience import); everything else a client creates goes through the SDK's
+`startMaterialize` / `materialize` (`@znasllc-io/memql-sdk-core/client`). The
+app calls `startMaterialize` through `query.executeNamed` and follows the
+composition on its own live feed, because the OS prefers a subscription to a
+timer; the editors use the polling `materialize`. What the cluster does with the
+request:
+
+| The request | What is made |
+|---|---|
+| A name and a format, nothing else | A blank Markdown, text, HTML, CSV or JSON file; no model call. A blank docx or PDF is refused |
+| Markdown with a statement and only Library files (or no sources) | A blank Markdown file, the statement kept on its composition; the app then hands the description to the Library (below) |
+| Markdown with a statement and a `concept_row` or `query` source | Written by the composer, which reads the records; the revision workflow cannot |
+| A template, another format, an email template, a package | Written by the composer |
+
+`test/onePathCreate.test.ts` holds the rule: no file under `src` names a
+file-creating construct (`composeMaterialize`, `createLibraryFile`,
+`createArtifact`, `createGeneratedOutput`), none builds a `File` out of nothing
+(`new File(`), and only the five modules that upload bytes the person picked or
+dropped may upload. The allowlist is a list of reasons, and a stale entry fails.
+
+**A REQUEST ID BELONGS TO ONE ASK** (`actions.ts`). It is how a repeat of a
+request finds the composition the first one made, so a double press makes one
+file. It is kept across a retry of the same facts and renewed when the cluster
+answers with a composition, when the facts change, and when the form is reset;
+a failed composition has already answered, so "try again" carries a new id.
+The cluster looks the id up and then writes, so the hook also lets only one
+start be in flight.
+
+**A FINISHED FILE SAYS WHAT IT IS** (`words.ts` `madeCaption`, `Provenance.tsx`).
+The cluster files two kinds of file empty, a blank one and a described one, and
+"the composed text is in the file" is false of both. The caption under what was
+asked for follows what is known: "This file was created blank."; for a described
+file, "Your description was sent to be written. Open the file to review and
+approve the draft." once this window has sent it, the failure notice alone when it
+could not, and "This file was created from a description. Open it to continue."
+when the window does not know (opened later from the list, or not heard back yet);
+and the composed-file caption for a file a model wrote. The row tells them apart
+(a statement, its sources, no model call, provenance not carried), and the
+window's own list of described files wins over it. Nothing is said of a file that
+does not exist yet. The provenance line renders the record's `provenanceNote`,
+which the stamp step writes knowing which branch it took, and falls back to the
+format's claim only for a record without one.
+
+**A NAME IS CHECKED AS IT IS TYPED, AND A REFUSAL IS ONE SENTENCE**
+(`ComposerSection.tsx`, `actions.ts`). The Name field says what is wrong with a
+name beside it, with the SDK's `fileNameProblem`: the rule and the words of the
+editor's New Markdown (no slash or control character, not empty, at most 150
+characters, something before the chosen kind of file's extension), so the two
+clients say the same thing about the same name and the cluster is never sent a
+name it would refuse. Whatever the cluster does refuse arrives with the call's
+name in front and inside the engine's frame; `refusalSentence` takes those (and
+a Go package name) off, so the person reads only the sentence.
+
+**A DESCRIBED FILE'S DESCRIPTION IS SENT BY THIS WINDOW, AS THE PERSON**
+(`descriptionHandOff.ts`). The Library refuses a revision request made from
+inside a work run, deliberately, so the cluster files the empty page and the
+person's own client sends the description: `handOffDescription` posts it as a
+document-level comment (the `library_file` sources attached where the Library
+accepts them) and asks for the revision. The hook waits for the
+composition to be `ready` on the composition feed and for the file's entry on the
+artifact feed -- a new file's Files entry is written after the file, by an
+automation -- and then sends once per composition, under the request id the file
+was started with, so a repeat finds the first receipts. Nothing polls. What it
+cannot do is outlive the window: close it between ready and sent and the
+composition keeps the statement while the editor's empty page offers **Describe
+document**.
+
+Notices follow the file, in place and not as errors, because the file exists
+either way: the description could not be sent (with what to do, and the
+cluster's reason verbatim, without the SDK's lead-in that repeats the notice),
+and one per reference the Library did not take ("This reference wasn't
+attached.", its label beside it; the SDK's entry carries no reason, so none is
+given). They are
+announced by a separate, always-mounted, visually hidden `role="status"` element
+that receives their text. It is not a wrapper around the notices: Safari and
+VoiceOver drop the role of an element laid out with `display: contents`, and a
+live region that appears together with its text is not reliably announced.
+
+**A FOLDER IS THE CLUSTER'S TO ACCEPT.** The composer has no folder control; a
+folder arrives with a starting setup and is sent as it is. The cluster refuses
+one the person cannot read or that is in the Bin, before anything is written, and
+the sentence ("That folder isn't available. Choose another folder.") is shown
+beside the control as worded. A check of its own here would turn that refusal
+into a file filed quietly at the top, somewhere nobody chose.
+
+### A starting setup
+
+Other apps can open the Materializer already pointed at a file to make; no app in
+the shell sends one today. The contract is one module,
+`src/items/materialize.ts`, which a sender imports instead of anything under
+`apps/materializer/`, and the tests exercise it against the current composer:
+
+```ts
+actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
+  format: "markdown",
+  folderId,                                        // a bare id
+  sources: [{ kind: "library_file", ref, label }],
+  returnTo: { appId: "files", sectionId: "browse" },
+}));
+```
+
+- **A SETUP IS A STARTING POINT, NEVER A COMMAND.** The person still names the
+  file, says what they want and chooses an organization; nothing in the intent
+  makes a file by itself. `outputKind: "email_template"` is the one kind a sender
+  can ask for, and it needs the JSON format.
+- **IT IS VALIDATED ON THE WAY IN.** `readComposeIntent` keeps what it can use
+  and drops the rest quietly -- a format this cluster does not write, a source of
+  a kind the Materializer does not take, a return target missing half of its
+  address -- because the sender cannot be told while it is still composing the
+  payload. A payload with no `compose` key is some other instruction and is left
+  standing. Bare ids only, per the identifiers contract.
+- **A SETUP LIVES AND DIES WITH THE FORM IT FILLED IN.** The composer applies it
+  once, over a fresh form: format, sources, folder and return target together.
+  Leaving the composer abandons the form, and the first file made from it uses
+  the folder and the way back up. **Compose another** and **Start over** end the
+  trip.
+- **THE WAY BACK IS A TEXT ACT, ONLY WHERE IT GOES SOMEWHERE.** *Back to Files*
+  sits in front of the primary act on a finished file made from that setup, in a
+  shell that holds the app and for a person who may open it. The bar holds three
+  acts, so Archive gives way while the trip is live and returns when it ends.
+- **SECTION IDS ARE CONTRACT.** `openApp` to a section an app does not declare
+  moves nobody and says nothing; `test/materializer/intent.test.tsx` pins
+  `composer` against the manifest's own list.
 
 ### The seam with Files
 
@@ -1685,16 +1820,25 @@ reason belong.
 
 ### What it deliberately does not do
 
-**There is no document editor.** The draft is Markdown in a textarea. A rich
-text editor is a product of its own, and half of one is worse than none -- a
-template is how a document gets a shape, which is what design D7 makes a
-template FOR.
+**There is no document editor, and no copy of the file.** The finished file
+opens in the person's editor from **Open the file**; writing and revising it is
+the editor's and the Library's revision workflow's job, not this window's.
+
+**There is no folder control.** A folder arrives with a starting setup, and a
+refusal tells the person to choose another one with nothing here to choose it
+with. A recipe whose folder has since been archived is refused by the same rule,
+and nothing in the OS edits a recipe's folder.
 
 **There is no Retry on a failed composition**, and Start over is offered
 instead. The record holds the sources it RESOLVED rather than the form that
 produced them, so a retry would silently re-run something slightly different
 from what was asked for; Start over opens the composer where a person can see
 what they are about to re-run.
+
+**A described file's Files entry that never appears is not timed out.** Nothing
+polls in this app, so there is no clock to say the description was never sent;
+the composition keeps the statement and the editor's empty page offers
+**Describe document**.
 
 **Audio and video are named and unoffered.** The brief asks for both. Audio
 wants a compose-then-speak pipeline with a spending ceiling of its own and
@@ -1824,6 +1968,14 @@ commerce cut is recorded in
 `docs/superpowers/specs/2026-09-01-os-voice-themes-handoff-design.md`.
 
 ## Nexus, the tenth app (the work spine, sub-projects A and B)
+
+The shared run feed pages through `workRunSummariesForOwner` and re-reads
+every live event through `workRunSummaryForOwner`. Keep captured inputs,
+compiled workflows and document outputs out of this retained navigation
+collection: full run history can exceed the browser transport ceiling. The
+summary preserves task titles, conversation scope and recovery controls;
+execution receipts are loaded only for the open run. Full run reads remain
+available to replay and other consumers.
 
 `src/apps/nexus/` is the goal surface: what a person asked the system to do,
 drawn as a place the work arrives at, plus the runs that carry it out, the

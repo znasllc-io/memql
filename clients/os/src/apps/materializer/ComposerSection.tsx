@@ -1,10 +1,12 @@
 import { AccountPicker } from "../accounts/AccountPicker";
 import { accountIsArchived, type AccountRow } from "../accounts/rows";
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { fileNameProblem } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Chip, Fact, Facts, Field, FormRow, Head, Input, Notice, RecordList, RecordRow, Select, Subhead } from "../../kit";
 import { ActionBar } from "../../kit/ActionBar";
+import type { ComposeSetup, ComposeSource } from "../../items/materialize";
 import { actsFor, stateLine, type ActId } from "./acts";
 import { ProvenanceChain } from "./Provenance";
 import type { CompositionRow, ModelRow, SourceRow, TemplateRow } from "./rows";
@@ -16,10 +18,15 @@ import {
 } from "./useCompose";
 import {
   DEPLOYABLE_KINDS,
+  DESCRIPTION_NOT_SENT,
+  DESCRIPTION_NOT_SENT_NEXT,
   FORMATS,
+  NOT_ATTACHED,
   UNOFFERED_FORMATS,
   deployableWord,
   formatWord,
+  madeCaption,
+  notSentDetail,
 } from "./words";
 
 // Materializer collects the brief, sources, and output settings. File content
@@ -37,15 +44,44 @@ export interface ComposerSectionProps {
   defaultFormat: string;
   busy: boolean;
   error: string;
+  /**
+   * A starting setup another app opened the composer with. Applied ONCE, when
+   * it arrives, over a fresh form: format, sources, output kind, and the folder
+   * and way back it may name. The composer has no folder control, so the folder
+   * is held with the form and sent as it is -- the cluster refuses one the person
+   * cannot use, and that refusal is shown. The person's own edits after that are
+   * theirs. Applying it is the last thing a setup does: `onApplied` tells the app
+   * it can let go, and nothing of it outlives the form.
+   */
+  initial?: ComposeSetup;
+  onApplied?: (setup: ComposeSetup) => void;
+  /**
+   * The name of the app that sent the person here to make the open file, when
+   * they can go back to it. Absent where there is nowhere to go back to.
+   */
+  backTo?: string;
+  /**
+   * What became of the open file's description, once it has been handed to the
+   * Library. Absent for a file that was not asked for by describing it, and
+   * while the hand-off is still on its way.
+   */
+  description?: { failure: string; unattached: string[] };
+  /** Whether this window asked for the open file by describing it, and so hands its description on. */
+  describedHere?: boolean;
   onMaterialize: (facts: {
     accountIds: string[];
     name: string;
     statement: string;
     format: string;
-    sources: { kind: string; ref: string; label: string }[];
+    sources: ComposeSource[];
     templateId: string;
     deployableKind: string;
-  }) => void;
+    outputKind: string;
+    /** From a setup; "" for the Library root. */
+    folderId: string;
+    /** From a setup: where the person goes back to after this file. */
+    returnTo: ReturnTo | null;
+  }) => Promise<boolean>;
   onAct: (act: ActId) => void;
   /** Clears the open composition and returns to a blank form. */
   onNewComposition: () => void;
@@ -55,6 +91,53 @@ interface PickedSource {
   kind: string;
   ref: string;
   label: string;
+}
+
+type ReturnTo = NonNullable<ComposeSetup["returnTo"]>;
+
+/** A notice about what became of the open file's description, in the order it is shown. */
+interface ArrivedNotice {
+  key: string;
+  tone: "warn" | "info";
+  sentence: string;
+  next?: string;
+  detail?: string;
+}
+
+function noticesFor(description: { failure: string; unattached: string[] }): ArrivedNotice[] {
+  const notices: ArrivedNotice[] = [];
+  if (description.failure) {
+    notices.push({ key: "not-sent", tone: "warn", sentence: DESCRIPTION_NOT_SENT, next: DESCRIPTION_NOT_SENT_NEXT, detail: notSentDetail(description.failure) });
+  }
+  // One notice per reference left off, named by the label the person gave it.
+  // The entry carries no reason, so none is given (see NOT_ATTACHED).
+  description.unattached.forEach((label, index) => {
+    notices.push({ key: `not-attached-${index}`, tone: "info", sentence: NOT_ATTACHED, detail: label });
+  });
+  return notices;
+}
+
+/**
+ * The notices as one thing to hear: each part ends like a sentence (a cluster's
+ * reason does not), so a screen reader pauses between them instead of running
+ * "...exhausted" into "Not attached".
+ */
+function spoken(notices: ArrivedNotice[]): string {
+  return notices
+    .flatMap((notice) => [notice.sentence, notice.next, notice.detail])
+    .flatMap((part) => (part && part.trim() !== "" ? [/[.!?]$/.test(part.trim()) ? part.trim() : `${part.trim()}.`] : []))
+    .join(" ");
+}
+
+/** The sources once each: the same file listed twice is one source, as it is when a person picks it twice. */
+function distinct(sources: ComposeSource[]): ComposeSource[] {
+  const seen = new Set<string>();
+  return sources.filter((source) => {
+    const key = `${source.kind} ${source.ref}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function ComposerSection({
@@ -68,17 +151,90 @@ export function ComposerSection({
   defaultFormat,
   busy,
   error,
+  initial,
+  onApplied,
+  backTo,
+  description,
+  describedHere = false,
   onMaterialize,
   onAct,
   onNewComposition,
 }: ComposerSectionProps) {
   const [name, setName] = useState("");
+  // Whether to say what is wrong with the name: once the person has typed in the
+  // field, or pressed Materialize without a name it can use. A form that has not
+  // been touched does not open on a complaint.
+  const [nameChecked, setNameChecked] = useState(false);
   const [accountId, setAccountId] = useState("");
   const [statement, setStatement] = useState("");
   const [format, setFormat] = useState(defaultFormat);
   const [templateId, setTemplateId] = useState("");
   const [deployableKind, setDeployableKind] = useState("");
-  const [picked, setPicked] = useState<PickedSource[]>([]);
+  // An email template is the one output kind, and no control sets it: it comes
+  // from a sender's setup, needs the JSON format, and goes if that is changed.
+  const [outputKind, setOutputKind] = useState("");
+  const [picked, setPicked] = useState<ComposeSource[]>([]);
+  // THE FOLDER AND THE WAY BACK ARE FORM STATE like everything else a setup
+  // fills in, with no control of their own. They are sent up with the other
+  // facts, so they live exactly as long as this form: a remount is a form
+  // nobody sent anything to, and the file they were for uses them up.
+  const [folderId, setFolderId] = useState("");
+  const [returnTo, setReturnTo] = useState<ReturnTo | null>(null);
+  // Which setup the form holds. A reply to an ask made under an earlier one must
+  // not use up the folder and the way back of a setup that arrived after it.
+  const generation = useRef(0);
+
+  useEffect(() => {
+    if (initial === undefined) return;
+    generation.current += 1;
+    // A new setup is a new file. What the person typed for the last one is not
+    // part of it; the organization they chose is, as it always is, theirs.
+    setName("");
+    setNameChecked(false);
+    setStatement("");
+    setTemplateId("");
+    setDeployableKind("");
+    setFormat(initial.format ?? (initial.outputKind ? "json" : defaultFormat));
+    setOutputKind(initial.outputKind ?? "");
+    setPicked(distinct(initial.sources ?? []));
+    setFolderId(initial.folderId ?? "");
+    setReturnTo(initial.returnTo ?? null);
+    onApplied?.(initial);
+  }, [initial]);
+
+  // THE NAME IS CHECKED HERE, AS IT IS TYPED, with the rule and the words of the
+  // editor's New Markdown (the SDK's fileNameProblem): a slash, a control
+  // character, an empty or over-long name, or only the chosen kind of file's
+  // extension. A name the cluster would refuse is never sent to be refused.
+  const kind = FORMATS.find((candidate) => candidate === format);
+  const nameProblem = kind === undefined ? undefined : fileNameProblem(name, kind);
+
+  function materialize() {
+    if (nameProblem !== undefined) {
+      setNameChecked(true);
+      return;
+    }
+    const held = generation.current;
+    void onMaterialize({
+      name,
+      statement,
+      accountIds: [accountId],
+      format,
+      sources: picked,
+      templateId,
+      deployableKind,
+      outputKind,
+      folderId,
+      returnTo,
+    }).then((made) => {
+      // The setup's folder and way back were for the file just made. A refusal
+      // keeps them -- the same form asked again is the same ask.
+      if (made && generation.current === held) {
+        setFolderId("");
+        setReturnTo(null);
+      }
+    });
+  }
 
   const composables = useComposableConcepts(showUnmarkedConcepts);
   const resolved = useResolvedSources(picked);
@@ -91,7 +247,11 @@ export function ComposerSection({
     hasOrganization: accounts.some(account => account.id === accountId && !accountIsArchived(account)),
     submitting: busy,
   };
-  const acts = actsFor(open, draftState);
+  const acts = actsFor(open, draftState, backTo, compositionSources);
+  const arrived = open !== null && description ? noticesFor(description) : [];
+  // What the open file is -- blank, described, or written by a model -- said
+  // under what was asked for, from its record and what this window knows.
+  const caption = open === null ? "" : madeCaption(open, compositionSources, compositionModels, describedHere, description);
 
   // The chain reads the OPEN composition once there is one, and the form
   // otherwise -- so the same device says "here is what you are about to
@@ -102,7 +262,7 @@ export function ComposerSection({
   const chainTemplate =
     templates.find((t) => t.id === (open ? open.templateId : templateId))?.name ?? "";
 
-  function addSource(next: PickedSource) {
+  function addSource(next: ComposeSource) {
     setPicked((prev) =>
       prev.some((p) => p.kind === next.kind && p.ref === next.ref) ? prev : [...prev, next],
     );
@@ -153,8 +313,13 @@ export function ComposerSection({
 
         <BriefColumn
           open={open}
+          caption={caption}
           name={name}
-          onName={setName}
+          onName={(next) => {
+            setName(next);
+            setNameChecked(true);
+          }}
+          nameProblem={nameChecked ? nameProblem : undefined}
           statement={statement}
           onStatement={setStatement}
           accounts={accounts}
@@ -165,7 +330,12 @@ export function ComposerSection({
         <TargetColumn
           templates={templates}
           format={open ? open.format : format}
-          onFormat={setFormat}
+          onFormat={(next) => {
+            setFormat(next);
+            // An email template is JSON; a person who chose another kind of
+            // file is not making one.
+            if (next !== "json") setOutputKind("");
+          }}
           templateId={open ? open.templateId : templateId}
           onTemplate={setTemplateId}
           deployableKind={open ? open.deployableKind : deployableKind}
@@ -183,29 +353,42 @@ export function ComposerSection({
         format={open ? open.format : format}
         models={open ? compositionModels : []}
         embedded={open ? open.provenanceEmbedded : null}
+        note={open ? open.provenanceNote : ""}
         pending={open === null}
       />
 
       {error ? <Notice tone="error" sentence={error} /> : null}
+      {/* WHAT BECAME OF THE DESCRIPTION, in place. The file is there either
+          way, so neither is an error: the first says what to do about it, the
+          second only names what the Library could not take. They sit in the
+          grid like any other notice. */}
+      {arrived.map((notice) => (
+        <Notice key={notice.key} tone={notice.tone} sentence={notice.sentence} next={notice.next} detail={notice.detail} />
+      ))}
+      {/* AND THE SAME WORDS, ANNOUNCED. They arrive a moment after "Ready"
+          without the person having done anything, so they are spoken -- by an
+          element of their own that is ALREADY here, visually hidden and polite,
+          because a live region that appears together with its text is not
+          reliably announced. It is not a wrapper around the notices above: a
+          wrapper laid out with `display: contents` (which is how one would keep
+          an empty region out of the grid) loses its role in Safari and
+          VoiceOver, and the announcement with it. Out of flow, this takes no
+          grid row. */}
+      <p className="os-sr-only os-mz-announce" role="status" aria-live="polite" aria-atomic="true">
+        {spoken(arrived)}
+      </p>
 
       <ActionBar
         state={stateLine(open, draftState)}
         acts={acts.map((a) => ({
           label: a.label,
           tone: a.tone === "primary" ? "primary" : a.tone === "danger" ? "danger" : "quiet",
+          text: a.text,
           ariaLabel: a.id === "openFile" ? `Open ${open?.name ?? "the file"}` : undefined,
           busy: busy && a.id === "materialize",
           onAct: () => {
             if (a.id === "materialize") {
-              onMaterialize({
-                name,
-                statement,
-                accountIds: [accountId],
-                format,
-                sources: picked,
-                templateId,
-                deployableKind,
-              });
+              materialize();
               return;
             }
             onAct(a.id);
@@ -243,7 +426,7 @@ function SourcesColumn({
   /** True once a composition exists: the sources are a RECORD, not a choice. */
   settled: boolean;
   recordsAvailable: boolean;
-  onAdd: (s: PickedSource) => void;
+  onAdd: (s: ComposeSource) => void;
   onRemove: (ref: string) => void;
 }) {
   const [query, setQuery] = useState("");
@@ -385,14 +568,20 @@ function matches(c: ComposableConcept, query: string): boolean {
 function BriefColumn({
   accounts, accountId, onAccount,
   open,
+  caption,
   name,
   onName,
+  nameProblem,
   statement,
   onStatement,
 }: {
   open: CompositionRow | null;
+  /** What the open file is (madeCaption), or "" to say nothing. */
+  caption: string;
   name: string;
   onName: (v: string) => void;
+  /** What is wrong with the name as typed, said beside the field; absent when it can be used. */
+  nameProblem?: string;
   statement: string;
   onStatement: (v: string) => void;
   accounts: AccountRow[];
@@ -404,18 +593,17 @@ function BriefColumn({
       <section className="os-mz-col os-mz-col-brief" aria-label="What was made">
         <Subhead>What was asked for</Subhead>
         <p className="os-mz-statement">{open.statement || "No statement was recorded."}</p>
+        {/* THE DRAFT IS NOT RE-RENDERED HERE, and that absence is deliberate:
+            what the file holds lives in the FILE, and showing a second copy in
+            this window would leave a person with two things that could disagree.
+            The caption says what the file is -- composed, blank, or described and
+            waiting on the Library's draft -- and the act that opens it is on the
+            bar. */}
         {open.failureReason ? (
           <Notice tone="error" sentence={open.failureReason} />
-        ) : (
-          <p className="os-caption">
-            {/* THE DRAFT IS NOT RE-RENDERED HERE, and that absence is
-                deliberate: the composed text lives in the FILE now, and
-                showing a second copy in this window would leave a person
-                with two things that could disagree. The act that opens
-                the real one is on the bar. */}
-            The composed text is in the file. Open it to read what was made.
-          </p>
-        )}
+        ) : caption ? (
+          <p className="os-caption">{caption}</p>
+        ) : null}
       </section>
     );
   }
@@ -428,6 +616,11 @@ function BriefColumn({
       <Field label="Name">
         <Input id="mz-name" value={name} onChange={onName} label="Name" placeholder="Q3 report" />
       </Field>
+      {nameProblem ? (
+        <p className="os-mz-name-problem" role="alert">
+          {nameProblem}
+        </p>
+      ) : null}
       <Field label="What do you want made?">
         <Input
           id="mz-statement"
