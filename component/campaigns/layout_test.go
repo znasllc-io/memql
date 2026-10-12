@@ -796,6 +796,56 @@ func TestEmailLayoutsIncludesArchivedOnRequest(t *testing.T) {
 	}
 }
 
+func TestEmailLayoutsBoundsDocumentsAndKeepsEveryLayout(t *testing.T) {
+	w, engine, _ := layoutFixture(t)
+	for i := 0; i < 12; i++ {
+		id := fmt.Sprintf("large-%02d", i)
+		row := storedLayout(t, "active")
+		row["id"] = "v1:campaigns:emailLayout:" + id
+		row["name"] = id
+		// Escaped characters ensure the budget measures encoded bytes, not
+		// the number of characters in the source document.
+		row["document"] = map[string]any{"subject": strings.Repeat("<", 180000)}
+		engine.emailLayouts[id] = row
+	}
+	nodes, err := w.handleEmailLayouts(importCtx(), map[string]any{"accountId": layoutOrg}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := nodePayloads(t, nodes)
+	if len(rows) != 16 {
+		t.Fatalf("a large list lost layouts: got %d rows, want 16", len(rows))
+	}
+	used, omitted := 0, 0
+	for i, row := range rows {
+		if row["documentOmitted"] == true {
+			omitted++
+			if _, exists := row["document"]; exists {
+				t.Fatal("an omitted document is still on the wire")
+			}
+			if str(row, "name") == "" || str(row, "revision") == "" || str(row, "status") != "active" {
+				t.Fatalf("omission lost the layout's metadata: %v", row)
+			}
+			full, found, err := w.store.EmailLayoutByID(importCtx(), str(row, "layoutId"))
+			if err != nil || !found || full["document"] == nil {
+				t.Fatalf("an omitted layout cannot be read on demand: found=%v err=%v", found, err)
+			}
+		} else {
+			data, err := json.Marshal(row["document"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			used += len(data)
+		}
+		if i < 4 && row["kind"] != "builtin" {
+			t.Fatal("large lists changed the built-in layout order")
+		}
+	}
+	if used > 8<<20 || omitted == 0 || omitted == 12 {
+		t.Fatalf("document budget: %d encoded bytes, %d omitted layouts", used, omitted)
+	}
+}
+
 func TestEmailLayoutsNeedsAnOrganizationTheCallerCanRead(t *testing.T) {
 	t.Run("no organization named", func(t *testing.T) {
 		w, _, _ := layoutFixture(t)

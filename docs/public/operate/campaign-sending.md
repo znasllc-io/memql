@@ -158,7 +158,10 @@ Colours in a block are the theme's own (`page`, `canvas`, `primary`,
 `secondary`, `accent`, `tint`, `text`, `muted` and `white`), never a value of
 their own. A link is empty, a web, email or phone address, or exactly one of
 the four link tags `{{unsubscribeUrl}}`, `{{preferencesUrl}}`, `{{viewUrl}}`
-and `{{confirmUrl}}`, which sending replaces for each recipient. No other merge
+and `{{confirmUrl}}`, which sending replaces for each recipient. A recipient
+link must stand alone, never inside another address or a link label; saves
+and previews refuse it there too. Sentence punctuation around a bare link is
+allowed. No other merge
 tag can stand in for an address, so a recipient's own value can never become a
 link. A picture is `artifact:<id>`, a PNG, JPEG or GIF in the Library, or a
 `data:` image. An email carries at most eight pictures and 1 MiB of picture
@@ -183,7 +186,10 @@ the next email in the series.
   `{id, kind, name, description, document, status}`, and an organization's own
   also carry `layoutId`, `revision` and `sourceArtifactId`. The `id`
   (`builtin:<name>` or `org:<layoutId>`) is opaque: a client passes it on and
-  never builds or splits one.
+  never builds or splits one. Documents are included up to an 8 MiB answer
+  budget. A later row may have `documentOmitted: true` with no `document`;
+  read `emailLayoutById` with its `layoutId` before opening or previewing it.
+  Every layout remains listed, with its metadata and order intact.
 - `campaignSaveLayout({layoutId, accountId, name, description, document,
   sourceArtifactId, expectedRevision, action})` saves an organization's layout
   with the same exact-revision rule as a template. It takes a layout-mode

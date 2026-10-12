@@ -83,7 +83,7 @@ func newLayoutWorldWith(t *testing.T, sessionParams map[string]any) *layoutWorld
 			t.Fatal(err)
 		}
 		w.engines[n] = e
-		w.workers[n] = NewWorker(deliveryDBEngine{e}, nil, nil, quietLogger(), func() *sql.DB { return db.DB })
+		w.workers[n] = NewWorker(deliveryDBEngine{e}, nil, nil, quietLogger(), gatePoolFor(t))
 		// Registered as the integration, so a builtin call runs the whole way:
 		// the DSL declaration, the executor name and the handler.
 		if err := e.RegisterIntegration(w.workers[n]); err != nil {

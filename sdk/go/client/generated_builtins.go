@@ -1722,7 +1722,7 @@ func EmailInboxBuild(args EmailInboxArgs) string {
 	return "builtin emailInbox()"
 }
 
-// EmailLayouts -- The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. The id is opaque: pass it to composeMaterialize as layoutId.
+// EmailLayouts -- The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. Documents are included up to an 8 MiB answer budget; later rows carry documentOmitted: true instead of document. Read emailLayoutById with the row layoutId when its document is needed. The id is opaque: pass it to composeMaterialize as layoutId.
 type EmailLayoutsArgs struct {
 	AccountId          string
 	IncludeArchived    bool
