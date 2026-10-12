@@ -19,6 +19,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/steps"
 	pure "github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
@@ -330,6 +331,16 @@ func materializeBlankDB(t *testing.T, format pure.Format) blankOutcome {
 // blank must never need a model, and a stray call would fail the run loudly.
 func materializeRequestDB(t *testing.T, args materializeArgs) blankOutcome {
 	t.Helper()
+	return materializeRequestDBAs(t, args, nil)
+}
+
+// materializeRequestDBAs is materializeRequestDB with the accepting call made
+// as asCaller says: it is given the accepting engine and the owner, may write
+// what the request needs there first (an organization, for an email) and finish
+// the arguments, and returns the context the request is made under. nil is the
+// owner as a plain signed-in person, as materializeRequestDB makes it.
+func materializeRequestDBAs(t *testing.T, args materializeArgs, asCaller func(e *memql.MemQLEngine, owner string, args *materializeArgs) context.Context) blankOutcome {
+	t.Helper()
 	accepting := materializeDBEngine(t)
 	executing := materializeDBEngine(t)
 	accept := New(accepting, accepting.Logger)
@@ -350,6 +361,9 @@ func materializeRequestDB(t *testing.T, args materializeArgs) blankOutcome {
 
 	owner := fmt.Sprintf("compose-blank-%s-%d", args.Format, time.Now().UnixNano())
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
+	if asCaller != nil {
+		ctx = asCaller(accepting, owner, &args)
+	}
 	args.RequestId = "r-" + owner
 	accepted, err := accept.materialize(ctx, owner, "", args)
 	if err != nil {
@@ -566,5 +580,140 @@ func TestMaterializeDB_RefusesAFolderTheCallerCannotUse(t *testing.T) {
 	mutate(accepting, ownerCtx, "createComposeRecipe", map[string]any{"recipeId": recipeId, "name": "Weekly notes", "description": "The week's notes", "format": "markdown", "folderId": archived})
 	if _, err := accept.handleRunRecipe(ownerCtx, map[string]any{"recipeId": recipeId}, 0); !errors.Is(err, errFolderUnavailable) {
 		t.Fatalf("a recipe saved to file into an archived folder ran: refusal = %v, want %q", err, errFolderUnavailable)
+	}
+}
+
+// A blank email on the real engine: the layout resolved when the request is
+// accepted travels in the saved request to the replica that adopts the run,
+// which files it as the email without a model (the executing node has no
+// composer). The organization is a real client account the caller can read.
+func TestMaterializeDB_BlankEmailFromABuiltinLayout(t *testing.T) {
+	asOrganizationOwner := func(e *memql.MemQLEngine, owner string, args *materializeArgs) context.Context {
+		ctx := auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: owner, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: owner})
+		account := owner + "-client"
+		if _, err := e.Execute(ctx, "mutation "+call("createClientAccount", map[string]any{"accountId": account, "name": "Email client"})); err != nil {
+			t.Fatal(err)
+		}
+		args.AccountIds = []string{account}
+		return ctx
+	}
+	out := materializeRequestDBAs(t, materializeArgs{Name: "Welcome", Format: pure.FormatJSON, OutputKind: "email_template", LayoutId: "builtin:confirmation"}, asOrganizationOwner)
+	want, ok := emaildoc.Layout("builtin:confirmation")
+	if !ok {
+		t.Fatal("no confirmation layout")
+	}
+	wantBytes, err := want.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.upload.calls != 1 || string(out.upload.bytes) != string(wantBytes) {
+		t.Fatalf("the blank email uploaded %d times:\n%s\nwant the confirmation layout itself", out.upload.calls, out.upload.bytes)
+	}
+	doc, err := emaildoc.Parse(out.upload.bytes)
+	if err != nil || doc.Layout != "builtin:confirmation" {
+		t.Fatalf("the filed email is not the confirmation layout: %q %v", doc.Layout, err)
+	}
+	if out.file == nil || out.file["name"] != "Welcome.email.json" || out.file["status"] != "ready" || out.file["summary"] != "Created from an email layout." {
+		t.Fatalf("the filed email is not a ready Welcome.email.json created from its layout: %v", out.file)
+	}
+	if stringOf(out.row["sourceFileId"]) != "" {
+		t.Fatalf("a blank email files no source package: %v", out.row)
+	}
+	if models, _ := out.row["modelsUsed"].([]any); len(models) != 0 {
+		t.Fatalf("a blank email reached a model: %v", out.row["modelsUsed"])
+	}
+	if out.journal.Status != "succeeded" {
+		t.Fatalf("the blank email run did not succeed: %+v", out.journal)
+	}
+}
+
+// AN ORGANIZATION'S LAYOUT IS READ ON THE REAL ENGINE. The unit tests stand a
+// map in for emailLayoutById; this asks the shipped query, as the person, behind
+// the organization boundary, and compares the organization the engine answers
+// with (in whatever form it answers it) with the one the email is for. A layout
+// of the email's organization is filed as the email; one of another of their
+// organizations, and an archived one, are refused before anything is written.
+func TestMaterializeDB_EmailFromAnOrganizationLayout(t *testing.T) {
+	letter, ok := emaildoc.Layout("builtin:letter")
+	if !ok {
+		t.Fatal("no letter layout")
+	}
+	letter.Subject = "Our house letter"
+	raw, err := letter.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	var layout string
+	saveLayout := func(e *memql.MemQLEngine, ctx context.Context, layoutId, account string) {
+		t.Helper()
+		// What campaignSaveLayout writes once it has checked the organization and
+		// the revision: the mutation is @serverOnly, so it runs with internal origin.
+		if _, err := e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call("createEmailLayout", map[string]any{
+			"layoutId": layoutId, "accountId": account, "name": "House letter", "document": document,
+			"versionTime": time.Now().UTC().Format(time.RFC3339Nano),
+		})); err != nil {
+			t.Fatalf("createEmailLayout: %v", err)
+		}
+	}
+	out := materializeRequestDBAs(t, materializeArgs{Name: "Welcome", Format: pure.FormatJSON, OutputKind: "email_template"},
+		func(e *memql.MemQLEngine, owner string, args *materializeArgs) context.Context {
+			ctx := auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: owner, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: owner})
+			account := owner + "-client"
+			if _, err := e.Execute(ctx, "mutation "+call("createClientAccount", map[string]any{"accountId": account, "name": "Email client"})); err != nil {
+				t.Fatal(err)
+			}
+			layout = owner + "-layout"
+			saveLayout(e, ctx, layout, account)
+			args.AccountIds, args.LayoutId = []string{account}, "org:"+layout
+			return ctx
+		})
+	doc, err := emaildoc.Parse(out.upload.bytes)
+	if err != nil {
+		t.Fatalf("the filed email is not a valid email document: %v", err)
+	}
+	if doc.Layout != "org:"+layout || doc.Subject != "Our house letter" {
+		t.Fatalf("filed layout %q with subject %q, want the organization's layout", doc.Layout, doc.Subject)
+	}
+	if out.journal.Status != "succeeded" || out.file == nil || out.file["name"] != "Welcome.email.json" {
+		t.Fatalf("the email from an organization layout did not finish as one ready file: %+v %v", out.journal, out.file)
+	}
+
+	// The refusals, made by the same kind of caller on a fresh engine.
+	e := materializeDBEngine(t)
+	accept := New(e, e.Logger)
+	accept.SetGoalOpener(work.New(e, e.Logger))
+	owner := fmt.Sprintf("compose-layout-refusals-%d", time.Now().UnixNano())
+	ctx := auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: owner, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: owner})
+	mine, theirs := owner+"-client", owner+"-other-client"
+	for _, account := range []string{mine, theirs} {
+		if _, err := e.Execute(ctx, "mutation "+call("createClientAccount", map[string]any{"accountId": account, "name": "Email client"})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	elsewhere, archived := owner+"-elsewhere", owner+"-archived"
+	saveLayout(e, ctx, elsewhere, theirs)
+	saveLayout(e, ctx, archived, mine)
+	if _, err := e.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call("updateEmailLayout", map[string]any{
+		"layoutId": archived, "status": "archived", "versionTime": time.Now().UTC().Add(time.Second).Format(time.RFC3339Nano),
+	})); err != nil {
+		t.Fatalf("archiving the layout: %v", err)
+	}
+	for _, c := range []struct{ layoutId, want string }{
+		{"org:" + elsewhere, "compose: that layout belongs to another organization"},
+		{"org:" + archived, "compose: that layout is archived; restore it first"},
+		{"org:" + owner + "-no-such-layout", "compose: that layout is not readable by you"},
+	} {
+		a := materializeArgs{Name: "Welcome", Format: pure.FormatJSON, OutputKind: "email_template", AccountIds: []string{mine}, LayoutId: c.layoutId, RequestId: "r-" + strings.TrimPrefix(c.layoutId, "org:")}
+		if _, err := accept.materialize(ctx, owner, "", a); err == nil || err.Error() != c.want {
+			t.Fatalf("%s: refusal = %v, want %q", c.layoutId, err, c.want)
+		}
+		written, err := accept.store().compositionById(ctx, stableMaterializeID("request", memql.BareShortId(owner), a.RequestId))
+		if err != nil || written != nil {
+			t.Fatalf("%s: refused, but a composition was written: %v (%v)", c.layoutId, written, err)
+		}
 	}
 }

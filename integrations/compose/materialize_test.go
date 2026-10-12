@@ -1,6 +1,7 @@
 package compose
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	pure "github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	work "github.com/znasllc-io/memql/integrations/work"
@@ -41,10 +43,18 @@ type materializeEngine struct {
 	// records, for each compositionById, whether it asked for a fresh read.
 	cachedCompositions map[string]map[string]any
 	compositionReads   []bool
+
+	// layouts are the organization email layouts the caller can READ, by bare
+	// id (emailLayoutById); artifacts are the caller's own Library artifacts,
+	// by the file id they index (libraryArtifactForFile). Any other id answers
+	// no row.
+	layouts   map[string]map[string]any
+	artifacts map[string]map[string]any
 }
 
 func newMaterializeEngine(t *testing.T) *materializeEngine {
-	return &materializeEngine{t: t, compositions: map[string]map[string]any{}, inputs: map[string]map[string]any{}, files: map[string]map[string]any{}, folders: map[string]map[string]any{}}
+	return &materializeEngine{t: t, compositions: map[string]map[string]any{}, inputs: map[string]map[string]any{}, files: map[string]map[string]any{}, folders: map[string]map[string]any{},
+		layouts: map[string]map[string]any{}, artifacts: map[string]map[string]any{}}
 }
 func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
 	name, args := materializeCall(e.t, query)
@@ -128,6 +138,10 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 	case "libraryFolderById":
 		e.folderReads = append(e.folderReads, memql.FreshReadFromContext(ctx))
 		row = e.folders[stringOf(args["folderId"])]
+	case "emailLayoutById":
+		row = e.layouts[stringOf(args["layoutId"])]
+	case "libraryArtifactForFile":
+		row = e.artifacts[stringOf(args["fileId"])]
 	case "sourceRows":
 		row = e.source
 	case "clientAccountById":
@@ -970,6 +984,21 @@ func TestMaterializeArgsWithoutARequestIdSerialiseAsBefore(t *testing.T) {
 	}
 }
 
+// The same for the layout of an email: a request that names none (every
+// request that is not an email, and an email that takes the default) keys
+// exactly as it did before the field existed.
+func TestMaterializeArgsWithoutALayoutIdSerialiseAsBefore(t *testing.T) {
+	for _, a := range []materializeArgs{materializeDraft(), {Name: "Welcome", Format: pure.FormatJSON, OutputKind: "email_template", AccountIds: []string{"client"}}} {
+		raw, err := json.Marshal(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "LayoutId") {
+			t.Fatalf("an absent layout id changed the saved request, and with it every in-run composition id: %s", raw)
+		}
+	}
+}
+
 // legacyMaterializeArgs is materializeArgs exactly as it was before RequestId
 // existed: same fields, same order, same tags. A nested materialization's
 // composition id is a hash of its arguments' JSON, so this is the shape every
@@ -1740,5 +1769,387 @@ func TestBlankAndDescribedFilesAreSummarisedAsCreatedBlank(t *testing.T) {
 		if f["summary"] != "Materialized from no sources." {
 			t.Fatalf("an ordinary file's summary = %q, want Materialized from no sources.", f["summary"])
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Emails written into layouts (epic #6022, task #6032)
+// ---------------------------------------------------------------------------
+//
+// An email template is a layout document. A blank email files the layout as it
+// is, with no model call; a described one asks the composer to fill only the
+// layout's content blocks, and the server merges what it wrote and refuses
+// anything aimed at the brand, a link tag or a picture nobody chose to include.
+
+const emailAccount = "client"
+
+// emailArgs is an email for the fixture's organization, with nothing to write
+// it from: a blank email.
+func emailArgs(layoutId string) materializeArgs {
+	return materializeArgs{Name: "Welcome", Format: pure.FormatJSON, OutputKind: "email_template", AccountIds: []string{emailAccount}, LayoutId: layoutId}
+}
+
+// emailFixture is materializeFixture with an organization the caller can file
+// an email for.
+func emailFixture(t *testing.T) (*Integration, *materializeEngine, *materializeUploader) {
+	i, e, u := materializeFixture(t)
+	e.account = map[string]any{"id": emailAccount, "status": "active"}
+	return i, e, u
+}
+
+// builtinLayout is a built-in layout and its canonical bytes.
+func builtinLayout(t *testing.T, id string) (emaildoc.Document, []byte) {
+	t.Helper()
+	doc, ok := emaildoc.Layout(id)
+	if !ok {
+		t.Fatalf("no built-in layout %s", id)
+	}
+	raw, err := doc.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc, raw
+}
+
+// layoutRow is an organization layout as emailLayoutById answers it: the
+// document is an object, as it comes back out of the database.
+func layoutRow(t *testing.T, id, accountId, status string, doc emaildoc.Document) map[string]any {
+	t.Helper()
+	raw, err := doc.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	return map[string]any{"id": "v1:campaigns:emailLayout:" + id, "accountId": accountId, "name": "House layout", "status": status, "document": document}
+}
+
+// emailBlock finds a block anywhere in an email document.
+func emailBlock(t *testing.T, doc emaildoc.Document, id string) emaildoc.Block {
+	t.Helper()
+	var walk func([]emaildoc.Block) *emaildoc.Block
+	walk = func(blocks []emaildoc.Block) *emaildoc.Block {
+		for i := range blocks {
+			if blocks[i].ID == id {
+				return &blocks[i]
+			}
+			if found := walk(blocks[i].Blocks); found != nil {
+				return found
+			}
+			for _, column := range blocks[i].Columns {
+				if found := walk(column.Blocks); found != nil {
+					return found
+				}
+			}
+		}
+		return nil
+	}
+	found := walk(doc.Blocks)
+	if found == nil {
+		t.Fatalf("the email has no block %q", id)
+	}
+	return *found
+}
+
+func sameBlock(t *testing.T, a, b emaildoc.Block) bool {
+	t.Helper()
+	x, err := json.Marshal(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	y, err := json.Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.Equal(x, y)
+}
+
+// filedEmail parses what was uploaded as the email file.
+func filedEmail(t *testing.T, u *materializeUploader) emaildoc.Document {
+	t.Helper()
+	doc, err := emaildoc.Parse(u.bytes)
+	if err != nil {
+		t.Fatalf("the filed email is not a valid email document: %v\n%s", err, u.bytes)
+	}
+	return doc
+}
+
+// contentComposer answers with what a model would write into a layout.
+func contentComposer(asked *[]ComposeRequest, content emaildoc.Content) materializeComposerFunc {
+	return func(_ context.Context, r ComposeRequest) (ComposeReply, error) {
+		*asked = append(*asked, r)
+		c := content
+		return ComposeReply{EmailContent: &c, Models: []pure.ModelContribution{{Provider: "fleet:writer", Model: "writer", Calls: 1}}}, nil
+	}
+}
+
+func text(s string) *string { return &s }
+
+func TestBlankEmailFilesTheLayoutWithoutAModelCall(t *testing.T) {
+	i, e, u := emailFixture(t)
+	i.SetComposer(forbidComposer(t))
+	compositionId, input := acceptAsAPerson(t, i, emailArgs("builtin:letter"))
+	// Accepted on one replica, executed on another that only has the saved request.
+	if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+		t.Fatal(err)
+	}
+	row := e.compositions[compositionId]
+	if row["status"] != "ready" {
+		t.Fatalf("the blank email did not complete: %v", row)
+	}
+	file := e.files[stringOf(row["outputFileId"])]
+	if file["name"] != "Welcome.email.json" || file["mimeType"] != "application/json" {
+		t.Fatalf("filed %v as %v, want Welcome.email.json", file["name"], file["mimeType"])
+	}
+	doc := filedEmail(t, u)
+	if doc.Layout != "builtin:letter" {
+		t.Fatalf("the filed email names layout %q, want builtin:letter", doc.Layout)
+	}
+	if _, want := builtinLayout(t, "builtin:letter"); !bytes.Equal(u.bytes, want) {
+		t.Fatalf("a blank email must be the layout itself, byte for byte:\n%s", u.bytes)
+	}
+	// One file: a layout has no recipe worth rebuilding, so no source package.
+	if len(e.files) != 1 || stringOf(row["sourceFileId"]) != "" || u.calls != 1 {
+		t.Fatalf("a blank email is one file: files=%d sourceFileId=%v uploads=%d", len(e.files), row["sourceFileId"], u.calls)
+	}
+	if file["summary"] != "Created from an email layout." {
+		t.Fatalf("summary = %q", file["summary"])
+	}
+	if models, _ := row["modelsUsed"].([]any); len(models) != 0 {
+		t.Fatalf("a blank email reached a model: %v", row["modelsUsed"])
+	}
+}
+
+func TestBlankEmailFromAnOrganizationLayout(t *testing.T) {
+	i, e, u := emailFixture(t)
+	house, _ := builtinLayout(t, "builtin:spotlight")
+	house.Subject, house.Layout = "Our house layout", "builtin:spotlight"
+	// The row names the organization by its canonical id; the request by its
+	// bare one. They are the same organization.
+	e.layouts["house"] = layoutRow(t, "house", "v1:accounts:account:"+emailAccount, "active", house)
+	if _, err := i.materialize(nestedMaterializeContext(), "u-alice", "", emailArgs("org:house")); err != nil {
+		t.Fatal(err)
+	}
+	doc := filedEmail(t, u)
+	// The layout is the one the person chose, named as they chose it, whatever
+	// the saved document said it came from.
+	if doc.Layout != "org:house" || doc.Subject != "Our house layout" {
+		t.Fatalf("filed layout %q with subject %q, want org:house with the organization's own subject", doc.Layout, doc.Subject)
+	}
+	if !sameBlock(t, emailBlock(t, doc, "footer"), emailBlock(t, house, "footer")) {
+		t.Fatal("the organization's footer was not filed as it was saved")
+	}
+}
+
+func TestEmailWithoutALayoutUsesTheArticle(t *testing.T) {
+	blank, e, u := emailFixture(t)
+	if _, err := blank.materialize(nestedMaterializeContext(), "u-alice", "", emailArgs("")); err != nil {
+		t.Fatal(err)
+	}
+	if _, want := builtinLayout(t, "builtin:article"); !bytes.Equal(u.bytes, want) {
+		t.Fatalf("a blank email with no layout must be the Article:\n%s", u.bytes)
+	}
+	if len(e.files) != 1 {
+		t.Fatalf("files = %d", len(e.files))
+	}
+
+	described, _, du := emailFixture(t)
+	var asked []ComposeRequest
+	described.SetComposer(contentComposer(&asked, emaildoc.Content{Subject: "Autumn mornings", Blocks: []emaildoc.ContentItem{{ID: "intro", Text: text("Autumn mornings are darker.")}}}))
+	a := emailArgs("")
+	a.Statement = "Tips for darker autumn mornings"
+	if _, err := described.materialize(nestedMaterializeContext(), "u-alice", "", a); err != nil {
+		t.Fatal(err)
+	}
+	article, _ := builtinLayout(t, "builtin:article")
+	if len(asked) != 1 || asked[0].EmailLayout == nil || asked[0].EmailLayout.Layout != "builtin:article" || len(asked[0].EmailLayout.Blocks) != len(article.Blocks) {
+		t.Fatalf("the composer was not given the Article to fill: %+v", asked)
+	}
+	if doc := filedEmail(t, du); doc.Layout != "builtin:article" || emailBlock(t, doc, "intro").Text != "Autumn mornings are darker." {
+		t.Fatalf("the described email was not written into the Article: %+v", doc)
+	}
+}
+
+func TestLayoutRefusalsWriteNothing(t *testing.T) {
+	letter, _ := builtinLayout(t, "builtin:letter")
+	for _, c := range []struct{ name, layoutId, want string }{
+		{"an unknown built-in", "builtin:newsletter", "compose: choose one of the listed layouts"},
+		{"an organization layout the caller cannot read", "org:missing", "compose: that layout is not readable by you"},
+		{"an archived layout", "org:old", "compose: that layout is archived; restore it first"},
+		{"another organization's layout", "org:theirs", "compose: that layout belongs to another organization"},
+		{"an id without its kind", "letter", "compose: layoutId must be builtin:<name> or org:<id>"},
+		{"an organization layout with no id", "org:", "compose: layoutId must be builtin:<name> or org:<id>"},
+		{"an id with a space", "org:old layout", "compose: layoutId must be builtin:<name> or org:<id>"},
+		{"a kind it does not know", "template:welcome", "compose: layoutId must be builtin:<name> or org:<id>"},
+	} {
+		for where, ctx := range map[string]context.Context{"in a run": nestedMaterializeContext(), "standalone": materializeContext()} {
+			i, e, u := emailFixture(t)
+			i.SetGoalOpener(&directMaterializeGoal{})
+			i.SetComposer(forbidComposer(t))
+			e.layouts["old"] = layoutRow(t, "old", emailAccount, "archived", letter)
+			e.layouts["theirs"] = layoutRow(t, "theirs", "other-client", "active", letter)
+			for _, a := range []materializeArgs{emailArgs(c.layoutId), func() materializeArgs {
+				described := emailArgs(c.layoutId)
+				described.Statement = "A welcome for new subscribers"
+				return described
+			}()} {
+				_, err := i.materialize(ctx, "u-alice", "", a)
+				if err == nil || err.Error() != c.want {
+					t.Fatalf("%s %s: refusal = %v, want %q", c.name, where, err, c.want)
+				}
+			}
+			if len(e.compositions) != 0 || len(e.inputs) != 0 || len(e.files) != 0 || u.calls != 0 {
+				t.Fatalf("%s %s: the refusal wrote rows: %v %v %v uploads=%d", c.name, where, e.compositions, e.inputs, e.files, u.calls)
+			}
+		}
+	}
+
+	// A layout belongs to an email template and nothing else.
+	for _, args := range []map[string]any{
+		{"name": "Notes", "format": "markdown", "layoutId": "builtin:letter"},
+		{"name": "Data", "format": "json", "layoutId": "builtin:letter"},
+	} {
+		if _, err := parseMaterializeArgs(args); err == nil || err.Error() != "compose: layoutId applies only to email templates" {
+			t.Fatalf("layoutId on %v: refusal = %v", args, err)
+		}
+	}
+	a, err := parseMaterializeArgs(map[string]any{"name": "Welcome", "format": "json", "outputKind": "email_template", "layoutId": " builtin:letter "})
+	if err != nil || a.LayoutId != "builtin:letter" {
+		t.Fatalf("layoutId = %q (%v), want builtin:letter", a.LayoutId, err)
+	}
+	if a.layoutID() != "builtin:letter" || emailArgs("").layoutID() != "builtin:article" {
+		t.Fatalf("layoutID() = %q / %q", a.layoutID(), emailArgs("").layoutID())
+	}
+}
+
+func TestDescribedEmailMergesTheComposersContent(t *testing.T) {
+	i, e, u := emailFixture(t)
+	a := emailArgs("builtin:letter")
+	a.Statement = "Welcome our autumn subscribers"
+	compositionId, input := acceptAsAPerson(t, i, a)
+	var asked []ComposeRequest
+	worker := anotherReplica(e, u, contentComposer(&asked, emaildoc.Content{
+		Subject:   "Welcome to autumn",
+		Preheader: "What the season brings.",
+		Blocks:    []emaildoc.ContentItem{{ID: "headline", Text: text("Autumn is here")}, {ID: "cta", Label: text("Read the autumn guide"), Href: nil}},
+	}))
+	if err := adoptTheRun(worker, input); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0].OutputKind != "email_template" || asked[0].Statement != a.Statement || asked[0].EmailLayout == nil || asked[0].EmailLayout.Layout != "builtin:letter" {
+		t.Fatalf("the composer was not asked to fill the letter: %+v", asked)
+	}
+	row := e.compositions[compositionId]
+	if row["status"] != "ready" {
+		t.Fatalf("the described email did not complete: %v", row)
+	}
+	doc := filedEmail(t, u)
+	letter, _ := builtinLayout(t, "builtin:letter")
+	if doc.Subject != "Welcome to autumn" || doc.Preheader != "What the season brings." || doc.Layout != "builtin:letter" {
+		t.Fatalf("filed subject %q, preheader %q, layout %q", doc.Subject, doc.Preheader, doc.Layout)
+	}
+	if got := emailBlock(t, doc, "headline").Text; got != "Autumn is here" {
+		t.Fatalf("headline = %q", got)
+	}
+	if got := emailBlock(t, doc, "cta"); got.Label != "Read the autumn guide" || got.Href != emailBlock(t, letter, "cta").Href {
+		t.Fatalf("cta = %+v", got)
+	}
+	for _, id := range []string{"footer", "logo", "signature", "promo", "social"} {
+		if !sameBlock(t, emailBlock(t, doc, id), emailBlock(t, letter, id)) {
+			t.Errorf("brand block %q changed", id)
+		}
+	}
+	// A composed email keeps its recipe beside it, as any composed file does.
+	if stringOf(row["sourceFileId"]) == "" || len(e.files) != 2 {
+		t.Fatalf("a composed email files its source package too: sourceFileId=%v files=%d", row["sourceFileId"], len(e.files))
+	}
+	if models, _ := row["modelsUsed"].([]any); len(models) != 1 {
+		t.Fatalf("the composer's model is not on the record: %v", row["modelsUsed"])
+	}
+}
+
+// Review Focus 4: model output aimed at a brand block or the confirm link, or
+// using a picture nobody selected for inclusion, is refused; the composition
+// fails and nothing is filed.
+func TestDescribedEmailRefusesBrandBlocksAndUnselectedPictures(t *testing.T) {
+	png := referencePNG(t)
+	referenceOnly := "memql-asset:" + (pure.Result{Bytes: png}).SHA256()
+	for _, c := range []struct {
+		name, layoutId, want string
+		content              emaildoc.Content
+	}{
+		{"a brand block", "builtin:letter", `the draft tried to change a brand block: "footer"`, emaildoc.Content{Subject: "Hi", Blocks: []emaildoc.ContentItem{
+			{ID: "headline", Text: text("Autumn is here")}, {ID: "footer", Text: text("Reply to win")}}}},
+		{"the confirm link", "builtin:confirmation", `the draft tried to replace the {{confirmUrl}} link on "confirm"`, emaildoc.Content{Subject: "Hi", Blocks: []emaildoc.ContentItem{
+			{ID: "confirm", Href: text("https://evil.test/confirm")}}}},
+		{"a reference-only picture", "builtin:article", "the draft used a picture that was not selected for inclusion", emaildoc.Content{Subject: "Hi", Blocks: []emaildoc.ContentItem{
+			{ID: "banner", Image: text(referenceOnly)}}}},
+		{"a picture from the web", "builtin:article", "the draft used a picture that was not selected for inclusion", emaildoc.Content{Subject: "Hi", Blocks: []emaildoc.ContentItem{
+			{ID: "banner", Image: text("https://cdn.example/a.png")}}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			i, e, u := emailFixture(t)
+			// The reference is read for the model to look at, and not for the email.
+			i.SetSourceDownloader(&referenceReader{data: png})
+			e.files["reference"] = map[string]any{"name": "example.png", "blobUrl": "library/u-alice/reference/example.png", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: png}).SHA256()}
+			e.artifacts["reference"] = map[string]any{"id": "v1:library:artifact:a1"}
+			a := emailArgs(c.layoutId)
+			a.Statement = "A welcome in our usual style"
+			a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference", Label: "Last year's welcome", Content: true}}
+			compositionId, input := acceptAsAPerson(t, i, a)
+			var asked []ComposeRequest
+			err := adoptTheRun(anotherReplica(e, u, contentComposer(&asked, c.content)), input)
+			if err == nil || !strings.Contains(err.Error(), terminalFailureCode) {
+				t.Fatalf("the composition must fail terminally, got %v", err)
+			}
+			row := e.compositions[compositionId]
+			if row["status"] != "failed" || stringOf(row["failureReason"]) != "compose: the email draft could not be used: "+c.want {
+				t.Fatalf("composition = %v / %q, want failed with %q", row["status"], row["failureReason"], c.want)
+			}
+			for _, call := range e.calls {
+				if call == "createLibraryFile" {
+					t.Fatalf("a refused draft was filed: %v", e.calls)
+				}
+			}
+			if u.calls != 0 || len(e.files) != 1 {
+				t.Fatalf("a refused draft was stored: uploads=%d files=%d", u.calls, len(e.files))
+			}
+		})
+	}
+}
+
+// A blank email is one with nothing to write it from. Anything to write it from
+// makes it a described one, and nothing but an email is a blank email.
+func TestBlankEmailMeansALayoutAndNothingToWriteItFrom(t *testing.T) {
+	if !emailArgs("builtin:letter").blankEmail() || !emailArgs("").blankEmail() {
+		t.Fatal("an email with a layout and nothing to write it from is a blank email")
+	}
+	around := emailArgs("org:house")
+	around.FolderId, around.Ceilings, around.RequestId, around.Draft = "folder-1", map[string]any{"maxRetries": 1}, "req-1", " \n "
+	if !around.blankEmail() {
+		t.Fatal("a folder, ceilings, a request id and a whitespace-only draft do not stop an email being blank")
+	}
+	for name, with := range map[string]func(*materializeArgs){
+		"a statement":    func(a *materializeArgs) { a.Statement = "A welcome" },
+		"a draft":        func(a *materializeArgs) { a.Draft = `{"subject":"Hi"}` },
+		"section keys":   func(a *materializeArgs) { a.SectionKeys = []string{"chapter-1"} },
+		"sources":        func(a *materializeArgs) { a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes"}} },
+		"a template":     func(a *materializeArgs) { a.TemplateId = "template-1" },
+		"a recipe":       func(a *materializeArgs) { a.RecipeId = "recipe-1" },
+		"a deployable":   func(a *materializeArgs) { a.DeployableKind = "spa" },
+		"no output kind": func(a *materializeArgs) { a.OutputKind = "" },
+	} {
+		a := emailArgs("builtin:letter")
+		with(&a)
+		if a.blankEmail() {
+			t.Fatalf("an email with %s is not a blank email", name)
+		}
+	}
+	// An email is never blank() itself: the blank document of its format is not
+	// what a blank email files.
+	if emailArgs("builtin:letter").blank() {
+		t.Fatal("a blank email must not be filed as the empty JSON document")
 	}
 }

@@ -1,60 +1,46 @@
 package compose
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
-	"io"
-	"strings"
-	"unicode"
+	"fmt"
 )
 
-// EmailTemplate is an editable authoring file, not a published campaign or an
-// instruction to send. The campaign renderer supplies recipient merge values.
-type EmailTemplate struct {
-	Subject  string `json:"subject"`
-	TextBody string `json:"textBody"`
-	HTMLBody string `json:"htmlBody"`
-}
+// maxEmailFileBytes is the largest email file: the size the email document's
+// own parser reads (emaildoc.MaxBytes, which this package may not import).
+const maxEmailFileBytes = 2 << 20
 
-// ParseEmailTemplate validates the editable file. Campaigns also supports
-// plain-text messages with an empty HTML alternative.
-func ParseEmailTemplate(source string) (EmailTemplate, error) {
-	if len(source) > 2<<20 {
-		return EmailTemplate{}, errors.New("email template exceeds 2 MiB")
-	}
-	decoder := json.NewDecoder(strings.NewReader(source))
-	decoder.DisallowUnknownFields()
-	var email EmailTemplate
-	if err := decoder.Decode(&email); err != nil {
-		return EmailTemplate{}, err
-	}
-	if err := decoder.Decode(new(any)); err != io.EOF {
-		return EmailTemplate{}, errors.New("email template contains trailing content")
-	}
-	if strings.TrimSpace(email.Subject) == "" || strings.IndexFunc(email.Subject, unicode.IsControl) >= 0 || len(email.Subject) > 998 {
-		return EmailTemplate{}, errors.New("email subject must be a nonempty single line under 999 bytes")
-	}
-	if strings.TrimSpace(email.TextBody) == "" {
-		return EmailTemplate{}, errors.New("email template needs a plain-text body")
-	}
-	return email, nil
-}
+var errEmailFileTooLarge = errors.New("email file exceeds 2 MiB")
 
-// RenderEmailTemplate requires the editable HTML promised by an AI email draft.
-func RenderEmailTemplate(source string) (Result, error) {
-	email, err := ParseEmailTemplate(source)
-	if err != nil {
-		return Result{}, err
+// RenderEmailFile writes an email document as its file: the JSON object it is
+// given, compacted and laid out again with two-space indentation and one
+// trailing newline. That is the canonical form the email document writes
+// itself in, so a document's own bytes come back unchanged, and the file a
+// recipe rebuilds is the file that was delivered.
+//
+// It checks only that the body is one JSON object and that it and the file are
+// at most 2 MiB. What the object says is checked before a recipe is saved
+// (integrations/compose parses it as an email document): this package rebuilds
+// files standalone and carries no email parser.
+func RenderEmailFile(body string) (Result, error) {
+	if len(body) > maxEmailFileBytes {
+		return Result{}, errEmailFileTooLarge
 	}
-	if strings.TrimSpace(email.HTMLBody) == "" {
-		return Result{}, errors.New("generated email template needs editable HTML")
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, []byte(body)); err != nil {
+		return Result{}, fmt.Errorf("email file is not valid JSON: %w", err)
 	}
-	if _, _, err := ExtractEmailImages(email.HTMLBody); err != nil {
-		return Result{}, err
+	if compact.Len() == 0 || compact.Bytes()[0] != '{' {
+		return Result{}, errors.New("an email file must be a JSON object")
 	}
-	data, err := json.MarshalIndent(email, "", "  ")
-	if err != nil {
-		return Result{}, err
+	var file bytes.Buffer
+	if err := json.Indent(&file, compact.Bytes(), "", "  "); err != nil {
+		return Result{}, fmt.Errorf("email file is not valid JSON: %w", err)
 	}
-	return Result{Bytes: append(data, '\n'), Embedded: false, Note: "Email JSON contains only subject, textBody, and htmlBody; provenance is stored on the composition."}, nil
+	file.WriteByte('\n')
+	if file.Len() > maxEmailFileBytes {
+		return Result{}, errEmailFileTooLarge
+	}
+	return Result{Bytes: file.Bytes(), Embedded: false, Note: "An email file carries no provenance of its own; its history is kept on its composition, not in the file."}, nil
 }

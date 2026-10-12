@@ -10,6 +10,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	pure "github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	workstate "github.com/znasllc-io/memql/component/work"
@@ -60,6 +61,10 @@ type materializeArgs struct {
 	// JSON, so a field that serialised as "" would re-key every step already in
 	// flight.
 	RequestId string `json:",omitempty"`
+	// LayoutId is the layout an email template is written into (builtin:<name>
+	// or org:<id>, opaque to the client that picked it). omitempty for the
+	// reason RequestId has it.
+	LayoutId string `json:",omitempty"`
 }
 
 // blank is a request with nothing to compose from: no words, no draft, no
@@ -67,6 +72,25 @@ type materializeArgs struct {
 func (a materializeArgs) blank() bool {
 	return a.Statement == "" && strings.TrimSpace(a.Draft) == "" && len(a.SectionKeys) == 0 &&
 		len(a.Sources) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == ""
+}
+
+// layoutID is the layout an email template is written into: the one the
+// request names, or the Article.
+func (a materializeArgs) layoutID() string {
+	if a.LayoutId == "" {
+		return defaultEmailLayout
+	}
+	return a.LayoutId
+}
+
+// blankEmail is an email template with nothing to write it from: no words, no
+// draft, no sections, no sources, no template, recipe or deployable kind. It is
+// the email's blank file, and that is its layout as it is, filed without a
+// model call (see email_layout.go). It is not blank(): the empty document of
+// its format is not what it files.
+func (a materializeArgs) blankEmail() bool {
+	return a.OutputKind == "email_template" && a.Statement == "" && strings.TrimSpace(a.Draft) == "" && len(a.SectionKeys) == 0 &&
+		len(a.Sources) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.DeployableKind == ""
 }
 
 // describedMarkdown is a Markdown file asked for by DESCRIBING it: a statement,
@@ -190,6 +214,7 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 		OutputKind:     strings.TrimSpace(stringOf(args["outputKind"])),
 		AccountIds:     stringList(args["accountIds"]),
 		RequestId:      strings.TrimSpace(stringOf(args["requestId"])),
+		LayoutId:       strings.TrimSpace(stringOf(args["layoutId"])),
 	}
 	if raw, exists := args["sectionKeys"]; exists && raw != nil {
 		encoded, err := json.Marshal(raw)
@@ -225,6 +250,9 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 	}
 	if out.OutputKind == "email_template" && (format != pure.FormatJSON || out.DeployableKind != "") {
 		return out, errors.New("compose: email templates require format json and no deployable kind")
+	}
+	if out.LayoutId != "" && out.OutputKind != "email_template" {
+		return out, errors.New("compose: layoutId applies only to email templates")
 	}
 	if out.DeployableKind != "" {
 		if _, err := pure.ParseDeployableKind(out.DeployableKind); err != nil {
@@ -291,6 +319,13 @@ type executionRequest struct {
 	// knows whether a person or a run made it. omitempty keeps every other saved
 	// request exactly as it was.
 	Described bool `json:"described,omitempty"`
+	// EmailLayout is the layout an email template is written into, as the
+	// document it was when the request was accepted (resolveEmailLayout), its
+	// Layout naming the id it was chosen by. Saved with the request so that the
+	// replica that writes the email reads the layout the person chose, and not
+	// whatever the organization has since made of it. Empty for every other
+	// request.
+	EmailLayout json.RawMessage `json:"emailLayout,omitempty"`
 }
 
 var materializeIDEngine = id.NewUntracked()
@@ -304,6 +339,7 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	if a.OutputKind != "" && (a.OutputKind != "email_template" || a.Format != pure.FormatJSON || a.DeployableKind != "") {
 		return nil, errors.New("compose: email_template requires json format and no deployable kind")
 	}
+	var emailLayout json.RawMessage
 	if a.OutputKind == "email_template" {
 		if len(a.AccountIds) != 1 || strings.TrimSpace(a.AccountIds[0]) == "" {
 			return nil, errors.New("compose: choose one organization for this email template")
@@ -314,6 +350,14 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 		}
 		if account == nil || stringOf(account["status"]) != "active" {
 			return nil, errors.New("compose: this organization is not active or accessible to you")
+		}
+		// THE LAYOUT IS RESOLVED WITH THE ORGANIZATION, before anything is
+		// written, and under the caller: a layout they cannot use is refused
+		// here like an organization they cannot use, and the one they can is
+		// saved with the request (the replica that writes the email has only
+		// that).
+		if emailLayout, err = i.resolveEmailLayout(ctx, a); err != nil {
+			return nil, err
 		}
 	}
 	if a.blank() {
@@ -417,6 +461,7 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 			return nil, err
 		}
 	}
+	request.EmailLayout = emailLayout
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("compose: capturing the request: %w", err)
@@ -666,8 +711,9 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 				return fail("checking an earlier output failed", err)
 			}
 			sourceFileId = ""
-			// A blank file has no recipe worth rebuilding, so it files no source package.
-			needsSource = !filedBlank && ((a.Format != pure.FormatText && a.Format != pure.FormatMarkdown) || a.DeployableKind != "" || a.OutputKind != "")
+			// A blank file has no recipe worth rebuilding, so it files no source
+			// package, and nor does a blank email, which is its layout as it is.
+			needsSource = !filedBlank && !a.blankEmail() && ((a.Format != pure.FormatText && a.Format != pure.FormatMarkdown) || a.DeployableKind != "" || a.OutputKind != "")
 			if needsSource {
 				sourceFileId = stableMaterializeID("materialized-source", compositionId)
 			}
@@ -732,8 +778,9 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 			// isBlank is false once a recipe snapshot exists, and that is safe: the
 			// snapshot a blank or described request saves is marked Blank (see
 			// composeRenderOutput), so a resumed run takes the restore branch and still
-			// renders the empty document rather than the draft it restored.
-			return map[string]any{"savedRecipe": request.Recipe != nil, "hasSections": request.Sections != nil, "hasComposer": i.composerRef() != nil, "hasDraft": strings.TrimSpace(draft.Body) != "", "hasRows": len(draft.Rows) > 0, "format": string(a.Format), "outputKind": a.OutputKind, "needsSource": needsSource, "sourceComplete": sourceComplete, "hasRecipeId": a.RecipeId != "", "isBlank": filedBlank && request.Recipe == nil}, nil
+			// renders the empty document rather than the draft it restored. A blank
+			// email's snapshot holds its layout as the draft, which is what it files.
+			return map[string]any{"savedRecipe": request.Recipe != nil, "hasSections": request.Sections != nil, "hasComposer": i.composerRef() != nil, "hasDraft": strings.TrimSpace(draft.Body) != "", "hasRows": len(draft.Rows) > 0, "format": string(a.Format), "outputKind": a.OutputKind, "needsSource": needsSource, "sourceComplete": sourceComplete, "hasRecipeId": a.RecipeId != "", "isBlank": (filedBlank || a.blankEmail()) && request.Recipe == nil}, nil
 		},
 		"composeRestoreDraft": func(context.Context, map[string]any) (any, error) {
 			if request.Recipe == nil {
@@ -752,6 +799,22 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 			if i.composerRef() == nil {
 				return nil, errors.New("compose: no composer configured")
 			}
+			// AN EMAIL IS WRITTEN INTO ITS LAYOUT: the composer is shown the layout
+			// and answers with its content blocks, which are merged in here. The
+			// pictures it may use are worked out first, so a read that fails costs
+			// no model call.
+			var layout *emaildoc.Document
+			var images map[string]string
+			if a.OutputKind == "email_template" {
+				saved, lerr := savedEmailLayout(request)
+				if lerr != nil {
+					return fail("the email layout could not be read", lerr)
+				}
+				layout = &saved
+				if images, lerr = i.emailImageSources(ctx, resolved); lerr != nil {
+					return fail("looking up the pictures selected for inclusion failed", lerr)
+				}
+			}
 			reply, cerr := i.composerRef().Compose(ctx, ComposeRequest{
 				Statement:    a.Statement,
 				Format:       a.Format,
@@ -760,12 +823,26 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 				TemplateName: templateName,
 				TemplateBody: templateBody,
 				Draft:        a.Draft,
+				EmailLayout:  layout,
 			})
 			if cerr != nil {
 				return fail("composing the draft failed: "+cerr.Error(), cerr)
 			}
 			draft = reply.Draft
 			models = reply.Models
+			if layout != nil {
+				// What the composer wrote is checked as it is merged: a block the
+				// layout lacks, a brand block, a link tag or a picture nobody chose
+				// fails the composition, and nothing is filed.
+				if reply.EmailContent == nil {
+					return fail("the composer returned no email content", nil)
+				}
+				body, merr := mergeEmailContent(*layout, *reply.EmailContent, images)
+				if merr != nil {
+					return fail("the email draft could not be used: "+merr.Error(), nil)
+				}
+				draft.Body = body
+			}
 			if strings.TrimSpace(draft.Title) == "" {
 				draft.Title = a.Name
 			}
@@ -778,6 +855,16 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 			return nil, nil
 		},
 		"composeBlankDraft": func(context.Context, map[string]any) (any, error) {
+			if a.OutputKind == "email_template" {
+				// A BLANK EMAIL IS ITS LAYOUT, filed as the email it is: it renders
+				// through the email file like any other, so blankDraft stays false
+				// and its recipe is not Blank (the empty JSON document is not it).
+				if len(request.EmailLayout) == 0 {
+					return fail("the saved request names no email layout", nil)
+				}
+				draft.Body = string(request.EmailLayout)
+				return nil, nil
+			}
 			blankDraft = true
 			return nil, nil
 		},
@@ -815,10 +902,19 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 			}
 
 			if a.OutputKind == "email_template" && request.Recipe == nil {
-				draft.Body, err = EmbedEmailAssets(draft.Body, resolved)
-				if err != nil {
-					return fail("embedding email assets failed", err)
+				// EVERY EMAIL IS FILED AS ITS DOCUMENT'S OWN BYTES, whatever wrote
+				// it: the layout itself, the merge, or a draft a person supplied.
+				// It is validated here, before the recipe that rebuilds it is saved,
+				// because the renderer that rebuilds it only lays the JSON out.
+				doc, perr := emaildoc.Parse([]byte(draft.Body))
+				if perr != nil {
+					return fail("the email document is not valid: "+perr.Error(), nil)
 				}
+				body, jerr := doc.JSON()
+				if jerr != nil {
+					return fail("the email document is not valid: "+jerr.Error(), nil)
+				}
+				draft.Body = string(body)
 			}
 			// Blank is stamped on the recipe, not kept in blankDraft alone: the saved
 			// snapshot is all a resumed run on another replica restores, and it must
@@ -1200,6 +1296,11 @@ func libraryFormatFor(f pure.Format, deployableKind string) string {
 func fileSummary(a materializeArgs, p pure.Provenance, blank bool) string {
 	if blank {
 		return "Created blank."
+	}
+	if a.blankEmail() {
+		// Not blank -- it is the layout, words and all -- and not made from
+		// sources either.
+		return "Created from an email layout."
 	}
 	if a.DeployableKind != "" {
 		return fmt.Sprintf("A %s package source, materialized from %s.", a.DeployableKind, p.SourceSummary())

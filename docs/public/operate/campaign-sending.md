@@ -104,12 +104,21 @@ settings select browser VS Code (the default), desktop VS Code, or Cursor.
 
 **Create from examples** starts a Materializer draft from an image, individual
 files, or an explicitly selected ZIP of resources plus your brief. MemQL reads
-the authorized bytes and produces editable HTML, plain text, and a subject in
-an `.email.json` file. A resource ZIP is inspected only for that explicit
-composition; opening a ZIP in Files still downloads it intact. Choose which images are visual inspiration and which should appear in the
-email. Included PNG, JPEG and GIF bytes stay with the editable template and
-are sent as inline attachments; the flow does not publish private file URLs.
-Review the generated layout and links before publishing.
+the authorized bytes and writes the email into a layout: the Article unless
+another is chosen (`composeMaterialize.layoutId`, one of the built-in layouts
+or one your organization saved). It writes the subject, the preheader and the
+layout's content blocks; the brand blocks (logo, signature, footer) stay as the
+layout has them. A draft aimed at a brand block, at a link tag such as
+`{{confirmUrl}}`, or at a picture you did not include is refused, and nothing
+is filed. With no brief and no files, the new `.email.json` is the layout
+itself, made without a model call. A resource ZIP is inspected only for that
+explicit composition; opening a ZIP in Files still downloads it intact. Choose
+which images are visual inspiration and which should appear in the email. An
+included picture that is one of your own Library files stays a reference to
+that file; one from a ZIP, or a file you cannot reference, is embedded as a
+copy of the bytes you selected. Pictures are sent as inline attachments; the
+flow does not publish private file URLs. Review the words, pictures and links
+before publishing.
 
 Use **Use in Campaigns** to save a draft or publish the reviewed template for
 its organization. Publishing makes it available to send; it does not send
