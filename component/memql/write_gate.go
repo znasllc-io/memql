@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/uptrace/bun/driver/pgdriver"
 )
 
 // write_gate.go -- the write gate (memql#6022, F9 fix rounds 2 and 3).
@@ -49,13 +51,37 @@ import (
 // will finish. The wait stays below that deadline, so the server's refusal is
 // always read.
 
-// ErrWriteGateBusy is what a write gate answers when it could not be taken in time:
-// another holder has the lock, or every connection of the gate pool is held.
-// NOTHING WAS ATTEMPTED: the caller may try again later, and a path that sends
+// ErrWriteGateBusy is what a write gate answers when its WAIT ended before it could
+// be taken: another holder has the lock, or every connection of the gate pool is
+// held. NOTHING WAS ATTEMPTED: the caller may try again later, and a path that sends
 // mail must treat it as exactly that -- never as a final outcome of the message,
 // because no send began. It should say so in words a person can read when it
 // reaches one; the cause is not theirs to see.
+//
+// The answer is wrapped (errors.Is finds ErrWriteGateBusy, and the cause with it)
+// and is given for exactly three things, and nothing else:
+//
+//   - SQLSTATE 55P03 (lock_not_available): the server's lock_timeout gave up on the
+//     advisory lock;
+//   - SQLSTATE 57014 (query_canceled) while waiting for it;
+//   - the wait's context ending, by the gate's own deadline or by the caller's
+//     cancellation or deadline, while the gate waits for a connection of the pool
+//     or for a lock.
+//
+// Everything else passes through as the engine reported it: a transaction that
+// could not begin on a live context, a backend that was terminated, a connection
+// that was lost or timed out -- a net i/o timeout is the driver's read deadline,
+// not the gate's wait -- and a pool the gate refused (ErrWriteGatePoolUnsuitable).
 var ErrWriteGateBusy = errors.New("shared write coordination is busy; try again")
+
+// IsWriteGateBusy reports whether err is a write gate that could not be taken in
+// time: by type while the error still carries it, and by its words when it has
+// crossed a boundary that kept only the message (a builtin called through the
+// engine, a step of a workflow). A caller that sends mail uses it to tell "nothing
+// was attempted, try later" from a failure of the message.
+func IsWriteGateBusy(err error) bool {
+	return err != nil && (errors.Is(err, ErrWriteGateBusy) || strings.Contains(err.Error(), ErrWriteGateBusy.Error()))
+}
 
 // ErrWriteGatePoolUnsuitable is what a write gate answers when the pool it was
 // given ends idle transactions sooner than a gated phase can be trusted to
@@ -160,6 +186,7 @@ func AcquireGateHold(ctx context.Context, db *sql.DB, wait time.Duration, keys .
 		wait = writeGateWait
 	}
 	if err := ctx.Err(); err != nil {
+		// Not waiting yet: the caller's context was already over.
 		return nil, err
 	}
 	// The wait ends at the sooner of its own limit and the caller's deadline; when
@@ -171,24 +198,25 @@ func AcquireGateHold(ctx context.Context, db *sql.DB, wait time.Duration, keys .
 		serverDeadline = callerDeadline.Add(-gateCallerMargin)
 	}
 	if !time.Now().Before(serverDeadline) {
-		return nil, context.DeadlineExceeded
+		// The caller's deadline is so near that no wait is left.
+		return nil, fmt.Errorf("%w: %w", ErrWriteGateBusy, context.DeadlineExceeded)
 	}
 	waitCtx, cancelWait := context.WithDeadline(ctx, deadline)
 	defer cancelWait()
 
 	if err := checkGatePool(waitCtx, db); err != nil {
-		return nil, gateWaitError(ctx, err)
+		return nil, gateWaitError(err, waitCtx)
 	}
 	conn, err := db.Conn(waitCtx)
 	if err != nil {
-		return nil, gateWaitError(ctx, err)
+		return nil, gateWaitError(err, waitCtx)
 	}
 	// The transaction lives as long as the caller's context, not the wait's: it must
 	// outlast this function, and it is rolled back when the caller's context ends.
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		_ = conn.Close()
-		return nil, err
+		return nil, gateWaitError(err, ctx)
 	}
 	hold := &GateHold{tx: tx, conn: conn, keys: append([]string(nil), keys...), taken: time.Now()}
 
@@ -198,16 +226,16 @@ func AcquireGateHold(ctx context.Context, db *sql.DB, wait time.Duration, keys .
 		remaining := time.Until(serverDeadline)
 		if remaining <= 0 {
 			hold.Release()
-			return nil, ErrWriteGateBusy
+			return nil, fmt.Errorf("%w: the wait for the lock of %q was over", ErrWriteGateBusy, key)
 		}
 		// The server enforces what is left of the wait (see the header).
 		if _, err = tx.ExecContext(lockCtx, "SELECT set_config('lock_timeout', $1, true)", strconv.FormatInt(max(1, remaining.Milliseconds()), 10)); err != nil {
 			hold.Release()
-			return nil, gateWaitError(ctx, err)
+			return nil, gateWaitError(err, lockCtx, waitCtx)
 		}
 		if _, err = tx.ExecContext(lockCtx, "SELECT pg_advisory_xact_lock(1296387409, hashtext($1))", key); err != nil {
 			hold.Release()
-			return nil, gateWaitError(ctx, err)
+			return nil, gateWaitError(err, lockCtx, waitCtx)
 		}
 	}
 	return hold, nil
@@ -281,24 +309,43 @@ func checkGatePool(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
-// gateWaitError turns the ways a gate's wait can end into one answer: the caller's
-// own cancellation is theirs to see, a pool that was refused stays refused, and
-// everything else that is the wait running out -- the gate's deadline, the server's
-// lock_timeout (55P03), a statement timeout (57014) -- is ErrWriteGateBusy.
-func gateWaitError(caller context.Context, err error) error {
-	if caller.Err() != nil {
-		return caller.Err()
-	}
+// gateWaitError says why a step of taking a gate failed. ErrWriteGateBusy, wrapped
+// with its cause, is the answer for exactly the ways a WAIT ends (see its
+// documentation): the server's lock_timeout (55P03), a cancelled statement (57014),
+// and one of the contexts the wait ran under being over -- whichever of them,
+// whether the error the driver gave for it said so or reported an i/o timeout when
+// it abandoned the read. Anything else is the engine's own error, unchanged: a
+// connection lost or timed out on a LIVE context is not a lock that was busy.
+func gateWaitError(err error, waits ...context.Context) error {
 	if errors.Is(err, ErrWriteGatePoolUnsuitable) {
 		return err
 	}
-	msg := err.Error()
-	if errors.Is(err, context.DeadlineExceeded) ||
-		strings.Contains(msg, "55P03") || strings.Contains(msg, "lock timeout") ||
-		strings.Contains(msg, "57014") || strings.Contains(msg, "statement timeout") {
-		return ErrWriteGateBusy
+	var ended error
+	for _, ctx := range waits {
+		if ctx != nil && ctx.Err() != nil {
+			ended = ctx.Err()
+			break
+		}
+	}
+	switch state := sqlState(err); {
+	case (state == "55P03" || state == "57014") && ended != nil:
+		// The server gave up and so did the caller's context: both are the cause.
+		return fmt.Errorf("%w: %w: %w", ErrWriteGateBusy, err, ended)
+	case state == "55P03" || state == "57014":
+		return fmt.Errorf("%w: %w", ErrWriteGateBusy, err)
+	case ended != nil:
+		return fmt.Errorf("%w: %w", ErrWriteGateBusy, ended)
 	}
 	return err
+}
+
+// sqlState is the SQLSTATE of a PostgreSQL error the driver reported, or "".
+func sqlState(err error) string {
+	var pgerr pgdriver.Error
+	if errors.As(err, &pgerr) {
+		return pgerr.Field('C')
+	}
+	return ""
 }
 
 // VersionTimeAfter keeps a serialized write newer even if a replica's clock

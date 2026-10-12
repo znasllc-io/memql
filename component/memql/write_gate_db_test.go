@@ -6,7 +6,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"net"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -645,4 +648,193 @@ func TestAVerificationPastTheCallersDeadlineIsTheCallers(t *testing.T) {
 	if err := hold.Verify(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("a verification on a cancelled context answered %v, want the context's error", err)
 	}
+}
+
+// TestABusyGateIsRecognisedByTypeAndByItsWords: a builtin called through the
+// engine and a step of a workflow keep the message and lose the type, and the
+// callers that send mail still have to tell "nothing was attempted" from a failure.
+func TestABusyGateIsRecognisedByTypeAndByItsWords(t *testing.T) {
+	for name, err := range map[string]error{
+		"the error itself":      ErrWriteGateBusy,
+		"wrapped":               fmt.Errorf("campaigns.sendToRecipient: %w", ErrWriteGateBusy),
+		"only its words remain": errors.New("builtin campaignSendToRecipient: " + ErrWriteGateBusy.Error()),
+	} {
+		if !IsWriteGateBusy(err) {
+			t.Errorf("%s: not recognised as a busy gate: %v", name, err)
+		}
+	}
+	for name, err := range map[string]error{
+		"nil":                nil,
+		"another failure":    errors.New("Azure did not accept the message"),
+		"a lost gate":        ErrWriteGateLost,
+		"an unsuitable pool": ErrWriteGatePoolUnsuitable,
+	} {
+		if IsWriteGateBusy(err) {
+			t.Errorf("%s: recognised as a busy gate: %v", name, err)
+		}
+	}
+}
+
+// TestTheBusyAnswerIsExactlyTheEndsOfAWait: ErrWriteGateBusy -- wrapped, so the
+// cause is still there -- is what a gate answers for the lock_timeout (55P03), a
+// cancelled statement (57014) and a wait context that ended; and nothing else is
+// busy. A terminated backend, a connection that was lost, and a net i/o timeout on
+// a context that is still live are not a lock that was held by someone: they pass
+// through as the engine reported them. The errors below are the real ones, from a
+// real server.
+func TestTheBusyAnswerIsExactlyTheEndsOfAWait(t *testing.T) {
+	pool, other := deployedGatePool(t, 4), gateDB(t, 0)
+	live := context.Background()
+
+	execFails := func(t *testing.T, db *sql.DB, ctx context.Context, setup, statement string, args ...any) error {
+		t.Helper()
+		tx, err := db.BeginTx(live, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		if setup != "" {
+			if _, err := tx.Exec(setup); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err = tx.ExecContext(ctx, statement, args...)
+		if err == nil {
+			t.Fatalf("%q did not fail", statement)
+		}
+		return err
+	}
+
+	t.Run("the server's lock_timeout (55P03) is busy", func(t *testing.T) {
+		key := gateKey(t, "55P03")
+		holder(t, other, key)
+		err := execFails(t, pool, live, "SELECT set_config('lock_timeout', '60', true)", "SELECT pg_advisory_xact_lock(1296387409, hashtext($1))", key)
+		if got := sqlState(err); got != "55P03" {
+			t.Fatalf("the test produced SQLSTATE %q, not 55P03: %v", got, err)
+		}
+		if answer := gateWaitError(err, live); !errors.Is(answer, ErrWriteGateBusy) || sqlState(answer) != "55P03" {
+			t.Errorf("a lock_timeout answered %v, want ErrWriteGateBusy with the server's refusal inside it", answer)
+		}
+	})
+
+	t.Run("a cancelled statement (57014) is busy", func(t *testing.T) {
+		err := execFails(t, pool, live, "SET LOCAL statement_timeout = '60ms'", "SELECT pg_sleep(2)")
+		if got := sqlState(err); got != "57014" {
+			t.Fatalf("the test produced SQLSTATE %q, not 57014: %v", got, err)
+		}
+		if answer := gateWaitError(err, live); !errors.Is(answer, ErrWriteGateBusy) {
+			t.Errorf("a cancelled statement answered %v, want ErrWriteGateBusy", answer)
+		}
+	})
+
+	t.Run("a wait context that ended is busy, by its own deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(live, 80*time.Millisecond)
+		defer cancel()
+		err := execFails(t, pool, ctx, "", "SELECT pg_sleep(2)")
+		answer := gateWaitError(err, ctx)
+		if !errors.Is(answer, ErrWriteGateBusy) || !errors.Is(answer, context.DeadlineExceeded) {
+			t.Errorf("a wait that ran out of time answered %v, want ErrWriteGateBusy and the deadline", answer)
+		}
+	})
+
+	t.Run("a wait context that was cancelled is busy, whatever the driver reported", func(t *testing.T) {
+		// pgdriver reads only a context's deadline, never its cancellation, so the
+		// statement itself runs on until the server ends it; the gate asks the
+		// context, not the error.
+		ctx, cancel := context.WithCancel(live)
+		cancel()
+		for _, reported := range []error{errors.New("driver: bad connection"), io.EOF, &net.OpError{Op: "read", Err: os.ErrDeadlineExceeded}} {
+			answer := gateWaitError(reported, ctx)
+			if !errors.Is(answer, ErrWriteGateBusy) || !errors.Is(answer, context.Canceled) {
+				t.Errorf("a cancelled wait answered %v for %v, want ErrWriteGateBusy and the cancellation", answer, reported)
+			}
+		}
+	})
+
+	t.Run("a net i/o timeout on a live context is not busy", func(t *testing.T) {
+		if !gateReachable(t) {
+			return
+		}
+		slow := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()), pgdriver.WithReadTimeout(150*time.Millisecond)))
+		defer slow.Close()
+		err := execFails(t, slow, live, "", "SELECT pg_sleep(2)")
+		var netErr net.Error
+		if !errors.As(err, &netErr) || !netErr.Timeout() || sqlState(err) != "" {
+			t.Fatalf("the test did not produce a net i/o timeout: %v", err)
+		}
+		if answer := gateWaitError(err, live); IsWriteGateBusy(answer) || answer.Error() != err.Error() {
+			t.Errorf("a net i/o timeout answered %v, want it unchanged and not busy", answer)
+		}
+	})
+
+	t.Run("a terminated backend is not busy", func(t *testing.T) {
+		conn, err := pool.Conn(live)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		var pid int
+		if err := conn.QueryRowContext(live, "SELECT pg_backend_pid()").Scan(&pid); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := other.Exec("SELECT pg_terminate_backend($1)", pid); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(100 * time.Millisecond)
+		_, err = conn.ExecContext(live, "SELECT 1")
+		if err == nil {
+			t.Fatal("a statement ran on a terminated backend")
+		}
+		if answer := gateWaitError(err, live); IsWriteGateBusy(answer) || answer.Error() != err.Error() {
+			t.Errorf("a terminated backend answered %v, want it unchanged and not busy", answer)
+		}
+	})
+
+	t.Run("another SQL error is not busy", func(t *testing.T) {
+		err := execFails(t, pool, live, "", "SELEKT 1")
+		if answer := gateWaitError(err, live); IsWriteGateBusy(answer) || answer.Error() != err.Error() {
+			t.Errorf("a syntax error answered %v, want it unchanged and not busy", answer)
+		}
+	})
+
+	t.Run("a pool the gate refused stays refused", func(t *testing.T) {
+		refused := fmt.Errorf("%w (this pool's limit is 1m0s)", ErrWriteGatePoolUnsuitable)
+		if answer := gateWaitError(refused, live); answer.Error() != refused.Error() || IsWriteGateBusy(answer) {
+			t.Errorf("a refused pool answered %v, want it unchanged", answer)
+		}
+	})
+
+	t.Run("through the gate: a caller who cancels while the gate waits gets the busy answer and the cancellation", func(t *testing.T) {
+		key := gateKey(t, "cancel-while-waiting")
+		holder(t, other, key)
+		ctx, cancel := context.WithCancel(live)
+		go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+		// The driver does not interrupt a statement for a cancellation, so the
+		// cancellation is read when the bounded wait ends.
+		_, err := AcquireWriteGatesWithin(ctx, pool, 400*time.Millisecond, key)
+		if !errors.Is(err, ErrWriteGateBusy) || !errors.Is(err, context.Canceled) {
+			t.Errorf("a gate waiting for a held lock answered %v when the caller cancelled, want ErrWriteGateBusy and the cancellation", err)
+		}
+	})
+
+	t.Run("through the gate: its own wait running out is busy", func(t *testing.T) {
+		key := gateKey(t, "own-wait")
+		holder(t, other, key)
+		_, err := AcquireWriteGatesWithin(live, pool, 200*time.Millisecond, key)
+		if !errors.Is(err, ErrWriteGateBusy) {
+			t.Errorf("a gate whose wait ran out answered %v, want ErrWriteGateBusy", err)
+		}
+	})
+
+	t.Run("through the gate: a pool that is closed is not busy", func(t *testing.T) {
+		closed, err := database.NewGatePool(dbtest.DSN(), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = closed.Close()
+		_, err = AcquireWriteGates(live, closed, gateKey(t, "closed"))
+		if err == nil || IsWriteGateBusy(err) {
+			t.Errorf("a gate on a closed pool answered %v, want the pool's own error and not busy", err)
+		}
+	})
 }
