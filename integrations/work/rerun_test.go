@@ -441,3 +441,68 @@ func TestAnActOnAPipelineRunIsRefusedNamingPipelinesRerun(t *testing.T) {
 		t.Fatalf("the control: the re-run wrote %d run updates, want 1 (calls: %s)", n, eng.summary())
 	}
 }
+
+// A different replica has only the last completed checkpoint plus the intent
+// row. It must still be able to target the interrupted step, without replaying
+// the completed research or reissuing a previous idempotency key.
+func TestARerunRecoversAnIntentBeyondTheRunCheckpoint(t *testing.T) {
+	for _, prefix := range [][]string{nil, {"fetch"}, {"fetch", "fetch/child"}} {
+		t.Run(strings.Join(prefix, "/"), func(t *testing.T) {
+			i, eng, store := newActsIntegration(t)
+			top := topLevelOrder(prefix)
+			addPristineRun(store, actRunId, top...)
+			addVersion(store, actRunId, "draft", len(top), 2, "running", nil, nil)
+			row := actRunRow(runStatusAbandoned, prefix...)
+			row["stepOrder"] = prefix // no checkpoint at all when the first step is interrupted
+			row["head"] = work.NewestHead(top, shapeVersionsFromTestPrefix(top)).Object()
+			eng.reply("workRunForOwner", row)
+			nodes, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": "draft"}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reply := decodeReply(t, nodes)
+			if reply["version"] != float64(3) || !reflect.DeepEqual(reply["staleSteps"], []any{"draft"}) {
+				t.Fatalf("recovery = %v; only the interrupted draft should run as version 3", reply)
+			}
+			writes := mutationsIn(eng)
+			if len(writes) != 1 {
+				t.Fatalf("writes = %s", eng.summary())
+			}
+			args := writes[0].Args(t)
+			if got := work.ParseHead(args["head"])["draft"].Version; got != 2 {
+				t.Fatalf("interrupted head = %d", got)
+			}
+			wantOrder := append(append([]string{}, prefix...), "draft")
+			if got := rowStringSlice(args, "stepOrder"); !reflect.DeepEqual(got, wantOrder) {
+				t.Fatalf("order = %v, want %v", got, wantOrder)
+			}
+			assertEveryCallParses(t, eng)
+		})
+	}
+}
+
+func shapeVersionsFromTestPrefix(keys []string) map[string][]work.StepVersion {
+	out := map[string][]work.StepVersion{}
+	for _, key := range keys {
+		out[key] = []work.StepVersion{{Key: key, Version: 1, Status: "done"}}
+	}
+	return out
+}
+
+func TestRecoveryDoesNotPromoteUnrecordedOrNestedSteps(t *testing.T) {
+	for _, tc := range []struct {
+		key string
+		seq int
+	}{{"draft/child", 1}, {"gap", 3}, {"old-template", 0}} {
+		t.Run(tc.key, func(t *testing.T) {
+			i, eng, store := newActsIntegration(t)
+			addPristineRun(store, actRunId, "fetch")
+			addVersion(store, actRunId, tc.key, tc.seq, 1, "running", nil, nil)
+			eng.reply("workRunForOwner", actRunRow(runStatusAbandoned, "fetch"))
+			_, err := i.handleRerunStep(callerContext(actOwner), map[string]any{"runId": actRunId, "stepKey": tc.key}, 0)
+			if err == nil || len(mutationsIn(eng)) != 0 {
+				t.Fatalf("unsafe recovery: err=%v writes=%s", err, eng.summary())
+			}
+		})
+	}
+}
