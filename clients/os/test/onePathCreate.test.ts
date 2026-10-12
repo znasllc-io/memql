@@ -57,7 +57,7 @@ const UPLOAD = /\.upload\s*(?:\?\.\s*)?\(|\b(?:uploadFile|createFile)\s*(?:\?\.\
 // Every module that uploads, and what the person handed it. None of them makes a file out of
 // text: each sends a File the person picked or dropped.
 const ALLOWED: Record<string, string> = {
-  "apps/campaigns/AudiencesSection.tsx": "uploads the CSV of addresses the person picked, then imports it",
+  "apps/email/AudiencesSection.tsx": "uploads the CSV of addresses the person picked, then imports it",
   "apps/files/uploadTree.ts": "uploads each file of a folder the person dropped",
   "apps/files/useUploadTasks.ts": "uploads the files the person picked or dropped in Files",
   "apps/training/useUploads.ts": "uploads the files the person dropped in Training",
