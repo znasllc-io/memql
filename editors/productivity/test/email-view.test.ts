@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 import { emailPage } from "../src/emailPage.js";
 import { EMAIL_COPY } from "../src/emailCopy.js";
-import { BLOCK_NAMES, BLOCK_TYPES, EDITABLE_FIELDS } from "../src/emailDocument.js";
+import { BLOCK_NAMES, BLOCK_TYPES, EDITABLE_FIELDS, THEME_COLOURS } from "../src/emailDocument.js";
 
 const C = EMAIL_COPY.editor;
 
@@ -23,8 +23,15 @@ function fixture(saved?: unknown) {
     clearTimeout: (id: number) => { timers.delete(id); },
     acquireVsCodeApi: () => ({ postMessage: (m: any) => messages.push(JSON.parse(JSON.stringify(m))), getState: () => state, setState: (value: unknown) => { state = JSON.parse(JSON.stringify(value)); } }),
   });
+  // Every focus() call, the page's and the test's: a host update must never add one while the window is elsewhere.
+  const focuses: Element[] = [];
+  const focus = dom.window.HTMLElement.prototype.focus;
+  dom.window.HTMLElement.prototype.focus = function (this: HTMLElement, ...options: [FocusOptions?]) { focuses.push(this); return focus.apply(this, options); };
   dom.window.eval(readFileSync("dist-test/email-view.js", "utf8"));
   const doc = dom.window.document, el = (id: string) => doc.getElementById(id)!;
+  // The person clicks into another window (the Source editor in Split): the field gets blur and stays document.activeElement.
+  const away = () => { Object.assign(doc, { hasFocus: () => false }); doc.activeElement?.dispatchEvent(new dom.window.FocusEvent("blur")); };
+  const back = () => { delete (doc as unknown as { hasFocus?: unknown }).hasFocus; };
   const send = (data: any) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data, origin: dom.window.origin }));
   // jsdom ignores srcdoc: write the pending frame's srcdoc into it, then fire its load event.
   const loadPreview = () => {
@@ -51,7 +58,7 @@ function fixture(saved?: unknown) {
   const select = (id: string) => row(id).click();
   const edits = () => messages.filter(m => m.type === "edit").map(m => m.op);
   const visible = (id: string) => !el(id).closest("[hidden]");
-  return { dom, doc, el, send, loadPreview, messages, advance, type, key, row, select, edits, visible, state: () => state };
+  return { dom, doc, el, send, loadPreview, messages, advance, type, key, row, select, edits, visible, focuses, away, back, state: () => state };
 }
 
 const theme = { page: "#eef0f3", canvas: "#ffffff", primary: "#2f5d8a", secondary: "#6f93b8", accent: "#d9822b", tint: "#f5f4f0", text: "#2b2b2b", muted: "#8a8a8a", headingFont: "Georgia", bodyFont: "Helvetica" };
@@ -653,12 +660,16 @@ test("each field refuses what the engine would refuse, in place, before anything
   label.focus(); f.type(label, ""); f.advance(250);
   assert.equal(f.el("field-label-notice").textContent, "");
   label.blur();
-  assert.equal(f.el("field-label-notice").textContent, C.buttonLabelInvalid);
+  assert.equal(f.el("field-label-notice").textContent, C.buttonLabelEmpty);
+  // The refusal is the field's own: a screen reader hears it with the field.
+  assert.equal(label.getAttribute("aria-invalid"), "true");
+  assert.equal(label.getAttribute("aria-describedby"), "field-label-notice");
   label.focus(); f.type(label, "Go now"); f.advance(250);
   assert.equal(f.el("field-label-notice").textContent, "");
+  assert.equal(label.hasAttribute("aria-invalid"), false);
   assert.deepEqual(f.edits().at(-1), { kind: "field", block: "cta", field: "label", value: "Go now" });
   label.blur();
-  refuses("field-label", "", C.buttonLabelInvalid);
+  refuses("field-label", "", C.buttonLabelEmpty);
   refuses("field-label", "é".repeat(101), C.buttonLabelInvalid);
   accepts("field-label", "é".repeat(100));
   refuses("field-href", "javascript:alert(1)", "Enter a web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}.");
@@ -688,7 +699,16 @@ test("each field refuses what the engine would refuse, in place, before anything
   const network = f.el("field-links").querySelector<HTMLInputElement>('input[data-part="name"]')!;
   assert.equal(network.value, "Mail");
   network.focus(); f.type(network, ""); network.blur();
+  assert.equal(f.el("field-links-notice").textContent, C.networkEmpty);
+  assert.equal(network.getAttribute("aria-invalid"), "true", "the link that is wrong says so");
+  assert.equal(network.getAttribute("aria-describedby"), "field-links-notice");
+  network.focus(); f.type(network, "x".repeat(41)); network.blur();
   assert.equal(f.el("field-links-notice").textContent, C.networkInvalid);
+  const address = f.el("field-links").querySelector<HTMLInputElement>('input[data-part="href"]')!;
+  network.focus(); f.type(network, "Email"); f.type(address, "ftp://acme.example"); network.blur();
+  assert.equal(network.hasAttribute("aria-invalid"), false);
+  assert.equal(address.getAttribute("aria-invalid"), "true");
+  address.focus(); f.type(address, "mailto:hello@acme.example");
   network.focus(); f.type(network, "Email"); network.blur();
   assert.equal(f.el("field-links-notice").textContent, "");
   assert.deepEqual(f.edits().at(-1), { kind: "field", block: "follow", field: "links", value: [{ network: "Email", href: "mailto:hello@acme.example", icon: "artifact:mail-icon" }] });
@@ -795,7 +815,10 @@ test("the page is the static editor: every id the view and the host use, and onl
   }
   assert.equal(doc.querySelector(".views")?.querySelectorAll("[aria-pressed]").length, 2);
   assert.equal(doc.getElementById("view-design")?.getAttribute("aria-pressed"), "true");
-  assert.equal(doc.getElementById("width-desktop")?.closest('[role="radiogroup"]') !== null, true);
+  assert.equal(doc.getElementById("width-desktop")?.closest('[role="radiogroup"]')?.getAttribute("aria-label"), C.previewWidth);
+  assert.equal(doc.getElementById("view-design")?.closest('[role="group"]')?.getAttribute("aria-label"), C.emailView);
+  // The theme lists its colours in the model's order.
+  assert.deepEqual([...doc.querySelectorAll('#theme input[type="color"]')].map(input => input.id), THEME_COLOURS.map(key => `theme-${key}`));
   // Every word a person can see or hear on the page is from EMAIL_COPY.
   const copy = new Set<string>();
   const collect = (value: unknown): void => { if (typeof value === "string") copy.add(value); else if (value && typeof value === "object") Object.values(value).forEach(collect); };
@@ -880,4 +903,205 @@ test("block ids from the file are only ever compared, never written into a selec
   f.key(oddRow(), "ArrowDown");
   assert.equal(f.row("headline").getAttribute("aria-selected"), "true");
   f.dom.window.close();
+});
+
+test("when the person works in another window, a field they left takes the document's value, and nothing is focused", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  const subject = f.el("subject") as HTMLInputElement;
+  subject.focus();
+  f.type(subject, "Hello there");
+  // Split view: the person clicks into the Source editor beside the page.
+  f.away();
+  assert.equal(f.doc.activeElement, subject, "the field is still the page's active element");
+  assert.deepEqual(f.edits().at(-1), { kind: "subject", value: "Hello there" }, "leaving for Source sends the typing");
+  const before = f.focuses.length;
+  f.send({ type: "document", version: 2, email: { ...clone(article), subject: "Hello there" } });
+  f.send({ type: "document", version: 3, email: { ...clone(article), subject: "Rewritten in Source" } });
+  assert.equal(subject.value, "Rewritten in Source", "a keystroke on return cannot send stale text over Source's edit");
+  assert.equal(f.focuses.length, before, "no element was focused");
+  f.dom.window.close();
+});
+
+test("no host update takes focus while the editor's window is elsewhere", () => {
+  const f = fixture();
+  const tagged = clone(article);
+  tagged.blocks[2]!.label = "Hi {{fields.zeta}}";
+  tagged.blocks[1]!.blocks![0]!.text = "Hello";
+  f.send({ type: "document", version: 1, email: tagged });
+  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"] });
+  const unfocused = (what: string, update: () => void) => {
+    f.away();
+    const before = f.focuses.length;
+    update();
+    assert.equal(f.focuses.length, before, what);
+    f.back();
+  };
+  // A focused outline row, drawn again by a document.
+  f.select("headline");
+  f.row("headline").focus();
+  unfocused("an outline row", () => f.send({ type: "document", version: 2, email: tagged }));
+  // A focused act, drawn again by a bar with other acts.
+  f.el("bar-acts").querySelectorAll<HTMLElement>("button")[1]!.focus();
+  unfocused("an act", () => f.send({ type: "bar", state: "Unsaved changes", acts: ["publish"] }));
+  // A focused sample value, moved when a merge tag that sorts before it arrives.
+  f.el("samples").querySelector<HTMLInputElement>("input")!.focus();
+  const twoTags = clone(tagged);
+  twoTags.blocks[0]!.text = "Hi {{displayName}}";
+  unfocused("a sample value", () => f.send({ type: "document", version: 3, email: twoTags }));
+  // Removing a block: the neighbour is selected, but the focus stays where the person left it.
+  f.select("headline");
+  f.el("remove-block").focus();
+  f.el("remove-block").click();
+  const removed = clone(twoTags);
+  removed.blocks.splice(0, 1);
+  unfocused("the removed block's neighbour", () => f.send({ type: "document", version: 4, email: removed }));
+  assert.equal(f.row("body").getAttribute("aria-selected"), "true");
+  // Adding a block: the host selects it, but its first field is not focused from afar.
+  f.el("add-after").click();
+  f.el("add-menu").querySelectorAll<HTMLElement>('[role="menuitem"]')[1]!.click();
+  const added = clone(removed);
+  added.blocks.splice(1, 0, { id: "text-1", type: "text", text: "" } as never);
+  unfocused("the added block's field", () => { f.send({ type: "document", version: 5, email: added }); f.send({ type: "select", block: "text-1" }); });
+  assert.equal(f.row("text-1").getAttribute("aria-selected"), "true");
+  f.dom.window.close();
+});
+
+test("a dimmed preview takes no clicks, only a newer failure dims it, and a click outside the email's blocks selects nothing", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  const withGhost = rendered.replace("</table></body>", '<tr><td data-block="ghost">Gone</td></tr></table></body>');
+  f.send({ type: "render", seq: 5, html: withGhost, text: "Hi", subject: "Hello", issues: [] });
+  f.send({ type: "renderFailed", seq: 4, problem: { message: "Older" } });
+  assert.ok(!f.el("preview").classList.contains("stale"), "a failure older than the render on its way");
+  const frame = f.loadPreview();
+  f.send({ type: "renderFailed", seq: 3, problem: { message: "Older still" } });
+  assert.ok(!f.el("preview").classList.contains("stale"), "a failure older than the render shown");
+  assert.equal(f.visible("preview-notice"), false);
+  const click = (id: string) => {
+    const event = new f.dom.window.MouseEvent("click", { bubbles: true, cancelable: true });
+    frame.contentDocument!.querySelector(`[data-block="${id}"]`)!.dispatchEvent(event);
+    return event;
+  };
+  assert.equal(click("ghost").defaultPrevented, true);
+  assert.equal(f.doc.querySelector('[aria-selected="true"]'), null, "a block the document no longer has selects nothing");
+  // A newer failure: the last good preview may show blocks whose ids now name others (an added block reuses a free id).
+  f.send({ type: "renderFailed", seq: 6, problem: { message: "Newer" } });
+  assert.ok(f.el("preview").classList.contains("stale"));
+  assert.equal(click("cta").defaultPrevented, true);
+  assert.equal(f.doc.querySelector('[aria-selected="true"]'), null, "a dimmed preview selects nothing");
+  f.send({ type: "render", seq: 7, html: rendered, text: "Hi", subject: "Hello", issues: [] });
+  const next = f.loadPreview();
+  next.contentDocument!.querySelector('[data-block="cta"]')!.dispatchEvent(new f.dom.window.MouseEvent("click", { bubbles: true, cancelable: true }));
+  assert.equal(f.row("cta").getAttribute("aria-selected"), "true");
+  f.dom.window.close();
+});
+
+test("a restored selection stays in the page state until its block arrives, and the person's own choice replaces it", () => {
+  const f = fixture({ width: "mobile", selected: "cta" });
+  assert.deepEqual(f.state(), { width: "mobile", selected: "cta" });
+  f.send({ type: "document", version: 1, email: { ...clone(article), blocks: [clone(article).blocks[0]] } });
+  assert.deepEqual(f.state(), { width: "mobile", selected: "cta" });
+  f.send({ type: "document", version: 2, email: article });
+  assert.equal(f.row("cta").getAttribute("aria-selected"), "true");
+  assert.deepEqual(f.state(), { width: "mobile", selected: "cta" });
+  const g = fixture({ width: "desktop", selected: "later" });
+  g.send({ type: "document", version: 1, email: article });
+  g.select("headline");
+  const later = clone(article);
+  later.blocks.push({ id: "later", type: "divider" } as never);
+  g.send({ type: "document", version: 2, email: later });
+  assert.equal(g.row("headline").getAttribute("aria-selected"), "true");
+  f.dom.window.close(); g.dom.window.close();
+});
+
+test("the action bar keeps what has not changed, takes a new act after a context, and gives the focus to its state after an act", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"], layoutName: "Welcome" });
+  const words = f.el("bar-state").firstChild;
+  const buttons = [...f.el("bar-acts").children];
+  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"], layoutName: "Welcome" });
+  assert.equal(f.el("bar-state").firstChild, words, "the live region is not written again");
+  assert.deepEqual([...f.el("bar-acts").children], buttons, "the acts stay the same buttons");
+  f.send({ type: "bar", state: "Changes since publishing", acts: ["saveLayout", "publish"] });
+  assert.equal(f.el("bar-state").textContent, "Changes since publishing");
+  assert.deepEqual([...f.el("bar-acts").children], buttons);
+  f.send({ type: "bar", state: "Published to Acme Co", acts: ["saveLayout"] });
+  assert.deepEqual([...f.el("bar-acts").children], [buttons[0]]);
+  // After an act that hides itself, the focus is on the state, not lost to the page.
+  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"] });
+  const publish = f.el("bar-acts").querySelectorAll<HTMLElement>("button")[1]!;
+  publish.focus();
+  publish.click();
+  assert.equal(f.doc.activeElement, f.el("bar-state"));
+  f.send({ type: "bar", state: "Draft", acts: ["saveLayout", "publish"], layoutName: "Welcome" });
+  f.el("bar-acts").querySelector<HTMLElement>("button")!.click();
+  f.key(f.el("layout-name"), "Enter");
+  assert.deepEqual(f.messages.at(-1), { type: "saveLayout", name: "Welcome" });
+  assert.equal(f.doc.activeElement, f.el("bar-state"));
+  // A context answers an act too: a cancelled Connect leaves the next click working.
+  f.send({ type: "bar", state: "Not connected", acts: ["connect"] });
+  f.el("bar-acts").querySelector<HTMLElement>("button")!.click();
+  f.send({ type: "context", connected: false, choices: [] });
+  f.el("bar-acts").querySelector<HTMLElement>("button")!.click();
+  assert.equal(f.messages.filter(m => m.type === "act" && m.act === "connect").length, 2);
+  // A problem or a failed render with no words says the page could not show the email, never nothing.
+  f.send({ type: "problem", problem: { message: "" } });
+  assert.equal(f.el("bar-notice").textContent, C.renderFailed);
+  f.send({ type: "renderFailed", seq: 1, problem: { message: "" } });
+  assert.equal(f.el("preview-notice").textContent, C.renderFailed);
+  f.dom.window.close();
+});
+
+test("a problem forgets the selection, the add and the removal it answered", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  f.select("headline");
+  f.el("add-after").click();
+  f.el("add-menu").querySelectorAll<HTMLElement>('[role="menuitem"]')[1]!.click();
+  f.send({ type: "problem", problem: { message: "Fix the email in Source first." } });
+  // The add never happened: a later block arriving from Source is selected by the host only if it says so, without taking the focus to a field.
+  f.send({ type: "select", block: "text-9" });
+  f.send({ type: "problem", problem: { message: "Fix the email in Source first." } });
+  const later = clone(article);
+  later.blocks.push({ id: "text-9", type: "text", text: "From Source" } as never);
+  f.send({ type: "document", version: 2, email: later });
+  assert.equal(f.row("headline").getAttribute("aria-selected"), "true", "the selection the problem answered is forgotten");
+  assert.equal(f.doc.activeElement, f.el("add-after"));
+  // A refused removal: when Source later removes the block, the focus is not taken to a row.
+  f.el("remove-block").focus();
+  f.el("remove-block").click();
+  f.send({ type: "problem", problem: { message: "Fix the email in Source first." } });
+  const gone = clone(later);
+  gone.blocks.splice(0, 1);
+  f.send({ type: "document", version: 3, email: gone });
+  assert.equal(f.doc.activeElement, f.el("remove-block"));
+  f.dom.window.close();
+});
+
+test("the lines field sends no trailing empty lines, and sample values are not moved when nothing changed", () => {
+  const f = fixture();
+  const footed = { ...clone(article), blocks: [{ id: "foot", type: "footer", lines: ["Acme Co"], links: [] }, { id: "zeta", type: "heading", text: "Hi {{fields.zeta}}" }] };
+  f.send({ type: "document", version: 1, email: footed });
+  f.select("foot");
+  const lines = f.el("field-lines") as HTMLTextAreaElement;
+  lines.focus(); f.type(lines, "Acme Co\nMain Street\n\n"); lines.blur();
+  assert.deepEqual(f.edits().at(-1), { kind: "field", block: "foot", field: "lines", value: ["Acme Co", "Main Street"] });
+  // A tag that sorts before the one already there: the inputs follow the tags' order, and stay put after that.
+  const both = clone(footed);
+  both.blocks.push({ id: "name", type: "heading", text: "{{displayName}}" } as never);
+  f.send({ type: "document", version: 2, email: both });
+  const inputs = [...f.el("samples").querySelectorAll("input")];
+  assert.deepEqual(inputs.map(input => input.dataset.sample), ["displayName", "fields.zeta"]);
+  let moved = 0;
+  new f.dom.window.MutationObserver(records => { moved += records.length; }).observe(f.el("sample-fields"), { childList: true, subtree: true });
+  f.send({ type: "document", version: 3, email: both });
+  f.send({ type: "document", version: 4, email: both });
+  return new Promise<void>(resolve => setTimeout(() => {
+    assert.equal(moved, 0, "the same tags leave the inputs where they are");
+    assert.deepEqual([...f.el("samples").querySelectorAll("input")], inputs);
+    f.dom.window.close();
+    resolve();
+  }, 5));
 });

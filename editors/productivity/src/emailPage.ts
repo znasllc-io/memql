@@ -5,7 +5,7 @@
 // Pure: no vscode and no DOM. Every word comes from EMAIL_COPY.
 
 import { EMAIL_COPY } from "./emailCopy.js";
-import { THEME_TOKENS, type AddableType, type EditableField, type ThemeToken } from "./emailDocument.js";
+import { THEME_COLOURS, THEME_TOKENS, type AddableType, type EditableField } from "./emailDocument.js";
 import { BASE_STYLES, ICONS, pageShell } from "./pageBase.js";
 
 const C = EMAIL_COPY.editor;
@@ -21,10 +21,10 @@ const ADDABLE: readonly AddableType[] = ["heading", "text", "highlight", "button
  */
 const FIELD_ORDER: readonly EditableField[] = ["text", "label", "src", "alt", "href", "title", "links", "lines", "html", "height", "color", "background", "align"];
 
-/** The theme's own colours: every token but white, which blocks may use but the theme does not set. */
-const THEME_COLOURS = THEME_TOKENS.filter((token): token is Exclude<ThemeToken, "white"> => token !== "white");
 
 const notice = (id: string) => `<p id="${id}-notice" class="notice" role="alert"></p>`;
+/** A control a refusal can be about: its notice describes it. */
+const described = (id: string) => `id="${id}" aria-describedby="${id}-notice"`;
 const iconAct = (id: string, label: string, icon: string, extra = "") => `<button type="button" id="${id}" class="icon-button" aria-label="${escape(label)}" title="${escape(label)}"${extra}>${icon}</button>`;
 const textField = (id: string, label: string, control: string) => `<div class="field"><label for="${id}">${escape(label)}</label>${control}${notice(id)}</div>`;
 
@@ -37,16 +37,16 @@ function fieldRow(field: EditableField): string {
   // "Default" is no colour of the block's own: the layout's. The swatch keeps its place, so the select never moves.
   const colour = (label: string) => labelled(label, `<div class="colour"><select id="${id}"><option value="">${escape(C.colourDefault)}</option>${THEME_TOKENS.map(token => `<option value="${token}">${escape(C.themeColours[token])}</option>`).join("")}</select><span id="${id}-swatch" class="swatch empty" aria-hidden="true"></span></div>`);
   switch (field) {
-    case "text": return labelled(C.words, `<textarea id="${id}" rows="3" spellcheck="true"></textarea>`);
-    case "label": return labelled(C.label, `<input id="${id}" autocomplete="off">`);
+    case "text": return labelled(C.words, `<textarea ${described(id)} rows="3" spellcheck="true"></textarea>`);
+    case "label": return labelled(C.label, `<input ${described(id)} autocomplete="off">`);
     case "src": return group(C.picture, `<div id="${id}" class="picture" role="group" aria-labelledby="${id}-label"><span id="picture-none" class="muted">${escape(C.noPicture)}</span><button type="button" id="picture-choose" class="text-act">${escape(C.chooseFromFiles)}</button><button type="button" id="picture-upload" class="text-act">${escape(C.upload)}</button><button type="button" id="picture-remove" class="text-act">${escape(C.removePicture)}</button></div>`);
-    case "alt": return labelled(C.description, `<input id="${id}" autocomplete="off">`);
-    case "href": return labelled(C.link, `<input id="${id}" autocomplete="off" spellcheck="false" inputmode="url">`);
-    case "title": return labelled(C.title, `<input id="${id}" autocomplete="off">`);
+    case "alt": return labelled(C.description, `<input ${described(id)} autocomplete="off">`);
+    case "href": return labelled(C.link, `<input ${described(id)} autocomplete="off" spellcheck="false" inputmode="url">`);
+    case "title": return labelled(C.title, `<input ${described(id)} autocomplete="off">`);
     case "links": return group(C.links, `<div id="${id}" class="links" role="group" aria-labelledby="${id}-label"></div><button type="button" id="links-add" class="text-act add-link">${escape(C.addLink)}</button>${notice(id)}`);
-    case "lines": return labelled(C.lines, `<textarea id="${id}" rows="3"></textarea>`);
-    case "html": return labelled(C.html, `<textarea id="${id}" class="mono" rows="8" spellcheck="false"></textarea>`);
-    case "height": return labelled(C.height, `<input id="${id}" type="number" min="0" max="2000" step="1" inputmode="numeric">`);
+    case "lines": return labelled(C.lines, `<textarea ${described(id)} rows="3"></textarea>`);
+    case "html": return labelled(C.html, `<textarea ${described(id)} class="mono" rows="8" spellcheck="false"></textarea>`);
+    case "height": return labelled(C.height, `<input ${described(id)} type="number" min="0" max="2000" step="1" inputmode="numeric">`);
     case "color": return colour(C.colour);
     case "background": return colour(C.background);
     case "align": return group(C.align, `<div id="${id}" class="views align" role="radiogroup" aria-labelledby="${id}-label">${(["left", "center", "right"] as const).map((value, index) => `<button type="button" role="radio" aria-checked="false" data-value="${value}" tabindex="${index === 0 ? 0 : -1}">${escape(C[value])}</button>`).join("")}</div>`);
@@ -94,8 +94,8 @@ const STYLES = [
 /** The Design page of an `*.email.json` file. `script` is the view script's address and `nonce` the page's script nonce. */
 export function emailPage(options: { title: string; script: string; nonce: string }): string {
   const body = `<header class="toolbar"><span></span>
-<div class="views" role="group"><button type="button" id="view-design" aria-pressed="true">${ICONS.design}<span>${escape(C.design)}</span></button><button type="button" id="view-source" aria-pressed="false">${ICONS.source}<span>${escape(C.source)}</span></button></div>
-<div class="views widths" role="radiogroup">${iconAct("width-desktop", C.desktop, ICONS.desktop, ' role="radio" aria-checked="true" tabindex="0"')}${iconAct("width-mobile", C.mobile, ICONS.mobile, ' role="radio" aria-checked="false" tabindex="-1"')}${iconAct("width-plain", C.plain, ICONS.plain, ' role="radio" aria-checked="false" tabindex="-1"')}</div>
+<div class="views" role="group" aria-label="${escape(C.emailView)}"><button type="button" id="view-design" aria-pressed="true">${ICONS.design}<span>${escape(C.design)}</span></button><button type="button" id="view-source" aria-pressed="false">${ICONS.source}<span>${escape(C.source)}</span></button></div>
+<div class="views widths" role="radiogroup" aria-label="${escape(C.previewWidth)}">${iconAct("width-desktop", C.desktop, ICONS.desktop, ' role="radio" aria-checked="true" tabindex="0"')}${iconAct("width-mobile", C.mobile, ICONS.mobile, ' role="radio" aria-checked="false" tabindex="-1"')}${iconAct("width-plain", C.plain, ICONS.plain, ' role="radio" aria-checked="false" tabindex="-1"')}</div>
 </header>
 <div class="workspace">
 <main id="preview" class="stage">
@@ -106,8 +106,8 @@ export function emailPage(options: { title: string; script: string; nonce: strin
 </main>
 <aside id="inspector" class="inspector">
 <section id="email-group" class="group" hidden><h2 class="subhead">${escape(C.email)}</h2>
-${textField("subject", C.subject, '<input id="subject" autocomplete="off">')}
-${textField("preheader", C.preheader, '<input id="preheader" autocomplete="off">')}
+${textField("subject", C.subject, `<input ${described("subject")} autocomplete="off">`)}
+${textField("preheader", C.preheader, `<input ${described("preheader")} autocomplete="off">`)}
 <div id="organization-row" class="field" hidden><label for="organization">${escape(C.organization)}</label><select id="organization"></select></div>
 </section>
 <section id="issues" class="group" hidden><h2 class="subhead">${escape(C.issues)}</h2><ul id="issue-list" class="issue-list"></ul></section>
@@ -121,14 +121,14 @@ ${FIELD_ORDER.map(fieldRow).join("\n")}
 <div id="custom-note" class="group" hidden><p class="custom-line"><span id="custom-words">${escape(C.htmlOnly)}</span><button type="button" id="edit-html" class="text-act">${escape(C.editHtml)}</button></p></div>
 <details id="theme" class="disclosure" hidden><summary class="subhead">${escape(C.theme)}</summary><div class="disclosure-body">
 <div class="colours">${THEME_COLOURS.map(key => `<label><span>${escape(C.themeColours[key])}</span><input type="color" id="theme-${key}"></label>`).join("")}</div>
-${textField("theme-headingFont", C.headingFont, '<input id="theme-headingFont" autocomplete="off" spellcheck="false">')}
-${textField("theme-bodyFont", C.bodyFont, '<input id="theme-bodyFont" autocomplete="off" spellcheck="false">')}
+${textField("theme-headingFont", C.headingFont, `<input ${described("theme-headingFont")} autocomplete="off" spellcheck="false">`)}
+${textField("theme-bodyFont", C.bodyFont, `<input ${described("theme-bodyFont")} autocomplete="off" spellcheck="false">`)}
 </div></details>
 <details id="samples" class="disclosure" hidden><summary class="subhead">${escape(C.previewWith)}</summary><div id="sample-fields" class="disclosure-body"></div></details>
 </aside>
 </div>
 <div id="bar-notice" class="notice bar-notice" role="alert" hidden></div>
-<footer id="bar" class="bar"><span id="bar-state" class="bar-state" role="status" aria-live="polite"></span><div id="bar-acts" class="bar-acts"></div>
+<footer id="bar" class="bar"><span id="bar-state" class="bar-state" role="status" aria-live="polite" tabindex="-1"></span><div id="bar-acts" class="bar-acts"></div>
 <div id="bar-form" class="bar-form" hidden><label for="layout-name">${escape(C.layoutName)}</label><input id="layout-name" autocomplete="off"><button type="button" id="layout-cancel" class="text-act">${escape(C.cancel)}</button><button type="button" id="layout-save" class="primary">${escape(C.saveLayoutConfirm)}</button></div></footer>`;
   return pageShell({ title: options.title, nonce: options.nonce, script: options.script, styles: BASE_STYLES + "\n" + STYLES, body });
 }

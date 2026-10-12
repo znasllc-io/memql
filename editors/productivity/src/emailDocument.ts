@@ -63,7 +63,8 @@ const THEME_KEY_ORDER = ["page", "canvas", "primary", "secondary", "accent", "ti
 const TOP_KEY_ORDER = ["subject", "preheader", "layout", "theme", "blocks", "textBody", "htmlBody"] as const;
 const LAYOUT_KEYS: readonly string[] = ["subject", "preheader", "layout", "theme", "blocks"];
 const CUSTOM_KEYS: readonly string[] = ["subject", "preheader", "textBody", "htmlBody"];
-const THEME_COLOURS: readonly string[] = ["page", "canvas", "primary", "secondary", "accent", "tint", "text", "muted"];
+/** The theme's own colours, in the order the theme lists them. White is a token blocks may use, not one the theme sets. */
+export const THEME_COLOURS = ["page", "canvas", "primary", "secondary", "accent", "tint", "text", "muted"] as const;
 const THEME_FONTS: readonly string[] = ["headingFont", "bodyFont"];
 
 /** Each type's own keys (parse.go, blockKeys); every type also takes id, type and role, and every type but spacer takes padding. */
@@ -469,7 +470,7 @@ type LayoutEdit = Exclude<EmailEdit, { kind: "subject" | "preheader" }>;
 
 function editLayout(next: LayoutEmail, edit: LayoutEdit): LayoutEmail {
   if (edit.kind === "theme") {
-    if (THEME_COLOURS.includes(edit.key)) { if (!HEX.test(edit.value)) throw refusal(SENTENCES.themeColour); }
+    if ((THEME_COLOURS as readonly string[]).includes(edit.key)) { if (!HEX.test(edit.value)) throw refusal(SENTENCES.themeColour); }
     else if (THEME_FONTS.includes(edit.key)) { if (!FONT.test(edit.value)) throw refusal(SENTENCES.font); }
     else throw misuse(`${String(edit.key)} is not a theme field`);
     setKey(next.theme, edit.key, edit.value, THEME_KEY_ORDER);

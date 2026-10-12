@@ -9,7 +9,8 @@
 // read clicks and to mark the selected block, nothing else.
 
 import { EMAIL_COPY } from "./emailCopy.js";
-import { EDITABLE_FIELDS, THEME_TOKENS, blockLabel, canMove, editEmail, isLayoutEmail, sampleKeys, validLink, walkBlocks, type AddableType, type EditableField, type EmailBlock, type EmailDocument, type EmailEdit, type ThemeToken } from "./emailDocument.js";
+import { EDITABLE_FIELDS, THEME_COLOURS, THEME_TOKENS, blockLabel, canMove, editEmail, isLayoutEmail, sampleKeys, validLink, walkBlocks, type AddableType, type EditableField, type EmailBlock, type EmailDocument, type EmailEdit } from "./emailDocument.js";
+import { markdownLinkProblem } from "./emailMarkdown.js";
 import { PREVIEW_CSP, previewHTML, skeletonHTML } from "./emailPreview.js";
 import { ICONS } from "./pageBase.js";
 import type { Problem } from "./problems.js";
@@ -32,8 +33,6 @@ const BUSY: readonly string[] = [C.publishing, C.savingLayout, C.savingCopy];
 /** Acts drawn as the bar's button; the others are text acts. */
 const BUTTON_ACTS: readonly BarAct[] = ["connect", "openSource", "saveToMemQL", "publish"];
 const ACT_WORDS: Readonly<Record<BarAct, string>> = { connect: C.connect, openSource: C.openSource, saveToMemQL: C.saveToMemQL, saveLayout: C.saveLayout, publish: C.publish };
-/** The theme's own colours: every token but white, which is fixed. */
-const THEME_COLOURS = THEME_TOKENS.filter((token): token is Exclude<ThemeToken, "white"> => token !== "white");
 const HEX = /^#[0-9a-fA-F]{6}$/;
 /** The most links a social or footer block takes. */
 const MAX_LINKS = 8;
@@ -56,9 +55,12 @@ const bytes = (text: string) => new TextEncoder().encode(text).length;
 const characters = (text: string) => { let count = 0; for (const _ of text) count++; return count; };
 /** Whether a person can reach the element: on the page and not inside anything hidden. */
 const reachable = (element: Element) => element.isConnected && !element.closest("[hidden]");
-function say(notice: HTMLElement | undefined, text: string): void {
-  if (notice && notice.textContent !== text) notice.textContent = text;
-}
+/**
+ * Whether the person is working in `box` now. The page keeps its active element
+ * while another window has the keyboard (the Source editor beside it in Split,
+ * say), so the window's focus is asked as well.
+ */
+const holds = (box: Element) => document.hasFocus() && box.contains(document.activeElement);
 
 // -- The page -----------------------------------------------------------------
 
@@ -147,6 +149,21 @@ interface Field {
   edit(value: unknown): EmailEdit;
   /** A refusal the model leaves to the engine's parser. */
   check?(value: unknown): string | undefined;
+  /** The controls a refusal can be about (the control itself unless said), and the one it is about now. */
+  controls?(): HTMLElement[];
+  offender?(): HTMLElement | undefined;
+}
+
+/** Shows a field's refusal in its notice, or clears it, and marks the control it is about for a screen reader. */
+function tell(field: Field, text: string): void {
+  const notice = field.notice;
+  if (!notice) return;
+  if (notice.textContent !== text) notice.textContent = text;
+  const about = text ? field.offender?.() ?? field.control : undefined;
+  for (const control of field.controls?.() ?? [field.control]) {
+    if (control === about) control.setAttribute("aria-invalid", "true");
+    else control.removeAttribute("aria-invalid");
+  }
 }
 
 const timers = new Map<Field, number>();
@@ -182,16 +199,16 @@ function commit(field: Field, leaving: boolean): void {
   const before = sent.get(key);
   if (same(value, before ? JSON.parse(before.value) : field.current())) {
     dirty.delete(key);
-    say(field.notice, "");
+    tell(field, "");
     return;
   }
   const edit = field.edit(value);
   const problem = field.check?.(value) ?? refusal(edit);
   if (problem !== undefined) {
-    if (leaving || field.notice?.textContent) say(field.notice, problem);
+    if (leaving || field.notice?.textContent) tell(field, problem);
     return;
   }
-  say(field.notice, "");
+  tell(field, "");
   dirty.delete(key);
   sent.set(key, { value: JSON.stringify(value), version });
   post({ type: "edit", op: edit });
@@ -200,8 +217,7 @@ function commit(field: Field, leaving: boolean): void {
 /** Puts the document's value in the field, unless the person's own value has to stay. */
 function refresh(field: Field): void {
   const key = field.key();
-  const active = document.activeElement;
-  if (field.typed && active && field.control.contains(active)) return;
+  if (field.typed && holds(field.control)) return;
   if (key !== undefined && (dirty.has(key) || sent.has(key))) return;
   field.show(field.current());
 }
@@ -244,8 +260,12 @@ const subjectField = textField(subject, byId("subject-notice"), () => "subject",
 // A preheader set to null is no preheader.
 const preheaderField = textField(preheader, byId("preheader-notice"), () => "preheader", () => str(email?.preheader), value => ({ kind: "preheader", value }));
 
-const wordsField = blockText("text", value => selectedBlock()?.type === "text" ? markdownProblem(value) : undefined);
-const labelField = blockText("label", value => { const size = bytes(value); return size < 1 || size > 200 ? C.buttonLabelInvalid : undefined; });
+const wordsField = blockText("text", value => {
+  const problem = selectedBlock()?.type === "text" ? markdownLinkProblem(value) : undefined;
+  return problem === "label" ? C.wordsLinkLabel : problem === "address" ? C.wordsLinkAddress : undefined;
+});
+// The engine counts a label in bytes; the person reads only that it is missing or too long.
+const labelField = blockText("label", value => { const size = bytes(value); return size < 1 ? C.buttonLabelEmpty : size > 200 ? C.buttonLabelInvalid : undefined; });
 
 const heightControl = byId<HTMLInputElement>("field-height");
 const heightField: Field = {
@@ -260,7 +280,8 @@ listen(heightField);
 const linesControl = byId<HTMLTextAreaElement>("field-lines");
 const linesField: Field = {
   control: linesControl, notice: byId("field-lines-notice"), typed: true, key: blockKey("lines"),
-  read: () => linesControl.value === "" ? [] : linesControl.value.split("\n"),
+  // An empty line at the end is not a line of the footer (the engine would count it toward the twelve).
+  read: () => { const lines = linesControl.value.split("\n"); while (lines.length && lines[lines.length - 1] === "") lines.pop(); return lines; },
   current: () => { const lines = selectedBlock()?.lines; return Array.isArray(lines) ? lines : []; },
   show: value => { linesControl.value = (Array.isArray(value) ? value : []).map(str).join("\n"); },
   edit: fieldEdit("lines"),
@@ -292,12 +313,29 @@ const linksField: Field = {
   edit: fieldEdit("links"),
   check: value => {
     for (const link of value as Record<string, unknown>[]) {
-      if (linkSocial) { const size = bytes(str(link.network)); if (size < 1 || size > 40) return C.networkInvalid; }
-      else { const count = characters(str(link.label)); if (count < 1 || count > 80) return C.linkLabelInvalid; }
+      const problem = linkNameProblem(linkSocial ? str(link.network) : str(link.label));
+      if (problem) return problem;
     }
     return undefined;
   },
+  controls: () => Array.from(linksBox.querySelectorAll<HTMLElement>("input")),
+  // The first name that is wrong, else the first address the link rule refuses.
+  offender: () => {
+    const rows = Array.from(linksBox.querySelectorAll<HTMLElement>(".link-row"));
+    const part = (row: HTMLElement, name: string) => row.querySelector<HTMLInputElement>(`[data-part="${name}"]`)!;
+    const named = rows.find(row => linkNameProblem(part(row, "name").value));
+    if (named) return part(named, "name");
+    const addressed = rows.find(row => !validLink(part(row, "href").value));
+    return addressed && part(addressed, "href");
+  },
 };
+
+/** A social network is 1 to 40 bytes and a footer link's label 1 to 80 characters; the person reads only that it is missing or too long. */
+function linkNameProblem(name: string): string | undefined {
+  if (linkSocial) { const size = bytes(name); return size < 1 ? C.networkEmpty : size > 40 ? C.networkInvalid : undefined; }
+  const count = characters(name);
+  return count < 1 || count > 80 ? C.linkLabelInvalid : undefined;
+}
 
 function drawLinks(value: unknown): void {
   linkSocial = selectedBlock()?.type === "social";
@@ -315,6 +353,7 @@ function linkRow(link: Record<string, unknown>, index: number): HTMLElement {
     input.dataset.part = name;
     input.value = value;
     input.autocomplete = "off";
+    input.setAttribute("aria-describedby", "field-links-notice");
     if (name === "href") { input.spellcheck = false; input.inputMode = "url"; }
     listen(linksField, input);
     wrap.append(textElement("span", label), input);
@@ -369,7 +408,7 @@ function colourField(name: "color" | "background"): Field {
 
 function paintSwatch(name: "color" | "background"): void {
   const token = byId<HTMLSelectElement>(`field-${name}`).value, swatch = byId(`field-${name}-swatch`);
-  const value = token === "white" ? "#ffffff" : email && isLayoutEmail(email) && (THEME_COLOURS as readonly string[]).includes(token) ? str(email.theme[token as Exclude<ThemeToken, "white">]) : "";
+  const value = token === "white" ? "#ffffff" : email && isLayoutEmail(email) && (THEME_COLOURS as readonly string[]).includes(token) ? str(email.theme[token as typeof THEME_COLOURS[number]]) : "";
   swatch.classList.toggle("empty", !HEX.test(value));
   swatch.style.backgroundColor = HEX.test(value) ? value : "";
 }
@@ -444,86 +483,6 @@ const themeFields: readonly Field[] = [
     () => email && isLayoutEmail(email) ? str(email.theme[key]) : "", value => ({ kind: "theme", key, value }))),
 ];
 
-// -- Links in Markdown ---------------------------------------------------------
-//
-// The text block's Markdown reads links as the engine's parser does
-// (component/compose/emaildoc/markdown.go): paragraphs are their lines joined,
-// a list item is one line, "[label](address)" with balanced parentheses, and a
-// backslash escapes \ * [ ] ( ). A link needs a label and an address the link
-// rule allows. Anything this does not call a link, the parser does not either.
-
-const ESCAPABLE = "\\*[]()";
-/** A backslash with one of \ * [ ] ( ) after it. */
-const escapes = (text: string, at: number) => text[at] === "\\" && at + 1 < text.length && ESCAPABLE.includes(text[at + 1]!);
-/** What Go's strings.TrimSpace trims (unicode.IsSpace). */
-const GO_SPACE = "\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
-const EDGE_SPACE = new RegExp(`^[${GO_SPACE}]+|[${GO_SPACE}]+$`, "g");
-const goTrim = (text: string) => text.replace(EDGE_SPACE, "");
-const LIST_ITEM = /^(?:- |\d{1,9}\. )/;
-
-function markdownProblem(source: string): string | undefined {
-  const runs: string[] = [];
-  let paragraph: string[] = [];
-  const endParagraph = () => { if (paragraph.length) runs.push(paragraph.join("\n")); paragraph = []; };
-  for (const raw of source.replace(/\r\n?/g, "\n").split("\n")) {
-    const line = goTrim(raw);
-    if (line === "") { endParagraph(); continue; }
-    const item = LIST_ITEM.exec(line);
-    if (!item) { paragraph.push(line); continue; }
-    endParagraph();
-    runs.push(goTrim(line.slice(item[0].length)));
-  }
-  endParagraph();
-  for (const run of runs) {
-    const problem = linkProblem(run);
-    if (problem) return problem;
-  }
-  return undefined;
-}
-
-function linkProblem(text: string): string | undefined {
-  if (!text.includes("](")) return undefined;
-  const parens = matchParens(text);
-  for (let at = 0; at < text.length;) {
-    const character = text[at]!;
-    if (escapes(text, at)) { at += 2; continue; }
-    if (character !== "[") { at++; continue; }
-    const close = labelEnd(text, at);
-    const closeParen = close < 0 || text[close + 1] !== "(" ? 0 : parens[close + 1] ?? 0;
-    if (closeParen === 0) { at++; continue; }
-    if (goTrim(unescape(text.slice(at + 1, close)).replace(/\n/g, " ")) === "") return C.wordsLinkLabel;
-    const address = unescape(text.slice(close + 2, closeParen));
-    if (address === "" || !validLink(address)) return C.wordsLinkAddress;
-    at = closeParen + 1;
-  }
-  return undefined;
-}
-
-/** For each "(", the index of the ")" that closes it, or 0 (a ")" is never at 0). */
-function matchParens(text: string): Int32Array {
-  const parens = new Int32Array(text.length), open: number[] = [];
-  for (let at = 0; at < text.length; at++) {
-    const character = text[at];
-    if (escapes(text, at)) at++;
-    else if (character === "(") open.push(at);
-    else if (character === ")" && open.length) parens[open.pop()!] = at;
-  }
-  return parens;
-}
-
-/** The "]" that closes the "[" at `start`, or -1; a label holds no "[". */
-function labelEnd(text: string, start: number): number {
-  for (let at = start + 1; at < text.length; at++) {
-    const character = text[at];
-    if (escapes(text, at)) at++;
-    else if (character === "[") return -1;
-    else if (character === "]") return at;
-  }
-  return -1;
-}
-
-const unescape = (text: string) => text.replace(/\\([\\*[\]()])/g, "$1");
-
 // -- The preview ---------------------------------------------------------------
 
 const POLICY = `<meta http-equiv="Content-Security-Policy" content="${PREVIEW_CSP}">`;
@@ -575,6 +534,8 @@ for (const frame of frames) frame.addEventListener("load", () => frameLoaded(fra
 /** A click in the email never follows anything; it selects the block it landed in. */
 function frameClick(event: MouseEvent): void {
   event.preventDefault();
+  // A dimmed preview may show blocks whose ids now name others (an added block takes the smallest free id).
+  if (stale !== undefined) return;
   const target = event.target as { closest?: (selector: string) => Element | null } | null;
   const id = (typeof target?.closest === "function" ? target.closest("[data-block]") : null)?.getAttribute("data-block");
   if (id && placed.has(id)) select(id, { fields: true });
@@ -689,7 +650,7 @@ const rowFor = (id: string | undefined) => rows().find(row => row.dataset.block 
 
 function drawOutline(): void {
   const active = document.activeElement;
-  const focusId = active instanceof HTMLElement && outline.contains(active) ? active.dataset.block : undefined;
+  const focusId = holds(outline) && active instanceof HTMLElement ? active.dataset.block : undefined;
   const list: HTMLElement[] = [];
   if (layout()) walkBlocks((email as { blocks: EmailBlock[] }).blocks, (block, depth) => {
     const row = textElement("div", "");
@@ -746,6 +707,7 @@ function drawBlock(): void {
  * typing that cannot be sent goes with the block it was for.
  */
 function select(id: string | undefined, options: { post?: boolean; preview?: boolean; fields?: boolean } = {}): void {
+  pendingSelect = undefined;
   if (id !== selected) {
     leaveBlock();
     selected = id;
@@ -765,7 +727,7 @@ function leaveBlock(): void {
   for (const field of blockFields) {
     const key = field.key();
     if (key !== undefined) dirty.delete(key);
-    say(field.notice, "");
+    tell(field, "");
   }
 }
 
@@ -876,18 +838,20 @@ function drawIssues(): void {
 const sampleInputs = new Map<string, HTMLInputElement>();
 let sampleTimer: number | undefined;
 
+/** One input per merge tag, in the tags' order; inputs whose tags stay are kept, with what is typed in them. */
 function drawSamples(): void {
   const keys = email && invalid === undefined ? sampleKeys(email) : [];
   samplesBox.hidden = keys.length === 0;
   if (same(keys, [...sampleInputs.keys()])) return;
-  const active = document.activeElement;
-  const labels = keys.map(key => sampleInputs.get(key)?.parentElement ?? sampleRow(key));
-  for (const key of [...sampleInputs.keys()]) if (!keys.includes(key)) sampleInputs.delete(key);
-  sampleFields.replaceChildren(...labels);
-  if (active instanceof HTMLElement && sampleFields.contains(active)) active.focus();
+  const active = holds(sampleFields) ? document.activeElement as HTMLElement : undefined;
+  const inputs = keys.map(key => sampleInputs.get(key) ?? sampleInput(key));
+  sampleInputs.clear();
+  keys.forEach((key, index) => sampleInputs.set(key, inputs[index]!));
+  sampleFields.replaceChildren(...inputs.map(input => input.parentElement!));
+  active?.focus();
 }
 
-function sampleRow(key: string): HTMLElement {
+function sampleInput(key: string): HTMLInputElement {
   const label = textElement("label", "", "field");
   const input = document.createElement("input");
   input.dataset.sample = key;
@@ -901,13 +865,14 @@ function sampleRow(key: string): HTMLElement {
     sampleTimer = window.setTimeout(postViewState, PAUSE);
   });
   label.append(textElement("span", Object.hasOwn(C.sampleLabels, key) ? C.sampleLabels[key as keyof typeof C.sampleLabels] : key, "label"), input);
-  sampleInputs.set(key, input);
-  return label;
+  return input;
 }
 
 function viewState(): ViewState {
   const state: ViewState = { width };
-  if (selected !== undefined) state.selected = selected;
+  // A selection still waiting for its block is the one to come back to.
+  const chosen = pendingSelect?.id ?? selected;
+  if (chosen !== undefined) state.selected = chosen;
   if (themeOpen) state.themeOpen = true;
   if (samplesOpen) state.samplesOpen = true;
   if (Object.keys(samples).length) state.samples = { ...samples };
@@ -939,7 +904,7 @@ function restore(state: Partial<ViewState>): void {
   if (state.samplesOpen !== undefined) { samplesOpen = state.samplesOpen; samplesBox.open = samplesOpen; }
   if (state.samples) {
     samples = { ...state.samples };
-    for (const [key, input] of sampleInputs) if (input !== document.activeElement) input.value = samples[key] ?? "";
+    for (const [key, input] of sampleInputs) if (!holds(input)) input.value = samples[key] ?? "";
   }
   if (state.selected !== undefined) {
     if (placed.has(state.selected)) select(state.selected, { post: false });
@@ -957,19 +922,24 @@ samplesBox.addEventListener("toggle", () => { if (samplesBox.open !== samplesOpe
 
 const isAct = (value: unknown): value is BarAct => typeof value === "string" && Object.hasOwn(ACT_WORDS, value);
 
+/** The state's words (a live region: written only when they change) and the acts, kept as they are when they are the same. */
 function drawBar(): void {
-  barState.textContent = bar.state;
+  if (barState.textContent !== bar.state) barState.textContent = bar.state;
   barState.classList.toggle("busy", BUSY.includes(bar.state));
+  const shown = Array.from(barActs.querySelectorAll<HTMLElement>("button"));
+  if (same(shown.map(button => button.dataset.act), bar.acts)) return;
   const active = document.activeElement;
-  const focused = active instanceof HTMLElement && barActs.contains(active) ? active.dataset.act : undefined;
-  barActs.replaceChildren(...bar.acts.map(act => {
-    const button = textElement("button", ACT_WORDS[act], BUTTON_ACTS.includes(act) ? "primary" : "text-act") as HTMLButtonElement;
-    button.type = "button";
-    button.dataset.act = act;
-    button.addEventListener("click", () => runAct(act));
-    return button;
-  }));
+  const focused = holds(barActs) && active instanceof HTMLElement ? active.dataset.act : undefined;
+  barActs.replaceChildren(...bar.acts.map(act => shown.find(button => button.dataset.act === act) ?? actButtonFor(act)));
   if (focused !== undefined) actButton(focused)?.focus();
+}
+
+function actButtonFor(act: BarAct): HTMLElement {
+  const button = textElement("button", ACT_WORDS[act], BUTTON_ACTS.includes(act) ? "primary" : "text-act") as HTMLButtonElement;
+  button.type = "button";
+  button.dataset.act = act;
+  button.addEventListener("click", () => runAct(act));
+  return button;
 }
 
 const actButton = (act: string) => Array.from(barActs.querySelectorAll<HTMLElement>("button")).find(button => button.dataset.act === act);
@@ -980,6 +950,8 @@ function runAct(act: BarAct): void {
   if (act === "saveLayout") { openForm(); return; }
   actPending = true;
   post({ type: "act", act });
+  // The act's button may go with the host's answer: the focus waits on the state, not on the page.
+  barState.focus();
 }
 
 function openForm(): void {
@@ -1010,6 +982,7 @@ function saveLayout(): void {
   actPending = true;
   post({ type: "saveLayout", name });
   closeForm(false);
+  barState.focus();
 }
 
 layoutName.addEventListener("keydown", event => {
@@ -1020,7 +993,7 @@ byId("layout-save").addEventListener("click", saveLayout);
 byId("layout-cancel").addEventListener("click", () => closeForm(true));
 
 function showProblem(problem: Problem): void {
-  renderProblem(barNotice, problem, post);
+  renderProblem(barNotice, { message: problem.message || C.renderFailed, reference: problem.reference }, post);
   barNotice.hidden = false;
 }
 function clearBarNotice(): void {
@@ -1051,7 +1024,8 @@ function drawGroups(): void {
 }
 
 function onDocument(message: Record<string, unknown>): void {
-  const focused = document.activeElement;
+  // A host update moves the focus only when the person is in the page.
+  const focused = document.hasFocus() ? document.activeElement : null;
   if (typeof message.version === "number") version = message.version;
   for (const [key, entry] of sent) if (version > entry.version) sent.delete(key);
   if (!isRecord(message.email)) {
@@ -1100,7 +1074,7 @@ function onDocument(message: Record<string, unknown>): void {
   drawStage();
   if (posted) postViewState();
   // Focus stays where it was, unless what had it went: then it goes to the selected block's row.
-  if (focusField) focusFirstField();
+  if (focusField && focused) focusFirstField();
   else if (removing !== undefined && removing === previous && !placed.has(removing) && focused && (blockGroup.contains(focused) || !reachable(focused))) rowFor(selected)?.focus();
   else if (focused && focused !== document.body && !reachable(focused)) rowFor(selected)?.focus();
   if (removing !== undefined && !placed.has(removing)) removing = undefined;
@@ -1122,20 +1096,22 @@ function onRenderFailed(message: Record<string, unknown>): void {
   lastSeq = message.seq;
   failedSeq = message.seq;
   stale = "failed";
-  renderProblem(previewNotice, { message: str(message.problem.message), reference: typeof message.problem.reference === "string" ? message.problem.reference : undefined }, post);
+  renderProblem(previewNotice, { message: str(message.problem.message) || C.renderFailed, reference: typeof message.problem.reference === "string" ? message.problem.reference : undefined }, post);
   previewNotice.hidden = false;
   drawStage();
 }
 
 function onContext(message: Record<string, unknown>): void {
   connected = message.connected === true;
+  // A context answers an act too (a Connect that was cancelled).
+  actPending = false;
   // Without a connection the last render may no longer be the email: the next one shows when it loads.
   if (!connected) frameShown = false;
   const choices = (Array.isArray(message.choices) ? message.choices : []).filter((choice): choice is { id: string; name: string } => isRecord(choice) && typeof choice.id === "string" && typeof choice.name === "string");
   const chosen = isRecord(message.organization) ? str(message.organization.id) : "";
   organizationKnown = chosen !== "";
   organizationRow.hidden = choices.length === 0;
-  if (choices.length && document.activeElement !== organization) {
+  if (choices.length && !holds(organization)) {
     const options = choices.map(choice => { const option = textElement("option", choice.name) as HTMLOptionElement; option.value = choice.id; return option; });
     if (!chosen) { const prompt = textElement("option", C.chooseOrganization) as HTMLOptionElement; prompt.value = ""; options.unshift(prompt); }
     organization.replaceChildren(...options);
@@ -1157,7 +1133,7 @@ function onSelect(message: Record<string, unknown>): void {
   awaitingAdd = false;
   if (!placed.has(message.block)) { pendingSelect = { id: message.block, post: true, focusField }; return; }
   select(message.block, { preview: true, fields: true });
-  if (focusField) focusFirstField();
+  if (focusField && document.hasFocus()) focusFirstField();
 }
 
 window.addEventListener("message", event => {
@@ -1174,7 +1150,11 @@ window.addEventListener("message", event => {
     case "restore": restore(asViewState(message.state)); break;
     case "select": onSelect(message); break;
     case "problem":
+      // The act, the selection, the add or the removal the problem answers is over.
       actPending = false;
+      pendingSelect = undefined;
+      awaitingAdd = false;
+      removing = undefined;
       if (isRecord(message.problem)) showProblem({ message: str(message.problem.message), reference: typeof message.problem.reference === "string" ? message.problem.reference : undefined });
       break;
   }
