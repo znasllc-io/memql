@@ -208,13 +208,14 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 	}
 	out.Format = format
 	// THE CLEANED NAME IS WHAT AN IN-RUN COMPOSITION IS KEYED BY. A nested
-	// composition's id hashes these arguments (see materialize), so dropping a
-	// matching extension changes the id of a step whose name ends in its format's
-	// extension: a step that was in flight when this cleaning shipped computes a
-	// new id on its next retry, misses the composition it wrote and files once
-	// more. That is transient (only steps in flight across the upgrade) and
-	// accepted pre-release. A name with no extension to drop, which is what the
-	// planner's triage chooses, keys exactly as before.
+	// composition's id hashes these arguments (see materialize), and before name
+	// cleaning a name reached that hash as it was given. So for a step that was in
+	// flight when the cleaning shipped, a name ending in its format's extension
+	// now hashes to a new id: its retry misses the composition it wrote and files
+	// once more. (A name with a slash, flattened at filing before, is now refused,
+	// so such a step fails its retry.) Both are transient -- only steps in flight
+	// across the upgrade -- and accepted pre-release. A name with no extension to
+	// drop and no slash keys exactly as before.
 	if out.Name, err = cleanFileName(out.Name, format); err != nil {
 		return out, err
 	}
