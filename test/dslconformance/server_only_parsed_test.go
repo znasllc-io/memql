@@ -397,8 +397,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Caller scoping admits authorized writers but cannot enforce that gate;
 		// direct writes could overwrite a concurrent edit or publish stale copy.
 		// campaignSaveTemplate retains the actor and checks organization rights.
-		{Path: "campaigns/mutations.memql", Name: "createTemplate"}:         true,
-		{Path: "campaigns/mutations.memql", Name: "updateTemplate"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "createTemplate"}: true,
+		{Path: "campaigns/mutations.memql", Name: "updateTemplate"}: true,
+		// Layout content shares the template revision gate; campaignSaveLayout
+		// retains the actor and checks organization rights.
+		{Path: "campaigns/mutations.memql", Name: "createEmailLayout"}:      true,
+		{Path: "campaigns/mutations.memql", Name: "updateEmailLayout"}:      true,
 		{Path: "campaigns/mutations.memql", Name: "startCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "pauseCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "resumeCampaign"}:         true,

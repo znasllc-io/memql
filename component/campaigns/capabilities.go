@@ -60,6 +60,11 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		{Name: "retryNewsletterWelcome", Description: "Recheck a blocked welcome without repeating an uncertain delivery attempt.", Handler: w.handleRetryNewsletterWelcome},
 		{Name: "configureSeries", Description: "Save, pause or resume a recurring campaign under current organization authority.", Handler: w.handleConfigureSeries},
 		{Name: "saveTemplate", Description: "Save or publish the reviewed revision of an organization email template.", Handler: w.handleSaveTemplate},
+		{Name: "saveLayout", Description: "Save an organization email layout on the reviewed revision, or archive or restore it.", Handler: w.handleSaveLayout},
+		// PreserveOrder: the picker lists the built-in layouts first, in catalogue
+		// order, and then the organization's own, newest first. A builtin's nodes
+		// are keyed by id, which sorts them; the flag is what keeps this order.
+		{Name: "emailLayouts", Description: "List the email layouts an organization can start from: the built-in layouts, then its own.", Handler: w.handleEmailLayouts, PreserveOrder: true},
 		{
 			Name:        "startSend",
 			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template or audience is not ready.",
@@ -661,4 +666,41 @@ func resultNode(kind string, payload map[string]any) ([]memorynodes.MemoryNode, 
 		CreatedAt: time.Now().UTC(),
 		Payload:   body,
 	}}, nil
+}
+
+// resultRows wraps a builtin's list reply: one node per row, keyed by the row's
+// own id, under the same made-up concept resultNode uses so no row-authorization
+// tier can mistake a row for stored state.
+//
+// The id is the key the engine files a builtin's nodes under, and the engine
+// drops a node whose id is blank and keeps one of two that share an id. Either
+// would take a row out of the answer without a word, so both are refused here.
+// The order of rows is the order of nodes; a capability that wants it kept on the
+// wire declares PreserveOrder.
+func resultRows(kind string, rows []map[string]any) ([]memorynodes.MemoryNode, error) {
+	nodes := make([]memorynodes.MemoryNode, 0, len(rows))
+	seen := make(map[string]bool, len(rows))
+	now := time.Now().UTC()
+	for _, row := range rows {
+		id := str(row, "id")
+		if strings.TrimSpace(id) == "" {
+			return nil, fmt.Errorf("campaigns: %s row has no id", kind)
+		}
+		if seen[id] {
+			return nil, fmt.Errorf("campaigns: two %s rows share the id %q", kind, id)
+		}
+		seen[id] = true
+		body, err := json.Marshal(row)
+		if err != nil {
+			return nil, fmt.Errorf("campaigns: marshal %s row %q: %w", kind, id, err)
+		}
+		nodes = append(nodes, memorynodes.MemoryNode{
+			ID:        id,
+			Concept:   "integration:campaigns:" + kind,
+			Type:      memorynodes.NodeTypeObject,
+			CreatedAt: now,
+			Payload:   body,
+		})
+	}
+	return nodes, nil
 }

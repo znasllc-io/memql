@@ -399,6 +399,48 @@ QueryClient.prototype.campaignRetryNewsletterWelcome = function (this: QueryClie
   return this.executeNamed("campaignRetryNewsletterWelcome", buildCampaignRetryNewsletterWelcome(args), opts);
 };
 
+/** Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision. */
+export interface CampaignSaveLayoutArgs {
+  /** Stable caller-generated layout id; reuse it on an uncertain creation response. */
+  layoutId: string;
+  /** Owning organization; immutable after creation. */
+  accountId: string;
+  /** Required when saving. */
+  name?: string;
+  description?: string;
+  /** The layout-mode email document. Required when saving. */
+  document?: Record<string, unknown>;
+  /** The Library file the layout comes from. */
+  sourceArtifactId?: string;
+  /** Exact createdAt from emailLayoutById; empty only when creating. */
+  expectedRevision: string;
+  /** save (default), archive or restore. */
+  action?: string;
+}
+
+export function buildCampaignSaveLayout(args: CampaignSaveLayoutArgs): string {
+  const parts: string[] = [];
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.document !== undefined) parts.push("document: " + renderMemQLValue(args.document));
+  if (args.sourceArtifactId !== undefined) parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
+  return "builtin campaignSaveLayout(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSaveLayout(args: CampaignSaveLayoutArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSaveLayout = function (this: QueryClient, args: CampaignSaveLayoutArgs = {} as CampaignSaveLayoutArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSaveLayout", buildCampaignSaveLayout(args), opts);
+};
+
 /** Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail. */
 export interface CampaignSaveTemplateArgs {
   /** Stable caller-generated template ID; reuse on an uncertain creation response. */
@@ -1211,6 +1253,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.emailInbox = function (this: QueryClient, args: EmailInboxArgs = {} as EmailInboxArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("emailInbox", buildEmailInbox(args), opts);
+};
+
+/** The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. The id is opaque: pass it to composeMaterialize as layoutId. */
+export interface EmailLayoutsArgs {
+  accountId: string;
+  includeArchived?: boolean;
+}
+
+export function buildEmailLayouts(args: EmailLayoutsArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  return "builtin emailLayouts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailLayouts(args: EmailLayoutsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailLayouts = function (this: QueryClient, args: EmailLayoutsArgs = {} as EmailLayoutsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailLayouts", buildEmailLayouts(args), opts);
 };
 
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */

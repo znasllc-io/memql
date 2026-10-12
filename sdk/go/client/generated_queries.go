@@ -3388,6 +3388,58 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	return b.String()
 }
 
+// EmailLayoutById -- One email layout by id, for the organization's members. Backs the revision check campaignSaveLayout makes and the editors that open a saved layout. The id is not a capability: the concept's account tier answers a layout outside the caller's organizations as not found.
+//
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutById"] in generated_concepts.go).
+type EmailLayoutByIdArgs struct {
+	LayoutId string
+}
+
+// EmailLayoutById calls the engine query emailLayoutById.
+func (qc *QueryClient) EmailLayoutById(ctx context.Context, args EmailLayoutByIdArgs) (*Result, error) {
+	call := EmailLayoutByIdBuild(args)
+	return qc.executeNamed(ctx, "emailLayoutById", call)
+}
+
+func EmailLayoutByIdBuild(args EmailLayoutByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailLayoutById(")
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailLayoutsForAccount -- An organization's email layouts, newest first. Backs the layout picker (through the emailLayouts builtin) and the Email app's Templates section. status narrows to active or archived layouts; omit it to see both.
+//
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutsForAccount"] in generated_concepts.go).
+type EmailLayoutsForAccountArgs struct {
+	AccountId string
+	Status    string
+}
+
+// EmailLayoutsForAccount calls the engine query emailLayoutsForAccount.
+func (qc *QueryClient) EmailLayoutsForAccount(ctx context.Context, args EmailLayoutsForAccountArgs) (*Result, error) {
+	call := EmailLayoutsForAccountBuild(args)
+	return qc.executeNamed(ctx, "emailLayoutsForAccount", call)
+}
+
+func EmailLayoutsForAccountBuild(args EmailLayoutsForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailLayoutsForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Status != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // EmailRuleById -- One event-email rule by id.
 //
 // Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRuleById"] in generated_concepts.go).

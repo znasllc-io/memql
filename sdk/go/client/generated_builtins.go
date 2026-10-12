@@ -497,6 +497,85 @@ func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs
 	return b.String()
 }
 
+// CampaignSaveLayout -- Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision.
+type CampaignSaveLayoutArgs struct {
+	// Stable caller-generated layout id; reuse it on an uncertain creation response.
+	LayoutId string
+	// Owning organization; immutable after creation.
+	AccountId string
+	// Required when saving.
+	Name        string
+	Description string
+	// The layout-mode email document. Required when saving.
+	Document map[string]any
+	// The Library file the layout comes from.
+	SourceArtifactId string
+	// Exact createdAt from emailLayoutById; empty only when creating.
+	ExpectedRevision string
+	// save (default), archive or restore.
+	Action string
+}
+
+// CampaignSaveLayout calls the engine builtin campaignSaveLayout.
+func (qc *QueryClient) CampaignSaveLayout(ctx context.Context, args CampaignSaveLayoutArgs) (*Result, error) {
+	call := CampaignSaveLayoutBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveLayout", call)
+}
+
+func CampaignSaveLayoutBuild(args CampaignSaveLayoutArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveLayout(")
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Name != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.Description != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.Document != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("document: ")
+		b.WriteString(renderMemQLValue(args.Document))
+	}
+	if args.SourceArtifactId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceArtifactId: ")
+		b.WriteString(quoteMemQL(args.SourceArtifactId))
+	}
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if args.Action != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("action: ")
+		b.WriteString(quoteMemQL(args.Action))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.
 type CampaignSaveTemplateArgs struct {
 	// Stable caller-generated template ID; reuse on an uncertain creation response.
@@ -1612,6 +1691,35 @@ func (qc *QueryClient) EmailInbox(ctx context.Context, args EmailInboxArgs) (*Re
 func EmailInboxBuild(args EmailInboxArgs) string {
 	_ = args
 	return "builtin emailInbox()"
+}
+
+// EmailLayouts -- The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. The id is opaque: pass it to composeMaterialize as layoutId.
+type EmailLayoutsArgs struct {
+	AccountId          string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+}
+
+// EmailLayouts calls the engine builtin emailLayouts.
+func (qc *QueryClient) EmailLayouts(ctx context.Context, args EmailLayoutsArgs) (*Result, error) {
+	call := EmailLayoutsBuild(args)
+	return qc.executeNamed(ctx, "emailLayouts", call)
+}
+
+func EmailLayoutsBuild(args EmailLayoutsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailLayouts(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.IncludeArchivedSet {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.

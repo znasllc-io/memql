@@ -9,28 +9,35 @@
 // per-row machinery as the rest of the graph. A campaign editor is then a
 // layout over queries and mutations, not a new subsystem.
 //
-// THIRTEEN CONCEPTS. Six answer the five questions a send has to answer --
-// who, what, from whom, when, and what happened -- four are the sending
-// engine's own state (memql#3348), and three are the compliance, engagement
-// and automation surfaces layered on top:
+// NINETEEN CONCEPTS. Seven answer the five questions a send has to answer --
+// who, what, from whom, when, and what happened. The rest are the sending
+// engine's own state (memql#3348) and the compliance, engagement, automation,
+// recurrence, newsletter and testing surfaces layered on top:
 //
-//   audience         WHO        a named set of addresses
-//   recipient        WHO        one address in an audience, with its subscription state
-//   template         WHAT       the subject + bodies, authored once and reused
-//   senderIdentity   FROM       a mailbox this deployment may send as (memql#4821)
-//   campaign         WHEN       audience x template x schedule, plus the send state
-//   delivery         OUTCOME    one row per recipient per campaign
-//   sendJob          ENGINE     the per-campaign send run the worker drains
-//   suppression      ENGINE     the cluster-wide do-not-mail list, digest-keyed
-//   reputationWindow ENGINE     per (identity, domain, day) deliverability counters
-//   warmupState      ENGINE     the evidence-driven ramp's own decision record
-//   consentEvent     EXPORT     append-only grant/withdraw/bounce/complaint/suppress
-//   engagementEvent  EXPORT     append-only open/click, one row per tracked hit (memql#4823)
-//   emailRule        AUTOMATION "when X happens on concept Y, send template Z" (memql#4829)
+//   audience           WHO         a named set of addresses
+//   recipient          WHO         one address in an audience, with its subscription state
+//   template           WHAT        the subject + bodies, authored once and reused
+//   emailLayout        WHAT        an organization's saved email, kept as the starting point for the next one
+//   senderIdentity     FROM        a mailbox this deployment may send as (memql#4821)
+//   campaign           WHEN        audience x template x schedule, plus the send state
+//   delivery           OUTCOME     one row per recipient per campaign
+//   sendJob            ENGINE      the per-campaign send run the worker drains
+//   suppression        ENGINE      the cluster-wide do-not-mail list, digest-keyed
+//   reputationWindow   ENGINE      per (identity, domain, day) deliverability counters
+//   warmupState        ENGINE      the evidence-driven ramp's own decision record
+//   singleSendReceipt  ENGINE      a private receipt for one intended event email, so a retry finds it
+//   consentEvent       EXPORT      append-only grant/withdraw/bounce/complaint/suppress
+//   engagementEvent    EXPORT      append-only open/click, one row per tracked hit (memql#4823)
+//   emailRule          AUTOMATION  "when X happens on concept Y, send template Z" (memql#4829)
+//   campaignSeries     RECURRENCE  a repeating instruction; each occurrence is its own campaign
+//   newsletterBinding  NEWSLETTER  a deployable's sign-up form bound to an audience and a welcome
+//   newsletterSignup   NEWSLETTER  one opt-in and its welcome, from consent to outcome
+//   testSettings       TESTING     an organization's shared testing audience
 //
 // The census used to say EIGHT and list nine, having been written before the
-// reputation and warmup rows landed. A count in a header is a claim the file
-// makes about itself; keep it true when you add to this file.
+// reputation and warmup rows landed, and later said THIRTEEN over eighteen
+// declarations. A count in a header is a claim the file makes about itself;
+// keep it true when you add to this file.
 //
 // ORGANIZATION OWNERSHIP on the operator-facing resources. Creation stamps
 // the authenticated person as ownerUserId and persists the selected accountId.
@@ -129,6 +136,23 @@ concept template {
   status       enum("draft", "ready", "archived")  @description("Authoring lifecycle. 'draft' is being written; 'ready' means an operator has decided it may be attached to a campaign; 'archived' keeps it readable for the campaigns that referenced it without offering it in the picker.")
   accountId    string   @description("The owning v1:accounts:account organization. New work requires an authorized organization selected explicitly or resolved from the caller. Legacy untied rows retain their existing attribution until an operator assigns one.")
 
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+}
+
+/// An organization's saved email layout: a finished email kept as the starting point for the next
+/// one. Brand blocks keep their content; content blocks keep theirs as the example the Materializer
+/// writes against. Only campaignSaveLayout writes it.
+@displayCard(primary="name", secondary="description", tertiary="accountId", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept emailLayout {
+  ownerUserId       string!  @description("The person who first saved it. Preserved across edits by organization members.")
+  accountId         string!  @description("The owning organization. A layout cannot move between organizations.")
+  name              string!  @description("Name shown on the layout card.")
+  description       string   @description("One line about when to use it.")
+  document          object!  @description("The layout-mode email document (emaildoc), validated on every save.")
+  sourceArtifactId  string   @description("The Library file the layout was saved from, when it was.")
+  status            enum("active", "archived")!  @description("Archived layouts stay readable for emails made from them and leave the layout picker.")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }

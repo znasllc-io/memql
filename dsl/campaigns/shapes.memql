@@ -56,6 +56,21 @@ shape template templateFull {
   row.createdAt
 }
 
+/// Full email-layout projection: the saved document and its lifecycle. Backs the layout picker
+/// (emailLayouts) and the revision check campaignSaveLayout makes before it writes.
+@row
+shape emailLayout emailLayoutFull {
+  row.id
+  ownerUserId
+  accountId
+  name
+  description
+  document
+  sourceArtifactId
+  status
+  row.createdAt
+}
+
 /// Full campaign projection: the authoring fields plus the send-state fields. The send-state half is
 /// written by updateCampaignProgress (dsl/campaigns/mutations.memql), the sending engine's progress
 /// writer (memql#3348).

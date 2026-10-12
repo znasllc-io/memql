@@ -246,6 +246,12 @@ func TestEveryRenderedCallParses(t *testing.T) {
 				Status: "sent", SentAt: now, Attempts: 1, EmailRuleID: awkward,
 			})
 		}},
+
+		// organization email layouts: both reads, and the list both ways (the
+		// status argument renders only when archived layouts are not wanted).
+		{"emailLayoutById", func() error { _, _, err := store.EmailLayoutByID(ctx, awkward); return err }},
+		{"emailLayoutsForAccount (active)", func() error { _, err := store.EmailLayoutsForAccount(ctx, awkward, false); return err }},
+		{"emailLayoutsForAccount (archived too)", func() error { _, err := store.EmailLayoutsForAccount(ctx, awkward, true); return err }},
 	}
 
 	before := 0

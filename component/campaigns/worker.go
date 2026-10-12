@@ -106,6 +106,7 @@ type ExecutionClaimer interface {
 type Worker struct {
 	testGate       func(context.Context, string) (func(), error)
 	templateGate   func(context.Context, string) (func(), error)
+	layoutGate     func(context.Context, string) (func(), error)
 	singleSendGate func(context.Context, string) (func(), error)
 	seriesGate     func(context.Context, string) (func(), error)
 	newsletterGate func(context.Context, string) (func(), error)
@@ -206,6 +207,13 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 				db = database[0]()
 			}
 			return memql.AcquireWriteGate(ctx, db, "campaign-template:"+key)
+		},
+		layoutGate: func(ctx context.Context, key string) (func(), error) {
+			var db *sql.DB
+			if len(database) > 0 && database[0] != nil {
+				db = database[0]()
+			}
+			return memql.AcquireWriteGate(ctx, db, "campaign-layout:"+key)
 		},
 		store:      NewStore(engine),
 		claimer:    claimer,

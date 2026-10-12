@@ -88,6 +88,34 @@ query template templateById {
   shape   templateFull
 }
 
+/// One email layout by id, for the organization's members. Backs the revision check
+/// campaignSaveLayout makes and the editors that open a saved layout. The id is not a capability:
+/// the concept's account tier answers a layout outside the caller's organizations as not found.
+@actor
+query emailLayout emailLayoutById {
+  args {
+    layoutId  string!
+  }
+  filter  row => row.id == args.layoutId
+  shape   emailLayoutFull
+}
+
+/// An organization's email layouts, newest first. Backs the layout picker (through the emailLayouts
+/// builtin) and the Email app's Templates section. status narrows to active or archived layouts;
+/// omit it to see both.
+@actor
+query emailLayout emailLayoutsForAccount {
+  args {
+    accountId  string!
+    status     string
+  }
+  filter    row => row.accountId == args.accountId
+                && (args.status == nil || row.status == args.status)
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     emailLayoutFull
+}
+
 /// Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which
 /// is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a
 /// filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the

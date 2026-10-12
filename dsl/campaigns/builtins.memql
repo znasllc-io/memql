@@ -211,6 +211,28 @@ builtin campaignSaveTemplate {
   action string @description("save (default), publish, or archive. Publishing is an explicit human action.")
 }
 
+@description("Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision.")
+@sdk
+@executor("integration.campaigns.saveLayout")
+builtin campaignSaveLayout {
+  layoutId          string!  @description("Stable caller-generated layout id; reuse it on an uncertain creation response.")
+  accountId         string!  @description("Owning organization; immutable after creation.")
+  name              string   @description("Required when saving.")
+  description       string
+  document          object   @description("The layout-mode email document. Required when saving.")
+  sourceArtifactId  string   @description("The Library file the layout comes from.")
+  expectedRevision  string!  @description("Exact createdAt from emailLayoutById; empty only when creating.")
+  action            string   @description("save (default), archive or restore.")
+}
+
+@description("The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. The id is opaque: pass it to composeMaterialize as layoutId.")
+@sdk
+@executor("integration.campaigns.emailLayouts")
+builtin emailLayouts {
+  accountId        string!
+  includeArchived  bool
+}
+
 @description("Save, pause or resume a recurring campaign. Each occurrence has a separate campaign and delivery ledger. Requires current organization write authority and an exact revision when changing a saved series.")
 @sdk
 @executor("integration.campaigns.configureSeries")

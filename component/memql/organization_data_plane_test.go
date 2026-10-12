@@ -15,6 +15,7 @@ func TestOrganizationDataPlaneClassifierOnlyDefersCompleteGuardedRequests(t *tes
 		want  bool
 	}{
 		{`query templateById(templateId: "one")`, true},
+		{`query emailLayoutById(layoutId: "one")`, true},
 		{`query clientAccountsAll()`, true},
 		{`query effectiveCapabilitiesForActor()`, true},
 		{`query groupCreate(name: "Team", accountId: "acme")`, true},

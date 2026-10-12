@@ -877,6 +877,32 @@
       }
     },
     {
+      "concept": "v1:campaigns:emailLayout",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "description",
+        "document",
+        "name",
+        "ownerUserId",
+        "sourceArtifactId",
+        "status"
+      ],
+      "required": [
+        "accountId",
+        "document",
+        "name",
+        "ownerUserId",
+        "status"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "archived"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:emailRule",
       "file": "campaigns/concepts.memql",
       "fields": [
