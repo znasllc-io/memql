@@ -82,8 +82,9 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   takes `--direct-pool=0` for an install with no direct DSN. The local overlay
   raises the main pool to eight (seventeen per process): its seven Deployments
   at one replica each fit (119 steady, 153 at a bff roll), and at two replicas
-  each they do not (238) -- lower the main pool or raise `max_connections`
-  before scaling a local cluster to two.
+  each they do not (238 steady, 289 at a bff roll; with the main pool back at
+  four, still 221 at a roll). Raise the local `max_connections` -- the staging
+  and production presets' 400 fits -- before scaling a local cluster to two.
 - **The write-gate pool** (`MEMQL_DB_GATE_POOL_SIZE`, default four) holds the
   transactions of write gates -- the advisory locks that serialise a signup, a
   welcome, a library file version, an approval decision -- and nothing else. A
