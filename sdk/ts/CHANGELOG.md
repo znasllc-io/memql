@@ -82,20 +82,21 @@ as they come.
 (memql#6033). The engine delivers each graph event on its own goroutine and a
 read can answer after an event it is newer than, so the last arrival is not
 always the newest copy. With no `supersedes` of its own, a collection now
-compares the `createdAt` each row and event carries at the top level -- the
-time of the row's version, at every digit the wire carries -- and refuses an
-arrival older than the row it holds; the same version or a newer one replaces
-it, and where either side has no version time the arrival wins as before. A
-copy refused as older is refused before `inScope` reads it, so it cannot take a
-newer row out of the list either, and a removal always lands. Once a row is
-out -- removed by an event that carried a version time, or taken out of the
-read's scope by a newer copy -- the collection keeps that time, across seeds
-(up to 1,024 rows, oldest forgotten first), so a late OLDER copy does not bring
-it back; a copy at that version or a newer one is placed. Pass `supersedes` to order by something else, or to take
-every arrival; such a feed keeps no tombstones. The engine's
-`graph.node.created` and `graph.node.updated` events carry that `createdAt` to
-the microsecond the row keeps (`.created` carried it to the second, `.updated`
-not at all).
+compares the `createdAt` each row and event carries at the top level -- the time
+of the row's version, at every digit the wire carries -- and refuses an arrival
+older than the row it holds; the same version or a newer one replaces it, and
+where either side has no version time the arrival wins as before. A copy refused
+as older is refused before `inScope` reads it, so it cannot take a newer row out
+of the list either, and a removal always lands. Once a row is out -- removed by
+an event that carried a version time, or taken out of the read's scope by a
+newer copy -- the collection keeps that time, across seeds (up to 1,024 rows,
+oldest forgotten first; a row removed again at a newer version moves to the back
+of that line), so a late OLDER copy does not bring it back; a copy at that
+version or a newer one is placed. Pass `supersedes` to order by something else,
+or to take every arrival; such a feed keeps no tombstones and owns its rows'
+history. The engine's `graph.node.created` and `graph.node.updated` events carry
+that `createdAt` to the microsecond the row keeps (`.created` carried it to the
+second, `.updated` not at all).
 
 ### Changed -- BREAKING for anyone importing the rotation helpers directly
 

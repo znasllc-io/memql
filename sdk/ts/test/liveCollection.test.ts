@@ -673,6 +673,96 @@ test("the tombstones are bounded: the oldest is forgotten first", async () => {
   store.dispose();
 });
 
+test("a row removed again is remembered as the newest word on it, and forgotten last", async () => {
+  // The cap forgets the oldest word first. A row removed AGAIN, at a newer
+  // version, has had a new word said about it: it moves to the back of the line
+  // rather than keeping the place of its first removal.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", { concept: "c", seed: async () => ({ rows: [], nextCursor: "" }) });
+  await settle();
+  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+
+  for (let n = 0; n < 1_024; n++) subs.deliver(event({ kind: "NODE_DELETED", payload: { id: `r${n}`, createdAt: T3 } }));
+  assert.equal(gone.size, 1_024);
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "r0", createdAt: T4 } }));
+  assert.equal(gone.get("r0"), T4, "the newer removal is the one kept");
+  // One more row removed forces one to be forgotten: the oldest word, which is r1's now.
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "extra", createdAt: T3 } }));
+  assert.equal(gone.size, 1_024);
+  assert.equal(gone.has("r0"), true, "r0 was said about last, so it stays");
+  assert.equal(gone.has("r1"), false, "r1 had the oldest word, so it goes");
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "r0", v: "late", createdAt: T3 } }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "r1", v: "late", createdAt: T2 } }));
+  const rows = byId(handle.value.snapshot.rows);
+  assert.equal(rows["r0"], undefined, "a copy older than r0's removal is still refused");
+  assert.equal(rows["r1"]?.["v"], "late", "r1's is not: nothing is held to compare it with");
+  store.dispose();
+});
+
+test("a removal whose time cannot be read records nothing", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", v: "read", createdAt: T1 }, { id: "b", v: "read", createdAt: T1 }], nextCursor: "" }),
+  });
+  await settle();
+  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+
+  for (const [id, createdAt] of [["a", "yesterday"], ["b", 42]] as const) {
+    subs.deliver(event({ kind: "NODE_DELETED", payload: { id, createdAt } as Row }));
+  }
+  assert.equal(gone.size, 0, "a time nothing can order by is no time to remember");
+  assert.deepEqual(handle.value.snapshot.rows, [], "the removal itself still lands");
+  // So the next copy is taken as it arrives, as with any removal that said nothing of when.
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "back", createdAt: T1 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["v"], "back");
+  store.dispose();
+});
+
+test("a removal with no time that arrives while a tombstone exists leaves the tombstone", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", v: "read", createdAt: T1 }], nextCursor: "" }),
+  });
+  await settle();
+  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T3 } }));
+  assert.equal(gone.get("a"), T3);
+  // The row is already out; a second removal that says nothing of when says
+  // nothing about what the first one did.
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a" } }));
+  assert.equal(gone.get("a"), T3, "the version that took it out is still kept");
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "late", createdAt: T2 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"], undefined, "so a late older copy is still refused");
+  store.dispose();
+});
+
+test("a copy with no version time is placed against a tombstone, which it then clears", async () => {
+  // Nothing says it is older than the removal, so it is taken as it arrives --
+  // the rule everywhere else for a copy with no version to compare.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", v: "read", createdAt: T1 }], nextCursor: "" }),
+  });
+  await settle();
+  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T3 } }));
+  assert.equal(gone.get("a"), T3);
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "no time" } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["v"], "no time");
+  assert.equal(gone.has("a"), false, "and the row it brought back needs no tombstone");
+  store.dispose();
+});
+
 // ---------------------------------------------------------------------
 // the fold matrix
 // ---------------------------------------------------------------------

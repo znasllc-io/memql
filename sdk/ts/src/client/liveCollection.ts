@@ -133,6 +133,14 @@ export interface LiveCollectionSpec<T = Row> {
   // It is also the judge when a seed replays what arrived while it read: the
   // row the read returned is what is held, so an arrival older than it is
   // refused rather than rolling it back.
+  //
+  // PASSING ONE TURNS THE TOMBSTONES OFF. The default also remembers the version
+  // that took a row out of the list (a removal, or a copy outside the read's
+  // scope) so a late OLDER copy cannot bring it back. A collection with its own
+  // judge keeps no such record: it owns its rows' history, and once a row is out
+  // nothing is held to compare a late copy with, so the judge sees it as a row
+  // the collection has not seen (`held === undefined`) and decides whether it
+  // may arrive.
   supersedes?: (incoming: T, held: T | undefined) => boolean;
   // CDC verbs. Defaults to all three.
   actions?: GraphAction[];
