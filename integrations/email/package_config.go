@@ -40,6 +40,9 @@ func (a *azureSetup) exportPackage(ctx context.Context, account, organization st
 		if !found || c.Status == "disconnected" {
 			return nil, fmt.Errorf("configure a sending domain before exporting it")
 		}
+		if c.Plan.ManagedDomain {
+			return nil, fmt.Errorf("the installation's Azure-managed sender belongs to this cluster; export a custom organization domain instead")
+		}
 		if c.Plan.ClusterID != session.ClusterID {
 			return nil, fmt.Errorf("review this domain under the current cluster connection before exporting")
 		}

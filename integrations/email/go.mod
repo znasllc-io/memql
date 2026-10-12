@@ -7,6 +7,7 @@ go 1.26.1
 toolchain go1.27.2
 
 require (
+	github.com/znasllc-io/memql/component/automations v0.0.0
 	github.com/uptrace/bun v1.3.0
 	github.com/uptrace/bun/dialect/pgdialect v1.3.0
 	github.com/uptrace/bun/driver/pgdriver v1.3.0
@@ -135,3 +136,5 @@ replace github.com/znasllc-io/memql/component/frontdoor => ../../component/front
 replace github.com/znasllc-io/memql/component/metrics => ../../component/metrics
 
 replace github.com/znasllc-io/memql/component/compose => ../../component/compose
+
+replace github.com/znasllc-io/memql/component/automations => ../../component/automations

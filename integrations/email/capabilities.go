@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -47,7 +48,7 @@ func (i *Integration) IntegrationName() string { return "email" }
 
 // Capabilities returns DSL-callable email operations.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
-	return []memql.IntegrationCapability{
+	return append(workflowhost.ScopedCapabilities((&installationScope{}).operations()), []memql.IntegrationCapability{
 		{Name: "azureSetup", Description: "Connect an organization to Azure email with delegated Microsoft sign-in.", Handler: i.handleAzureSetup},
 		{Name: "inbox", Description: "Read the restricted captured test inbox.", Handler: i.handleInbox, ArgsSchema: map[string]string{}},
 		{
@@ -83,7 +84,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"probe": "boolean (optional) - run a live, non-sending reachability check against the configured provider",
 			},
 		},
-	}
+	}...)
 }
 
 // handleStatus backs the `integrationStatus` builtin (memql#3323).

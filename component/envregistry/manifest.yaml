@@ -245,6 +245,12 @@ variables:
     scope: global
     description: "Azure AD application ID for the email integration's Microsoft Graph sender. (Legacy name `AZURE_CLIENT_ID` still accepted.)"
 
+  - name: MEMQL_EMAIL_INSTALLATION
+    component: email
+    scope: node
+    optional: true
+    description: "Public JSON choices for this cluster's installed Azure email workload identity and dedicated email resource group. No credentials. A projected service-account assertion at /var/run/secrets/azure-email/token authorizes bounded sender setup; each replica reads sealed shared progress. Installed by configureAzureEmail before first sync."
+
   - name: MEMQL_EMAIL_TRANSPORT
     component: email
     scope: node
