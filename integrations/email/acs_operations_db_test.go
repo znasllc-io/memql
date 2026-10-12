@@ -61,7 +61,7 @@ func TestACSSendReceiptReconcilesOnAnotherReplicaWithoutReposting(t *testing.T) 
 			t.Fatal(err)
 		}
 		engines[n] = e
-		a := &azureSetup{store: &connectionStore{engine: NewConfigWriter(e), gateDB: replicaGatePool(t)}, protocol: newAzureProtocol("12345678-1234-1234-1234-123456789012"), now: func() time.Time { return now }, operationClient: &http.Client{Transport: transport}, canManage: func(ctx context.Context, id string) bool {
+		a := &azureSetup{store: &connectionStore{engine: feedbackTestStore{ConfigWriter: NewConfigWriter(e), prefix: account}, gateDB: replicaGatePool(t)}, protocol: newAzureProtocol("12345678-1234-1234-1234-123456789012"), now: func() time.Time { return now }, operationClient: &http.Client{Transport: transport}, canManage: func(ctx context.Context, id string) bool {
 			return e.OrganizationCapable(ctx, id, auth.VerbUpdate, auth.ResourceData)
 		}}
 		instances[n] = NewIntegration(NewLogSender(nil), nil)

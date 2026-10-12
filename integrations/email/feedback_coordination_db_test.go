@@ -164,3 +164,44 @@ func TestAzureFeedbackReadinessTracksCurrentConnection(t *testing.T) {
 	}
 	check("not-configured")
 }
+
+func TestACSInitialReceiptKeepsGateWhenCanceledAtCommit(t *testing.T) {
+	w := newAzureFeedbackWorld(t)
+	sender, err := NewACSSender(w.connection.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	guarded := *w.instances[0].azure.store
+	writes := 0
+	guarded.engine = feedbackCommitStore{ConfigWriter: guarded.engine, before: func(commit context.Context) {
+		writes++
+		if writes != 1 {
+			return
+		}
+		cancel()
+		time.Sleep(10 * time.Millisecond)
+		if commit.Err() != nil {
+			t.Error("initial receipt inherited cancellation")
+		}
+		if !lockHeldBy(t, w.db.DB, "email-operation:"+sender.operationKey("initial-cancel")) {
+			t.Error("initial receipt lost its gate before commit")
+		}
+	}}
+	sender.operations = &storedACSOperations{connection: &guarded}
+	sender.client = &http.Client{Transport: acsRoundTrip(func(request *http.Request) (*http.Response, error) {
+		if request.Context().Err() == nil {
+			t.Error("POST did not honor original cancellation")
+		}
+		return nil, request.Context().Err()
+	})}
+	msg := Message{IntentID: "initial-cancel", To: "receiver@example.test", Subject: "Synthetic cancellation", TextBody: "Fixture"}
+	if err = sender.Send(ctx, msg, SendAs{AccountID: w.account}); err == nil {
+		t.Fatal("canceled send succeeded")
+	}
+	saved, _, found, err := sender.operations.read(context.Background(), sender.operationKey(msg.IntentID))
+	if err != nil || !found || saved.Status != "unknown" || writes != 2 {
+		t.Fatalf("receipt did not settle: %+v found=%v writes=%d error=%v", saved, found, writes, err)
+	}
+}

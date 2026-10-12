@@ -338,7 +338,13 @@ func (s *ACSSender) submitOnce(ctx context.Context, intent string, body []byte) 
 	if err = scope.hold.Verify(ctx); err != nil {
 		return err
 	}
-	_, err = s.operations.write(ctx, key, op, prior)
+	// The engine may finish a dispatched mutation after the caller stops
+	// waiting. Keep the reservation until this bounded receipt commit settles.
+	commit, finish := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	if err = scope.hold.Verify(commit); err == nil {
+		_, err = s.operations.write(commit, key, op, prior)
+	}
+	finish()
 	if err != nil {
 		return err
 	} // No POST before its durable receipt.

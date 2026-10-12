@@ -73,6 +73,7 @@ func TestAzureSetupSessionSurvivesReplicaHopAndRefusesAnotherActor(t *testing.T)
 		}
 		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
+	suffix := fmt.Sprintf("azure-%d", time.Now().UnixNano())
 	instances := make([]*Integration, 2)
 	var first *memql.MemQLEngine
 	for n := range instances {
@@ -86,13 +87,12 @@ func TestAzureSetupSessionSurvivesReplicaHopAndRefusesAnotherActor(t *testing.T)
 		if first == nil {
 			first = e
 		}
-		setup := &azureSetup{store: &connectionStore{engine: NewConfigWriter(e), gateDB: replicaGatePool(t)}, protocol: protocol, now: func() time.Time { return now }, canManage: func(ctx context.Context, account string) bool {
+		setup := &azureSetup{store: &connectionStore{engine: feedbackTestStore{ConfigWriter: NewConfigWriter(e), prefix: suffix}, gateDB: replicaGatePool(t)}, protocol: protocol, now: func() time.Time { return now }, canManage: func(ctx context.Context, account string) bool {
 			return e.OrganizationCapable(ctx, account, auth.VerbUpdate, auth.ResourceData)
 		}}
 		instances[n] = NewIntegration(NewLogSender(nil), nil)
 		instances[n].azure = setup
 	}
-	suffix := fmt.Sprintf("azure-%d", time.Now().UnixNano())
 	account, other := suffix+"-client", suffix+"-other"
 	actor := func(user string) context.Context {
 		return auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: user, Role: auth.RoleOwner}), &auth.TokenInfo{Subject: user})

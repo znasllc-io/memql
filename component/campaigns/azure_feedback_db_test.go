@@ -40,7 +40,7 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 	for index, engine := range []*memql.MemQLEngine{n.engine, e2} {
 		for _, registration := range memql.RegisteredPlugins() {
 			if registration.Name == "email" {
-				provider, err := registration.Factory(memql.PluginContext{Engine: engine, GateDB: sharedGate, Logger: quietLogger()})
+				provider, err := registration.Factory(memql.PluginContext{Engine: feedbackCampaignEngine{MemQLEngine: engine, prefix: n.suffix}, GateDB: sharedGate, Logger: quietLogger()})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -70,6 +70,9 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 	}
 	state := func(key string, value any) {
 		t.Helper()
+		if key == "azure-cluster" {
+			key = n.suffix + key
+		}
 		n.execute(t, n.system, call("mutation", "storeEmailConnectionState", arg{"id", stateID(key)}, arg{"encryptedValue", seal(value)}, arg{"versionTime", time.Now().UTC().Format(time.RFC3339Nano)}))
 	}
 	plan := map[string]any{"clusterId": n.suffix, "subscriptionId": "12345678-1234-1234-1234-123456789012", "resourceGroup": "feedback-tests", "emailService": "synthetic", "communicationService": "synthetic", "domain": "example.test", "dataLocation": "United States"}
@@ -280,4 +283,19 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 	if _, err := n.engine.Execute(n.owner, call("mutation", "recordProviderBounce", arg{"eventId", "forged"}, arg{"emailDigest", EmailDigest("forged@example.test")}, arg{"accountId", n.org}, arg{"ownerUserId", n.user}, arg{"recipientId", "forged"}, arg{"occurredAt", now.Format(time.RFC3339Nano)})); err == nil {
 		t.Fatal("public caller forged provider audit")
 	}
+}
+
+// Isolate the installation-wide fixture without weakening production lookup.
+type feedbackCampaignEngine struct {
+	*memql.MemQLEngine
+	prefix string
+}
+
+func (e feedbackCampaignEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
+	if strings.Contains(query, "emailConnectionStateById(") || strings.Contains(query, "storeEmailConnectionState(") {
+		original := string(id.New().FromString("email-state:azure-cluster"))
+		isolated := string(id.New().FromString("email-state:" + e.prefix + "azure-cluster"))
+		query = strings.ReplaceAll(query, original, isolated)
+	}
+	return e.MemQLEngine.Execute(ctx, query)
 }
