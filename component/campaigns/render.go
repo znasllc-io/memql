@@ -620,12 +620,20 @@ const (
 	// whose content is text (<style>, <script>, <textarea>, <title>, <xmp>,
 	// <iframe>, <noembed>, <noframes>, <noscript>, <plaintext>). Anything
 	// written after the last byte of such a template is part of the unfinished
-	// construct, and no client shows it.
+	// construct, and no client shows it. The same sentence is the answer when the
+	// tokenizer found a clean spot and a client's parser still would not show what
+	// is put there (checkShown): a comment that only the tree builder sees, an
+	// element left open whose content is not the page's.
 	errTemplateEndsOpen = templateFault("This template's HTML ends inside a comment or a tag, so its unsubscribe link cannot be placed. Fix the HTML and save it again.")
 
 	// errTemplateFrames: a frameset document has no body, and a message built
 	// from one shows nothing a footer could be part of.
 	errTemplateFrames = templateFault("This template uses frames, which email cannot show.")
+
+	// errTemplateOutlookOpen: a section that Outlook does not show (<![if !mso]>
+	// or <!--[if !mso]><!-->, see readSection) is still open where the footer
+	// would go, so Outlook would not show the footer.
+	errTemplateOutlookOpen = templateFault("This template leaves an Outlook-only section open at its end, so its unsubscribe link cannot be placed. Close the section and save it again.")
 )
 
 // completeHTML adds to a substituted HTML part what every message needs and the
@@ -652,9 +660,23 @@ const (
 // a pixel depends on the campaign, and a template that passed a test send, which
 // tracks nothing, only to fail the campaign, which tracks opens, would teach the
 // author nothing.
+//
+// # What a client shows is a tree's answer
+//
+// The tokenizer reads a template alone, with scripting on and no namespaces. A
+// mail client builds a tree, with scripting off, and the two can disagree about
+// what is markup: a <noscript> whose content opens a comment, an svg <style> or
+// <![CDATA[ section, an element left open whose content is not the page's. So
+// the spot is checked again, after the pass and before anything is placed, in a
+// tree built the client's way (checkShown), and a template that fails is refused
+// with the same sentence as one that ends inside a comment. The bytes sent are
+// still the splice's: the tree only judges.
 func completeHTML(body string, opts RenderOptions) (string, error) {
 	plan, err := planHTML(body, opts.Links.Unsubscribe)
 	if err != nil {
+		return "", err
+	}
+	if err := checkShown(body, plan, opts); err != nil {
 		return "", err
 	}
 	var fragment strings.Builder
@@ -682,11 +704,128 @@ func completeHTML(body string, opts RenderOptions) (string, error) {
 	return body[:plan.insertAt] + fragment.String() + body[plan.insertAt:], nil
 }
 
+// The addresses checkShown puts in the footer and the pixel it tries at the
+// spot. They are never sent. The check asks whether a client would show a footer
+// and a pixel put there, and asks it of every template, whatever is to be placed:
+// the real footer goes in only when the template has no link of its own, and the
+// real pixel only when the campaign tracks opens. The same question for every
+// message is what lets a test send, which tracks nothing, and a campaign, which
+// tracks opens, agree about a template.
+const (
+	probeUnsubscribeURL = "https://probe.invalid/unsubscribe"
+	probePixelSrc       = "https://probe.invalid/pixel"
+)
+
+// checkShown builds, the way a mail client does, the message the template would
+// make with a footer and a pixel at the spot, and refuses the template when a
+// person would not be shown them. It is read-only: the bytes that are sent are the
+// splice's, and the tree only judges.
+//
+// A client parses with the HTML5 algorithm and scripting off. What is shown is an
+// element of the HTML namespace with no <template>, <noscript> or foreign-content
+// (svg, math) ancestor; a link or an image that a comment swallowed, that sits
+// in a template, or that is an svg element, is not shown. The template's own link,
+// when it has one, has to be shown too, in the same tree: the tokenizer counted
+// it, and a client may see otherwise.
+//
+// The cost is one more pass over the part, about 0.3 ms for a 33 kB message
+// (BenchmarkCheckShown), against the round trip to the provider, so there is
+// nothing worth caching per revision.
+func checkShown(body string, plan htmlPlan, opts RenderOptions) error {
+	footer, err := footerTemplate(footerSender(opts), probeUnsubscribeURL)
+	if err != nil {
+		return err
+	}
+	probe := footer + `<img src="` + probePixelSrc + `" width="1" height="1" alt="">`
+	doc, err := nethtml.ParseWithOptions(
+		strings.NewReader(body[:plan.insertAt]+probe+body[plan.insertAt:]),
+		nethtml.ParseOptionEnableScripting(false))
+	if err != nil {
+		return fmt.Errorf("campaigns: reading the HTML part: %w", err)
+	}
+	if !clientShows(doc, opts.Links.Unsubscribe).enough(plan.linksToUnsubscribe) {
+		return errTemplateEndsOpen
+	}
+	return nil
+}
+
+// shownByClient is what a client's tree shows of the probe and of the
+// template's own link.
+type shownByClient struct {
+	footer  bool // the probe footer's link
+	pixel   bool // the probe pixel
+	ownLink bool // a link to the message's own unsubscribe address
+}
+
+// clientShows reads a client's tree for what checkShown asks about.
+func clientShows(doc *nethtml.Node, ownURL string) (got shownByClient) {
+	eachShownElement(doc, func(n *nethtml.Node) {
+		switch n.Data {
+		case "a":
+			if href := attrValue(n, "href"); href == probeUnsubscribeURL {
+				got.footer = true
+			} else if ownURL != "" && href == ownURL {
+				got.ownLink = true
+			}
+		case "img":
+			if attrValue(n, "src") == probePixelSrc {
+				got.pixel = true
+			}
+		}
+	})
+	return got
+}
+
+// enough is whether a message with this much shown has what every message needs:
+// a spot where the footer is shown, one where the pixel is, and, when the
+// template was counted as having a link of its own, that link.
+func (got shownByClient) enough(templateHasOwnLink bool) bool {
+	return got.footer && got.pixel && (!templateHasOwnLink || got.ownLink)
+}
+
+// eachShownElement calls visit for every element of the tree that a client
+// shows: in the HTML namespace, with no <template>, <noscript> or foreign-content
+// ancestor.
+func eachShownElement(doc *nethtml.Node, visit func(*nethtml.Node)) {
+	type frame struct {
+		node   *nethtml.Node
+		hidden bool
+	}
+	stack := []frame{{doc, false}}
+	for len(stack) > 0 {
+		f := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		hidden := f.hidden
+		if f.node.Type == nethtml.ElementNode {
+			if !hidden && f.node.Namespace == "" {
+				visit(f.node)
+			}
+			hidden = hidden || f.node.Namespace != "" || f.node.Data == "template" || f.node.Data == "noscript"
+		}
+		for c := f.node.FirstChild; c != nil; c = c.NextSibling {
+			stack = append(stack, frame{c, hidden})
+		}
+	}
+}
+
+// attrValue is the value of an element's first attribute of that name, trimmed
+// the way a browser trims a URL.
+func attrValue(n *nethtml.Node, key string) string {
+	for _, a := range n.Attr {
+		if a.Key == key {
+			return strings.TrimFunc(a.Val, isURLPadding)
+		}
+	}
+	return ""
+}
+
 // htmlPlan is what one pass over a template's HTML finds.
 type htmlPlan struct {
 	// insertAt is the byte offset the footer and the pixel go at: the start of
 	// the last real closing body tag, else of the last real closing html tag,
-	// else the end of the part.
+	// else the end of the part. A closing tag inside a <template> is not real: it
+	// closes nothing of the document's, and a footer put before it is inside the
+	// template, where no client shows it.
 	insertAt int
 
 	// linksToUnsubscribe is whether the template has a link a client would show
@@ -734,11 +873,12 @@ var rawTextElements = map[string]bool{
 // fragment lands inside whatever is. A table cell or a division left open is
 // where the footer is shown, and that is fine; an anchor left open nests the
 // footer in a link, which a client sorts out. An element whose content a client
-// does not show as HTML (<template>, <svg>, <math>, <select>) or that the
-// author hid (a division with display:none) left open would hide it, and the
-// tokenizer cannot see that. Those are not refused, and a message built from one
-// is a template the author has to have noticed. What is refused is the end of
-// the input falling inside something that swallows what follows it:
+// does not show as HTML (<template>, <svg>, <math>) left open would hide it, and
+// so would a comment or a style that only a tree builder sees, and the tokenizer
+// cannot see that. checkShown does, in a tree built the way a client builds one,
+// and refuses what it finds. What a division with display:none hides is not
+// something either can see. What this pass refuses itself is the end of the
+// input falling inside something that swallows what follows it:
 //
 //   - a comment, a bogus comment or a doctype with no closing ">" (a comment
 //     needs "-->" or "--!>", or to be "<!-->" or "<!--->");
@@ -750,8 +890,10 @@ var rawTextElements = map[string]bool{
 //   - a raw-text element with no end tag, <plaintext> always.
 //
 // A frameset is refused for a different reason: it has no body to show a footer
-// in. The pass also checks that the tokens added up to the whole part, because
-// an offset that is off by one is a footer in the middle of a tag.
+// in. A template whose spot is inside a section Outlook does not show (see
+// readSection) is refused for a third, when a footer is to go there. The pass
+// also checks that the tokens added up to the whole part, because an offset that
+// is off by one is a footer in the middle of a tag.
 func planHTML(source, unsubscribeURL string) (htmlPlan, error) {
 	z := nethtml.NewTokenizer(strings.NewReader(source))
 	plan := htmlPlan{insertAt: len(source)}
@@ -764,6 +906,14 @@ func planHTML(source, unsubscribeURL string) (htmlPlan, error) {
 		cutShort   bool
 		frames     bool
 		bracket    bool // the token just read is text ending in "<" or "</"
+
+		// The Outlook sections open at this point, innermost last, each true when
+		// Outlook does not show it; hiding counts the true ones. spotHiding is
+		// whether one was open where the footer will go.
+		sections   []bool
+		hiding     int
+		spotHiding bool
+		htmlHiding bool // hiding at the closing html tag closingHTML records
 	)
 	for {
 		kind := z.Next()
@@ -792,6 +942,20 @@ func planHTML(source, unsubscribeURL string) (htmlPlan, error) {
 			bracket = rawText == "" && (bytes.HasSuffix(raw, []byte("<")) || bytes.HasSuffix(raw, []byte("</")))
 		case nethtml.CommentToken:
 			cutShort = cutShort || !commentTerminated(raw)
+			switch section, hidesFromOutlook := readSection(raw); section {
+			case sectionOpens:
+				sections = append(sections, hidesFromOutlook)
+				if hidesFromOutlook {
+					hiding++
+				}
+			case sectionCloses:
+				if n := len(sections); n > 0 {
+					if sections[n-1] {
+						hiding--
+					}
+					sections = sections[:n-1]
+				}
+			}
 		case nethtml.DoctypeToken:
 			cutShort = cutShort || !bytes.HasSuffix(raw, []byte(">"))
 		case nethtml.StartTagToken, nethtml.SelfClosingTagToken:
@@ -803,15 +967,17 @@ func planHTML(source, unsubscribeURL string) (htmlPlan, error) {
 				rawText = tag
 			}
 			frames = frames || tag == "frameset"
-			if kind == nethtml.StartTagToken {
-				switch tag {
-				case "template":
-					inTemplate++
-				case "svg", "math":
+			switch tag {
+			case "template":
+				// A slash on a template is ignored by the HTML parser: it opens one.
+				inTemplate++
+			case "svg", "math":
+				// In foreign content the slash is honoured: <svg/> is an empty svg.
+				if kind == nethtml.StartTagToken {
 					inForeign++
 				}
 			}
-			if tag == "a" && inTemplate == 0 && inForeign == 0 && !plan.linksToUnsubscribe {
+			if tag == "a" && inTemplate == 0 && inForeign == 0 && hiding == 0 && !plan.linksToUnsubscribe {
 				plan.linksToUnsubscribe = hrefIs(z, hasAttr, unsubscribeURL)
 			}
 		case nethtml.EndTagToken:
@@ -822,9 +988,13 @@ func planHTML(source, unsubscribeURL string) (htmlPlan, error) {
 			}
 			switch tag {
 			case "body":
-				plan.insertAt = start
+				if inTemplate == 0 {
+					plan.insertAt, spotHiding = start, hiding > 0
+				}
 			case "html":
-				closingHTML = start
+				if inTemplate == 0 {
+					closingHTML, htmlHiding = start, hiding > 0
+				}
 			case "template":
 				if inTemplate > 0 {
 					inTemplate--
@@ -847,10 +1017,79 @@ func planHTML(source, unsubscribeURL string) (htmlPlan, error) {
 	}
 	// No closing body tag: before the closing html tag if there is one, so the
 	// footer is not written after the document, else at the end.
-	if plan.insertAt == len(source) && closingHTML >= 0 {
-		plan.insertAt = closingHTML
+	if plan.insertAt == len(source) {
+		spotHiding = hiding > 0
+		if closingHTML >= 0 {
+			plan.insertAt, spotHiding = closingHTML, htmlHiding
+		}
+	}
+	// Outlook would not show a footer put where a section it hides is still open.
+	// Only a footer that is to be put there: a template with a link of its own gets
+	// none, and a pixel Outlook does not load changes no one's opt-out.
+	if spotHiding && !plan.linksToUnsubscribe {
+		return htmlPlan{}, errTemplateOutlookOpen
 	}
 	return plan, nil
+}
+
+// Outlook sections.
+//
+// A layout hides markup from Outlook, and shows it to every other client, with a
+// downlevel-revealed conditional: <![if !mso]> ... <![endif]>, or the same
+// written so that an HTML parser reads it as two ordinary comments,
+// <!--[if !mso]><!--> ... <!--<![endif]-->. To the tokenizer each of the four is
+// a comment, and what stands between them is markup like any other. Outlook
+// shows the markup between them only when the expression is true for it, so the
+// section is one Outlook hides when the expression is !mso.
+//
+// A footer put where such a section is still open is a footer Outlook does not
+// show, and so is a link the template has inside one: neither is a way out for
+// the person reading in Outlook. Only these two forms of !mso are read. Layouts
+// close their sections around buttons, columns and media queries, and a section
+// that is closed before the spot is no obstacle; the forms with other
+// expressions ((gte mso 9), (!mso)|(IE), !IE) either show Outlook the markup or
+// are not how layouts hide markup from it.
+var (
+	revealedSectionOpen = regexp.MustCompile(`(?is)^<!\[\s*if\s+([^\]]*?)\s*\]>$`)
+	wrappedSectionOpen  = regexp.MustCompile(`(?is)^<!--\s*\[\s*if\s+([^\]]*?)\s*\]\s*><!.*-->$`)
+	sectionClose        = regexp.MustCompile(`(?is)^(?:<!\[\s*endif\s*\]>|<!--\s*<!\[\s*endif\s*\]\s*-->)$`)
+
+	sectionOpenForms = []*regexp.Regexp{revealedSectionOpen, wrappedSectionOpen}
+)
+
+type sectionToken int
+
+const (
+	notASection sectionToken = iota
+	sectionOpens
+	sectionCloses
+)
+
+// readSection reads one comment token of the tokenizer as a boundary of an
+// Outlook section, and says whether the section it opens is one Outlook hides.
+func readSection(raw []byte) (sectionToken, bool) {
+	if bytes.IndexByte(raw, '[') < 0 {
+		return notASection, false
+	}
+	if sectionClose.Match(raw) {
+		return sectionCloses, false
+	}
+	for _, open := range sectionOpenForms {
+		if m := open.FindSubmatch(raw); m != nil {
+			return sectionOpens, hidesFromOutlook(string(m[1]))
+		}
+	}
+	return notASection, false
+}
+
+// hidesFromOutlook is whether an expression in <![if EXPRESSION]> is false for
+// Outlook, which is true for the mso feature.
+func hidesFromOutlook(expression string) bool {
+	switch strings.ToLower(strings.Join(strings.Fields(expression), "")) {
+	case "!mso", "!(mso)", "(!mso)":
+		return true
+	}
+	return false
 }
 
 // commentTerminated reports whether the raw bytes of a comment token, as the

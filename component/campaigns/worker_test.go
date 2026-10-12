@@ -1014,13 +1014,18 @@ func TestCampaignSendsCarryPreferencesAndViewLinks(t *testing.T) {
 }
 
 // TestACampaignWhoseTemplateCannotCarryItsFooterFailsWithAPlainReason -- a
-// template whose HTML ends inside a comment or a tag, or is a frameset, cannot
-// be sent: no message goes out, the job fails, and the reason the author reads
-// on the campaign is the sentence that says what to fix, not a wrapper around it.
+// template whose HTML ends inside a comment or a tag, is a frameset, leaves an
+// Outlook section open where the footer goes, or has a spot a client's parser
+// would not show, cannot be sent: no message goes out, the job fails, and the
+// reason the author reads on the campaign is the sentence that says what to fix,
+// not a wrapper around it.
 func TestACampaignWhoseTemplateCannotCarryItsFooterFailsWithAPlainReason(t *testing.T) {
 	for name, tc := range map[string]struct{ html, want string }{
-		"a comment that never ends": {"<p>Hi</p><!--", wantEndsOpen},
-		"a frameset":                {"<frameset><frame src=x></frameset>", wantFrames},
+		"a comment that never ends":          {"<p>Hi</p><!--", wantEndsOpen},
+		"a frameset":                         {"<frameset><frame src=x></frameset>", wantFrames},
+		"an Outlook section left open":       {"<html><body><p>Hi</p><![if !mso]><p>modern</p></body></html>", wantOutlookOpen},
+		"a comment only a tree builder sees": {"<html><body><p>Hi</p><noscript><!--</noscript></body></html>", wantEndsOpen},
+		"an svg style that opens a comment":  {"<html><body><p>Hi</p><svg><style><!--</style></svg></body></html>", wantEndsOpen},
 	} {
 		template := templateRow()
 		template["htmlBody"] = tc.html
@@ -1048,10 +1053,20 @@ func TestACampaignWhoseTemplateCannotCarryItsFooterFailsWithAPlainReason(t *test
 		if !failed {
 			t.Errorf("%s: the job was not failed, so nobody learns why the campaign sent nothing", name)
 		}
+		// The campaign carries the reason too, and the test must not pass when it
+		// does not: a write that never happened, or one with no reason, says nothing.
+		onCampaign := false
 		for _, c := range engine.mutations("updateCampaignProgress") {
-			if got := argOf(c.query, "lastError"); got != "" && got != tc.want {
+			if argOf(c.query, "status") != "failed" {
+				continue
+			}
+			onCampaign = true
+			if got := argOf(c.query, "lastError"); got != tc.want {
 				t.Errorf("%s: the campaign's reason is %q, want the sentence %q", name, got, tc.want)
 			}
+		}
+		if !onCampaign {
+			t.Errorf("%s: the campaign was not marked failed, so its author reads no reason there", name)
 		}
 	}
 }

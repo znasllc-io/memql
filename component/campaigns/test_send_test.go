@@ -182,15 +182,19 @@ func TestTestSendLinksAreInert(t *testing.T) {
 }
 
 // TestTestSendRefusesATemplateWhoseFooterCannotBePlaced: the test send is where
-// the author learns that a template's HTML ends inside a comment or a tag, or is
-// a frameset, before a campaign built on it finds out. It says the same sentence
+// the author learns that a template's HTML ends inside a comment or a tag, is a
+// frameset, leaves an Outlook section open or has a spot a client would not
+// show, before a campaign built on it finds out. It says the same sentence
 // the campaign would, and sends nothing.
 func TestTestSendRefusesATemplateWhoseFooterCannotBePlaced(t *testing.T) {
 	for name, tc := range map[string]struct{ html, want string }{
-		"a comment that never ends": {"<p>Hi</p><!--", wantEndsOpen},
-		"a tag that is cut off":     {"<p>Hi<a title=x", wantEndsOpen},
-		"a style that never ends":   {"<p>Hi</p><style>p{", wantEndsOpen},
-		"a frameset":                {"<frameset><frame src=x></frameset>", wantFrames},
+		"a comment that never ends":          {"<p>Hi</p><!--", wantEndsOpen},
+		"a tag that is cut off":              {"<p>Hi<a title=x", wantEndsOpen},
+		"a style that never ends":            {"<p>Hi</p><style>p{", wantEndsOpen},
+		"a frameset":                         {"<frameset><frame src=x></frameset>", wantFrames},
+		"an Outlook section left open":       {"<html><body><p>Hi</p><![if !mso]><p>x</p></body></html>", wantOutlookOpen},
+		"a comment only a tree builder sees": {"<html><body><p>Hi</p><noscript><!--</noscript></body></html>", wantEndsOpen},
+		"a template that is never closed":    {"<html><body><p>Hi</p><template>", wantEndsOpen},
 	} {
 		engine := testSendFixture()
 		engine.template["htmlBody"] = tc.html

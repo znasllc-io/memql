@@ -1,6 +1,9 @@
 package campaigns
 
 import (
+	"fmt"
+	"html"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -24,10 +27,18 @@ import (
 // frameset has nowhere to show one. Those fail with a plain sentence for the
 // template's author, in a campaign send and in a test send alike, rather than
 // mailing a message with no footer.
+//
+// The tokenizer reads a template alone, with scripting on and no namespaces, and
+// a mail client does not: it builds a tree with the HTML5 algorithm, scripting
+// off. So a spot the tokenizer finds can be one the client does not show (inside
+// a <template>, swallowed by a comment only the tree builder sees, inside an svg
+// or an element Outlook hides), and the planner's work is checked against the
+// tree. shownByAClient is that tree, written out again from the requirement.
 
 const (
-	wantEndsOpen = "This template's HTML ends inside a comment or a tag, so its unsubscribe link cannot be placed. Fix the HTML and save it again."
-	wantFrames   = "This template uses frames, which email cannot show."
+	wantEndsOpen    = "This template's HTML ends inside a comment or a tag, so its unsubscribe link cannot be placed. Fix the HTML and save it again."
+	wantFrames      = "This template uses frames, which email cannot show."
+	wantOutlookOpen = "This template leaves an Outlook-only section open at its end, so its unsubscribe link cannot be placed. Close the section and save it again."
 
 	// here marks, in a test template, the byte offset the fragment is expected
 	// at. It is removed before the template is rendered.
@@ -64,6 +75,60 @@ func unmarked(t *testing.T, marked string) (template string, at int) {
 		t.Fatalf("a test template needs exactly one %q: %q", here, marked)
 	}
 	return marked[:at] + marked[at+len(here):], at
+}
+
+// pixelSource is the address of the open pixel in a fragment placement returned.
+func pixelSource(t *testing.T, fragment string) string {
+	t.Helper()
+	m := regexp.MustCompile(`<img src="([^"]*)"`).FindStringSubmatch(fragment)
+	if m == nil {
+		t.Fatalf("no pixel in the fragment %q", fragment)
+	}
+	return html.UnescapeString(m[1])
+}
+
+// shownByAClient parses message the way a mail client does -- the HTML5 tree
+// builder with scripting off -- and counts what a person would be shown of it:
+// the links to unsubscribeURL and the images from pixelSrc that are elements of
+// the HTML namespace with no <template>, <noscript> or foreign-content (svg,
+// math) ancestor. A link a comment swallowed is not an element at all.
+func shownByAClient(t *testing.T, message, unsubscribeURL, pixelSrc string) (links, pixels int) {
+	t.Helper()
+	doc, err := nethtml.ParseWithOptions(strings.NewReader(message), nethtml.ParseOptionEnableScripting(false))
+	if err != nil {
+		t.Fatalf("parsing %q: %v", message, err)
+	}
+	attr := func(n *nethtml.Node, key string) string {
+		for _, a := range n.Attr {
+			if a.Key == key {
+				return strings.TrimFunc(a.Val, isURLPadding)
+			}
+		}
+		return ""
+	}
+	var walk func(n *nethtml.Node, hidden bool)
+	walk = func(n *nethtml.Node, hidden bool) {
+		if n.Type == nethtml.ElementNode {
+			if !hidden && n.Namespace == "" {
+				switch n.Data {
+				case "a":
+					if attr(n, "href") == unsubscribeURL {
+						links++
+					}
+				case "img":
+					if pixelSrc != "" && attr(n, "src") == pixelSrc {
+						pixels++
+					}
+				}
+			}
+			hidden = hidden || n.Namespace != "" || n.Data == "template" || n.Data == "noscript"
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c, hidden)
+		}
+	}
+	walk(doc, false)
+	return links, pixels
 }
 
 // TestTheFooterIsSplicedInAndEveryOtherByteIsKept: the message is the template
@@ -307,6 +372,240 @@ func TestATemplateThatStopsShortOfItsEndStillGetsItsFooter(t *testing.T) {
 	}
 }
 
+// TestAFooterAClientWouldNotShowIsNotPlaced: the tokenizer reads a template with
+// scripting on and no namespaces, and a client builds a tree with scripting off.
+// Each row is a template where the two disagree about what is markup, so the
+// spot the tokenizer finds is one where the client shows nothing. Such a template
+// is placed at a spot the client does show, or refused with the sentence for a
+// template that ends inside something. It is never mailed with a footer nobody
+// sees, which is what these were before: each of the first five is a template an
+// earlier planner accepted with no unsubscribe link in the message a client built.
+func TestAFooterAClientWouldNotShowIsNotPlaced(t *testing.T) {
+	for name, tc := range map[string]struct {
+		marked string // the template; where the fragment goes, when it is placed, the marker is
+		want   string // the refusal sentence, or "" when the fragment is placed at the marker
+	}{
+		// A closing body or html tag inside a <template> closes nothing: the
+		// template's content is not the document's. The fragment goes after it.
+		"a closing body tag inside a template":               {"<html><body><p>Hi</p><template></body></template>" + here + "</html>", ""},
+		"a closing html tag inside a template":               {"<html><body><p>Hi</p><template></html></template>" + here, ""},
+		"a closing html tag in a template and another after": {"<html><body><p>Hi</p><template></html></template>" + here + "</html>", ""},
+		"both closing tags inside a template and none after": {"<p>Hi</p><template></body></html></template>" + here, ""},
+		"closing tags in nested templates":                   {"<body><template><template></body></template></body></template>" + here + "</body>", ""},
+		"a template closed before the closing body tag":      {"<body><template><p>x</p></template><p>Hi</p>" + here + "</body>", ""},
+		// A slash on a <template> is ignored by the HTML parser: it opens a template.
+		"a self-closed template still opens one": {"<html><body><template/></body></template>" + here + "</html>", ""},
+
+		// Scripting off, what follows <noscript> is markup, so a comment or a style
+		// that the tokenizer ended at </noscript> goes on and swallows the rest.
+		"a noscript that opens a comment": {"<html><body><p>Hi</p><noscript><!--</noscript></body></html>", wantEndsOpen},
+		"a noscript that opens a style":   {"<html><body><p>Hi</p><noscript><style></noscript></body></html>", wantEndsOpen},
+		// ...and a </noscript> cannot close a noscript that has a paragraph open
+		// inside it, so what follows is still inside the noscript.
+		"a noscript whose paragraph its end tag cannot close": {"<html><body><p>Hi</p><noscript><p></noscript></body></html>", wantEndsOpen},
+
+		// In svg a <style> is not raw text, and <![CDATA[ is a section whose text
+		// holds everything up to ]]>, closing body tag included.
+		"an svg style that opens a comment": {"<html><body><p>Hi</p><svg><style><!--</style></svg></body></html>", wantEndsOpen},
+		"an svg CDATA section":              {"<html><body><p>Hi</p><svg><![CDATA[ > </body> ]]></svg>", wantEndsOpen},
+
+		// Left open at the end, the fragment lands inside an element whose content
+		// a client does not show as HTML.
+		"a template left open":           {"<html><body><p>Hi</p><template>", wantEndsOpen},
+		"a math element left open":       {"<p>Hi</p><math><mi>", wantEndsOpen},
+		"an svg foreignObject left open": {"<p>Hi</p><svg><foreignObject>", wantEndsOpen},
+
+		// The template's own link is judged the same way: a link the tokenizer
+		// counts but a client does not see is no link, and the footer's spot must
+		// be shown whether or not this message has a footer to place.
+		"its own link swallowed":                          {`<html><body><svg><style><!--</style></svg><a href="{{unsubscribeUrl}}">Leave</a></body></html>`, wantEndsOpen},
+		"the spot swallowed though its own link is shown": {`<html><body><a href="{{unsubscribeUrl}}">Leave</a><svg><style><!--</style></svg></body></html>`, wantEndsOpen},
+		// A comment the tree builder opens in an svg style can end at a later one:
+		// the link is swallowed, the spot after it is not. The tokenizer counted the
+		// link, so no footer is placed, and the message would have none a person
+		// could use.
+		"its own link swallowed and the spot not": {`<html><body><svg><style><!--</style></svg><a href="{{unsubscribeUrl}}">Leave</a><!-- x -->MORE</body></html>`, wantEndsOpen},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.want != "" {
+				out, _, err := placement(t, tc.marked)
+				if err == nil || err.Error() != tc.want {
+					t.Fatalf("err = %v, want the sentence %q.\nthe message was: %q", err, tc.want, out)
+				}
+				return
+			}
+			template, at := unmarked(t, tc.marked)
+			out, fragment, err := placement(t, template)
+			if err != nil {
+				t.Fatalf("a template with a spot a client shows was refused: %v", err)
+			}
+			if want := template[:at] + fragment + template[at:]; out != want {
+				t.Errorf("the fragment is not at byte %d.\n want: %q\n got:  %q", at, want, out)
+			}
+			links, pixels := shownByAClient(t, out, messageTestLinks().Unsubscribe, pixelSource(t, fragment))
+			if links != 1 || pixels != 1 {
+				t.Errorf("a client would show %d unsubscribe links and %d pixels, want 1 and 1.\ngot: %s", links, pixels, out)
+			}
+		})
+	}
+}
+
+// TestAMessageNeedsAShownFooterSpotPixelAndOwnLink: what checkShown asks of the
+// tree, one requirement at a time. A hidden pixel beside a shown footer is not a
+// thing a parser makes of real markup (both are siblings at one spot), so the
+// requirements are held apart here and not by templates.
+func TestAMessageNeedsAShownFooterSpotPixelAndOwnLink(t *testing.T) {
+	for _, footer := range []bool{false, true} {
+		for _, pixel := range []bool{false, true} {
+			for _, own := range []bool{false, true} {
+				got := shownByClient{footer: footer, pixel: pixel, ownLink: own}
+				for _, hasOwn := range []bool{false, true} {
+					want := footer && pixel && (!hasOwn || own)
+					if got.enough(hasOwn) != want {
+						t.Errorf("%+v with a link of its own = %v: enough = %v, want %v", got, hasOwn, got.enough(hasOwn), want)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestTheTreeIsReadForTheProbeAndForNothingElse: clientShows on tiny documents.
+// Only the probe's own link and image, and the message's own unsubscribe link,
+// are looked for, and only where a client shows them.
+func TestTheTreeIsReadForTheProbeAndForNothingElse(t *testing.T) {
+	const own = "https://api.example.test/unsubscribe?token=u3.x"
+	probeLink := `<a href="` + probeUnsubscribeURL + `">u</a>`
+	probeImage := `<img src="` + probePixelSrc + `">`
+	for name, tc := range map[string]struct {
+		html string
+		want shownByClient
+	}{
+		"the probe in a body":           {probeLink + probeImage, shownByClient{footer: true, pixel: true}},
+		"other links and images":        {`<a href="https://acme.test/x">x</a><img src="https://acme.test/i.png">`, shownByClient{}},
+		"the message's own link":        {`<a href="` + own + `">u</a>`, shownByClient{ownLink: true}},
+		"its own link padded by blanks": {"<a href=\" " + own + "\n\">u</a>", shownByClient{ownLink: true}},
+		"a link with no address":        {`<a>u</a><img>`, shownByClient{}},
+		"the probe in a template":       {`<template>` + probeLink + probeImage + `</template>`, shownByClient{}},
+		// In the head a <noscript> is closed by the first thing that is not head
+		// content, so the row is in the body.
+		"the probe in a noscript":                   {`<p>x</p><noscript>` + probeLink + probeImage + `</noscript>`, shownByClient{}},
+		"the probe in a comment":                    {`<!--` + probeLink + probeImage + `-->`, shownByClient{}},
+		"the probe in an svg foreignObject":         {`<svg><foreignObject>` + probeLink + probeImage + `</foreignObject></svg>`, shownByClient{}},
+		"the probe in math text":                    {`<math><mi>` + probeLink + probeImage + `</mi></math>`, shownByClient{}},
+		"the link in a template, the image outside": {`<template>` + probeLink + `</template>` + probeImage, shownByClient{pixel: true}},
+		"the link outside, the image in a template": {probeLink + `<template>` + probeImage + `</template>`, shownByClient{footer: true}},
+		"the own link in a template":                {`<template><a href="` + own + `">u</a></template>`, shownByClient{}},
+	} {
+		doc, err := nethtml.ParseWithOptions(strings.NewReader(tc.html), nethtml.ParseOptionEnableScripting(false))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := clientShows(doc, own); got != tc.want {
+			t.Errorf("%s: clientShows = %+v, want %+v", name, got, tc.want)
+		}
+	}
+}
+
+// TestAnOutlookSectionLeftOpenHidesTheFooter: <![if !mso]> and
+// <!--[if !mso]><!--> open a section that Outlook does not show and every other
+// client does, and <![endif]> and <!--<![endif]--> close it. A footer put where a
+// section is still open is hidden from Outlook, so such a template is refused
+// with a sentence that says what to close. Layouts close their sections around
+// buttons, columns and media queries, and those are placed.
+func TestAnOutlookSectionLeftOpenHidesTheFooter(t *testing.T) {
+	emaildocShaped := "<html xmlns:v=\"urn:schemas-microsoft-com:vml\"><head>\n" +
+		"<!--[if mso]><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->\n" +
+		"<!--[if !mso]><!--><style>@media (max-width:480px){.c1-c0{display:block!important}}</style><!--<![endif]-->\n</head><body>\n" +
+		"<!--[if mso]><table align=\"center\" width=\"600\"><tr><td><![endif]-->\n" +
+		"<table><tbody><tr><td>" +
+		"<!--[if mso]><v:roundrect href=\"https://acme.test/shop\" style=\"height:44px;width:200px\"><center>Shop</center></v:roundrect><![endif]-->" +
+		"<!--[if !mso]><!--><a href=\"https://acme.test/shop\">Shop</a><!--<![endif]-->" +
+		"</td></tr></tbody></table>\n" +
+		"<![if !mso]><p>Only for clients that are not Outlook</p><![endif]>\n" +
+		"<!--[if mso]></td></tr></table><![endif]-->\n" + here + "</body></html>"
+
+	for name, tc := range map[string]struct {
+		marked string
+		want   string // the refusal sentence, or "" when the fragment is placed at the marker
+	}{
+		"a revealed section left open":                     {"<html><body><p>Hi</p><![if !mso]><p>modern</p></body></html>", wantOutlookOpen},
+		"a comment-wrapped section left open":              {"<html><body><p>Hi</p><!--[if !mso]><!--><p>modern</p></body></html>", wantOutlookOpen},
+		"a section left open and no closing tags at all":   {"<p>Hi</p><![if !mso]><p>modern</p>", wantOutlookOpen},
+		"a section left open and only a closing html tag":  {"<p>Hi</p><![if !mso]><p>modern</p></html>", wantOutlookOpen},
+		"a section opened again after one was closed":      {"<body><![if !mso]>a<![endif]><![if !mso]>b</body>", wantOutlookOpen},
+		"an inner section closed and the outer left open":  {"<body><!--[if !mso]><!--><![if !mso]>a<![endif]>b</body>", wantOutlookOpen},
+		"a section closed only after the closing body tag": {"<body><![if !mso]><p>x</p></body><![endif]>", wantOutlookOpen},
+		"capitals, spaces and parentheses":                 {"<body><![IF  !(MSO) ]>x</body>", wantOutlookOpen},
+		"an open section holding the template's own link":  {`<body><![if !mso]><a href="{{unsubscribeUrl}}">Unsubscribe</a></body>`, wantOutlookOpen},
+
+		"a revealed section that is closed":                 {"<body><![if !mso]><p>modern</p><![endif]>" + here + "</body>", ""},
+		"a comment-wrapped section that is closed":          {"<body><!--[if !mso]><!--><p>modern</p><!--<![endif]-->" + here + "</body>", ""},
+		"a section Outlook shows, left open":                {"<body><![if mso]><p>both</p>" + here + "</body>", ""},
+		"an Outlook-only comment":                           {"<body><!--[if mso]><p>Outlook</p><![endif]-->" + here + "</body>", ""},
+		"a comment that hides a section from Outlook":       {"<body><!--[if !mso]><p>never shown</p><![endif]-->" + here + "</body>", ""},
+		"sections closed around a button and a media query": {emaildocShaped, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.want != "" {
+				out, _, err := placement(t, tc.marked)
+				if err == nil || err.Error() != tc.want {
+					t.Fatalf("err = %v, want the sentence %q.\nthe message was: %q", err, tc.want, out)
+				}
+				return
+			}
+			template, at := unmarked(t, tc.marked)
+			out, fragment, err := placement(t, template)
+			if err != nil {
+				t.Fatalf("a template whose sections are closed was refused: %v", err)
+			}
+			if want := template[:at] + fragment + template[at:]; out != want {
+				t.Errorf("the fragment is not at byte %d.\n want: %q\n got:  %q", at, want, out)
+			}
+		})
+	}
+}
+
+// TestALinkInASectionOutlookHidesIsNotTheTemplatesOwn: a template that links to
+// {{unsubscribeUrl}} is not given a footer, but only if a person sees the link,
+// and a link inside a section Outlook hides is not seen by Outlook. It does not
+// stand in for the footer, which goes in as for any other template. A link
+// outside every section does.
+func TestALinkInASectionOutlookHidesIsNotTheTemplatesOwn(t *testing.T) {
+	const footerWords = "You are receiving this because"
+	for name, tc := range map[string]struct {
+		template   string
+		wantFooter bool
+		wantLinks  int // links to the unsubscribe page a client would show
+	}{
+		"in a closed revealed section":        {`<body><![if !mso]><a href="{{unsubscribeUrl}}">Unsubscribe</a><![endif]></body>`, true, 2},
+		"in a closed comment-wrapped section": {`<body><!--[if !mso]><!--><a href="{{unsubscribeUrl}}">Unsubscribe</a><!--<![endif]--></body>`, true, 2},
+		"outside every section":               {`<body><a href="{{unsubscribeUrl}}">Unsubscribe</a><![if !mso]><p>x</p><![endif]></body>`, false, 1},
+		"after a section that was closed":     {`<body><![if !mso]><p>x</p><![endif]><a href="{{unsubscribeUrl}}">Unsubscribe</a></body>`, false, 1},
+		// A template with a link of its own is given no footer, so a section left
+		// open after the link hides nothing the footer needed.
+		"outside every section, and one left open after it": {`<body><a href="{{unsubscribeUrl}}">Unsubscribe</a><![if !mso]><p>x</p></body>`, false, 1},
+		"in a section Outlook shows":                        {`<body><![if mso]><a href="{{unsubscribeUrl}}">Unsubscribe</a><![endif]></body>`, false, 1},
+		"in a comment only Outlook reads":                   {`<body><!--[if mso]><a href="{{unsubscribeUrl}}">Unsubscribe</a><![endif]--></body>`, true, 1},
+		"in the second of two closed sections":              {`<body><![if !mso]>a<![endif]><![if !mso]><a href="{{unsubscribeUrl}}">U</a><![endif]></body>`, true, 2},
+		"in a section nested inside one that is open":       {`<body><!--[if !mso]><!--><![if mso]><a href="{{unsubscribeUrl}}">U</a><![endif]><!--<![endif]--></body>`, true, 2},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, fragment, err := placement(t, tc.template)
+			if err != nil {
+				t.Fatalf("renderMessage: %v", err)
+			}
+			if got := strings.Contains(out, footerWords); got != tc.wantFooter {
+				t.Errorf("footer placed = %v, want %v.\ngot: %s", got, tc.wantFooter, out)
+			}
+			links, _ := shownByAClient(t, out, messageTestLinks().Unsubscribe, pixelSource(t, fragment))
+			if links != tc.wantLinks {
+				t.Errorf("a client would show %d unsubscribe links, want %d.\ngot: %s", links, tc.wantLinks, out)
+			}
+		})
+	}
+}
+
 // TestAFaultIsRefusedWhetherOrNotAnythingWouldBePlaced: whether a message needs a
 // footer depends on the template, and whether it needs a pixel depends on the
 // campaign. A template with a fault must not pass the test send, which tracks
@@ -342,12 +641,12 @@ func TestATemplateWithNoHTMLPartHasNothingToRefuse(t *testing.T) {
 // is made of, and the constructs that decide where a document ends (comments of
 // every state, quotes, raw-text elements, brackets, closing tags).
 //
-// Not in the pieces, on purpose: <svg>, <math>, <template>, <select> and
-// <frameset>. A footer left inside one of those when the template stops short is
-// shown as something other than HTML (or not shown), and the tokenizer cannot
-// see that; planHTML says so, and does not refuse it. (A frameset is refused, for
-// a different reason; the test of where a refusal comes from adds it to its own
-// alphabet.)
+// <svg>, <math>, <template>, <select>, <![CDATA[ and the Outlook sections are in
+// the pieces: the tokenizer cannot say what a client shows of them, and the tree
+// check after the splice is what stands between a template made of them and a
+// message with no footer a person can see. Not in the pieces: <frameset>, which
+// is refused for a different reason (the test of where a refusal comes from adds
+// it to its own alphabet).
 var templatePieces = []string{
 	"<p>", "</p>", "<div>", "</div>", "<table>", "<tr>", "<td>", "</td>", "</tr>", "</table>", "<br>", "<hr/>",
 	"<b>", "</b>", "<span style=\"color:red\">", "</span>", "<a href=\"https://acme.test/x\">", "</a>",
@@ -359,6 +658,8 @@ var templatePieces = []string{
 	"<noscript>", "</noscript>", "<xmp>", "</xmp>", "<iframe>", "</iframe>", "<plaintext>", "<noembed>", "<noframes>",
 	"<", ">", "</", "/", "=", "\"", "'", " ", "\n", "\r\n", "\t", "x", "Hi", "&nbsp;", "&amp;", "&lt;", "é", "日本",
 	"<a title=\"", "<img alt='", "title=", "href=", "<a ", "<p class=x",
+	"<template>", "</template>", "<svg>", "</svg>", "<math>", "</math>", "<select>", "</select>", "<option>",
+	"<foreignObject>", "<![CDATA[", "]]>", "<![if mso]>", "<!--[if mso]>", "<!--[if !mso]>",
 }
 
 // templateGenerator is a deterministic source of random templates: the same seed
@@ -382,9 +683,10 @@ func templateGenerator(seed uint64) func() string {
 // TestAnAcceptedTemplateShowsItsFooterToARealParser: the tokenizer decides where
 // the fragment goes and whether it can go anywhere, and a client decides what is
 // shown with a tree builder. This puts thirty thousand random templates
-// (templatePieces) through both. A template is refused with one of the two
+// (templatePieces) through both. A template is refused with one of the three
 // sentences, or the message is the template with the fragment spliced in once,
-// and a parser sees the unsubscribe link as one link in the body.
+// and a client's tree (scripting off) shows the unsubscribe link once and the
+// pixel once.
 //
 // It does not say whether a refusal was called for. TestARefusalIsExactlyAnEndThatSwallows
 // does.
@@ -402,8 +704,8 @@ func TestAnAcceptedTemplateShowsItsFooterToARealParser(t *testing.T) {
 		out, fragment, err := placement(t, template)
 		if err != nil {
 			refused++
-			if err.Error() != wantEndsOpen && err.Error() != wantFrames {
-				t.Fatalf("template %q was refused with something that is not one of the two sentences: %v", template, err)
+			if e := err.Error(); e != wantEndsOpen && e != wantFrames && e != wantOutlookOpen {
+				t.Fatalf("template %q was refused with something that is not one of the three sentences: %v", template, err)
 			}
 			continue
 		}
@@ -411,13 +713,8 @@ func TestAnAcceptedTemplateShowsItsFooterToARealParser(t *testing.T) {
 		if strings.Count(out, fragment) != 1 || strings.Replace(out, fragment, "", 1) != template {
 			t.Fatalf("template %q: taking the fragment out of %q does not give the template back", template, out)
 		}
-		if n := countOf(anchorHrefs(t, out), url); n != 1 {
-			t.Fatalf("template %q was accepted, but a parser finds %d unsubscribe links in %q", template, n, out)
-		}
-		// The planner reads its own output as a template with a link and no fault.
-		again, perr := planHTML(out, url)
-		if perr != nil || !again.linksToUnsubscribe {
-			t.Fatalf("template %q: the planner does not read %q as a template with its link (%+v, %v)", template, out, again, perr)
+		if links, pixels := shownByAClient(t, out, url, pixelSource(t, fragment)); links != 1 || pixels != 1 {
+			t.Fatalf("template %q was accepted, but a client would show %d unsubscribe links and %d pixels in %q", template, links, pixels, out)
 		}
 	}
 	if refused < 1000 || placed < 1000 {
@@ -508,7 +805,7 @@ func endSwallowsATag(template string) bool {
 // property test above.
 func TestARefusalIsExactlyAnEndThatSwallows(t *testing.T) {
 	url := messageTestLinks().Unsubscribe
-	var swallowing, refusedOpen, framed, checked int
+	var swallowing, refusedOpen, framed, outlook, checked int
 	check := func(template string) {
 		if strings.TrimSpace(template) == "" {
 			return
@@ -522,6 +819,10 @@ func TestARefusalIsExactlyAnEndThatSwallows(t *testing.T) {
 		switch {
 		case err == errTemplateFrames:
 			framed++
+		case err == errTemplateOutlookOpen:
+			// A different question (is a section Outlook hides still open at the
+			// spot?), answered after the one this test asks.
+			outlook++
 		case err == errTemplateEndsOpen:
 			refusedOpen++
 			if !swallows && !strings.HasSuffix(template, "<") {
@@ -599,7 +900,6 @@ func TestPlanHTMLFindsTheSpotAndTheLink(t *testing.T) {
 // closing body tag after <name> is a tag if and only if the name is not on the
 // list.
 func TestTheRawTextElementsAreTheTokenizersOwn(t *testing.T) {
-	const url = "https://x.test/u?token=1"
 	for _, name := range []string{
 		"a", "abbr", "address", "applet", "area", "article", "aside", "audio", "b", "base", "blockquote", "body", "br",
 		"button", "canvas", "caption", "center", "code", "col", "colgroup", "data", "datalist", "dd", "details", "dialog",
@@ -610,14 +910,68 @@ func TestTheRawTextElementsAreTheTokenizersOwn(t *testing.T) {
 		"summary", "sup", "table", "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "title", "tr", "track", "u",
 		"ul", "video", "wbr", "xmp", "svg", "math", "marquee", "blink", "nobr", "isindex", "keygen", "bgsound", "image",
 	} {
-		// "<name></body>" then a second, unmistakable closing tag: if </body> is a tag
-		// the spot is before it. If <name> made it text, the spot is not there (the
-		// input then ends inside the element, a refusal, or the end tag closes it).
-		source := "<" + name + "></body>"
-		plan, err := planHTML(source, url)
-		tokenizerReadsATag := err == nil && plan.insertAt == len("<"+name+">")
+		// "<name></body>": if the tokenizer reads </body> as a tag, <name> did not
+		// make what follows it text. Asked of the tokenizer itself and not of
+		// planHTML, which has rules of its own about some of these names (what
+		// follows <template> is not the document's).
+		z := nethtml.NewTokenizer(strings.NewReader("<" + name + "></body>"))
+		z.Next()
+		tokenizerReadsATag := z.Next() == nethtml.EndTagToken
 		if rawTextElements[name] == tokenizerReadsATag {
 			t.Errorf("<%s>: the list says raw text = %v, the tokenizer says </body> is a tag = %v", name, rawTextElements[name], tokenizerReadsATag)
 		}
 	}
+}
+
+// BenchmarkCheckShown is what the tree check costs beside the tokenizer pass, for
+// the sizes a layout makes (8, 33 and 134 kB): go test ./component/campaigns/
+// -run XXX -bench CheckShown. Both run once per message. On the machine this was
+// written on, the tree check takes about 0.07, 0.3 and 1.6 ms and the tokenizer
+// pass 55 to 70 percent of that, against a round trip to the provider of tens of
+// milliseconds, so the verdict is not cached per template revision (a cache would
+// also have to show that what a recipient's name or address does to the text
+// cannot change the tree).
+func BenchmarkCheckShown(b *testing.B) {
+	opts := RenderOptions{Links: messageTestLinks()}
+	for _, blocks := range []int{10, 40, 160} {
+		doc := layoutOfBlocks(blocks)
+		plan, err := planHTML(doc, opts.Links.Unsubscribe)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.Run(fmt.Sprintf("%dkB/planHTML", len(doc)/1024), func(b *testing.B) {
+			b.SetBytes(int64(len(doc)))
+			for i := 0; i < b.N; i++ {
+				if _, err := planHTML(doc, opts.Links.Unsubscribe); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("%dkB/checkShown", len(doc)/1024), func(b *testing.B) {
+			b.SetBytes(int64(len(doc)))
+			for i := 0; i < b.N; i++ {
+				if err := checkShown(doc, plan, opts); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+// layoutOfBlocks is a document shaped like a layout's output, n blocks long: a
+// table per block, Outlook sections around its wrapper and its button.
+func layoutOfBlocks(n int) string {
+	var b strings.Builder
+	b.WriteString(`<html xmlns:v="urn:schemas-microsoft-com:vml"><head><meta name="viewport" content="width=device-width">` +
+		`<style>body{margin:0}@media (max-width:599px){.ecw{width:100%!important}}</style></head><body style="margin:0">`)
+	for i := 0; i < n; i++ {
+		b.WriteString(`<!--[if mso]><table align="center" width="600"><tr><td><![endif]-->`)
+		b.WriteString(`<table align="center" width="600" class="ecw" style="width:600px"><tbody><tr><td style="padding:24px;font-family:Arial,sans-serif;font-size:16px;line-height:24px">`)
+		b.WriteString(`<h2 style="margin:0 0 12px">Section heading</h2><p style="margin:0 0 12px">Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam &copy; &nbsp; quis nostrud.</p>`)
+		b.WriteString(`<!--[if !mso]><!--><table><tbody><tr><td bgcolor="#111111"><a href="https://acme.test/shop" target="_blank" style="display:block;color:#fff">Shop now</a></td></tr></tbody></table><!--<![endif]-->`)
+		b.WriteString(`<img src="https://cdn.acme.test/a.png" width="552" height="200" alt="banner" style="display:block">`)
+		b.WriteString(`</td></tr></tbody></table><!--[if mso]></td></tr></table><![endif]-->`)
+	}
+	b.WriteString(`</body></html>`)
+	return b.String()
 }

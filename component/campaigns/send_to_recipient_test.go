@@ -170,23 +170,30 @@ func TestASingleSendCarriesTheLinksButNoCampaign(t *testing.T) {
 }
 
 // TestSendToRecipientRefusesATemplateWhoseFooterCannotBePlaced: a message whose
-// unsubscribe link cannot be placed is not sent, and nothing is ledgered as an
-// attempt: the refusal comes before the transport is contacted.
+// unsubscribe link cannot be placed, or would not be shown, is not sent, and
+// nothing is ledgered as an attempt: the refusal comes before the transport is
+// contacted.
 func TestSendToRecipientRefusesATemplateWhoseFooterCannotBePlaced(t *testing.T) {
-	engine := recipientSendEngine()
-	engine.template["htmlBody"] = "<p>Hi</p><!--"
-	sender := &recordingSender{}
-	w := newTestWorker(t, engine, sender)
+	for name, tc := range map[string]struct{ html, want string }{
+		"a comment that never ends":          {"<p>Hi</p><!--", wantEndsOpen},
+		"an Outlook section left open":       {"<html><body><p>Hi</p><![if !mso]><p>x</p></body></html>", wantOutlookOpen},
+		"a comment only a tree builder sees": {"<html><body><p>Hi</p><noscript><!--</noscript></body></html>", wantEndsOpen},
+	} {
+		engine := recipientSendEngine()
+		engine.template["htmlBody"] = tc.html
+		sender := &recordingSender{}
+		w := newTestWorker(t, engine, sender)
 
-	_, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0)
-	if err == nil || err.Error() != "campaigns.sendToRecipient: "+wantEndsOpen {
-		t.Fatalf("err = %v, want the sentence %q", err, wantEndsOpen)
-	}
-	if sender.count() != 0 {
-		t.Error("a message went out")
-	}
-	if written := callsWithPrefix(engine, "mutation recordCampaignDelivery"); len(written) != 0 {
-		t.Errorf("a refused message was ledgered: %v", written)
+		_, err := w.handleSendToRecipient(importCtx(), sendToRecipientArgs(), 0)
+		if err == nil || err.Error() != "campaigns.sendToRecipient: "+tc.want {
+			t.Errorf("%s: err = %v, want the sentence %q", name, err, tc.want)
+		}
+		if sender.count() != 0 {
+			t.Errorf("%s: a message went out", name)
+		}
+		if written := callsWithPrefix(engine, "mutation recordCampaignDelivery"); len(written) != 0 {
+			t.Errorf("%s: a refused message was ledgered: %v", name, written)
+		}
 	}
 }
 
