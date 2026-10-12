@@ -298,6 +298,13 @@ automation provisionInstance {
 @trigger(event="instance.installRequested")
 automation installInstance {
   args {
+    emailResourceGroup string
+    emailIdentityName string
+    emailService string
+    communicationService string
+    emailLocation string
+    emailDataLocation string
+    emailReplyTo string
     instanceId        string!
     subscriptionId    string!
     clusterName       string!
@@ -359,6 +366,22 @@ automation installInstance {
         repoRoot: args.repoRoot,
         dryRun: args.dryRun
       )
+      if args.emailResourceGroup != nil && args.emailResourceGroup != "" {
+        action configureAzureEmail(
+          subscriptionId: args.subscriptionId,
+          resourceGroup: args.resourceGroup,
+          clusterName: args.clusterName,
+          emailResourceGroup: args.emailResourceGroup,
+          emailIdentityName: args.emailIdentityName,
+          emailService: args.emailService,
+          communicationService: args.communicationService,
+          emailLocation: args.emailLocation,
+          emailDataLocation: args.emailDataLocation,
+          replyTo: args.emailReplyTo,
+          namespace: args.namespace,
+          dryRun: args.dryRun
+        )
+      }
       action registerGitOpsRepo(
         repoUrl:   args.repoUrl,
         transport: args.repoTransport,
@@ -480,6 +503,13 @@ automation repairInstance {
 @trigger(event="instance.bringUpRequested")
 automation bringUpInstance {
   args {
+    emailResourceGroup string
+    emailIdentityName string
+    emailService string
+    communicationService string
+    emailLocation string
+    emailDataLocation string
+    emailReplyTo string
     instanceId     string!
     subscriptionId string!
     resourceGroup  string!
@@ -512,6 +542,13 @@ automation bringUpInstance {
     dryRun: args.dryRun
   )
   workloads := automation installInstance(
+    emailResourceGroup: args.emailResourceGroup,
+    emailIdentityName: args.emailIdentityName,
+    emailService: args.emailService,
+    communicationService: args.communicationService,
+    emailLocation: args.emailLocation,
+    emailDataLocation: args.emailDataLocation,
+    emailReplyTo: args.emailReplyTo,
     instanceId: args.instanceId,
     subscriptionId: args.subscriptionId,
     clusterName: args.clusterName,

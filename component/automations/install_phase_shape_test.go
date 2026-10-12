@@ -93,6 +93,7 @@ func TestInstallInstanceSyncsLast(t *testing.T) {
 		"installClusterOperators",
 		"seedInstanceSecrets",
 		"wireExternalSecrets",
+		"configureAzureEmail",
 		"registerGitOpsRepo",
 		"argoSync",
 		"settleAfterSync",

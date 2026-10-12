@@ -410,16 +410,62 @@ The device code flow uses the existing MemQL stream. It adds no OAuth callback
 endpoint or per-installation redirect URL. Local capture works without Azure;
 connecting Microsoft does not switch test emails to external delivery.
 
-**Initial installation integration remains planned.** The intended onboarding
-is to configure cluster email during installation and leave Email ready to
-manage client domains. Azure deployment authorization should be reused where
-possible, with a durable cluster identity and narrowly scoped access; deployment
-CLI credentials must not be copied into the cluster. The current implementation
-uses the one-time Settings flow above. The infrastructure installer does not yet
-provision this authorization or a verified sender. Existing transactional email
-bootstrap is separate: do not remove a working bootstrap transport before its
-replacement can deliver owner verification and login mail. Creating the app
-registration alone does not solve that bootstrap dependency.
+**Azure installation can prepare email before first sign-in.** Supply
+`emailResourceGroup`, `emailIdentityName`, `emailService`,
+`communicationService`, `emailLocation` and `emailDataLocation` to
+`installInstance` or `bringUpInstance`. `emailReplyTo` is optional. The install
+runs `configureAzureEmail` after its operators and secrets are ready and before
+ArgoCD starts the engine. An install that omits these choices keeps its existing
+email configuration. The same bounded step can be run directly:
+
+```bash
+scripts/deploy/configure-azure-email.sh \
+  --subscriptionId=00000000-0000-0000-0000-000000000000 \
+  --resourceGroup=example-cluster --clusterName=example \
+  --emailResourceGroup=example-email --emailIdentityName=example-email \
+  --emailService=example-email --communicationService=example-delivery \
+  --emailLocation=westus2 '--emailDataLocation=United States' \
+  --namespace=memql --dryRun=true
+```
+
+Remove `--dryRun=true` to apply the choices using the operator's signed-in
+Azure account. That account must be able to create the dedicated email resource
+group and managed identity, register Microsoft.Communication and
+Microsoft.EventGrid, and assign a role on the new group. The cluster itself
+receives **Contributor on that email group only**, through its own managed
+identity and federated service-account assertions. Its email group must differ
+from the cluster resource group. A group or identity bound to another cluster's
+OIDC issuer is refused, including a recreated cluster with a different issuer.
+
+Only public identifiers and resource choices enter the
+`memql-email-installation` ConfigMap as `MEMQL_EMAIL_INSTALLATION`. Each engine
+replica exchanges its projected assertion for a short-lived management token;
+operator CLI credentials and refresh tokens are never copied into the cluster.
+Sending credentials and setup progress use the existing encrypted shared store.
+A repeat install preserves the same identity and choices; it refuses a different
+configuration instead of replacing a live connection.
+
+Engine startup runs the installed `emailInstallationWorkflow`: establish the
+cluster connection, ensure the ordinary operator organization exists, prepare
+the named resources, and enable the sender after Azure confirms them. The
+initial sender is Azure's default `donotreply@…azurecomm.net` with Azure's
+existing display name, so first sign-in does not depend on custom-domain DNS.
+Azure-managed domains have limited sending volume and do not support personalized
+sender usernames; configure a custom domain in Settings for branded or
+higher-volume mail. This cluster-bound bootstrap domain is not exported as a
+portable organization package. See Microsoft's [Azure-managed domain guide](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/add-azure-managed-domains)
+and [domain comparison](https://learn.microsoft.com/en-us/azure/communication-services/quickstarts/email/add-custom-verified-domains).
+
+Azure creates can remain pending. A fresh node reports that email setup is not
+ready and resumes from the saved plan on restart; it does not claim readiness
+with a logging-only sender. A working Graph/SMTP transport remains available
+while setup progresses, and maintenance continues the same bounded workflow
+after startup. Completion uses the same sender identity and readiness checks as
+Settings. A later disconnect or a connection explicitly chosen in Settings is
+preserved across restarts. Operator-managed client domains use this installation's
+saved Azure authority, with their own organization-scoped resources and sending
+credentials. Local capture stays capture; it does not use an Azure identity or
+require public OIDC federation.
 
 Microsoft directory policy can require administrator approval. Publisher
 verification is separate from verifying a publisher domain. The registration's
