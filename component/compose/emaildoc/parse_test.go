@@ -66,7 +66,7 @@ func TestParseRefuses(t *testing.T) {
 		{"multiline subject", `{"subject":"a\nb","textBody":"y","htmlBody":""}`, "email subject must be a nonempty single line under 999 bytes"},
 		{"long preheader", `{"subject":"x","preheader":"` + strings.Repeat("p", 201) + `","textBody":"y","htmlBody":""}`, "the preheader must be one line of at most 200 characters"},
 		{"empty text body", `{"subject":"x","textBody":" ","htmlBody":""}`, "email needs a plain-text body"},
-		{"too large", big, "email document exceeds 2 MiB"},
+		{"too large", big, "This email file is larger than 2 MiB. Use fewer or smaller pictures."},
 		{"trailing", `{"subject":"x","textBody":"y","htmlBody":""} {}`, "email document contains trailing content"},
 		{"too many blocks", layoutJSON(strings.Join(blocks, ",")), "an email can have at most 300 blocks"},
 		{"html image", layoutJSON(`{"id":"x","type":"html","html":"<img src=\"data:image/png;base64,AA\">"}`), `block "x": html blocks cannot contain pictures; use an image block`},
@@ -676,6 +676,158 @@ func TestParseRefusesInvalidUTF8(t *testing.T) {
 	if _, err := Parse([]byte(layoutJSON(`{"id":"t","type":"text","text":"é 日 😀 é"}`))); err != nil {
 		t.Fatalf("UTF-8 of every width is fine: %v", err)
 	}
+}
+
+// The size refusal is a sentence for a person, and it is one value the callers
+// that check the size themselves (before they spend anything on a document)
+// can return, so their sentence is this one.
+func TestParseSizeRefusalIsASentenceForAPerson(t *testing.T) {
+	const sentence = "This email file is larger than 2 MiB. Use fewer or smaller pictures."
+	over := []byte(`{"subject":"x","textBody":"` + strings.Repeat("a", MaxBytes) + `","htmlBody":""}`)
+	for _, doc := range [][]byte{over, make([]byte, MaxBytes+1)} {
+		if _, err := Parse(doc); err != ErrFileTooLarge || err.Error() != sentence {
+			t.Errorf("a file of %d bytes: want %q, got %v", len(doc), sentence, err)
+		}
+	}
+	// Exactly at the limit is not over it.
+	atLimit := []byte(`{"subject":"x","textBody":"` + strings.Repeat("a", MaxBytes-len(`{"subject":"x","textBody":"","htmlBody":""}`)) + `","htmlBody":""}`)
+	if len(atLimit) != MaxBytes {
+		t.Fatalf("the fixture is %d bytes, not %d", len(atLimit), MaxBytes)
+	}
+	if _, err := Parse(atLimit); err != nil {
+		t.Errorf("a file of exactly %d bytes: %v", MaxBytes, err)
+	}
+}
+
+// A control character cannot be saved: PostgreSQL's jsonb cannot hold NUL, the
+// engine would store its six-character escape instead and change the email
+// without a word, and none of the others means anything in an email. Tab,
+// newline and carriage return are the three that are text.
+func TestParseRefusesControlCharacters(t *testing.T) {
+	const refused = "This email contains a character that can't be saved. Remove it and try again."
+	// Where a string can sit in a file. Each is a template with the string "@@@"
+	// where the character goes.
+	places := []struct{ name, doc string }{
+		{"subject", `{"subject":"a@@@b","textBody":"y","htmlBody":""}`},
+		{"preheader", `{"subject":"x","preheader":"a@@@b","textBody":"y","htmlBody":""}`},
+		{"text body", `{"subject":"x","textBody":"a@@@b","htmlBody":""}`},
+		{"html body", `{"subject":"x","textBody":"y","htmlBody":"<p>a@@@b</p>"}`},
+		{"heading", layoutJSON(`{"id":"h","type":"heading","text":"a@@@b"}`)},
+		{"text block", layoutJSON(`{"id":"t","type":"text","text":"a@@@b"}`)},
+		{"button label", layoutJSON(`{"id":"b","type":"button","label":"a@@@b","href":"https://example.com"}`)},
+		{"button link", layoutJSON(`{"id":"b","type":"button","label":"Go","href":"https://example.com/a@@@b"}`)},
+		{"image alt", layoutJSON(`{"id":"i","type":"image","width":100,"alt":"a@@@b"}`)},
+		{"html block", layoutJSON(`{"id":"x","type":"html","html":"<p>a@@@b</p>"}`)},
+		{"footer line", layoutJSON(`{"id":"f","type":"footer","lines":["a@@@b"]}`)},
+		{"footer link label", layoutJSON(`{"id":"f","type":"footer","links":[{"label":"a@@@b","href":"https://example.com"}]}`)},
+		{"inside a column", layoutJSON(`{"id":"c","type":"columns","columns":[{"width":100,"blocks":[{"id":"t","type":"text","text":"a@@@b"}]}]}`)},
+		{"block id", layoutJSON(`{"id":"h@@@","type":"spacer","height":4}`)},
+		{"layout name", `{"subject":"x","layout":"builtin:a@@@b","theme":` + neutralTheme() + `,"blocks":[]}`},
+		{"theme font", `{"subject":"x","theme":` + strings.Replace(neutralTheme(), `"Georgia"`, `"Geo@@@gia"`, 1) + `,"blocks":[]}`},
+		{"a key", `{"subject":"x","te@@@xtBody":"y","htmlBody":""}`},
+	}
+	// Every C0 character but the three that are text, as the \u escape in both
+	// cases of hexadecimal digits, and the short escapes of backspace and form
+	// feed (which are C0 characters too).
+	var escapes []string
+	for c := 0; c < 0x20; c++ {
+		if c != '\t' && c != '\n' && c != '\r' {
+			escapes = append(escapes, fmt.Sprintf(`\u%04x`, c), fmt.Sprintf(`\u%04X`, c))
+		}
+	}
+	escapes = append(escapes, `\b`, `\f`)
+	for _, place := range places {
+		// One report for each place, with the first escape that got through.
+		var missed []string
+		var first error
+		for _, escape := range escapes {
+			if _, err := Parse([]byte(strings.Replace(place.doc, "@@@", escape, 1))); err == nil || err.Error() != refused {
+				if missed = append(missed, escape); first == nil {
+					first = err
+				}
+			}
+		}
+		if len(missed) > 0 {
+			t.Errorf("%s: %d of %d escapes were not refused with %q (%s, ...); the first got %v", place.name, len(missed), len(escapes), refused, missed[0], first)
+		}
+	}
+
+	t.Run("a control character written into the file itself", func(t *testing.T) {
+		// Not valid JSON either, but a person is told what to remove, not that
+		// the JSON is wrong. Inside a string and between the pieces of the file.
+		for _, doc := range []string{
+			"{\"subject\":\"a\x00b\",\"textBody\":\"y\",\"htmlBody\":\"\"}",
+			"{\"subject\":\"a\x01b\",\"textBody\":\"y\",\"htmlBody\":\"\"}",
+			"{\"subject\":\"x\",\"textBody\":\"y\",\"htmlBody\":\"\"}\x00",
+			"\x1f{\"subject\":\"x\",\"textBody\":\"y\",\"htmlBody\":\"\"}",
+			"{\"subject\":\"x\",\x0b\"textBody\":\"y\",\"htmlBody\":\"\"}",
+		} {
+			if _, err := Parse([]byte(doc)); err == nil || err.Error() != refused {
+				t.Errorf("%q: want %q, got %v", doc, refused, err)
+			}
+		}
+	})
+
+	t.Run("tab, newline and carriage return are text", func(t *testing.T) {
+		for _, text := range []string{`a\tb`, `a\nb`, `a\r\nb`, `a\u0009b`, `a\u000ab`, `a\u000Db`, `a\u000A\u000d\u0009b`} {
+			for name, doc := range map[string]string{
+				"text block": layoutJSON(`{"id":"t","type":"text","text":"` + text + `"}`),
+				"text body":  `{"subject":"x","textBody":"` + text + `","htmlBody":""}`,
+				"html body":  `{"subject":"x","textBody":"y","htmlBody":"<p>` + text + `</p>"}`,
+				"html block": layoutJSON(`{"id":"x","type":"html","html":"<p>` + text + `</p>"}`),
+			} {
+				if _, err := Parse([]byte(doc)); err != nil {
+					t.Errorf("%s with %s: %v", name, text, err)
+				}
+			}
+		}
+	})
+
+	t.Run("a backslash is not an escape of what follows it", func(t *testing.T) {
+		// "\\u0000" is a backslash and the five characters "u0000": text. "\\\u0000"
+		// is a backslash and then a NUL. A scan that looked for "\u0000" in the
+		// bytes would get both wrong.
+		for _, c := range []struct {
+			name, text string
+			ok         bool
+		}{
+			{"an escaped backslash and the text u0000", `a\\u0000b`, true},
+			{"two escaped backslashes and the text u001f", `a\\\\u001fb`, true},
+			{"an escaped backslash and the text \\b", `a\\bb`, true},
+			{"an escaped backslash and then a NUL", `a\\\u0000b`, false},
+			{"two escaped backslashes and then a NUL", `a\\\\\u0000b`, false},
+			{"an escaped quote and then a NUL", `a\"\u0000b`, false},
+			{"an escaped quote and the text u0000", `a\"u0000b`, true},
+		} {
+			_, err := Parse([]byte(layoutJSON(`{"id":"t","type":"text","text":"` + c.text + `"}`)))
+			switch {
+			case c.ok && err != nil:
+				t.Errorf("%s: %v", c.name, err)
+			case !c.ok && (err == nil || err.Error() != refused):
+				t.Errorf("%s: want %q, got %v", c.name, refused, err)
+			}
+		}
+	})
+
+	t.Run("only C0 is refused", func(t *testing.T) {
+		// Space, DEL, the C1 controls and no-break space are not C0.
+		for _, escape := range []string{`\u0020`, `\u007f`, `\u0085`, `\u009f`, `\u00a0`, `\u2028`} {
+			if _, err := Parse([]byte(layoutJSON(`{"id":"t","type":"text","text":"a` + escape + `b"}`))); err != nil {
+				t.Errorf("%s: %v", escape, err)
+			}
+		}
+	})
+
+	t.Run("a file of nothing else is refused before any of it is read", func(t *testing.T) {
+		// 2 MiB of NUL escapes would be 350,000 characters to read, write out
+		// and check; the refusal is a scan of the bytes.
+		pre, post, _ := strings.Cut(layoutJSON(`{"id":"t","type":"text","text":"@@@"}`), "@@@")
+		doc := []byte(pre + strings.Repeat(`\u0000`, (MaxBytes-len(pre)-len(post))/6) + post)
+		var err error
+		if allocated := allocatedBy(func() { _, err = Parse(doc) }); err == nil || err.Error() != refused || allocated > 1<<20 {
+			t.Errorf("want %q before reading anything, got %v after %d bytes", refused, err, allocated)
+		}
+	})
 }
 
 func TestParseCostDoesNotDependOnHTMLCharacters(t *testing.T) {
@@ -1309,6 +1461,37 @@ func TestParseRefusesUnsafeHTMLBlocks(t *testing.T) {
 	}
 }
 
+// refusedControlIn returns the first string of a decoded JSON value (a key or a
+// value) that holds a C0 control character which is not tab, newline or
+// carriage return, or "".
+func refusedControlIn(v any) string {
+	bad := func(s string) bool {
+		return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 && r != '\t' && r != '\n' && r != '\r' }) >= 0
+	}
+	switch v := v.(type) {
+	case string:
+		if bad(v) {
+			return v
+		}
+	case []any:
+		for _, item := range v {
+			if found := refusedControlIn(item); found != "" {
+				return found
+			}
+		}
+	case map[string]any:
+		for key, item := range v {
+			if bad(key) {
+				return key
+			}
+			if found := refusedControlIn(item); found != "" {
+				return found
+			}
+		}
+	}
+	return ""
+}
+
 func FuzzParse(f *testing.F) {
 	for _, seed := range []string{
 		`{"subject":"x","textBody":"y","htmlBody":""}`,
@@ -1320,6 +1503,8 @@ func FuzzParse(f *testing.F) {
 		layoutJSON(`{"id":"f","type":"footer","links":[{"label":"u","href":"{{unsubscribeUrl}}"}],"lines":["x"],"separator":"|","gap":0}`),
 		layoutJSON(`{"id":"x","type":"html","html":"<table><tr><td>A &amp; B</td></tr></table>"}`),
 		layoutJSON(`{"id":"i","type":"image","width":10,"src":"artifact:abc"}`),
+		layoutJSON(`{"id":"t","type":"text","text":"a\tb\nc\u0009\\u0000\u000d"}`),
+		layoutJSON(`{"id":"t","type":"text","text":"a\u0000b\bc\f\u001F"}`),
 	} {
 		f.Add([]byte(seed))
 	}
@@ -1331,6 +1516,15 @@ func FuzzParse(f *testing.F) {
 		out, err := d.JSON()
 		if err != nil {
 			t.Fatalf("JSON of an accepted document: %v", err)
+		}
+		// Whatever way the file wrote a control character, an accepted document
+		// has none of the refused ones in any key or value.
+		var tree any
+		if err := json.Unmarshal(out, &tree); err != nil {
+			t.Fatalf("canonical bytes are not JSON: %v", err)
+		}
+		if bad := refusedControlIn(tree); bad != "" {
+			t.Fatalf("an accepted document holds a control character: %q\n%s", bad, out)
 		}
 		again, err := Parse(out)
 		if err != nil {
