@@ -2189,6 +2189,18 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   font-family: var(--os-font-mono);
   font-variant-ligatures: none;
 }
+/* Prose (kit `TextArea`): still the field -- colour, border, radius and text
+ * size come from `.os-input` above -- but not a one-line field. It starts two
+ * control lines tall and can be pulled taller. This rule has to FOLLOW the
+ * `.os-input` one: both are a single class, so the later `height` wins. */
+.os-textarea {
+  height: auto;
+  min-height: calc(var(--os-control-h) * 2);
+  padding: 8px 10px;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: inherit;
+}
 .os-select-label {
   display: inline-flex;
 }
@@ -14012,15 +14024,6 @@ button.os-cluster-mesh-peer:focus-visible {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.os-rule-textarea {
-  height: auto;
-  min-height: calc(var(--os-control-h) * 2);
-  padding: 8px 10px;
-  line-height: 1.5;
-  resize: vertical;
-  font-family: inherit;
 }
 
 .os-rule-simulation-said {

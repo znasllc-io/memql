@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { ActionBar, type Act } from "../../../kit/ActionBar";
-import { Head, Notice } from "../../../kit";
+import { Head, Notice, TextArea } from "../../../kit";
 import { shadowedBy, simulationSentence, type RuleActions, type RuleRow, type Simulation } from "../../settings/rulesFacts";
 import { RuleSentence } from "./RuleSentence";
 import { routeTitle, whenWords } from "./vocabulary";
@@ -123,16 +123,12 @@ export function DescribeRulePage({
     <div className="os-deploy-pane fleet-rule-page">
       <div className="os-deploy-scroll">
         <Head title="Describe a rule" breadcrumbs={[{ label: "Rules", onSelect: onBack }, { label: "Describe a rule" }]} back={{ label: "Rules", onSelect: onBack }} />
-        <label className="os-sr-only" htmlFor="rule-describe">
-          Describe a rule in your own words
-        </label>
-        <textarea
+        <TextArea
           id="rule-describe"
-          className="os-input os-rule-textarea"
-          rows={3}
+          label="Describe a rule in your own words"
           value={sentence}
           placeholder="Send planning work to my own machines, and never to a paid vendor"
-          onChange={(e) => edit(e.target.value)}
+          onChange={edit}
         />
 
         {problem === "" ? null : (
