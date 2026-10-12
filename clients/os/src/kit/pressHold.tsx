@@ -157,14 +157,24 @@ export function usePressHold(read: () => string, { holdFirst = false }: { holdFi
  * becomes "Revoke it / Keep it", a panel's Disconnect that expands into Cancel
  * and a confirmation, a dropped folder's "Archive / Cancel" (DESIGN.md rule 8).
  *
- * Put it around the question and its buttons -- the element that appears when
- * the ask does. Everything pressable inside takes no press for
- * `CONFIRM_SETTLE_MS` after it appears, and again after anything in it
- * changes (a refusal drawn beside the buttons, another question), so the
- * second click of the double-click that asked cannot answer it. Its element,
- * class, role and label are the caller's: it adds the hold and nothing else.
+ * It holds presses on WHAT IT WRAPS: everything pressable inside takes no press
+ * for `CONFIRM_SETTLE_MS` after it appears, and again after anything inside it
+ * changes (a refusal drawn beside the buttons), so the second click of the
+ * double-click that asked cannot answer it. What it does not wrap it does not
+ * watch, so wrap what a press could be answering:
  *
- * An ask in a bar's own acts or children does not need it; the bar holds those.
+ *   - THE BUTTONS, where the question cannot change while they stay. A row's
+ *     Revoke, a panel's Disconnect: the ask is that row's or that panel's, it
+ *     appears with its buttons and goes with them, and the sentence may stand
+ *     beside the wrapper.
+ *   - THE QUESTION TOO, where it CAN change while the same buttons stay. The
+ *     dock's Bin, where a second file dropped on it changes the file under the
+ *     same Archive; the Files notice, which another row or folder can take over.
+ *     Wrap the whole Notice, so a new question holds its buttons again.
+ *
+ * Its element, class, role and label are the caller's: it adds the hold and
+ * nothing else. An ask in a bar's own acts or children does not need it; the
+ * bar holds those.
  */
 export function InPlaceAsk({
   as: Tag = "div",

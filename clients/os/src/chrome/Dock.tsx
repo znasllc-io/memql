@@ -414,29 +414,34 @@ export function Dock({
     return () => clearTimeout(t);
   }, [binNote]);
 
+  // THE WHOLE NOTICE IS THE ASK, question and all: a second file dropped while
+  // this one is open changes the question under the same Archive and Cancel,
+  // and a hold on the buttons alone would not notice (see InPlaceAsk).
   const binBubble: ReactNode =
     pending !== null ? (
-      <Notice
-        tone="warn"
-        sentence={`Archive "${pending.name}"?`}
-        next="It goes to the Bin and keeps its bytes, its history and its provenance. Nothing is deleted."
-      >
-        <InPlaceAsk className="os-dock-bubble-actions">
-          <Button
-            tone="danger"
-            busy={archiving}
-            busyLabel="Archiving"
-            onClick={() => {
-              const drop = pending;
-              setPending(null);
-              void archive(drop);
-            }}
-          >
-            Archive
-          </Button>
-          <Button onClick={() => setPending(null)}>Cancel</Button>
-        </InPlaceAsk>
-      </Notice>
+      <InPlaceAsk>
+        <Notice
+          tone="warn"
+          sentence={`Archive "${pending.name}"?`}
+          next="It goes to the Bin and keeps its bytes, its history and its provenance. Nothing is deleted."
+        >
+          <div className="os-dock-bubble-actions">
+            <Button
+              tone="danger"
+              busy={archiving}
+              busyLabel="Archiving"
+              onClick={() => {
+                const drop = pending;
+                setPending(null);
+                void archive(drop);
+              }}
+            >
+              Archive
+            </Button>
+            <Button onClick={() => setPending(null)}>Cancel</Button>
+          </div>
+        </Notice>
+      </InPlaceAsk>
     ) : binNote !== null ? (
       <Notice tone={binNote.tone} sentence={binNote.sentence} next={binNote.next} detail={binNote.detail} />
     ) : null;

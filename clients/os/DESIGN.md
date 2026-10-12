@@ -156,10 +156,12 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     **A question answered in place, outside any bar, is held the same way**
     (a row's Revoke that becomes "Revoke it / Keep it", a panel's
     Disconnect that expands into Cancel and a confirmation, a dropped
-    file's "Archive / Cancel"): put the question and its buttons in the
+    file's "Archive / Cancel"): wrap what a press could be answering in the
     kit's `InPlaceAsk`, which is the bar's own hold (`kit/pressHold`), held
-    from the moment the question appears. A question in a bar's acts or
-    children needs nothing; the bar holds it.
+    from the moment the question appears -- the buttons, and the question too
+    where it can change while the same buttons stay (a second file dropped
+    on the Bin). A question in a bar's acts or children needs nothing; the
+    bar holds it.
     Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them

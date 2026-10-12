@@ -76,18 +76,23 @@ describe("the question over the Bin, one double-click later", () => {
         ports={{ store: new LocalDesktopStore(memStorage()), disableConnection: true, askTransport: new StubAskTransport(), askVoice: null }}
       />,
     );
-    const archiveArtifact = vi.fn(async () => ({}));
+    const archiveArtifact = vi.fn(async (_args: { artifactId: string }) => ({}));
     h.connection = { query: { archiveArtifact } };
     expect(h.dock).not.toBeNull();
+    await dropFile("a-1", "cut-03.mov");
+    const dock = document.querySelector("[data-os-dock]") as HTMLElement;
+    expect(within(dock).getByText('Archive "cut-03.mov"?')).toBeTruthy();
+    return { archiveArtifact, dock, dropFile };
+  }
+
+  /** Another file lands on the Bin, as a finished drag hands the dock it. */
+  async function dropFile(artifactId: string, name: string) {
     await act(async () => {
       h.dock!.onDragEnd({
-        active: { id: "item:desk-1", data: { current: { artifactId: "a-1", name: "cut-03.mov", folder: false, deskItemId: "" } } },
+        active: { id: `item:${artifactId}`, data: { current: { artifactId, name, folder: false, deskItemId: "" } } },
         over: { id: BIN_DROPPABLE_ID },
       });
     });
-    const dock = document.querySelector("[data-os-dock]") as HTMLElement;
-    expect(within(dock).getByText('Archive "cut-03.mov"?')).toBeTruthy();
-    return { archiveArtifact, dock };
   }
 
   it("does not archive on a press that comes straight after the question, and does once it is read", async () => {
@@ -119,5 +124,32 @@ describe("the question over the Bin, one double-click later", () => {
     });
     expect(within(dock).queryByText('Archive "cut-03.mov"?')).toBeNull();
     expect(archiveArtifact).not.toHaveBeenCalled();
+  });
+
+  it("holds the buttons again when a second dropped file changes the question under them", async () => {
+    // The first question has been read and its buttons answer. A second file is
+    // dropped while it is open: the same Archive and Cancel stand where they
+    // stood, and the question is about another file. A press that lands now was
+    // aimed at the first question.
+    const { archiveArtifact, dock, dropFile } = await drop();
+    await readTheBar();
+    await dropFile("a-2", "cut-04.mov");
+    expect(within(dock).getByText('Archive "cut-04.mov"?')).toBeTruthy();
+    expect(within(dock).queryByText('Archive "cut-03.mov"?')).toBeNull();
+
+    betweenTheClicks();
+    await act(async () => {
+      fireEvent.click(within(dock).getByRole("button", { name: "Archive" }));
+    });
+    expect(archiveArtifact).not.toHaveBeenCalled();
+    expect(within(dock).getByText('Archive "cut-04.mov"?')).toBeTruthy();
+
+    // Read, it archives the file it asks about -- not the one it asked about before.
+    await readTheBar();
+    await act(async () => {
+      fireEvent.click(within(dock).getByRole("button", { name: "Archive" }));
+    });
+    expect(archiveArtifact).toHaveBeenCalledTimes(1);
+    expect(archiveArtifact).toHaveBeenCalledWith({ artifactId: "a-2" });
   });
 });

@@ -213,6 +213,36 @@ describe("a folder's archive, one double-click later", () => {
     expect(screen.queryByText(/Archive "Client videos" and its 2 items\?/)).toBeNull();
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
   });
+
+  it("holds the buttons again when another folder is chosen while one is asked about", async () => {
+    // The same Archive and Cancel stand under a question about another folder.
+    const connection = fakeConnection({
+      folders: [folderRow({ id: "f-vid", name: "Client videos" }), folderRow({ id: "f-old", name: "Old reels" })],
+      artifacts: [
+        artifactRow({ id: "a-1", title: "one.mp4", folderId: "f-vid" }),
+        artifactRow({ id: "a-2", title: "two.mp4", folderId: "f-vid" }),
+        artifactRow({ id: "a-3", title: "three.mp4", folderId: "f-old" }),
+        artifactRow({ id: "a-4", title: "four.mp4", folderId: "f-old" }),
+      ],
+    });
+    h.connection = connection;
+    await renderFiles();
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
+    await click(screen.getByRole("menuitem", { name: "Archive" }));
+    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    await readTheBar();
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Old reels/ }));
+    await click(screen.getByRole("menuitem", { name: "Archive" }));
+    const confirm = screen.getByText(/Archive "Old reels" and its 2 items\?/).closest(".os-notice") as HTMLElement;
+    betweenTheClicks();
+    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
+
+    await readTheBar();
+    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    expect(connection.callsNamed("archiveLibraryFolder")).toEqual(['mutation archiveLibraryFolder(folderId: "f-old")']);
+  });
 });
 
 describe("the inspector", () => {

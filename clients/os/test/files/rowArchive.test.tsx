@@ -145,4 +145,30 @@ describe("archiving from a file row, one double-click later", () => {
     expect(screen.queryByText('Move "cut-03.mov" to the Bin?')).toBeNull();
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(0);
   });
+
+  it("holds the buttons again when another file is chosen while one is asked about", async () => {
+    // The question is about another file now and the same buttons stand where
+    // they stood: a press that lands on them was aimed at the first question.
+    const connection = fakeConnection({
+      artifacts: [artifactRow({ id: "a-1", title: "cut-03.mov" }), artifactRow({ id: "a-2", title: "cut-04.mov" })],
+    });
+    h.connection = connection;
+    await renderFiles({ settings: { confirmBeforeArchive: true } });
+    await rightClickRow(/cut-03\.mov/);
+    await click(screen.getByRole("menuitem", { name: "Move to Bin" }));
+    expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
+    await readTheBar();
+
+    await rightClickRow(/cut-04\.mov/);
+    await click(screen.getByRole("menuitem", { name: "Move to Bin" }));
+    expect(screen.getByText('Move "cut-04.mov" to the Bin?')).toBeTruthy();
+    betweenTheClicks();
+    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    expect(connection.callsNamed("archiveArtifact")).toHaveLength(0);
+
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    expect(connection.callsNamed("archiveArtifact")).toHaveLength(1);
+    expect(connection.callsNamed("archiveArtifact")[0]).toContain('artifactId: "a-2"');
+  });
 });
