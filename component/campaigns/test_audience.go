@@ -121,7 +121,7 @@ func (w *Worker) handleTestAudienceSend(ctx context.Context, args map[string]any
 			return nil, err
 		}
 		if audience == "" || bare(str(setting, "audienceId")) != audience {
-			return nil, fmt.Errorf("choose and review this organization's testing audience in Campaigns Settings")
+			return nil, fmt.Errorf("choose and review this organization's testing audience in Email Settings")
 		}
 		if err := w.activeTestAudience(ctx, original.AccountID, audience); err != nil {
 			return nil, err

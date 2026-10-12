@@ -18,10 +18,10 @@ import type { EmailFeeds } from "./useEmail";
 
 // Email organizes reusable templates. File content is edited and previewed
 // by Productivity Tools, using the same revision-checked backend on both hosts.
-export function TemplatesSection({ feeds, writes, showFiled, openRequest }: {
+export function TemplatesSection({ feeds, writes, includeArchived, openRequest }: {
   feeds: EmailFeeds;
   writes: CampaignWrites;
-  showFiled: boolean;
+  includeArchived: boolean;
   /** A template to open, or the Add flow to start, from search, Ask or another page. */
   openRequest?: OpenRequest;
 }) {
@@ -39,9 +39,9 @@ export function TemplatesSection({ feeds, writes, showFiled, openRequest }: {
       setOpenId(target.id);
     }
   });
-  const source = useLiveView<Row, TemplateRow>(feeds.templates.source, `filed:${showFiled}`, rows => {
+  const source = useLiveView<Row, TemplateRow>(feeds.templates.source, `archived:${includeArchived}`, rows => {
     const templates = rows.map(templateFromRow).filter(t => t.id !== "");
-    return showFiled ? templates : templates.filter(t => !templateIsArchived(t));
+    return includeArchived ? templates : templates.filter(t => !templateIsArchived(t));
   });
   // A PAGE OPENS WHICHEVER TEMPLATE ITS ID NAMES, however the list is filtered
   // (`recordNamed`): an archived one is hidden from the list by default and
@@ -72,7 +72,7 @@ export function TemplatesSection({ feeds, writes, showFiled, openRequest }: {
   return <div className="os-app-stack">
     <Head title="Templates" meta={listCount(source?.snapshot)}><AddButton onClick={() => setAdding(true)} label="New template" /></Head>
     {feeds.templates.snapshot.error ? <Notice tone="error" sentence="This cluster did not return your templates."><Button onClick={feeds.templates.reseed}>Try again</Button></Notice> : null}
-    <LiveList<TemplateRow> key={`templates:${showFiled}`} source={source} rowId={t => t.id} fingerprint={templateFingerprint} label="Your templates"
+    <LiveList<TemplateRow> key={`templates:${includeArchived}`} source={source} rowId={t => t.id} fingerprint={templateFingerprint} label="Your templates"
       emptyText="No templates yet."
       emptyContent={<EmptyState icon={FileText} title="No templates yet">Create a template and shape it in Productivity Tools.</EmptyState>}
       renderRow={(template, tick) => <RecordRow icon={<FileText size={16} aria-hidden />} name={templateName(template)}

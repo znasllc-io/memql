@@ -11,7 +11,7 @@ import { useSession } from "../../chrome/access";
 import { absent, figureFrom, type Figure } from "../../kit/measure";
 import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
-import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
+import { feedIsBehind, useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
 import {
   AUDIENCE_CONCEPT,
   CAMPAIGN_CONCEPT,
@@ -170,8 +170,7 @@ interface Composition {
   readFor: (connection: Connection, id: string, signal: AbortSignal) => Promise<Row[]>;
 }
 
-/** `read` for each id, a few at a time. The first refusal ends it: a feed that
- *  could not read every id it was asked about does not claim to hold the rest. */
+/** `read` for each id, a few at a time. */
 async function readEach<T>(ids: readonly string[], read: (id: string) => Promise<T>, signal: AbortSignal): Promise<T[]> {
   const answers: T[] = [];
   let next = 0;
@@ -202,7 +201,35 @@ async function everyPage(read: (cursor: string) => Promise<Result>): Promise<Row
 
 const textOf = (row: Row, key: string): string => (typeof row[key] === "string" ? (row[key] as string) : "");
 
-function useComposedFeed(name: string, composition: Composition, ids: readonly string[]): LiveCollectionHandle<Row> {
+/**
+ * A composed feed: the collection, and what it knows about each id it was read
+ * over.
+ *
+ * THE ROWS ARE ONE COLLECTION'S, but a per-id read has three answers a list of
+ * rows cannot tell apart: the id has rows, the id has none, and the id has not
+ * been read -- or was refused. "No row" for an organization's testing audience
+ * is a real answer ("none chosen") and also what an unread or refused
+ * organization looks like, so a surface that draws the first for the other two
+ * invents a fact about somebody's organization.
+ */
+export interface ComposedFeed extends LiveCollectionHandle<Row> {
+  /** Whether this id has been read since the feed began, answered or refused. Before that, no rows is "not read yet". */
+  settled: (id: string) => boolean;
+  /** The engine's sentence when the last read of this id was refused; "" when it was answered. */
+  refusal: (id: string) => string;
+  /**
+   * Read this id's rows again and leave every other id's as they are -- what a
+   * write to one id's row asks for, in place of a `reseed()` that reads them all.
+   * When another read is already running the next one is a whole read instead,
+   * because the running one may be a recovery from a gap in the stream that a
+   * single id must not stand in for.
+   */
+  refresh: (id: string) => void;
+}
+
+const NO_ANSWERS: ReadonlyMap<string, string> = new Map();
+
+function useComposedFeed(name: string, composition: Composition, ids: readonly string[]): ComposedFeed {
   // The SET, not the array: callers hand a new array every render.
   const signature = [...new Set(ids)].filter((id) => id !== "").sort().join("\n");
   const wanted = useMemo(() => new Set(signature === "" ? [] : signature.split("\n")), [signature]);
@@ -210,14 +237,61 @@ function useComposedFeed(name: string, composition: Composition, ids: readonly s
   latest.current = { wanted, signature };
   /** The set the last seed STARTED with, so a change after it re-reads. */
   const seeded = useRef<string | null>(null);
+  /** Per id, once read: "" when it was answered, else the engine's refusal. */
+  const [answers, setAnswers] = useState<ReadonlyMap<string, string>>(NO_ANSWERS);
+  /** The ids a `refresh()` is asking the seed it is about to start to read. */
+  const only = useRef<ReadonlySet<string> | null>(null);
+  /** The handle itself, for the seed to read what the collection holds now. */
+  const handle = useRef<LiveCollectionHandle<Row> | null>(null);
 
   const feed = useLiveCollection<Row>(`campaigns:${name}`, (connection) => ({
     concept: composition.concept,
     seed: async (_cursor, signal) => {
       const { wanted: asked, signature: set } = latest.current;
       seeded.current = set;
-      const answers = await readEach([...asked], (id) => composition.readFor(connection, id, signal), signal);
-      return { rows: answers.flat(), nextCursor: "" };
+      // Taken by the seed that starts first, so it can only ever mean the one a
+      // `refresh()` started: any other seed is a whole read.
+      const partial = only.current;
+      only.current = null;
+      // What the collection holds now, by the id each row answers to.
+      const held = new Map<string, Row[]>();
+      for (const row of handle.current?.source?.snapshot.rows ?? []) {
+        const owner = composition.ownerOf(flatten(row));
+        const bucket = held.get(owner);
+        if (bucket === undefined) held.set(owner, [row]);
+        else bucket.push(row);
+      }
+      const heldFor = (id: string) => held.get(id) ?? [];
+
+      // EACH ID IS ITS OWN ANSWER. One organization this person may not read
+      // must not empty the feed for the ones they may, so a refusal is kept
+      // against its id (and the rows that id last had are kept too: a refusal
+      // is not a zero) while every other id lands.
+      const reading = [...asked].filter((id) => partial === null || partial.has(id));
+      const read = await readEach(reading, async (id) => {
+        try {
+          return { id, rows: await composition.readFor(connection, id, signal), refusal: "" };
+        } catch (err) {
+          if (signal.aborted) throw err;
+          return { id, rows: [] as Row[], refusal: describe(err) };
+        }
+      }, signal);
+      const fresh = new Map(read.map((answer) => [answer.id, answer]));
+      const rows = [...asked].flatMap((id) => {
+        const answer = fresh.get(id);
+        return answer !== undefined && answer.refusal === "" ? answer.rows : heldFor(id);
+      });
+      setAnswers((previous) => {
+        const next = new Map<string, string>();
+        for (const id of asked) {
+          const answer = fresh.get(id);
+          const known = answer !== undefined ? answer.refusal : previous.get(id);
+          if (known !== undefined) next.set(id, known);
+        }
+        const same = next.size === previous.size && [...next].every(([id, refusal]) => previous.get(id) === refusal);
+        return same ? previous : next;
+      });
+      return { rows, nextCursor: "" };
     },
     // The stream carries every row of the concept the caller may see; this
     // feed holds the ones it was asked about.
@@ -228,6 +302,7 @@ function useComposedFeed(name: string, composition: Composition, ids: readonly s
     },
     paged: false,
   }));
+  handle.current = feed;
 
   const reseed = feed.reseed;
   useEffect(() => {
@@ -236,12 +311,31 @@ function useComposedFeed(name: string, composition: Composition, ids: readonly s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature]);
 
-  return feed;
+  const refresh = useCallback((id: string) => {
+    only.current = new Set([id]);
+    // A seed that is not already running starts INSIDE this call and takes
+    // `only`; one that is running makes this a no-op that queues a follow-up,
+    // and the follow-up is a whole read.
+    handle.current?.reseed();
+    only.current = null;
+  }, []);
+
+  // The feed's own error, or else the first id's refusal: a surface that reads
+  // `snapshot.error` still hears that something could not be read, and one that
+  // cares WHICH id asks `refusal(id)`.
+  const firstRefusal = useMemo(() => [...answers.values()].find((refusal) => refusal !== "") ?? "", [answers]);
+  const snapshot = useMemo(
+    () => (feed.snapshot.error !== "" || firstRefusal === "" ? feed.snapshot : { ...feed.snapshot, error: firstRefusal }),
+    [feed.snapshot, firstRefusal],
+  );
+  const settled = useCallback((id: string) => answers.has(id), [answers]);
+  const refusal = useCallback((id: string) => answers.get(id) ?? "", [answers]);
+  return { ...feed, snapshot, settled, refusal, refresh };
 }
 
 /** The repeating schedule of every campaign in view: one subscription over
  *  `v1:campaigns:campaignSeries`, `campaignSeriesForCampaign` read per id. */
-export function useSeriesFeed(campaignIds: readonly string[]): LiveCollectionHandle<Row> {
+export function useSeriesFeed(campaignIds: readonly string[]): ComposedFeed {
   return useComposedFeed("series", {
     concept: "v1:campaigns:campaignSeries",
     ownerOf: (row) => textOf(row, "sourceCampaignId"),
@@ -252,7 +346,7 @@ export function useSeriesFeed(campaignIds: readonly string[]): LiveCollectionHan
 
 /** The testing audience of every organization in view: one subscription over
  *  `v1:campaigns:testSettings`, `campaignTestSettings` read per id. */
-export function useTestSettingsFeed(accountIds: readonly string[]): LiveCollectionHandle<Row> {
+export function useTestSettingsFeed(accountIds: readonly string[]): ComposedFeed {
   return useComposedFeed("test-settings", {
     concept: "v1:campaigns:testSettings",
     ownerOf: (row) => textOf(row, "accountId"),
@@ -264,7 +358,7 @@ export function useTestSettingsFeed(accountIds: readonly string[]): LiveCollecti
 /** The signup forms of every audience in view: one subscription over
  *  `v1:campaigns:newsletterBinding`, `newslettersForAudience` read per id and
  *  walked to its last page. */
-export function useSignupFormFeed(audienceIds: readonly string[]): LiveCollectionHandle<Row> {
+export function useSignupFormFeed(audienceIds: readonly string[]): ComposedFeed {
   return useComposedFeed("signup-forms", {
     concept: "v1:campaigns:newsletterBinding",
     ownerOf: (row) => textOf(row, "audienceId"),
@@ -274,10 +368,12 @@ export function useSignupFormFeed(audienceIds: readonly string[]): LiveCollectio
 }
 
 export interface EmailRecordFeeds {
-  series: LiveCollectionHandle<Row>;
-  testSettings: LiveCollectionHandle<Row>;
-  signupForms: LiveCollectionHandle<Row>;
+  series: ComposedFeed;
+  testSettings: ComposedFeed;
+  signupForms: ComposedFeed;
 }
+
+const NO_IDS: readonly string[] = [];
 
 /**
  * The three composed feeds, over what the root's five are showing.
@@ -288,8 +384,12 @@ export interface EmailRecordFeeds {
  * whose testing audience a page may name; every audience may have a signup
  * form. Reading these only from the feeds that exist keeps a cluster with no
  * mail from reading anything per id at all.
+ *
+ * `alsoOrganizations` are organizations a page asks for whatever the lists
+ * hold: Settings chooses an organization's testing audience, and an
+ * organization with no campaign or audience has nothing in view to ask it by.
  */
-export function useEmailRecordFeeds(feeds: EmailFeeds): EmailRecordFeeds {
+export function useEmailRecordFeeds(feeds: EmailFeeds, alsoOrganizations: readonly string[] = NO_IDS): EmailRecordFeeds {
   const campaignRows = feeds.campaigns.snapshot.rows;
   const audienceRows = feeds.audiences.snapshot.rows;
   const drafts = useMemo(
@@ -298,14 +398,53 @@ export function useEmailRecordFeeds(feeds: EmailFeeds): EmailRecordFeeds {
   );
   const organizations = useMemo(() => {
     const accounts = [...campaignRows.map(campaignFromRow), ...audienceRows.map(audienceFromRow)].map((r) => r.accountId);
-    return [...new Set(accounts.filter((id) => id !== ""))];
-  }, [campaignRows, audienceRows]);
+    return [...new Set([...accounts, ...alsoOrganizations].filter((id) => id !== ""))];
+  }, [campaignRows, audienceRows, alsoOrganizations]);
   const audiences = useMemo(() => audienceRows.map(audienceFromRow).map((a) => a.id).filter((id) => id !== ""), [audienceRows]);
   return {
     series: useSeriesFeed(drafts),
     testSettings: useTestSettingsFeed(organizations),
     signupForms: useSignupFormFeed(audiences),
   };
+}
+
+/**
+ * What a surface may honestly say about something a feed holds:
+ *
+ *   reading      the feed has not answered yet -- a skeleton, never a warning
+ *   refused      the engine refused this id's read -- its sentence, in place
+ *   unconfirmed  the feed is behind (degraded or disconnected) -- the last rows,
+ *                with a notice that they cannot be confirmed
+ *   known        read, and current
+ *
+ * Reading is not a fault. A notice that says "not confirmed" during the first
+ * read is a warning drawn about nothing wrong, on every page load.
+ */
+export type Knowledge = "reading" | "refused" | "unconfirmed" | "known";
+
+/** What one id of a composed feed knows, and the sentence when it was refused. */
+export function knowledgeOf(feed: ComposedFeed, id: string): { knowledge: Knowledge; refusal: string } {
+  const refusal = feed.refusal(id);
+  if (refusal !== "") return { knowledge: "refused", refusal };
+  if (feedIsBehind(feed.snapshot.state)) return { knowledge: "unconfirmed", refusal: "" };
+  return { knowledge: feed.settled(id) ? "known" : "reading", refusal: "" };
+}
+
+/** What a plain list feed knows: still reading, behind, or known. */
+export function listKnowledge(feed: LiveCollectionHandle<Row>): Exclude<Knowledge, "refused"> {
+  if (feedIsBehind(feed.snapshot.state)) return "unconfirmed";
+  return feed.snapshot.state === "seeding" ? "reading" : "known";
+}
+
+/**
+ * What a surface that depends on several feeds may say: the least it can claim.
+ * A refusal outranks a feed that is behind, which outranks one still reading.
+ */
+export function weakest(...answers: Knowledge[]): Knowledge {
+  for (const worst of ["refused", "unconfirmed", "reading"] as const) {
+    if (answers.includes(worst)) return worst;
+  }
+  return "known";
 }
 
 // ---------------------------------------------------------------------------

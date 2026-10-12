@@ -579,12 +579,18 @@ export interface SenderFacts {
 }
 
 export interface CreateSenderState extends WriteState {
-  create: (facts: SenderFacts) => Promise<string>;
+  /**
+   * `senderIdentityId` is the CALLER'S, held for the life of the flow that adds
+   * the sender. A write whose answer was lost (a dropped connection, a refusal
+   * the person fixes and tries again) is retried under the same id and writes
+   * the same sender, rather than a second one the person then has to find and
+   * archive.
+   */
+  create: (senderIdentityId: string, facts: SenderFacts) => Promise<boolean>;
 }
 
 export function useCreateSender(): CreateSenderState {
-  const { busy, error, reset, call } = useWrite(async (query, facts: SenderFacts) => {
-    const senderIdentityId = newShortId();
+  const { busy, error, reset, call } = useWrite(async (query, senderIdentityId: string, facts: SenderFacts) => {
     await query.createSenderIdentity({
       senderIdentityId,
       address: facts.address.trim(),
@@ -593,8 +599,8 @@ export function useCreateSender(): CreateSenderState {
       accountId: facts.accountId.trim(),
       notes: omitBlank(facts.notes),
     });
-    return senderIdentityId;
-  }, "");
+    return true;
+  }, false);
   return { busy, error, reset, create: call };
 }
 
@@ -602,6 +608,17 @@ export interface UpdateSenderState extends WriteState {
   update: (senderIdentityId: string, facts: SenderFacts) => Promise<boolean>;
 }
 
+/**
+ * Save what a sender's page edits.
+ *
+ * THE FORM'S CONTENTS ARE THE FACTS, so Reply to and Notes go as typed, empty
+ * included. Every update here read-merges -- a field left out inherits its
+ * stored value -- and that is the right thing for a form that sends only what
+ * changed, and the wrong one for this: a person who clears the reply-to means
+ * "replies come to the sender itself", and leaving the field out would keep the
+ * old address while the page said it was saved. An explicit empty string is a
+ * value, and it blanks the stored one.
+ */
 export function useUpdateSender(): UpdateSenderState {
   const { busy, error, reset, call } = useWrite(
     async (query, senderIdentityId: string, facts: SenderFacts) => {
@@ -609,9 +626,9 @@ export function useUpdateSender(): UpdateSenderState {
         senderIdentityId,
         address: facts.address.trim(),
         fromName: facts.fromName.trim(),
-        replyTo: omitBlank(facts.replyTo),
+        replyTo: facts.replyTo.trim(),
         accountId: facts.accountId.trim(),
-        notes: omitBlank(facts.notes),
+        notes: facts.notes.trim(),
       });
       return true;
     },

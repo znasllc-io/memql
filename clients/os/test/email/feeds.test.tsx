@@ -15,7 +15,7 @@ vi.mock("../../src/auth/context", () => ({
 
 const { EmailApp } = await import("../../src/apps/email/EmailApp");
 const { LocalEmailSettingsStore } = await import("../../src/apps/email/settings");
-const { useSeriesFeed, useSignupFormFeed, useSubscriberCounts, useTestSettingsFeed } = await import("../../src/apps/email/useEmail");
+const { knowledgeOf, listKnowledge, useEmailFeeds, useSeriesFeed, useSignupFormFeed, useSubscriberCounts, useTestSettingsFeed, weakest } = await import("../../src/apps/email/useEmail");
 const { absent, figureOf } = await import("../../src/kit/measure");
 const { ACCOUNT_CONCEPT } = await import("../../src/apps/accounts/rows");
 const { SITE_CONCEPT } = await import("../../src/apps/deployables/concepts");
@@ -160,7 +160,7 @@ describe("one subscription per concept", () => {
 
     // Settings, with both pages still open: the testing settings and the account list again.
     section("settings");
-    expect(await within(pane("settings")).findByText("Testing audience", { selector: "h4" })).toBeTruthy();
+    expect(await within(pane("settings")).findByRole("heading", { level: 4, name: "Testing" })).toBeTruthy();
     noConceptHasTwo(conn);
 
     const open = liveSubscriptions(conn);
@@ -223,7 +223,7 @@ describe("composed feeds", () => {
       ],
       campaignSeries: [{ id: "series-1", sourceCampaignId: "d1", status: "active", intervalWeeks: 3, timeZone: "UTC", anchorAt: "2028-01-02T16:00:00Z", nextAt: "2028-01-23T16:00:00Z", createdAt: "2027-10-01T12:00:00Z" }],
     });
-    mount(conn, "campaigns", { showFiled: true });
+    mount(conn, "campaigns", { includeArchived: true });
     await within(pane("campaigns")).findByText("Welcome series");
     await waitFor(() => expect(conn.query.campaignSeriesForCampaign).toHaveBeenCalledTimes(2));
 
@@ -280,12 +280,12 @@ describe("one campaign page", () => {
         campaignRow({ id: "s1", name: "Already sent", status: "sent" }),
       ],
     });
-    const { view } = mount(conn, "campaigns", { showFiled: true });
+    const { view } = mount(conn, "campaigns", { includeArchived: true });
     fireEvent.click(await within(pane("campaigns")).findByText("Draft one"));
     expect(await within(pane("campaigns")).findByRole("region", { name: "Repeating campaign" })).toBeTruthy();
 
     view.unmount();
-    mount(conn, "campaigns", { showFiled: true });
+    mount(conn, "campaigns", { includeArchived: true });
     fireEvent.click(await within(pane("campaigns")).findByText("Already sent"));
     await within(pane("campaigns")).findByRole("region", { name: "Already sent progress" });
     expect(within(pane("campaigns")).queryByRole("region", { name: "Repeating campaign" })).toBeNull();
@@ -361,7 +361,7 @@ describe("a composed feed", () => {
     expect(conn.query.newslettersForAudience.mock.calls[1]![1]).toMatchObject({ cursor: "more" });
   });
 
-  it("says so, in the engine's sentence, when it could not read every id", async () => {
+  it("says so, in the engine's sentence, when it could not read every id -- and still holds the ids it could", async () => {
     const conn = fakeConnection({ testSettings: [{ id: "ts1", accountId: "acme", audienceId: "a1" }] });
     conn.query.campaignTestSettings.mockImplementation(async (args) => {
       if ((args as { accountId?: string }).accountId === "other") throw new Error("Reading testing settings is not yours to do.");
@@ -369,9 +369,92 @@ describe("a composed feed", () => {
     });
     h.connection = conn;
     const { result } = renderHook(() => useTestSettingsFeed(["acme", "other"]));
-    // A feed that could not read one id does not claim to hold the others as
-    // the whole answer: the failure is the feed's, and it is not a zero.
+    // The failure is the feed's to report, and it is not a zero...
     await waitFor(() => expect(result.current.snapshot.error).toBe("Reading testing settings is not yours to do."));
+    // ...but it is the REFUSED id's: one organization this person may not read
+    // does not empty the feed for the one they may.
+    expect(result.current.snapshot.rows).toEqual([{ id: "ts1", accountId: "acme", audienceId: "a1" }]);
+    expect(result.current.refusal("other")).toBe("Reading testing settings is not yours to do.");
+    expect(result.current.refusal("acme")).toBe("");
+    // Both were read; one was answered and one was refused. An id nobody asked about was neither.
+    expect(result.current.settled("acme")).toBe(true);
+    expect(result.current.settled("other")).toBe(true);
+    expect(result.current.settled("never-asked")).toBe(false);
+  });
+
+  it("does not call an id read until it has been", async () => {
+    const conn = fakeConnection({ testSettings: [{ id: "ts1", accountId: "acme", audienceId: "a1" }] });
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    const answer = conn.query.campaignTestSettings.getMockImplementation()!;
+    conn.query.campaignTestSettings.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    h.connection = conn;
+    const { result } = renderHook(() => useTestSettingsFeed(["acme"]));
+
+    // No row yet is "not read yet", which is not "no testing audience".
+    expect(result.current.settled("acme")).toBe(false);
+    await act(async () => { release(); });
+    await waitFor(() => expect(result.current.settled("acme")).toBe(true));
+    expect(result.current.snapshot.rows).toHaveLength(1);
+  });
+
+  it("reads one id again and leaves every other id as it was", async () => {
+    const acme = { id: "ts1", accountId: "acme", audienceId: "a1", createdAt: "2026-09-01T00:00:00Z" };
+    const other = { id: "ts2", accountId: "other", audienceId: "a2", createdAt: "2026-09-02T00:00:00Z" };
+    const conn = fakeConnection({ testSettings: [acme, other] });
+    h.connection = conn;
+    const { result } = renderHook(() => useTestSettingsFeed(["acme", "other"]));
+    await waitFor(() => expect(result.current.snapshot.rows).toHaveLength(2));
+    const reads = conn.query.campaignTestSettings.mock.calls.length;
+    expect(reads).toBe(2);
+
+    conn.query.campaignTestSettings.mockImplementation(async (args) =>
+      rowsResult((args as { accountId?: string }).accountId === "acme" ? [{ ...acme, audienceId: "a9", createdAt: "2026-10-01T00:00:00Z" }] : [other]),
+    );
+    act(() => result.current.refresh("acme"));
+    await waitFor(() => expect(result.current.snapshot.rows.find((row) => row.accountId === "acme")).toMatchObject({ audienceId: "a9" }));
+
+    // One more read, for the id that changed; the other organization is neither read nor lost.
+    expect(conn.query.campaignTestSettings).toHaveBeenCalledTimes(reads + 1);
+    expect(conn.query.campaignTestSettings.mock.calls.at(-1)![0]).toEqual({ accountId: "acme" });
+    expect(result.current.snapshot.rows.find((row) => row.accountId === "other")).toEqual(other);
+    expect(opened(conn, TEST_SETTINGS)).toBe(1);
+  });
+
+  it("keeps an id's last rows, and says why, when a later read of it is refused", async () => {
+    const acme = { id: "ts1", accountId: "acme", audienceId: "a1", createdAt: "2026-09-01T00:00:00Z" };
+    const conn = fakeConnection({ testSettings: [acme] });
+    h.connection = conn;
+    const { result } = renderHook(() => useTestSettingsFeed(["acme"]));
+    await waitFor(() => expect(result.current.snapshot.rows).toEqual([acme]));
+
+    conn.query.campaignTestSettings.mockRejectedValueOnce(new Error("The cluster is busy."));
+    act(() => result.current.refresh("acme"));
+    await waitFor(() => expect(result.current.refusal("acme")).toBe("The cluster is busy."));
+    // What was known stays known: a refusal is not a zero.
+    expect(result.current.snapshot.rows).toEqual([acme]);
+
+    act(() => result.current.refresh("acme"));
+    await waitFor(() => expect(result.current.refusal("acme")).toBe(""));
+    expect(result.current.snapshot.error).toBe("");
+  });
+
+  it("reads everything again when a single-id read is asked for while a read is already running", async () => {
+    const conn = fakeConnection({ testSettings: [{ id: "ts1", accountId: "acme", audienceId: "a1" }, { id: "ts2", accountId: "other", audienceId: "a2" }] });
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    const answer = conn.query.campaignTestSettings.getMockImplementation()!;
+    conn.query.campaignTestSettings.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    h.connection = conn;
+    const { result } = renderHook(() => useTestSettingsFeed(["acme", "other"]));
+    await waitFor(() => expect(conn.query.campaignTestSettings).toHaveBeenCalledTimes(2));
+
+    // The running read may be a recovery from a gap in the stream, which a
+    // single-id read must never stand in for: the follow-up is a whole read.
+    act(() => result.current.refresh("acme"));
+    await act(async () => { release(); });
+    await waitFor(() => expect(conn.query.campaignTestSettings).toHaveBeenCalledTimes(4));
+    expect(conn.query.campaignTestSettings.mock.calls.slice(2).map(([args]) => (args as { accountId: string }).accountId).sort()).toEqual(["acme", "other"]);
   });
 
   it("reads a crowd of ids a few at a time", async () => {
@@ -392,6 +475,63 @@ describe("a composed feed", () => {
     await waitFor(() => expect(result.current.snapshot.state).toBe("live"));
     expect(most).toBeGreaterThan(1);
     expect(most).toBeLessThanOrEqual(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What a feed knows
+// ---------------------------------------------------------------------------
+
+describe("what a surface may say about a feed", () => {
+  type Stoppable = { markDisconnected: () => void };
+
+  it("reads, answers, refuses, and falls behind: four different things, never a warning for the first", async () => {
+    const conn = fakeConnection({ testSettings: [{ id: "ts1", accountId: "acme", audienceId: "a1" }] });
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    const answer = conn.query.campaignTestSettings.getMockImplementation()!;
+    conn.query.campaignTestSettings.mockImplementation(async (args, opts) => {
+      await gate;
+      if ((args as { accountId?: string }).accountId === "other") throw new Error("Not yours to read.");
+      return answer(args, opts);
+    });
+    h.connection = conn;
+    const { result } = renderHook(() => useTestSettingsFeed(["acme", "other"]));
+
+    expect(knowledgeOf(result.current, "acme")).toEqual({ knowledge: "reading", refusal: "" });
+    await act(async () => { release(); });
+    await waitFor(() => expect(knowledgeOf(result.current, "acme").knowledge).toBe("known"));
+    expect(knowledgeOf(result.current, "other")).toEqual({ knowledge: "refused", refusal: "Not yours to read." });
+
+    // A feed that has fallen behind cannot confirm what it holds -- the last
+    // rows stay, and the surface says so; a refusal is still the engine's own.
+    act(() => (result.current.source as unknown as Stoppable).markDisconnected());
+    expect(knowledgeOf(result.current, "acme")).toEqual({ knowledge: "unconfirmed", refusal: "" });
+    expect(knowledgeOf(result.current, "other").knowledge).toBe("refused");
+    expect(result.current.snapshot.rows).toHaveLength(1);
+  });
+
+  it("knows a list feed is reading until it is not, and behind when it is", async () => {
+    const conn = fakeConnection({ audiences: [audienceRow({ id: "a1" })] });
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    const answer = conn.query.audiences.getMockImplementation()!;
+    conn.query.audiences.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    h.connection = conn;
+    const { result } = renderHook(() => useEmailFeeds());
+    expect(listKnowledge(result.current.audiences)).toBe("reading");
+    await act(async () => { release(); });
+    await waitFor(() => expect(listKnowledge(result.current.audiences)).toBe("known"));
+    act(() => (result.current.audiences.source as unknown as Stoppable).markDisconnected());
+    expect(listKnowledge(result.current.audiences)).toBe("unconfirmed");
+  });
+
+  it("claims no more than the least of several answers: refused, then behind, then reading", () => {
+    expect(weakest("known", "known")).toBe("known");
+    expect(weakest("known", "reading")).toBe("reading");
+    expect(weakest("reading", "unconfirmed")).toBe("unconfirmed");
+    expect(weakest("unconfirmed", "refused", "known")).toBe("refused");
+    expect(weakest()).toBe("known");
   });
 });
 

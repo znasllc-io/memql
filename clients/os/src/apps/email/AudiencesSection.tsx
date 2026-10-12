@@ -58,14 +58,14 @@ export function AudiencesSection({
   recordFeeds,
   writes,
   uploads,
-  showFiled,
+  includeArchived,
   openRequest,
 }: {
   feeds: EmailFeeds;
   recordFeeds: EmailRecordFeeds;
   writes: CampaignWrites;
   uploads: UploadProvider;
-  showFiled: boolean;
+  includeArchived: boolean;
   /** An audience to open, or the Add flow to start, from search, Ask or another page. */
   openRequest?: OpenRequest;
 }) {
@@ -83,10 +83,10 @@ export function AudiencesSection({
 
   const source = useLiveView<Row, AudienceRow>(
     feeds.audiences.source,
-    `filed:${showFiled}`,
+    `archived:${includeArchived}`,
     (rows) => {
       const audiences = rows.map(audienceFromRow).filter((a) => a.id !== "");
-      return showFiled ? audiences : audiences.filter((a) => !audienceIsArchived(a));
+      return includeArchived ? audiences : audiences.filter((a) => !audienceIsArchived(a));
     },
   );
 
@@ -158,7 +158,7 @@ export function AudiencesSection({
       ) : null}
 
       <LiveList<AudienceRow>
-        key={`audiences:${showFiled}`}
+        key={`audiences:${includeArchived}`}
         source={source}
         rowId={(a) => a.id}
         fingerprint={audienceFingerprint}

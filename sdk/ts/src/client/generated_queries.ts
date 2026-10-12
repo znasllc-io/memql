@@ -7700,7 +7700,8 @@ QueryClient.prototype.sendableRecipientsForAudience = function (this: QueryClien
   return this.executeNamed("sendableRecipientsForAudience", buildSendableRecipientsForAudience(args), opts);
 };
 
-/** Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all. */
+/** Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders list in the OS app's Settings. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+SORTED BY WHEN IT WAS ADDED, NOT BY ADDRESS, because the sort is also the page cursor. A payload field is not keyset-eligible, so a list ordered by `address` could not continue past its first page: a caller walking it past 200 identities got the first 200 and a list that ended without saying so. */
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentities"] in generated_concepts.ts).
 export interface SenderIdentitiesArgs {
   status?: string;
@@ -7722,7 +7723,7 @@ QueryClient.prototype.senderIdentities = function (this: QueryClient, args: Send
   return this.executeNamed("senderIdentities", buildSenderIdentities(args), opts);
 };
 
-/** The sending identities filed under one account. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1). */
+/** The sending identities filed under one account, newest first. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1). */
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentitiesForAccount"] in generated_concepts.ts).
 export interface SenderIdentitiesForAccountArgs {
   accountId: string;

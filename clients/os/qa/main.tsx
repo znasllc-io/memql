@@ -1,12 +1,12 @@
 import { FilesApp } from "../src/apps/files/FilesApp";
 import { LocalFilesSettingsStore } from "../src/apps/files/settings";
 import { fakeConnection as filesConnection, artifactRow as filesArtifact, folderRow as filesFolder, fileRow as filesFile, versionRow as filesVersion, watchedFolderRow, withSession as filesSession } from "../test/files/harness";
-import { CampaignsSettingsSection } from "../src/apps/email/CampaignsSettingsSection";
+import { EmailApp } from "../src/apps/email/EmailApp";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
-import { DEFAULT_EMAIL_SETTINGS } from "../src/apps/email/settings";
-import { fakeConnection as campaignConnection, rowsResult, withSession as campaignSession } from "../test/email/harness";
+import { LocalEmailSettingsStore } from "../src/apps/email/settings";
+import { audienceRow as campaignAudience, fakeConnection as campaignConnection, rowsResult, senderRow as campaignSender, withSession as campaignSession } from "../test/email/harness";
 import { NewsletterPanel } from "../src/apps/email/NewsletterPanel";
-import { useEmailFeeds, useEmailRecordFeeds, useSeriesFeed, useSignupFormFeed } from "../src/apps/email/useEmail";
+import { useEmailFeeds, useSeriesFeed, useSignupFormFeed } from "../src/apps/email/useEmail";
 import { RecurrencePanel } from "../src/apps/email/RecurrencePanel";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
@@ -1201,8 +1201,20 @@ function azureEmailView(status: string) {
 function campaignSettingsView(connected: boolean) {
   return {
     connect: () => {
-      const conn = campaignConnection({ accounts: [accountRow({ id: "studio", name: "Our Studio" })] });
+      const conn = campaignConnection({
+        accounts: [accountRow({ id: "studio", name: "Our Studio" })],
+        // The connected scene is the populated one: senders (one put away), and an audience to test with.
+        ...(connected ? {
+          senderIdentities: [
+            campaignSender({ id: "qa-sender-1", address: "news@studio.example", fromName: "Studio News", replyTo: "hello@studio.example", accountId: "studio", createdAt: "2026-09-02T00:00:00Z" }),
+            campaignSender({ id: "qa-sender-2", address: "events@studio.example", fromName: "Studio Events", accountId: "studio", status: "disabled", createdAt: "2026-08-01T00:00:00Z" }),
+          ],
+          audiences: [campaignAudience({ id: "qa-audience-1", name: "Studio reviewers", accountId: "studio" })],
+          testSettings: [{ id: "qa-test", accountId: "studio", audienceId: "qa-audience-1", createdAt: "2026-09-03T00:00:00Z" }],
+        } : {}),
+      });
       Object.assign(conn.query, { emailAzureSetup: async ({ action }: { action: string }) => rowsResult([
+        action === "clusterStatus" ? { status: "connected", capture: true, resourceGroup: "mail" } :
         action === "begin" ? { status: "waiting", sessionId: "qa", userCode: "WXYZ-1234", verificationUri: "https://microsoft.com/devicelogin" } :
         connected ? { status: "ready", sender: "news@studio.example", replyTo: "hello@studio.example", plan: { domain: "studio.example" } } : { status: "unconfigured" },
       ]) });
@@ -1212,11 +1224,12 @@ function campaignSettingsView(connected: boolean) {
     render: () => <CampaignSettingsPane />,
   };
 }
+// Email -> Settings as the window shows it: the page inside the app that holds
+// it, so its organization, senders, testing audience and package read the same
+// feeds a real window's do. (Task 19 renames the scenes.)
 function CampaignSettingsPane() {
-  const [settings, setSettings] = useState(DEFAULT_EMAIL_SETTINGS);
-  const feeds = useEmailFeeds();
-  const recordFeeds = useEmailRecordFeeds(feeds);
-  return <WindowBody fallback="Email"><CampaignsSettingsSection feeds={feeds} recordFeeds={recordFeeds} settings={settings} update={patch => setSettings(old => ({ ...old, ...patch }))}/></WindowBody>;
+  const [store] = useState(() => new LocalEmailSettingsStore({ getItem: () => null, setItem: () => {} }));
+  return <WindowBody fallback="Email"><EmailApp sectionId="settings" navigate={() => {}} askContext={() => {}} store={store}/></WindowBody>;
 }
 
 function AccountsPane() {

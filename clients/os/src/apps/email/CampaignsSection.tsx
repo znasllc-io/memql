@@ -79,7 +79,7 @@ export function CampaignsSection({
   feeds,
   recordFeeds,
   writes,
-  showFiled,
+  includeArchived,
   trackByDefault,
   uploads,
   openRequest,
@@ -88,7 +88,7 @@ export function CampaignsSection({
   feeds: EmailFeeds;
   recordFeeds: EmailRecordFeeds;
   writes: CampaignWrites;
-  showFiled: boolean;
+  includeArchived: boolean;
   trackByDefault: boolean;
   /** A campaign to open, or the Add flow to start, from search, Ask or another page. */
   openRequest?: OpenRequest;
@@ -110,10 +110,10 @@ export function CampaignsSection({
   // predicate below runs on a campaignFromRow result.
   const source = useLiveView<Row, CampaignRow>(
     feeds.campaigns.source,
-    `filed:${showFiled}`,
+    `archived:${includeArchived}`,
     (rows) => {
       const campaigns = rows.map(campaignFromRow).filter((c) => c.id !== "");
-      return showFiled ? campaigns : campaigns.filter((c) => !campaignIsFinished(c));
+      return includeArchived ? campaigns : campaigns.filter((c) => !campaignIsFinished(c));
     },
   );
 
@@ -193,7 +193,7 @@ export function CampaignsSection({
           Revealing rows the browser already had is not the cluster sending
           them. */}
       <LiveList<CampaignRow>
-        key={`campaigns:${showFiled}`}
+        key={`campaigns:${includeArchived}`}
         source={source}
         rowId={(c) => c.id}
         // THE COUNTERS ARE NOT NAMED HERE. See campaignFingerprint: the drain
@@ -203,7 +203,7 @@ export function CampaignsSection({
         fingerprint={campaignFingerprint}
         label="Your campaigns"
         emptyText={
-          showFiled
+          includeArchived
             ? "No campaigns yet. Write one above -- you will need an audience and a template first."
             : "Nothing in flight. Start a campaign above -- or turn on finished campaigns in this app's settings to see what has already gone out."
         }

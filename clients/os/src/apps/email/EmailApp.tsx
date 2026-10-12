@@ -14,9 +14,7 @@ import { AccountOptionsProvider } from "../accounts/tie";
 import { AudiencesSection } from "./AudiencesSection";
 import { CampaignsOverview } from "./CampaignsOverview";
 import { CampaignsSection } from "./CampaignsSection";
-import { CampaignsSettingsSection } from "./CampaignsSettingsSection";
 import { RulesSection } from "./RulesSection";
-import { SendersSection } from "./SendersSection";
 import { TemplatesSection } from "./TemplatesSection";
 import { useCampaignWrites } from "./actions";
 import {
@@ -28,12 +26,15 @@ import {
 } from "./openRequest";
 import { emailPreview } from "./preview";
 import {
+  EMAIL_OPENING_TABS,
   EMAIL_SECTIONS,
   EMAIL_SECTION_IDS,
   LocalEmailSettingsStore,
   type EmailSettings,
   type EmailSettingsStore } from "./settings";
+import { SettingsSection } from "./settings/SettingsSection";
 import { useEmailFeeds, useEmailRecordFeeds } from "./useEmail";
+import "./email.css";
 
 // What a section outside this directory reaches for to open a record or start
 // an Add flow, and the type of the request a section is handed.
@@ -144,7 +145,16 @@ function EmailSections({
   );
 
   const feeds = useEmailFeeds();
-  const recordFeeds = useEmailRecordFeeds(feeds);
+  // THE ORGANIZATIONS SETTINGS HAS BEEN ON. The composed feeds read the
+  // organizations the lists show; an organization with no campaign or audience
+  // is not among them, and Settings asks for the one it is on. They accumulate,
+  // so choosing back an organization already visited reads nothing again.
+  const [settingsOrganizations, setSettingsOrganizations] = useState<readonly string[]>([]);
+  const noteOrganization = useCallback(
+    (accountId: string) => setSettingsOrganizations((held) => (accountId === "" || held.includes(accountId) ? held : [...held, accountId])),
+    [],
+  );
+  const recordFeeds = useEmailRecordFeeds(feeds, settingsOrganizations);
   const writes = useCampaignWrites();
 
   // THE OPEN INTENT (epic memql#4842, #4845): "show this campaign, this
@@ -192,8 +202,12 @@ function EmailSections({
     // the tab that holds the record, and a preference navigating after it
     // would win.
     if (intent) return;
-    if (settings.defaultSection && settings.defaultSection !== sectionId) {
-      navigate(settings.defaultSection);
+    // NOR TO A TAB THIS PERSON CANNOT OPEN. The preference is the browser's, and
+    // a browser is shared: what an owner chose is not a tab a writer can reach,
+    // and a window sent there would show nothing.
+    const preferred = EMAIL_OPENING_TABS.find((tab) => tab.id === settings.defaultSection);
+    if (preferred && accessAdmits(preferred.requires) && preferred.id !== sectionId) {
+      navigate(preferred.id);
     }
     // ONCE PER MOUNT, WHICH IS ONCE PER WINDOW.
   }, []);
@@ -212,15 +226,15 @@ function EmailSections({
       case "inbox":
         return <EmailInbox />;
       case "settings":
-        // A MAILBOX IS HOW THE APP SENDS, so it has no tab of its own: the list
-        // is reached from here, beneath the rest of Settings. It takes the
-        // pane over when a mailbox or its Add is open, as every list does.
         return (
-          <SendersSection
+          <SettingsSection
             feeds={feeds}
+            recordFeeds={recordFeeds}
             writes={writes}
-            showFiled={settings.showFiled}
-            above={<CampaignsSettingsSection feeds={feeds} recordFeeds={recordFeeds} settings={settings} update={updateSettings} />}
+            settings={settings}
+            update={updateSettings}
+            request={requests.settings}
+            onOrganization={noteOrganization}
           />
         );
       case "logs":
@@ -235,18 +249,18 @@ function EmailSections({
           />
         );
       case "audiences":
-        return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} uploads={uploadProvider} showFiled={settings.showFiled} openRequest={requests.audiences} />;
+        return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} uploads={uploadProvider} includeArchived={settings.includeArchived} openRequest={requests.audiences} />;
       case "templates":
-        return <TemplatesSection feeds={feeds} writes={writes} showFiled={settings.showFiled} openRequest={requests.templates} />;
+        return <TemplatesSection feeds={feeds} writes={writes} includeArchived={settings.includeArchived} openRequest={requests.templates} />;
       case "automations":
-        return <RulesSection feeds={feeds} writes={writes} showFiled={settings.showFiled} openRequest={requests.automations} />;
+        return <RulesSection feeds={feeds} writes={writes} includeArchived={settings.includeArchived} openRequest={requests.automations} />;
       default:
         return (
           <CampaignsSection
             feeds={feeds}
             recordFeeds={recordFeeds}
             writes={writes}
-            showFiled={settings.showFiled}
+            includeArchived={settings.includeArchived}
             trackByDefault={settings.trackByDefault}
             uploads={uploadProvider}
             openRequest={requests.campaigns}

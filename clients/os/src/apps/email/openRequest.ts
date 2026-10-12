@@ -36,9 +36,8 @@ export type OpenRequest = { revision: number } & OpenTarget;
 export type SettingsRequest = { accountId: string; revision: number };
 
 /**
- * The last request made of each tab. The Settings request is recorded for the
- * Organization field that scopes the whole Settings page; Settings does not
- * read it yet, because its three organization pickers are still three.
+ * The last request made of each tab. The Settings request is read by the
+ * Organization field that scopes the whole Settings page.
  */
 export type Requests = Partial<Record<OpenSection, OpenRequest>> & { settings?: SettingsRequest };
 
@@ -113,6 +112,26 @@ export function useOpenRequest(request: OpenRequest | undefined, apply: (target:
     if (request === undefined || request.revision === handled.current) return;
     handled.current = request.revision;
     latest.current("add" in request ? { add: true } : { id: request.id });
+  }, [request]);
+}
+
+/**
+ * Settings' side of `useOpenSettings`: act on a request the first time its
+ * revision is seen. Asking again for the same organization is a new revision,
+ * so it brings the person back to it after they have chosen another.
+ *
+ * `apply` is told the organization asked for and nothing about whether it can
+ * be chosen: the organizations may not have arrived yet, and Settings checks
+ * the choice against them when it draws, so a request made early still lands.
+ */
+export function useOpenSettingsRequest(request: SettingsRequest | undefined, apply: (accountId: string) => void): void {
+  const handled = useRef<number | undefined>(undefined);
+  const latest = useRef(apply);
+  latest.current = apply;
+  useLayoutEffect(() => {
+    if (request === undefined || request.revision === handled.current) return;
+    handled.current = request.revision;
+    latest.current(request.accountId);
   }, [request]);
 }
 

@@ -1,90 +1,51 @@
 import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { AutoRefresh, Button, Caption, Field, Notice, Panel, RecordList, RecordRow, Select, Subhead, formatMoment } from "../../kit";
+import { AutoRefresh, Button, Caption, InlineSkeleton, Notice, Panel, RecordList, RecordRow, Subhead, formatMoment } from "../../kit";
 import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
-import type { LiveCollectionHandle } from "../../live/useLiveCollection";
-import { AccountPicker } from "../accounts/AccountPicker";
-import { useAccountOptions } from "../accounts/tie";
-import { useDefaultOrganization } from "../accounts/organization";
-import { audienceFromRow, campaignFromRow, deliveryFromRow, type AudienceRow, type CampaignRow } from "./rows";
-import { EMAIL_REFRESH_MS, useCampaignDeliveries, useReading, type SendingReadiness } from "./useEmail";
+import { campaignFromRow, deliveryFromRow, type AudienceRow, type CampaignRow } from "./rows";
+import { EMAIL_REFRESH_MS, knowledgeOf, useCampaignDeliveries, useReading, type ComposedFeed, type SendingReadiness } from "./useEmail";
 import { useTestSend } from "./actions";
 import { SendBar } from "./SendBar";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 
 const noRows: Row[] = [];
 const text = (row: Record<string, unknown> | null, key: string) => typeof row?.[key] === "string" ? row[key] as string : "";
-const unavailable = (feed: LiveCollectionHandle<Row>) => feed.snapshot.state !== "live" || !!feed.snapshot.error;
 /** One organization's testing settings, out of the feed the app root retains for every organization in view. */
-const settingsOf = (feed: LiveCollectionHandle<Row>, accountId: string) =>
+const settingsOf = (feed: ComposedFeed, accountId: string) =>
   feed.snapshot.rows.map(flatten).find(row => text(row, "accountId") === accountId) ?? null;
 
-export function TestAudienceSettings({ audiences, testSettings }: { audiences: LiveCollectionHandle<Row>; testSettings: LiveCollectionHandle<Row> }) {
-  const accounts = useAccountOptions();
-  const defaultAccountId = useDefaultOrganization(accounts);
-  const [chosen, setChosen] = useState("");
-  const accountId = chosen || defaultAccountId;
-  return <Panel label="Testing audience"><Subhead>Testing audience</Subhead>
-    <Caption>Choose the internal audience that receives campaign tests for each organization. Manage its addresses in Audiences.</Caption>
-    <Field label="Organization"><AccountPicker id="test-organization" label="Testing organization" required accounts={accounts} value={accountId} onChange={setChosen} /></Field>
-    {accountId ? <TestAudienceChoice key={accountId} accountId={accountId} audiences={audiences} feed={testSettings} /> : null}
-  </Panel>;
-}
-
-function TestAudienceChoice({ accountId, audiences, feed }: { accountId: string; audiences: LiveCollectionHandle<Row>; feed: LiveCollectionHandle<Row> }) {
-  const connection = useOsConnection();
-  const row = settingsOf(feed, accountId);
-  const saved = text(row, "audienceId");
-  const [choice, setChoice] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const selected = choice ?? saved;
-  const options = audiences.snapshot.rows.map(audienceFromRow).filter(a => a.accountId === accountId && a.status === "active");
-  const blocked = unavailable(feed) || unavailable(audiences);
-  const save = async () => {
-    if (!connection || busy || blocked) return;
-    setBusy(true); setError("");
-    try {
-      await connection.query.campaignConfigureTestAudience({ accountId, audienceId: selected, expectedRevision: text(row, "createdAt") || undefined });
-      setChoice(null); feed.reseed();
-    } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
-    finally { setBusy(false); }
-  };
-  return <>
-    <Field label="Audience"><Select id={`test-audience-${accountId}`} label="Testing audience" value={selected} onChange={setChoice}>
-      <option value="">None selected</option>
-      {options.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-      {selected && !options.some(a => a.id === selected) ? <option value={selected}>Unavailable audience</option> : null}
-    </Select></Field>
-    <Button busy={busy} disabled={blocked || selected === saved} onClick={() => void save()}>Save testing audience</Button>
-    <Caption>Saved in the cluster and shared with this organization. Use a separate audience from the campaign’s live subscribers.</Caption>
-    {blocked ? <Notice tone="warn" sentence="Testing settings are not confirmed." next="Waiting for the connection to recover." /> : null}
-    {error ? <Notice tone="error" sentence="Testing audience was not saved." detail={error} /> : null}
-  </>;
-}
+// The Settings half of this file (choosing an organization's testing audience)
+// is `settings/TestingPanel.tsx`. What stays is the campaign page's: the audience
+// a test goes to, and its results.
 
 /** `sending` is the campaign page's own reading, asked for once and handed to
  *  every panel that needs it. */
 export function TestSendPanel({ campaign, audiences, testSettings: settings, sending }: {
-  campaign: CampaignRow; audiences: AudienceRow[]; testSettings: LiveCollectionHandle<Row>; sending: SendingReadiness;
+  campaign: CampaignRow; audiences: AudienceRow[]; testSettings: ComposedFeed; sending: SendingReadiness;
 }) {
   const testSend = useTestSend();
   const connection = useOsConnection();
   const row = settingsOf(settings, campaign.accountId);
+  // READING IS NOT A FAULT: a skeleton while the organization's testing audience
+  // is being read, a notice only when it was refused or cannot be confirmed.
+  const { knowledge, refusal } = knowledgeOf(settings, campaign.accountId);
   const audienceId = text(row, "audienceId");
   const audience = audiences.find(a => a.id === audienceId && a.accountId === campaign.accountId && a.status === "active");
   const read = useMemo(() => connection ? async (signal: AbortSignal) => (await connection.query.campaignTestRuns({ campaignId: campaign.id }, { signal })).rows() : null, [connection, campaign.id]);
   const history = useReading<Row[]>(noRows, read, [read]);
   const [expanded, setExpanded] = useState("");
-  const ready = sending.ready && !unavailable(settings) && !!audience && audienceId !== campaign.audienceId;
+  const ready = sending.ready && knowledge === "known" && !!audience && audienceId !== campaign.audienceId;
   const send = async () => { if (ready && await testSend.send(campaign.id, audienceId)) history.reload(); };
   const runs = history.value.map(campaignFromRow);
   return <Panel label="Send a test"><Subhead>Test results</Subhead>
     <AutoRefresh onRefresh={history.reload} busy={history.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
-    <Caption>{audience ? `Testing audience: ${audience.name}` : "Choose a testing audience for this organization in Settings."}</Caption>
+    {knowledge === "reading" ? <InlineSkeleton label="Loading the testing audience" />
+      : audience ? <Caption>{`Testing audience: ${audience.name}`}</Caption>
+      : knowledge === "known" ? <Caption>Choose a testing audience for this organization in Settings.</Caption> : null}
     {audienceId === campaign.audienceId ? <Notice tone="warn" sentence="Choose a separate testing audience in Settings." /> : null}
-    {unavailable(settings) ? <Notice tone="warn" sentence="Testing audience is not confirmed." next="Waiting for the connection to recover." /> : null}
+    {knowledge === "refused" ? <Notice tone="warn" sentence="Testing audience is not confirmed." detail={refusal} /> : null}
+    {knowledge === "unconfirmed" ? <Notice tone="warn" sentence="Testing audience is not confirmed." next="Waiting for the connection to recover." /> : null}
     {!sending.ready ? <Notice tone="warn" sentence="Finish sending setup before sending a test." detail={sending.reason}><Button onClick={sending.reload}>Check again</Button></Notice> : null}
     {sending.capture ? <Caption>View the test in the Email app. No email will reach the recipient’s inbox.</Caption> : null}
     {runs[0] ? <div aria-label="Latest test results"><Subhead meta={formatMoment(runs[0].startedAt || runs[0].createdAt)}>Latest test</Subhead><SendBar campaign={runs[0]} stats={null} showEngagement={false} /></div> : null}

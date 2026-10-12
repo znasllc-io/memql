@@ -215,7 +215,13 @@ func TestAudienceRunsUseNormalWorkerAcrossReplicas(t *testing.T) {
 	}
 	args["audienceId"] = live
 	args["requestId"] = "wrong-audience"
-	if _, err := workers[0].handleTestAudienceSend(owner, args, 0); err == nil {
+	_, err = workers[0].handleTestAudienceSend(owner, args, 0)
+	if err == nil {
 		t.Fatal("allowed unconfigured live audience")
+	}
+	// The refusal names the place the audience is chosen: the Email app's Settings.
+	// Campaigns stopped being an app when it became part of Email.
+	if !strings.Contains(err.Error(), "testing audience in Email Settings") {
+		t.Fatalf("refusal does not point at Email Settings: %v", err)
 	}
 }

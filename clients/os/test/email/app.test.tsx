@@ -127,7 +127,7 @@ describe("the campaigns list", () => {
     expect(screen.queryByText("All done")).toBeNull();
     first.view.unmount();
 
-    mount(fakeConnection(seed), "campaigns", fakeUploads(), { showFiled: true });
+    mount(fakeConnection(seed), "campaigns", fakeUploads(), { includeArchived: true });
     expect(await screen.findByText("All done")).toBeTruthy();
   });
 });
@@ -238,7 +238,7 @@ describe("one campaign", () => {
         }),
       ],
     });
-    mount(conn, "campaigns", fakeUploads(), { showFiled: true });
+    mount(conn, "campaigns", fakeUploads(), { includeArchived: true });
     fireEvent.click(await screen.findByText("August update"));
     // VERBATIM. The preflight's sentence names the thing to go and fix.
     expect(
@@ -253,7 +253,7 @@ describe("one campaign", () => {
       ],
       campaignStats: [{ sent: 10, opens: { total: 90 }, clicks: { total: 5, unique: 3 } }],
     });
-    mount(conn, "campaigns", fakeUploads(), { showFiled: true });
+    mount(conn, "campaigns", fakeUploads(), { includeArchived: true });
     fireEvent.click(await screen.findByText("August update"));
     // A zero there would be this window inventing a fact -- and a zero open
     // rate is a thing operators act on.
@@ -265,7 +265,7 @@ describe("one campaign", () => {
       campaigns: [campaignRow({ id: "v1:campaigns:campaign:c1", status: "sent" })],
       campaignStats: [{ sent: 10 }],
     });
-    mount(conn, "campaigns", fakeUploads(), { showFiled: true });
+    mount(conn, "campaigns", fakeUploads(), { includeArchived: true });
     fireEvent.click(await screen.findByText("August update"));
     expect(await screen.findByText(/Soft bounces are not counted per campaign/)).toBeTruthy();
   });
@@ -307,7 +307,7 @@ describe("one campaign", () => {
       campaigns: [campaignRow({ id: "c1", status: "sent", recipientCount: 1, sentCount: 1 })],
       testRuns: [first],
     });
-    mount(conn, "campaigns", fakeUploads(), { showFiled: true });
+    mount(conn, "campaigns", fakeUploads(), { includeArchived: true });
     fireEvent.click(await screen.findByText("August update"));
     const latest = await screen.findByLabelText("Latest test results");
     expect(within(latest).getByRole("img").getAttribute("aria-label")).toContain("1 sent, 0 skipped");
@@ -427,6 +427,56 @@ describe("one campaign", () => {
     expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
   });
 
+  it("shows no warning while the testing audience is still being read", async () => {
+    const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1", accountId: "org" })] });
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    const answer = conn.query.campaignTestSettings.getMockImplementation()!;
+    conn.query.campaignTestSettings.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    await openCampaign(conn);
+    await screen.findByRole("region", { name: "August update progress" });
+
+    // Reading is a skeleton in the line's place, not a notice that something is wrong.
+    expect(screen.getByText("Loading the testing audience")).toBeTruthy();
+    expect(screen.queryByText("Testing audience is not confirmed.")).toBeNull();
+    expect(screen.queryByText("Waiting for the connection to recover.")).toBeNull();
+
+    await act(async () => { release(); });
+    expect(await screen.findByText("Choose a testing audience for this organization in Settings.")).toBeTruthy();
+    expect(screen.queryByText("Loading the testing audience")).toBeNull();
+  });
+
+  it("sends no test to a testing audience it can no longer confirm, and keeps saying which one it knew", async () => {
+    const conn = fakeConnection({
+      campaigns: [campaignRow({ id: "c1", accountId: "org" })],
+      audiences: [audienceRow({ id: "test-audience", name: "Reviewers", accountId: "org" })],
+      testSettings: [{ id: "settings", accountId: "org", audienceId: "test-audience" }],
+    });
+    await openCampaign(conn);
+    expect(await screen.findByText("Testing audience: Reviewers")).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Send test" }) as HTMLButtonElement).disabled).toBe(false));
+
+    // Another organization's campaign arrives, the feed reads again, and this
+    // time the cluster refuses the read.
+    conn.query.campaignTestSettings.mockRejectedValue(new Error("Reading testing settings is not yours to do."));
+    await act(async () => { conn.subscriptions.emit("v1:campaigns:campaign", campaignRow({ id: "c2", name: "Elsewhere", accountId: "other" }), "NODE_CREATED"); });
+
+    expect(await screen.findByText("Testing audience is not confirmed.")).toBeTruthy();
+    expect(screen.getByText("Testing audience: Reviewers")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send test" }));
+    expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
+  });
+
+  it("says the testing audience could not be confirmed when this organization's read was refused", async () => {
+    const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1", accountId: "org" })] });
+    conn.query.campaignTestSettings.mockRejectedValue(new Error("Reading testing settings is not yours to do."));
+    await openCampaign(conn);
+    expect(await screen.findByText("Testing audience is not confirmed.")).toBeTruthy();
+    expect(screen.getByText("Reading testing settings is not yours to do.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send test" }));
+    expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
+  });
+
   it.each(["sending", "paused", "sent", "scheduled"])("tests a %s campaign using its separate audience and recovers an uncertain response", async status => {
     const conn = fakeConnection({
       campaigns: [campaignRow({ id: "c1", accountId: "org", status })],
@@ -436,7 +486,7 @@ describe("one campaign", () => {
     });
     conn.query.campaignTestAudienceSend.mockRejectedValueOnce(new Error("Connection lost"));
     h.connection = conn;
-    render(withSession(<EmailApp sectionId="campaigns" navigate={() => {}} askContext={() => {}} store={memoryStore({ showFiled: true })} uploads={fakeUploads()} />));
+    render(withSession(<EmailApp sectionId="campaigns" navigate={() => {}} askContext={() => {}} store={memoryStore({ includeArchived: true })} uploads={fakeUploads()} />));
     fireEvent.click(await screen.findByText("August update"));
     await waitFor(() => expect((screen.getByRole("button", { name: "Send test" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByText("Send test"));
@@ -662,99 +712,12 @@ describe("the template editor handoff", () => {
 // ---------------------------------------------------------------------------
 
 describe("sender identities", () => {
-  it("are reached from Settings, which gives way to a mailbox's page and comes back with the list", async () => {
-    // A mailbox has no tab of its own. Its page takes the pane over because the
-    // window draws its one trail row for the FIRST heading on the pane: a page
-    // beneath Settings' own heading would have no way back.
-    const conn = fakeConnection({
-      senderIdentities: [senderRow({ id: "v1:campaigns:senderIdentity:s1" })],
-    });
-    mount(conn, "settings");
-    expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 3, name: "Senders" })).toBeTruthy();
-
-    fireEvent.click(await screen.findByText("news@acme.com"));
-    expect(await screen.findByRole("heading", { level: 3, name: "news@acme.com" })).toBeTruthy();
-    expect(screen.queryByRole("heading", { level: 3, name: "Settings" })).toBeNull();
-    expect(screen.queryByRole("heading", { level: 3, name: "Senders" })).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Back to Senders" }));
-    expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
-    expect(screen.getByRole("heading", { level: 3, name: "Senders" })).toBeTruthy();
-    expect(screen.getByText("news@acme.com")).toBeTruthy();
-  });
-
-  it("leave what was chosen in Settings standing while a mailbox's page has the pane", async () => {
-    // The page takes the pane over, but Settings stays mounted behind it, parked
-    // the way a section is: a choice not yet saved survives the visit.
-    const conn = fakeConnection({
-      accounts: [{ id: "org", name: "Client", status: "active" }],
-      audiences: [audienceRow({ id: "reviewers", name: "Reviewers", accountId: "org" })],
-      senderIdentities: [senderRow({ id: "v1:campaigns:senderIdentity:s1", accountId: "org" })],
-    });
-    mount(conn, "settings");
-    openSelect(await screen.findByRole("combobox", { name: "Testing organization" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Client" }));
-    const picker = await screen.findByRole("combobox", { name: "Testing audience" });
-    await waitFor(() => expect(screen.queryByText("Testing settings are not confirmed.")).toBeNull());
-    openSelect(picker);
-    fireEvent.click(screen.getByRole("option", { name: "Reviewers" }));
-
-    fireEvent.click(await screen.findByText("news@acme.com"));
-    await screen.findByRole("heading", { level: 3, name: "news@acme.com" });
-    expect(screen.queryByRole("combobox", { name: "Testing audience" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Back to Senders" }));
-
-    expect((await screen.findByRole("combobox", { name: "Testing audience" })).textContent).toContain("Reviewers");
-    expect(conn.query.campaignConfigureTestAudience).not.toHaveBeenCalled();
-  });
-
-  it("are not a tab", async () => {
+  it("are not a tab: they are set up in Settings", async () => {
     const conn = fakeConnection({ senderIdentities: [senderRow({ id: "v1:campaigns:senderIdentity:s1" })] });
     mount(conn, "senders");
     // A section the app does not declare reads as the campaigns list.
     expect(await screen.findByRole("heading", { level: 3, name: "Campaigns" })).toBeTruthy();
     expect(screen.queryByText("news@acme.com")).toBeNull();
-  });
-
-  it("retires rather than deletes, and says why", async () => {
-    const conn = fakeConnection({
-      senderIdentities: [senderRow({ id: "v1:campaigns:senderIdentity:s1" })],
-    });
-    mount(conn, "settings");
-    fireEvent.click(await screen.findByText("news@acme.com"));
-
-    // The reason is on screen BEFORE anybody reaches for a control: past
-    // campaigns name the row and the reputation history is keyed on its
-    // address, which is why there is no delete to find.
-    expect(
-      await screen.findByText(/sending reputation is kept against its address/),
-    ).toBeTruthy();
-
-    fireEvent.click(screen.getByText("Retire this mailbox"));
-    // The confirm warns that a campaign naming it will be REFUSED rather than
-    // quietly sent from the default mailbox.
-    expect(
-      await screen.findByText(/REFUSED rather than sent from the default mailbox/),
-    ).toBeTruthy();
-
-    fireEvent.click(screen.getByText("Retire", { selector: ".os-button" }));
-    await waitFor(() =>
-      expect(conn.query.setSenderIdentityStatus).toHaveBeenCalledWith({
-        senderIdentityId: "v1:campaigns:senderIdentity:s1",
-        status: "disabled",
-      }),
-    );
-  });
-
-  it("offers no delete anywhere", async () => {
-    const conn = fakeConnection({
-      senderIdentities: [senderRow({ id: "v1:campaigns:senderIdentity:s1" })],
-    });
-    mount(conn, "settings");
-    fireEvent.click(await screen.findByText("news@acme.com"));
-    await screen.findByText("Retire this mailbox");
-    expect(screen.queryByText(/^Delete/)).toBeNull();
   });
 });
 
@@ -1159,7 +1122,7 @@ describe("a rule that stopped itself", () => {
       templates: [],
       concepts: [],
     });
-    mount(conn, "automations", fakeUploads(), { showFiled: true });
+    mount(conn, "automations", fakeUploads(), { includeArchived: true });
     fireEvent.click(await screen.findByText("Tell the owner about new admins"));
     expect(await screen.findByText(/Paused, and its last run failed/)).toBeTruthy();
     // The engine's own sentence is what somebody acts on.
@@ -1181,51 +1144,10 @@ describe("a rule that stopped itself", () => {
       templates: [],
       concepts: [],
     });
-    mount(conn, "automations", fakeUploads(), { showFiled: true });
+    mount(conn, "automations", fakeUploads(), { includeArchived: true });
     fireEvent.click(await screen.findByText("Tell the owner about new admins"));
     expect(
       await screen.findByText(/what it generated is still there waiting/),
-    ).toBeTruthy();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// The app's own settings
-// ---------------------------------------------------------------------------
-
-describe("the app's settings", () => {
-  it("saves an organization testing audience and excludes other clients", async () => {
-    const conn = fakeConnection({
-      accounts: [{ id: "org", name: "Client", status: "active" }],
-      audiences: [audienceRow({ id: "reviewers", name: "Reviewers", accountId: "org" }), audienceRow({ id: "other", name: "Other client list", accountId: "other-org" })],
-    });
-    mount(conn, "settings");
-    openSelect(await screen.findByRole("combobox", { name: "Testing organization" }));
-    fireEvent.click(await screen.findByRole("option", { name: "Client" }));
-    const picker = await screen.findByRole("combobox", { name: "Testing audience" });
-    await waitFor(() => expect(screen.queryByText("Testing settings are not confirmed.")).toBeNull());
-    openSelect(picker);
-    expect(screen.queryByRole("option", { name: "Other client list" })).toBeNull();
-    fireEvent.click(screen.getByRole("option", { name: "Reviewers" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save testing audience" }));
-    await waitFor(() => expect(conn.query.campaignConfigureTestAudience).toHaveBeenCalledWith({ accountId: "org", audienceId: "reviewers", expectedRevision: undefined }));
-  });
-
-  it("offers exactly the sections the manifest declares", async () => {
-    const conn = fakeConnection({});
-    mount(conn, "settings");
-    const group = await screen.findByRole("combobox", { name: "Opening page" });
-    openSelect(group);
-    for (const name of ["Campaigns", "Automations", "Audiences", "Templates", "Settings"]) {
-      expect(screen.getByRole("option", { name })).toBeTruthy();
-    }
-  });
-
-  it("says the tracking preference reaches no campaign that exists", async () => {
-    const conn = fakeConnection({});
-    mount(conn, "settings");
-    expect(
-      await screen.findByText(/Existing campaigns stay unchanged/),
     ).toBeTruthy();
   });
 });
@@ -1303,8 +1225,6 @@ describe("record list counts", () => {
     { name: "campaigns", section: "campaigns", query: "campaigns", row: campaignRow({ id: "count-c", name: "Counted campaign" }) },
     { name: "audiences", section: "audiences", query: "audiences", row: audienceRow({ id: "count-a", name: "Counted audience" }) },
     { name: "templates", section: "templates", query: "templates", row: templateRow({ id: "count-t", name: "Counted template" }) },
-    // Senders are listed beneath Settings until Settings holds them itself.
-    { name: "senders", section: "settings", query: "senderIdentities", row: senderRow({ id: "count-s", address: "counted@example.com" }) },
     { name: "automations", section: "automations", query: "emailRules", row: ruleRow({ id: "count-r", name: "Counted rule" }) },
   ] as const;
 

@@ -83,12 +83,12 @@ import { useAuthoredAutomations, useTriggerConcepts, type EmailFeeds } from "./u
 export function RulesSection({
   feeds,
   writes,
-  showFiled,
+  includeArchived,
   openRequest,
 }: {
   feeds: EmailFeeds;
   writes: CampaignWrites;
-  showFiled: boolean;
+  includeArchived: boolean;
   /** A rule to open, or the Add flow to start, from another page. */
   openRequest?: OpenRequest;
 }) {
@@ -106,14 +106,14 @@ export function RulesSection({
 
   const source = useLiveView<Row, EmailRuleRow>(
     feeds.rules.source,
-    `filed:${showFiled}`,
+    `archived:${includeArchived}`,
     (rows) => {
       const rules = rows.map(emailRuleFromRow).filter((r) => r.id !== "");
       // "Filed" for a rule means paused: a paused rule is one somebody turned
       // off, which is a different thing from a draft (never armed) and a
       // different thing again from failed (the engine refused it). Drafts and
       // failures stay visible because both are waiting on somebody.
-      return showFiled ? rules : rules.filter((r) => r.status !== "paused");
+      return includeArchived ? rules : rules.filter((r) => r.status !== "paused");
     },
   );
 
@@ -183,7 +183,7 @@ export function RulesSection({
       ) : null}
 
       <LiveList<EmailRuleRow>
-        key={`rules:${showFiled}`}
+        key={`rules:${includeArchived}`}
         source={source}
         rowId={(r) => r.id}
         fingerprint={ruleFingerprint}

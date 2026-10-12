@@ -131,7 +131,7 @@ export function WindowFrame({
   // RESOURCE ("app:email"), a string, and `string.includes` is a substring
   // test: read as a module list it answered true for any module whose name is
   // spelled inside the app's resource, so Email's own `email` module would have
-  // named the app for a gate only the Rules section asked for.
+  // named the app for a gate only the Automations section asked for.
   const appNeeds = manifest.needs ?? [];
   const unmetIsSectionOnly = gate.unmet.some((id) => !appNeeds.includes(id));
   const Icon = manifest.icon;

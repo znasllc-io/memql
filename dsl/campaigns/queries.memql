@@ -427,8 +427,14 @@ query recipient recipientById {
 }
 
 /// Every sending identity the caller may use, newest first. Backs the identity picker on the
-/// campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees
-/// every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+/// campaign editor and the Senders list in the OS app's Settings. Composite tier, so a cluster
+/// owner sees every operator's -- which is what makes "who is this cluster mailing as"
+/// answerable at all.
+///
+/// SORTED BY WHEN IT WAS ADDED, NOT BY ADDRESS, because the sort is also the page cursor. A
+/// payload field is not keyset-eligible, so a list ordered by `address` could not continue past
+/// its first page: a caller walking it past 200 identities got the first 200 and a list that
+/// ended without saying so.
 @actor
 query senderIdentity senderIdentities {
   args {
@@ -436,7 +442,7 @@ query senderIdentity senderIdentities {
   }
   filter    row => true
                 && (args.status == nil || row.status == args.status)
-  sort      "address", "asc"
+  sort      "row.createdAt", "desc"
   paginate  200
   shape     senderIdentityFull
 }
@@ -454,9 +460,9 @@ query senderIdentity senderIdentityById {
   shape   senderIdentityFull
 }
 
-/// The sending identities filed under one account. The tie is a RECORD, not a scope: this is the
-/// same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried
-/// verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
+/// The sending identities filed under one account, newest first. The tie is a RECORD, not a scope:
+/// this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct
+/// is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
 @actor
 query senderIdentity senderIdentitiesForAccount {
   args {
@@ -465,7 +471,7 @@ query senderIdentity senderIdentitiesForAccount {
   filter  row => row.accountId == args.accountId
 
   shape   senderIdentityFull
-  sort    "address", "asc"
+  sort    "row.createdAt", "desc"
 }
 
 // ---------------------------------------------------------------------------

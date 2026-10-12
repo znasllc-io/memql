@@ -404,13 +404,13 @@ describe("a section given an open request", () => {
     const [uploads] = useState(fakeUploads);
     switch (name) {
       case "campaigns":
-        return <CampaignsSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} showFiled={false} trackByDefault uploads={uploads} openRequest={request} />;
+        return <CampaignsSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} includeArchived={false} trackByDefault uploads={uploads} openRequest={request} />;
       case "audiences":
-        return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} showFiled={false} uploads={uploads} openRequest={request} />;
+        return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} includeArchived={false} uploads={uploads} openRequest={request} />;
       case "templates":
-        return <TemplatesSection feeds={feeds} writes={writes} showFiled={false} openRequest={request} />;
+        return <TemplatesSection feeds={feeds} writes={writes} includeArchived={false} openRequest={request} />;
       case "automations":
-        return <RulesSection feeds={feeds} writes={writes} showFiled={false} openRequest={request} />;
+        return <RulesSection feeds={feeds} writes={writes} includeArchived={false} openRequest={request} />;
     }
   }
 

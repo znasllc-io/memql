@@ -46,27 +46,38 @@ export const EMAIL_SECTIONS: OsAppSection[] = [
 
 export const EMAIL_SECTION_IDS = EMAIL_SECTIONS.map((s) => s.id);
 
+/**
+ * The tabs a window can OPEN ON: every section but Logs and Settings. Those two
+ * are the header's icons, reached by their own control in every app, and a
+ * window that opened on one would open on the place a person goes to leave the
+ * work. Which of these a given person may open is their access's to say
+ * (`accessAdmits`), so the preference lists these and the picker narrows them.
+ */
+export const EMAIL_OPENING_TABS: OsAppSection[] = EMAIL_SECTIONS.filter((s) => s.id !== "logs" && s.id !== "settings");
+const EMAIL_OPENING_TAB_IDS = EMAIL_OPENING_TABS.map((s) => s.id);
+
 export interface EmailSettings {
   version: 1;
-  /** The section the app navigates to when its window opens. */
+  /** The tab a new window opens on (one of `EMAIL_OPENING_TABS`). */
   defaultSection: string;
   /**
-   * Whether finished campaigns, archived audiences and templates, and retired
-   * senders are listed. OFF by default.
+   * Whether archived things are listed: archived audiences and templates,
+   * archived senders and, for now, finished campaigns and paused rules. OFF by
+   * default.
    *
-   * ONE TOGGLE FOR FOUR LISTS, deliberately. The standing question all four
-   * answer is what you are working with now, and somebody who wants to see a
-   * filed-away audience is almost always looking for the campaign that used
-   * it. Four separate switches would be four places to be in a different
-   * state, and a list that is empty because of a switch on another screen is
-   * the worst kind of empty.
+   * ONE TOGGLE FOR EVERY LIST, deliberately. The standing question all of them
+   * answer is what you are working with now, and somebody who wants to see an
+   * archived audience is almost always looking for the campaign that used
+   * it. Separate switches would be separate places to be in a different state,
+   * and a list that is empty because of a switch on another screen is the
+   * worst kind of empty.
    *
    * It is a FILTER over rows already here, not a second read. Every seed asks
    * for everything and the fold narrows -- seeding filtered would make
    * flipping the toggle re-run the read and re-baseline every arrival cue, so
    * revealing rows the browser already had would announce them as new.
    */
-  showFiled: boolean;
+  includeArchived: boolean;
   /**
    * What the open/click boxes are set to when a campaign is created here.
    *
@@ -87,7 +98,7 @@ export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
   // corrupt or absent document falls back to -- and falling back to "whatever
   // is first in an array" would move with an unrelated edit.
   defaultSection: "overview",
-  showFiled: false,
+  includeArchived: false,
   trackByDefault: true,
 };
 
@@ -106,16 +117,18 @@ export function sanitizeEmailSettings(raw: unknown): EmailSettings {
   const doc = raw as Partial<EmailSettings>;
   if (doc.version !== 1) return { ...DEFAULT_EMAIL_SETTINGS };
 
+  // A tab a window can open on. A section the app does not declare, one it
+  // used to, and the two header icons all fall back to the first.
   const defaultSection =
-    typeof doc.defaultSection === "string" && EMAIL_SECTION_IDS.includes(doc.defaultSection)
+    typeof doc.defaultSection === "string" && EMAIL_OPENING_TAB_IDS.includes(doc.defaultSection)
       ? doc.defaultSection
       : DEFAULT_EMAIL_SETTINGS.defaultSection;
 
   return {
     version: 1,
     defaultSection,
-    showFiled:
-      typeof doc.showFiled === "boolean" ? doc.showFiled : DEFAULT_EMAIL_SETTINGS.showFiled,
+    includeArchived:
+      typeof doc.includeArchived === "boolean" ? doc.includeArchived : DEFAULT_EMAIL_SETTINGS.includeArchived,
     trackByDefault:
       typeof doc.trackByDefault === "boolean"
         ? doc.trackByDefault

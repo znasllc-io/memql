@@ -7822,7 +7822,8 @@ func SendableRecipientsForAudienceBuild(args SendableRecipientsForAudienceArgs) 
 	return b.String()
 }
 
-// SenderIdentities -- Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+// SenderIdentities -- Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders list in the OS app's Settings. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+// SORTED BY WHEN IT WAS ADDED, NOT BY ADDRESS, because the sort is also the page cursor. A payload field is not keyset-eligible, so a list ordered by `address` could not continue past its first page: a caller walking it past 200 identities got the first 200 and a list that ended without saying so.
 //
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentities"] in generated_concepts.go).
 type SenderIdentitiesArgs struct {
@@ -7846,7 +7847,7 @@ func SenderIdentitiesBuild(args SenderIdentitiesArgs) string {
 	return b.String()
 }
 
-// SenderIdentitiesForAccount -- The sending identities filed under one account. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
+// SenderIdentitiesForAccount -- The sending identities filed under one account, newest first. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
 //
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentitiesForAccount"] in generated_concepts.go).
 type SenderIdentitiesForAccountArgs struct {

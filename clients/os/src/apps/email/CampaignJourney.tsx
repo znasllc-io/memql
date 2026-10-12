@@ -28,7 +28,7 @@ import {
   senderProjection,
   templateProjection,
 } from "./CampaignsSection";
-import { SenderForm } from "./SendersSection";
+import { SenderForm } from "./SenderForm";
 import { NewTemplate } from "./TemplatesSection";
 import { editorTemplateURL } from "../../items/editorPreference";
 import { openHandoff } from "../../items/vscode";

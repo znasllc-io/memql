@@ -131,6 +131,14 @@ export interface FakeSeed {
    *  harness whose default produced it would put a warning on every test. */
   integrationStatus?: Row[] | Error;
   sendingReadiness?: Row[] | Error;
+  /**
+   * The `emailAzureSetup` reply for one `{ accountId, action }`. Absent = a
+   * cluster whose Azure is connected and whose organizations have no sending
+   * domain yet, because the unset state is the one the Settings page draws its
+   * Add control in and a harness whose default was a finished domain would hide
+   * it. An Error rejects, which is how the cluster refuses.
+   */
+  azure?: (args: { accountId: string; action: string }) => Row | Error | Promise<Row | Error>;
   /** Audience id -> `audienceSubscriberCount`'s answer. An Error is a refused
    *  read; an audience not named here is an empty one (the engine answers 0). */
   subscriberCounts?: Record<string, number | Error>;
@@ -160,6 +168,12 @@ const HEALTHY_EMAIL: Row = {
     { name: "email", registered: true, configured: "yes", health: "unknown", mode: "graph", detail: "" },
   ],
 };
+
+/** A cluster whose Azure is connected and whose organizations have no domain. */
+const CONNECTED_AZURE = (args: { action: string }): Row =>
+  args.action === "clusterStatus"
+    ? { status: "connected", resourceGroup: "mail", dataLocation: "United States", capture: false }
+    : { status: "unconfigured" };
 
 /** A cluster whose authored automations are running. */
 const RUNNING_AUTOMATIONS: Row = { id: "cluster", authoredAutomationsEnabled: true };
@@ -198,6 +212,14 @@ export function fakeConnection(seed: FakeSeed = {}) {
       integrationStatus: reader(seed.integrationStatus ?? [HEALTHY_EMAIL]),
       campaignSendingReadiness: reader(seed.sendingReadiness ?? [{ ready: true, reason: "" }]),
       clusterSettingsCurrent: reader(seed.clusterSettings ?? [RUNNING_AUTOMATIONS]),
+      // Settings -> Sending domain, and Package. The same two reads the
+      // Connections page makes, because the domain's wizard is one component.
+      emailAzureSetup: vi.fn(async (args: { accountId: string; action: string }, _opts?: unknown) => {
+        const reply = await (seed.azure ?? CONNECTED_AZURE)(args);
+        if (reply instanceof Error) throw reply;
+        return rowsResult([reply]);
+      }),
+      packageCampaigns: vi.fn(async (_args: Record<string, unknown>, _opts?: unknown) => rowsResult([{ status: "installed", manifest: null }])),
       listConcepts: vi.fn(async () =>
         (seed.concepts ?? []).map((c) => ({
           ...c,

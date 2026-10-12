@@ -1,0 +1,42 @@
+/* The Email app's own CSS (memql#6033).
+ *
+ * Everything the app draws is the kit's vocabulary -- rows, panels, notices,
+ * facts, fields, the wizard and the action bar. What lives here is only what the
+ * kit has no word for, and it grows only when a surface needs it. */
+
+/* ---- Email -> Settings ---------------------------------------------------- */
+
+/* A FIELD KEEPS A FIELD'S WIDTH (DESIGN.md rule 9). The page takes the window,
+ * but a picker stretched across a monitor is a text box nobody can read. */
+.email-field {
+  width: 100%;
+  max-width: 24rem;
+}
+.email-field .os-select-wrap {
+  width: 100%;
+}
+
+/* A switch and the one sentence that says what it does to something else stay
+ * together as one preference. */
+.email-preference {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.email-preference > .os-caption {
+  margin: 0;
+}
+
+/* The page's own spacing is the stack's gap; a group's bottom margin would double it. */
+.email-settings .os-field-group {
+  margin: 0;
+}
+
+/* A sender's page, the Add a sender wizard and the sending domain's page or
+ * wizard take the pane. They fill the window's height so their bar stands on
+ * its bottom edge, which means the page that holds them must have a height to
+ * fill. */
+.email-settings:has(.os-action-pane, .os-wizard) {
+  height: 100%;
+  min-height: 0;
+}
