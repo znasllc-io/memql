@@ -942,3 +942,14 @@ query journeyEnrollment waitingEnrollmentsForRecipient {
  paginate 100
  shape journeyEnrollmentFull
 }
+
+/// Internal membership lifecycle check. actor.userId cannot read other owners' worker enrollments; both internal origin and clusterOwner are required.
+@actor
+@serverOnly
+query journeyEnrollment recipientJourneyEnrollments {
+ args { recipientId string! }
+ filter row => actor.isClusterOwner == true && row.recipientId == args.recipientId
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}

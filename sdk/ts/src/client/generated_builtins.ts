@@ -197,7 +197,7 @@ export interface CampaignConfigureNewsletterArgs {
   siteId: string;
   audienceId: string;
   templateId?: string;
-  senderIdentityId: string;
+  senderIdentityId?: string;
   consentText: string;
   enabled: boolean;
   expectedRevision?: string;
@@ -208,7 +208,7 @@ export function buildCampaignConfigureNewsletter(args: CampaignConfigureNewslett
   parts.push("siteId: " + renderMemQLValue(args.siteId));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
-  parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
+  if (args.senderIdentityId !== undefined) parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
   parts.push("consentText: " + renderMemQLValue(args.consentText));
   parts.push("enabled: " + renderMemQLValue(args.enabled));
   if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));

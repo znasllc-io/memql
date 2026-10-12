@@ -263,7 +263,7 @@ builtin campaignConfigureNewsletter {
   siteId string!
   audienceId string!
   templateId string
-  senderIdentityId string!
+  senderIdentityId string
   consentText string!
   enabled bool!
   expectedRevision string

@@ -255,11 +255,13 @@ func CampaignConfigureNewsletterBuild(args CampaignConfigureNewsletterArgs) stri
 		b.WriteString("templateId: ")
 		b.WriteString(quoteMemQL(args.TemplateId))
 	}
-	if b.Len() > 36 {
-		b.WriteString(", ")
+	if args.SenderIdentityId != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("senderIdentityId: ")
+		b.WriteString(quoteMemQL(args.SenderIdentityId))
 	}
-	b.WriteString("senderIdentityId: ")
-	b.WriteString(quoteMemQL(args.SenderIdentityId))
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}

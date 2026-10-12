@@ -1233,7 +1233,7 @@ mutation newsletterBinding configureNewsletter {
     storeId string!
     audienceId string!
     templateId string
-    senderIdentityId string!
+    senderIdentityId string
     consentText string!
     enabled bool!
     versionTime datetime!
@@ -1267,7 +1267,7 @@ mutation newsletterSignup recordNewsletterSignup {
     requestedAt datetime!
     templateId string
     templateSnapshot object
-    senderIdentityId string!
+    senderIdentityId string
   }
   insert {
     accept { accountId, newsletterId, siteId, storeId, audienceId, recipientId, email, displayName, emailDigest, submissionId, consentText, consentRevision, requestedAt, templateId, templateSnapshot, senderIdentityId }
