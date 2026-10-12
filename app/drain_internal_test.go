@@ -162,7 +162,7 @@ func TestDefaultWaitForDependenciesReady_ReturnsWhenAllReady(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		DefaultWaitForDependenciesReady([]common.Dependency{d1, d2})
+		assert.NoError(t, DefaultWaitForDependenciesReady(context.Background(), []common.Dependency{d1, d2}))
 		close(done)
 	}()
 
@@ -182,7 +182,7 @@ func TestDefaultWaitForDependenciesReady_BlocksUntilDepReady(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		DefaultWaitForDependenciesReady([]common.Dependency{slow})
+		assert.NoError(t, DefaultWaitForDependenciesReady(context.Background(), []common.Dependency{slow}))
 		close(done)
 	}()
 
@@ -207,7 +207,7 @@ func TestDefaultWaitForDependenciesReady_BlocksUntilDepReady(t *testing.T) {
 func TestDefaultWaitForDependenciesReady_EmptyIsNoop(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
-		DefaultWaitForDependenciesReady(nil)
+		assert.NoError(t, DefaultWaitForDependenciesReady(context.Background(), nil))
 		close(done)
 	}()
 	select {
