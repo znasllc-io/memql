@@ -176,7 +176,8 @@ func authoredEntryKey(owner, name string) string {
 // trigger (event subscription or cron entry). The construct MUST be an
 // `automation` kind carrying its `.memql` source on construct.Source; its
 // ownerUserId is the authz envelope the runs execute under. Re-activating the
-// same (owner, name) replaces the prior subscription in place (a version bump).
+// same (owner, name) replaces the prior subscription in place (a version bump);
+// an Activate that is refused leaves the prior subscription wired.
 func (s *AuthoredScheduler) Activate(construct *memql.AuthoredConstruct) error {
 	s.activationMu.Lock()
 	defer s.activationMu.Unlock()
@@ -211,6 +212,24 @@ func (s *AuthoredScheduler) Activate(construct *memql.AuthoredConstruct) error {
 	if err := s.validateBeforeWriteFields(automation); err != nil {
 		return err
 	}
+	// Everything that can refuse this activation is checked BEFORE the prior
+	// entry is torn down, so a refused Activate leaves whatever was wired
+	// under the name wired. The arming code relies on it (memql#6022): it
+	// registers a newer version over the one a node holds, and keeps the held
+	// one when the newer one is refused here.
+	switch {
+	case automation.BeforeWrite != nil:
+		if s.beforeWriteEngine == nil {
+			return fmt.Errorf("authored scheduler: before-write engine is not wired")
+		}
+	case automation.IsEventTriggered():
+	case automation.IsScheduled():
+		if _, err := automationCronParser.Parse(automation.Schedule); err != nil {
+			return fmt.Errorf("authored scheduler: schedule %s: %w", origin, err)
+		}
+	default:
+		return fmt.Errorf("authored scheduler: automation %q has neither an event trigger nor a schedule", construct.Name)
+	}
 
 	// Replace any prior subscription for this (owner, name) before re-wiring.
 	s.Deactivate(construct.OwnerUserId, construct.Name)
@@ -225,22 +244,17 @@ func (s *AuthoredScheduler) Activate(construct *memql.AuthoredConstruct) error {
 
 	switch {
 	case automation.BeforeWrite != nil:
-		if s.beforeWriteEngine == nil {
-			return fmt.Errorf("authored scheduler: before-write engine is not wired")
-		}
 		entry.unsub = s.subscribeBeforeWrite(construct.OwnerUserId, automation)
 	case automation.IsEventTriggered():
-		unsub := s.subscribeEvent(construct.OwnerUserId, automation)
-		entry.unsub = unsub
-	case automation.IsScheduled():
+		entry.unsub = s.subscribeEvent(construct.OwnerUserId, automation)
+	default: // scheduled: the switch above admitted nothing else
 		id, err := s.scheduleCron(construct.OwnerUserId, automation)
 		if err != nil {
+			// Unreachable: the spec parsed above with the cron's own parser.
 			return fmt.Errorf("authored scheduler: schedule %s: %w", origin, err)
 		}
 		entry.cronEntry = id
 		entry.scheduled = true
-	default:
-		return fmt.Errorf("authored scheduler: automation %q has neither an event trigger nor a schedule", construct.Name)
 	}
 
 	s.mu.Lock()

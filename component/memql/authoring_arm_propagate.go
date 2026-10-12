@@ -39,7 +39,10 @@ package memql
 //     same bundle, an older version, or anything whose own bundle no longer
 //     reads active -- except one whose own bundle still reads active at the
 //     same or a newer version (armConstruct): that is two live bundles
-//     claiming one name, which the registry's version rule always refused.
+//     claiming one name, which the registry's version rule always refused. An
+//     older version is replaced by registering over it, so when this node
+//     refuses the newer one the older one keeps firing while its own bundle
+//     still reads active (armOver).
 //   - Disarming -- a retire's teardown, a disarm broadcast, a superseded
 //     version's leftovers, the reconcile sweep -- takes an entry out only when
 //     its OWN bundle no longer reads active (disarmStaleEntries), never by name.
@@ -503,44 +506,84 @@ const (
 // armConstruct puts c into deps -- the registry entry and, for an automation,
 // the scheduler entry -- unless deps already holds exactly c, or holds the name
 // for another bundle that still reads active at the same or a newer version.
-// Anything else under the name is stale and is replaced. Returns the verdict
-// and the entry that was held under the name, if any.
+// Returns the verdict and the entry that was held under the name, if any.
+//
+// What happens to a held entry it replaces depends on what that entry is:
+//
+//   - A stale copy of c's own bundle, or the name held for another bundle that
+//     no longer reads active: it comes out FIRST, scheduler included, so if c
+//     is then refused nothing fires rather than a definition the database has
+//     replaced.
+//   - An OLDER version of another bundle -- the registry's own replacement
+//     rule, and what lets an activation register its new version before it
+//     retires the one it supersedes: c registers OVER it (armOver), and if c
+//     is refused on this node the held entry stays wired unless its own
+//     bundle no longer reads active. Taking it out first meant a version a node
+//     could not run took the one it could run down with it -- and, while both
+//     read active, every reconcile pass armed the old one again only to tear
+//     it down again.
 func armConstruct(ctx context.Context, c *AuthoredConstruct, deps AuthoredRuntimeDeps, live *bundleLiveness) (armVerdict, *AuthoredConstruct, error) {
 	held, ok := deps.Registry.Lookup(c.OwnerUserId, c.Kind, c.Name)
-	if ok {
-		if sameAuthoredConstruct(held, c) {
-			return armAlreadyHeld, held, nil
-		}
-		if !replacesWithoutAsking(held, c) {
-			active, err := live.active(ctx, held.OwnerUserId, held.BundleId)
-			if err != nil {
-				return armConflict, held, fmt.Errorf("authoring: read bundle %q, which holds %s %q: %w", held.BundleId, c.Kind, c.Name, err)
-			}
-			if active {
-				return armConflict, held, nil
-			}
-		}
-		// Out first, scheduler included: if the new definition then fails to
-		// compile, nothing fires rather than the old definition.
-		disarmEntry(held, deps)
+	if !ok {
+		return armRegistered, nil, registerArmed(c, deps)
 	}
+	if sameAuthoredConstruct(held, c) {
+		return armAlreadyHeld, held, nil
+	}
+	if held.BundleId != c.BundleId {
+		if held.Version < c.Version {
+			return armRegistered, held, armOver(ctx, held, c, deps, live)
+		}
+		active, err := live.active(ctx, held.OwnerUserId, held.BundleId)
+		if err != nil {
+			return armConflict, held, fmt.Errorf("authoring: read bundle %q, which holds %s %q: %w", held.BundleId, c.Kind, c.Name, err)
+		}
+		if active {
+			return armConflict, held, nil
+		}
+	}
+	disarmEntry(held, deps)
+	return armRegistered, held, registerArmed(c, deps)
+}
+
+// registerArmed registers c into deps and leaves nothing half-armed: an entry
+// the scheduler refused would read as held from then on and never be retried.
+func registerArmed(c *AuthoredConstruct, deps AuthoredRuntimeDeps) error {
 	if err := registerBundleConstructs([]*AuthoredConstruct{c}, deps); err != nil {
-		// Leave nothing half-armed: an entry the scheduler refused would read as
-		// held from then on and never be retried.
 		if cur, ok := deps.Registry.Lookup(c.OwnerUserId, c.Kind, c.Name); ok && sameAuthoredConstruct(cur, c) {
 			_ = deps.Registry.Retire(c.OwnerUserId, c.Kind, c.Name)
 		}
-		return armRegistered, held, err
+		return err
 	}
-	return armRegistered, held, nil
+	return nil
 }
 
-// replacesWithoutAsking reports whether c replaces the held entry with no read:
-// a stale copy of c's own bundle, or an older version -- the registry's own
-// rule, and what lets an activation register its new version before it
-// retires the one it supersedes.
-func replacesWithoutAsking(held, c *AuthoredConstruct) bool {
-	return held.BundleId == c.BundleId || held.Version < c.Version
+// armOver registers c over held, an older version of another bundle, without
+// taking held out first. The scheduler is asked first, and a refusal there
+// changes nothing -- a refused register hook leaves the entry it would have
+// replaced in place (AuthoredRegisterHook) -- so held keeps firing, unless its
+// own bundle no longer reads active: a definition the database has retired
+// must not keep running because its successor cannot. A held entry whose
+// bundle cannot be read is left for the next reconcile pass to decide.
+func armOver(ctx context.Context, held, c *AuthoredConstruct, deps AuthoredRuntimeDeps, live *bundleLiveness) error {
+	if c.Kind == "automation" && deps.RegisterHook != nil {
+		if err := deps.RegisterHook(c); err != nil {
+			if active, rerr := live.active(ctx, held.OwnerUserId, held.BundleId); rerr == nil && !active {
+				disarmEntry(held, deps)
+			}
+			return fmt.Errorf("authoring: schedule automation %s: %w", c.Name, err)
+		}
+	}
+	// A newer version replaces the held entry in place (the registry's own
+	// rule), so this cannot be refused for the version; should it be refused
+	// anyway, the scheduler goes back to what the registry still holds.
+	if err := deps.Registry.Register(c); err != nil {
+		if c.Kind == "automation" && deps.RegisterHook != nil {
+			_ = deps.RegisterHook(held)
+		}
+		return fmt.Errorf("authoring: register %s/%s into runtime: %w", c.Kind, c.Name, err)
+	}
+	return nil
 }
 
 // sameAuthoredConstruct reports whether held is exactly c: the same bundle,
