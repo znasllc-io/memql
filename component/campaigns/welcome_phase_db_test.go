@@ -267,7 +267,7 @@ func TestAWelcomeWhoseSendCouldNotReadStaysPending(t *testing.T) {
 		"query suppressionByDigest", // the do-not-mail list: unread is not "not suppressed"
 	} {
 		t.Run(strings.TrimPrefix(failing, "query "), func(t *testing.T) {
-			n := newEmptyNewsletter(t, "welcome-unread")
+			n := newDigestFixture(t).newEmptyNewsletter(t, "welcome-unread")
 			signup := pendingWelcome(t, n)
 			receiptID := welcomeReceiptID(signup)
 			actual := n.worker.store.engine
@@ -316,7 +316,7 @@ func TestAWelcomeWhoseSendCouldNotReadStaysPending(t *testing.T) {
 // that an attempt began fails. No attempt began -- the transport was not contacted --
 // so the welcome is not blocked; it stays pending and goes out on the next pass.
 func TestAWelcomeWhoseAttemptCouldNotBeRecordedStaysPending(t *testing.T) {
-	n := newEmptyNewsletter(t, "welcome-unrecorded")
+	n := newDigestFixture(t).newEmptyNewsletter(t, "welcome-unrecorded")
 	signup := pendingWelcome(t, n)
 	receiptID := welcomeReceiptID(signup)
 	actual := n.worker.store.engine
@@ -365,7 +365,7 @@ func TestAWelcomeWhoseAttemptCouldNotBeRecordedStaysPending(t *testing.T) {
 // says they are still held. Here it is not made -- no receipt, no mail -- and the
 // welcome stays pending; the next pass takes the locks afresh and sends it once.
 func TestAWelcomeRecordsNoAttemptAfterItsLocksWereLost(t *testing.T) {
-	n := newEmptyNewsletter(t, "welcome-lost-first")
+	n := newDigestFixture(t).newEmptyNewsletter(t, "welcome-lost-first")
 	signup := pendingWelcome(t, n)
 	receiptID := welcomeReceiptID(signup)
 	ender := &sessionEnder{admin: n.db.DB, key: newsletterLock("audience", n.audience), t: t}
@@ -411,7 +411,7 @@ func TestAWelcomeRecordsNoAttemptAfterItsLocksWereLost(t *testing.T) {
 // locks back, beside whichever replica had taken them since. Started under the locks,
 // the write is waited for and commits while they are held.
 func TestAWelcomesAttemptCommitsUnderItsLocksEvenWhenItsPhaseEndsDuringTheWrite(t *testing.T) {
-	n := newEmptyNewsletter(t, "welcome-attempt-straddle")
+	n := newDigestFixture(t).newEmptyNewsletter(t, "welcome-attempt-straddle")
 	signup := pendingWelcome(t, n)
 	receiptID := welcomeReceiptID(signup)
 	actual := n.worker.store.engine
@@ -445,7 +445,7 @@ func TestAWelcomesAttemptCommitsUnderItsLocksEvenWhenItsPhaseEndsDuringTheWrite(
 // request names -- not a version of a row every other message to the person shares --
 // carrying the request, the template and the sender it went out with.
 func TestAWelcomeIsLedgeredUnderItsOwnRequest(t *testing.T) {
-	n := newEmptyNewsletter(t, "welcome-ledger")
+	n := newDigestFixture(t).newEmptyNewsletter(t, "welcome-ledger")
 	signup := pendingWelcome(t, n)
 
 	if err := n.worker.sendNewsletterWelcome(context.Background(), n.worker.systemActorContext(context.Background()), signup); err != nil {

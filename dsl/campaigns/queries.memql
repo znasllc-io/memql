@@ -714,3 +714,160 @@ query campaign campaignTestRuns {
   paginate 50
   shape campaignFull
 }
+
+/// Internal scan of due single-recipient deliveries deferred by the rate limiter.
+@actor
+@serverOnly
+query delivery deferredSingleSends {
+ args { dueAt datetime! }
+ filter row => actor.isClusterOwner == true && statusIsPending(row) && row.requestId != nil && row.requestId != "" && row.nextAttemptAt <= args.dueAt
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape deferredSendRef
+}
+
+/// Organization-authorized email automation read.
+@actor
+query journey journeys {
+ args {
+ status string
+ }
+ filter row => ((args.status == nil || row.status == args.status))
+ sort "row.createdAt", "asc"
+ paginate 50
+ shape journeyFull
+}
+
+/// Organization-authorized email automation read.
+@actor
+query journey journeyById {
+ args {
+ journeyId string!
+ }
+ filter row => (row.id == args.journeyId)
+ shape journeyFull
+}
+
+/// Organization-authorized email automation read.
+@actor
+query journeyEnrollment journeyEnrollmentCounts {
+ args {
+ journeyId string!
+ status string
+ stepId string
+ }
+ filter row => (row.journeyId == args.journeyId && (args.status == nil || row.status == args.status) && (args.stepId == nil || row.stepId == args.stepId))
+ count
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journey activeJourneys {
+ filter row => actor.isClusterOwner == true && (statusIsActive(row))
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journey journeysToRetire {
+ filter row => actor.isClusterOwner == true && (row.status == "archived" && (row.retiredAt == nil || row.retiredAt == ""))
+ sort "row.createdAt", "asc"
+ paginate 50
+ shape journeyFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journeyEnrollment dueEnrollmentsForJourney {
+ args {
+ journeyId string!
+ dueAt datetime!
+ }
+ filter row => actor.isClusterOwner == true && (row.journeyId == args.journeyId && (statusIsActive(row) || row.status == "waiting") && row.nextAt <= args.dueAt)
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journeyEnrollment openEnrollmentsForJourney {
+ args {
+ journeyId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.journeyId == args.journeyId && (statusIsActive(row) || row.status == "waiting"))
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journeyEnrollment newestJourneyEnrollment {
+ args {
+ journeyId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.journeyId == args.journeyId)
+ sort "triggeredAt", "desc"
+ paginate 1
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journeyEnrollment journeyEnrollmentById {
+ args {
+ enrollmentId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.id == args.enrollmentId)
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query recipient audienceJoinersSince {
+ args {
+ audienceId string!
+ since datetime!
+ }
+ filter row => actor.isClusterOwner == true && (row.audienceId == args.audienceId && row.joinedAt >= args.since && (isSendableRecipient(row) || row.subscriptionStatus == "pending"))
+ sort "row.createdAt", "asc"
+ paginate 200
+ shape recipientEnrollmentRef
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query recipient audienceConfirmationsSince {
+ args {
+ audienceId string!
+ since datetime!
+ }
+ filter row => actor.isClusterOwner == true && (row.audienceId == args.audienceId && row.confirmedAt >= args.since && isSendableRecipient(row))
+ sort "row.createdAt", "asc"
+ paginate 200
+ shape recipientEnrollmentRef
+}
+
+/// Internal automation state read.
+@actor
+@serverOnly
+query journeyEnrollment waitingEnrollmentsForRecipient {
+ args {
+ recipientId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.recipientId == args.recipientId && row.status == "waiting")
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}

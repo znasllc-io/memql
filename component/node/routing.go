@@ -844,6 +844,8 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.updated.v1:campaigns:newsletterBinding", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:testSettings", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:campaigns:testSettings", TargetType: ""},
+		{Pattern: "graph.node.created.v1:campaigns:journey", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:journey", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:campaignSeries", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:campaigns:campaignSeries", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:campaign", TargetType: ""},

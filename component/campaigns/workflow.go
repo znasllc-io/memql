@@ -18,6 +18,14 @@ func (w *Worker) drainWorkflow(ctx context.Context) error {
 			w.promoteDueSeries(ctx, systemCtx)
 			return nil, nil
 		},
+		"campaignRetryDeferredSends": func(ctx context.Context, _ map[string]any) (any, error) {
+			w.retryDeferredSends(ctx, systemCtx)
+			return nil, nil
+		},
+		"campaignDrainJourneys": func(ctx context.Context, _ map[string]any) (any, error) {
+			w.drainJourneys(ctx, systemCtx)
+			return nil, nil
+		},
 		"campaignDrainWelcomes": func(ctx context.Context, _ map[string]any) (any, error) {
 			w.drainNewsletterWelcomes(ctx, systemCtx)
 			return nil, nil
@@ -80,6 +88,6 @@ func campaignPage(ctx context.Context, ids []string, operation func(context.Cont
 
 func campaignWorkflowCapabilities() []string {
 	return []string{
-		"campaignPromoteSeries", "campaignDrainWelcomes", "campaignPromoteSchedules", "campaignApplyWarmup", "campaignDrainableJobs", "campaignDrainJob", "campaignFlushReputation", "campaignProcessSelected",
+		"campaignPromoteSeries", "campaignDrainWelcomes", "campaignRetryDeferredSends", "campaignDrainJourneys", "campaignJourneyExit", "campaignJourneyComplete", "campaignJourneyAdvance", "campaignJourneyWait", "campaignJourneyAwaitConfirmation", "campaignJourneySend", "campaignPromoteSchedules", "campaignApplyWarmup", "campaignDrainableJobs", "campaignDrainJob", "campaignFlushReputation", "campaignProcessSelected",
 	}
 }

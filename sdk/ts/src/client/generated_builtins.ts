@@ -196,7 +196,7 @@ QueryClient.prototype.campaignActivateEmailRule = function (this: QueryClient, a
 export interface CampaignConfigureNewsletterArgs {
   siteId: string;
   audienceId: string;
-  templateId: string;
+  templateId?: string;
   senderIdentityId: string;
   consentText: string;
   enabled: boolean;
@@ -207,7 +207,7 @@ export function buildCampaignConfigureNewsletter(args: CampaignConfigureNewslett
   const parts: string[] = [];
   parts.push("siteId: " + renderMemQLValue(args.siteId));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
-  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   parts.push("senderIdentityId: " + renderMemQLValue(args.senderIdentityId));
   parts.push("consentText: " + renderMemQLValue(args.consentText));
   parts.push("enabled: " + renderMemQLValue(args.enabled));
@@ -399,6 +399,44 @@ QueryClient.prototype.campaignRetryNewsletterWelcome = function (this: QueryClie
   return this.executeNamed("campaignRetryNewsletterWelcome", buildCampaignRetryNewsletterWelcome(args), opts);
 };
 
+/** Save an email automation with an exact revision. Omit expectedRevision to create one under a new caller-generated id. Editable while draft or paused. Never sends mail; returns the revision and what still blocks turning it on. */
+export interface CampaignSaveJourneyArgs {
+  /** Stable caller-generated id; reuse it after an uncertain create. */
+  journeyId: string;
+  /** Owning organization; immutable after creation. */
+  accountId: string;
+  name: string;
+  description?: string;
+  /** {kind: joined | confirmed, audienceId} */
+  trigger: Record<string, unknown>;
+  /** Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, timeoutDays?} */
+  steps: Record<string, unknown>[];
+  /** Exact revision from journeyById; omit when creating. */
+  expectedRevision?: string;
+}
+
+export function buildCampaignSaveJourney(args: CampaignSaveJourneyArgs): string {
+  const parts: string[] = [];
+  parts.push("journeyId: " + renderMemQLValue(args.journeyId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  parts.push("trigger: " + renderMemQLValue(args.trigger));
+  parts.push("steps: " + renderMemQLValue(args.steps));
+  if (args.expectedRevision !== undefined) parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignSaveJourney(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSaveJourney(args: CampaignSaveJourneyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSaveJourney = function (this: QueryClient, args: CampaignSaveJourneyArgs = {} as CampaignSaveJourneyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSaveJourney", buildCampaignSaveJourney(args), opts);
+};
+
 /** Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail. */
 export interface CampaignSaveTemplateArgs {
   /** Stable caller-generated template ID; reuse on an uncertain creation response. */
@@ -484,6 +522,32 @@ declare module "./query.js" {
 
 QueryClient.prototype.campaignSendingReadiness = function (this: QueryClient, args: CampaignSendingReadinessArgs = {} as CampaignSendingReadinessArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("campaignSendingReadiness", buildCampaignSendingReadiness(args), opts);
+};
+
+/** Turn an email automation on, pause it, or archive it. Turning on checks templates, senders and the audience first; archiving is permanent and exits everyone still in it. */
+export interface CampaignSetJourneyStateArgs {
+  journeyId: string;
+  // Enum: activate | pause | archive
+  action: string;
+  expectedRevision: string;
+}
+
+export function buildCampaignSetJourneyState(args: CampaignSetJourneyStateArgs): string {
+  const parts: string[] = [];
+  parts.push("journeyId: " + renderMemQLValue(args.journeyId));
+  parts.push("action: " + renderMemQLValue(args.action));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  return "builtin campaignSetJourneyState(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSetJourneyState(args: CampaignSetJourneyStateArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSetJourneyState = function (this: QueryClient, args: CampaignSetJourneyStateArgs = {} as CampaignSetJourneyStateArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSetJourneyState", buildCampaignSetJourneyState(args), opts);
 };
 
 /** Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through. */

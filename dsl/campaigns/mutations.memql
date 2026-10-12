@@ -39,6 +39,7 @@
 @actor
 mutation audience createAudience {
   args {
+    confirmation enum("none", "required")
     audienceId   string!
     name         string!
     description  string
@@ -50,6 +51,7 @@ mutation audience createAudience {
       id: args.audienceId
       ownerUserId: actor.userId
       status: "active"
+      confirmation: args.confirmation ?? "none"
     }
   }
 }
@@ -73,8 +75,10 @@ mutation audience archiveAudience {
 /// concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest)
 /// so the membership can be found by it (recipientInAudienceByDigest).
 @actor
+@createOnly("joinedAt")
 mutation recipient addRecipient {
   args {
+    subscriptionStatus enum("subscribed", "pending")
     recipientId  string!
     audienceId   string!
     email        string!
@@ -88,7 +92,8 @@ mutation recipient addRecipient {
     stamp {
       id: args.recipientId
       ownerUserId: actor.userId
-      subscriptionStatus: "subscribed"
+      subscriptionStatus: args.subscriptionStatus ?? "subscribed"
+      joinedAt: now
       source: args.source ?? "manual"
       // The mailbox's key: the SHA-256 of the address trimmed and lower-cased,
       // so the rows a mailbox holds are found by whoever holds the address
@@ -447,7 +452,7 @@ mutation delivery recordCampaignDelivery {
     outboundRequestId  string
     emailRuleId        string
     accountId          string
-    requestId          string
+    requestId          string @pattern("^[A-Za-z0-9_-]{8,160}$")
     templateId         string
     senderIdentityId   string
   }
@@ -1149,7 +1154,7 @@ mutation newsletterBinding configureNewsletter {
     siteId string!
     storeId string!
     audienceId string!
-    templateId string!
+    templateId string
     senderIdentityId string!
     consentText string!
     enabled bool!
@@ -1167,6 +1172,7 @@ mutation newsletterBinding configureNewsletter {
 @serverOnly
 mutation newsletterSignup recordNewsletterSignup {
   args {
+    status enum("pending", "none")
     signupId string!
     accountId string!
     newsletterId string!
@@ -1181,13 +1187,13 @@ mutation newsletterSignup recordNewsletterSignup {
     consentText string!
     consentRevision datetime!
     requestedAt datetime!
-    templateId string!
-    templateSnapshot object!
+    templateId string
+    templateSnapshot object
     senderIdentityId string!
   }
   insert {
     accept { accountId, newsletterId, siteId, storeId, audienceId, recipientId, email, displayName, emailDigest, submissionId, consentText, consentRevision, requestedAt, templateId, templateSnapshot, senderIdentityId }
-    stamp { id: args.signupId, ownerUserId: actor.userId, status: "pending", lastError: "" }
+    stamp { id: args.signupId, ownerUserId: actor.userId, status: args.status ?? "pending", lastError: "" }
   }
 }
 
@@ -1261,4 +1267,153 @@ mutation campaign createCampaignTestRun {
       skippedCount: 0
     }
   }
+}
+
+/// Choose whether new newsletter members must confirm their address.
+@actor
+mutation audience setAudienceConfirmation {
+ args {
+ audienceId string!
+ confirmation enum("none", "required")!
+ }
+ update { accept { confirmation } stamp { id: args.audienceId, ownerUserId: actor.userId } }
+}
+
+/// Confirmation is written only by the token-authenticated email page.
+@actor
+@serverOnly
+mutation recipient confirmRecipientSubscription {
+ args {
+ recipientId string!
+ confirmedAt datetime!
+ }
+ update { accept { confirmedAt } stamp { id: args.recipientId, ownerUserId: actor.userId, subscriptionStatus: "subscribed" } }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+@actor
+@serverOnly
+mutation journey createJourney {
+ args {
+ journeyId string!
+ accountId string!
+ name string!
+ description string
+ trigger object!
+ steps []object!
+ versionTime datetime!
+ }
+ insert {
+ accept { accountId, name, description, trigger, steps }
+ stamp { id: args.journeyId, ownerUserId: actor.userId, status: "draft", createdAt: args.versionTime }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+@actor
+@serverOnly
+mutation journey updateJourney {
+ args {
+ journeyId string!
+ name string!
+ description string
+ trigger object!
+ steps []object!
+ versionTime datetime!
+ }
+ update {
+ accept { name, description, trigger, steps }
+ stamp { id: args.journeyId, createdAt: args.versionTime }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+@actor
+@serverOnly
+mutation journey setJourneyStatus {
+ args {
+ journeyId string!
+ status enum("draft", "active", "paused", "archived")!
+ activatedAt datetime
+ lastError string
+ versionTime datetime!
+ }
+ update {
+ accept { status, activatedAt, lastError }
+ stamp { id: args.journeyId, createdAt: args.versionTime }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+@actor
+@serverOnly
+mutation journey recordJourneyDrain {
+ args {
+ journeyId string!
+ lastError string
+ retiredAt datetime
+ versionTime datetime!
+ }
+ update {
+ accept { lastError, retiredAt }
+ stamp { id: args.journeyId, createdAt: args.versionTime }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+@actor
+@serverOnly
+@createOnly("ownerUserId", "accountId", "journeyId", "recipientId", "emailDigest", "stepId", "stepIndex", "nextAt", "status", "exitReason", "enrolledAt", "triggeredAt", "completedAt", "lastError", "attempts")
+mutation journeyEnrollment enrollJourneyRecipient {
+ args {
+ enrollmentId string!
+ accountId string!
+ journeyId string!
+ recipientId string!
+ emailDigest string!
+ stepId string!
+ enrolledAt datetime!
+ triggeredAt datetime!
+ }
+ insert {
+ accept { accountId, journeyId, recipientId, emailDigest, stepId, enrolledAt, triggeredAt }
+ stamp { id: args.enrollmentId, ownerUserId: actor.userId, stepIndex: 0, nextAt: args.enrolledAt, status: "active", attempts: 0, exitReason: "", lastError: "", completedAt: "" }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+@actor
+@serverOnly
+mutation journeyEnrollment advanceJourneyEnrollment {
+ args {
+ enrollmentId string!
+ stepId string
+ stepIndex int!
+ nextAt datetime
+ status enum("active", "waiting", "completed", "exited", "failed")!
+ exitReason string
+ completedAt datetime
+ lastError string
+ attempts int
+ versionTime datetime!
+ }
+ update {
+ accept { stepId, stepIndex, nextAt, status, exitReason, completedAt, lastError, attempts }
+ stamp { id: args.enrollmentId, createdAt: args.versionTime }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+@actor
+@serverOnly
+mutation journeyEnrollment nudgeJourneyEnrollment {
+ args {
+ enrollmentId string!
+ nextAt datetime!
+ versionTime datetime!
+ }
+ update {
+ accept { nextAt }
+ stamp { id: args.enrollmentId, createdAt: args.versionTime }
+ }
 }

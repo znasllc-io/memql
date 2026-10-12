@@ -705,6 +705,7 @@
       "file": "campaigns/concepts.memql",
       "fields": [
         "accountId",
+        "confirmation",
         "description",
         "name",
         "ownerUserId",
@@ -715,6 +716,10 @@
         "ownerUserId"
       ],
       "enums": {
+        "confirmation": [
+          "none",
+          "required"
+        ],
         "status": [
           "active",
           "archived"
@@ -834,9 +839,11 @@
           "withdraw"
         ],
         "source": [
+          "double_opt_in",
           "import",
           "one_click",
           "operator",
+          "preferences",
           "provider",
           "rfc8058",
           "signup"
@@ -956,6 +963,79 @@
       }
     },
     {
+      "concept": "v1:campaigns:journey",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "activatedAt",
+        "description",
+        "lastError",
+        "name",
+        "ownerUserId",
+        "retiredAt",
+        "status",
+        "steps",
+        "trigger"
+      ],
+      "required": [
+        "accountId",
+        "name",
+        "ownerUserId",
+        "status",
+        "steps",
+        "trigger"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "archived",
+          "draft",
+          "paused"
+        ]
+      }
+    },
+    {
+      "concept": "v1:campaigns:journeyEnrollment",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "attempts",
+        "completedAt",
+        "emailDigest",
+        "enrolledAt",
+        "exitReason",
+        "journeyId",
+        "lastError",
+        "nextAt",
+        "ownerUserId",
+        "recipientId",
+        "status",
+        "stepId",
+        "stepIndex",
+        "triggeredAt"
+      ],
+      "required": [
+        "accountId",
+        "emailDigest",
+        "enrolledAt",
+        "journeyId",
+        "ownerUserId",
+        "recipientId",
+        "status",
+        "stepIndex",
+        "triggeredAt"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "completed",
+          "exited",
+          "failed",
+          "waiting"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:newsletterBinding",
       "file": "campaigns/concepts.memql",
       "fields": [
@@ -977,8 +1057,7 @@
         "ownerUserId",
         "senderIdentityId",
         "siteId",
-        "storeId",
-        "templateId"
+        "storeId"
       ]
     },
     {
@@ -1020,13 +1099,12 @@
         "siteId",
         "status",
         "storeId",
-        "submissionId",
-        "templateId",
-        "templateSnapshot"
+        "submissionId"
       ],
       "enums": {
         "status": [
           "blocked",
+          "none",
           "pending",
           "sent",
           "suppressed",
@@ -1040,10 +1118,12 @@
       "fields": [
         "accountId",
         "audienceId",
+        "confirmedAt",
         "displayName",
         "email",
         "emailDigest",
         "fields",
+        "joinedAt",
         "ownerUserId",
         "source",
         "subscriptionStatus",
@@ -1063,6 +1143,7 @@
         "subscriptionStatus": [
           "bounced",
           "complained",
+          "pending",
           "subscribed",
           "unsubscribed"
         ]
@@ -4494,6 +4575,7 @@
         "attempts",
         "body",
         "dedupeKey",
+        "htmlBody",
         "lastError",
         "medium",
         "nextAttemptAt",

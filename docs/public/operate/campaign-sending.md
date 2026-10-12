@@ -393,9 +393,9 @@ availability and suppression are checked again before sending.
 A welcome takes the storefront's lock, the audience's and its own send receipt's
 together, in that order, in one transaction on one connection. It holds them for
 at most the send's timeout plus thirty seconds for its reads (two minutes at most),
-and a send that began can hold them past that for its last two writes: up to five
-seconds to save the receipt of the accepted message and up to ten to write the
-welcome's outcome. The receipt that says an attempt began and the outcome are
+and a send that began can hold them past that for up to twenty seconds: an attempt
+receipt begun at the phase boundary can take ten seconds, followed by up to ten
+seconds to write the welcome's outcome. The receipt that says an attempt began and the outcome are
 written only if the locks are still held, and a write begun is waited for rather
 than cut; the one exception is the ten-second wait described under signups, which a
 write can outlast without the server ending it. A lock that is busy at any point

@@ -212,6 +212,26 @@ func (w *Worker) newsletterPreflight(ctx context.Context, row map[string]any, se
 	if campaign.SenderIdentityID == "" {
 		return Template{}, fmt.Errorf("select this organization's sender")
 	}
+	audience, found, err := w.store.AudienceByID(ctx, campaign.AudienceID)
+	if err != nil {
+		return Template{}, err
+	}
+	if !found || !sameOrganization(campaign.AccountID, audience.AccountID) || audience.Status == "archived" {
+		return Template{}, fmt.Errorf("choose an active audience in this organization")
+	}
+	if audience.Confirmation == "required" && campaign.TemplateID != "" {
+		return Template{}, visitorMessage("This audience asks people to confirm, so its welcome comes from an automation. Remove the welcome template.")
+	}
+	if campaign.TemplateID == "" {
+		if err := w.requireSendAuthority(ctx, campaign.AccountID); err != nil {
+			return Template{}, err
+		}
+		_, refusal := w.resolveSendIdentity(ctx, campaign)
+		if refusal.refused() {
+			return Template{}, fmt.Errorf("%s", refusal.Reason)
+		}
+		return Template{}, nil
+	}
 	if sending {
 		_, snapshot, err := w.preflightAudienceWith(ctx, "newsletter", campaign, true, known)
 		return snapshot, err
@@ -357,7 +377,7 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		return nil, err
 	}
 	member, found, optedOut := mailboxVerdict(members)
-	if optedOut {
+	if optedOut || found && member.SubscriptionStatus == "pending" {
 		return accepted()
 	}
 	// The count that decides a new member's ceiling is the one the send preflight
@@ -493,6 +513,20 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 			}
 		}
 	}
+	audience, audienceFound, err := w.store.AudienceByID(locked, audienceID)
+	if err != nil {
+		return fail(err)
+	}
+	if !audienceFound {
+		return nil, fmt.Errorf("the audience is no longer readable")
+	}
+	pending := audience.Confirmation == "required"
+	if pending && snapshot.ID != "" {
+		return nil, visitorMessage("This audience asks people to confirm, so its welcome comes from an automation. Remove the welcome template.")
+	}
+	if found && (pending || member.SubscriptionStatus == "pending") {
+		return accepted()
+	}
 	// Consent lands first, by address digest. If enrollment fails afterwards,
 	// no unconsented recipient can become sendable. Its stable event key is
 	// checked on retry, so replay cannot turn an old grant into a new grant.
@@ -502,20 +536,20 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		return fail(err)
 	}
 	requestedAt := w.nowUTC()
-	if consent == nil {
+	if consent == nil && !pending {
 		if err = write(func(ctx context.Context) error {
 			return w.store.RecordConsent(ctx, ConsentGrant, ConsentRecord{EventID: eventID, EmailDigest: EmailDigest(address), Source: "signup", AccountID: bare(str(row, "accountId")), OccurredAt: requestedAt})
 		}); err != nil {
 			return nil, err
 		}
-	} else {
+	} else if consent != nil {
 		requestedAt = templateTime(consent["occurredAt"])
 	}
 	recipientID := member.ID
 	if !found {
 		recipientID = sha256Hex("newsletter-recipient\x00" + signupID)
 		if err = write(func(ctx context.Context) error {
-			return w.store.AddRecipient(ctx, recipientID, audienceID, address, name, "signup", bare(str(row, "accountId")), nil)
+			return w.store.AddRecipient(ctx, recipientID, audienceID, address, name, "signup", bare(str(row, "accountId")), map[bool]string{true: "pending", false: "subscribed"}[pending], nil)
 		}); err != nil {
 			return nil, err
 		}
@@ -529,6 +563,7 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		return nil, err
 	}
 	values := map[string]any{
+		"status":   map[bool]string{true: "none", false: "pending"}[pending || snapshot.ID == ""],
 		"signupId": signupID, "newsletterId": bare(str(row, "id")), "siteId": siteID, "storeId": bare(str(row, "storeId")),
 		"accountId": bare(str(row, "accountId")), "audienceId": audienceID, "recipientId": bare(recipientID),
 		"emailDigest": EmailDigest(address), "email": address, "displayName": name, "submissionId": argString(args, "submissionId"), "consentText": str(row, "consentText"),
@@ -627,8 +662,7 @@ const welcomePhaseCeiling = 2 * time.Minute
 // last, and nothing is waited for beyond it.
 //
 // ONLY A SEND THAT BEGAN CAN END A WELCOME. A busy lock anywhere, a phase that runs
-// out (or a pass that is stopped) before the send begins, a read the welcome or its
-// send needs that fails, the record that an attempt began that cannot be written:
+// out (or a pass that is stopped) before the send begins, a read that reports a database failure, the record that an attempt began that cannot be written:
 // each is "nothing attempted, try later" -- no verdict is written, the welcome stays
 // pending, and the next pass takes it. (A send refused on its merits -- the template
 // is gone, the address changed, the sender is disabled -- is a verdict, and blocks.)
@@ -648,8 +682,8 @@ const welcomePhaseCeiling = 2 * time.Minute
 //
 // HOW LONG THE LOCKS ARE HELD: the phase (the send's timeout plus
 // welcomePhaseMargin for the reads around it, never more than welcomePhaseCeiling),
-// and for a send that began, after it, up to completeReceiptLimit to save the
-// accepted message's receipt and up to lockedWriteLimit to write the verdict.
+// plus up to two lockedWriteLimit writes: the attempt begun at the phase
+// boundary and the verdict. An accepted receipt normally has the shorter cap.
 func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned map[string]any) error {
 	scannedOwner := bare(str(scanned, "ownerUserId"))
 	requestID := "newsletter-" + bare(str(scanned, "id"))

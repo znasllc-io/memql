@@ -535,6 +535,9 @@ var errNoUnsubscribeLink = errors.New("campaigns: a message needs its unsubscrib
 // List-Unsubscribe header, the footer's link and {{unsubscribeUrl}}; the
 // header pair is on every message, whatever the body carries.
 func renderMessage(c Campaign, t Template, r Recipient, opts RenderOptions) (email.Message, error) {
+	if err := validateRecipientLinkLocations(t); err != nil {
+		return email.Message{}, err
+	}
 	if strings.TrimSpace(opts.Links.Unsubscribe) == "" {
 		return email.Message{}, errNoUnsubscribeLink
 	}

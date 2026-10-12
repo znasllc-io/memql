@@ -191,7 +191,7 @@ func renderTagFixture(t *testing.T, c mergeTagCase) (text string, html string) {
 
 	tmpl := Template{
 		ID:       "t1",
-		Subject:  "Subject " + c.tag,
+		Subject:  "Subject",
 		TextBody: "Text " + c.tag + " end.",
 		HTMLBody: "<p>Html " + c.tag + " end.</p>",
 	}

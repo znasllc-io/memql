@@ -46,13 +46,15 @@ func AcknowledgeAttentionBuild(args AcknowledgeAttentionArgs) string {
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.go).
 type AddRecipientArgs struct {
-	RecipientId string
-	AudienceId  string
-	Email       string
-	DisplayName string
-	Fields      map[string]any
-	Source      string
-	AccountId   string
+	// Enum: subscribed | pending
+	SubscriptionStatus string
+	RecipientId        string
+	AudienceId         string
+	Email              string
+	DisplayName        string
+	Fields             map[string]any
+	Source             string
+	AccountId          string
 }
 
 // AddRecipient calls the engine mutation addRecipient.
@@ -64,6 +66,13 @@ func (qc *QueryClient) AddRecipient(ctx context.Context, args AddRecipientArgs) 
 func AddRecipientBuild(args AddRecipientArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation addRecipient(")
+	if args.SubscriptionStatus != "" {
+		b.WriteString("subscriptionStatus: ")
+		b.WriteString(quoteMemQL(args.SubscriptionStatus))
+	}
+	if b.Len() > 22 {
+		b.WriteString(", ")
+	}
 	b.WriteString("recipientId: ")
 	b.WriteString(quoteMemQL(args.RecipientId))
 	if b.Len() > 22 {
@@ -1964,10 +1973,12 @@ func CreateAskConversationBuild(args CreateAskConversationArgs) string {
 //
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["createAudience"] in generated_concepts.go).
 type CreateAudienceArgs struct {
-	AudienceId  string
-	Name        string
-	Description string
-	AccountId   string
+	// Enum: none | required
+	Confirmation string
+	AudienceId   string
+	Name         string
+	Description  string
+	AccountId    string
 }
 
 // CreateAudience calls the engine mutation createAudience.
@@ -1979,6 +1990,13 @@ func (qc *QueryClient) CreateAudience(ctx context.Context, args CreateAudienceAr
 func CreateAudienceBuild(args CreateAudienceArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation createAudience(")
+	if args.Confirmation != "" {
+		b.WriteString("confirmation: ")
+		b.WriteString(quoteMemQL(args.Confirmation))
+	}
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
 	if b.Len() > 24 {
@@ -10908,6 +10926,35 @@ func SetArtifactAccountsBuild(args SetArtifactAccountsArgs) string {
 		b.WriteString("accountIds: ")
 		b.WriteString(renderMemQLValue(args.AccountIds))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// SetAudienceConfirmation -- Choose whether new newsletter members must confirm their address.
+//
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["setAudienceConfirmation"] in generated_concepts.go).
+type SetAudienceConfirmationArgs struct {
+	AudienceId string
+	// Enum: none | required
+	Confirmation string
+}
+
+// SetAudienceConfirmation calls the engine mutation setAudienceConfirmation.
+func (qc *QueryClient) SetAudienceConfirmation(ctx context.Context, args SetAudienceConfirmationArgs) (*Result, error) {
+	call := SetAudienceConfirmationBuild(args)
+	return qc.executeNamed(ctx, "setAudienceConfirmation", call)
+}
+
+func SetAudienceConfirmationBuild(args SetAudienceConfirmationArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setAudienceConfirmation(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 33 {
+		b.WriteString(", ")
+	}
+	b.WriteString("confirmation: ")
+	b.WriteString(quoteMemQL(args.Confirmation))
 	b.WriteString(")")
 	return b.String()
 }

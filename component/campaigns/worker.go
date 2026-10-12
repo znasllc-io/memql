@@ -141,6 +141,7 @@ type Worker struct {
 	// open gate, which can say whether the lock is still held before the receipt that
 	// says an attempt began is written (singleSendReceipt.hold).
 	singleSendGate func(context.Context, string) (gateHold, error)
+	journeyGate    func(context.Context, string) (func(), error)
 	seriesGate     func(context.Context, string) (func(), error)
 	// newsletterGate takes the locks for the keys it is given -- full keys, from
 	// newsletterLock and singleSendLock -- in the order given, in ONE transaction on
@@ -254,6 +255,7 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 			}
 			return hold, nil
 		},
+		journeyGate: func(ctx context.Context, key string) (func(), error) { return gate(ctx, "campaign-journey:"+key) },
 		seriesGate: func(ctx context.Context, key string) (func(), error) {
 			return gate(ctx, "campaign-series:"+key)
 		},

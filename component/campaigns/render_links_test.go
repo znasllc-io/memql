@@ -128,12 +128,12 @@ const footerSentence = "You are receiving this because"
 // nothing left over.
 func TestLinkTagsResolveInBothParts(t *testing.T) {
 	links := messageTestLinks()
-	const tags = "U={{unsubscribeUrl}} P={{preferencesUrl}} V={{viewUrl}} C={{confirmUrl}}"
+	const tags = "U: {{unsubscribeUrl}} P: {{preferencesUrl}} V: {{viewUrl}} C: {{confirmUrl}}"
 	tmpl := Template{ID: "t1", Subject: "s", TextBody: "Text " + tags, HTMLBody: "<p>Html " + tags + "</p>"}
 
 	msg := renderLinks(t, tmpl, RenderOptions{})
 
-	want := "U=" + links.Unsubscribe + " P=" + links.Preferences + " V=" + links.View + " C=" + links.Confirm
+	want := "U: " + links.Unsubscribe + " P: " + links.Preferences + " V: " + links.View + " C: " + links.Confirm
 	if !strings.Contains(msg.TextBody, want) {
 		t.Errorf("the text part did not resolve the four tags.\n  want to contain: %s\n  got: %s", want, msg.TextBody)
 	}
@@ -356,6 +356,13 @@ func TestOnlyALinkHrefCountsAsTheHTMLPartsOwnUnsubscribeLink(t *testing.T) {
 		{"the other link tags", `<a href="{{preferencesUrl}}">Preferences</a>`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			switch tc.name {
+			case "an alt text", "the text of a link to somewhere else", "a title on a link to somewhere else", "a comment", "a longer URL", "a URL with something after it", "a link inside an svg element", "a link inside a script", "a link inside a textarea":
+				if err := validateRecipientLinkLocations(Template{HTMLBody: tc.source}); err == nil {
+					t.Fatal("unsafe recipient link location was accepted")
+				}
+				return
+			}
 			msg := renderLinks(t, Template{ID: "t1", Subject: "s", TextBody: "t", HTMLBody: tc.source}, RenderOptions{})
 			if got := strings.Contains(msg.HTMLBody, footerSentence); got != tc.wantFooter {
 				t.Errorf("footer appended = %v, want %v.\ntemplate: %s\ngot: %s", got, tc.wantFooter, tc.source, msg.HTMLBody)
@@ -400,6 +407,13 @@ func TestOnlyAStandaloneURLCountsAsTheTextPartsOwnUnsubscribeLink(t *testing.T) 
 		{"no tag", "Hi\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			switch tc.name {
+			case "the second of two", "glued to a label", "glued to a word before", "glued to a word after", "a longer URL":
+				if err := validateRecipientLinkLocations(Template{TextBody: tc.source}); err == nil {
+					t.Fatal("attached recipient link was accepted")
+				}
+				return
+			}
 			msg := renderLinks(t, Template{ID: "t1", Subject: "s", TextBody: tc.source}, RenderOptions{})
 			if got := strings.Contains(msg.TextBody, footerSentence); got != tc.wantFooter {
 				t.Errorf("footer appended = %v, want %v.\ntemplate: %q\ngot: %q", got, tc.wantFooter, tc.source, msg.TextBody)

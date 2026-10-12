@@ -50,7 +50,7 @@ func (e *recordEngine) Execute(ctx context.Context, q string) (any, error) {
 		}
 		return rowsEnvelope([]map[string]any{row}), nil
 	case strings.HasPrefix(q, "query templateById"):
-		return rowsEnvelope([]map[string]any{{"id": "v1:campaigns:template:t1", "subject": "s", "textBody": "b"}}), nil
+		return rowsEnvelope([]map[string]any{{"id": "v1:campaigns:template:t1", "subject": "s", "textBody": "b", "status": "ready"}}), nil
 	case strings.HasPrefix(q, "query activeUsers"):
 		return rowsEnvelope([]map[string]any{{"id": "v1:identity:user:owner1", "role": "owner", "primaryEmail": "owner@acme.com"}}), nil
 	}

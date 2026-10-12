@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -224,7 +225,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 			"recipientId": recipient.ID, "emailRuleId": emailRuleID,
 		})
 	}
-	if recipient.SubscriptionStatus != "" && recipient.SubscriptionStatus != "subscribed" {
+	if recipient.SubscriptionStatus != "" && recipient.SubscriptionStatus != "subscribed" && !(opts.confirm && recipient.SubscriptionStatus == "pending") {
 		w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{
 			Status: "skipped", SkipReason: recipient.SubscriptionStatus,
 		})
@@ -238,7 +239,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	if err != nil {
 		w.logger.Debug("campaigns.sendToRecipient: could not resolve the account name", "error", err)
 	}
-	opts := RenderOptions{
+	renderOpts := RenderOptions{
 		ReplyTo:     replyToFor(campaign, identity),
 		AccountName: accountName,
 		// The footer names the identity's display name, then the organization
@@ -249,20 +250,26 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	// campaign relationship; the signed organization and digest identify the opt-out.
 	// The view link names the sender the footer shows, which the options decide.
 	links, err := w.messageLinks(linkRequest{
-		OwnerUserID: ownerUserID, RecipientID: recipient.ID, AccountID: campaign.AccountID, EmailDigest: digest,
+		Confirm: opts.confirm, OwnerUserID: ownerUserID, RecipientID: recipient.ID, AccountID: campaign.AccountID, EmailDigest: digest,
 		TemplateID: tmpl.ID, TemplateRevision: tmpl.Revision,
-		CampaignName: campaign.Name, SenderName: footerSender(opts),
+		CampaignName: campaign.Name, SenderName: footerSender(renderOpts),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: cannot mint the links for the message: %w", err)
 	}
-	opts.Links = links
-	msg, err := renderMessage(campaign, tmpl, recipient, opts)
+	renderOpts.Links = links
+	msg, err := renderMessage(campaign, tmpl, recipient, renderOpts)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", err)
 	}
 
 	if !w.allowSend() {
+		if opts.deferWhenLimited && receipt != nil {
+			if err := w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{Status: "pending", NextAttemptAt: w.nowUTC().Add(time.Minute)}); err != nil {
+				return nil, undecided(err)
+			}
+			return resultNode("campaignRecipientSend", map[string]any{"sent": false, "skipped": false, "deferred": true, "reason": "The send-rate limit is reached; this email will be retried shortly.", "recipientId": recipient.ID, "emailRuleId": emailRuleID})
+		}
 		return nil, errCampaignRateLimited
 	}
 	// Record the attempt before contacting the transport. After this point a
@@ -366,7 +373,7 @@ func (w *Worker) recordAttempt(ctx context.Context, receipt *singleSendReceipt) 
 // sent, and a failed ledger write must not turn a delivered message into an
 // error the caller retries. Logged loudly instead, because an unrecorded send
 // is invisible everywhere else.
-func (w *Worker) recordLoneDelivery(ctx context.Context, args map[string]any, campaign Campaign, recipient Recipient, emailRuleID string, d Delivery) {
+func (w *Worker) recordLoneDelivery(ctx context.Context, args map[string]any, campaign Campaign, recipient Recipient, emailRuleID string, d Delivery) error {
 	d.CampaignID = "" // This synthetic send has no campaign relationship.
 	d.RecipientID = recipient.ID
 	d.Email = recipient.Email
@@ -385,5 +392,7 @@ func (w *Worker) recordLoneDelivery(ctx context.Context, args map[string]any, ca
 	if err := w.store.RecordDelivery(ctx, d); err != nil {
 		w.logger.Warn("campaigns.sendToRecipient: could not record the delivery outcome",
 			"recipient", recipient.ID, "rule", emailRuleID, "status", d.Status, "error", err)
+		return err
 	}
+	return nil
 }
