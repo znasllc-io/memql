@@ -52,6 +52,18 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand("vscode.openWith", layoutURI, "memql.productivity.email");
   const blocks = (await tools.emailReady(layoutURI)).blocks;
   check(blocks === 2, `The email editor did not read the layout's blocks (${blocks}).`);
+  const newEmailURI = vscode.Uri.parse("memql-file://cluster.example/new-email/client-org/New%20email");
+  check(commands.includes("memql.productivity.newEmail"), "New Email command missing.");
+  for (const old of ["newTemplate", "templateFromExamples", "resumeEmailComposition"]) check(!commands.includes(`memql.productivity.${old}`), "Obsolete email command remains.");
+  const pageStat = await vscode.workspace.fs.stat(newEmailURI);
+  check(pageStat.size === 0 && (await vscode.workspace.fs.readFile(newEmailURI)).length === 0, "New email links must have no file bytes.");
+  let refused = false;
+  try { await vscode.workspace.fs.writeFile(newEmailURI, new Uint8Array([1])); } catch { refused = true; }
+  check(refused, "The New email page accepted a file write.");
+  await vscode.commands.executeCommand("vscode.open", newEmailURI);
+  const pageInput = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
+  check(pageInput instanceof vscode.TabInputCustom && pageInput.viewType === "memql.productivity.newEmail", "New email selector did not open its page.");
+  check((await tools.newEmailReady(newEmailURI)).state === "Not connected to cluster.example", "New email did not report the disconnected cluster.");
   const markdownURI = vscode.Uri.joinPath(root, "host-review.md");
   await vscode.workspace.fs.writeFile(markdownURI, new TextEncoder().encode("# Markdown review\n\nA **rendered** passage.\n"));
   await vscode.commands.executeCommand("vscode.openWith", markdownURI, "memql.productivity.markdown");

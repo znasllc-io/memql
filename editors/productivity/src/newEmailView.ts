@@ -115,7 +115,7 @@ let writing: string | undefined;
 /** The last write that failed: its state and problem stay until the person changes something. */
 let failure: Problem | undefined;
 /** An act was sent; the next waits for the host's answer. */
-let pending = false;
+let pending: Act | undefined;
 /** The host restores the draft once a page: a later restore is the host repeating itself. */
 let restored = false;
 let phase: Phase = "idle";
@@ -129,6 +129,7 @@ let writingShape: string | undefined;
 /** The cards by layout (id, words and shape): a card whose layout comes back keeps its render. */
 let cardCache = new Map<string, HTMLElement>();
 let cardCount = 0;
+let referenceCount = 0;
 
 const layouts = () => setup?.layouts ?? [];
 const chosenLayout = () => waiting ? undefined : layouts().find(layout => layout.id === chosen);
@@ -229,7 +230,7 @@ function runAct(act: Act): void {
       post({ type: act });
       break;
   }
-  pending = true;
+  pending = act;
   // The act's button may go with the host's answer: the focus waits on the state, not on the page.
   barState.focus();
   render();
@@ -263,9 +264,12 @@ organizationSelect.addEventListener("change", () => {
   wantedOrganization = undefined;
   askFor(id);
   changed();
+  saveDraft();
   drawLayouts();
   render();
 });
+
+organizationSelect.addEventListener("blur", drawOrganizations);
 
 // -- Layouts --------------------------------------------------------------------------
 
@@ -285,11 +289,13 @@ function cardFor(layout: Layout): HTMLElement {
   thumb.append(canvas);
   const name = textElement("span", layout.name, "card-name");
   name.id = `layout-name-${count}`;
+  name.title = layout.name;
   card.setAttribute("aria-labelledby", name.id);
   card.append(thumb, name);
   if (layout.description) {
     const description = textElement("span", layout.description, "card-description");
     description.id = `layout-description-${count}`;
+    description.title = layout.description;
     card.setAttribute("aria-describedby", description.id);
     card.append(description);
   }
@@ -438,12 +444,14 @@ function chipFor(item: Reference): HTMLElement {
   const icon = textElement("span", "", "chip-icon");
   const name = textElement("span", item.label, "chip-name");
   name.title = item.label;
+  name.id = `reference-name-${++referenceCount}`;
   chip.append(icon, name);
   if (item.kind !== "file") {
     // Pictures and ZIPs can go into the email itself; off until the person turns it on.
     const label = textElement("label", "", "switch");
     const toggle = document.createElement("input");
     toggle.type = "checkbox";
+    toggle.setAttribute("aria-describedby", name.id);
     toggle.setAttribute("role", "switch");
     toggle.addEventListener("change", () => { changed(); post({ type: "include", index: Number(chip.dataset.index), on: toggle.checked }); render(); });
     label.append(toggle, textElement("span", C.useInEmail));
@@ -623,7 +631,7 @@ function onSetup(message: Record<string, unknown>): void {
   const next = readSetup(message);
   if (!next) return;
   setup = next;
-  pending = false;
+  if (pending === "connect" || pending === "retry") pending = undefined;
   if (!next.connected) { drawOrganizations(); drawDictation(); render(); return; }
   waiting = false;
   layoutsProblem = undefined;
@@ -670,7 +678,7 @@ function onDictation(message: Record<string, unknown>): void {
 
 function onWriting(message: Record<string, unknown>): void {
   writing = typeof message.layoutId === "string" ? message.layoutId : "";
-  pending = false;
+  pending = undefined;
   failure = undefined;
   stopDictating();
   render();
@@ -689,20 +697,20 @@ function drawWriting(): void {
 
 function onFailed(message: Record<string, unknown>): void {
   writing = undefined;
-  pending = false;
+  pending = undefined;
   failure = readProblem(message.problem) ?? { message: "" };
   render();
 }
 
 function onIdle(): void {
   writing = undefined;
-  pending = false;
+  pending = undefined;
   render();
 }
 
 function onLayoutsFailed(message: Record<string, unknown>): void {
   waiting = false;
-  pending = false;
+  pending = undefined;
   layoutsProblem = readProblem(message.problem) ?? { message: "" };
   drawLayouts();
   render();

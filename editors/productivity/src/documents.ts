@@ -16,7 +16,8 @@ export function resourceFrom(uri: string): Resource {
       !parsed.hostname || segments.length !== 3 || !["artifacts", "templates", "new-email"].includes(segments[0]) || !/^[\w-]{1,160}$/.test(segments[1])) {
     throw new UserInputError("Invalid MemQL file link.");
   }
-  if (!segments[2] || /[\\/\u0000-\u001f]/.test(segments[2])) throw new UserInputError("Invalid file name.");
+  if (segments[0] === "new-email" && (!/^\/new-email\/[A-Za-z0-9_-]{1,160}\/[^/]+$/.test(parsed.pathname) || !/^[A-Za-z0-9.-]+$/.test(parsed.host) || /^memql-file:\/\/[^/]*:/.test(uri))) throw new UserInputError("Invalid MemQL file link.");
+  if (!segments[2] || /[\\/\u0000-\u001f\u007f]/.test(segments[2])) throw new UserInputError("Invalid file name.");
   return { domain: parsed.hostname.toLowerCase(), kind: segments[0] as Resource["kind"], id: segments[1], name: segments[2] };
 }
 /** Why a New email link is never read, saved or written: the page it opens has no bytes. */
@@ -33,7 +34,7 @@ export function newEmailResource(domain: string, accountId: string): string {
   try { parsed = resourceFrom(link); } catch { /* not a link; refused below */ }
   // The id is checked as written (resourceFrom decodes, so "%61" would read as "a"), and the host must
   // come back as given: a slash in it would have reshaped the link.
-  if (!/^[\w-]{1,160}$/.test(accountId) || parsed?.domain !== host) throw new UserInputError("Invalid MemQL file link.");
+  if (!/^[A-Za-z0-9.-]+$/.test(domain) || !/^[\w-]{1,160}$/.test(accountId) || parsed?.domain !== host) throw new UserInputError("Invalid MemQL file link.");
   return link;
 }
 export function isZip(name: string, mime = "", bytes?: Uint8Array): boolean {
@@ -156,8 +157,8 @@ export class Documents {
     if (!rows[0]) throw new Error("The cluster did not return document feedback.");
     return rows[0];
   }
-  async transcribe(document:OpenDocument,audio:ReadableStream<Uint8Array>,signal:AbortSignal,onPartial:(text:string)=>void):Promise<string>{
-    return this.api.transcribe(document.lease,audio,signal,onPartial);
+  async transcribe(lease:ConnectionLease,audio:ReadableStream<Uint8Array>,signal:AbortSignal,onPartial:(text:string)=>void):Promise<string>{
+    return this.api.transcribe(lease,audio,signal,onPartial);
   }
   async cancelRevision(document:OpenDocument,requestId:string):Promise<void>{
     const status=await this.revision(document,requestId);

@@ -38,6 +38,12 @@ test("a New email link names an organization and opens no file", async () => {
   for (const bad of [
     "memql-file://client.example/new/email?account=client-org&returnTo=email",
     "memql-file://client.example/new-email/client-org",
+    "memql-file://client.example//new-email/client-org/New%20email",
+    "memql-file://client.example/new-email/client-org/New%20email/",
+    "memql-file://client.example/new-email/%61/New%20email",
+    "memql-file://client.example:/new-email/client-org/New%20email",
+    "memql-file://client.example/new-email/client-org/Bad%7f",
+
     "memql-file://client.example/new-email/v1:accounts:account:client-org/New%20email",
     "memql-file://client.example/new-email/client-org/New%20email?returnTo=email",
     "memql-file://client.example/new-email/client-org/a%2Fb",
@@ -58,7 +64,7 @@ test("the New email builder returns the one canonical link or refuses", () => {
     assert.throws(() => newEmailResource("client.example", id), refusal, `id ${JSON.stringify(id)}`);
   }
   // A domain that reshapes the link (a slash, a port, a user, a query, a fragment, nothing at all) is refused, never reshaped.
-  for (const domain of ["", "client.example/", "client.example/x", "client.example:8080", "user@client.example", "client.example?x=1", "client.example#x", "client example"]) {
+  for (const domain of ["", "client.example/", "client.example/x", "client.example:8080", "user@client.example", "client.example?x=1", "client.example#x", "client example", "%61.example", "K.example"]) {
     assert.throws(() => newEmailResource(domain, "client-org"), refusal, `domain ${JSON.stringify(domain)}`);
   }
 });

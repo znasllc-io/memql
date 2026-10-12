@@ -11,6 +11,9 @@ export function requestedResource(pageURL) {
       !['artifacts', 'templates', 'new-email'].includes(parts[0]) || !/^[\w-]{1,160}$/.test(parts[1]) || !parts[2] || /[\\/\u0000-\u001f\u007f]/.test(parts[2])) {
     throw new Error('This file link does not belong to this MemQL installation. Open it again from MemQL OS.');
   }
+  if (parts[0] === 'new-email' && (!/^\/new-email\/[A-Za-z0-9_-]{1,160}\/[^/]+$/.test(resource.pathname) || !/^[A-Za-z0-9.-]+$/.test(resource.host) || /^memql-file:\/\/[^/]*:/.test(resources[0]))) {
+    throw new Error('Invalid MemQL file link. Open the file again from MemQL OS.');
+  }
   return resource.href;
 }
 

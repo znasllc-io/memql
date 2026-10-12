@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 import { DocumentDictation } from '../src/dictation.js';
-import type { Documents, OpenDocument } from '../src/documents.js';
+import type { Documents } from '../src/documents.js';
+import type { ConnectionLease } from '../../vscode/src/connection/api.js';
 
 test('dictation routes PCM to the connected document and cancellation releases capture', {timeout:5000}, async () => {
   const handlers = new Map<string, (...args:any[])=>any>();
@@ -20,9 +21,9 @@ test('dictation routes PCM to the connected document and cancellation releases c
     },
   });
   const panel={webview:{postMessage:async(message:any)=>{messages.push(message);return true;}}} as vscode.WebviewPanel;
-  const base={} as OpenDocument;
+  const base={} as ConnectionLease;
   let signal!:AbortSignal;
-  const files={transcribe:async(document:OpenDocument,audio:ReadableStream<Uint8Array>,abort:AbortSignal,partial:(text:string)=>void)=>{
+  const files={transcribe:async(document:ConnectionLease,audio:ReadableStream<Uint8Array>,abort:AbortSignal,partial:(text:string)=>void)=>{
     assert.equal(document,base);signal=abort;
     const reader=audio.getReader();
     const first=await reader.read();chunks.push(Array.from(first.value!));partial('Clarify this');
@@ -48,12 +49,12 @@ test('a dismissed old microphone prompt cannot interrupt a new dictation', {time
   executeCommand:(name:string,id:string)=>name.endsWith('.stop')?Promise.resolve():new Promise<void>((_,reject)=>captures.push({id,reject})),
  });
  const panel={webview:{postMessage:async(message:any)=>{messages.push(message);return true;}}} as vscode.WebviewPanel;
- const files={transcribe:async(_base:OpenDocument,audio:ReadableStream<Uint8Array>,signal:AbortSignal)=>new Promise<string>((_,reject)=>signal.addEventListener('abort',()=>{void audio.cancel();reject(new Error('cancelled'));},{once:true}))} as Documents;
+ const files={transcribe:async(_base:ConnectionLease,audio:ReadableStream<Uint8Array>,signal:AbortSignal)=>new Promise<string>((_,reject)=>signal.addEventListener('abort',()=>{void audio.cancel();reject(new Error('cancelled'));},{once:true}))} as Documents;
  const dictation=new DocumentDictation({subscriptions:[]} as unknown as vscode.ExtensionContext,files);
- const first=dictation.start(panel,{} as OpenDocument);
+ const first=dictation.start(panel,{} as ConnectionLease);
  while(captures.length<1)await new Promise(resolve=>setTimeout(resolve,0));
  dictation.cancel(panel);await first;
- const second=dictation.start(panel,{} as OpenDocument);
+ const second=dictation.start(panel,{} as ConnectionLease);
  while(captures.length<2)await new Promise(resolve=>setTimeout(resolve,0));
  const count=messages.length;captures[0].reject(new Error('Old permission prompt dismissed'));
  await new Promise(resolve=>setTimeout(resolve,0));assert.equal(messages.length,count);
@@ -73,13 +74,23 @@ test('unavailable speech releases capture, gives a recovery action, and permits 
   return 'Add a concrete example.';
  }} as unknown as Documents;
  const dictation=new DocumentDictation({subscriptions:[]} as unknown as vscode.ExtensionContext,files);
- await dictation.start(panel,{} as OpenDocument);
+ await dictation.start(panel,{} as ConnectionLease);
  assert.equal(stopped,1);
  assert.match(messages.at(-1).error,/AI model.*Fleet/);
  assert.ok(messages.at(-1).error.length<200);
  assert.equal(messages.some(m=>m.final),false);
- await dictation.start(panel,{} as OpenDocument);
+ await dictation.start(panel,{} as ConnectionLease);
  assert.equal(stopped,2);
  assert.equal(messages.at(-1).text,'Add a concrete example.');
  assert.equal(messages.at(-1).final,true);
+});
+
+
+test('dictation failures name the requested operation and use its lease', async () => {
+  const messages:any[]=[];const lease={domain:'client.example',name:'Client',generation:1};
+  Object.assign(vscode.commands,{registerCommand:()=>({dispose(){}}),getCommands:async()=>['memql.editor.dictation.start'],executeCommand:async()=>undefined});
+  const files={transcribe:async(received:ConnectionLease)=>{assert.equal(received,lease);throw new Error('Unrecognized service failure');}} as unknown as Documents;
+  const dictation=new DocumentDictation({subscriptions:[]} as unknown as vscode.ExtensionContext,files);
+  await dictation.start({webview:{postMessage:async(message:any)=>{messages.push(message);return true;}}} as vscode.WebviewPanel,lease,'transcribe your description');
+  assert.match(messages.at(-1).error,/transcribe your description/);
 });

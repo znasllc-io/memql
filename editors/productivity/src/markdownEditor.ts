@@ -18,7 +18,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
   private readonly dictation: DocumentDictation;
   constructor(private readonly context: vscode.ExtensionContext, private readonly files: Documents,
     private readonly load: (uri: vscode.Uri) => Promise<OpenDocument>,
-    private readonly refreshRemote: (document: vscode.TextDocument) => Promise<boolean> = async () => false) { this.revisions = new RevisionReview(context, files, load); this.dictation = new DocumentDictation(context,files); }
+    private readonly refreshRemote: (document: vscode.TextDocument) => Promise<boolean> = async () => false, dictation?: DocumentDictation) { this.revisions = new RevisionReview(context, files, load); this.dictation = dictation ?? new DocumentDictation(context,files); }
   async whenRendered(uri: vscode.Uri, version?: number): Promise<string> {
     const end = Date.now() + 15000;
     while (Date.now() < end) {
@@ -232,7 +232,7 @@ export class MarkdownEditor implements vscode.CustomTextEditorProvider {
             const uri = markdownImageURI(message.uri, document.uri.toString());
             if (uri) await panel.webview.postMessage({type:"attachmentPreview",uri:message.uri,preview:String(panel.webview.asWebviewUri(vscode.Uri.parse(uri)))});
           }
-          else if (message.type === "dictationStart") { if(document.uri.scheme!=="memql-file"||document.isDirty)throw new UserInputError("Save the MemQL document before dictating feedback.");void this.dictation.start(panel,await this.load(document.uri)).catch(error); }
+          else if (message.type === "dictationStart") { if(document.uri.scheme!=="memql-file"||document.isDirty)throw new UserInputError("Save the MemQL document before dictating feedback.");void this.dictation.start(panel,(await this.load(document.uri)).lease).catch(error); }
           else if (message.type === "dictationStop") await this.dictation.stop(panel);
           else if (message.type === "dictationCancel") this.dictation.cancel(panel);
           else if (message.type === "removeAnnotation") {

@@ -20,7 +20,7 @@ test('a New email link opens on this installation only', () => {
     'memql-file://cluster.example/new/email?account=client-org&returnTo=email',
     link.replace('cluster.example', 'other.example'),
     link.replace('client-org', 'v1:accounts:account:client-org'),
-    link + '#x',
+    link + '#x', link + '/', link.replace('/new-email/', '//new-email/'), link.replace('client-org', '%61'), link.replace('cluster.example/', 'cluster.example:/'),
   ]) assert.throws(() => requestedResource(handoff(invalid)));
 });
 test('requires successful activation of both tools and the shared connection API', async () => {

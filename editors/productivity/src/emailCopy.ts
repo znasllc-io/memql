@@ -52,6 +52,7 @@ export const EMAIL_COPY = {
   },
   host: {
     connectFirst: "Connect to your cluster in MemQL before writing an email.",
+    descriptionRequired: "Describe the email in up to 8,000 characters.",
     addOrganization: "Add an organization in MemQL OS before writing an email.",
     addReferences: "Add references", fromComputer: "From this computer", fromFiles: "From Files",
     chooseReferences: "Choose references", addLabel: "Add", recentFiles: "Recent files in MemQL",
@@ -69,7 +70,7 @@ export const EMAIL_COPY = {
     operations: {
       render: "show the email", organization: "find the email’s organization", published: "check where the email is published", edit: "change the email",
       picture: "add the picture", publish: "publish the email", layout: "save the layout", copy: "save the email to MemQL", connect: "connect",
-      view: "open the email view",
+      view: "open the email view", write: "write the email", layouts: "load the layouts", references: "add references", description: "transcribe your description",
     },
   },
 } as const;

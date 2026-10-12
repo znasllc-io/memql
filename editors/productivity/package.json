@@ -2,7 +2,7 @@
   "name": "memql-productivity-tools",
   "displayName": "MemQL Productivity Tools",
   "description": "Documents, emails, PDFs and human-reviewed suggestions connected to MemQL.",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -106,16 +106,6 @@
         "category": "MemQL"
       },
       {
-        "command": "memql.productivity.templateFromExamples",
-        "title": "Create Email from Examples",
-        "category": "MemQL"
-      },
-      {
-        "command": "memql.productivity.resumeEmailComposition",
-        "title": "Open Last Email Composition",
-        "category": "MemQL"
-      },
-      {
         "command": "memql.productivity.checkTools",
         "title": "Check Editor Tools",
         "category": "MemQL"
@@ -135,6 +125,11 @@
         "title": "Insert Image into Markdown",
         "category": "MemQL",
         "icon": "$(file-media)"
+      },
+      {
+        "command": "memql.productivity.newEmail",
+        "title": "New Email",
+        "category": "MemQL"
       }
     ],
     "customEditors": [
@@ -167,6 +162,16 @@
         "selector": [
           {
             "filenamePattern": "*.email.json"
+          }
+        ],
+        "priority": "default"
+      },
+      {
+        "viewType": "memql.productivity.newEmail",
+        "displayName": "New Email",
+        "selector": [
+          {
+            "filenamePattern": "memql-file:/new-email/*/*"
           }
         ],
         "priority": "default"

@@ -5,11 +5,10 @@
 // Pure: no vscode and no DOM. Every word comes from EMAIL_COPY.
 
 import { EMAIL_COPY } from "./emailCopy.js";
-import { BASE_STYLES, ICONS, pageShell } from "./pageBase.js";
+import { BASE_STYLES, ICONS, pageShell, escape } from "./pageBase.js";
 
 const C = EMAIL_COPY.newEmail;
 
-const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]!));
 
 /** The longest name, in UTF-16 code units, as New Markdown counts it. */
 const NAME_LIMIT = 150;

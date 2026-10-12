@@ -4,7 +4,8 @@ import * as vscode from "vscode";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 import { Documents, isZip, NEW_EMAIL_IS_A_PAGE, resourceFrom, type OpenDocument } from "./documents.js";
 import { EmailEditor } from "./emailEditor.js";
-import { TemplateExamples } from "./templateExamples.js";
+import { NewEmail } from "./newEmail.js";
+import { DocumentDictation } from "./dictation.js";
 import { newMarkdown } from "./newMarkdown.js";
 import { MarkdownEditor } from "./markdownEditor.js";
 import { PDFEditor, PDFDocument } from "./pdfEditor.js";
@@ -12,7 +13,7 @@ import { syncDesktopAppearance } from "./themeSync.js";
 import { imageMime, rasterImageName } from "./markdownAssets.js";
 import { insertImage } from "./insertImage.js";
 
-class MemQLFiles implements vscode.FileSystemProvider {
+export class MemQLFiles implements vscode.FileSystemProvider {
   readonly changed = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
   readonly onDidChangeFile = this.changed.event;
   private readonly documents = new Map<string, OpenDocument>();
@@ -87,6 +88,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(problems);
   const files = new Documents(connection);
   const provider = new MemQLFiles(files);
+  const dictation = new DocumentDictation(context, files);
   const markdown = new MarkdownEditor(context, files, uri => provider.load(uri), async document => {
     if (document.isDirty) return false;
     const version = document.version;
@@ -95,7 +97,7 @@ export async function activate(context: vscode.ExtensionContext) {
     provider.useBase(document.uri, latest);
     provider.changed.fire([{type:vscode.FileChangeType.Changed,uri:document.uri}]);
     return true;
-  });
+  }, dictation);
   const pdf = new PDFEditor(context, {
     base: async uri => { const doc = await provider.load(uri); return { version: doc.version, revision: doc.revision, sourceId: doc.sourceId }; },
     recover: async (uri, base) => {
@@ -107,7 +109,7 @@ export async function activate(context: vscode.ExtensionContext) {
     release: uri => { if (!vscode.workspace.textDocuments.some(doc => doc.uri.toString() === uri.toString())) provider.close(uri); },
   });
   const emails = new EmailEditor(context, connection, files, uri => provider.load(uri));
-  const examples = new TemplateExamples(connection, context);
+  const newEmail = new NewEmail(context, connection, dictation);
   const comparisons = new Map<string, { snapshot: vscode.Uri; document: OpenDocument }>();
   const snapshots = new Map<string, string>();
   let snapshotNumber = 0;
@@ -126,11 +128,9 @@ export async function activate(context: vscode.ExtensionContext) {
     ...(["design", "source", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.email.${mode}`, async (uri?: vscode.Uri) => {
       try { await emails.show(mode, uri); } catch (error) { void showProblem(error, "open the email view"); }
     })),
-    vscode.commands.registerCommand("memql.productivity.templateFromExamples", async () => {
-      try { await examples.start(); } catch (error) { void showProblem(error, "create the email draft"); }
-    }),
-    vscode.commands.registerCommand("memql.productivity.resumeEmailComposition", async () => {
-      try { await examples.resume(); } catch (error) { void showProblem(error, "resume the email draft"); }
+    vscode.window.registerCustomEditorProvider("memql.productivity.newEmail", newEmail),
+    vscode.commands.registerCommand("memql.productivity.newEmail", async () => {
+      try { await newEmail.open(); } catch (error) { void showProblem(error, "open New email"); }
     }),
     vscode.window.registerCustomEditorProvider("memql.productivity.markdown", { resolveCustomTextEditor: (document, panel) => userOperation("open the document", () => markdown.resolveCustomTextEditor(document, panel)) }, { supportsMultipleEditorsPerDocument: true, webviewOptions: { enableFindWidget: false } }),
     vscode.commands.registerCommand("memql.productivity.newMarkdown", async () => {
@@ -204,5 +204,5 @@ export async function activate(context: vscode.ExtensionContext) {
     resourceFrom(resource);
     await vscode.commands.executeCommand("vscode.open", vscode.Uri.parse(resource));
   }
-  return { connectionVersion: connection.version, ...(context.extensionMode === vscode.ExtensionMode.Test ? { emailReady: (uri: vscode.Uri, version?: number) => emails.whenShown(uri, version), pdfReady: (uri: vscode.Uri) => pdf.whenRendered(uri), markdownReady: (uri: vscode.Uri, version?: number) => markdown.whenRendered(uri, version) } : {}) };
+  return { connectionVersion: connection.version, ...(context.extensionMode === vscode.ExtensionMode.Test ? { newEmailReady: (uri: vscode.Uri) => newEmail.whenShown(uri), emailReady: (uri: vscode.Uri, version?: number) => emails.whenShown(uri, version), pdfReady: (uri: vscode.Uri) => pdf.whenRendered(uri), markdownReady: (uri: vscode.Uri, version?: number) => markdown.whenRendered(uri, version) } : {}) };
 }

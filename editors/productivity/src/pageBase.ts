@@ -26,7 +26,7 @@ export const ICONS: Readonly<Record<"design" | "source" | "desktop" | "mobile" |
   picture: icon('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9.5" r="1.6"/><path d="m3 17 5-5 4 4 3-3 6 6"/>'),
 };
 
-const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]!));
+export const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]!));
 
 /**
  * The policy of an email page: its own nonce-marked script, inline styles,

@@ -6,11 +6,10 @@
 
 import { EMAIL_COPY } from "./emailCopy.js";
 import { THEME_COLOURS, THEME_TOKENS, type AddableType, type EditableField } from "./emailDocument.js";
-import { BASE_STYLES, ICONS, pageShell } from "./pageBase.js";
+import { BASE_STYLES, ICONS, pageShell, escape } from "./pageBase.js";
 
 const C = EMAIL_COPY.editor;
 
-const escape = (value: string) => value.replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]!));
 
 /** What Add after offers: the leaf blocks, in the order a writer reaches for them. */
 const ADDABLE: readonly AddableType[] = ["heading", "text", "highlight", "button", "image", "divider", "spacer"];

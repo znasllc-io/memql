@@ -16,12 +16,7 @@ function fixture(saved?: unknown, globals: Record<string, unknown> = {}) {
   // Messages cross a structured clone in the editor; JSON does the same here and brings them into this realm.
   const messages: any[] = [];
   let state = saved;
-  // A clock the test moves by hand, so a pause is exact and the suite never sleeps.
-  let now = 0, nextTimer = 1;
-  const timers = new Map<number, { at: number; run: () => void }>();
   Object.assign(dom.window, {
-    setTimeout: (run: () => void, ms = 0) => { const id = nextTimer++; timers.set(id, { at: now + ms, run }); return id; },
-    clearTimeout: (id: number) => { timers.delete(id); },
     acquireVsCodeApi: () => ({ postMessage: (m: any) => messages.push(JSON.parse(JSON.stringify(m))), getState: () => state, setState: (value: unknown) => { state = JSON.parse(JSON.stringify(value)); } }),
   });
   // Every focus() call, the page's and the test's: a host update must never add one while the window is elsewhere.
@@ -34,15 +29,6 @@ function fixture(saved?: unknown, globals: Record<string, unknown> = {}) {
   const away = () => { Object.assign(doc, { hasFocus: () => false }); };
   const back = () => { delete (doc as unknown as { hasFocus?: unknown }).hasFocus; };
   const send = (data: any) => dom.window.dispatchEvent(new dom.window.MessageEvent("message", { data, origin: dom.window.origin }));
-  const advance = (ms: number) => {
-    now += ms;
-    for (;;) {
-      let due: [number, { at: number; run: () => void }] | undefined;
-      for (const entry of timers) if (entry[1].at <= now && (!due || entry[1].at < due[1].at)) due = entry;
-      if (!due) return;
-      timers.delete(due[0]); due[1].run();
-    }
-  };
   const type = (target: string | Element, value: string) => {
     const field = (typeof target === "string" ? el(target) : target) as HTMLInputElement;
     field.value = value; field.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
@@ -63,7 +49,7 @@ function fixture(saved?: unknown, globals: Record<string, unknown> = {}) {
     const d = frame.contentDocument!; d.open(); d.write(frame.getAttribute("srcdoc")!); d.close();
     frame.dispatchEvent(new dom.window.Event("load"));
   };
-  return { dom, doc, el, send, advance, type, key, cards, card, named, acts, act, barState, visible, posted, loadThumbnail, messages, focuses, away, back, state: () => state };
+  return { dom, doc, el, send, type, key, cards, card, named, acts, act, barState, visible, posted, loadThumbnail, messages, focuses, away, back, state: () => state };
 }
 
 const theme = { page: "#eef0f3", canvas: "#ffffff", primary: "#2f5d8a", secondary: "#6f93b8", accent: "#d9822b", tint: "#f5f4f0", text: "#2b2b2b", muted: "#8a8a8a", headingFont: "Georgia", bodyFont: "Helvetica" };
@@ -772,4 +758,22 @@ test("no host update takes focus while the window is elsewhere, and the page kee
   f.send({ type: "writing", layoutId: "builtin:article" });
   assert.equal(f.doc.activeElement, f.el("bar-state"));
   f.dom.window.close();
+});
+
+
+test("organization changes save the draft and refresh the select after blur", () => {
+  const f = fixture(); f.send(setup({ organizations: [acme, { id: "other", name: "Other" }], organizationId: undefined }));
+  const select = f.el("organization") as HTMLSelectElement; select.focus(); select.value = "other";
+  select.dispatchEvent(new f.dom.window.Event("change", { bubbles: true }));
+  assert.equal(f.posted("draft").at(-1).draft.organizationId, "other");
+  f.send(setup({ organizations: [acme, { id: "other", name: "Other" }], organizationId: "other" }));
+  f.el("name").focus(); assert.equal(select.querySelector('option[value=""]'), null); f.dom.window.close();
+});
+
+test("an unrelated setup cannot reopen an in-flight write; reference switches name their file", () => {
+  const f = fixture(); f.send(setup()); f.card("builtin:article").click(); f.type("name", "Welcome"); f.type("description", "Write a welcome.");
+  f.act(C.write).click(); f.send(setup()); f.act(C.write).click(); assert.equal(f.posted("write").length, 1);
+  f.send({ type: "references", items: [{ label: "logo.png", kind: "picture", include: false }] });
+  const toggle = f.el("references").querySelector('input')!; assert.equal(f.named(toggle, "aria-describedby"), "logo.png");
+  assert.equal(f.card("builtin:article").querySelector('.card-name')?.getAttribute("title"), "Article"); f.dom.window.close();
 });
