@@ -46,9 +46,12 @@ const (
 	IssueEmailTooLarge      = "email_too_large"     // more HTML than sending takes, its pictures embedded
 )
 
-// MaxRenderBytes is the most a render writes of each part. A render that
-// would write more stops with ErrTooLarge, so no document, picture or sample
-// value can make it allocate much more than this.
+// MaxRenderBytes is the most a render writes of each part: the subject, the
+// HTML and the text. A render that would write more stops with ErrTooLarge,
+// so no document, picture or sample value can make it write much more than
+// this. It bounds what is written, not what is read to write it: the
+// pictures a render reads and keeps, the Markdown it reads and its list of
+// issues are outside it.
 const MaxRenderBytes = 8 << 20
 
 // ErrTooLarge is the error of a render that would write more than
@@ -67,17 +70,22 @@ const tooLargeMessage = "This email is larger than 2 MiB once its pictures are e
 //
 // A layout is written in the table dialect of the emails layouts are taken
 // from: a 600 pixel canvas that is full width on phones, Outlook conditionals,
-// and every block's spacing, sizes and colours inline. The text part is made
-// from the same blocks. A custom document keeps its own markup; Render
-// embeds its Library pictures and puts the preheader after its body tag.
+// and every block's spacing, sizes and colours inline. Sections, columns,
+// social links and footers are tables of a maximum width; on phones columns
+// stack and text over 16 pixels shrinks, by rules in the head. The text part
+// is made from the same blocks. A custom document keeps its own markup;
+// Render embeds its Library pictures and puts the preheader after its body
+// tag.
 //
 // Every picture is embedded as a data URI: artifact: pictures are read with
 // images, which may be nil (every artifact: picture is then
-// image_unavailable). A picture that would take the HTML past the 2 MiB
-// sending takes is not embedded (email_too_large). Merge tags are filled from
-// opts.Sample, escaped in the HTML and as written in the text and the subject;
-// the four link tags are never sample values and stay as written. A link tag
-// counts as the unsubscribe or confirm link only where it is a link's address.
+// image_unavailable). A use of a picture that would take the HTML past the
+// 2 MiB sending takes is not embedded (email_too_large). Merge tags are filled
+// from opts.Sample, escaped in the HTML and as written in the text and the
+// subject; the four link tags are never sample values and stay as written. A
+// link tag counts as the unsubscribe or confirm link only where it is a
+// link's address, written as the tag itself: sending replaces the tag's text,
+// so one written with character references would never become a link.
 //
 // Render does not re-check a document: it expects one Parse returned. A
 // layout built any other way still gets no markup, style, link or picture
@@ -101,6 +109,8 @@ func Render(ctx context.Context, d Document, images ImageResolver, opts RenderOp
 		if markup, err = r.layout(d); err != nil {
 			return Result{}, err
 		}
+		// No block writes more to the text part than to the HTML, so the
+		// ceiling the HTML was written within bounds the text part too.
 		plain = layoutText(d.Blocks)
 		// Only a layout must carry the link: sending appends a footer with
 		// one to custom HTML that has none.
@@ -146,13 +156,12 @@ func fill(replacer *strings.Replacer, s string) (string, error) {
 }
 
 // bounded is a strings.Builder that refuses to hold more than MaxRenderBytes.
+// A strings.Replacer writes to it with WriteString; Write is there for any
+// other writer, and goes the same way.
 type bounded struct{ strings.Builder }
 
 func (b *bounded) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > MaxRenderBytes {
-		return 0, ErrTooLarge
-	}
-	return b.Builder.Write(p)
+	return b.WriteString(string(p))
 }
 
 func (b *bounded) WriteString(s string) (int, error) {
@@ -165,15 +174,16 @@ func (b *bounded) WriteString(s string) (int, error) {
 // renderer holds one render: the output, the pictures read so far and the
 // issues found.
 type renderer struct {
-	ctx     context.Context
-	theme   Theme
-	preview bool
-	pics    *pictures
-	out     strings.Builder
-	linked  map[string]bool // the addresses written as links
-	size    int             // custom mode: the HTML so far, its pictures embedded
-	tooBig  bool            // email_too_large has been said
-	issues  []Issue
+	ctx        context.Context
+	theme      Theme
+	preview    bool
+	pics       *pictures
+	out        strings.Builder
+	linked     map[string]bool // the addresses written as links
+	containers int             // the columns and social blocks written so far
+	size       int             // custom mode: the HTML so far, its pictures embedded
+	tooBig     bool            // email_too_large has been said
+	issues     []Issue
 }
 
 func (r *renderer) issue(code, block, message string) {
@@ -249,6 +259,9 @@ func (r *renderer) layout(d Document) (string, error) {
 		w.WriteString(webFonts(r.theme))
 	}
 	w.WriteString(docStyle)
+	if err := r.phoneRules(d.Blocks); err != nil {
+		return "", err
+	}
 	w.WriteString(`</head><body style="width:100%;-webkit-text-size-adjust:100%;text-size-adjust:100%;background-color:` + page + `;margin:0;padding:0">`)
 	if d.Preheader != "" {
 		w.WriteString(preheader(d.Preheader, page))
@@ -257,7 +270,7 @@ func (r *renderer) layout(d Document) (string, error) {
 	w.WriteString(`<!--[if mso]><center><table align="center" border="0" cellpadding="0" cellspacing="0" width="600"><tbody><tr><td><![endif]-->`)
 	w.WriteString(`<table align="center" width="600" border="0" cellpadding="0" cellspacing="0" role="presentation" class="ecw" style="max-width:600px;min-height:600px;margin:0 auto;background-color:` + attr(r.theme.Canvas) + `;width:600px;min-width:600px"><tbody>`)
 	w.WriteString(docColumnOpen)
-	if err := r.rows(d.Blocks, canvasWidth); err != nil {
+	if err := r.rows(d.Blocks, canvasWidth, false); err != nil {
 		return "", err
 	}
 	w.WriteString(docTail)
@@ -336,7 +349,8 @@ func (r *renderer) custom(d Document) (string, error) {
 	if d.HTMLBody == "" {
 		return "", nil
 	}
-	alts := customTags(d.HTMLBody, r.linked)
+	alts := pictureAlts(d.HTMLBody)
+	literalLinks(d.HTMLBody, r.linked)
 	hidden := ""
 	if d.Preheader != "" {
 		hidden = preheader(d.Preheader, "#ffffff")
@@ -415,12 +429,11 @@ func (r *renderer) customPicture(src, alt string) (string, error) {
 	return pic.uri, nil
 }
 
-// customTags reads the img and a tags of custom markup: it returns the alt of
-// the first img with each source, the name of the picture in an issue, and
-// adds the address of every link to linked. It reads the tokens
-// RewriteEmailImageSources reads, which keep the first of two equal
-// attributes, as a browser does.
-func customTags(markup string, linked map[string]bool) map[string]string {
+// pictureAlts reads the img tags of custom markup and returns the alt of the
+// first img with each source, the name of the picture in an issue. It reads
+// the tokens RewriteEmailImageSources reads, which keep the first of two
+// equal attributes, as a browser does.
+func pictureAlts(markup string) map[string]string {
 	alts := map[string]string{}
 	z := html.NewTokenizer(strings.NewReader(markup))
 	for {
@@ -428,11 +441,7 @@ func customTags(markup string, linked map[string]bool) map[string]string {
 		case html.ErrorToken:
 			return alts
 		case html.StartTagToken, html.SelfClosingTagToken:
-			token := z.Token()
-			switch token.Data {
-			case "a":
-				addLink(token, linked)
-			case "img":
+			if token := z.Token(); token.Data == "img" {
 				var src, alt string
 				for _, a := range token.Attr {
 					switch a.Key {
@@ -450,26 +459,30 @@ func customTags(markup string, linked map[string]bool) map[string]string {
 	}
 }
 
-// addLink adds the address of an a tag to linked. A browser ignores the
-// spaces around an address.
-func addLink(token html.Token, linked map[string]bool) {
-	for _, a := range token.Attr {
-		if a.Key == "href" {
-			linked[strings.TrimSpace(a.Val)] = true
-		}
-	}
-}
-
-// markupLinks adds the address of every a tag of markup to linked.
-func markupLinks(markup string, linked map[string]bool) {
-	z := html.NewTokenizer(strings.NewReader(markup))
+// literalLinks adds to linked the address of every a tag of markup, as it is
+// written in the markup (less the spaces around it, which a browser ignores).
+// Sending fills a link tag by replacing its text where it is written, so an
+// address that spells the tag with character references, such as
+// "&#123;&#123;confirmUrl&#125;&#125;", is never filled and links nowhere: it
+// must not count as the link. The tokenizer decodes character references in
+// attribute values, so the markup is read with every "&" made a NUL byte,
+// which, like "&", ends no tag and no value: each value is then what is
+// written between its quotes, and a reference is no longer the tag.
+func literalLinks(markup string, linked map[string]bool) {
+	z := html.NewTokenizer(strings.NewReader(strings.ReplaceAll(markup, "&", "\x00")))
 	for {
 		switch z.Next() {
 		case html.ErrorToken:
 			return
 		case html.StartTagToken, html.SelfClosingTagToken:
-			if token := z.Token(); token.Data == "a" {
-				addLink(token, linked)
+			token := z.Token()
+			if token.Data != "a" {
+				continue
+			}
+			for _, a := range token.Attr {
+				if a.Key == "href" {
+					linked[strings.TrimSpace(a.Val)] = true
+				}
 			}
 		}
 	}

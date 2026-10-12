@@ -30,10 +30,14 @@ const (
 	typeHTML    = "html"
 )
 
-// maxHrefBytes bounds a link; maxHTMLBytes bounds an html block.
+// maxHrefBytes bounds a link; maxHTMLBytes bounds an html block;
+// maxTextLines bounds a text block. Reading Markdown costs memory in
+// proportion to its paragraphs and list items, and a list item is one line,
+// so a bound on lines bounds both.
 const (
 	maxHrefBytes = 2000
 	maxHTMLBytes = 64 << 10
+	maxTextLines = 2000
 )
 
 func wordSet(words string) map[string]bool {
@@ -774,6 +778,10 @@ func blockProblem(b *Block) string {
 		}
 		return hrefProblem(b.Href, true)
 	case typeText:
+		// Counted before the Markdown is read, so a long block costs nothing.
+		if lineCount(b.Text) > maxTextLines {
+			return "This text block is too long. Split it into smaller blocks."
+		}
 		return markdownProblem(b.Text)
 	case typeHTML:
 		if len(b.HTML) > maxHTMLBytes {
@@ -798,6 +806,31 @@ func blockProblem(b *Block) string {
 		}
 	}
 	return ""
+}
+
+// lineCount is how many lines s has, split as the Markdown reader splits
+// them: a line break is "\r\n", "\r" or "\n", and one at the very end ends the
+// last line rather than starting another.
+func lineCount(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\n':
+			n++
+		case '\r':
+			n++
+			if i+1 < len(s) && s[i+1] == '\n' {
+				i++
+			}
+		}
+	}
+	if last := s[len(s)-1]; last != '\n' && last != '\r' {
+		n++
+	}
+	return n
 }
 
 // markdownProblem reads the Markdown of a text block and applies the link rule

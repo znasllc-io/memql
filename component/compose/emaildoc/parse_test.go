@@ -516,6 +516,41 @@ func TestParseAcceptsTheLimits(t *testing.T) {
 	}
 }
 
+func TestParseBoundsTextBlocks(t *testing.T) {
+	// Reading Markdown costs memory in proportion to its paragraphs and list
+	// items, so a text block may have at most 2,000 lines; a list item is one
+	// line. A line break at the very end starts no new line.
+	block := func(s string) string { return `{"id":"t","type":"text","text":` + jsonString(s) + `}` }
+	textBlock := func(s string) string { return layoutJSON(block(s)) }
+	const tooLong = `block "t": This text block is too long. Split it into smaller blocks.`
+	expectRefused(t, []refusal{
+		{"2,001 list items", textBlock(strings.Repeat("- a\n", 2001)), tooLong},
+		{"2,001 lines", textBlock(strings.Repeat("a\n", 2000) + "a"), tooLong},
+		{"2,001 lines, most of them blank", textBlock("a" + strings.Repeat("\n", 2000) + "b"), tooLong},
+		{"2,001 lines ended by carriage returns", textBlock(strings.Repeat("a\r", 2001)), tooLong},
+		{"2,001 numbered items in a section", layoutJSON(`{"id":"s","type":"section","blocks":[` + block(strings.Repeat("1. a\n", 2001)) + `]}`), tooLong},
+	})
+	for name, s := range map[string]string{
+		"2,000 list items":                   strings.Repeat("- a\n", 2000),
+		"2,000 lines":                        strings.Repeat("a\n", 1999) + "a",
+		"2,000 lines ended by CRLF":          strings.Repeat("a\r\n", 2000),
+		"2,000 lines, the last one blank":    strings.Repeat("a\n", 1999) + "\n",
+		"one long line of 1,000,000 letters": strings.Repeat("a", 1_000_000),
+	} {
+		if _, err := Parse([]byte(textBlock(s))); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// The block is refused before its Markdown is read. Decoding the 1.2 MB
+	// of JSON costs about 33 MB; reading the 300,000 list items would cost
+	// about 90 MB more.
+	huge := []byte(textBlock(strings.Repeat("- a\n", 300_000)))
+	var err error
+	if allocated := allocatedBy(func() { _, err = Parse(huge) }); err == nil || allocated > 64<<20 {
+		t.Fatalf("want a refusal without reading the list, got %v after %d bytes", err, allocated)
+	}
+}
+
 func TestParseKeepsRolesAndZeroValuesAsWritten(t *testing.T) {
 	d, err := Parse([]byte(layoutJSON(`{"id":"a","type":"heading","role":"content","text":"x"},{"id":"b","type":"heading","text":"y"},{"id":"c","type":"footer","separator":"","gap":0}`)))
 	if err != nil {
