@@ -178,7 +178,6 @@ export function SenderPage({ sender, organization, writes, onBack }: {
         detail={detail}
         tone={archived || editingNow ? "none" : "live"}
         acts={toKitActs(specs, run, busyId)}
-        asking={asking === "archive" && !editingNow && !archived}
       >
         {asking === "archive" && !editingNow && !archived ? (
           <span className="os-actbar-confirm">

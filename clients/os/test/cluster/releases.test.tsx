@@ -1,13 +1,19 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { readTheQuestion } from "../readTheQuestion";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 import { ReleaseBrowser } from "../../src/apps/cluster/releases/ReleasesSection";
 import { fileReleaseFixture, releaseFixture, releaseId, releaseResult, candidateRecord } from "./releaseFixtures";
 
 async function open() { fireEvent.click(await screen.findByRole("button", { name: "Review engine 0.25.0" })); await screen.findByText("Versions"); }
 async function destination() { fireEvent.click(await screen.findByRole("button", { name: "Review destination rehearsal" })); await screen.findByText("Artifact digest"); }
+/** Presses a bar act once the bar has been read: its acts change as each read lands, and a bar that has just changed takes no press for a moment. */
+async function pressBar(label: string) { await screen.findByRole("button", { name: label }); await readTheBar(); fireEvent.click(screen.getByRole("button", { name: label })); }
 /** Asks, reads the question, and confirms: the confirmation stands where the ask did, under its label. */
-async function twice(label: string) { fireEvent.click(await screen.findByRole("button", { name: label })); await readTheQuestion(); fireEvent.click(await screen.findByRole("button", { name: label })); }
+async function twice(label: string) { await pressBar(label); await pressBar(label); }
+
+// A fake Date, so reading a bar costs nothing: the release reads poll on real timers.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { vi.useRealTimers(); });
 
 describe("release review", () => {
   it("explains that a file upload remains in an existing draft release", async () => {
@@ -18,7 +24,7 @@ describe("release review", () => {
     await open(); await destination();
     expect(screen.getByText("Draft #81")).toBeTruthy();
     expect(screen.getByText(/Making the release public is a separate action/)).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: "Upload file" }));
+    await pressBar("Upload file");
     expect(screen.getByText(/This does not make the release public/)).toBeTruthy();
     expect(f.state.calls.some((c) => c.kind === "publish")).toBe(false);
   });
@@ -69,6 +75,24 @@ describe("release review", () => {
     await twice("Reconcile publication");
     await screen.findByText("Published and verified");
     expect(f.state.calls.filter((c) => c.kind === "publish")).toHaveLength(2);
+  });
+  it("a double-click on Retire release asks and does not retire", async () => {
+    // [Retire release, Approve release] asks as [Cancel, Retire release]: the
+    // confirmation is the danger act on the right edge -- the label just
+    // pressed, at another place, and within reach of the double-click's
+    // second half. The bar that changed takes no press until it is read.
+    const f = releaseFixture();
+    render(<ReleaseBrowser query={f.query} connected />);
+    await open();
+    await screen.findByRole("button", { name: "Approve release" });
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Retire release" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retire release" }));
+    expect(screen.getByText("Retirement is permanent and releases this candidate’s artifact retention.")).toBeTruthy();
+    expect(f.state.calls.some((c) => c.kind === "retire")).toBe(false);
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Retire release" }));
+    await waitFor(() => expect(f.state.calls.filter((c) => c.kind === "retire")).toHaveLength(1));
   });
   it("keeps last content through a disconnection but hides acts until a fresh read", async () => {
     const f = releaseFixture();
@@ -155,20 +179,18 @@ describe("draft release lifecycle", () => {
     const f = fileReleaseFixture();
     render(<ReleaseBrowser query={f.query} connected />);
     await open(); await destination();
-    fireEvent.click(await screen.findByRole("button", { name: "Create draft" }));
+    await pressBar("Create draft");
     expect(screen.getByText(/The tag may trigger repository automation/)).toBeTruthy();
-    await readTheQuestion();
-    fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
+    await pressBar("Create draft");
     await screen.findByText("Draft #81");
     expect(f.state.calls.filter((c) => ["publish", "promote"].includes(c.kind))).toHaveLength(0);
     await twice("Upload file");
     await screen.findByRole("button", { name: "Publish release" });
     expect(f.state.calls.filter((c) => c.kind === "promote")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Publish release" }));
+    await pressBar("Publish release");
     expect(screen.getByText(/and its uploaded files public/)).toBeTruthy();
     expect(screen.getByText(/Select as the latest release/)).toBeTruthy();
-    await readTheQuestion();
-    fireEvent.click(screen.getByRole("button", { name: "Publish release" }));
+    await pressBar("Publish release");
     await screen.findByText("Release public and verified");
     expect(screen.getByText("Release #81")).toBeTruthy();
     const identity = { candidateId: releaseId, approvalId: "approval-exact", targetId: "rehearsal" };

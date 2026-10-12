@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readTheQuestion } from "../readTheQuestion";
+import { readTheBar } from "../readTheBar";
 const h = vi.hoisted(() => ({ connection: null as unknown, openApp: vi.fn() }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 vi.mock("../../src/chrome/state", async importOriginal => ({ ...await importOriginal<typeof import("../../src/chrome/state")>(), useOs: () => ({ actions: { openApp: h.openApp } }), useOsIfPresent: () => null }));
@@ -41,7 +41,9 @@ describe("shared Shopify connections", () => {
     render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: {} })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
     await click(await screen.findByRole("button", { name: "Configure production store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Continue" }));
+    await readTheBar();
     await click(within(document.querySelector(".os-actbar")!).getByRole("button", { name: "Connect store" }));
     expect(connection.callsNamed("updateSiteStoreBinding")[0]).toContain('storeId: "my-store"');
     expect(connection.callsNamed("shopifyStoreAppSave")).toHaveLength(0);
@@ -51,7 +53,7 @@ describe("shared Shopify connections", () => {
     render(withSession(<ShopifyConnections header={<h2>Settings</h2>} appId="settings" />));
     await click(await screen.findByRole("button", { name: `Manage Shopify store ${saved.label}` }));
     await click(screen.getByRole("button", { name: "Disconnect" }));
-    await readTheQuestion();
+    await readTheBar();
     await click(within(document.querySelector(".os-actbar")!).getByRole("button", { name: "Disconnect" }));
     expect(await screen.findByText("No Shopify stores connected")).toBeTruthy();
     expect(connection.callsNamed("updateSiteStoreBinding")).toHaveLength(0);
@@ -79,8 +81,10 @@ describe("shared Shopify connections", () => {
     await click(screen.getByRole("button", { name: "Configure testing store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
     expect(screen.getByText("Sandbox store")).toBeTruthy();
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByText("Sandbox store — purchases follow Shopify’s test-store rules.")).toBeTruthy();
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Connect store" }));
     expect(connection.callsNamed("updateSitePreviewBinding")[0]).toContain('storeId: "my-store"');
     expect(connection.callsNamed("updateSiteStoreBinding")).toHaveLength(0);
@@ -90,7 +94,9 @@ describe("shared Shopify connections", () => {
     render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, previewBinding: { storeId: "my-store" } })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
     await click(await screen.findByRole("button", { name: "Configure production store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Continue" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Connect store" }));
     await vi.waitFor(() => expect(connection.callsNamed("updateSiteStoreBinding")).toHaveLength(1));
     expect(connection.callsNamed("updateSitePreviewBinding")).toHaveLength(0);
@@ -100,7 +106,9 @@ describe("shared Shopify connections", () => {
     render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: { storeId: "my-store" } })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
     await click(await screen.findByRole("button", { name: "Configure testing store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Continue" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Connect store" }));
     await vi.waitFor(() => expect(connection.callsNamed("updateSitePreviewBinding")).toHaveLength(1));
     expect(connection.callsNamed("updateSitePreviewBinding")[0]).toContain('storeId: "my-store"');
@@ -125,7 +133,9 @@ describe("shared Shopify connections", () => {
     render(withSession(<ShopifyStorePanel site={siteFromRow({ ...SHOP, binding: { storeId: "my-store" } })} canBind trail={[]} back={{ label: "Deployables", onSelect: vi.fn() }} onWritten={vi.fn()} />));
     await click(await screen.findByRole("button", { name: "Configure testing store" }));
     await click(await screen.findByRole("button", { name: `Select Shopify store ${saved.label}` }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Continue" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Connect store" }));
     expect(await screen.findByText("Store access changed")).toBeTruthy();
     expect(connection.callsNamed("updateSiteStoreBinding")).toHaveLength(0);

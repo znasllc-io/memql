@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { useState } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { readTheQuestion } from "../../readTheQuestion";
+import { readTheBar } from "../../readTheBar";
 import { chooseOption } from "../../selectControl";
 import { installSeededAccess } from "../../seededAccess";
 
@@ -159,6 +159,8 @@ async function walkToReview(template?: RegExp) {
   choose(/^Send now/);
   expect(openStep()).toBe("Review");
   await waitFor(() => expect(barWord()).not.toBe("Review the campaign"));
+  // Review is a step the bar has just moved to, and a bar that has just changed takes no press for a moment.
+  await readTheBar();
 }
 
 const createdCampaign = (conn: Conn) => conn.query.createCampaign.mock.calls[0]![0] as Record<string, unknown>;
@@ -388,6 +390,7 @@ describe("Add a campaign", () => {
     // A client organization has no cluster sender to fall back on.
     expect(screen.queryAllByRole("radio")).toEqual([]);
     expect(barActs()).toEqual(["Set up sending"]);
+    await readTheBar();
     press("Set up sending");
     expect(owner.navigate).toHaveBeenCalledWith("settings", { fromContent: true });
     expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
@@ -423,18 +426,20 @@ describe("Add a campaign, on Review", () => {
     expect(barActs()).toEqual(["Not yet", "Send now"]);
     expect(conn.query.createCampaign).not.toHaveBeenCalled();
     // Not yet writes nothing and asks nothing -- once the question has been read.
-    await readTheQuestion();
+    await readTheBar();
     press("Not yet");
     expect(barActs()).toEqual(["Send a test", "Save as draft", "Send now"]);
     expect(screen.queryByText("Send “August copy” to 1,204 subscribers now?")).toBeNull();
 
+    // Not yet put the acts back, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     press("Send now");
     // A double-click asks and does not answer: its second click lands on the
     // confirmation before anybody could have read the question.
     press("Send now");
     expect(conn.query.createCampaign).not.toHaveBeenCalled();
     expect(barActs()).toEqual(["Not yet", "Send now"]);
-    await readTheQuestion();
+    await readTheBar();
     const confirm = within(bar()).getByRole("button", { name: "Send now" });
     // Two presses before the first one's busy state is drawn: one campaign, one send.
     act(() => {
@@ -480,8 +485,9 @@ describe("Add a campaign, on Review", () => {
     mountWindow(conn);
     await walkToReview();
     await waitFor(() => expect(barActs()).toContain("Send now"));
+    await readTheBar();
     press("Send now");
-    await readTheQuestion();
+    await readTheBar();
     press("Send now");
 
     expect(await screen.findByText("The campaign was saved as a draft but not sent.")).toBeTruthy();
@@ -492,9 +498,9 @@ describe("Add a campaign, on Review", () => {
 
     // Trying again sends the same campaign; it is not written twice. The ask
     // took the refused confirmation's place under its label, so it is read first.
-    await readTheQuestion();
+    await readTheBar();
     press("Send now");
-    await readTheQuestion();
+    await readTheBar();
     press("Send now");
     await waitFor(() => expect(conn.query.campaignStartSend).toHaveBeenCalledTimes(2));
     expect(conn.query.createCampaign).toHaveBeenCalledTimes(1);
@@ -516,14 +522,17 @@ describe("Add a campaign, on Review", () => {
     expect(barWord()).toBe("Choose a time in the future.");
     expect(barActs()).not.toContain("Next");
     fireEvent.change(at, { target: { value: "2031-10-14T09:00" } });
+    // Next joined the bar with the time, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     press("Next");
     expect(openStep()).toBe("Review");
     expect(railLine("When").textContent).toContain("On Tue, Oct 14 at 9:00");
 
     await waitFor(() => expect(barWord()).toBe("Ready to schedule"));
+    await readTheBar();
     press("Schedule");
     expect(screen.getByText("Schedule “August copy” for Tue, Oct 14 at 9:00 (America/Phoenix), to 1,204 subscribers?")).toBeTruthy();
-    await readTheQuestion();
+    await readTheBar();
     press("Schedule");
 
     await waitFor(() => expect(conn.query.campaignScheduleSend).toHaveBeenCalledOnce());
@@ -552,15 +561,17 @@ describe("Add a campaign, on Review", () => {
     choose(/^Repeat/);
     chooseOption(screen.getByLabelText("Every"), "2 weeks");
     fireEvent.change(screen.getByLabelText("Starting · America/Phoenix"), { target: { value: "2031-10-14T09:00" } });
+    await readTheBar();
     press("Next");
     expect(openStep()).toBe("Review");
 
     await waitFor(() => expect(barWord()).toBe("Ready to start repeating"));
     // A repeat is not something a draft can hold.
     expect(barDetail()).toBe("A draft doesn't repeat until you start it.");
+    await readTheBar();
     press("Start repeating");
     expect(screen.getByText("Send “August copy” to Newsletter every 2 weeks from Tue, Oct 14 at 9:00?")).toBeTruthy();
-    await readTheQuestion();
+    await readTheBar();
     press("Start repeating");
 
     await waitFor(() => expect(conn.query.campaignConfigureSeries).toHaveBeenCalledOnce());
@@ -609,8 +620,9 @@ describe("Add a campaign, on Review", () => {
     mountWindow(conn);
     await walkToReview();
     await waitFor(() => expect(barActs()).toContain("Send now"));
+    await readTheBar();
     press("Send now");
-    await readTheQuestion();
+    await readTheBar();
     press("Send now");
     expect(await screen.findByText("no email sender is registered on this node")).toBeTruthy();
 
@@ -619,10 +631,12 @@ describe("Add a campaign, on Review", () => {
     choose(/^Repeat/);
     chooseOption(screen.getByLabelText("Every"), "2 weeks");
     fireEvent.change(screen.getByLabelText("Starting · America/Phoenix"), { target: { value: "2031-10-14T09:00" } });
+    await readTheBar();
     press("Next");
     await waitFor(() => expect(barActs()).toContain("Start repeating"));
+    await readTheBar();
     press("Start repeating");
-    await readTheQuestion();
+    await readTheBar();
     press("Start repeating");
     expect(await screen.findByText("choose a first send in the future, within five years")).toBeTruthy();
     expect(screen.getByText("The campaign was saved as a draft, but repeating didn't start.")).toBeTruthy();
@@ -635,9 +649,11 @@ describe("Add a campaign, on Review", () => {
     await walkToWhen();
     choose(/^Schedule/);
     fireEvent.change(screen.getByLabelText("Send at · America/Phoenix"), { target: { value: "2031-10-14T09:00" } });
+    await readTheBar();
     press("Next");
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Launch day" } });
     await waitFor(() => expect(barActs()).toContain("Save as draft"));
+    await readTheBar();
     press("Save as draft");
 
     await waitFor(() => expect(conn.query.createCampaign).toHaveBeenCalledOnce());
@@ -654,6 +670,7 @@ describe("Add a campaign, on Review", () => {
     const first = mountWindow(testing);
     await walkToReview();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     await waitFor(() => expect(testing.query.campaignTestAudienceSend).toHaveBeenCalledOnce());
     const created = createdCampaign(testing);
@@ -662,7 +679,8 @@ describe("Add a campaign, on Review", () => {
     expect(testing.query.campaignTestSend).not.toHaveBeenCalled();
     // The draft exists now, so the floor is the draft's.
     expect(barActs()).toEqual(["Cancel", "Send a test", "Send now"]);
-    // A second test sends again and writes no second draft.
+    // A second test sends again and writes no second draft -- once the draft's floor has been read.
+    await readTheBar();
     press("Send a test");
     await waitFor(() => expect(testing.query.campaignTestAudienceSend).toHaveBeenCalledTimes(2));
     expect(testing.query.createCampaign).toHaveBeenCalledTimes(1);
@@ -674,6 +692,7 @@ describe("Add a campaign, on Review", () => {
     mountWindow(toMe);
     await walkToReview();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     await waitFor(() => expect(toMe.query.campaignTestSend).toHaveBeenCalledOnce());
     const draft = createdCampaign(toMe);
@@ -691,6 +710,7 @@ describe("Add a campaign, on Review", () => {
     mountWindow(conn);
     await walkToReview();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     await waitFor(() => expect(conn.query.campaignTestSend).toHaveBeenCalledWith({ campaignId: createdCampaign(conn).campaignId, to: "owner@example.com" }));
     expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
@@ -702,6 +722,7 @@ describe("Add a campaign, on Review", () => {
     const owner = mountWindow(captured());
     await walkToReview();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     const view = await screen.findByRole("button", { name: "View it in Inbox" });
     fireEvent.click(view);
@@ -712,6 +733,7 @@ describe("Add a campaign, on Review", () => {
     mountWindow(captured(), { role: "writer", everyAccount: false, accountIds: ["self"] });
     await walkToReview();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     expect(await screen.findByText("An owner or developer can read it in Email → Inbox.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "View it in Inbox" })).toBeNull();
@@ -722,14 +744,16 @@ describe("Add a campaign, on Review", () => {
     mountWindow(conn);
     await walkToReview();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     await waitFor(() => expect(conn.query.campaignTestSend).toHaveBeenCalledOnce());
 
     // Named after the test: the send carries the name, written to the same draft.
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Spring sale" } });
+    await readTheBar();
     press("Send now");
     expect(screen.getByText("Send “Spring sale” to 1,204 subscribers now?")).toBeTruthy();
-    await readTheQuestion();
+    await readTheBar();
     press("Send now");
     await waitFor(() => expect(conn.query.campaignStartSend).toHaveBeenCalledOnce());
     const created = createdCampaign(conn);
@@ -744,8 +768,10 @@ describe("Add a campaign, on Review", () => {
     await walkToReview();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Spring sale" } });
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     await waitFor(() => expect(barActs()).toEqual(["Cancel", "Send a test", "Send now"]));
+    await readTheBar();
 
     press("Cancel");
     expect(screen.getByText("Cancel “Spring sale”?")).toBeTruthy();
@@ -755,13 +781,15 @@ describe("Add a campaign, on Review", () => {
     press("Cancel campaign");
     expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
     expect(screen.getByText("Cancel “Spring sale”?")).toBeTruthy();
-    await readTheQuestion();
+    await readTheBar();
     press("Keep");
     expect(barActs()).toEqual(["Cancel", "Send a test", "Send now"]);
     expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
 
+    // Keep put the acts back, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     press("Cancel");
-    await readTheQuestion();
+    await readTheBar();
     press("Cancel campaign");
     await waitFor(() => expect(conn.query.cancelCampaign).toHaveBeenCalledWith({ campaignId: createdCampaign(conn).campaignId }));
     // Back on the list.
@@ -780,6 +808,7 @@ describe("Add a campaign, on Review", () => {
     expect(document.querySelector(".os-facts")).toBeNull();
     // A draft can still be saved, and a test to me reads a draft template.
     expect(barActs()).toEqual(["Send a test", "Save as draft"]);
+    await readTheBar();
     press("Save as draft");
     await waitFor(() => expect(conn.query.createCampaign).toHaveBeenCalledOnce());
     expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
@@ -795,8 +824,10 @@ describe("Add a campaign, on Review", () => {
       expect(deadButtons()).toEqual([]);
       choose(/^Newsletter/);
       expect(deadButtons()).toEqual([]);
+      await readTheBar();
       press("Create new template");
       expect(deadButtons()).toEqual([]);
+      await readTheBar();
       press("Stop waiting");
       expect(deadButtons()).toEqual([]);
       choose(/^Autumn draft/);
@@ -804,6 +835,7 @@ describe("Add a campaign, on Review", () => {
       choose(/^Schedule/);
       expect(deadButtons()).toEqual([]);
       fireEvent.change(screen.getByLabelText("Send at · America/Phoenix"), { target: { value: "2031-10-14T09:00" } });
+      await readTheBar();
       press("Next");
       await waitFor(() => expect(barWord()).toBe("Publish “Autumn draft” before sending."));
       expect(deadButtons()).toEqual([]);
@@ -813,6 +845,7 @@ describe("Add a campaign, on Review", () => {
       fireEvent.click(railLine("Review"));
       await waitFor(() => expect(barWord()).toBe("Ready to schedule"));
       expect(deadButtons()).toEqual([]);
+      await readTheBar();
       press("Schedule");
       expect(deadButtons()).toEqual([]);
     } finally {

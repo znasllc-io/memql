@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 import { chooseOption } from "../selectControl";
 import { rowsResult, withSession } from "../email/harness";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -16,7 +17,13 @@ const query = (reply: (args: Args) => Record<string, unknown> | Promise<Record<s
   h.connection = { query: { emailAzureSetup: call, packageCampaigns: vi.fn(async () => rowsResult([{status:"installed",manifest:null}])) } };
   return call;
 };
-const click = async (name: string) => { const button = vi.isFakeTimers() ? screen.getByRole("button", { name }) : await screen.findByRole("button", { name }); await act(async () => { fireEvent.click(button); }); };
+/** Clicks a button; one of the bar's acts is clicked once the bar has been read, since a bar that has just changed takes no press for a moment. */
+const click = async (name: string) => {
+  const find = () => (vi.isFakeTimers() ? screen.getByRole("button", { name }) : screen.findByRole("button", { name }));
+  if ((await find()).closest('[aria-label="What you can do with this"]') !== null) await readTheBar();
+  const button = await find();
+  await act(async () => { fireEvent.click(button); });
+};
 afterEach(() => { h.connection = null; sessionStorage.clear(); vi.useRealTimers(); });
 
 describe("one Azure configuration per cluster", () => {

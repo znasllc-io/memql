@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { useState } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { readTheQuestion } from "../../readTheQuestion";
+import { readTheBar } from "../../readTheBar";
 import { chooseOption, openSelect } from "../../selectControl";
 import { installSeededAccess } from "../../seededAccess";
 
@@ -87,8 +87,11 @@ async function openEdit(name = "August update") {
   fireEvent.click(await screen.findByText(name));
   expect(await screen.findByRole("heading", { level: 3, name })).toBeTruthy();
   await waitFor(() => expect(barActs()).toContain("Edit"));
+  // The page's acts arrive as its reads land, and a bar that has just changed takes no press for a moment.
+  await readTheBar();
   press("Edit");
   expect(await screen.findByRole("heading", { level: 3, name: "Edit campaign" })).toBeTruthy();
+  await readTheBar();
 }
 
 /** The arguments the one write sent, and nothing it left out. */
@@ -109,6 +112,8 @@ describe("editing a campaign", () => {
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Spring sale" } });
     fireEvent.change(screen.getByLabelText("Reply to"), { target: { value: "help@acme.com" } });
     expect(barActs()).toEqual(["Cancel campaign", "Discard changes", "Save"]);
+    // Save joined the bar with the first change, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     press("Save");
 
     await waitFor(() => expect(conn.query.updateCampaign).toHaveBeenCalledOnce());
@@ -128,6 +133,7 @@ describe("editing a campaign", () => {
     chooseOption(screen.getByLabelText("When"), "Schedule");
     expect(barDetail()).toBe("Choose a time");
     fireEvent.change(screen.getByLabelText("Send at · America/Phoenix"), { target: { value: "2031-10-14T09:00" } });
+    await readTheBar();
     press("Save");
     await waitFor(() => expect(conn.query.updateCampaign).toHaveBeenCalledOnce());
     expect(updated(conn)).toEqual({ campaignId: "c1", name: "August update", audienceId: "a1", templateId: "t1", replyTo: "", scheduledAt: "2031-10-14T16:00:00Z" });
@@ -138,6 +144,7 @@ describe("editing a campaign", () => {
     mountWindow(conn);
     await openEdit();
     chooseOption(screen.getByLabelText("Audience"), "Signups");
+    await readTheBar();
     press("Discard changes");
     expect(await screen.findByRole("heading", { level: 3, name: "August update" })).toBeTruthy();
     expect(conn.query.updateCampaign).not.toHaveBeenCalled();
@@ -160,12 +167,14 @@ describe("editing a campaign", () => {
     // The second click of a double-click is not an answer.
     press("Cancel campaign");
     expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
-    await readTheQuestion();
+    await readTheBar();
     press("Keep");
     expect(barActs()).toEqual(["Cancel campaign"]);
 
+    // Keep put the acts back, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     press("Cancel campaign");
-    await readTheQuestion();
+    await readTheBar();
     press("Cancel campaign");
     await waitFor(() => expect(conn.query.cancelCampaign).toHaveBeenCalledWith({ campaignId: "c1" }));
     // Taken, not yet arrived: the act stays busy and nothing else can be pressed.
@@ -184,6 +193,7 @@ describe("editing a campaign", () => {
     await openEdit();
     const reads = conn.query.campaigns.mock.calls.length;
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "September update" } });
+    await readTheBar();
     press("Save");
     expect(await screen.findByText("Couldn't confirm that your changes were saved.")).toBeTruthy();
     expect(screen.queryByText("Your changes weren't saved.")).toBeNull();
@@ -204,7 +214,7 @@ describe("editing a campaign", () => {
     await openEdit();
     const reads = conn.query.campaigns.mock.calls.length;
     press("Cancel campaign");
-    await readTheQuestion();
+    await readTheBar();
     press("Cancel campaign");
     expect(await screen.findByText("Couldn't confirm that it was cancelled.")).toBeTruthy();
     expect(screen.queryByText("The campaign wasn't cancelled.")).toBeNull();
@@ -220,10 +230,30 @@ describe("editing a campaign", () => {
     await openEdit();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "September update" } });
     await waitFor(() => expect(barActs()).toEqual(["Cancel campaign", "Discard changes", "Save"]));
+    await readTheBar();
     press("Cancel campaign");
     press("Cancel campaign");
     expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
     expect(barActs()).toEqual(["Keep", "Cancel campaign"]);
+  });
+
+  it("a double-click on Keep beside unsaved changes does not discard them", async () => {
+    // Keep puts [Cancel campaign, Discard changes, Save] back, and Discard
+    // changes now stands where Keep stood: the rest of the double-click on
+    // Keep must not throw the edits away.
+    const conn = seed();
+    mountWindow(conn);
+    await openEdit();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "September update" } });
+    await waitFor(() => expect(barActs()).toEqual(["Cancel campaign", "Discard changes", "Save"]));
+    await readTheBar();
+    press("Cancel campaign");
+    await readTheBar();
+    press("Keep");
+    press("Discard changes");
+    expect(barActs()).toEqual(["Cancel campaign", "Discard changes", "Save"]);
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("September update");
+    expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
   });
 
   it("defaults to the client's organization, filters resources and sends no owner", async () => {
@@ -247,6 +277,7 @@ describe("editing a campaign", () => {
     expect(barDetail()).toBe("Choose a sender");
     expect(barActs()).not.toContain("Save");
     chooseOption(screen.getByLabelText("Sender"), "news@acme.test");
+    await readTheBar();
     press("Save");
 
     await waitFor(() => expect(conn.query.updateCampaign).toHaveBeenCalledOnce());
@@ -310,10 +341,11 @@ describe("editing a campaign", () => {
     expect(barActs()).toEqual(["Cancel campaign", "Discard changes", "Start repeating"]);
 
     // Starting it is a send to an audience on its own clock: it asks, naming them.
+    await readTheBar();
     press("Start repeating");
     expect(within(bar()).getByText("Send “August update” to Newsletter every 2 weeks from Tue, Oct 14 at 9:00?")).toBeTruthy();
     expect(barActs()).toEqual(["Not yet", "Start repeating"]);
-    await readTheQuestion();
+    await readTheBar();
     press("Start repeating");
     await waitFor(() =>
       expect(conn.query.campaignConfigureSeries).toHaveBeenCalledWith({
@@ -356,6 +388,7 @@ describe("editing a campaign", () => {
     mountWindow(conn);
     await openEdit();
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Spring sale" } });
+    await readTheBar();
     press("Save");
     expect(await screen.findByText("Your changes weren't saved.")).toBeTruthy();
     expect(screen.getByText(/the template belongs to another organization/)).toBeTruthy();

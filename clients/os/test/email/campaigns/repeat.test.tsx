@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readTheBarNow } from "../../readTheBar";
 import { chooseOption } from "../../selectControl";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -93,7 +94,15 @@ const bar = () => screen.getByRole("group", { name: "What you can do with this" 
 const barWord = () => bar().querySelector(".os-actbar-word")?.textContent ?? "";
 const barDetail = () => bar().querySelector(".os-actbar-detail")?.textContent ?? "";
 const barActs = () => within(bar()).queryAllByRole("button").map((button) => button.textContent);
-const press = (name: string) => fireEvent.click(within(bar()).getByRole("button", { name }));
+/**
+ * Presses one of the bar's acts once it has been read: the page's acts arrive
+ * as its reads land and change with every write, and a bar that has just
+ * changed takes no press for a moment (kit ActionBar). The Date is fake, so
+ * reading costs nothing.
+ */
+const press = (name: string) => { readTheBarNow(); fireEvent.click(within(bar()).getByRole("button", { name })); };
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { vi.useRealTimers(); });
 
 async function openCampaign(name = "Weekly digest") {
   fireEvent.click(await screen.findByText(name));

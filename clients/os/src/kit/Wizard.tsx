@@ -310,8 +310,9 @@ export function Wizard({
         </section>
       </div>
 
-      {/* The open step is what the bar is about: a confirmation is held only
-          within one step, and the next step's forward act is a new question. */}
+      {/* The open step is what the bar is about: moving to another one is a
+          change of the bar, so the double-click on Next that opened a step
+          does not answer it. */}
       <ActionBar
         state={status.word}
         detail={status.detail}
@@ -320,7 +321,6 @@ export function Wizard({
         live
         acts={acts}
         scope={open}
-        asking={confirm !== undefined && confirm !== null && confirm !== false}
       >
         {confirm}
       </ActionBar>

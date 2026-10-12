@@ -6,7 +6,7 @@ import { useOs } from "../../src/chrome/state";
 import { ConnectReturnDispatcher } from "../../src/apps/deployables/sources/ConnectReturnDispatcher";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readTheQuestion } from "../readTheQuestion";
+import { readTheBar } from "../readTheBar";
 
 let wakeTime = Date.now();
 async function wakeRead() {
@@ -837,7 +837,7 @@ describe("existing credential and cluster settings", () => {
     await click(within(detail).getByRole("button", { name: "Disconnect" }));
     expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(0);
     expect(within(detail).getByText(/Sources and deployables are kept/)).toBeTruthy();
-    await readTheQuestion();
+    await readTheBar();
     await click(within(detail).getByRole("button", { name: "Disconnect" }));
     await waitFor(() => expect(connection.callsNamed("sourceCredentialRevoke")).toHaveLength(1));
     expect(connection.callsNamed("sourceCredentialRevoke")[0]).toContain('credentialId: "cred-grant"');
@@ -872,6 +872,8 @@ describe("existing credential and cluster settings", () => {
     expect(screen.queryByRole("button", { name: "Disconnect" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Analyze" })).toBeNull();
     expect(screen.getByText("Read only")).toBeTruthy();
+    // Opening the repository changed the bar, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Back" }));
     expect((screen.getByRole("textbox", { name: "Search repositories" }) as HTMLInputElement).value).toBe("widget");
     expect(screen.queryByRole("button", { name: /docs/ })).toBeNull();
@@ -887,7 +889,7 @@ describe("existing credential and cluster settings", () => {
     const footer = screen.getByRole("group", { name: "What you can do with this" });
     await click(within(footer).getByRole("button", { name: "Disconnect" }));
     expect(connection.callsNamed("sourceConnectionRemove")).toHaveLength(0);
-    await readTheQuestion();
+    await readTheBar();
     await click(within(footer).getByRole("button", { name: "Disconnect" }));
     await screen.findByRole("button", { name: "Manage organization beta" });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Manage organization acme" })).toBeNull());
@@ -919,7 +921,7 @@ describe("existing credential and cluster settings", () => {
     await screen.findByRole("button", { name: "Try again" });
     expect(screen.queryByText("This connection reaches no repositories yet.")).toBeNull();
     await click(screen.getByRole("button", { name: "Disconnect" }));
-    await readTheQuestion();
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Disconnect" }));
     await screen.findByText(/Cannot disconnect/);
     expect(screen.getByRole("region", { name: "GitHub organization acme" })).toBeTruthy();
@@ -950,7 +952,7 @@ describe("existing credential and cluster settings", () => {
     const { reportSetupState } = mountSources({ credentials: [GRANT, githubGrantRow({id: "other-account", login: "work"})], credentialRevokeRemote: false });
     await click(await screen.findByRole("button", { name: "Manage GitHub account octocat" }));
     await click(screen.getByRole("button", { name: "Disconnect" }));
-    await readTheQuestion();
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Disconnect" }));
     await screen.findByText("Disconnected here, but GitHub did not confirm the authorization ended.");
     expect(reportSetupState).toHaveBeenLastCalledWith("ready");

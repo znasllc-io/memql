@@ -45,35 +45,37 @@ import { Button, type ButtonTone } from "./controls";
 // the content above it scrolls, and the bar does not.
 //
 // ===========================================================================
-// A CONFIRMATION IS NOT PRESSED BY THE CLICK THAT ASKED FOR IT
+// A BAR THAT HAS JUST CHANGED IS NOT PRESSED BY THE CLICK THAT CHANGED IT
 // ===========================================================================
-// An act that asks first turns the bar into a question (`asking`): the question
-// beside the acts, and acts that answer it -- "Send now" answered by "Not yet"
-// and "Send now", "Cancel" by "Keep" and "Cancel campaign". A
-// double-click is two presses, and the second lands on whatever now stands
+// A double-click is two presses, and the second lands on whatever now stands
 // under the pointer. The acts are right-aligned, so WHICH act that is depends
-// on widths, not on order: a confirmation under another label, or at another
-// place in the list (a place counts acts, not pixels), can still be exactly
-// where the ask was. So a bar that has just turned into a question takes NO
-// press at all for `CONFIRM_SETTLE_MS` -- not the confirmation, not the way
-// out -- and the question is on screen long enough to be read before anything
-// answers it.
+// on widths, not on order: under another label, or at another place in the
+// list (a place counts acts, not pixels), it can still be exactly where the
+// first press landed. And a bar changes under a press in every flow the shell
+// has: an ask turns it into a question ("Send now" answered by "Not yet" and
+// "Send now", "Cancel" by "Keep" and "Cancel campaign"); the way back from one
+// puts the old acts back, with "Discard changes" where "Keep" stood; Pause
+// turns into Resume; a refusal into Try again; a wizard's Next opens a step
+// whose Next stands where the last one did.
 //
-// THE WAY BACK is held too, by its label: an ask that comes back to the place
-// it was pressed in (a confirmation refused at once puts it back) ignores the
-// rest of the double-click for the same moment, so the question does not open
-// again on its own.
+// So WHENEVER WHAT THE BAR OFFERS CHANGES -- its acts, their order, or what
+// they are about (`scope`, a wizard's open step) -- it takes NO press at all
+// for `CONFIRM_SETTLE_MS`, wherever the press lands and whatever caused the
+// change: a question is on screen long enough to be read before anything
+// answers it, and nothing a person aimed at one bar is taken by another. One
+// guard, here, for every bar in the shell; nothing a page says turns it on or
+// off. The cost is a deliberate press within that moment of a change, which
+// needs a second press.
 //
-// What it leaves alone: an act whose bar did not change under it (a test sent
-// twice, a save tried again after a refusal); a bar that changed into another
-// set of acts that is not a question (Pause turning into Resume is a different
-// promise, pressed on purpose); and a wizard's next step -- its `scope` (the
-// open step) moved, so the Next that stands where the last Next stood is a new
-// question, not the answer to the last one. One guard, here, for every ask in
-// the shell that says it is asking; a bar that draws something else beside its
-// acts (an error, a typed confirmation) is not a question by being drawn.
+// What it leaves alone: a bar whose acts did not change (a test sent twice, a
+// save tried again beside the refusal it drew -- what a bar draws beside its
+// acts is not what it offers); a bar on its way in, and a bar's FIRST acts --
+// a page whose record arrives after it opens offered nothing there for a
+// press to have been aimed at. A bar that offered nothing for a moment (a
+// write in flight takes its acts away) remembers what it last offered: the
+// same acts back are not a change, and other acts are.
 
-/** How long a bar that has just turned into a question -- or an ask back in the place just pressed -- ignores presses. */
+/** How long a bar whose acts just changed ignores presses. */
 export const CONFIRM_SETTLE_MS = 400;
 
 /** One act the current state offers. */
@@ -133,64 +135,36 @@ export interface ActionBarProps {
   /** Drawn beside the acts: the question an ask turns the bar into, or the typed confirmation a delete takes. */
   children?: ReactNode;
   /**
-   * THE ACTS ANSWER A QUESTION: an ask turned the bar into it ("Keep" and
-   * "Cancel campaign" answering "Cancel"). A bar that has just started asking
-   * takes no press for `CONFIRM_SETTLE_MS`, wherever the press lands, so the
-   * second click of the double-click that asked answers nothing.
-   */
-  asking?: boolean;
-  /**
    * WHAT THE BAR IS ABOUT, when it moves through several things: a wizard's
-   * open step. A confirmation is held only within one -- the next step's
-   * forward act standing where the last one stood is a new question, not the
-   * answer to the one just asked (`CONFIRM_SETTLE_MS`).
+   * open step. A move to another one is a change of the bar even where the
+   * acts keep their labels -- the Next that stands where the last Next stood
+   * asks about another step -- so it holds presses like any change
+   * (`CONFIRM_SETTLE_MS`).
    */
   scope?: string;
 }
 
-/** The press the bar last acted on, and where it landed. */
-interface Pressed {
-  label: string;
-  /** Counted from the right edge, where the primary is. */
-  place: number;
-  /** What the bar offered when it was pressed. */
-  arrangement: string;
-  scope: string;
-}
-
-export function ActionBar({ state, detail, tone = "none", meta, live = false, acts = [], children, asking = false, scope = "" }: ActionBarProps) {
-  // WHAT THE BAR OFFERS, and since when: the labels in order, and whether they
-  // answer a question. A press that changes it (an ask) starts the clock for
-  // whatever now stands where the press landed.
-  const arrangement = `${asking ? "?" : ""}${acts.map((act) => act.label).join("\u001f")}`;
+export function ActionBar({ state, detail, tone = "none", meta, live = false, acts = [], children, scope = "" }: ActionBarProps) {
+  // WHAT THE BAR OFFERS, and since when: what it is about and the labels in
+  // order. A bar offering nothing has no arrangement to change, so it keeps
+  // the last one it offered (see the note above CONFIRM_SETTLE_MS).
+  const arrangement = acts.length === 0 ? "" : `${scope}\u001e${acts.map((act) => act.label).join("\u001f")}`;
   const shown = useRef({ arrangement, since: 0 });
   useLayoutEffect(() => {
-    if (shown.current.arrangement !== arrangement) shown.current = { arrangement, since: Date.now() };
+    if (arrangement === "" || arrangement === shown.current.arrangement) return;
+    // The first acts a bar offers are not a change of anything.
+    shown.current = { arrangement, since: shown.current.arrangement === "" ? 0 : Date.now() };
   }, [arrangement]);
-  const pressed = useRef<Pressed | null>(null);
 
   // NOTHING HAPPENS WHERE NOTHING IS OFFERED. With no state to name and no act
   // to offer, the bar is absent rather than an empty band of chrome -- the
   // same rule the shell states about right-click.
   if (state === "" && acts.length === 0 && !children) return null;
 
-  function press(act: Act, index: number) {
-    const place = acts.length - 1 - index;
-    const last = pressed.current;
-    const fresh = shown.current.since > 0 && Date.now() - shown.current.since < CONFIRM_SETTLE_MS;
-    // A question that has just appeared answers nothing yet, wherever the press lands.
-    const unread = asking && fresh;
-    // An ask back in the place just pressed, under its label: the rest of the click that answered.
-    const returning =
-      last !== null &&
-      last.label === act.label &&
-      last.place === place &&
-      last.scope === scope &&
-      last.arrangement !== shown.current.arrangement &&
-      fresh;
-    // A press that lands too soon neither answers, nor asks, nor counts as a press of its own.
-    if (unread || returning) return;
-    pressed.current = { label: act.label, place, arrangement: shown.current.arrangement, scope };
+  function press(act: Act) {
+    // A press that lands too soon after the bar changed neither answers, nor
+    // asks, nor counts as a press of its own.
+    if (shown.current.since > 0 && Date.now() - shown.current.since < CONFIRM_SETTLE_MS) return;
     act.onAct();
   }
 
@@ -204,7 +178,7 @@ export function ActionBar({ state, detail, tone = "none", meta, live = false, ac
       </div>
       <div className="os-actbar-acts">
         {children}
-        {acts.map((act, index) =>
+        {acts.map((act) =>
           act.text ? (
             <button
               key={act.label}
@@ -214,7 +188,7 @@ export function ActionBar({ state, detail, tone = "none", meta, live = false, ac
               disabled={act.busy}
               aria-busy={act.busy || undefined}
               aria-label={act.ariaLabel}
-              onClick={() => press(act, index)}
+              onClick={() => press(act)}
             >
               {act.icon}
               {act.label}
@@ -224,7 +198,7 @@ export function ActionBar({ state, detail, tone = "none", meta, live = false, ac
               key={act.label}
               tone={act.tone}
               busy={act.busy}
-              onClick={() => press(act, index)}
+              onClick={() => press(act)}
               ariaLabel={act.ariaLabel}
             >
               {act.icon}

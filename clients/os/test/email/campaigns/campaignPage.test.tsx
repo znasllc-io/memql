@@ -2,7 +2,7 @@ import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@te
 import { useState } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { readTheQuestion } from "../../readTheQuestion";
+import { readTheBar } from "../../readTheBar";
 import { chooseOption } from "../../selectControl";
 import { installSeededAccess } from "../../seededAccess";
 
@@ -216,19 +216,22 @@ describe("acting on a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toEqual(["Edit", "Send a test", "Send now"]));
+    await readTheBar();
 
     press("Send now");
     expect(await within(bar()).findByText("Send “August update” to 4,182 subscribers now?")).toBeTruthy();
     expect(barActs()).toEqual(["Not yet", "Send now"]);
     expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
     // Not yet sends nothing and asks nothing -- once the question has been read.
-    await readTheQuestion();
+    await readTheBar();
     press("Not yet");
     expect(barActs()).toEqual(["Edit", "Send a test", "Send now"]);
     expect(within(bar()).queryByText(/subscribers now\?$/)).toBeNull();
 
+    // Not yet put the acts back, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     press("Send now");
-    await readTheQuestion();
+    await readTheBar();
     press("Send now");
     await waitFor(() => expect(conn.query.campaignStartSend).toHaveBeenCalledWith({ campaignId: "c1" }));
     expect(conn.query.campaignStartSend).toHaveBeenCalledTimes(1);
@@ -239,9 +242,10 @@ describe("acting on a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toEqual(["Edit", "Send a test", "Schedule"]));
+    await readTheBar();
     press("Schedule");
     expect(await within(bar()).findByText("Schedule “August update” for Tue, Oct 14 at 9:00 (America/Phoenix), to 1,204 subscribers?")).toBeTruthy();
-    await readTheQuestion();
+    await readTheBar();
     press("Schedule");
     await waitFor(() => expect(conn.query.campaignScheduleSend).toHaveBeenCalledWith({ campaignId: "c1", scheduledAt: OCT_14 }));
   });
@@ -251,6 +255,7 @@ describe("acting on a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toEqual(["Cancel", "Send a test", "Send now"]));
+    await readTheBar();
 
     press("Cancel");
     expect(within(bar()).getByText("Cancel “August update”? Nobody will get it, and it stays on the list as cancelled.")).toBeTruthy();
@@ -260,13 +265,14 @@ describe("acting on a campaign", () => {
     // ended. It answers nothing.
     press("Cancel campaign");
     expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
-    await readTheQuestion();
+    await readTheBar();
     press("Keep");
     expect(barActs()).toEqual(["Cancel", "Send a test", "Send now"]);
     expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
 
+    await readTheBar();
     press("Cancel");
-    await readTheQuestion();
+    await readTheBar();
     press("Cancel campaign");
     await waitFor(() => expect(conn.query.cancelCampaign).toHaveBeenCalledWith({ campaignId: "c1" }));
   });
@@ -276,6 +282,7 @@ describe("acting on a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toEqual(["Cancel", "Send a test", "Resume"]));
+    await readTheBar();
     press("Cancel");
     expect(within(bar()).getByText("Cancel “August update”? The 40 already sent stay sent, and nobody else will get it.")).toBeTruthy();
   });
@@ -289,12 +296,14 @@ describe("acting on a campaign", () => {
     expect(barWord()).toBe("Sending");
     expect(barDetail()).toBe("40 of 100 sent");
 
+    await readTheBar();
     press("Pause");
     await waitFor(() => expect(conn.query.campaignPauseSend).toHaveBeenCalledWith({ campaignId: "c1" }));
     expect(bar().querySelector(".os-actbar-confirm")).toBeNull();
 
     act(() => conn.subscriptions.emit(CAMPAIGN, { ...sending, status: "paused" }));
     await waitFor(() => expect(barActs()).toEqual(["Cancel", "Send a test", "Resume"]));
+    await readTheBar();
     press("Resume");
     await waitFor(() => expect(conn.query.campaignResumeSend).toHaveBeenCalledWith({ campaignId: "c1" }));
     expect(bar().querySelector(".os-actbar-confirm")).toBeNull();
@@ -308,6 +317,7 @@ describe("acting on a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toEqual(["Cancel", "Send a test", "Resume"]));
+    await readTheBar();
     press("Resume");
     await waitFor(() => expect(conn.query.campaignResumeSend).toHaveBeenCalledWith({ campaignId: "c1" }));
   });
@@ -319,6 +329,7 @@ describe("acting on a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toEqual(["Send a test", "Duplicate"]));
+    await readTheBar();
     press("Duplicate");
 
     await waitFor(() => expect(conn.query.createCampaign).toHaveBeenCalledOnce());
@@ -350,6 +361,7 @@ describe("acting on a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Duplicate"));
+    await readTheBar();
     press("Duplicate");
     expect(await screen.findByText("The campaign wasn't duplicated.")).toBeTruthy();
     expect(screen.getByText("Connection lost")).toBeTruthy();
@@ -365,6 +377,7 @@ describe("acting on a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Duplicate"));
+    await readTheBar();
     press("Duplicate");
     expect(await screen.findByText("Couldn't confirm the copy.")).toBeTruthy();
     expect(screen.getByText("Try again: it makes the same copy, never a second one.")).toBeTruthy();
@@ -377,8 +390,9 @@ describe("acting on a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send now"));
+    await readTheBar();
     press("Send now");
-    await readTheQuestion();
+    await readTheBar();
     press("Send now");
     expect(await screen.findByText("The campaign wasn't sent.")).toBeTruthy();
     expect(screen.getByText("no email sender is registered on this node")).toBeTruthy();
@@ -445,8 +459,9 @@ describe("a change on its way", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain(asked));
+    await readTheBar();
     press(asked);
-    await readTheQuestion();
+    await readTheBar();
     press(confirm);
     await waitFor(() => expect(conn.query[write]).toHaveBeenCalledOnce());
 
@@ -470,8 +485,9 @@ describe("a change on its way", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send now"));
+    await readTheBar();
     press("Send now");
-    await readTheQuestion();
+    await readTheBar();
     press("Send now");
     await waitFor(() => expect(barWord()).toBe("Starting"));
     act(() => conn.subscriptions.emit(CAMPAIGN, { ...campaign, status: "sending" }));
@@ -488,6 +504,7 @@ describe("a change on its way", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toEqual(["Send a test", "Pause"]));
+    await readTheBar();
     press("Pause");
     await waitFor(() => expect(barWord()).toBe("Pausing"));
     expect(barActs()).toEqual(["Pause"]);
@@ -501,8 +518,9 @@ describe("a change on its way", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toEqual(["Edit", "Send a test", "Send now"]));
+    await readTheBar();
     press("Send now");
-    await readTheQuestion();
+    await readTheBar();
     vi.useFakeTimers();
     press("Send now");
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -525,9 +543,10 @@ describe("a change on its way", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send now"));
+    await readTheBar();
     const reads = conn.query.campaigns.mock.calls.length;
     press("Send now");
-    await readTheQuestion();
+    await readTheBar();
     press("Send now");
 
     expect(await screen.findByText("Couldn't confirm the send.")).toBeTruthy();
@@ -548,8 +567,9 @@ describe("a change on its way", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send now"));
+    await readTheBar();
     press("Send now");
-    await readTheQuestion();
+    await readTheBar();
     press("Send now");
     expect(await screen.findByText("The campaign wasn't sent.")).toBeTruthy();
     expect(screen.getByText("campaign is already sending")).toBeTruthy();
@@ -969,6 +989,7 @@ describe("testing a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     await waitFor(() => expect(conn.query.campaignTestSend).toHaveBeenCalledWith({ campaignId: "c1", to: "owner@example.com" }));
     expect(await screen.findByText("Test sent to owner@example.com.")).toBeTruthy();
@@ -982,6 +1003,7 @@ describe("testing a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     expect(await screen.findByText("Couldn't confirm the test was sent.")).toBeTruthy();
     expect(screen.queryByText("The test wasn't sent.")).toBeNull();
@@ -997,6 +1019,7 @@ describe("testing a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     expect(await screen.findByText("Connection lost")).toBeTruthy();
     expect(screen.getByText("The test wasn't confirmed.")).toBeTruthy();
@@ -1015,6 +1038,7 @@ describe("testing a campaign", () => {
     mountWindow(conn);
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     await waitFor(() => expect(conn.query.campaignTestSend).toHaveBeenCalledWith({ campaignId: "c1", to: "owner@example.com" }));
     expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
@@ -1050,6 +1074,8 @@ describe("testing a campaign", () => {
     await act(async () => { conn.subscriptions.emit(CAMPAIGN, campaignRow({ id: "c2", name: "Elsewhere", accountId: "other" }), "NODE_CREATED"); });
     expect(await screen.findByText("This cluster did not return the testing audience.")).toBeTruthy();
     expect(screen.getByText("Reading testing settings is not yours to do.")).toBeTruthy();
+    // The refusal changed what the bar offers, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     press("Send a test");
     await waitFor(() => expect(conn.query.campaignTestSend).toHaveBeenCalledWith({ campaignId: "c1", to: "owner@example.com" }));
     expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
@@ -1070,11 +1096,14 @@ describe("testing a campaign", () => {
     const owner = mountWindow(captured());
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     // Before anything goes, the question says where it goes.
     press("Send now");
     expect(await within(bar()).findByText("This cluster keeps email in Inbox instead of delivering it.")).toBeTruthy();
-    await readTheQuestion();
+    await readTheBar();
     press("Not yet");
+    // Not yet put the acts back, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     press("Send a test");
     fireEvent.click(await screen.findByRole("button", { name: "View it in Inbox" }));
     expect(owner.navigate).toHaveBeenCalledWith("inbox", { fromContent: true });
@@ -1084,6 +1113,7 @@ describe("testing a campaign", () => {
     mountWindow(captured(), { role: "writer", everyAccount: false, accountIds: ["self"] });
     await openCampaign();
     await waitFor(() => expect(barActs()).toContain("Send a test"));
+    await readTheBar();
     press("Send a test");
     expect(await screen.findByText("An owner or developer can read it in Email → Inbox.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "View it in Inbox" })).toBeNull();

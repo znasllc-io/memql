@@ -1,6 +1,7 @@
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { useLayoutEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -297,6 +298,8 @@ describe("one campaign page", () => {
     const { view } = mount(conn, "campaigns", { includeArchived: true });
     fireEvent.click(await within(pane("campaigns")).findByText("Draft one"));
     await waitFor(() => expect(barActs("campaigns")).toContain("Edit"));
+    // The page's acts arrive as its reads land, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     fireEvent.click(within(bar("campaigns")).getByRole("button", { name: "Edit" }));
     const when = await within(pane("campaigns")).findByLabelText("When");
     fireEvent.click(when);

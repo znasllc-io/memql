@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 
 // =============================================================================
 // NOTHING LOST (design decision D5, memql#5159)
@@ -454,6 +455,8 @@ const CASES: ActsCase[] = [
       await screen.findByText(MACHINE_LABEL);
       await click(screen.getByLabelText("Add a machine"));
       await type(screen.getByLabelText("Machine name") as HTMLInputElement, "mini");
+      // Continue joined the bar with the name, and a bar that has just changed takes no press for a moment.
+      await readTheBar();
       await click(screen.getByRole("button", { name: "Continue" }));
       await settle();
       await click(screen.getByText("Connection token"));

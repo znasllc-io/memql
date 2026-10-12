@@ -618,7 +618,6 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
         tone={barState.tone}
         live
         acts={toKitActs(barSpecs, run, landing !== null ? landing.spec.id : busyId)}
-        asking={question !== null}
       >
         {question === null ? null : <span className="os-actbar-confirm">{question}</span>}
       </ActionBar>

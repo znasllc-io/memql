@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { act } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -10,6 +10,7 @@ import { DeployablesApp } from "../../src/apps/deployables/DeployablesApp";
 import { DEPLOYMENT_CONCEPT } from "../../src/apps/deployables/packages/rows";
 import { SOURCE_CONNECTION_CONCEPT } from "../../src/modules/connections/connections";
 import { LocalDeployablesSettingsStore } from "../../src/apps/deployables/settings";
+import { readTheBar } from "../readTheBar";
 import { click, emit, fakeConnection, githubGrantRow, probeReply, repositoriesReply, repositoryFixture, siteRow, rowsResult, sourceConnectionRow, withSession, type FakeConnection, type FakeSeed } from "./harness";
 
 const SELF: Row = { id: "self", name: "Operator organization", status: "active" };
@@ -29,7 +30,9 @@ const BETA = source("source-beta", "Beta source");
 const REPORT = { name: "saved project", formatVersion: 1, ok: true, problems: [], dslDomains: [],
   deployables: [{ name: "web", kind: "spa", path: "clients/web", output: "dist", prebuilt: true, buildPlan: "already built: dist" }] };
 
-afterEach(() => { cleanup(); h.connection = null; });
+// A fake Date, so reading a bar costs nothing: the reads run on real timers.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { cleanup(); vi.useRealTimers(); h.connection = null; });
 
 async function open(seed: FakeSeed = {}, prepare?: (connection: FakeConnection) => void) {
   const connection = fakeConnection({ accounts: [SELF, CLIENT], packages: [ALPHA, BETA], ...connectedSeed(), ...seed });
@@ -52,6 +55,9 @@ function floorAct(name: string): HTMLButtonElement | null {
 
 async function forward(name: string) {
   await waitFor(() => expect(floorAct(name)).toBeTruthy());
+  // The act joined a bar that has just changed, and such a bar takes no press
+  // for a moment (kit ActionBar): read it first, as a person does.
+  await readTheBar();
   await click(floorAct(name)!);
 }
 
@@ -532,6 +538,8 @@ describe("GitHub Sources in Add a deployable", () => {
     });
     await addRepository(region);
     await waitFor(() => expect(floorAct("Analyze")).toBeTruthy());
+    // Read first: the second press must meet the write in flight, not the moment the bar holds after it changed.
+    await readTheBar();
     const analyze = floorAct("Analyze")!;
     await act(async () => { analyze.click(); analyze.click(); });
     expect(connection.callsNamed("packageSourceRegister")).toHaveLength(1);

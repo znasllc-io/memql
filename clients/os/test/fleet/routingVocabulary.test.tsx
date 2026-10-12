@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBarNow } from "../readTheBar";
 import type { ReactNode } from "react";
 
 // ONE VOCABULARY (routing design brief, section 1): Source, Route, Rule,
@@ -71,6 +72,18 @@ function floorBar(): HTMLElement {
   return screen.getByRole("group", { name: "What you can do with this" });
 }
 
+// A bar that has just changed takes no press for a moment (kit ActionBar), and
+// a step, a choice or a write changes the routing bars: each press reads the
+// bar first, on a fake Date so reading costs nothing.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { vi.useRealTimers(); });
+
+/** Presses one of a bar's acts once the bar has been read. */
+function pressBar(group: () => HTMLElement, name: string | RegExp) {
+  readTheBarNow();
+  fireEvent.click(within(group()).getByRole("button", { name }));
+}
+
 // The SHIPPED rules as the DSL declares them -- all of them, read from
 // dsl/rules/rules.memql rather than from a literal that could leave out the
 // very rule whose words leak (it did: `policyCompilerLocalOnly` matches the
@@ -130,7 +143,7 @@ describe("the routing surfaces speak Source, Route, Rule and Level", () => {
     await settle();
     // A route inside this one, whose engine id carries a retired word.
     expect(screen.getByRole("button", { name: /^4\. Local, then best vendor,/ })).toBeTruthy();
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Restore shipped" }));
+    pressBar(floorBar, "Restore shipped");
     expect(retired()).toEqual([]);
   });
 
@@ -140,10 +153,10 @@ describe("the routing surfaces speak Source, Route, Rule and Level", () => {
     fireEvent.click(screen.getByRole("button", { name: "New route" }));
     expect(retired()).toEqual([]);
     fireEvent.change(screen.getByLabelText("Route name"), { target: { value: "Night shift" } });
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Next" }));
+    pressBar(floorBar, "Next");
     fireEvent.click(within(screen.getByLabelText("Sources you can add")).getByRole("button", { name: /^Local, then best vendor:/ }));
     expect(retired()).toEqual([]);
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Next" }));
+    pressBar(floorBar, "Next");
     expect(retired()).toEqual([]);
   });
 
@@ -158,14 +171,14 @@ describe("the routing surfaces speak Source, Route, Rule and Level", () => {
     expect(retired()).toEqual([]);
     fireEvent.click(screen.getByRole("radio", { name: /Local, then best vendor/ }));
     expect(retired()).toEqual([]);
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Cancel" }));
+    pressBar(floorBar, "Cancel");
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
     fireEvent.click(screen.getByRole("button", { name: "Describe it instead" }));
     fireEvent.change(screen.getByLabelText("Describe a rule in your own words"), { target: { value: "keep planning local" } });
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Compile it" }));
+    pressBar(floorBar, "Compile it");
     await settle();
     expect(retired()).toEqual([]);
-    fireEvent.click(within(floorBar()).getByRole("button", { name: "Cancel" }));
+    pressBar(floorBar, "Cancel");
     fireEvent.click(screen.getByRole("button", { name: /Tagged nightly/ }));
     expect(retired()).toEqual([]);
   });

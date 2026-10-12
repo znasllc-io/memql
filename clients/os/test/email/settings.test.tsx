@@ -1,8 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { readTheQuestion } from "../readTheQuestion";
+import { readTheBar, readTheBarNow } from "../readTheBar";
 import { chooseOption, openSelect } from "../selectControl";
 import { installSeededAccess } from "../seededAccess";
 import { readiness, verdict, withOs } from "../setup/harness";
@@ -468,12 +468,18 @@ describe("Senders", () => {
 });
 
 describe("Add a sender", () => {
+  // Each answer moves the wizard to its next step, and a bar that has just
+  // changed takes no press for a moment (kit ActionBar): every press reads the
+  // bar first, on a fake Date so reading costs nothing.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+  afterEach(() => { vi.useRealTimers(); });
+
   async function openWizard() {
     fireEvent.click(await screen.findByRole("button", { name: "Add a sender" }));
     expect(await screen.findByRole("heading", { level: 3, name: "Add a sender" })).toBeTruthy();
   }
   const type = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
-  const press = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
+  const press = (name: string) => { readTheBarNow(); fireEvent.click(screen.getByRole("button", { name })); };
 
   it("adds a sender through the wizard", async () => {
     const conn = fakeConnection();
@@ -495,6 +501,7 @@ describe("Add a sender", () => {
 
     // Two presses before the page has drawn the first one's busy state: the
     // second is the same press, not a second sender.
+    readTheBarNow();
     const add = screen.getByRole("button", { name: "Add sender" });
     act(() => {
       fireEvent.click(add);
@@ -642,16 +649,18 @@ describe("A sender's page", () => {
     expect(barButtons()).toEqual(["Keep", "Archive"]);
     expect(conn.query.setSenderIdentityStatus).not.toHaveBeenCalled();
 
-    await readTheQuestion();
+    await readTheBar();
     fireEvent.click(within(bar()).getByRole("button", { name: "Keep" }));
     expect(barButtons()).toEqual(["Archive", "Edit"]);
     expect(conn.query.setSenderIdentityStatus).not.toHaveBeenCalled();
 
-    // A double-click on Archive asks; its second click does not answer.
+    // A double-click on Archive asks; its second click does not answer -- once
+    // the bar Keep put back has been read.
+    await readTheBar();
     fireEvent.click(within(bar()).getByRole("button", { name: "Archive" }));
     fireEvent.click(within(bar()).getByRole("button", { name: "Archive" }));
     expect(conn.query.setSenderIdentityStatus).not.toHaveBeenCalled();
-    await readTheQuestion();
+    await readTheBar();
     fireEvent.click(within(bar()).getByRole("button", { name: "Archive" }));
     await waitFor(() =>
       expect(conn.query.setSenderIdentityStatus).toHaveBeenCalledWith({ senderIdentityId: "s1", status: "disabled" }),
@@ -664,6 +673,7 @@ describe("A sender's page", () => {
     expect(screen.getByRole("heading", { level: 3, name: "news@acme.com" })).toBeTruthy();
     expect(deadButtons()).toEqual([]);
 
+    await readTheBar();
     fireEvent.click(within(bar()).getByRole("button", { name: "Restore" }));
     await waitFor(() =>
       expect(conn.query.setSenderIdentityStatus).toHaveBeenLastCalledWith({ senderIdentityId: "s1", status: "active" }),
@@ -675,7 +685,7 @@ describe("A sender's page", () => {
     conn.query.setSenderIdentityStatus.mockRejectedValueOnce(new Error("Only the owner of this sender can archive it."));
     await openSender(conn);
     fireEvent.click(within(bar()).getByRole("button", { name: "Archive" }));
-    await readTheQuestion();
+    await readTheBar();
     fireEvent.click(within(bar()).getByRole("button", { name: "Archive" }));
     expect(await screen.findByText("Only the owner of this sender can archive it.")).toBeTruthy();
     // Still the sender it was, still asking.
@@ -698,6 +708,8 @@ describe("A sender's page", () => {
     expect(barButtons()).toEqual(["Cancel"]);
     fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Acme Team" } });
 
+    // Save came back with the name, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     fireEvent.click(within(bar()).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(conn.query.updateSenderIdentity).toHaveBeenCalledTimes(1));
     // An explicit empty reply to clears it; leaving the field out would keep the old one.

@@ -588,7 +588,6 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
         detail={landing === null && askingNow === "" ? blocked : undefined}
         tone={landing === null ? "none" : "busy"}
         acts={toKitActs(barSpecs, run, landing !== null ? landing.spec.id : busyId)}
-        asking={question !== null}
       >
         {question === null ? null : <span className="os-actbar-confirm">{question}</span>}
       </ActionBar>
