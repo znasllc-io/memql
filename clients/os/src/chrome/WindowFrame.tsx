@@ -121,7 +121,7 @@ export function WindowFrame({
   const { settingsTone, reportSetupState } = useAppSetupMark(manifest.id, markToneFor(appGate));
   // The dot inside a button is DECORATIVE and the button says the state
   // itself: a labelled role="img" nested in a button appends to the button's
-  // accessible name, so "Settings" would announce as "Settings Campaigns is
+  // accessible name, so "Settings" would announce as "Settings Email is
   // not set up" -- the right information in a shape nothing can match on.
   const settingsStatePhrase = settingsTone === "needsSetup" ? "not set up" : "partly set up";
   // A module the SECTION alone asked for names the section in the headline

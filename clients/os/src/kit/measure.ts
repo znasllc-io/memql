@@ -25,7 +25,7 @@
 // figure and a zero are different answers".
 //
 // Promoted from src/cluster/figure.ts into the kit (epic memql#5153, D3):
-// thirteen consumers across Campaigns, Cluster, Fleet, Settings and Stores,
+// thirteen consumers across Email, Cluster, Fleet, Settings and Stores,
 // and this epic adds Levels and the fleet-wide measured column. The
 // COMPONENT half is kit/Measure.tsx; this half stays pure so a .ts module
 // can import it without pulling JSX through the barrel.

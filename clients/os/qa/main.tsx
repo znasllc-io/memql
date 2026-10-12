@@ -1,3 +1,4 @@
+import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
 import { LocalFilesSettingsStore } from "../src/apps/files/settings";
 import { fakeConnection as filesConnection, artifactRow as filesArtifact, folderRow as filesFolder, fileRow as filesFile, versionRow as filesVersion, watchedFolderRow, withSession as filesSession } from "../test/files/harness";
@@ -675,7 +676,6 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
 // `syncStatesAll`. Two fixture harnesses rather than one widened one, for the
 // reason the README gives about the fake in general: each is the SUITE's, so a
 // screenshot cannot disagree with what those tests assert.
-}
 
 const VIEWS: Record<
   string,
@@ -695,12 +695,10 @@ const VIEWS: Record<
   "azure-email-dns": azureEmailView("dns"),
   "azure-email-provisioning": azureEmailView("provisioning"),
   "azure-email-empty": azureEmailView("unconfigured"),
-  "campaigns-settings": campaignSettingsView(false),
-  "campaigns-settings-connected": campaignSettingsView(true),
+  ...emailScenes(WindowBody),
   // Email -> Campaigns (memql#6033): the list, and Add a campaign reached the
   // way a person reaches it, `&click=Add a campaign|Newsletter|...`.
-  "email-campaigns": emailCampaignsView(true),
-  "email-campaigns-empty": emailCampaignsView(false),
+
   // The same, for somebody who chooses between organizations: Review's sentence
   // then says whose campaign it is.
   "email-campaigns-organizations": emailCampaignsView(true, true),
@@ -1895,17 +1893,28 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
 // `?click=A|B` presses the first control whose text (or accessible name) is A
 // once the reads have landed, then B a beat later. `element.click()` is a real
 // click event, which React's root listener handles like a person's.
-const clicks = (new URLSearchParams(window.location.search).get("click") ?? "").split("|").filter((c) => c !== "");
+const clicks = (new URLSearchParams(window.location.search).get("click") ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
 clicks.forEach((label, i) => {
   window.setTimeout(() => {
     // A choice card and a record row answer to their names: a card's note ("1,204
     // subscribers") and a row's other lines are not part of what is pressed.
+    if (label.startsWith("fill:")) {
+      const [field, ...value] = label.slice(5).split("=");
+      const target = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")).find(el => el.getAttribute("aria-label") === field || Array.from(el.labels ?? []).some(l => l.textContent?.trim() === field));
+      if (target) { const proto = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(target, value.join("=")); target.dispatchEvent(new Event("input", { bubbles: true })); }
+      return;
+    }
+    if (label === "file:people") {
+      const target = document.querySelector<HTMLInputElement>('input[type="file"]');
+      if (target) { const data = new DataTransfer(); data.items.add(new File(["email,name\ndana@example.com,Dana"], "people.csv", { type: "text/csv" })); target.files = data.files; target.dispatchEvent(new Event("change", { bubbles: true })); }
+      return;
+    }
     const target = Array.from(document.querySelectorAll<HTMLElement>("button, [role=tab], [role=radio], a")).find(
-      (el) =>
+      (el) => el.checkVisibility() && (
         (el.textContent ?? "").trim() === label ||
         el.getAttribute("aria-label") === label ||
         el.querySelector(".os-choice-card-name")?.textContent?.trim() === label ||
-        el.querySelector(".os-row-name")?.textContent?.trim() === label,
+        el.querySelector(".os-row-name")?.textContent?.trim() === label),
     );
     target?.click();
   }, 2500 + i * 1200);

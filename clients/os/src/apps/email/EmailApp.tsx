@@ -45,22 +45,22 @@ export type { OpenRequest } from "./openRequest";
 // window and a second place to look for what happened to a message.
 //
 // ===========================================================================
-// FIVE FEEDS AT THE ROOT, ONE PER CONCEPT -- AND THREE MORE, COMPOSED
+// SIX FEEDS AT THE ROOT, ONE PER CONCEPT -- AND THREE MORE, COMPOSED
 // ===========================================================================
 // The one-feed rule is per CONCEPT, not per app (the Packages rule): what must
 // never happen is two subscriptions over the SAME concept, free to disagree
-// about what the cluster holds. Five concepts cannot disagree with each other.
+// about what the cluster holds. Six concepts cannot disagree with each other.
 //
 // They are retained HERE rather than per section because every one of them is
 // needed in more than one place -- the campaign editor picks an audience, a
-// template and a mailbox; the rules builder picks the same three; the template
+// template and a sender; the rules builder picks the same three; the template
 // editor lists the campaigns that use it. A per-section feed would open a
 // second subscription over one concept the moment somebody opened two
 // sections, which is exactly the failure the rule names.
 //
 // A series, a testing audience and a signup form are read per id (the series
 // OF this campaign), and used to be one collection per open page. Each is now
-// ONE collection here, composed over the ids the five lists are showing
+// ONE collection here, composed over the ids the six lists are showing
 // (`useEmailRecordFeeds`), and the account list every picker reads is retained
 // once under `AccountOptionsProvider` -- so with a campaign page, an audience
 // page and Settings all open, no concept has two subscriptions.
@@ -88,7 +88,7 @@ const EMAIL_LOG_CONCEPTS = [
   Concepts.CAMPAIGNS_TEMPLATE,
   Concepts.CAMPAIGNS_SENDER_IDENTITY,
   Concepts.CAMPAIGNS_EMAIL_RULE,
-  "v1:campaigns:journey",
+  Concepts.CAMPAIGNS_JOURNEY,
   Concepts.CAMPAIGNS_SEND_JOB,
   Concepts.CAMPAIGNS_DELIVERY,
   Concepts.EMAIL_CAPTURED_MESSAGE,

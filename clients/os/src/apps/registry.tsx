@@ -626,7 +626,7 @@ const bin: OsAppManifest = {
 // (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person
 // has goals of their own to read and the engine decides how far each list
 // reaches. Gating here would be presentation pretending to be authorization --
-// the same reading Files, Deployables and Campaigns record. The writes carry
+// the same reading Files, Deployables and Email record. The writes carry
 // their gate in the engine: each `integration.work.*` builtin repeats its own,
 // because a builtin's annotation set carries no `@requiresRank`. The one floor
 // in the app is on its Logs section, and that one IS a mirror: every read on
@@ -653,7 +653,7 @@ const nexus: OsAppManifest = {
 // (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person
 // has compositions of their own and the engine decides how far each list
 // reaches. Gating here would be presentation pretending to be authorization --
-// the reading Files, Deployables, Campaigns and Work all record. The writes
+// the reading Files, Deployables, Email and Work all record. The writes
 // carry their gate in the engine: each `integration.compose.*` builtin repeats
 // its own, because a builtin's annotation set carries no `@requiresRank`.
 //
