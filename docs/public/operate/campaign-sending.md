@@ -360,6 +360,11 @@ Email rules supply a stable identifier automatically for each event and recipien
 Their firing reports count suppressed and replayed sends as skipped, and show
 uncertain outcomes as refusals.
 
+An email rule fires once, on the replica where its triggering write happened, and
+the limits its runs draw on (10 concurrent runs and the automation execution
+budget) are counted per replica, so the cluster-wide ceiling is those limits times
+the number of replicas.
+
 Other automations that call `campaignSendToRecipient` should supply a stable
 `requestId` for each intended message, such as one signup event's welcome.
 Keep that identifier unchanged when retrying the same event. The recipient,

@@ -296,11 +296,14 @@ func (a *App) cluster() {
 	}
 
 	// Wire the authored-runtime cluster owner gate (epic memql#954, #961 / #959):
-	// distribute owners across the live mesh so an owner's authored automations
-	// fire on exactly one node cluster-wide rather than once per replica. The
-	// membership view is self + the live peer set, read live so a membership
-	// change rebalances without a restart. Single-node (peerMgr nil or empty
-	// mesh) keeps the default where this node owns every owner.
+	// distribute owners across the live mesh so an owner's SCHEDULED authored
+	// automations fire on exactly one node cluster-wide rather than once per
+	// replica whose cron ticked. Event triggers do not consult it: they fire on
+	// the node where their event happened, claimed once across replicas
+	// (memql#6022, F2). The membership view is self + the live peer set, read
+	// live so a membership change rebalances without a restart. Single-node
+	// (peerMgr nil or empty mesh) keeps the default where this node owns every
+	// owner.
 	if a.authoredScheduler != nil && peerMgr != nil {
 		ownerGate := automations.NewAuthoredOwnerGate(nodeIdentity.ID, func() []string {
 			ids := []string{nodeIdentity.ID}

@@ -5,13 +5,13 @@ package clustere2e
 //
 // # WHAT WAS BROKEN
 //
-// Activating an email rule registers its generated automation into the
+// Activating an email rule registered its generated automation into the
 // authored runtime of the node that handled the activation, and nowhere else.
 // Every other replica learned of the rule, and of its retirement, only by
-// restarting. The authored owner gate runs an owner's automations on exactly
-// ONE node of the mesh, so whenever that node was not the one the activation
-// landed on, a rule somebody saved simply did not fire -- and a rule somebody
-// retired kept firing on every replica that had armed it at boot.
+// restarting. A rule fires on the replica its triggering write lands on, so a
+// write on any node but the one the activation landed on fired nothing -- and
+// a rule somebody retired kept firing on every replica that had armed it at
+// boot.
 //
 // # WHAT THIS PROVES
 //
@@ -20,22 +20,23 @@ package clustere2e
 // own authored scheduler. The buses are joined by newMeshLink, which forwards
 // an event only when node.ForwardDecisionFor -- the decision EventBridge
 // applies -- says it may, and round-trips its payload through structpb as the
-// wire does. The owner gate names node B, so the rule can only ever fire on B,
-// and every change to it is made on node A. The test proves, against real
-// rows:
+// wire does. Every change to the rule is made on node A, and its trigger is
+// published on node B. The test proves, against real rows:
 //
 //   - the arm broadcast crosses, and B arms the bundle it names;
 //   - a reconcile pass on B leaves a node that already agrees alone, and
 //     re-arms a rule whose arm B lost;
-//   - the rule fires on B and not on A;
+//   - the rule fires on B, where its event happened, and not on A, which
+//     hears only the forwarded copy;
 //   - an edit on A moves B to the new version, and a late disarm of the old
 //     version leaves the new one armed (B reads the new bundle, by id, as
 //     active);
 //   - the retire broadcast crosses, and B stops firing the rule.
 //
-// The trigger is published on B, the gate node: arbitrary-concept trigger
-// events are not forwarded across nodes (plan Ruling 13), so the event has to
-// originate where the rule runs.
+// An event rule fires on the node where its event happened (memql#6022, F2),
+// so a rule armed only on A would never fire for a write on B: that is what
+// makes B's firing the proof that B armed what A activated. Where a rule fires,
+// and that it fires once, is email_rule_firing_db_test.go.
 //
 // # WHY THIS FILE CARRIES NO BUILD TAG
 //
@@ -64,6 +65,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -115,7 +117,6 @@ type armingReplica struct {
 
 	mu        sync.Mutex
 	fired     map[string]int // automation name -> firings that ran
-	gated     map[string]int // owner -> firings that reached the owner gate
 	scheduled map[string]int // automation name -> times handed to the scheduler
 }
 
@@ -131,7 +132,7 @@ func (r *armingReplica) read(counter map[string]int, key string) int {
 	return counter[key]
 }
 
-func newArmingReplica(t *testing.T, dsn string, runsTheOwner bool) *armingReplica {
+func newArmingReplica(t *testing.T, dsn string) *armingReplica {
 	t.Helper()
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
 	ping, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -154,7 +155,7 @@ func newArmingReplica(t *testing.T, dsn string, runsTheOwner bool) *armingReplic
 
 	r := &armingReplica{
 		bus: events.NewBus(), eng: eng, registry: memql.NewAuthoredRuntimeRegistry(),
-		fired: map[string]int{}, gated: map[string]int{}, scheduled: map[string]int{},
+		fired: map[string]int{}, scheduled: map[string]int{},
 	}
 	t.Cleanup(r.bus.Close)
 	eng.SetEventBus(r.bus)
@@ -165,13 +166,6 @@ func newArmingReplica(t *testing.T, dsn string, runsTheOwner bool) *armingReplic
 		Run: func(_ context.Context, a *automations.Automation, _ *events.Event) error {
 			r.bump(r.fired, a.Name)
 			return nil
-		},
-		// The owner gate runs an owner's authored automations on ONE node of
-		// the mesh. Counting its consultations is what lets the test say the
-		// node that did not fire was asked, and declined.
-		OwnerGate: func(owner string) bool {
-			r.bump(r.gated, owner)
-			return runsTheOwner
 		},
 	})
 	if err != nil {
@@ -214,8 +208,8 @@ func TestAnEmailRuleArmedOnOneReplicaFiresOnAnother(t *testing.T) {
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatal(err)
 	}
-	a := newArmingReplica(t, dsn, false)
-	b := newArmingReplica(t, dsn, true)
+	a := newArmingReplica(t, dsn)
+	b := newArmingReplica(t, dsn)
 	if a == nil || b == nil {
 		return
 	}
@@ -288,7 +282,7 @@ func TestAnEmailRuleArmedOnOneReplicaFiresOnAnother(t *testing.T) {
 	if !armingEventually(15*time.Second, func() bool { return b.scheduler.IsActive(armedOwner, name) }) {
 		t.Fatalf("CROSS-NODE FAILURE: node B never armed the rule node A activated "+
 			"(authoring.arm broadcasts that crossed the link: %d). Without the arm broadcast B learns "+
-			"of a rule at its next reconcile pass, and the owner gate names B, so the rule does not fire until then.",
+			"of a rule at its next reconcile pass, and a write on B fires nothing until then.",
 			link.count(armTopic))
 	}
 	// B's own reconcile pass, which starts with its subscriber, could have
@@ -320,7 +314,8 @@ func TestAnEmailRuleArmedOnOneReplicaFiresOnAnother(t *testing.T) {
 		t.Fatal("a reconcile pass did not re-arm the rule node B had lost")
 	}
 
-	// --- Fire on node B, the gate node ---
+	// --- Fire on node B, where the event happens ---
+	const userCreatedTopic = "graph.node.created.v1:identity:user"
 	created := func(person string) {
 		id := "v1:identity:user:" + person
 		email := person + "@example.test"
@@ -329,20 +324,28 @@ func TestAnEmailRuleArmedOnOneReplicaFiresOnAnother(t *testing.T) {
 			"primaryEmail": email, "payload": map[string]any{"primaryEmail": email},
 			"firstVersion": true,
 		}
-		b.bus.PublishSync(events.NewEvent("graph.node.created.v1:identity:user", events.KindNodeCreated, payload))
+		b.bus.PublishSync(events.NewEvent(userCreatedTopic, events.KindNodeCreated, payload))
 	}
-	firedA, firedB, gatedA := a.read(a.fired, name), b.read(b.fired, name), a.read(a.gated, armedOwner)
+	// The event also crosses to A (graph.node.created.v1:identity:user is
+	// broadcast). A holds the rule too, and must leave the forwarded copy to
+	// the node it happened on.
+	var forwardedToA atomic.Int64
+	a.bus.Subscribe(userCreatedTopic, func(ev events.Event) {
+		if ev.IsRemote() {
+			forwardedToA.Add(1)
+		}
+	})
+	firedA, firedB := a.read(a.fired, name), b.read(b.fired, name)
 	created("arm-newcomer-" + suffix)
 	if got := b.read(b.fired, name) - firedB; got != 1 {
 		t.Fatalf("node B fired the rule %d times for one created user, want 1", got)
 	}
-	// The event also crosses to A (graph.node.created.v1:identity:user is
-	// broadcast). A holds the rule too, and its gate must decline it.
-	if !armingEventually(5*time.Second, func() bool { return a.read(a.gated, armedOwner) > gatedA }) {
-		t.Fatal("node A never consulted its owner gate for the forwarded event, so its zero firings prove nothing")
+	if !armingEventually(5*time.Second, func() bool { return forwardedToA.Load() > 0 }) {
+		t.Fatal("the created event never reached node A, so A's zero firings prove nothing")
 	}
+	time.Sleep(200 * time.Millisecond) // A's subscriber sees the copy beside the probe
 	if got := a.read(a.fired, name) - firedA; got != 0 {
-		t.Fatalf("node A fired the rule %d times; the owner gate names node B", got)
+		t.Fatalf("node A fired the rule %d times for a forwarded copy; the event happened on node B", got)
 	}
 
 	// --- Edit on node A: version 2 supersedes version 1 ---

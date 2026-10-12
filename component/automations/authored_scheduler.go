@@ -56,14 +56,16 @@ type AuthoredSchedulerOptions struct {
 	// errors increments that automation's breaker, and on trip the scheduler
 	// auto-pauses ONLY that automation (the others, and core, keep running).
 	// nil = no breaker (every run fires regardless of prior faults). The app
-	// wires a breaker whose onTrip surfaces the trip; tests supply their own.
+	// wires a breaker whose onTrip pauses the automation on every replica;
+	// tests supply their own.
 	Breaker *AuthoredBreaker
-	// OwnerGate, when set, leader-gates owner-scoped authored automations in a
-	// cluster: a firing for owner O runs only on the node OwnerGate(O) returns
-	// true for, so an owner's authored automation fires once cluster-wide
-	// rather than once per replica. nil = ungated (every node runs every
-	// owner's automations -- the single-node / dev default). Typically
-	// AuthoredOwnerGate.OwnsOwner.
+	// OwnerGate, when set, leader-gates owner-scoped SCHEDULED authored
+	// automations in a cluster: a cron firing for owner O runs only on the
+	// node OwnerGate(O) returns true for, so it fires once cluster-wide rather
+	// than once per replica whose cron ticked. EVENT triggers never consult it:
+	// they fire on the node where their event happened (fireOnEvent). nil =
+	// ungated (every node runs every owner's schedules -- the single-node /
+	// dev default). Typically AuthoredOwnerGate.OwnsOwner.
 	OwnerGate func(ownerUserId string) bool
 	// GlobalGate, when set, is the cluster-wide GLOBAL KILL SWITCH for authored
 	// automations (epic memql#954, issue #961): it returns false when the
@@ -155,8 +157,8 @@ func (s *AuthoredScheduler) SetGlobalGate(gate func() bool) {
 
 // SetOwnerGate installs (or replaces) the cluster owner gate after
 // construction. The app wires it during the cluster phase once the peer mesh is
-// available so an owner's authored automations fire on exactly one node
-// cluster-wide. nil restores the single-node default (this node owns every
+// available so an owner's SCHEDULED authored automations fire on exactly one
+// node cluster-wide. nil restores the single-node default (this node owns every
 // owner). Safe to call against a running scheduler.
 func (s *AuthoredScheduler) SetOwnerGate(gate func(ownerUserId string) bool) {
 	s.mu.Lock()
@@ -312,6 +314,19 @@ func (s *AuthoredScheduler) Stop() {
 // subscribeEvent wires an event-triggered authored automation. The handler
 // runs under the author's authz envelope.
 //
+// AN EVENT FIRES ON THE NODE WHERE IT HAPPENED, and only there (memql#6022,
+// F2). Trigger events for arbitrary concepts are not forwarded between nodes
+// -- forwarding is default-deny -- so the node a write landed on is the only
+// node guaranteed to hear its event, and the firing has to run there. The
+// owner gate used to decide this too, and it named one node per owner: a rule
+// fired only when its write happened to land on that node, which in the
+// two-replica cluster was about half of them. A concept the mesh DOES
+// broadcast reaches every node, and each node fires for its own writes; the
+// forwarded copies are the same events their origin already fired for, so
+// they are ignored here, before any work. The runner claims each event run
+// across replicas as well (authored_runner.go), so an event observed as local
+// on two nodes still runs once.
+//
 // THE @filter DECIDES WHETHER THE EVENT FIRES THE AUTOMATION AT ALL, and it
 // is asked here exactly as the core scheduler's subscriber asks it: the args
 // contract is bound first, then the filter -- a `row => ...` lambda --
@@ -323,6 +338,9 @@ func (s *AuthoredScheduler) subscribeEvent(owner string, automation *Automation)
 	a := automation
 	pattern := automation.Trigger.Event
 	return s.eventBus.Subscribe(pattern, func(event events.Event) {
+		if event.IsRemote() {
+			return
+		}
 		ev := event
 		bound, _, argErr := bindEventArgs(a, &ev)
 		if argErr != nil {
@@ -342,7 +360,7 @@ func (s *AuthoredScheduler) subscribeEvent(owner string, automation *Automation)
 				return
 			}
 		}
-		s.runUnderAuthor(owner, a, &ev)
+		s.fireOnEvent(owner, a, &ev)
 	}, events.WithSubscriberName("authored:"+owner+":"+a.Name))
 }
 
@@ -350,44 +368,68 @@ func (s *AuthoredScheduler) subscribeEvent(owner string, automation *Automation)
 func (s *AuthoredScheduler) scheduleCron(owner string, automation *Automation) (cron.EntryID, error) {
 	a := automation
 	return s.cron.AddFunc(automation.Schedule, func() {
-		s.runUnderAuthor(owner, a, nil)
+		s.fireOnSchedule(owner, a)
 	})
 }
 
-// runUnderAuthor executes one authored automation firing under the AUTHOR's
-// authz envelope: a ctx carrying an AccessContext + claims stamped with the
-// author's userId and a non-privileged WRITER role. This is the no-escalation
-// guarantee -- the authored automation runs as its author, so the same per-row
-// authz that gates the author's interactive calls gates this run. It can never
-// act as a cluster owner or the system actor.
-func (s *AuthoredScheduler) runUnderAuthor(owner string, automation *Automation, event *events.Event) {
-	// GLOBAL KILL SWITCH (#961): a cluster-wide hard stop. When the global gate
-	// reports the authored runtime disabled, NO authored automation fires for
-	// ANY owner -- checked first so a halted cluster does no owner-gating,
-	// breaker work, or run. The flag lives on
-	// v1:identity:clusterSettings.authoredAutomationsEnabled and is read live, so
-	// flipping it halts (or resumes) every node without a restart.
-	s.mu.Lock()
-	gate := s.globalGate
-	ownerGate := s.ownerGate
-	s.mu.Unlock()
-	if gate != nil && !gate() {
-		if s.logger != nil {
-			s.logger.Debug("authored automation suppressed by global kill switch",
-				"owner", owner, "automation", automation.Name)
-		}
+// fireOnEvent runs one event-triggered firing on THIS node, the node the event
+// happened on (subscribeEvent says why). The owner gate is not consulted:
+// nothing forwards the event to the owner's node, so a gate that said no here
+// would mean the firing never ran anywhere.
+func (s *AuthoredScheduler) fireOnEvent(owner string, automation *Automation, event *events.Event) {
+	if s.globallyHalted(owner, automation) {
 		return
 	}
+	s.runUnderAuthor(owner, automation, event)
+}
 
-	// Cluster leader gate (#561 analogue, owner-scoped): only the node that
-	// owns this owner's authored automations runs the firing, so it fires once
-	// cluster-wide instead of once per replica. Checked BEFORE the breaker so a
-	// non-owning node neither runs nor records faults for an owner it does not
-	// own. nil gate = ungated (single-node / dev).
+// fireOnSchedule runs one cron firing on the node that owns the owner's
+// scheduled automations. A cron entry ticks on EVERY node that armed it, so
+// without the owner gate a schedule would run once per replica (the cluster
+// leader gate, #561, owner-scoped). Checked BEFORE the breaker so a non-owning
+// node neither runs nor records faults for an owner it does not own. nil gate
+// = ungated (single-node / dev).
+func (s *AuthoredScheduler) fireOnSchedule(owner string, automation *Automation) {
+	if s.globallyHalted(owner, automation) {
+		return
+	}
+	s.mu.Lock()
+	ownerGate := s.ownerGate
+	s.mu.Unlock()
 	if ownerGate != nil && !ownerGate(owner) {
 		return
 	}
+	s.runUnderAuthor(owner, automation, nil)
+}
 
+// globallyHalted is the GLOBAL KILL SWITCH (#961): a cluster-wide hard stop.
+// When the global gate reports the authored runtime disabled, NO authored
+// automation fires for ANY owner -- checked first on every firing, so a halted
+// cluster does no owner-gating, breaker work, or run. The flag lives on
+// v1:identity:clusterSettings.authoredAutomationsEnabled and is read live, so
+// flipping it halts (or resumes) every node without a restart.
+func (s *AuthoredScheduler) globallyHalted(owner string, automation *Automation) bool {
+	s.mu.Lock()
+	gate := s.globalGate
+	s.mu.Unlock()
+	if gate == nil || gate() {
+		return false
+	}
+	if s.logger != nil {
+		s.logger.Debug("authored automation suppressed by global kill switch",
+			"owner", owner, "automation", automation.Name)
+	}
+	return true
+}
+
+// runUnderAuthor executes one authored automation firing -- one the caller has
+// already decided runs on this node -- under the AUTHOR's authz envelope: a ctx
+// carrying an AccessContext + claims stamped with the author's userId and a
+// non-privileged WRITER role. This is the no-escalation guarantee -- the
+// authored automation runs as its author, so the same per-row authz that gates
+// the author's interactive calls gates this run. It can never act as a cluster
+// owner or the system actor.
+func (s *AuthoredScheduler) runUnderAuthor(owner string, automation *Automation, event *events.Event) {
 	// Circuit breaker gate: a tripped automation is suppressed (belt-and-
 	// suspenders -- the trip already paused its subscription, but a late
 	// in-flight firing might still reach here).

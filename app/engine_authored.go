@@ -10,25 +10,29 @@ package app
 // process: it constructs the authored runtime (registry + per-owner scheduler +
 // per-automation breaker) during the engine phase and binds:
 //
-//   - the scheduler's run hook to the live automations Executor, so an
-//     activated authored automation actually fires its steps;
-//   - the breaker's onTrip to Deactivate + registry-pause, so a misbehaving
-//     authored automation fault-isolates (auto-pause, no cascade);
+//   - the scheduler's run hook to the live automations executors, so an
+//     activated authored automation actually fires its steps -- an event
+//     firing claimed once per (automation, event) across replicas;
+//   - the breaker's onTrip to the engine's PauseTrippedAutomation, so a
+//     misbehaving authored automation fault-isolates (auto-pause, no cascade)
+//     on every replica, durably;
 //   - the global kill switch to v1:identity:clusterSettings
 //     .authoredAutomationsEnabled, so a single flag halts every node;
 //   - the activation audit sink to the identity audit logger.
 //
-// The cluster owner gate (which node runs an owner's automations) is wired
-// later in the cluster phase, where the peer mesh is available; until then the
-// single-node default (this node owns every owner) applies.
+// The cluster owner gate (which node runs an owner's SCHEDULED automations) is
+// wired later in the cluster phase, where the peer mesh is available; until
+// then the single-node default (this node owns every owner) applies. Event
+// triggers never consult it: they fire on the node where their event happened.
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/emailrules"
-	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/memql"
 	routerlib "github.com/znasllc-io/memql/component/router"
@@ -44,31 +48,43 @@ import (
 func (a *App) wireAuthoredRuntime() {
 	a.authoredRuntime = memql.NewAuthoredRuntimeRegistry()
 
-	// A dedicated Executor for authored runs: same engine + step registry +
+	// Dedicated executors for authored runs: same engine + step registry +
 	// event bus the core scheduler uses, so authored automations get the same
-	// step executors, integrations, and AI providers. It is NOT the core
-	// scheduler's executor -- authored runs are driven by the authored
-	// scheduler under the author's envelope, kept separate from core.
-	authoredExecutor := automations.NewExecutor(automations.ExecutorOptions{
+	// step executors, integrations, and AI providers. They are NOT the core
+	// scheduler's executors -- authored runs are driven by the authored
+	// scheduler under the author's envelope, kept separate from core. An EVENT
+	// firing is claimed per (automation, event) through the same cluster guard
+	// the core scheduler's event executor claims through, so one event runs an
+	// authored automation once however many replicas observe it as local
+	// (memql#6022, F2); a scheduled firing is not claimed.
+	//
+	// THE CEILINGS ARE PER PROCESS. The 10-run concurrency these executors
+	// share and the execution budget every run is admitted against
+	// (component/automations/budget.go) count this process's runs only, and an
+	// event rule fires on whichever replica its write landed on -- so the
+	// cluster-wide ceiling is the per-process one times the number of replicas
+	// running the authored scheduler.
+	runAuthored := automations.NewAuthoredRunner(automations.AuthoredRunnerOptions{
 		Logger:       a.Logger,
 		Engine:       a.engine,
 		EventBus:     a.eventBus,
 		StepRegistry: a.stepRegistry,
+		ClusterGuard: a.clusterGuard,
 	})
 
 	// Breaker: a faulting authored automation trips after N consecutive
-	// failures; onTrip auto-pauses it (Deactivate stops the trigger; the
-	// registry Pause stops resolution) so it fault-isolates without cascading.
+	// failures. onTrip pauses it on EVERY replica (memql#6022, F2): the engine
+	// stops it here, records the pause on its bundle row -- so neither a
+	// reboot nor a reconcile pass arms it again -- and broadcasts the disarm
+	// to every other node, which an event rule firing wherever its write
+	// lands needs. It runs off the failing run's goroutine: the breaker asks
+	// onTrip not to block, and the breaker itself already refuses this
+	// automation's next runs here.
 	a.authoredBreaker = automations.NewAuthoredBreaker(0, func(info automations.BreakerTripInfo) {
-		if a.authoredScheduler != nil {
-			a.authoredScheduler.Deactivate(info.Owner, info.Automation)
-		}
-		if a.authoredRuntime != nil {
-			_ = a.authoredRuntime.Pause(info.Owner, "automation", info.Automation)
-		}
-		a.Logger.Warn("authored automation circuit breaker tripped -- auto-paused",
+		a.Logger.Warn("authored automation circuit breaker tripped -- pausing it on every replica",
 			"owner", info.Owner, "automation", info.Automation,
 			"failures", info.Failures, "lastError", info.LastError)
+		go a.pauseTrippedAuthoredAutomation(info)
 	})
 
 	scheduler, err := automations.NewAuthoredScheduler(automations.AuthoredSchedulerOptions{
@@ -79,11 +95,8 @@ func (a *App) wireAuthoredRuntime() {
 		Breaker:  a.authoredBreaker,
 		// Run hook: execute one compiled authored automation under the
 		// already-author-scoped ctx the scheduler builds (AuthorContext). The
-		// run goes through the live Executor so the steps actually fire.
-		Run: func(ctx context.Context, automation *automations.Automation, ev *events.Event) error {
-			_, runErr := authoredExecutor.ExecuteWithEvent(ctx, automation, "authored", ev)
-			return runErr
-		},
+		// run goes through the live executors so the steps actually fire.
+		Run: runAuthored,
 		// GlobalGate: the cluster-wide kill switch. Reads
 		// v1:identity:clusterSettings.authoredAutomationsEnabled live so a flip
 		// halts (or resumes) every node. Defaults to enabled when the row is
@@ -182,10 +195,13 @@ func (a *App) wireAuthoredRuntime() {
 	// Boot re-arm (#1039): re-register every already-active bundle across all
 	// owners so their automations fire again after a restart, with no manual
 	// re-approval. The scheduler still enforces the global kill switch (#1034)
-	// and the cluster owner gate (#1030) at fire time, so a restart neither
-	// double-fires nor bypasses governance -- re-arm only re-establishes the
-	// registrations. A re-arm failure degrades gracefully (the core engine keeps
-	// serving; only the authored surface that failed to restore is affected).
+	// at fire time, an event firing still runs once per event (on the node it
+	// happened on, claimed across replicas) and a schedule still runs on the
+	// owner's node only (#1030), so a restart neither double-fires nor
+	// bypasses governance -- re-arm only re-establishes the registrations. A
+	// bundle a breaker paused reads paused, not active, so it stays out. A
+	// re-arm failure degrades gracefully (the core engine keeps serving; only
+	// the authored surface that failed to restore is affected).
 	a.rearmActiveAuthoredBundles()
 
 	// Boot re-hydration of durably-promoted PLAIN constructs (memql#1557): the
@@ -196,6 +212,36 @@ func (a *App) wireAuthoredRuntime() {
 	// e.specs on boot so the promotion survives a restart. Core-first +
 	// idempotent; automation bundles are untouched (they re-arm above).
 	a.rehydratePromotedConstructs()
+}
+
+// pauseTrippedAuthoredAutomation pauses an automation whose breaker tripped on
+// every replica: the engine stops it here, records the pause on its bundle row
+// and broadcasts the disarm. A pause that cannot be recorded leaves it stopped
+// on this node only, which is what the warning says.
+func (a *App) pauseTrippedAuthoredAutomation(info automations.BreakerTripInfo) {
+	if a.engine == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := a.engine.PauseTrippedAutomation(ctx, a.AuthoredRuntimeDeps(), info.Owner, info.Automation, breakerPauseReason(info)); err != nil {
+		a.Logger.Warn("authored automation paused on this node only -- the pause could not be recorded, so other replicas may still run it",
+			"owner", info.Owner, "automation", info.Automation, "error", err)
+		return
+	}
+	a.Logger.Info("authored automation paused on every replica after its circuit breaker tripped",
+		"owner", info.Owner, "automation", info.Automation)
+}
+
+// breakerPauseReason is the sentence a breaker's pause leaves on the bundle
+// row (failureReason): what happened and what to do, then the last failure.
+func breakerPauseReason(info automations.BreakerTripInfo) string {
+	last := strings.TrimSpace(info.LastError)
+	if r := []rune(last); len(r) > 2000 {
+		last = string(r[:2000])
+	}
+	return fmt.Sprintf("Paused automatically after %d failed runs in a row. Fix the cause, then turn it on again. Last error: %s",
+		info.Failures, last)
 }
 
 // rehydratePromotedConstructs recompiles every durably-promoted plain construct

@@ -8,10 +8,9 @@ package memql
 // the activation -- and RetireActiveBundle tears them down there. Until this
 // file nothing told any other replica: each learned of an activation, and of a
 // retire, only by restarting (RearmActiveBundles arms what is active at boot).
-// The authored owner gate runs an owner's automations on exactly ONE node of
-// the mesh, so an email rule activated anywhere but that node did not fire,
-// and a rule retired on one node kept firing on every replica that had armed
-// it at boot.
+// An event rule fires on the node its triggering write lands on, so a rule
+// activated on one node fired for no write on any other, and a rule retired on
+// one node kept firing on every replica that had armed it at boot.
 //
 // Two mechanisms, one rule:
 //
