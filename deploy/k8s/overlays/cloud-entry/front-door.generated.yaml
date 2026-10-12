@@ -182,6 +182,13 @@ spec:
                 name: bff-http
                 port:
                   number: 8085
+          - path: /email/events/azure
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
           - path: /email/preferences
             pathType: Prefix
             backend:

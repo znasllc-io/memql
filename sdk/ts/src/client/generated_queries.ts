@@ -1912,6 +1912,30 @@ QueryClient.prototype.campaignEngagementRefs = function (this: QueryClient, args
   return this.executeNamed("campaignEngagementRefs", buildCampaignEngagementRefs(args), opts);
 };
 
+/** Counts confirmed outcomes, not a subtraction from messages accepted by the transport. */
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignProviderDeliveryCount"] in generated_concepts.ts).
+export interface CampaignProviderDeliveryCountArgs {
+  campaignId: string;
+  providerStatus: string;
+}
+
+export function buildCampaignProviderDeliveryCount(args: CampaignProviderDeliveryCountArgs): string {
+  const parts: string[] = [];
+  parts.push("campaignId: " + renderMemQLValue(args.campaignId));
+  parts.push("providerStatus: " + renderMemQLValue(args.providerStatus));
+  return "query campaignProviderDeliveryCount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignProviderDeliveryCount(args: CampaignProviderDeliveryCountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignProviderDeliveryCount = function (this: QueryClient, args: CampaignProviderDeliveryCountArgs = {} as CampaignProviderDeliveryCountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignProviderDeliveryCount", buildCampaignProviderDeliveryCount(args), opts);
+};
+
 /** Current repeating instruction for this blueprint; organization authorization applies. */
 // Bound concept: v1:campaigns:campaignSeries (machine-readable: BoundConcepts["campaignSeriesForCampaign"] in generated_concepts.ts).
 export interface CampaignSeriesForCampaignArgs {

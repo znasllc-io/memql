@@ -8216,6 +8216,7 @@ QueryClient.prototype.updateRoutingPolicy = function (this: QueryClient, args: U
 /** ENGINE: stamp a send job's progress or lifecycle transition. Called by the drain worker after each batch and on every terminal outcome. clusterOwner tier. */
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["updateSendJob"] in generated_concepts.ts).
 export interface UpdateSendJobArgs {
+  versionTime?: string;
   sendJobId: string;
   status?: string;
   recipientCount?: number;
@@ -8232,6 +8233,7 @@ export interface UpdateSendJobArgs {
 
 export function buildUpdateSendJob(args: UpdateSendJobArgs): string {
   const parts: string[] = [];
+  if (args.versionTime !== undefined) parts.push("versionTime: " + renderMemQLValue(args.versionTime));
   parts.push("sendJobId: " + renderMemQLValue(args.sendJobId));
   if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
   if (args.recipientCount !== undefined) parts.push("recipientCount: " + renderMemQLValue(args.recipientCount));

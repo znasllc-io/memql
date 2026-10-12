@@ -863,6 +863,9 @@
         "nextAttemptAt",
         "outboundRequestId",
         "ownerUserId",
+        "providerAt",
+        "providerCountersPending",
+        "providerStatus",
         "recipientId",
         "requestId",
         "senderIdentityId",
@@ -878,6 +881,15 @@
         "status"
       ],
       "enums": {
+        "providerStatus": [
+          "bounced",
+          "delivered",
+          "expanded",
+          "failed",
+          "filtered-spam",
+          "quarantined",
+          "suppressed"
+        ],
         "status": [
           "failed",
           "pending",
@@ -2104,7 +2116,10 @@
       "concept": "v1:email:connectionState",
       "file": "email/concepts.memql",
       "fields": [
-        "encryptedValue"
+        "accountId",
+        "encryptedValue",
+        "nextAttemptAt",
+        "purpose"
       ],
       "required": [
         "encryptedValue"
@@ -2117,6 +2132,7 @@
         "accountId",
         "encryptedValue",
         "nextPollAt",
+        "providerMessageId",
         "status"
       ],
       "required": [

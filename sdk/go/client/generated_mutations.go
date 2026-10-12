@@ -14204,6 +14204,7 @@ func UpdateRoutingPolicyBuild(args UpdateRoutingPolicyArgs) string {
 //
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["updateSendJob"] in generated_concepts.go).
 type UpdateSendJobArgs struct {
+	VersionTime          string
 	SendJobId            string
 	Status               string
 	RecipientCount       int
@@ -14228,6 +14229,11 @@ func (qc *QueryClient) UpdateSendJob(ctx context.Context, args UpdateSendJobArgs
 func UpdateSendJobBuild(args UpdateSendJobArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation updateSendJob(")
+	b.WriteString("versionTime: ")
+	b.WriteString(quoteMemQL(args.VersionTime))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
 	b.WriteString("sendJobId: ")
 	b.WriteString(quoteMemQL(args.SendJobId))
 	if args.Status != "" {
