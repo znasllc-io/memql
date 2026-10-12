@@ -57,8 +57,7 @@ shows this delivery mode before sending and when confirming a test. A captured
 test verifies rendering and local persistence, not Azure delivery.
 
 Review the campaign's template and mark it `ready` before **Send now** or
-scheduling. Open the template in the editor and choose **Use in Campaigns →
-Publish template for campaigns** after reviewing the preview. Saving keeps it
+scheduling. Open the template in the editor and choose **Publish** after reviewing the preview. Saving keeps it
 as a draft. The campaign's **Review template** action opens that editor; send
 and schedule actions appear when its publication arrives through the live
 collection. **Send a test** queues a separate run using a published template and the
@@ -96,14 +95,13 @@ proves which organization owns them.
 
 ## Templates in Productivity Tools
 
-Create a named template in **Campaigns → Templates**, choose its organization,
-then open it in the editor. File content lives in MemQL Productivity Tools:
-**Source**, **Preview**, and **Split** use the same editable document. The OS
+Choose **New email** from the Email app to write a template in the editor. File content lives in MemQL Productivity Tools:
+**Design**, **Source**, and **Split** use the same editable document. The OS
 keeps the template list, organization, status, and archive controls. Files
 settings select browser VS Code (the default), desktop VS Code, or Cursor.
 
-**Create from examples** starts a Materializer draft from an image, individual
-files, or an explicitly selected ZIP of resources plus your brief. MemQL reads
+**New Email** asks for the organization, layout and name. Start from the layout
+or describe it with an image, individual files or a selected ZIP of resources. MemQL reads
 the authorized bytes and writes the email into a layout: the Article unless
 another is chosen (`composeMaterialize.layoutId`, one of the built-in layouts
 or one your organization saved). It writes the subject, the preheader and the
@@ -120,8 +118,10 @@ copy of the bytes you selected. Pictures are sent as inline attachments; the
 flow does not publish private file URLs. Review the words, pictures and links
 before publishing.
 
-Use **Use in Campaigns** to save a draft or publish the reviewed template for
-its organization. Publishing makes it available to send; it does not send
+Use **Publish** to save and publish the reviewed email for its organization.
+Publishing the same file updates that template. Resolve displayed issues first.
+**Save as layout** keeps its design for future emails. Local files use
+**Save to MemQL** first. Publishing makes it available to send; it does not send
 mail. Editing a published template returns it to draft. Concurrent edits fail
 with a comparison prompt, and publishing requires the exact saved revision.
 An existing template cannot be moved to another organization by editing its
