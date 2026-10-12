@@ -1348,169 +1348,50 @@ Failures stay beside the operation that failed, and local machine policy can
 refuse a directory even when its owner requested the backup in Files.
 
 
-## Campaigns, the eighth app (epic memql#4827 / #4828 / #4830)
+## Email
 
-`src/apps/campaigns/` is mail: the audiences it goes to, the copy it is made
-of, the mailboxes it leaves from, the sends themselves, and the rules that
-send one message when something happens in the cluster. It is the first app
-whose subject LEAVES the cluster, and six things about it are new rules
-rather than repetitions of the seven before it.
+`apps/email/EmailApp.tsx` owns Overview, Campaigns, Automations, Audiences,
+Templates, Inbox, Logs and Settings. Inbox and Logs follow their own access
+gates. The app keeps opened sections mounted behind hidden panes so edits and
+wizard answers survive navigation; `AutoRefresh` pauses with those panes.
 
-- **A HEARTBEAT IS NOT NEWS, AND THIS IS THE SHARPEST CASE OF IT SO FAR.**
-  Fleet's heartbeat moves every fifteen seconds and the Domains sweep every
-  two minutes; the drain worker writes `sentCount` / `failedCount` /
-  `skippedCount` on every batch of every running send. Naming one in
-  `campaignFingerprint` would ring every row in the list, repeatedly, for the
-  whole duration of every send in the cluster -- arriving exactly when
-  somebody is watching. `recipientCount` is out for a second reason: the
-  preflight freezes it at the same instant the status flips, so it would fire
-  a second cue for a change the status already announced. The fingerprint is
-  `name | status | scheduledAt | audienceId | templateId | senderIdentityId |
-  accountId | lastError`.
+Six retained root feeds carry campaigns, audiences, templates, senders, event
+rules and journeys. Composed reads carry each campaign's repeating series,
+each organization's testing audience and each audience's signup forms.
+`useEmailRecordFeeds` retains the composed feeds once per window. Queries
+establish membership; CDC events fold with full-precision version ordering,
+and omitted payloads re-read through the authorized path. A capped list says
+that some records are outside its loaded window.
 
-  **The counters must still RE-RENDER live**, which is the whole point of the
-  send bar filling under the person watching it. Re-rendering and ringing are
-  different statements and the fingerprint is the only thing that separates
-  them, so `test/campaigns/app.test.tsx` pins BOTH: a counter tick leaves
-  `data-arrival` null AND puts the new figure on screen; a rename rings. A
-  test of one half passes against a cue that fires on everything.
+Delivery ledgers, campaign statistics, tests, roster samples, signup welcomes
+and journey enrollment counts are ordinary reads because their volume does
+not belong in broadcasts. The shared refresher reads them while visible,
+keeps the last answer during a new read, cancels stale requests and stops when
+the window is parked. An absent figure stays absent, rather than becoming zero.
+The send bar divides the campaign's total into sent, skipped, failed and pending;
+engagement rates use delivered recipients as their denominator.
 
-- **AUTOMATIC UPDATES WITHOUT RECIPIENT-VOLUME BROADCASTS.** Operator records
-  use existing graph subscriptions. Delivery, engagement and recipient events
-  remain mesh routing exclusions because CSV imports and sends can produce tens
-  of thousands of rows. Visible statistics, ledgers, audience rosters, welcome
-  outcomes and test history re-read every five seconds after the preceding read
-  settles. Reads never overlap, pause in hidden browser tabs, resume on focus or
-  reconnect, abort on navigation, and retry errors. Loaded data remains during
-  background reads; failed reads show their error. Routine refresh buttons are
-  absent. Campaign results and the latest test show separate progress bars, so a
-  test unsubscribe cannot be mistaken for a change to the original send.
+Every record opens its own page, with one heading and one pinned action bar.
+`acts.ts` and the per-noun action tables offer only legal actions. Adds use the
+kit Wizard and Rail; list questions live in Refine. An audience's import
+report stays in place until Done, including unreadable line samples. No Email
+surface deletes a record; archive, restore and retirement retain history.
 
-- **AN ABSENT FIGURE IS AN EM DASH WITH A REASON, NEVER A ZERO.**
-  `campaignStats` reports a unique open or click count as UNMEASURED when the
-  fold behind it hit its bound, and reports no soft-bounce figure at all
-  because nothing measures one per campaign. A `0` there would be this window
-  inventing a fact about somebody's send -- and a zero open rate is a thing
-  operators act on. `Figure` is `{value: number | null, absentBecause}`, an
-  absent key and an explicit null are the same answer, and a rate is OF
-  DELIVERED rather than of the audience: an open rate over the whole roster
-  silently punishes a campaign for its suppressions, which is the opposite of
-  what suppressing was for.
+The automation Flow is a vertical trigger, sequence of Send, Confirm and Wait
+cards, and End. Its inspector sits alongside at wide widths and beneath the
+selected card in narrow windows. Arrow keys move focus, Alt+arrows reorder,
+Delete removes and Escape returns focus from the inspector. Step IDs survive
+reordering, editing and saves. Counts follow the engine's enrollment state:
+Confirm shows waiting rows, Wait reads the next step's active rows, and End
+shows completed, exited and failed rows. Activation uses the reviewed revision.
+Describe validates without writing; Save draft and Turn on are explicit actions.
 
-- **A SEND IS A BAR, NOT A ROW OF STAT CARDS.** Four numbers in four boxes
-  makes a person add them up to learn the one thing they came for. One band,
-  the width of the panel, partitions the audience into `sent | skipped |
-  failed | pending` -- which is literally what happened to it -- with a legend
-  giving the exact figures beneath. It makes the SKIPPED slice visible, the
-  compliance-relevant number nobody goes looking for. `pending` is DERIVED
-  rather than read, so the slices always sum to the whole and the band can
-  never show a gap that reads as a rendering fault; the counts CLAMP at zero,
-  because when a frozen estimate and live observations disagree the
-  observations win. It is `flex-grow` and four token colours, not a chart
-  library, and it carries `role="img"` with an `aria-label` stating the
-  figures in words -- a bar a screen reader cannot read is a bar that excluded
-  somebody, and the picture's whole content is proportion. Engagement sits
-  BELOW it, smaller, as a rate of delivered plus the raw unique-of-total: it
-  is a different question about the sent slice only, and a fifth segment would
-  put two denominators in one band.
-
-- **THE IMPORT REPORT IS A PANEL THE PERSON DISMISSES.** The operator's next
-  action after a CSV import is fixing the file -- open it, go to line 412 --
-  so the outcome sentence and the sample bad lines with their numbers stay on
-  screen until they say they are done. A toast puts that evidence on a timer,
-  which is the reason this shell has none. The upload itself rides
-  `items/edgeUpload.ts` like every other transfer in the OS
-  (`test/files/onePath.test.ts` fails the build on a second speaker), so
-  chunking, resume, retry and verbatim refusals apply with nothing new
-  learning them; the artifact id then goes to the engine, which reads the file
-  under the CALLER'S OWN actor. The id is not a capability.
-
-- **MERGE TAGS SHOW WHAT THEY RENDER TO, WHICH IS DOCUMENTATION THAT CANNOT
-  GO STALE.** Four base tags are a closed set the renderer knows;
-  `{{fields.*}}` is not, because those exist only because somebody's CSV had a
-  `company` column. No list in this repo could know that, so the strip samples
-  a real recipient from a chosen audience -- which is the only way an operator
-  discovers `fields.*` at all, and which also catches the case a spelling
-  check cannot, a column present but blank for the person you sampled.
-  Clicking inserts at the cursor and leaves the cursor after the tag. The test
-  send's UNRESOLVED list renders in the same vocabulary, right where the
-  copy is being written: a typo'd `{{fields.compnay}}` goes out as its own
-  literal text and looks like nothing from this side, so this is the only
-  check that catches it before the whole audience does.
-
-- **THE RULES BUILDER IS A SENTENCE, AND THE DELIVERY LANE IS NEVER A
-  TOGGLE.** "When a *[thing]* is *[created / changes]* -- optionally *[only
-  when ...]* -- email *[template]* to *[who]*." Six labelled boxes would make
-  somebody assemble that meaning themselves, from parts that only mean
-  anything together. The `who` control is the ONLY place the recipient mode is
-  chosen and the two delivery lanes are a CONSEQUENCE of it: each choice says
-  in one plain line what it does -- "no unsubscribe footer, and the do-not-mail
-  list is not consulted" versus "the do-not-mail list is checked before each
-  message, an unsubscribe link is attached, every outcome is recorded" -- as an
-  EFFECT rather than as a term of art. The words "operational lane" and
-  "marketing lane" appear nowhere in the surface, and a test asserts that.
-  Trigger concepts come from the LIVE registry (`listConcepts`, the SDK's own
-  `ConceptsListMsg` accessor; the OS had none before this surface), because a
-  fixed list would make the newest half of a cluster's schema untriggerable
-  with no way to tell. A rule whose bundle failed validation or whose circuit
-  breaker tripped renders the ENGINE'S OWN SENTENCE, never a paraphrase.
-
-- **A CLUSTER-WIDE FACT IS A BANNER OVER THE LIST, NEVER A STATUS ON EACH
-  ROW.** `authoredAutomationsEnabled` is a global hard stop: with it off, the
-  scheduler's `GlobalGate` suppresses every firing for every owner on every
-  node, checked before owner-gating and before the breaker -- and NOTHING about
-  a rule row changes. Every rule still reads `active`, which is true: they are
-  active AND inert, all of them at once. Painting "halted" onto each row would
-  claim something about each rule that is not true of any of them, so the fact
-  is stated once, above the thing it applies to. Without it an operator reads a
-  list of active rules that send nothing and has nowhere on screen to find out
-  why, which is the exact silent failure this app exists to remove.
-
-  **ABSENT IS NOT FALSE, and that half is bigger than the banner.** A missing
-  settings row, a shape that stops projecting the field, and a failed read are
-  all *unknown*; only an explicit `false` shows the banner. The SDK's `rowBool`
-  answers `false` for a missing key, so reading the switch through it would put
-  "your rules are halted" on every fresh cluster there is -- `kit`'s `boolOr`
-  with a `true` fallback is the honest read, and it matches what the engine's
-  own gate does with an absent row. A read that FAILED says quietly that it
-  could not check, rather than claiming the switch is on: "we could not check"
-  is a fact about this window, not about the cluster. Three tests pin the
-  silences and one pins the appearance, because the silences are the half that
-  turns a banner into a scare.
-
-- **TWO THINGS WEAR THE STATUS `paused`, AND ONLY ONE IS SOMEBODY'S
-  DECISION.** `setEmailRuleStatus` is the operator's stop button; a rule can
-  also stop after its runs kept failing, and the failure that did it is on
-  `lastError`. Saying "you paused this" over the second case throws away the
-  only diagnostic there is and is wrong about who did it. The reading is made
-  from the EVIDENCE rather than from a mechanism the browser cannot observe --
-  a paused rule carrying a run failure is reported as paused *with* that
-  failure, and the copy never names who stopped it.
-
-### What it deliberately does not do
-
-**There is no delete anywhere in this app, and every surface says why rather
-than leaving somebody hunting for one.** An audience is archived because every
-delivery record names it; a campaign is cancelled because what already went
-out stays sent; a mailbox is retired because past campaigns name the row and
-the reputation and warmup history are keyed on its address. Removing any of
-them orphans the evidence a deliverability review is made of.
-
-**Campaign tests use the ordinary sending queue.** Settings selects an active,
-organization-owned testing audience. `campaignTestAudienceSend` makes an immutable
-run and invokes the same admission and worker as a live send; a stable request id
-recovers an uncertain result across replicas. Active and completed sources remain
-testable. Repeating sources use the saved series definition without advancing it.
-Recent tests and their delivery records update automatically while visible;
-they do not inflate the live campaign’s counters or the regular campaign feed.
-
-**Senders live here rather than in Settings -> Integrations**, even though the
-two sit next to each other. Integrations is about CREDENTIALS -- the things an
-operator rotates from a shell -- and a sending identity carries none: it is a
-campaigns record saying a mailbox exists and may be used. What it cannot do is
-make a mailbox sendable; that is the tenant's own policy, and an address
-declared here but missing from it comes back as the provider's own 403 on the
-campaign's `lastError`.
+`words.ts` owns user-facing status vocabulary. `Preview` keeps formatted HTML
+styles inside a sandboxed frame, offers plain text, and renders unresolved tag
+issues beside the result. Templates and organization layouts use editor drafts
+with exact-revision saves and retain the author's work on refusals. Settings
+chooses one organization for domain, sender and testing controls; the operator
+organization may use the cluster sender.
 
 ## Logs, the ninth app -- and a section on every other one (epic memql#4895)
 
@@ -2648,11 +2529,3 @@ actual detail page, including arrival while a different tab is selected.
 A navigation event holds a quiet window/tab glow long enough to be seen. Only
 an explicitly bound action control receives a control cue; reads and unrelated
 tool completions must not move focus or erase a navigation cue. No fake cursor.
-
-### Email app availability
-
-`MEMQL_EMAIL_APP_ENABLED=false` on Edge removes the operator test inbox from
-the OS registry, including the launcher and restored windows.
-It defaults to enabled and is independent of `MEMQL_EMAIL_TRANSPORT`; Campaigns
-and transactional mail continue using their configured providers. Set this value
-in the installation overlay, never by branching on its domain or environment.

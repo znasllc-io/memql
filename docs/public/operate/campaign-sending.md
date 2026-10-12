@@ -73,7 +73,7 @@ manage several organizations are asked to choose; MemQL never silently assigns
 new work to the installation owner's organization. A member with access to just
 one organization sees that organization selected.
 
-A send requires access to the Campaigns app and permission to update data in
+A send requires access to the Email app and permission to update data in
 its organization. Reading a shared campaign or recipient list does not grant
 permission to send. Campaigns, audiences, templates and sending identities
 must belong to the same organization. The worker checks the campaign owner's
@@ -93,9 +93,9 @@ Rule-triggered deliveries name their email rule; they do not invent a campaign
 relationship. Historical records are attributed only when an existing parent
 proves which organization owns them.
 
-## Templates in Productivity Tools
+## Templates in the editor
 
-Choose **New email** from the Email app to write a template in the editor. File content lives in MemQL Productivity Tools:
+Choose **Create new template** from the Email app to write a template in the editor. The editor keeps the file content:
 **Design**, **Source**, and **Split** use the same editable document. The OS
 keeps the template list, organization, status, and archive controls. Files
 settings select browser VS Code (the default), desktop VS Code, or Cursor.
@@ -308,7 +308,7 @@ An owner or developer configures **Settings → Connections → Email** once for
 this installation. There is one Azure configuration, shared by every client
 organization in the cluster. Clients do not need Azure accounts or separate
 Microsoft sign-ins when the operator runs their email on its own subscription.
-Campaigns manages client domains and senders; it links to Settings when the
+Email manages client domains and senders; it links to Settings when the
 cluster needs configuration.
 
 1. **Sign in with Microsoft.** Enter the displayed code on Microsoft's page.
@@ -344,7 +344,7 @@ policy. Already submitted messages cannot be recalled.
 
 ### Add each client's domain and sender
 
-In **Campaigns → Settings**, **Campaigns → Senders → Connect email domain**, or
+In **Email → Settings**, **Email → Settings → Sending domain**, or
 **Settings → Connections → Email**, select the client organization. An owner or
 developer also needs write access to that organization. Other campaign authors
 use its saved sending identities.
@@ -377,7 +377,7 @@ use its saved sending identities.
 4. **Save sender.** Sender `news` on `client.com` sends as `news@client.com`.
    Set the client's display name and an existing reply mailbox such as
    `help@client.com`. ACS sends outbound mail; it does not create receiving
-   mailboxes. `no-reply` is optional. The verified sender appears in Campaigns.
+   mailboxes. `no-reply` is optional. The verified sender appears in Email.
 
 A client send requires that organization's ready transport and verified sender.
 It never falls back to the operator's Graph/SMTP mailbox. ACS sets the display
@@ -411,7 +411,7 @@ endpoint or per-installation redirect URL. Local capture works without Azure;
 connecting Microsoft does not switch test emails to external delivery.
 
 **Initial installation integration remains planned.** The intended onboarding
-is to configure cluster email during installation and leave Campaigns ready to
+is to configure cluster email during installation and leave Email ready to
 manage client domains. Azure deployment authorization should be reused where
 possible, with a durable cluster identity and narrowly scoped access; deployment
 CLI credentials must not be copied into the cluster. The current implementation
@@ -434,8 +434,7 @@ Protocol references: [device authorization flow](https://learn.microsoft.com/en-
 
 ## Storefront newsletter signups
 
-In **Campaigns → Audiences**, open the client's audience and choose **Storefront
-signups → Connect a signup form**. Select its deployable.
+In **Email → Audiences**, open the client's audience and choose **Signup forms → Connect a signup form**. Select its deployable.
 A published welcome template is optional for an audience that does not require
 confirmation; leave it empty when an automation sends the welcome. Select the
 client's sender when a welcome template is chosen. Write the sentence the visitor will agree to,
@@ -597,7 +596,7 @@ off, the saved copy of the reviewed template cannot be read, the send was refuse
 for instance because the recipient's address changed or the sender was retired).
 
 **Recent welcomes** shows the latest 50 outcomes, read when the audience opens
-or **Refresh** is selected. A rate limit or a busy lock leaves mail pending for a
+and updates on its own. A rate limit or a busy lock leaves mail pending for a
 later worker pass. A blocked welcome shows its reason; after resolving it, **Check again**
 rechecks that exact saved outcome. An attempt with a lost provider response is
 `uncertain` and is never automatically submitted again. `sent` means the
@@ -685,7 +684,7 @@ freezes that copy in a separate campaign/send job. Later edits cannot change an
 already queued occurrence. The audience is resolved when that occurrence runs,
 and consent and suppression are checked before delivery.
 
-Each occurrence appears in Campaigns with its scheduled date in the name and its
+Each occurrence appears in Email with its scheduled date in the name and its
 own delivery history. The original draft can still be sent as a one-off; that is
 an additional campaign, independent of its repeating schedule.
 
@@ -785,7 +784,7 @@ generated by sign-in, invitations, campaigns and email rules. Messages are store
 in the installation's shared storage, encrypted with its existing master key;
 capturing on one node and reading on another works without a separate mail server.
 
-The inbox shows the latest 100 messages from the past seven days. Refresh it after
+The inbox shows the latest 100 messages from the past seven days and updates on its own after
 triggering mail, or return focus to the app. Open a message to inspect its sender,
 recipient and body, and follow its verification link. Previews remove scripts,
 remote images and styles, so opening test mail does not load tracking pixels.
@@ -1446,7 +1445,7 @@ tag it could not resolve.
 ## Testing a campaign with an audience
 
 Create a separate audience containing your reviewers’ email addresses and merge
-fields. In **Campaigns → Settings → Testing audience**, choose the organization,
+fields. In **Email → Settings → Testing**, choose the organization,
 select that audience and save. This is shared cluster configuration, not a browser
 preference. Each organization has its own selection; an active audience from a
 different organization is refused. Choose **None selected** and save to disconnect.
@@ -1497,7 +1496,7 @@ A deliberate new test uses a new request id. The reply identifies `testRunId`; u
 ### Existing single-address preview API
 
 The existing `campaignTestSend` DSL builtin below remains a render-only preview
-for existing callers. It is not used by the Campaigns app’s **Send test** action
+for existing callers. It is not used by the Email app’s **Send test** action
 and does not verify the normal queue or delivery ledger. Use the audience-based
 operation above for execution testing.
 
@@ -1623,8 +1622,8 @@ transport says accepted and a bounce arrives later.
 
 ## Running a send
 
-1. Author the audience, template and campaign in the Campaigns app
-   (Integrations → Campaigns).
+1. Author the audience, template and campaign in the Email app
+   in Email.
 2. Mark the template **ready**. A draft is refused: half-written copy
    delivered to an audience is unrecallable, and this is the cheapest guard
    against it.
@@ -2003,3 +2002,29 @@ resource does not move old operations: they belong to the original resource.
 No message body, mailbox address, or access key appears in the receipt status
 response. Disconnecting email stops new sends and pauses reconciliation until
 the original resource is connected again.
+
+
+## The Email app
+
+Email brings Campaigns, Automations, Audiences and Templates into one app.
+Overview shows recent sends and activity. Inbox captures messages for owners
+and developers when the cluster uses capture mode; Logs follows the reader's
+access. Settings holds the sending domain, senders, testing audience and
+package configuration for each organization.
+
+Use **Add a campaign** to choose an audience, template, sender and schedule.
+**Create new template** opens the editor and keeps the campaign's answers while
+you work. Templates and layouts have their own pages, formatted and plain-text
+previews, and publication or archive actions.
+
+Automations send a sequence when someone joins an audience or confirms a
+subscription, or send one email when a MemQL event occurs. Build the sequence
+as steps, or describe it to produce an unsaved proposal. **Save draft** keeps
+that proposal; **Turn on** asks for confirmation before it starts sending.
+Each live sequence shows its enrolled, waiting and finished counts. Pause stops
+new sending; retirement keeps the automation's history.
+
+Audiences distinguish subscribers from the whole list, including people waiting
+to confirm. Add people by hand or import a CSV file; the import report stays on
+screen until you finish reviewing it. Connect a signup form from the audience's
+page. A confirming audience uses an automation to ask for confirmation.

@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ReactNode } from "react";
 
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
+
 // Settings -> Tokens (epic memql#4984). Every credential in the cluster that
 // is not a browser session, and the one act that can be taken on one.
 //
@@ -201,6 +203,7 @@ describe("Settings -> Tokens", () => {
   it("revokes through the identity admin op, never a mutation", async () => {
     await renderTokens();
     fireEvent.click(screen.getByRole("button", { name: "Revoke laptop" }));
+    await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Revoke it" }));
     await act(async () => {
       for (let i = 0; i < 4; i += 1) await Promise.resolve();
@@ -213,6 +216,7 @@ describe("Settings -> Tokens", () => {
   it("keeps it when the answer is keep it", async () => {
     await renderTokens();
     fireEvent.click(screen.getByRole("button", { name: "Revoke laptop" }));
+    await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
     await act(async () => {
       await Promise.resolve();
@@ -233,6 +237,7 @@ describe("Settings -> Tokens", () => {
     );
     await renderTokens();
     fireEvent.click(screen.getByRole("button", { name: "Revoke laptop" }));
+    await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Revoke it" }));
     await act(async () => {
       for (let i = 0; i < 4; i += 1) await Promise.resolve();
@@ -269,5 +274,50 @@ describe("Settings -> Tokens", () => {
     expect(container.innerHTML).not.toContain(PLANTED_HASH);
     // The negative control. Without it this asserts only that the sweep ran.
     expect(container.innerHTML).toContain("laptop");
+  });
+});
+
+// The question opens under the Revoke that asked it, outside any bar
+// (memql#6033): the second click of a double-click on Revoke used to revoke the
+// credential before the sentence about what breaks had been read.
+describe("Settings -> Tokens, one double-click later", () => {
+  useFakeDate();
+
+  const settle = () =>
+    act(async () => {
+      for (let i = 0; i < 4; i += 1) await Promise.resolve();
+    });
+
+  it.each([
+    ["a personal token", "Revoke laptop", /Revoke laptop, held by/, { op: "revokePersonalAccessToken", id: "pat-live" }],
+    ["a node credential", "Revoke the credential for bff-2", /Revoke the credential for bff-2\?/, { op: "revokeNodeToken", id: "node-live" }],
+  ] as const)("does not revoke %s on the second click of the click that asked, and does once it is read", async (_kind, opener, question, call) => {
+    await renderTokens();
+    fireEvent.click(screen.getByRole("button", { name: opener }));
+    expect(screen.getByText(question)).toBeTruthy();
+
+    betweenTheClicks();
+    fireEvent.click(screen.getByRole("button", { name: "Revoke it" }));
+    await settle();
+    expect(h.state.adminCalls).toEqual([]);
+    // Still asking: the press that came too soon neither answered nor withdrew the question.
+    expect(screen.getByText(question)).toBeTruthy();
+
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Revoke it" }));
+    await settle();
+    expect(h.state.adminCalls).toEqual([call]);
+  });
+
+  it("does not keep it on that click either", async () => {
+    await renderTokens();
+    fireEvent.click(screen.getByRole("button", { name: "Revoke laptop" }));
+    betweenTheClicks();
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.getByText(/Revoke laptop, held by/)).toBeTruthy();
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(screen.queryByText(/Revoke laptop, held by/)).toBeNull();
+    expect(h.state.adminCalls).toEqual([]);
   });
 });

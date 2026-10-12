@@ -31,7 +31,8 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    accessible label and tooltip. Do not replace it with a text button such as
    "Connect GitHub account". A settings page is titled **Settings**; subjects
    such as **GitHub accounts** are sections beneath that title, with their Add
-   control on the section heading. Settings lists use the available width.
+   control on the section heading (`kit` `Subhead` `actions`). Settings lists
+   use the available width.
    Shared record lists draw dividers **only between items**: no top line on
    the first, no bottom line on the last, and no lines for a single item.
    Keep this in the shared list styles, including rows with separate actions
@@ -57,7 +58,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    is the shell's selection language, not a field. Ask shares the window header
    and icon controls, app-content text scale and page gutters; its sheet
    dimensions do not define a separate scale for its contents. Selects drop UA chrome
-   (`Select` draws its own currentColor chevron). Forms use `Field` --
+   (`Select` draws its own currentColor chevron). A date and time is
+   `DateTimeInput`, on the line like `Input`; prose is `TextArea`, the one field
+   taller than the line (two lines to start, resizable) with the same radius and
+   text size. Forms use `Field` --
    label above, control on the line; nothing invents a third field size.
 
 6. **Actions are verbs, nouns are nouns.** An action is never styled as a
@@ -86,7 +90,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    one look, not two. Panel actions align to the right edge in the shared
    `os-panel-actions` row. An action such as Disconnect stays on that same
    edge when it expands into Cancel and confirmation; do not shift the
-   controls left or fill the panel width. Confirmation copy sits above them.
+   controls left or fill the panel width. Confirmation copy sits above them,
+   and the confirmation holds presses for a moment after it appears
+   (`InPlaceAsk`, rule 12), so the second click of a double-click on the act
+   that asked cannot answer it.
    A deliberate MOMENT (the Accounts first-run card's
    eyebrow and headline) may keep its voice; chrome may not.
 
@@ -129,13 +136,32 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     one surface, and the person had to know which was which.
     Account and organization details use this footer too: state on the left,
     Back/Disconnect on the right; Cancel/confirmation stay on that same edge.
-    A bar whose actions or wizard step change holds presses for 400 ms
-    (`CONFIRM_SETTLE_MS`). This prevents a double-click from confirming a
-    question it just opened, discarding changes after Keep, resuming after
-    Pause, or skipping a wizard step. The guard belongs to `ActionBar`;
-    `Wizard` supplies its open step as the bar's `scope`. Initial actions
-    and unchanged actions accept clicks immediately. An empty bar remembers
-    its last actions, so removing them during a write does not bypass the hold.
+    **Everything pressable in a bar is held for a moment after the bar
+    changes** (`CONFIRM_SETTLE_MS`, 400 ms): its acts, and whatever it
+    draws beside them -- a typed confirmation's Keep it, a question's own
+    buttons -- by pointer or by keyboard. A change is any change to what
+    the bar offers, whatever caused it and whatever now stands under the
+    pointer: an ask turning the bar into a question, the way back from one
+    (Discard changes where Keep stood), Pause turning into Resume, a
+    refusal drawn beside the acts, an act that only changes its tone, a
+    wizard moving to its next step (`scope`). So the second click of a
+    double-click cannot answer a question nobody read, or press what the
+    first click put there. An ask is the bar's acts (the way out a text
+    act, the act itself the button) with the question drawn beside them.
+    Every bar, decided in the kit; a bar's first acts, and a bar that did
+    not change, take a press at once. Text that changes on its own (the
+    measure of a wait, a live figure) goes in the bar's `meta`, in the state
+    group outside what the hold watches, never beside the acts, where every
+    tick would hold the bar's presses again.
+    **A question answered in place, outside any bar, is held the same way**
+    (a row's Revoke that becomes "Revoke it / Keep it", a panel's
+    Disconnect that expands into Cancel and a confirmation, a dropped
+    file's "Archive / Cancel"): wrap what a press could be answering in the
+    kit's `InPlaceAsk`, which is the bar's own hold (`kit/pressHold`), held
+    from the moment the question appears -- the buttons, and the question too
+    where it can change while the same buttons stay (a second file dropped
+    on the Bin). A question in a bar's acts or children needs nothing; the
+    bar holds it.
     Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them
@@ -263,8 +289,13 @@ Audit inventory: [loading and navigation coverage](qa/loading-and-navigation.md)
 Overview is the shared summary destination. Use `kit/Overview` for the header
 and measured statistics, and `OverviewBreakdown` for a current distribution.
 Each app supplies facts from its existing authorized reads; unavailable values
-use `Figure` absence semantics instead of zero. Only draw activity history when
+use `Figure` absence semantics instead of zero. A count the engine stopped at
+its window is a floor (`countFigure`, from the SDK's `Result.count()`) and
+reads "5,000 or more", never as exact; a sum with a floor in it is a floor
+too. Only draw activity history when
 a real time series exists. Keep record lists and editors in their own sections.
+Four figures stand in one row, then two; five stand in one row while each label
+fits on one line, then three, then two.
 
 Maps use `MapHeading` for title alignment, `MapControls` for bottom-right zoom
 and reset actions, and `usePanZoom` with wheel zoom disabled and fitted reset
@@ -479,8 +510,9 @@ surface in the shell that read as a single thought.
   runs, hide Retry; offer Done only after every required check passes.
 - **A wait is visible.** When it is the cluster's turn (`tone: "busy"`) there
   is no forward act, the bar's top hairline becomes a moving thread, the dot
-  becomes a spinner, the state takes the accent, and `meta` measures the wait
-  ("0:42", "checked 40s ago"). Waiting for a record somebody has not created
+  becomes a spinner, the state takes the accent, and `meta` carries the measure
+  of the wait ("0:42", "checked 40s ago") -- the one place text that ticks
+  belongs (rule 12). Waiting for a record somebody has not created
   yet is a wait and is drawn as one, not as a failure. Reduced motion keeps the
   held line and the held dot.
 - **The floor has two verbs and one button.** *Cancel* undoes the whole thing:

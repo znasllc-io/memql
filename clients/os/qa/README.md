@@ -250,14 +250,54 @@ behind the shell's window surface; also inspect a narrow viewport. All themes
 share the approved Fold geometry (3.1% / 1.7% ground–ink mixes). There are no
 nodes, lines, canvas or animation. The palette and numeral remain the theme's.
 
-Recurring campaigns use `campaign-repeat-empty`, `campaign-repeat-active`, and
-`campaign-repeat-blocked`. Add `width=narrow` for the constrained panel. Open
-**Set up repeating sends** on the empty view to inspect the date/cadence form.
+Email's full scene set uses `emailSeeds.ts` and `emailScenes.tsx`. Each renders
+real components over the suite's fixture connection, with public example data.
+The named scenes drive the same controls a person uses; `click=A|B` can override
+the scene's interaction sequence. `fill:Label=value` fills a field, and the CSV
+report scene supplies a browser File to the upload port. No scene sends email.
 
-Newsletter signup fixtures: `campaign-newsletter-empty` and `campaign-newsletter-active`. Open the plus control to review setup; use `width=narrow` for the compact layout.
+- Campaigns: `email-campaigns`, `email-campaigns-empty`, `email-campaign-add`,
+  `email-campaign-add-waiting`, `email-campaign-add-review`, `email-campaign-draft`,
+  `email-campaign-scheduled`, `email-campaign-sending`, `email-campaign-sent`,
+  `email-campaign-repeating`, `email-campaign-edit`.
+- Automations: `email-automations`, `email-automations-empty`,
+  `email-automation-draft`, `email-automation-on`, `email-automation-add`,
+  `email-automation-describe`, `email-rule`. Inspect the selected card's inspector,
+  issue placement, proposal outline, counts and narrow vertical reading order.
+- Audiences: `email-audiences`, `email-audiences-empty`, `email-audience`,
+  `email-audience-add`, `email-people-report`, `email-signup-form`. Inspect the
+  subscriber states, persistent import evidence and copyable signup code.
+- Templates: `email-templates`, `email-templates-empty`, `email-template`,
+  `email-template-plain`, `email-template-issues`, `email-template-create`,
+  `email-layouts`, `email-layouts-none`, `email-layout`, `email-layout-builtin`.
+  Inspect styled and plain previews, issues, publication actions and editor waits.
+- Inbox: `email-inbox`, `email-inbox-empty`, `email-inbox-external`, `email-message`.
+- Settings: `email-settings`, `email-settings-member`, `email-settings-single`,
+  `email-sender`. The member fixture verifies that actions follow access.
+
+Capture all scenes at 1400 and 520 pixels, light and dark. Check one heading,
+one pinned action bar, readable copy and keyboard focus. Rendering fixtures do
+not establish live cluster behavior; the component tests exercise subscriptions,
+version order, omitted-payload re-reads and refusals separately.
+
+Email's Overview: `email-overview` is a month of mail (five measured figures and
+the campaigns by state), `email-overview-empty` is first use (real zeros, one
+sentence and `Add a campaign` -- `&click=Add a campaign` follows it to the
+wizard), `email-overview-reading` has every read still on its way (shapes, no
+warning), `email-overview-refused` has three reads refused with nothing to show
+(dashes and the engine's sentences, never a zero), `email-overview-unmeasured`
+has a rate the engine could not state exactly (a dash with its reason beneath)
+and `email-overview-untracked` has two rates with the same reason (said once,
+under the first). `email-overview-floor` has an audience past the engine's count
+window, so Subscriptions is a floor: `5,089 or more`, never an exact-looking sum.
+Two scenes catch the page a few seconds after the cluster
+stopped answering, with every figure still the last one: `email-overview-interrupted`
+(the cluster refuses the refreshes: one notice carrying its sentence) and
+`email-overview-reconnecting` (the connection dropped: the same notice, saying it
+is reconnecting). Take the 520 capture too: the five figures fall to three and two.
 
 Azure email setup: `azure-email-dns`, `azure-email-provisioning`, and
-`azure-email-empty` use the shared Campaigns/Settings domain wizard. Open the
+`azure-email-empty` use the shared Email Settings domain wizard. Open the
 domain row (or Add sending domain on the empty view). Inspect both modes and
 `width=narrow`: DNS names and values use the same copyable strips as Deployables
 domain binding; the footer stays reachable and prior steps reopen. Provisioning

@@ -182,7 +182,7 @@ func organizationAccountsAgree(account, parent string) bool {
 
 func organizationApp(concept string) string {
 	if strings.HasPrefix(concept, "v1:campaigns:") {
-		return "app:campaigns"
+		return "app:email"
 	}
 	if strings.HasPrefix(concept, "v1:platform:") {
 		return "app:deployables"
@@ -375,13 +375,13 @@ func (e *MemQLEngine) organizationAuthorizationFingerprint(ctx context.Context) 
 	decisions := map[string]struct{}{fmt.Sprintf("global/read/%t", e.GlobalDataCapable(ctx, auth.VerbRead)): {}}
 	if scope != nil {
 		if scope.everyAccount {
-			for _, resource := range []string{auth.ResourceData, "app:campaigns", "app:deployables"} {
+			for _, resource := range []string{auth.ResourceData, "app:email", "app:deployables"} {
 				decisions[fmt.Sprintf("every/%s/%t", resource, e.organizationAppAllows(ctx, "", resource))] = struct{}{}
 			}
 		}
 		for account := range scope.accounts {
 			bare := BareShortId(account)
-			for _, resource := range []string{auth.ResourceData, "app:campaigns", "app:deployables"} {
+			for _, resource := range []string{auth.ResourceData, "app:email", "app:deployables"} {
 				decisions[fmt.Sprintf("%s/%s/%t", bare, resource, e.organizationAppAllows(ctx, bare, resource))] = struct{}{}
 			}
 		}

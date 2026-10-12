@@ -71,6 +71,21 @@ mutation audience archiveAudience {
   }
 }
 
+/// Restore an archived audience: it returns to the campaign and automation pickers. Authorized
+/// organization peers may restore it; the engine preserves its original owner and records the
+/// current writer on the new version.
+@actor
+mutation audience restoreAudience {
+  args {
+    audienceId  string!
+  }
+  update {
+    id: args.audienceId
+    ownerUserId: actor.userId
+    status: "active"
+  }
+}
+
 /// Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the
 /// concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest)
 /// so the membership can be found by it (recipientInAudienceByDigest).
@@ -1159,6 +1174,8 @@ mutation singleSendReceipt recordCampaignSingleSend {
 
 /// Scoping to actor.userId cannot attest that the captured configuration passed preflight.
 /// Only campaignConfigureSeries writes this under a shared lock with a revision check.
+/// `lastError` is carried only by a save that keeps a stopped series stopped (memql#6033): it
+/// keeps saying why it stopped until it is resumed. Every other write clears it.
 @actor
 @serverOnly
 mutation campaignSeries configureCampaignSeries {
@@ -1175,11 +1192,12 @@ mutation campaignSeries configureCampaignSeries {
     status enum("active", "paused", "blocked")!
     lastCampaignId string
     lastOccurrenceAt datetime
+    lastError string
     versionTime datetime!
   }
   insert {
     accept { accountId, sourceCampaignId, name, definition, intervalWeeks, timeZone, anchorAt, nextAt, status, lastCampaignId, lastOccurrenceAt }
-    stamp { id: args.seriesId, ownerUserId: actor.userId, authorizedByUserId: actor.userId, createdAt: args.versionTime, lastError: "" }
+    stamp { id: args.seriesId, ownerUserId: actor.userId, authorizedByUserId: actor.userId, createdAt: args.versionTime, lastError: args.lastError ?? "" }
   }
 }
 

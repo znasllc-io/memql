@@ -1,3 +1,4 @@
+import { versionOrder } from "@znasllc-io/memql-sdk-core/client";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import {
@@ -54,7 +55,7 @@ export function defaultRunId(runRows: readonly Row[], goalId: string): string {
     .filter((run) => run.status === "running" || run.status === "waiting" || run.status === "compiling")
     .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0];
   if (live !== undefined) return live.id;
-  return mine.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]?.id ?? "";
+  return mine.sort((a, b) => (versionOrder(b.createdAt, a.createdAt) ?? 0))[0]?.id ?? "";
 }
 
 export interface BuildWorldInput {
@@ -84,13 +85,7 @@ export function buildWorld({
     // Newest first, which is the order the picker offers them in. A total
     // order on `createdAt` then id, never fold order.
     .sort((a, b) =>
-      a.createdAt !== b.createdAt
-        ? a.createdAt < b.createdAt
-          ? 1
-          : -1
-        : a.id < b.id
-          ? 1
-          : -1,
+      (versionOrder(b.createdAt, a.createdAt) ?? 0) || b.id.localeCompare(a.id),
     );
 
   const run = runs.find((candidate) => idTail(candidate.id) === idTail(openRunId)) ?? null;

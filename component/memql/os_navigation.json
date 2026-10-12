@@ -54,9 +54,9 @@
     "records": []
   },
   {
-    "id": "campaigns",
-    "name": "Campaigns",
-    "requires": "app:campaigns",
+    "id": "email",
+    "name": "Email",
+    "requires": "app:email",
     "sections": [
       {
         "id": "overview",
@@ -67,6 +67,10 @@
         "name": "Campaigns"
       },
       {
+        "id": "automations",
+        "name": "Automations"
+      },
+      {
         "id": "audiences",
         "name": "Audiences"
       },
@@ -74,31 +78,6 @@
         "id": "templates",
         "name": "Templates"
       },
-      {
-        "id": "senders",
-        "name": "Senders"
-      },
-      {
-        "id": "rules",
-        "name": "Rules"
-      },
-      {
-        "id": "logs",
-        "name": "Logs",
-        "requires": "app:campaigns/logs"
-      },
-      {
-        "id": "settings",
-        "name": "Settings"
-      }
-    ],
-    "records": []
-  },
-  {
-    "id": "email",
-    "name": "Email",
-    "requires": "app:email",
-    "sections": [
       {
         "id": "inbox",
         "name": "Inbox",
@@ -114,7 +93,43 @@
         "name": "Settings"
       }
     ],
-    "records": []
+    "records": [
+      {
+        "section": "campaigns",
+        "idField": "campaignId",
+        "query": "campaigns.campaigns",
+        "labels": [
+          "name"
+        ]
+      },
+      {
+        "section": "audiences",
+        "idField": "audienceId",
+        "query": "campaigns.audiences",
+        "labels": [
+          "name",
+          "description"
+        ]
+      },
+      {
+        "section": "templates",
+        "idField": "templateId",
+        "query": "campaigns.templates",
+        "labels": [
+          "name",
+          "subject"
+        ]
+      },
+      {
+        "section": "automations",
+        "idField": "journeyId",
+        "query": "campaigns.journeys",
+        "labels": [
+          "name",
+          "description"
+        ]
+      }
+    ]
   },
   {
     "id": "cluster",

@@ -255,14 +255,10 @@ function ShellRoster({
   layout: ChromeLayout;
   children: ReactNode;
 }) {
-  const { access, config, ladderLoaded, accessEpoch } = useSession();
-  const registry = useMemo(() => ({
-    ...OS_REGISTRY,
-    apps: OS_REGISTRY.apps.filter(app => app.id !== "email" || config.emailAppEnabled !== false),
-  }), [config.emailAppEnabled]);
+  const { access, ladderLoaded, accessEpoch } = useSession();
   return (
     <OsProvider
-      registry={registry}
+      registry={OS_REGISTRY}
       actorRole={access?.role ?? ""}
       // The effective set's epoch (epic memql#5289): the roster gates on the
       // capability set now, and it lands after the role and changes on

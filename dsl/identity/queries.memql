@@ -1786,15 +1786,17 @@ query user currentUser {
 // =================================
 //
 // Returns the cardinality of the active-user set as a self-describing
-// {count: N} aggregate, computed server-side via the `count` query
+// {count, atLeast} aggregate, computed server-side via the `count` query
 // directive. Mirrors activeUsers' filter without the optional
 // role / groupId filters; the admin dashboard only needs the count.
 //
 // Returns:
-//   {count: N} -- N is the number of active v1:identity:user rows.
+//   {count: N, atLeast: B} -- N is the number of active v1:identity:user
+//   rows, or the engine's window when B is true and more matched.
 //
 
-/// Count of active v1:identity:user rows. Returns a {count: N} aggregate.
+/// Count of active v1:identity:user rows. Returns a {count, atLeast} aggregate: past the engine's
+/// window, `count` is the window and `atLeast` is true (memql#6033).
 query user userCount {
   filter  row => isActiveRecord(row)
   count

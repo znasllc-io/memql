@@ -24,6 +24,7 @@ import { MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION } from "../../items/m
 import { kindGlyph } from "./glyphs";
 import { LocalTabs } from "../../kit/LocalTabs";
 import { AddButton } from "../../kit/AddButton";
+import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import {
   Button,
@@ -833,33 +834,38 @@ export function BrowseSection({
               const name = folderNameOf(pendingArchive);
               const keeping = subtreeHoldsArtifact(tree, content, pendingArchive);
               const emptied = plan.deleteFolderIds.length;
+              // THE WHOLE NOTICE IS THE ASK, question and all: another folder
+              // chosen while this one is open changes the question under the
+              // same buttons (see InPlaceAsk).
               return (
-                <Notice
-                  tone="warn"
-                  sentence={
-                    keeping
-                      ? `Archive "${name}" and its ${plan.itemCount} items?`
-                      : `Delete "${name}"?`
-                  }
-                  next={
-                    keeping
-                      ? `Everything inside archives too, children first, and lives under Archive where Restore puts it back.${
-                          emptied > 0
-                            ? ` The ${emptied} empty ${emptied === 1 ? "folder" : "folders"} inside are deleted instead -- there is nothing in them to put back.`
-                            : ""
-                        }`
-                      : `It holds no files at any depth${
-                          emptied > 1 ? `, and nor do the ${emptied - 1} folders inside it` : ""
-                        }. There is nothing to put back, so it is removed from every surface rather than kept in the Bin.`
-                  }
-                >
-                  <div className="os-files-confirm">
-                    <Button tone="danger" onClick={() => void runFolderArchive(pendingArchive)}>
-                      {keeping ? "Archive" : "Delete"}
-                    </Button>
-                    <Button onClick={() => setPendingArchive("")}>Cancel</Button>
-                  </div>
-                </Notice>
+                <InPlaceAsk>
+                  <Notice
+                    tone="warn"
+                    sentence={
+                      keeping
+                        ? `Archive "${name}" and its ${plan.itemCount} items?`
+                        : `Delete "${name}"?`
+                    }
+                    next={
+                      keeping
+                        ? `Everything inside archives too, children first, and lives under Archive where Restore puts it back.${
+                            emptied > 0
+                              ? ` The ${emptied} empty ${emptied === 1 ? "folder" : "folders"} inside are deleted instead -- there is nothing in them to put back.`
+                              : ""
+                          }`
+                        : `It holds no files at any depth${
+                            emptied > 1 ? `, and nor do the ${emptied - 1} folders inside it` : ""
+                          }. There is nothing to put back, so it is removed from every surface rather than kept in the Bin.`
+                    }
+                  >
+                    <div className="os-files-confirm">
+                      <Button tone="danger" onClick={() => void runFolderArchive(pendingArchive)}>
+                        {keeping ? "Archive" : "Delete"}
+                      </Button>
+                      <Button onClick={() => setPendingArchive("")}>Cancel</Button>
+                    </div>
+                  </Notice>
+                </InPlaceAsk>
               );
             })()
           ) : null}
@@ -967,18 +973,23 @@ export function BrowseSection({
         />
       ) : null}
       {rowArchive !== null ? (
-        <Notice
-          tone="warn"
-          sentence={`Move "${artifactName(rowArchive)}" to the Bin?`}
-          next="Nothing is deleted -- it keeps its bytes, its history and everywhere it came from, and the Bin can put it back."
-        >
-          <div className="os-files-confirm">
-            <Button tone="danger" onClick={() => void archiveOneRow(rowArchive)}>
-              Move to Bin
-            </Button>
-            <Button onClick={() => setRowArchive(null)}>Cancel</Button>
-          </div>
-        </Notice>
+        // THE WHOLE NOTICE IS THE ASK, question and all: another file chosen
+        // while this one is open changes the question under the same buttons
+        // (see InPlaceAsk).
+        <InPlaceAsk>
+          <Notice
+            tone="warn"
+            sentence={`Move "${artifactName(rowArchive)}" to the Bin?`}
+            next="Nothing is deleted -- it keeps its bytes, its history and everywhere it came from, and the Bin can put it back."
+          >
+            <div className="os-files-confirm">
+              <Button tone="danger" onClick={() => void archiveOneRow(rowArchive)}>
+                Move to Bin
+              </Button>
+              <Button onClick={() => setRowArchive(null)}>Cancel</Button>
+            </div>
+          </Notice>
+        </InPlaceAsk>
       ) : null}
       {rowNote !== null ? (
         <Notice

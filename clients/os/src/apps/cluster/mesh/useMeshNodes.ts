@@ -1,4 +1,4 @@
-import { Concepts, getRowByConceptAndId, type LiveState, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { Concepts, getRowByConceptAndId, versionOrder, type LiveState, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import type { LiveListSource } from "../../../live/LiveList";
 import { useOsConnection } from "../../../live/connection";
@@ -18,7 +18,11 @@ import { meshNodeFromRow } from "./rows";
 // THE HISTORY IS COLLAPSED IN THE SEED, for the reason
 // apps/fleet/workbenches/useWorkbenches.ts gives: the row is append-only, and
 // a collection folding an unordered read by id would keep an arbitrary row of
-// a replica's lifetime. Events need no such care; they arrive newest-last.
+// a replica's lifetime. The newest version is the one with the later
+// `createdAt`, compared as an INSTANT (the SDK's `versionOrder`): the engine
+// trims the fraction's trailing zeros, so as a string `.3251Z` is greater than
+// `.325101Z` and is the earlier time. Events need no such care; the live list
+// orders them by the same version time.
 //
 // KEYED BY THE COLLECTION'S OWN RULE, deliberately: the seed and the fold must
 // agree on a row's key, and the fold keys an event by the payload's own `id`
@@ -48,7 +52,9 @@ export function useMeshNodes(): MeshNodesState {
           const node = meshNodeFromRow(raw);
           if (node.id === "") continue;
           const held = newest.get(node.id);
-          if (held === undefined || node.createdAt >= held.createdAt) {
+          // A version with no time to compare, on either side, is placed by
+          // the order it was read in, as the live list places an arrival.
+          if (held === undefined || (versionOrder(node.createdAt, held.createdAt) ?? 0) >= 0) {
             newest.set(node.id, { createdAt: node.createdAt, raw });
           }
         }

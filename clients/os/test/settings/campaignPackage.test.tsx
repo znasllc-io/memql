@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { rowsResult } from "../campaigns/harness";
+import { rowsResult } from "../email/harness";
 import { configuredManifest, manifestYaml } from "../../src/apps/deployables/packages/manifest";
 import type { PackageManifest } from "../../src/apps/deployables/packages/rows";
 const h = vi.hoisted(() => ({connection: null as unknown}));

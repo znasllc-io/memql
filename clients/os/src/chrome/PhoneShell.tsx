@@ -57,7 +57,7 @@ export function PhoneShell({ onSignOut }: { onSignOut: () => void }) {
   const { settingsTone, reportSetupState } = useAppSetupMark(current?.id ?? "", current ? markToneFor(appGate) : null);
   // The dot inside a button is DECORATIVE and the button says the state
   // itself: a labelled role="img" nested in a button appends to the button's
-  // accessible name, so "Settings" would announce as "Settings Campaigns is
+  // accessible name, so "Settings" would announce as "Settings Email is
   // not set up" -- the right information in a shape nothing can match on.
   const settingsStatePhrase = settingsTone === "needsSetup" ? "not set up" : "partly set up";
   const unmetIsSectionOnly = gate.unmet.some((id) => !(current?.needs ?? []).includes(id));

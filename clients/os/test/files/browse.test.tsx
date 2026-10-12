@@ -12,6 +12,7 @@ vi.mock("../../src/live/connection", () => ({
 
 import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
 import { artifactRow, click, emit, fakeConnection, folderRow, renderFiles } from "./harness";
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
 
 // The browse surface (epic #4722): live rows with the arrival cue in both
 // directions, the tree, the filters, the inspector's stories and actions.
@@ -153,6 +154,7 @@ describe("the folder rail", () => {
     const confirm = screen
       .getByText(/Archive "Client videos" and its 2 items\?/)
       .closest(".os-notice") as HTMLElement;
+    await readTheBar();
     await click(within(confirm).getByRole("button", { name: "Archive" }));
     // Contents first, then the folder -- the children-first walk, as real
     // rendered calls.
@@ -163,6 +165,83 @@ describe("the folder rail", () => {
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual([
       'mutation archiveLibraryFolder(folderId: "f-vid")',
     ]);
+  });
+});
+
+// The folder's question opens where the menu item that asked it was (memql#6033):
+// outside any bar, so the second click of a double-click on "Archive" used to
+// answer it before it had been read.
+describe("a folder's archive, one double-click later", () => {
+  useFakeDate();
+
+  async function ask() {
+    const connection = fakeConnection({
+      folders: [folderRow({ id: "f-vid", name: "Client videos" })],
+      artifacts: [
+        artifactRow({ id: "a-1", title: "one.mp4", folderId: "f-vid" }),
+        artifactRow({ id: "a-2", title: "two.mp4", folderId: "f-vid" }),
+      ],
+    });
+    h.connection = connection;
+    await renderFiles();
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
+    await click(screen.getByRole("menuitem", { name: "Archive" }));
+    const confirm = screen.getByText(/Archive "Client videos" and its 2 items\?/).closest(".os-notice") as HTMLElement;
+    return { connection, confirm };
+  }
+
+  it("does not archive on the second click of the click that asked, and does once it is read", async () => {
+    const { connection, confirm } = await ask();
+    betweenTheClicks();
+    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
+    expect(connection.callsNamed("archiveArtifact")).toEqual([]);
+    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+
+    await readTheBar();
+    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    expect(connection.callsNamed("archiveLibraryFolder")).toHaveLength(1);
+  });
+
+  it("does not cancel on that click either", async () => {
+    const { connection, confirm } = await ask();
+    betweenTheClicks();
+    await click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    await readTheBar();
+    await click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText(/Archive "Client videos" and its 2 items\?/)).toBeNull();
+    expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
+  });
+
+  it("holds the buttons again when another folder is chosen while one is asked about", async () => {
+    // The same Archive and Cancel stand under a question about another folder.
+    const connection = fakeConnection({
+      folders: [folderRow({ id: "f-vid", name: "Client videos" }), folderRow({ id: "f-old", name: "Old reels" })],
+      artifacts: [
+        artifactRow({ id: "a-1", title: "one.mp4", folderId: "f-vid" }),
+        artifactRow({ id: "a-2", title: "two.mp4", folderId: "f-vid" }),
+        artifactRow({ id: "a-3", title: "three.mp4", folderId: "f-old" }),
+        artifactRow({ id: "a-4", title: "four.mp4", folderId: "f-old" }),
+      ],
+    });
+    h.connection = connection;
+    await renderFiles();
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
+    await click(screen.getByRole("menuitem", { name: "Archive" }));
+    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    await readTheBar();
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Old reels/ }));
+    await click(screen.getByRole("menuitem", { name: "Archive" }));
+    const confirm = screen.getByText(/Archive "Old reels" and its 2 items\?/).closest(".os-notice") as HTMLElement;
+    betweenTheClicks();
+    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
+
+    await readTheBar();
+    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    expect(connection.callsNamed("archiveLibraryFolder")).toEqual(['mutation archiveLibraryFolder(folderId: "f-old")']);
   });
 });
 
@@ -209,6 +288,14 @@ describe("the inspector", () => {
     const footer = within(inspector).getByRole("group", { name: "What you can do with this" });
     expect(within(footer).getByText(/Delete "brief\.pdf"\?/)).toBeTruthy();
     expect(within(footer).queryByRole("button", { name: "Open" })).toBeNull();
+    // The question is drawn by the inspector itself, beside no acts of the
+    // bar's; the bar holds its buttons all the same. The second click of a
+    // double-click on Delete lands on the question's own Delete, and answers
+    // nothing.
+    await click(within(footer).getByRole("button", { name: "Delete" }));
+    expect(connection.callsNamed("archiveArtifact")).toEqual([]);
+    expect(within(footer).getByText(/Delete "brief\.pdf"\?/)).toBeTruthy();
+    await readTheBar();
     await click(within(footer).getByRole("button", { name: "Cancel" }));
     expect(within(footer).getByRole("button", { name: "Open" })).toBeTruthy();
     expect(connection.callsNamed("archiveArtifact")).toEqual([]);

@@ -87,7 +87,7 @@ import { runTitle } from "./pipelines/words";
 //
 // Every other app in this shell already did better: Bin puts its detail beside
 // the list in its own scroller (`.os-bin-list { overflow-y: auto }`), and
-// Campaigns, Users, Accounts and Training do variants of the same. Deployables
+// Email, Users, Accounts and Training do variants of the same. Deployables
 // was the one app that did not adopt the pattern the shell already had.
 //
 //     List --select an app--> Deployable  --history--> History

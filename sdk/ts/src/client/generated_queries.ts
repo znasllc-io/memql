@@ -1207,7 +1207,7 @@ QueryClient.prototype.audienceRosterForSend = function (this: QueryClient, args:
   return this.executeNamed("audienceRosterForSend", buildAudienceRosterForSend(args), opts);
 };
 
-/** ENGINE (owner-scoped): how many recipients an audience holds, as a {count: N} aggregate (memql#3460). Computed server-side, so it is the one question about a large audience that needs no window at all -- which is exactly why the preflight and the frozen `recipientCount` use it rather than measuring the length of a bounded read. Measuring a page and calling it a total is how the 5000 ceiling came to be load-bearing in the first place. Owned. */
+/** ENGINE (owner-scoped): how many recipients an audience holds, as a {count, atLeast} aggregate (memql#3460). Computed server-side rather than by measuring the length of a bounded read, which is why the preflight and the frozen `recipientCount` use it: measuring a page and calling it a total is how the 5000 ceiling came to be load-bearing in the first place. The count still reads up to the engine's window: past it, `count` is the window and `atLeast` is true (memql#6033). Owned. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceRosterSize"] in generated_concepts.ts).
 export interface AudienceRosterSizeArgs {
   audienceId: string;
@@ -1227,6 +1227,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.audienceRosterSize = function (this: QueryClient, args: AudienceRosterSizeArgs = {} as AudienceRosterSizeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("audienceRosterSize", buildAudienceRosterSize(args), opts);
+};
+
+/** How many people in one audience can be mailed now, as a {count, atLeast} aggregate. Pending and unsubscribed members are on the list but are not counted. The Email app's audience rows, the campaign wizard and the send confirmation name this number. Past the engine's window, `count` is the window and `atLeast` is true, which the Email app says as "5,000 or more" (memql#6033). */
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceSubscriberCount"] in generated_concepts.ts).
+export interface AudienceSubscriberCountArgs {
+  audienceId: string;
+}
+
+export function buildAudienceSubscriberCount(args: AudienceSubscriberCountArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "query audienceSubscriberCount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    audienceSubscriberCount(args: AudienceSubscriberCountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.audienceSubscriberCount = function (this: QueryClient, args: AudienceSubscriberCountArgs = {} as AudienceSubscriberCountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("audienceSubscriberCount", buildAudienceSubscriberCount(args), opts);
 };
 
 /** The caller's audiences, newest first. Backs the audience list and the campaign editor's audience picker. Owned. */
@@ -7840,7 +7862,8 @@ QueryClient.prototype.sendableRecipientsForAudience = function (this: QueryClien
   return this.executeNamed("sendableRecipientsForAudience", buildSendableRecipientsForAudience(args), opts);
 };
 
-/** Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all. */
+/** Every sending identity the caller may use, newest first. Backs the identity picker on the campaign editor and the Senders list in the OS app's Settings. Composite tier, so a cluster owner sees every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+SORTED BY WHEN IT WAS ADDED, NOT BY ADDRESS, because the sort is also the page cursor. A payload field is not keyset-eligible, so a list ordered by `address` could not continue past its first page: a caller walking it past 200 identities got the first 200 and a list that ended without saying so. */
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentities"] in generated_concepts.ts).
 export interface SenderIdentitiesArgs {
   status?: string;
@@ -7862,7 +7885,7 @@ QueryClient.prototype.senderIdentities = function (this: QueryClient, args: Send
   return this.executeNamed("senderIdentities", buildSenderIdentities(args), opts);
 };
 
-/** The sending identities filed under one account. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1). */
+/** The sending identities filed under one account, newest first. The tie is a RECORD, not a scope: this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1). */
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["senderIdentitiesForAccount"] in generated_concepts.ts).
 export interface SenderIdentitiesForAccountArgs {
   accountId: string;
@@ -12126,7 +12149,7 @@ QueryClient.prototype.userById = function (this: QueryClient, args: UserByIdArgs
   return this.executeNamed("userById", buildUserById(args), opts);
 };
 
-/** Count of active v1:identity:user rows. Returns a {count: N} aggregate. */
+/** Count of active v1:identity:user rows. Returns a {count, atLeast} aggregate: past the engine's window, `count` is the window and `atLeast` is true (memql#6033). */
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["userCount"] in generated_concepts.ts).
 export interface UserCountArgs {
 }

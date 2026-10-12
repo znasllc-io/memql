@@ -245,7 +245,7 @@ export function accountIdOf(row: Row): string {
  * rows this caller cannot read -- the tie is still true, and "tied to
  * something you cannot see" is a more useful thing to show than nothing.
  */
-export function accountNameFrom(accounts: AccountRow[], accountId: string): string {
+export function accountNameFrom(accounts: readonly AccountRow[], accountId: string): string {
   const id = accountId.trim();
   if (id === "") return "";
   const found = accounts.find((a) => a.id === id);

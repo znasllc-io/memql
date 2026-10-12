@@ -1,3 +1,5 @@
+import { refusalSentence } from "@znasllc-io/memql-sdk-core/client";
+
 import type { AskActivity } from "./conversationSession";
 // Ask's voice state machine (epic memql#4747). Pure: no DOM, no React, no
 // audio stack -- the microphone and the transcription wire are both seams, so
@@ -286,8 +288,10 @@ export function problemFor(err: unknown): VoiceProblem {
 }
 
 function messageOf(err: unknown): string {
-  const raw = err instanceof Error ? err.message : "";
-  // pushToTalk prefixes its own name; the surface has no use for it.
-  const text = raw.replace(/^pushToTalk:\s*/, "").trim();
+  // A refused call arrives as the call's name, the server's frame and then its
+  // sentence ("pushToTalk: MemQL engine failed to execute query. Details: ...").
+  // The SDK's refusalSentence takes the first two off and leaves the sentence,
+  // which names the fix. Anything that is not an Error carries no words of its own.
+  const text = err instanceof Error ? refusalSentence(err, "pushToTalk").trim() : "";
   return text || "Voice did not work that time.";
 }

@@ -895,7 +895,7 @@ services, domain and sender. Optional `createResourceGroup: true` requires
 with the existing policy, rather than publishing a second SPF record. There is
 no MX change: campaign sending does not create a receiving mailbox.
 
-An owner or developer can use **Campaigns → Settings → Package configuration**
+An owner or developer can use **Email → Settings → Package**
 to load a file, review one package organization, and import it into the explicitly
 selected organization on this cluster. Import saves setup choices; it never
 creates Azure resources, sends email, changes DNS, transfers resource ownership,

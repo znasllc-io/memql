@@ -25,7 +25,7 @@
 // figure and a zero are different answers".
 //
 // Promoted from src/cluster/figure.ts into the kit (epic memql#5153, D3):
-// thirteen consumers across Campaigns, Cluster, Fleet, Settings and Stores,
+// thirteen consumers across Email, Cluster, Fleet, Settings and Stores,
 // and this epic adds Levels and the fleet-wide measured column. The
 // COMPONENT half is kit/Measure.tsx; this half stays pure so a .ts module
 // can import it without pulling JSX through the barrel.
@@ -73,6 +73,13 @@ export type AbsentReason =
 export interface MeasuredFigure {
   readonly kind: "measured";
   readonly value: number;
+  /**
+   * THE VALUE IS A FLOOR: the read stopped at a window and found more, so it
+   * is "this many or more" (memql#6033). Still a measurement -- somebody
+   * counted -- but never an exact one, and it is drawn with "or more"
+   * wherever it is drawn. Present only on a floor.
+   */
+  readonly atLeast?: true;
 }
 
 export interface AbsentFigure {
@@ -88,10 +95,22 @@ export type Figure = MeasuredFigure | AbsentFigure;
  * A measured figure. Refuses a non-finite value: NaN and Infinity are what
  * arithmetic over a missing field produces, and rendering either is how an
  * absent number reaches a person looking like a measured one.
+ *
+ * `atLeast` makes it a floor: the read stopped at a window and found more.
  */
-export function figureOf(value: number): Figure {
+export function figureOf(value: number, atLeast = false): Figure {
   if (!Number.isFinite(value)) return absent("unmeasured");
-  return { kind: "measured", value };
+  return atLeast ? { kind: "measured", value, atLeast: true } : { kind: "measured", value };
+}
+
+/**
+ * A `count` query's answer as a figure (the SDK's `Result.count()`): exact,
+ * or -- when the engine stopped at its window, which is configurable and so
+ * never guessed here -- a floor. No count at all is unmeasured, not zero.
+ */
+export function countFigure(answer: { count: number; atLeast: boolean } | null): Figure {
+  if (answer === null) return absent("unmeasured");
+  return figureOf(answer.count, answer.atLeast);
 }
 
 export function absent(reason: AbsentReason, detail = ""): Figure {

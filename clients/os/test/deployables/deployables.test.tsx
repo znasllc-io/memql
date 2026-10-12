@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { readTheBar } from "../readTheBar";
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -753,6 +753,44 @@ describe("the Source stop", () => {
     });
   });
 
+  // THE TYPED CONFIRMATION OPENS UNDER THE ARCHIVE THAT ASKED IT, outside any
+  // bar (memql#6033): its way out and its act wait for the sentence to be read.
+  describe("the source's archive, one double-click later", () => {
+    useFakeDate();
+
+    async function ask() {
+      const { connection, page } = await mountAndOpen(WITH_PACKAGE, "store.memql.example.com");
+      const source = await openSourceView(page);
+      await click(within(source).getByRole("button", { name: "Archive this source" }));
+      expect(within(source).getByText(/goes offline the moment you confirm/)).toBeTruthy();
+      return { connection, source };
+    }
+
+    it("does not archive on a press that comes straight after the question, and does once it is read", async () => {
+      const { connection, source } = await ask();
+      await typeInto(within(source).getByLabelText("Type acme to confirm") as HTMLInputElement, "acme");
+      betweenTheClicks();
+      await click(within(source).getByRole("button", { name: "Archive" }));
+      expect(connection.callsNamed("packageArchive")).toEqual([]);
+      expect(within(source).getByLabelText("Type acme to confirm")).toBeTruthy();
+
+      await readTheBar();
+      await click(within(source).getByRole("button", { name: "Archive" }));
+      expect(connection.callsNamed("packageArchive")).toEqual(['builtin packageArchive(packageId: "pkg-acme", confirmName: "acme")']);
+    });
+
+    it("does not keep it on that click either", async () => {
+      const { connection, source } = await ask();
+      betweenTheClicks();
+      await click(within(source).getByRole("button", { name: "Keep it" }));
+      expect(within(source).getByLabelText("Type acme to confirm")).toBeTruthy();
+      await readTheBar();
+      await click(within(source).getByRole("button", { name: "Keep it" }));
+      expect(within(source).queryByLabelText("Type acme to confirm")).toBeNull();
+      expect(connection.callsNamed("packageArchive")).toEqual([]);
+    });
+  });
+
   // THE SOURCE'S OWN ACTS MOVED TO THE SOURCE'S OWN VIEW (epic memql#4937,
   // D4). "Archive this source and every app it produced" CASCADES, so on an
   // app's page it was a control that destroyed a SIBLING -- and it rendered
@@ -785,6 +823,7 @@ describe("the Source stop", () => {
       expect(archive.disabled).toBe(true);
       await typeInto(within(source).getByLabelText("Type acme to confirm") as HTMLInputElement, "acme");
       expect(archive.disabled).toBe(false);
+      await readTheBar();
       await click(archive);
       expect(connection.callsNamed("packageArchive")).toEqual(['builtin packageArchive(packageId: "pkg-acme", confirmName: "acme")']);
     });
@@ -802,6 +841,7 @@ describe("the Source stop", () => {
       const source = await openSourceView(page);
       await click(within(source).getByRole("button", { name: "Archive this source" }));
       await typeInto(within(source).getByLabelText("Type acme to confirm") as HTMLInputElement, "acme");
+      await readTheBar();
       await click(within(source).getByRole("button", { name: "Archive" }));
       expect(await within(source).findByText("What you typed does not match")).toBeTruthy();
       expect(within(source).getByText(/Type "acme" exactly/)).toBeTruthy();
@@ -1043,6 +1083,25 @@ describe("the Live stop", () => {
     expect(connection.callsNamed("siteArchive")).toEqual(['builtin siteArchive(siteId: "site-shop", confirmHostname: "shop")']);
   });
 
+  it("a double-click on Archive does not answer the confirmation it opens", async () => {
+    const paused = siteRow({ ...SHOP, id: "site-shop", status: "disabled" });
+    const { connection, page } = await mountAndOpen({ sites: [paused] }, "shop.memql.example.com");
+    const bar = document.querySelector(".os-actbar") as HTMLElement;
+    await readTheBar();
+    await click(within(bar).getByRole("button", { name: /^Archive/ }));
+    // THE CONFIRMATION IS THE BAR'S CHILDREN, not its acts: the sentence, the
+    // field, Keep it and the act. The second click of a double-click lands on
+    // one of them -- here the way out -- and answers nothing.
+    await click(within(bar).getByRole("button", { name: "Keep it" }));
+    expect(within(bar).getByLabelText("Type shop to confirm")).toBeTruthy();
+    // Read, it answers: the way out puts the acts back.
+    await readTheBar();
+    await click(within(bar).getByRole("button", { name: "Keep it" }));
+    expect(within(bar).queryByLabelText("Type shop to confirm")).toBeNull();
+    expect(barActs(page)).toEqual(["Archive", "Go live"]);
+    expect(connection.callsNamed("siteArchive")).toHaveLength(0);
+  });
+
   it("DELETES an archived standalone, which is what releases its name", async () => {
     // THE FOURTH RUNG (epic memql#4937, D1). Archiving never freed the
     // hostname: liveSiteIdsForHostname excludes `deleted` and never reads
@@ -1060,6 +1119,8 @@ describe("the Live stop", () => {
     const del = within(bar).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
     expect(del.disabled).toBe(true);
     await typeInto(within(bar).getByLabelText("Type shop to confirm") as HTMLInputElement, "shop");
+    // The bar just turned into the confirmation, and takes no press until it is read.
+    await readTheBar();
     await click(del);
     expect(connection.callsNamed("siteDelete")).toEqual(['builtin siteDelete(siteId: "site-shop", confirmHostname: "shop")']);
   });
@@ -1076,6 +1137,7 @@ describe("the Live stop", () => {
     expect(within(bar).getByText(/can be activated again/)).toBeTruthy();
     // THE APP'S NAME, never its hostname.
     await typeInto(within(bar).getByLabelText("Type storefront to confirm") as HTMLInputElement, "storefront");
+    await readTheBar();
     await click(within(bar).getByRole("button", { name: "Deactivate" }));
     await waitFor(() =>
       expect(connection.callsNamed("packageDeactivateDeployable")).toEqual([
@@ -1490,6 +1552,7 @@ describe("deactivating a source-backed deployable", () => {
     expect(within(bar).getByText(/releases/)).toBeTruthy();
     expect(within(bar).getByText(/can be activated again/)).toBeTruthy();
     await typeInto(within(bar).getByLabelText("Type storefront to confirm") as HTMLInputElement, "storefront");
+    await readTheBar();
     await click(barButton("Deactivate"));
 
     await waitFor(() =>

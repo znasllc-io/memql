@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Caption, Notice, RecordList, RecordRow, Subhead, flatten } from "../../../kit";
+import { InPlaceAsk } from "../../../kit/pressHold";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
 
@@ -134,7 +135,7 @@ export function DeadLetterBand({ connector }: { connector: string }) {
       {rows.map((entry) => (
         <RecordRow key={entry.id} name={entry.conceptId} secondary={entry.rowRef} state={entry.action || "unstated"} tone="warn" actions={
           confirming !== null && confirming.id === entry.id ? (
-            <span className="os-cluster-confirm">
+            <InPlaceAsk as="span" className="os-cluster-confirm">
               <span className="os-cluster-confirm-text">
                 {confirming.act === "retry"
                   ? "Send this entry to the drain again?"
@@ -151,7 +152,7 @@ export function DeadLetterBand({ connector }: { connector: string }) {
               >
                 {confirming.act === "retry" ? "Retry" : "Discard"}
               </Button>
-            </span>
+            </InPlaceAsk>
           ) : (
             <span className="os-cluster-dl-acts">
               <Button tone="quiet" onClick={() => setConfirming({ id: entry.id, act: "retry" })}>

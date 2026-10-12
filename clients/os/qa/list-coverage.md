@@ -25,7 +25,7 @@ answer does display zero.
 | Deployables | Deployables and Sources already canonical; source-produced apps, source credentials, Library zip choices, package report records, paired development stores; GitHub repository choices and group counts |
 | Fleet | Machines; machine apps/models; recommended models; previous downloads; recent work; app sessions and produced artifacts; available models and host machines; catalog and uncatalogued models; workspaces/replicas; routing call history and policy references |
 | Users | People, groups and roles; memberships, invitations, standing managers, role holders and sessions |
-| Campaigns | Campaigns, audiences, senders, templates and rules; audience recipients and delivery ledger |
+| Email | Email, audiences, senders, templates and rules; audience recipients and delivery ledger |
 | Training | Files/teaching worklist, domains and domain chunks; existing domain disclosure preserved |
 | Materializer | Compositions, templates, recipes and recorded composition sources |
 | Cluster | Agents and standing grants; audit events; modules and per-node readiness; connector coverage, origin health and dead letters; standalone automations, relationships and stopped chains |

@@ -152,7 +152,7 @@ The reserved words that are not constructs: the statements of a body, the clause
 | `branch` | `branch` | One list of a parallel statement: `branch <label> { ... }`. |
 | `case` | `case` | A switch branch: `case <literal>[, <literal>] { ... }`. A label is a literal, written once per switch. |
 | `config` | `config` | Reserved namespace for the allow-listed configuration values a body may read, as `config.<key>`. The allow-list is component/config/policy_exposable.go; a key outside it is not readable from the DSL at all, so configuration cannot leak into a construct by accident. |
-| `count` | `"count"` | Query clause: aggregate the matching set to {count: N} -- a bare `count`. Mutually exclusive with shape, sort and paginate. |
+| `count` | `"count"` | Query clause: aggregate the matching set to {count: N, atLeast: B} -- a bare `count`. The count reads up to the engine's window: past it, N is the window and atLeast is true. Mutually exclusive with shape, sort and paginate. |
 | `default` | `default` | The switch branch that runs when no case matches. |
 | `else` | `else` | Alternative branch of an if statement, on the closing brace's line: `} else {`. |
 | `filter` | `"filter" <lambda>` | Query clause: `filter row => <predicate>`, the boolean predicate over the row, pushed down to SQL. A line clause -- it takes the rest of its line and the lines after it that open with an operator; no block. |

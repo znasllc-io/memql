@@ -118,6 +118,36 @@ func TestOrganizationTargetBindingDoesNotChangeUserAuthoredMutationContracts(t *
 	}
 }
 
+// organizationApp is the app resource a member needs in an organization to read
+// a concept, and the Email app answers for every campaigns concept (journeys,
+// layouts and the rest follow the namespace, not a list), so a new concept in
+// that namespace is reachable through app:email with no change here. A concept
+// outside both namespaces names no app, and that is "" -- the gate then asks
+// nothing app-shaped of it.
+func TestOrganizationAppNamesTheAppAConceptsNamespaceBelongsTo(t *testing.T) {
+	for _, tc := range []struct{ concept, want string }{
+		{"v1:campaigns:journey", "app:email"},
+		{"v1:campaigns:campaign", "app:email"},
+		{"v1:campaigns:emailLayout", "app:email"},
+		{"v1:campaigns:", "app:email"},
+		{"v1:platform:site", "app:deployables"},
+		{"v1:platform:package", "app:deployables"},
+		{"v1:identity:user", ""},
+		{"v1:cluster:node", ""},
+		{"", ""},
+		// The namespace is the whole word between the colons, and the version is part of it.
+		{"v1:campaignsx:thing", ""},
+		{"v1:platformer:thing", ""},
+		{"v2:campaigns:journey", ""},
+		{"campaigns:journey", ""},
+		{"app:email", ""},
+	} {
+		if got := organizationApp(tc.concept); got != tc.want {
+			t.Errorf("organizationApp(%q) = %q, want %q", tc.concept, got, tc.want)
+		}
+	}
+}
+
 // A write to a row that exists in an organization the caller may not change is
 // refused with an exported value, so that a caller can say it in words of its own
 // (a template id another organization holds) without matching the text, and its

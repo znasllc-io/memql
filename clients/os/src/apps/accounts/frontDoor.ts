@@ -1,3 +1,4 @@
+import { versionOrder } from "@znasllc-io/memql-sdk-core/client";
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 // An account's reserved MemQL name, as the MemQL address stop understands it
@@ -247,5 +248,5 @@ export function currentDoor(rows: FrontDoorRow[], accountId: string): FrontDoorR
   // ALL REMOVED: show the most recent one rather than nothing. "We served this
   // and stopped" is a different answer from "we never did", and the row that
   // survives removal is what makes it sayable.
-  return [...mine].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0] ?? null;
+  return [...mine].sort((a, b) => (versionOrder(b.createdAt, a.createdAt) ?? 0))[0] ?? null;
 }

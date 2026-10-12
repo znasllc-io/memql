@@ -365,6 +365,8 @@ export function clusterNodeRow(over: {
   health?: string;
   lastSeen?: string;
   address?: string;
+  /** The version's time, as the engine writes it: RFC 3339 with the fraction's trailing zeros trimmed. */
+  createdAt?: string;
   mesh?: Record<string, unknown> | null;
 }): Row {
   const lastSeen = over.lastSeen ?? new Date().toISOString();
@@ -376,7 +378,7 @@ export function clusterNodeRow(over: {
     address: over.address ?? "10.244.0.9:50058",
     health: over.health ?? "healthy",
     lastSeen,
-    createdAt: "2026-09-22T09:00:00Z",
+    createdAt: over.createdAt ?? "2026-09-22T09:00:00Z",
   };
   if (over.mesh !== null) {
     row.mesh = {

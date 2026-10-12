@@ -206,16 +206,16 @@ describe("the core gate, mounted by the real shell", () => {
 });
 
 describe("an unconfigured app gates only once readiness has loaded", () => {
-  it("keeps preparation open and gates Rules once sending readiness has loaded", async () => {
+  it("keeps preparation open and gates Automations once sending readiness has loaded", async () => {
     const { connection, openReadiness } = fakeConnection([
       readinessRow("email", "unconfigured"),
       readinessRow("campaigns", "configured"),
     ]);
     h.connection = connection;
     mountShell();
-    await openApp("Campaigns");
-    const win = await screen.findByRole("dialog", { name: "Campaigns" });
-    fireEvent.click(within(win).getByRole("button", { name: "Rules" }));
+    await openApp("Email");
+    const win = await screen.findByRole("dialog", { name: "Email" });
+    fireEvent.click(within(win).getByRole("button", { name: "Automations" }));
 
     // Unknown: nothing gated, nothing drawn. This is the frame the test
     // exists for -- a configured cluster passes through it on every load.
@@ -224,8 +224,13 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
 
     openReadiness();
 
+    // THE SECTION NAMES ITSELF, not the app. Email is the one app whose id is
+    // also the id of one of its modules (`email`), and only the Automations
+    // section asks for it: the headline reads the app's own `needs`, not a
+    // substring of its resource name ("app:email"), or this would say "Email
+    // is not set up yet" over a window whose other tabs work.
     await waitFor(() => {
-      expect(within(win).getByRole("heading", { name: "Rules is not set up yet" })).toBeTruthy();
+      expect(within(win).getByRole("heading", { name: "Automations is not set up yet" })).toBeTruthy();
     });
     // TWO marks, and both are wanted: the title-bar gear and the rail's own
     // Settings entry. A person looking at the window chrome and a person
@@ -236,9 +241,9 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
     // one appends to that button's name -- so the button is what has to say it,
     // and the button's name is what a screen reader actually announces.
     const settingsEntry = within(win).getByRole("button", {
-      name: "Campaigns settings, not set up",
+      name: "Email settings, not set up",
     });
-    expect(within(win).getByRole("button", { name: "Campaigns settings, not set up" })).toBeTruthy();
+    expect(within(win).getByRole("button", { name: "Email settings, not set up" })).toBeTruthy();
 
     // The rail is intact and Settings still answers: an app must never gate
     // the one place its own repair lives.
@@ -249,7 +254,7 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
     // And the mark STAYS while they stand in Settings fixing it -- it is
     // computed from the app's requirements, not the current section's.
     expect(
-      within(win).getByRole("button", { name: "Campaigns settings, not set up" }),
+      within(win).getByRole("button", { name: "Email settings, not set up" }),
     ).toBeTruthy();
   });
 
@@ -260,9 +265,9 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
     ]);
     h.connection = connection;
     mountShell();
-    await openApp("Campaigns");
+    await openApp("Email");
     openReadiness();
-    const win = await screen.findByRole("dialog", { name: "Campaigns" });
+    const win = await screen.findByRole("dialog", { name: "Email" });
     await waitFor(() =>
       expect(connection.query.executeNamed).toHaveBeenCalledWith(
         "moduleReadinessAll",
@@ -273,6 +278,6 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
     expect(within(win).queryByText(/is not set up yet/)).toBeNull();
     expect(within(win).queryByRole("button", { name: /is not set up/ })).toBeNull();
     // The gear keeps its plain name when there is nothing to report.
-    expect(within(win).getByRole("button", { name: "Campaigns settings" })).toBeTruthy();
+    expect(within(win).getByRole("button", { name: "Email settings" })).toBeTruthy();
   });
 });

@@ -77,14 +77,14 @@
           "mutation": "writeGrant",
           "args": {
             "grantId": {
-              "$id": "grant-read-app-campaigns"
+              "$id": "grant-read-app-email"
             },
             "subjectKind": "group",
             "subjectId": {
               "$id": "organization-group"
             },
             "verb": "read",
-            "resourceType": "app:campaigns",
+            "resourceType": "app:email",
             "effect": "allow"
           }
         },

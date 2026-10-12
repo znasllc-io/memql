@@ -1,3 +1,4 @@
+import { versionOrder } from "@znasllc-io/memql-sdk-core/client";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -117,7 +118,7 @@ export async function readAllTokens(
 
   // Newest first. The fan-out returns per-person groups, which is the order the
   // requests happened to complete in and means nothing to a reader.
-  out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  out.sort((a, b) => (versionOrder(b.createdAt, a.createdAt) ?? 0));
   return out;
 }
 

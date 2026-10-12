@@ -6,6 +6,7 @@ import { Concepts, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import type { OsAppManifest } from "../../src/system/registry";
 
+
 const h = vi.hoisted(() => ({ connection: null as unknown, os: null as unknown, openApp: vi.fn() }));
 
 vi.mock("../../src/live/connection", () => ({
@@ -86,14 +87,20 @@ async function chooseOrganization() {
   fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
 }
 
-/** Fill the brief and press Materialize. */
-async function materializeNotes(over: { name?: string; statement?: string } = {}) {
+/**
+ * Fill the brief and press Materialize.
+ *
+ * `afterChange` is for a form the bar has just come back to (Compose another):
+ * a bar whose acts have just changed takes no press for a moment, so a person
+ * starting the second file reads it first, as `readTheBar` does.
+ */
+async function materializeNotes(over: { name?: string; statement?: string; afterChange?: boolean } = {}) {
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: over.name ?? "Notes" } });
   fireEvent.change(screen.getByLabelText("What do you want made?"), { target: { value: over.statement ?? "A one page brief" } });
   await chooseOrganization();
-  await screen.findByRole("button", { name: "Materialize" });
-  await readTheBar();
-  fireEvent.click(screen.getByRole("button", { name: "Materialize" }));
+  const press = await screen.findByRole("button", { name: "Materialize" });
+  if (over.afterChange) await readTheBar();
+  fireEvent.click(press);
 }
 
 const sent = (conn: Conn, index = 0): Record<string, unknown> => conn.query.composeMaterialize.mock.calls[index]?.[0] ?? {};
@@ -322,7 +329,7 @@ describe("the folder a setup names", () => {
     // The first composition arrives, the person starts another.
     conn.subscriptions.emit(COMPOSITION, compositionRow({ id: "c1", status: "ready", format: "markdown" }), "NODE_CREATED");
     fireEvent.click(await screen.findByRole("button", { name: "Compose another" }));
-    await materializeNotes({ name: "Second" });
+    await materializeNotes({ name: "Second", afterChange: true });
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
     expect(sent(conn, 0)["folderId"]).toBe("folder-1");
     expect(sent(conn, 1)).not.toHaveProperty("folderId");
@@ -453,8 +460,9 @@ describe("creating a file", () => {
     conn.subscriptions.emit(COMPOSITION, compositionRow({ id: "c1", status: "ready", format: "markdown" }), "NODE_CREATED");
     fireEvent.click(await screen.findByRole("button", { name: "Compose another" }));
     // The very same facts: only a fresh id tells the cluster this is another file.
+    const again = await screen.findByRole("button", { name: "Materialize" });
     await readTheBar();
-    fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
+    fireEvent.click(again);
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
     expect(sent(conn, 1)["requestId"]).not.toBe(sent(conn, 0)["requestId"]);
   });
@@ -1114,7 +1122,7 @@ describe("returning to the app that sent the person", () => {
     await screen.findByRole("button", { name: "Back to Files" });
     fireEvent.click(screen.getByRole("button", { name: "Compose another" }));
     conn.query.composeMaterialize.mockResolvedValueOnce(rowsResult([{ compositionId: "c2" } as unknown as Row]));
-    await materializeNotes({ name: "Second" });
+    await materializeNotes({ name: "Second", afterChange: true });
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
     conn.subscriptions.emit(COMPOSITION, finished({ id: "c2", name: "Second" }), "NODE_UPDATED");
     await screen.findByRole("button", { name: "Open Second" });

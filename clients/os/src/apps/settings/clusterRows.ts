@@ -1,3 +1,4 @@
+import { versionOrder } from "@znasllc-io/memql-sdk-core/client";
 // Projections for the Cluster facts panel (memql#4742). PURE -- a function
 // of a wire row, unit-testable with no browser and no cluster, for the
 // reason `apps/fleet/rows.ts` states: a projection asserted through render()
@@ -70,7 +71,7 @@ export function latestDeployment(rows: readonly DeploymentRow[]): DeploymentRow 
   let newest: DeploymentRow | null = null;
   for (const row of rows) {
     if (row.deploymentId === "") continue;
-    if (newest === null || row.createdAt > newest.createdAt) newest = row;
+    if (newest === null || (versionOrder(row.createdAt, newest.createdAt) ?? 0) > 0) newest = row;
   }
   return newest;
 }

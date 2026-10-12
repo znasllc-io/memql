@@ -310,11 +310,12 @@ query recipient audienceRosterForSend {
   shape     recipientFull
 }
 
-/// ENGINE (owner-scoped): how many recipients an audience holds, as a {count: N} aggregate
-/// (memql#3460). Computed server-side, so it is the one question about a large audience that needs
-/// no window at all -- which is exactly why the preflight and the frozen `recipientCount` use it
-/// rather than measuring the length of a bounded read. Measuring a page and calling it a total is
-/// how the 5000 ceiling came to be load-bearing in the first place. Owned.
+/// ENGINE (owner-scoped): how many recipients an audience holds, as a {count, atLeast} aggregate
+/// (memql#3460). Computed server-side rather than by measuring the length of a bounded read, which
+/// is why the preflight and the frozen `recipientCount` use it: measuring a page and calling it a
+/// total is how the 5000 ceiling came to be load-bearing in the first place. The count still reads
+/// up to the engine's window: past it, `count` is the window and `atLeast` is true (memql#6033).
+/// Owned.
 @actor
 query recipient audienceRosterSize {
   args {
@@ -322,6 +323,21 @@ query recipient audienceRosterSize {
   }
   filter  row => true
               && row.audienceId == args.audienceId
+  count
+}
+
+/// How many people in one audience can be mailed now, as a {count, atLeast} aggregate. Pending and
+/// unsubscribed members are on the list but are not counted. The Email app's audience rows, the
+/// campaign wizard and the send confirmation name this number. Past the engine's window, `count` is
+/// the window and `atLeast` is true, which the Email app says as "5,000 or more" (memql#6033).
+@actor
+query recipient audienceSubscriberCount {
+  args {
+    audienceId  string!
+  }
+  filter  row => true
+              && row.audienceId == args.audienceId
+              && isSendableRecipient(row)
   count
 }
 
@@ -500,8 +516,14 @@ query recipient recipientsWithoutDigestInAudience {
 }
 
 /// Every sending identity the caller may use, newest first. Backs the identity picker on the
-/// campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees
-/// every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+/// campaign editor and the Senders list in the OS app's Settings. Composite tier, so a cluster
+/// owner sees every operator's -- which is what makes "who is this cluster mailing as"
+/// answerable at all.
+///
+/// SORTED BY WHEN IT WAS ADDED, NOT BY ADDRESS, because the sort is also the page cursor. A
+/// payload field is not keyset-eligible, so a list ordered by `address` could not continue past
+/// its first page: a caller walking it past 200 identities got the first 200 and a list that
+/// ended without saying so.
 @actor
 query senderIdentity senderIdentities {
   args {
@@ -509,7 +531,7 @@ query senderIdentity senderIdentities {
   }
   filter    row => true
                 && (args.status == nil || row.status == args.status)
-  sort      "address", "asc"
+  sort      "row.createdAt", "desc"
   paginate  200
   shape     senderIdentityFull
 }
@@ -527,9 +549,9 @@ query senderIdentity senderIdentityById {
   shape   senderIdentityFull
 }
 
-/// The sending identities filed under one account. The tie is a RECORD, not a scope: this is the
-/// same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried
-/// verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
+/// The sending identities filed under one account, newest first. The tie is a RECORD, not a scope:
+/// this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct
+/// is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
 @actor
 query senderIdentity senderIdentitiesForAccount {
   args {
@@ -538,7 +560,7 @@ query senderIdentity senderIdentitiesForAccount {
   filter  row => row.accountId == args.accountId
 
   shape   senderIdentityFull
-  sort    "address", "asc"
+  sort    "row.createdAt", "desc"
 }
 
 // ---------------------------------------------------------------------------
