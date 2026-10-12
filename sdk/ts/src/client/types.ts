@@ -483,17 +483,35 @@ function compareInstant(a: string | undefined, b: string | undefined): number {
   return pa.fraction < pb.fraction ? -1 : pa.fraction > pb.fraction ? 1 : 0;
 }
 
-// versionOrder orders two VERSION TIMES -- an engine row's `createdAt` -- by
-// the instant they name, at every digit the wire carries (compareInstant), or
-// answers null when either is no time to order by: absent, not a string, or
-// unparseable. Internal, not exported through the package barrel: it is
-// LiveCollection's default ordering (memql#6033).
+/**
+ * Which of two VERSION TIMES is later.
+ *
+ * A version time is the `createdAt` an engine row, a graph event and a read of
+ * it carry: the time of that version of the row (the store is append-only, and
+ * the latest version of a row is the one with the greatest `createdAt`). Use
+ * this to keep the newer of two copies of a row; it is the ordering a
+ * `LiveCollection` applies by default (memql#6033).
+ *
+ * The times are compared AS INSTANTS, at every fractional digit the wire
+ * carries -- never as strings. The engine writes RFC 3339 with the trailing
+ * zeros of the fraction trimmed, so `….3251Z` names an EARLIER instant than
+ * `….325101Z` while being the larger string; a zone offset is folded into the
+ * instant, and `….5Z` and `….500000Z` are the same time.
+ *
+ * Returns a negative number when `a` is earlier than `b`, a positive number
+ * when it is later, and 0 when they are the same instant. Returns `null` when
+ * EITHER side is not a time to order by -- absent, not a string, or not a
+ * parseable RFC 3339 time -- and then claims no order at all: what to do about
+ * a copy that cannot be placed is the caller's decision (a `LiveCollection` lets
+ * the arrival win, as it did before it had versions to compare).
+ */
 export function versionOrder(a: unknown, b: unknown): number | null {
   if (!isVersionTime(a) || !isVersionTime(b)) return null;
   return compareInstant(a, b);
 }
 
-// isVersionTime: a time versionOrder can order by. Internal, like versionOrder.
+// isVersionTime: a time versionOrder can order by. Internal: not exported
+// through the package barrel.
 export function isVersionTime(value: unknown): value is string {
   return typeof value === "string" && instantParts(value) !== null;
 }

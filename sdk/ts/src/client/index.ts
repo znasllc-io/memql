@@ -61,6 +61,7 @@ export {
   rowNumber,
   rowObject,
   rowString,
+  versionOrder,
   type AccessSummary,
   type Concept,
   type ConceptField,

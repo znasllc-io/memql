@@ -54,6 +54,17 @@ more". The window is configurable, so read `atLeast` rather than comparing the
 figure with a number you assume. `countConcept` still answers the number
 alone.
 
+**`versionOrder(a, b)`** (`@znasllc-io/memql-sdk-core/client`, memql#6033) --
+which of two version times is later. A row's `createdAt`, on a read and on a
+graph event, is the time of that version of the row; `versionOrder` compares
+two of them as instants at every fractional digit, not as strings (the engine
+trims trailing zeros, so `.3251Z` is the earlier instant and the larger string
+beside `.325101Z`), and folds a zone offset. It answers a negative number, 0 or
+a positive number, and `null` when either side is not a time to order by -- the
+caller then decides what a copy it cannot place means. It is the ordering a
+`LiveCollection` applies by default, now exported so a client that keeps the
+newer of two copies of a row by hand does not write a second.
+
 ### Changed
 
 **A `LiveCollection` seed keeps what arrives while it reads** (memql#6033).
