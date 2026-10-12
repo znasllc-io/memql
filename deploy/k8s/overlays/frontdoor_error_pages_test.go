@@ -56,12 +56,13 @@ var errorPagesOverlays = []string{cloudOverlay, entryOverlay, "local"}
 // ingress-nginx builds the custom default backend as a copy of the location's
 // own upstream and keeps the location's protocol: only its built-in default
 // backend is forced back to plain http (template.go buildProxyPass, v1.15.1).
-// So a default backend behind `backend-protocol: GRPC` is sent h2c, and one
-// behind HTTPS is sent a TLS handshake. `memql error-pages` is a plain HTTP/1.1
-// server, so both answer 502 -- worse than the bare 503 they would replace. The
-// exclusion is pinned by NAME as well as by the protocol rule below, so that
-// flipping an Ingress's protocol annotation and adding the default backend in
-// the same edit cannot satisfy the rule by changing the question.
+// `memql error-pages` is a plain HTTP/1.1 server, so each protocol below rules
+// an Ingress out ON ITS OWN ACCOUNT (errorPagesUnfitReason says how): HTTPS is
+// not the GRPC case under another name, and would hold if the gRPC Ingress did
+// not exist. Either way the proxy answers 502, worse than the bare 503 it would
+// replace. The exclusion is pinned by NAME as well as by the protocol rule, so
+// that flipping an Ingress's protocol annotation and adding the default backend
+// in the same edit cannot satisfy the rule by changing the question.
 var errorPagesExcluded = []struct{ name, protocol string }{
 	{"api-front-door-grpc", "GRPC"},
 	{"identity-front-door", "HTTPS"},
@@ -72,6 +73,54 @@ var errorPagesExcluded = []struct{ name, protocol string }{
 func plainHTTPBackend(annotations map[string]string) bool {
 	protocol := strings.ToUpper(strings.TrimSpace(annotations[backendProtocolAnnotation]))
 	return protocol == "" || protocol == "HTTP"
+}
+
+// errorPagesUnfitReason says why an Ingress with this backend protocol cannot
+// name the error pages: one reason per protocol, each sufficient alone.
+func errorPagesUnfitReason(protocol string) string {
+	switch strings.ToUpper(strings.TrimSpace(protocol)) {
+	case "GRPC", "GRPCS":
+		return "grpc_pass would hand the error pages HTTP/2, and they speak HTTP/1.1"
+	case "HTTPS":
+		return "the proxy would open a TLS connection to the error pages, which speak no TLS, and the handshake would fail"
+	case "AUTO_HTTP":
+		return "the proxy would use the client's own scheme, so a TLS client gets a TLS connection to the error pages, which speak no TLS"
+	case "FCGI":
+		return "fastcgi_pass is not HTTP"
+	}
+	return "its backend protocol is not plain HTTP"
+}
+
+// TestOnlyPlainHTTPBackendsFitTheErrorPages reads the rule itself, one protocol
+// at a time, so that HTTPS is held as a reason in its own right and not only
+// through the two Ingresses that happen to set it today.
+func TestOnlyPlainHTTPBackendsFitTheErrorPages(t *testing.T) {
+	for _, tc := range []struct {
+		protocol string
+		set      bool
+		fits     bool
+	}{
+		{set: false, fits: true},
+		{protocol: "HTTP", set: true, fits: true},
+		{protocol: "http", set: true, fits: true},
+		{protocol: "HTTPS", set: true, fits: false},
+		{protocol: "https", set: true, fits: false},
+		{protocol: "GRPC", set: true, fits: false},
+		{protocol: "GRPCS", set: true, fits: false},
+		{protocol: "AUTO_HTTP", set: true, fits: false},
+		{protocol: "FCGI", set: true, fits: false},
+	} {
+		annotations := map[string]string{}
+		if tc.set {
+			annotations[backendProtocolAnnotation] = tc.protocol
+		}
+		if got := plainHTTPBackend(annotations); got != tc.fits {
+			t.Errorf("backend protocol %q (set=%v): fits = %v, want %v", tc.protocol, tc.set, got, tc.fits)
+		}
+		if !tc.fits && strings.Contains(errorPagesUnfitReason(tc.protocol), "not plain HTTP") {
+			t.Errorf("backend protocol %q has no reason of its own in errorPagesUnfitReason", tc.protocol)
+		}
+	}
 }
 
 // annotatedIngress is the slice of an Ingress these gates read.
@@ -152,9 +201,9 @@ func assertErrorPagesBackends(t *testing.T, where string, ingresses []annotatedI
 		excluded++
 		if has {
 			t.Errorf("%s: %s sets %s=%q but its backend protocol is %q. ingress-nginx keeps that protocol "+
-				"when it swaps in the default backend, and the error pages speak plain HTTP/1.1, so the proxy "+
-				"would answer 502 instead of the bare 503.",
-				where, name, defaultBackendAnnotation, got, annotations[backendProtocolAnnotation])
+				"when it swaps in the default backend: %s. The proxy would answer 502 instead of the bare 503.",
+				where, name, defaultBackendAnnotation, got, annotations[backendProtocolAnnotation],
+				errorPagesUnfitReason(annotations[backendProtocolAnnotation]))
 		}
 	}
 
@@ -171,7 +220,8 @@ func assertErrorPagesBackends(t *testing.T, where string, ingresses []annotatedI
 			t.Errorf("%s: %s has backend protocol %q, want %q (that is why it is excluded)", where, x.name, got, x.protocol)
 		}
 		if _, has := ing.Metadata.Annotations[defaultBackendAnnotation]; has {
-			t.Errorf("%s: %s names the error pages; it must not (backend protocol %s)", where, x.name, x.protocol)
+			t.Errorf("%s: %s names the error pages; it must not (backend protocol %s: %s)",
+				where, x.name, x.protocol, errorPagesUnfitReason(x.protocol))
 		}
 	}
 

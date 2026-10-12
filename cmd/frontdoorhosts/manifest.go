@@ -53,18 +53,25 @@ const ingressClass = "nginx"
 // backend, which is all but two. ingress-nginx builds the custom default
 // backend as a copy of the Ingress's own upstream and KEEPS the location's
 // backend protocol; only its built-in default backend is forced back to plain
-// http (buildProxyPass, v1.15.1). So behind `backend-protocol: GRPC` the error
-// pages would be sent h2c, and behind HTTPS a TLS handshake. `memql
-// error-pages` is a plain HTTP/1.1 server, so both would answer 502 -- worse
-// than the bare 503 they replace:
+// http (buildProxyPass, v1.15.1). `memql error-pages` is a plain HTTP/1.1
+// server, so a backend protocol of either kind rules an Ingress out, each on
+// its own account:
 //
-//	api-front-door-grpc  GRPC   and a gRPC client cannot render a page in any case
-//	identity-front-door  HTTPS  identity serves TLS in-cluster, so the proxy does too
+//	GRPC   grpc_pass would hand the error pages h2c, and the proxy would answer
+//	       502 (a gRPC client could not render a page in any case).
+//	       api-front-door-grpc.
+//	HTTPS  the proxy would open a TLS connection to the error pages, which speak
+//	       no TLS: the handshake fails and it answers 502. This is not the gRPC
+//	       case under another name, and would hold if api-front-door-grpc did not
+//	       exist. identity serves TLS in-cluster, so identity-front-door sets
+//	       backend-protocol HTTPS (with proxy-ssl-verify off), and it is the
+//	       sign-in host.
 //
-// The identity host therefore keeps ingress-nginx's own 503 during an outage
-// until the error pages can answer TLS. TestEveryFrontDoorIngressHasErrorPagesBackend
-// pins both the rule and these two names, so a later edit cannot silently add
-// the annotation to either.
+// Either 502 is worse than the bare 503 it would replace, so those two keep
+// ingress-nginx's own 503 during an outage until the error pages can answer TLS
+// (a listener and a Service of their own, which is later work).
+// TestEveryFrontDoorIngressHasErrorPagesBackend pins the rule by protocol and
+// the two names, so a later edit cannot silently add the annotation to either.
 //
 // NEVER `custom-http-errors`: that would make ingress-nginx replace the
 // application's own 4xx and 5xx responses, the API's JSON error bodies
@@ -160,13 +167,14 @@ func header(overlay, domain string) string {
 		"# " + defaultBackendAnnotation + ": " + errorPagesService + ", so that when the Service it\n" +
 		"# routes to has no ready endpoints ingress-nginx answers with the maintenance page\n" +
 		"# (`memql error-pages`, deploy/k8s/base/error-pages.yaml) instead of its own bare 503, which\n" +
-		"# is what every host on the cluster answered on 2026-10-11. Two Ingresses do NOT:\n" +
-		"# api-front-door-grpc (backend-protocol GRPC) and identity-front-door (backend-protocol\n" +
-		"# HTTPS). ingress-nginx keeps an Ingress's backend protocol when it swaps in the default\n" +
-		"# backend, and the error pages are a plain HTTP/1.1 server, so behind either the proxy would\n" +
-		"# answer 502 rather than the page. Nothing here sets custom-http-errors, which would replace\n" +
-		"# the application's own error responses. cmd/frontdoorhosts/manifest.go has the reasoning and\n" +
-		"# deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.\n" +
+		"# is what every host on the cluster answered on 2026-10-11. Two Ingresses do NOT, each on its\n" +
+		"# own backend protocol: api-front-door-grpc (GRPC: the proxy would speak h2c to the error\n" +
+		"# pages) and identity-front-door (HTTPS: the proxy would open a TLS connection to the error\n" +
+		"# pages, which speak none). ingress-nginx keeps an Ingress's backend protocol when it swaps\n" +
+		"# in the default backend, and the error pages are a plain HTTP/1.1 server, so behind either\n" +
+		"# the proxy would answer 502 rather than the page. Nothing here sets custom-http-errors,\n" +
+		"# which would replace the application's own error responses. cmd/frontdoorhosts/manifest.go\n" +
+		"# has the reasoning and deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.\n" +
 		"#\n" +
 		"# NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx\n" +
 		"# resolves server_name by specificity in its own core -- an exact name beats a leading\n" +

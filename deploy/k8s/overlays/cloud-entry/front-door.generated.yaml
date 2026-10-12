@@ -48,13 +48,14 @@
 # nginx.ingress.kubernetes.io/default-backend: error-pages, so that when the Service it
 # routes to has no ready endpoints ingress-nginx answers with the maintenance page
 # (`memql error-pages`, deploy/k8s/base/error-pages.yaml) instead of its own bare 503, which
-# is what every host on the cluster answered on 2026-10-11. Two Ingresses do NOT:
-# api-front-door-grpc (backend-protocol GRPC) and identity-front-door (backend-protocol
-# HTTPS). ingress-nginx keeps an Ingress's backend protocol when it swaps in the default
-# backend, and the error pages are a plain HTTP/1.1 server, so behind either the proxy would
-# answer 502 rather than the page. Nothing here sets custom-http-errors, which would replace
-# the application's own error responses. cmd/frontdoorhosts/manifest.go has the reasoning and
-# deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.
+# is what every host on the cluster answered on 2026-10-11. Two Ingresses do NOT, each on its
+# own backend protocol: api-front-door-grpc (GRPC: the proxy would speak h2c to the error
+# pages) and identity-front-door (HTTPS: the proxy would open a TLS connection to the error
+# pages, which speak none). ingress-nginx keeps an Ingress's backend protocol when it swaps
+# in the default backend, and the error pages are a plain HTTP/1.1 server, so behind either
+# the proxy would answer 502 rather than the page. Nothing here sets custom-http-errors,
+# which would replace the application's own error responses. cmd/frontdoorhosts/manifest.go
+# has the reasoning and deploy/k8s/overlays/frontdoor_error_pages_test.go holds the rule.
 #
 # NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx
 # resolves server_name by specificity in its own core -- an exact name beats a leading

@@ -20,12 +20,14 @@
 # sends a custom default backend to the Service's FIRST port -- the Service
 # below lists exactly one, on purpose.
 #
-# The Ingresses whose proxy speaks gRPC or HTTPS to their backend (the api
-# host's gRPC half, the identity host, and an account door's id. host) do NOT
-# name it. ingress-nginx keeps an Ingress's backend protocol when it swaps in
-# the default backend, and this server is plain HTTP/1.1, so behind either the
-# proxy would answer 502 instead of its own 503. Those hosts keep ingress-nginx's
-# 503 until this can answer TLS (cmd/frontdoorhosts/manifest.go has the detail).
+# The Ingresses whose proxy speaks gRPC or HTTPS to their backend do NOT name
+# it, each on its own account. ingress-nginx keeps an Ingress's backend protocol
+# when it swaps in the default backend, and this server is plain HTTP/1.1. Behind
+# backend-protocol GRPC (the api host's gRPC half) the proxy would speak h2c to
+# it; behind HTTPS (the identity host, and an account door's id. host) it would
+# open a TLS connection to a server that speaks none. Either answers 502 instead
+# of ingress-nginx's own 503, so those hosts keep that 503 until this can answer
+# TLS (cmd/frontdoorhosts/manifest.go has the detail).
 #
 # THE IMAGE IS THE EDGE'S, NOT A NEW ONE. The server is a subcommand of the
 # engine binary (the same reason dsl-fetch is), so every image the cluster

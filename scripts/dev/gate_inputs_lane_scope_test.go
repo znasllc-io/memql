@@ -111,6 +111,10 @@ var gateInputs = []struct {
 	{"examples/referencepack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"packs/reviewspack/dsl/namespace.pin", ".", "TestEmbeddedFileCountsAreStable"},
 	{"integrations/integrations.json", ".", "TestEmbeddedFileCountsAreStable"},
+	// The error pages (after the 2026-10-11 outage): component/errorpages embeds
+	// its two templates, the brand mark and the wordmark face, and the inventory
+	// pins all four. Named by a template, which no other `gates` glob covers.
+	{"component/errorpages/maintenance.html.tmpl", ".", "TestEmbeddedFileCountsAreStable"},
 	// Not embedded either, and the newest of this shape (memql#3326).
 	// clients_allowlist_test.go sweeps `git ls-files clients` from the root
 	// package, so every file under clients/ is a gate input. A new client is

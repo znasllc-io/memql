@@ -372,6 +372,12 @@ jobs:
               # fail-open this block exists to close.
               - 'brand/**'
               - 'component/mcp/*.svg'
+              # The error pages' two templates, brand mark and wordmark face
+              # (after the 2026-10-11 outage): embed_inventory_test.go pins the
+              # four, so they are routed as a TREE, for the reason above. The
+              # package's own tests read them too, which the `go` bucket below
+              # routes.
+              - 'component/errorpages/**'
               - 'dsl/**'
               - 'examples/deploypack/dsl/**'
               - 'examples/referencepack/dsl/**'
@@ -520,6 +526,15 @@ jobs:
               # Embedded browser runtime and Node tests execute in component/edge.
               - 'component/edge/site_refresh.js'
               - 'component/edge/site_refresh_test.cjs'
+              # The error pages' embedded assets (after the 2026-10-11 outage):
+              # two HTML templates, the brand mark and the wordmark face, read by
+              # component/errorpages's own tests through go:embed -- the pages'
+              # sizes, the stylesheet hash their Content-Security-Policy pins and
+              # the byte copies of brand/. The gate-inputs step does not run that
+              # package, and the `gates` entry above reaches only the embed
+              # inventory in the root package, so `go` is the bucket that reaches
+              # these tests. A PR editing only a template touches no .go file.
+              - 'component/errorpages/**'
               - 'go.mod'
               - 'go.sum'
               - 'go.work'

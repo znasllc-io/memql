@@ -148,8 +148,10 @@ const (
 	// (deploy/k8s/base/error-pages.yaml) is what answers instead, and a client's
 	// visitor gets its neutral page: nothing on it names the platform
 	// underneath their site. The cluster's own front door carries the same
-	// annotation, written by cmd/frontdoorhosts; its copy of these two names is
-	// held equal to these by that package's test.
+	// annotation, written by cmd/frontdoorhosts, and so do the two bind scripts
+	// (scripts/deploy/bind-custom-domain.sh, bind-account-front-door.sh), which
+	// write these same Ingresses from a shell; their copies of these two names
+	// are held equal to these by those packages' tests.
 	ErrorPagesBackendAnnotation = "nginx.ingress.kubernetes.io/default-backend"
 	// ErrorPagesServiceName is the Service that annotation names.
 	ErrorPagesServiceName = "error-pages"
@@ -175,16 +177,23 @@ const (
 // of the gap is the missing page and nothing worse. The annotation is likewise
 // ignored while the Service has no ready endpoint of its own.
 //
-// THE PROTOCOL. Only a plain-HTTP backend qualifies. ingress-nginx builds the
-// custom default backend as a copy of the Ingress's own upstream and keeps the
+// THE PROTOCOL. Only a plain-HTTP backend qualifies, and every other protocol
+// rules an Ingress out on its own account. ingress-nginx builds the custom
+// default backend as a copy of the Ingress's own upstream and keeps the
 // location's backend protocol (buildProxyPass reads it from the Ingress; only
 // ingress-nginx's built-in default backend is forced back to plain http, in
-// v1.15.1). So behind `backend-protocol: GRPC` the error pages would be sent
-// h2c, and behind HTTPS a TLS handshake. `memql error-pages` is a plain HTTP/1.1
-// server: both would answer 502, which is worse than the bare 503 they replace.
-// The rule reads the protocol off the annotations themselves rather than from a
-// list of the callers that happen to set one, so a backend added tomorrow is
-// classified by what it speaks.
+// v1.15.1). `memql error-pages` is a plain HTTP/1.1 server, so:
+//
+//	GRPC   the proxy speaks h2c to it (grpc_pass) and answers 502.
+//	HTTPS  the proxy opens a TLS connection to it, the handshake fails, and it
+//	       answers 502. Not the gRPC case under another name: an account door's
+//	       id. host is HTTPS because identity serves TLS in-cluster, it is the
+//	       sign-in host, and it would be ruled out if no gRPC Ingress existed.
+//
+// AUTO_HTTP (the client's own scheme) and FCGI fail the same way. A 502 is worse
+// than the bare 503 it replaces. The rule reads the protocol off the
+// annotations themselves rather than from a list of the callers that happen to
+// set one, so a backend added tomorrow is classified by what it speaks.
 //
 // It never sets `custom-http-errors`, which would make ingress-nginx replace
 // the application's own 4xx and 5xx responses with the maintenance page.

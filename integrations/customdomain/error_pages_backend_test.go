@@ -1,6 +1,8 @@
 package customdomain
 
 import (
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -69,9 +71,11 @@ func TestCustomDomainIngressHasErrorPagesBackend(t *testing.T) {
 // to the error pages. The proxy keeps the Ingress's backend protocol when it
 // swaps in the default backend (ingress-nginx's buildProxyPass reads the
 // location's protocol, and only its own built-in default backend is forced back
-// to http), so a default backend behind `backend-protocol: GRPC` is sent h2c
-// and one behind HTTPS is sent a TLS handshake. The error pages speak neither,
-// so both would answer 502 -- worse than the bare 503 they replace.
+// to http), and the error pages are a plain HTTP/1.1 server. Each of the other
+// two protocols rules an Ingress out on its own account: behind GRPC the proxy
+// speaks h2c to them, and behind HTTPS it opens a TLS connection to a server
+// that speaks none, so the handshake fails. Both answer 502 -- worse than the
+// bare 503 they replace.
 func TestAccountDoorIngressHasErrorPagesBackend(t *testing.T) {
 	door := DoorBindRequest{
 		AccountID: "a1", ReservedName: "memql.example.com", Namespace: "memql",
@@ -90,8 +94,8 @@ func TestAccountDoorIngressHasErrorPagesBackend(t *testing.T) {
 	want := map[string]bool{
 		"-app":      true,  // edge, plain HTTP
 		"-api":      true,  // bff-http, plain HTTP
-		"-api-grpc": false, // grpc_pass: the error pages answer HTTP/1.1
-		"-id":       false, // identity speaks TLS in-cluster, so the proxy does too
+		"-api-grpc": false, // backend-protocol GRPC: the proxy would speak h2c to a server that speaks HTTP/1.1
+		"-id":       false, // backend-protocol HTTPS: the proxy would start a TLS handshake with a server that speaks none
 	}
 	seen := map[string]bool{}
 	for _, obj := range objects {
@@ -150,6 +154,72 @@ func TestErrorPagesAreOfferedOnlyToPlainHTTPBackends(t *testing.T) {
 		_, has := annotations[defaultBackendKey]
 		if has != tc.fits {
 			t.Errorf("backend protocol %q (set=%v): default-backend present = %v, want %v", tc.protocol, tc.set, has, tc.fits)
+		}
+	}
+}
+
+// THE UPGRADE BACKFILL SELECTS ON WHAT THE BUILDERS WRITE. The reconciler
+// applies an Ingress only while a binding is issuing, so a custom domain or an
+// account door that is already live when the annotation ships does not carry
+// it until it is bound again. docs/public/operate/front-door.md gives the
+// one-off that adds it, and that command selects the custom-domain Ingresses by
+// one label, and a door's app and api Ingresses by label AND name suffix --
+// the four of a door share every label, so no label tells app and api from id
+// and the gRPC half. This holds the command to the objects it acts on: if a
+// builder's label or suffix moves, or a fifth door Ingress appears, the doc's
+// command would silently annotate the wrong set (or none), and the failure
+// would surface during an outage.
+func TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel(t *testing.T) {
+	const (
+		customDomainSelector = "app.kubernetes.io/name=custom-domain"
+		doorSelector         = "app.kubernetes.io/name=account-front-door"
+		doorNameFilter       = "-(app|api)$"
+	)
+
+	labelOf := func(obj map[string]any, key string) string {
+		labels, _ := obj["metadata"].(map[string]any)["labels"].(map[string]any)
+		v, _ := labels[key].(string)
+		return v
+	}
+
+	domain := IngressObject(BindRequest{Hostname: "shop.example.org", DomainID: "d1", Namespace: "memql", IngressClass: "nginx", Service: "edge", Port: 8085})
+	if got := labelOf(domain, "app.kubernetes.io/name"); got != "custom-domain" {
+		t.Errorf("the custom domain Ingress is labelled app.kubernetes.io/name=%q; the backfill selects %q", got, customDomainSelector)
+	}
+
+	door := DoorBindRequest{AccountID: "a1", ReservedName: "memql.example.com", Namespace: "memql", IngressClass: "nginx"}
+	filter := regexp.MustCompile(doorNameFilter)
+	var annotated, selected int
+	for _, obj := range doorIngressObjects(door, []string{"/healthz"}) {
+		name, _ := obj["metadata"].(map[string]any)["name"].(string)
+		if got := labelOf(obj, "app.kubernetes.io/name"); got != "account-front-door" {
+			t.Errorf("%s is labelled app.kubernetes.io/name=%q; the backfill selects %q", name, got, doorSelector)
+		}
+		_, has := ingressAnnotations(t, obj)[defaultBackendKey]
+		picked := filter.MatchString(name)
+		if has != picked {
+			t.Errorf("%s: carries the annotation = %v, but the backfill's name filter %q picks it = %v; "+
+				"the one-off would annotate the wrong set of door Ingresses", name, has, doorNameFilter, picked)
+		}
+		if has {
+			annotated++
+		}
+		if picked {
+			selected++
+		}
+	}
+	if annotated != 2 || selected != 2 {
+		t.Errorf("a door renders %d annotated and %d selected Ingresses, want 2 and 2 (app and api)", annotated, selected)
+	}
+
+	raw, err := os.ReadFile("../../docs/public/operate/front-door.md")
+	if err != nil {
+		t.Fatalf("reading the front-door page: %v", err)
+	}
+	doc := string(raw)
+	for _, want := range []string{"-l " + customDomainSelector, "-l " + doorSelector, "'" + doorNameFilter + "'", "default-backend=error-pages"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("docs/public/operate/front-door.md does not contain %q; the upgrade backfill the page gives must select exactly what the builders label", want)
 		}
 	}
 }
