@@ -343,6 +343,9 @@ var tierDecidesTheRead = map[string]string{
 	"emailLayoutsForAccount":        "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"emailRuleById":                 "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"emailRules":                    "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"journeyById":                   "memql#6032: the mandatory organization and Email app boundary scopes automations to current members; creator-only filtering would exclude authorized organization peers.",
+	"journeys":                      "memql#6032: as journeyById; optional status selection narrows the organization-authorized row set.",
+	"journeyEnrollmentCounts":       "memql#6032: the mandatory organization and Email app boundary scopes enrollment counts, including authorized peers reviewing shared automations.",
 	"packagesByRepoUrl":             "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"packagesTrackingRepos":         "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"recipientById":                 "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
@@ -359,6 +362,7 @@ var tierDecidesTheRead = map[string]string{
 	"senderIdentityById":            "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"siteByHostname":                "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"templateById":                  "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"templateAtRevision":            "memql#6032: the same mandatory organization and Email app boundary as templateById applies to the pinned revision; creator-only filtering would hide a peer's published template.",
 	"templateForSource":             "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"templates":                     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 

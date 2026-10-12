@@ -1412,12 +1412,27 @@ func (e *MemQLEngine) executeCountPlan(ctx context.Context, plan *QueryPlan, tim
 
 	completeness := &countCompleteness{}
 	ctx = context.WithValue(ctx, countCompletenessKey{}, completeness)
-	set, err := e.evaluateExpressionSet(ctx, plan.Root, timestamp, e.config.MaxWindow, sorter)
+	window := e.config.MaxWindow
+	if window <= 0 {
+		window = e.config.MaxResults
+	}
+	// Probe one extra candidate to distinguish an exactly full window from
+	// an incomplete scan. Keep source completeness as well: authorization or
+	// latest-version filtering may shorten an otherwise truncated source.
+	target := window
+	if target > 0 && target < int(^uint(0)>>1) {
+		target++
+	}
+	set, err := e.evaluateExpressionSet(ctx, plan.Root, timestamp, target, sorter)
 	if err != nil {
 		return nil, err
 	}
 
 	count := int64(len(set))
+	if window > 0 && len(set) > window {
+		count = int64(window)
+		completeness.truncated.Store(true)
+	}
 	result := newExecuteResult(nil)
 	output := map[string]any{"count": count}
 	if completeness.truncated.Load() {
