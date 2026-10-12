@@ -24,6 +24,7 @@ import {
   floorActs,
   formatOf,
   MAKE_STEPS,
+  openingStep,
   readyWords,
   stepsOf,
   stepState,
@@ -124,7 +125,11 @@ export function MakeWizard({
             )}
             onChange={(value) => {
               const picked = FILE_KINDS.find((kind) => kind.value === value);
-              if (picked) onDraft(withKind(draft, picked.kind, facts));
+              if (picked) {
+                const nextDraft = withKind(draft, picked.kind, facts);
+                onDraft(nextDraft);
+                onOpen(openingStep(nextDraft, facts));
+              }
             }}
           />
         );
@@ -252,7 +257,7 @@ export function MakeWizard({
           : "ahead"
         : stepState(step, draft, facts),
     answer: answerOf(step, draft, names),
-    openable: step !== "file" && !making && !starting,
+    openable: step === "file" ? !!making : !making && !starting,
     body: body(step),
   }));
   const elapsed = making

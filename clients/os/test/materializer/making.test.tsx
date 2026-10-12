@@ -17,7 +17,7 @@ function mount(seed: Parameters<typeof fakeConnection>[0] = {}, setup: Parameter
  const tab={navigate:vi.fn(),close:vi.fn()},ports={reserve:vi.fn(()=>tab),navigate:vi.fn(),schedule:vi.fn(()=>()=>{})};
  const store=memoryStore(); let go!:(section:string)=>void; let sendIntent!:(intent:{id:string;payload:Record<string,unknown>})=>void; const navigate=vi.fn((section:string)=>go(section));
  function Harness(){const [section,setSection]=useState("composer");const [intent,setIntent]=useState({id:"setup",payload:composeIntent(setup)});go=setSection;sendIntent=setIntent;return withSession(<MaterializerApp sectionId={section} navigate={navigate} askContext={()=>{}} store={store} handoffPorts={ports} intent={intent} consumeIntent={()=>{}}/>);}
- render(<Harness/>); return {conn,tab,ports,navigate,go:(section:string)=>act(()=>go(section)),open:(id:string)=>act(()=>sendIntent({id:`open-${id}`,payload:{compositionId:id}}))};
+ const view=render(<Harness/>); return {conn,tab,ports,navigate,unmount:view.unmount,go:(section:string)=>act(()=>go(section)),open:(id:string)=>act(()=>sendIntent({id:`open-${id}`,payload:{compositionId:id}}))};
 }
 async function name(value="Notes"){fireEvent.change(await screen.findByRole("textbox",{name:"Name"}),{target:{value}});}
 async function describe(){fireEvent.click(screen.getByRole("button",{name:/^Describe/}));fireEvent.change(await screen.findByRole("textbox",{name:"Describe what you want"}),{target:{value:"Write a brief"}});}
@@ -78,4 +78,47 @@ it("opening another running file keeps an older Make reply from replacing it", a
   await act(async () => finish());
   await readTheBar(); fireEvent.click(screen.getByRole("button", { name: "Stop" }));
   await waitFor(() => expect(conn.query.composeCancel).toHaveBeenCalledWith({ compositionId: "chosen", reason: "Stopped by the person" }));
+});
+
+it.each(["accepted", "refused"])("closing the app releases the pending editor tab before a late %s reply", async outcome => {
+  const { conn, tab, navigate, unmount } = mount();
+  let finish!: () => void;
+  conn.query.composeMaterialize.mockImplementationOnce(() => new Promise((resolve, reject) => {
+    finish = () => outcome === "accepted"
+      ? resolve(rowsResult([{ compositionId: "late" } as Row]))
+      : reject(refused("composeMaterialize", "Try again."));
+  }));
+  await name(); await make();
+  await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+  expect(tab.close).not.toHaveBeenCalled();
+  navigate.mockClear();
+  unmount();
+  expect(tab.close).toHaveBeenCalledOnce();
+  await act(async () => finish());
+  expect(tab.close).toHaveBeenCalledOnce();
+  expect(tab.navigate).not.toHaveBeenCalled();
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it.each([
+  { initialName: "", nextLabel: "Name" },
+  { initialName: "Notes", nextLabel: "Describe what you want" },
+])("choosing a kind opens $nextLabel for the new draft", async ({ initialName, nextLabel }) => {
+  mount();
+  await name(initialName);
+  fireEvent.click(screen.getByRole("button", { name: /^Kind of file/ }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Plain text" }));
+  expect(await screen.findByRole("textbox", { name: nextLabel })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^Kind of file/ }).textContent).toContain("Plain text");
+});
+
+it("the narrow making stage shows the file while earlier steps remain locked", async () => {
+  mount();
+  await name(); await make(); await making();
+  expect(document.querySelector(".os-wizard")?.getAttribute("data-layout")).toBe("stack");
+  expect(screen.getByText("Notes.md", { selector: ".mz-file-result strong" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Kind of file/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Name/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /^File What you get/ }));
+  expect(screen.getByText("Notes.md", { selector: ".mz-file-result strong" })).toBeTruthy();
 });

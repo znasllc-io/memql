@@ -63,7 +63,11 @@ import {
   recipeFacts,
 } from "./actions";
 import { useDescriptionHandOff, useFilesEntries } from "./descriptionHandOff";
-import { reserveEditor, useEditorOpening } from "./editorOpening";
+import {
+  reserveEditor,
+  useEditorOpening,
+  type Reservation,
+} from "./editorOpening";
 import {
   compositionFromRow,
   modelsOf,
@@ -160,7 +164,23 @@ export function MaterializerApp({
   const currentSection = useRef(sectionId);
   currentSection.current = sectionId;
   const cancelHandoff = useRef<(() => void) | null>(null);
-  useEffect(() => () => cancelHandoff.current?.(), []);
+  const mounted = useRef(true);
+  const pendingEditors = useRef(new Set<Reservation>());
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      cancelHandoff.current?.();
+      for (const reservation of pendingEditors.current) {
+        try {
+          reservation.close();
+        } catch {
+          /* A person may have closed the tab. */
+        }
+      }
+      pendingEditors.current.clear();
+    };
+  }, []);
   const [templateFilesNeeded, setTemplateFilesNeeded] = useState(false);
   const libraryFiles = useLibraryFiles(
     sectionId === "composer" || templateFilesNeeded,
@@ -392,11 +412,21 @@ export function MaterializerApp({
       handoffPorts,
       readEditorPreference(),
     );
+    if (reserved.reservation) pendingEditors.current.add(reserved.reservation);
     void materialize
       .start(requestOf(draft), facts.files)
       .then((id) => {
+        // Until the reply names a composition the tab belongs to this pending
+        // ask. Closing the window releases it, and a late reply cannot reclaim it.
+        if (!mounted.current) return;
+        if (reserved.reservation)
+          pendingEditors.current.delete(reserved.reservation);
         if (!id) {
-          reserved.reservation?.close();
+          try {
+            reserved.reservation?.close();
+          } catch {
+            /* A person may have closed the tab. */
+          }
           return;
         }
         setMadeHere((previous) => [...previous, id]);
