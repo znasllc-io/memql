@@ -119,7 +119,7 @@ func (s *installationScope) account(ctx context.Context, _ map[string]any) (any,
 		return nil, err
 	}
 	defer release()
-	result, err := s.a.store.engine.Execute(ctx, `query clientAccountById(accountId: "self")`)
+	result, err := s.a.store.engine.Execute(memql.ContextWithFreshRead(ctx), `query clientAccountById(accountId: "self")`)
 	if err != nil {
 		return nil, err
 	}
