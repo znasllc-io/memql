@@ -645,6 +645,39 @@ func TestParseBoundsFormattedTextPerEmail(t *testing.T) {
 	}
 }
 
+func TestParseRefusesInvalidUTF8(t *testing.T) {
+	// Reading JSON turns each byte that is not UTF-8 into U+FFFD, three bytes,
+	// so a 2 MiB document of them would be a 6 MiB paragraph (239 MiB to read
+	// and write, measured). Parse refuses the file before it reads any of it.
+	const notUTF8 = "This email file isn't valid UTF-8. Save it as UTF-8 and try again."
+	pre, post, _ := strings.Cut(layoutJSON(`{"id":"t","type":"text","text":"@@@"}`), "@@@")
+	for _, c := range []struct{ name, text string }{
+		{"2 MiB of 0xff", strings.Repeat("\xff", MaxBytes-len(pre)-len(post))},
+		{"2 MiB of 0xff after ](", "](" + strings.Repeat("\xff", MaxBytes-len(pre)-len(post)-2)},
+		{"an overlong lead byte", "a\xc0\xafb"},
+		{"a lone continuation byte", "a\x80"},
+		{"a sequence cut short", "a\xe2\x80"},
+		{"a surrogate", "\xed\xa0\x80"},
+	} {
+		doc := []byte(pre + c.text + post)
+		var err error
+		if allocated := allocatedBy(func() { _, err = Parse(doc) }); err == nil || err.Error() != notUTF8 || allocated > 1<<20 {
+			t.Errorf("%s: want %q before reading anything, got %v after %d bytes", c.name, notUTF8, err, allocated)
+		}
+	}
+	for _, doc := range []string{
+		"{\"subject\":\"x\xff\",\"textBody\":\"y\",\"htmlBody\":\"\"}",
+		"{\"subject\":\"x\",\"textBody\":\"y\",\"htmlBody\":\"<p>\xff</p>\"}",
+	} {
+		if _, err := Parse([]byte(doc)); err == nil || err.Error() != notUTF8 {
+			t.Errorf("custom %q: want %q, got %v", doc, notUTF8, err)
+		}
+	}
+	if _, err := Parse([]byte(layoutJSON(`{"id":"t","type":"text","text":"é 日 😀 é"}`))); err != nil {
+		t.Fatalf("UTF-8 of every width is fine: %v", err)
+	}
+}
+
 func TestParseCostDoesNotDependOnHTMLCharacters(t *testing.T) {
 	// Reading a block writes its values out again as JSON once; written with
 	// HTML escaping, each "<", ">" and "&" would take six bytes for one, and

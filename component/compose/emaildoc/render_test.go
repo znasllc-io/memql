@@ -2504,12 +2504,13 @@ func TestLinkTagsAroundOtherSpacesAreNotLinks(t *testing.T) {
 
 // formattedTextCost is the most Parse and Render together may allocate for
 // one of the worst documents Parse accepts under its budget for formatted
-// text (see TestFormattedTextCostIsBounded). The worst of them measured 161
-// MiB: a paragraph of 2 MiB of "&&)" after "](", whose parentheses the reader
-// pairs and whose HTML comes just under the ceiling, so all of it is written
-// (2026-10-11, go1.27.2, darwin/arm64; a search over 1,360 documents of
-// repeated units found none dearer). The bound leaves about 1.5x that.
-const formattedTextCost = 240 << 20
+// text (see TestFormattedTextCostIsBounded). The worst of the table measured
+// 228 MiB: a paragraph filling the document with a merge tag every 20 bytes,
+// filled with a 50-byte sample value, its one "(" (from "](") making the
+// reader build its table of parentheses, its HTML just under the ceiling, and
+// the rest of the mark budget spent in another block (2026-10-11, go1.27.2,
+// darwin/arm64). The bound is 1.5x that, rounded up to the next 16 MiB.
+const formattedTextCost = 352 << 20
 
 func TestFormattedTextCostIsBounded(t *testing.T) {
 	// The worst documents Parse accepts under the budget for formatted text,
@@ -2538,34 +2539,46 @@ func TestFormattedTextCostIsBounded(t *testing.T) {
 		}
 		return out
 	}
-	// A paragraph as long as a document can hold: prefix, then unit as many
-	// times as fit.
-	whole := func(size, prefix, unit string) []byte {
-		room := MaxBytes - len(document(size, raw(prefix)))
-		return document(size, raw(prefix+strings.Repeat(unit, room/len(unit))))
+	// A document whose first text block is a paragraph as long as the
+	// document can hold (prefix, then unit as many times as fit), with the
+	// other texts in blocks after it.
+	filled := func(size, prefix, unit string, others ...string) []byte {
+		room := MaxBytes - len(document(size, append([]string{raw(prefix)}, others...)...))
+		return document(size, append([]string{raw(prefix + strings.Repeat(unit, room/len(unit)))}, others...)...)
 	}
+	// The mark budget spent in a block of its own, all but the one "(" of a
+	// paragraph's "](".
+	spent := jsonString(runs(4999))
+	preview := RenderOptions{Preview: true}
+	sample := RenderOptions{Preview: true, Sample: map[string]string{"displayName": strings.Repeat("a", 50)}}
 	worst := 0
 	for _, size := range []string{"", `,"size":18`} {
 		for _, c := range []struct {
 			name string
 			doc  []byte
+			opts RenderOptions
 		}{
-			{"one paragraph of 5,000 emphasis runs", document(size, quoted(runs(5000))...)},
-			{"5,000 list items", document(size, quoted(items(2000, "a"), items(2000, "a"), items(1000, "a"))...)},
-			{"5,000 list items and 10,000 marks", document(size, quoted(items(2000, "*a*"), items(2000, "*a*"), items(1000, "*a*"))...)},
-			{"50 blocks of 100 emphasis runs on one line", document(size, quoted(fifty...)...)},
-			{"a plain paragraph of 2 MiB", whole(size, "", "a")},
-			{"a paragraph of 2 MiB that escapes to five times its size", whole(size, "", "&")},
-			// "](" makes the reader pair every parenthesis of the text; with
-			// "&&)" the HTML comes just under the ceiling, so all of it is
-			// written, and the text part too.
-			{"a paragraph of 2 MiB of paired parentheses near the ceiling", whole(size, "](", "&&)")},
+			{"one paragraph of 5,000 emphasis runs", document(size, quoted(runs(5000))...), preview},
+			{"5,000 list items", document(size, quoted(items(2000, "a"), items(2000, "a"), items(1000, "a"))...), preview},
+			{"5,000 list items and 10,000 marks", document(size, quoted(items(2000, "*a*"), items(2000, "*a*"), items(1000, "*a*"))...), preview},
+			{"50 blocks of 100 emphasis runs on one line", document(size, quoted(fifty...)...), preview},
+			{"a plain paragraph of 2 MiB", filled(size, "", "a"), preview},
+			{"a paragraph of 2 MiB that escapes to five times its size", filled(size, "", "&"), preview},
+			// The one "(" of "](" makes the reader build its table of the
+			// parentheses it pairs, as long as the text; with "&&)" the HTML
+			// comes just under the ceiling, so all of it is written, and the
+			// text part too.
+			{"one open parenthesis, its table, and HTML near the ceiling", filled(size, "](", "&&)"), preview},
+			{"the same, and the rest of the mark budget in another block", filled(size, "](", "&&)", spent), preview},
+			// A merge tag every 20 bytes filled with a 50-byte sample value:
+			// the HTML and the text part are written again, filled.
+			{"merge tags filled near the ceiling, and the mark budget spent", filled(size, "](", "&&&&&{{displayName}}", spent), sample},
 		} {
 			var parseErr, renderErr error
 			allocated := allocatedBy(func() {
 				var d Document
 				if d, parseErr = Parse(c.doc); parseErr == nil {
-					_, renderErr = Render(context.Background(), d, nil, RenderOptions{Preview: true})
+					_, renderErr = Render(context.Background(), d, nil, c.opts)
 				}
 			})
 			if parseErr != nil || (renderErr != nil && !errors.Is(renderErr, ErrTooLarge)) {
@@ -2582,7 +2595,7 @@ func TestFormattedTextCostIsBounded(t *testing.T) {
 	// Each open parenthesis is a mark: 2 MiB of them after "](" (which cost
 	// 409 MiB to read and write when they were not) is refused at once.
 	var err error
-	doc := whole("", "](", "(")
+	doc := filled("", "](", "(")
 	if allocated := allocatedBy(func() { _, err = Parse(doc) }); err == nil || err.Error() != "This email has too much formatted text. Shorten it or split it into more emails." || allocated > 64<<20 {
 		t.Fatalf("2 MiB of open parentheses: want the budget's refusal, cheaply, got %v after %d bytes", err, allocated)
 	}

@@ -46,7 +46,10 @@ const (
 	maxInlineMarks    = 10000
 )
 
-var errTooMuchFormatting = errors.New("This email has too much formatted text. Shorten it or split it into more emails.")
+var (
+	errTooMuchFormatting = errors.New("This email has too much formatted text. Shorten it or split it into more emails.")
+	errNotUTF8           = errors.New("This email file isn't valid UTF-8. Save it as UTF-8 and try again.")
+)
 
 func wordSet(words string) map[string]bool {
 	set := map[string]bool{}
@@ -397,7 +400,7 @@ func textOf(raw json.RawMessage) (string, error) {
 	return s, err
 }
 
-// Parse reads and validates an email document.
+// Parse reads and validates an email document, which must be UTF-8.
 //
 // The document is exactly one of two modes: a layout (blocks) or custom HTML
 // (textBody and htmlBody). Every key, value, link, picture and piece of markup
@@ -410,6 +413,11 @@ func textOf(raw json.RawMessage) (string, error) {
 func Parse(data []byte) (Document, error) {
 	if len(data) > MaxBytes {
 		return Document{}, errors.New("email document exceeds 2 MiB")
+	}
+	// Reading JSON turns each byte that is not UTF-8 into U+FFFD, three bytes,
+	// so a file of them would be three times its size once read.
+	if !utf8.Valid(data) {
+		return Document{}, errNotUTF8
 	}
 	fields, err := readDocument(data)
 	if err != nil {
