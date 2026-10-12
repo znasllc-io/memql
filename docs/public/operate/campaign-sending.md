@@ -348,8 +348,15 @@ holds can be held by locks at once, so the work done under them can always reach
 the database. A signup that cannot take its locks within six seconds answers "Too
 many signups at once. Try again in a moment." and writes nothing. The locks are an
 idle transaction, which PostgreSQL ends after 60 seconds
-(`idle_in_transaction_session_timeout`) and the lock with it, so the part under
-them is a few single-row reads and writes and never a roster walk.
+(`idle_in_transaction_session_timeout`) and the lock with it, so what runs under
+them is kept to a handful of reads and the writes, and never a roster walk. For a
+mailbox the signup is about to add, two of those reads are the expensive ones (the
+mailbox by digest and the audience's size): the engine answers any recipient read
+from every current recipient in the cluster, which costs one to four seconds each
+at 200,000 recipients, depending on how busy the database is. New subscribers to
+one audience therefore take their turns, and one that waits more than six seconds
+for its turn is told to try again. The single-row reads and the writes are
+milliseconds.
 
 Consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and

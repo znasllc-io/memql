@@ -253,8 +253,13 @@ func (w *Worker) signupSettled(ctx context.Context, row map[string]any, signupID
 // had; no lock of the newsletter stops it.
 //
 // The locks are an idle transaction on the request pool, which PostgreSQL ends at
-// idle_in_transaction_session_timeout (60 s by default) and the lock with it, so the
-// part under them is seconds of single-row reads and writes, and never a roster walk.
+// idle_in_transaction_session_timeout (60 s by default) and the lock with it, so what
+// runs under them is kept to a handful of reads and the writes, and never a roster
+// walk. For a mailbox about to be added two of those reads are the expensive ones:
+// the engine answers any recipient read, the keyed one and the count alike, from every
+// current recipient in the cluster, so each costs seconds at 200,000 recipients, and a
+// new subscriber holds the locks for the pair. The single-row reads and the writes are
+// milliseconds.
 func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
 	address := NormalizeEmail(argString(args, "email"))
