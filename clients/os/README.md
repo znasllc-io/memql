@@ -1069,6 +1069,12 @@ label chips. Label filters still work. Open remains a text action; desktop,
 download and Delete use named icons. Delete moves the file to the Bin, where it
 can be restored until purged.
 
+**Add to this folder** offers Upload files, New Markdown file, and New folder.
+New Markdown file opens Make a file on Name with Markdown, the current folder,
+and a way back to Files. Searching, Bin, Materializer and the Library root name
+no destination folder. The Markdown item is absent when Materializer cannot be
+opened.
+
 Ordinary uploads are independent copies. Host-path tracking belongs only to
 explicit folder backups; see the [upload contract](../../docs/public/operate/library.md#uploads-and-folder-backups).
 Backups use a plus action, a full-page form, a schedule, and a hidden-file switch.
@@ -1328,7 +1334,8 @@ folder is still archived moves it to Library root. Purging remains in the Bin ap
 Materializer shows live files whose backing file is named by a composition’s
 `outputFileId`. Empty or failed compositions do not create placeholder file rows;
 archived outputs belong in Bin. Folders scope this same subset. **Open in
-Materializer** opens the composition, and appears only when that app is installed.
+Materializer** opens the composition’s finished-file page in Materialized, and
+appears only when that app can be opened.
 The composition feed is retained once at the app root, alongside the file feeds.
 
 ### Folder-backup state
@@ -1576,280 +1583,162 @@ wrong by default.
   is absolute against the list's relative root, never fixed -- the desk plate
   is CSS-transformed and becomes a fixed element's containing block.
 
-## The Materializer, the eleventh app (epic memql#4977), and the one way a file is made (memql#6023)
+## The Materializer and the one way a file is made
 
-`src/apps/materializer/` is where a person and the model make a file: a report,
-a spreadsheet, a branded document, a package a site is deployed from, or a
-blank document. Design records:
-[2026-09-05-compose-materializer-design.md](../../docs/superpowers/specs/2026-09-05-compose-materializer-design.md)
-for the app and
-[2026-10-11-materializer-front-door-design.md](../../docs/superpowers/specs/2026-10-11-materializer-front-door-design.md)
-for the one-creation-path rule.
+`src/apps/materializer/` makes files and shows their composition records. Its
+visible tabs are **Materialized**, **Templates**, and **Recipes**; Settings holds
+preferences and prerequisite setup. The app id is `materializer`, and its records
+live in `v1:compose:*`. The shared creation and navigation contracts live in
+`src/items/materialize.ts` and the SDK. Design records:
+[Materializer app](../../docs/superpowers/specs/2026-10-12-materializer-app-design.md)
+and [one creation path](../../docs/superpowers/specs/2026-10-11-materializer-front-door-design.md).
 
-**THE APP IS `materializer` AND THE ROWS ARE `v1:compose:*`, and that split is
-the epic's rather than a slip.** `materializer` already names the engine's boot
-seeder (`component/memql/seed_materializer.go`), so the namespace could not
-take the word without putting `system:seedMaterializer` and `v1:materializer:*`
-one word apart in every log line. The SURFACE keeps the name --
-`v1:work:goal.requestedVia` has carried the string since before this app
-existed.
+### Make a file
 
-Five things about it are new rules rather than repetitions of the ten apps
-before it.
+The plus in Materialized, Start over, and a starting setup open the shared
+`Wizard` in `MakeWizard.tsx`. The model in `make.ts` decides its steps, answers,
+opening step, status and request. The steps are Kind of file, Template when
+relevant, From, Describe, Name, Folder and Organization, followed by File while
+making. Optional answers start usable; a blank file needs only a name. Make the
+file is offered from any step once the answers can be used. The Name field uses
+the SDK's `fileNameProblem`, including the same words used in the editor.
 
-- **THE COLUMNS ARE THE COMPOSITION'S OWN STRUCTURE, NOT A LAYOUT.** What goes
-  in, what is asked for, what comes out: Sources, the brief, the Target. Three
-  columns is a shape this shell had not used and it earns it because the
-  subject genuinely has three parts a person moves between -- not because
-  three panels looked balanced. Below a pointer breakpoint they stack in that
-  reading order.
+`Ingredients.tsx` mixes readable Library files and available record types in a
+searchable From tray. Picked items appear as removable cards, with record counts.
+The file list shows the twenty newest until a search narrows it. Marked record
+types come first; the setting to offer every record type includes usable
+unmarked types. A record without a list query is not offered. Feed groups load
+as skeletons, and errors stay beside the group they affect.
 
-  **The file is the deliverable, and this window never shows a second copy of
-  it.** The middle column is the brief -- organization, name, and what the
-  person wants made -- and once a composition exists it reads *what was asked
-  for* and one sentence saying the composed text is in the file. The act that
-  opens the file is on the bar. A copy of the text here would be a second thing
-  that could disagree with the first, and the person's question on a finished
-  composition is "which file did I get", which the file answers and a
-  transcript beside it cannot.
+`FolderSelect` shows the Library root and usable folders. A setup's inaccessible
+folder stays visible as Unavailable folder; the client does not silently replace
+it with the root. The cluster checks the chosen folder before writing and its
+refusal stays in the wizard, where the Folder step can correct it. An email
+template requires an organization and starts with the person's default one when
+available. Other kinds can have no organization. Inference setup is offered only
+to people who can perform it.
 
-- **THE PROVENANCE CHAIN IS THE ONE DEVICE THIS APP SPENDS ANYTHING ON, and it
-  is drawn in INK RATHER THAN HUE.** One line under the columns reads the whole
-  claim -- *from 3 rows, 1 file → through Acme quarterly → by
-  anthropic/claude-sonnet-5 → as PDF* -- with a sentence beneath saying whether
-  that survives the file leaving the cluster. The direction is drawn because
-  the direction is a RULE (sources feed the template, which produces the file),
-  which is the same ground the Files backup wire draws one on.
+The floor tells the person whether the request starts blank, produces a model's
+file, or produces a draft to review in the editor. Audio and video are not
+offered. Requests follow this table in the OS, the SDK and the engine:
 
-  The models link is a **hollow mark where no model was reached and a filled
-  one where one was**: the Work app's own axis, reused deliberately rather than
-  re-invented, so somebody who has read one run already knows what a filled
-  mark means. Hue was the wrong axis for the reason the Work spine records --
-  amber is `warn`, red is `error`, the accent is live/primary/yes-here, and a
-  colour-per-state legend would put status hues on a partition that has nothing
-  to do with status.
+| The request | Path |
+|---|---|
+| A name and kind, with no description, sources or template | Blank Markdown, text, HTML, CSV or JSON, with no model call. Word and PDF need content |
+| Markdown described in words with nothing picked, or only Markdown files up to 32 KiB each and PNG, JPEG, GIF or WebP pictures up to 8 MiB each | Blank file followed by the person's Library revision request |
+| Markdown described in words with any other file, a record or a query | Composer reads the sources and writes the file |
+| A template, another kind of file, an email template or a package | Composer writes the file |
 
-  **It is live, and that is the point.** Changing the target changes the last
-  link and the claim under the person's hand, which is how somebody learns that
-  some formats cannot carry provenance by USING the app rather than by reading
-  a design record.
+The SDK's `readDescribedMarkdown` reads missing Library file facts before
+starting; its shared predicate determines the route. Every picked Library file
+travels with `content: true`, so the composer can read it when that route is
+chosen. The model uses the same predicate over known rows to describe the path
+on screen. Unknown or unreadable facts never promise an editor draft. The
+engine's copy tests hold file types, blank formats, packages and filed names to
+the OS model.
 
-- **THREE ANSWERS ABOUT PROVENANCE, NEVER TWO.** `provenanceEmbedded` is read
-  through `optionalBool` rather than the SDK's `rowBool`, which answers `false`
-  for a missing key. A composition still composing has not reached the stamp
-  step, so nothing has answered yet -- and reading that as `false` would put
-  "the record is the only copy" on a file that will carry its own the moment it
-  is written. Absent renders NO claim at all. `test/materializer/rows.test.ts`
-  pins all three.
+### Making and the file's page
 
-  The `false` case is not a failure and the surface never draws it as one:
-  markdown, HTML, docx and PDF embed the record in their own bytes; txt, CSV
-  and JSON are written EXACTLY as composed -- no `#` header, no
-  `{provenance, rows}` wrapper -- because either would break the spreadsheet
-  or the parser downstream. A blank file carries none either: its history is
-  kept on its composition and the file says nothing about it. The app says
-  which it is, in the format's name.
+Starting keeps the wizard in view. File becomes its current step; the status
+moves through Starting, Composing and Writing the file, with elapsed time.
+**Stop** requests cancellation. **Leave** leaves the work running and returns to
+the app that supplied the setup when it is available, or to Materialized. A live
+ready, failed or cancelled result opens its page only while that wizard is still
+showing the same work. It does not move a window the person has taken elsewhere.
 
-- **THE SOURCES COLUMN IS THE `@composable` MARK, AND AN UNMARKED CONCEPT IS
-  UNMARKED RATHER THAN FORBIDDEN.** `composableConcepts` reads the concept
-  registry -- so it is an on-demand read that says when it looked, not a feed:
-  there is no `graph.node.*` event for a registry, and a `useLiveCollection`
-  over one would render "Loading from the cluster" and then a list that
-  silently never moved. The set changes when a DSL bundle is redeployed, not
-  while somebody is composing.
+`CompositionPage.tsx` replaces the list and presents the file's kind, folder,
+sources, description, optional template and organization, models, provenance and
+creation time. It shows the composition's own provenance sentence. A model mark
+names the model and opens its run where permitted; it does not copy the file's
+contents. Blank and described files have their own captions and say No model
+when none wrote them. Description and attachment notices stay beside the file
+and are announced through a mounted status region.
 
-  **"Nothing is marked" and "this node cannot read the registry" look identical
-  from an empty list**, and only one of them is something an operator can fix,
-  so the engine reports which and the column says so. A marked concept with no
-  `list` query is rendered and DISABLED with the reason on it -- there the
-  useful statement is "the cluster has this and cannot offer it", which an
-  absent row could not make.
+`pageActs` keeps the permitted actions to at most three, primary last. A ready
+file offers Open in editor, with Save as recipe when the request can run again.
+A package offers Download and Deploy it. A failed or stopped record offers Start
+over, which puts its answers back into Make a file for review. Archived records
+can be restored and their existing files opened; archiving a composition leaves
+the file in Files.
 
-- **THE APP ASKS THE SHELL WHETHER IT IS THERE** (`useOsIfPresent`, in
-  `chrome/state.tsx`). The only things this app wants from the shell are handing
-  off to another one -- Files for the output, Nexus for the goal, the app that
-  sent the person here for the way back -- and all happen on a click. Reaching
-  for `useOs` at an app root makes the whole app unmountable without a desktop,
-  which costs every one of its tests a shell it does not otherwise need; a test
-  that has to build a desktop to assert a sentence is one that stops being
-  written. `useOs` KEEPS ITS THROW for chrome, where a missing provider is a
-  wiring bug worth failing loudly on.
+For a blank or described request with the browser editor selected,
+`editorOpening.ts` reserves a tab during the person's Make press. It navigates
+only after the file's Library index entry exists and, for described Markdown,
+after the description hand-off has settled. Refused, failed or stopped work
+closes the reservation. A browser refusal is shown beside the file and Open in
+editor remains available. With the desktop editor selected, opening stays an
+explicit action. A composed file is also opened explicitly.
 
 ### One way to make a file
 
-**Every new file is a composition, a blank one included.** Uploading bytes the
-person already has stays an upload (Files, the desk, Training and the Campaigns
-audience import); everything else a client creates goes through the SDK's
-`startMaterialize` / `materialize` (`@znasllc-io/memql-sdk-core/client`). The
-app calls `startMaterialize` through `query.executeNamed` and follows the
-composition on its own live feed, because the OS prefers a subscription to a
-timer; the editors use the polling `materialize`. What the cluster does with the
-request:
+Every client uses the SDK's `materialize` contract. The OS calls
+`startMaterialize` and follows retained live collections for compositions and
+Library artifacts, then calls `handOffDescription`; editors use
+`followComposition` through `materialize`. No app writes a new Library file or
+calls the compose builtins through another path. `test/onePathCreate.test.ts`
+and the editor's matching guard fail on a competing creation path. Uploading an
+existing file remains an upload.
 
-| The request | What is made |
-|---|---|
-| A name and a format, nothing else | A blank Markdown, text, HTML, CSV or JSON file; no model call. A blank docx or PDF is refused |
-| Markdown with a statement and only Library files (or no sources) | A blank Markdown file, the statement kept on its composition; the app then hands the description to the Library (below) |
-| Markdown with a statement and a `concept_row` or `query` source | Written by the composer, which reads the records; the revision workflow cannot |
-| A template, another format, an email template, a package | Written by the composer |
+A request id belongs to one action and survives retry, so a double press starts
+one composition. Changed inputs use a new id. The description's comment and
+revision ids derive from that request. The cluster enforces authorization,
+format, folder and stored request consistency.
 
-`test/onePathCreate.test.ts` holds the rule: no file under `src` names a
-file-creating construct (`composeMaterialize`, `createLibraryFile`,
-`createArtifact`, `createGeneratedOutput`), none builds a `File` out of nothing
-(`new File(`), and only the five modules that upload bytes the person picked or
-dropped may upload. The allowlist is a list of reasons, and a stale entry fails.
-
-**A REQUEST ID BELONGS TO ONE ASK** (`actions.ts`). It is how a repeat of a
-request finds the composition the first one made, so a double press makes one
-file. It is kept across a retry of the same facts and renewed when the cluster
-answers with a composition, when the facts change, and when the form is reset;
-a failed composition has already answered, so "try again" carries a new id.
-The cluster looks the id up and then writes, so the hook also lets only one
-start be in flight.
-
-**A FINISHED FILE SAYS WHAT IT IS** (`words.ts` `madeCaption`, `Provenance.tsx`).
-The cluster files two kinds of file empty, a blank one and a described one, and
-"the composed text is in the file" is false of both. The caption under what was
-asked for follows what is known: "This file was created blank."; for a described
-file, "Your description was sent to be written. Open the file to review and
-approve the draft." once this window has sent it, the failure notice alone when it
-could not, and "This file was created from a description. Open it to continue."
-when the window does not know (opened later from the list, or not heard back yet);
-and the composed-file caption for a file a model wrote. The row tells them apart
-(a statement, its sources, no model call, provenance not carried), and the
-window's own list of described files wins over it. Nothing is said of a file that
-does not exist yet. The provenance line renders the record's `provenanceNote`,
-which the stamp step writes knowing which branch it took, and falls back to the
-format's claim only for a record without one.
-
-**A NAME IS CHECKED AS IT IS TYPED, AND A REFUSAL IS ONE SENTENCE**
-(`ComposerSection.tsx`, `actions.ts`). The Name field says what is wrong with a
-name beside it, with the SDK's `fileNameProblem`: the rule and the words of the
-editor's New Markdown (no slash or control character, not empty, at most 150
-characters, something before the chosen kind of file's extension), so the two
-clients say the same thing about the same name and the cluster is never sent a
-name it would refuse. Whatever the cluster does refuse arrives with the call's
-name in front and inside the engine's frame; `refusalSentence` takes those (and
-a Go package name) off, so the person reads only the sentence.
-
-**A DESCRIBED FILE'S DESCRIPTION IS SENT BY THIS WINDOW, AS THE PERSON**
-(`descriptionHandOff.ts`). The Library refuses a revision request made from
-inside a work run, deliberately, so the cluster files the empty page and the
-person's own client sends the description: `handOffDescription` posts it as a
-document-level comment (the `library_file` sources attached where the Library
-accepts them) and asks for the revision. The hook waits for the
-composition to be `ready` on the composition feed and for the file's entry on the
-artifact feed -- a new file's Files entry is written after the file, by an
-automation -- and then sends once per composition, under the request id the file
-was started with, so a repeat finds the first receipts. Nothing polls. What it
-cannot do is outlive the window: close it between ready and sent and the
-composition keeps the statement while the editor's empty page offers **Describe
-document**.
-
-Notices follow the file, in place and not as errors, because the file exists
-either way: the description could not be sent (with what to do, and the
-cluster's reason verbatim, without the SDK's lead-in that repeats the notice),
-and one per reference the Library did not take ("This reference wasn't
-attached.", its label beside it; the SDK's entry carries no reason, so none is
-given). They are
-announced by a separate, always-mounted, visually hidden `role="status"` element
-that receives their text. It is not a wrapper around the notices: Safari and
-VoiceOver drop the role of an element laid out with `display: contents`, and a
-live region that appears together with its text is not reliably announced.
-
-**A FOLDER IS THE CLUSTER'S TO ACCEPT.** The composer has no folder control; a
-folder arrives with a starting setup and is sent as it is. The cluster refuses
-one the person cannot read or that is in the Bin, before anything is written, and
-the sentence ("That folder isn't available. Choose another folder.") is shown
-beside the control as worded. A check of its own here would turn that refusal
-into a file filed quietly at the top, somewhere nobody chose.
+A described Markdown file is created blank. `descriptionHandOff.ts` waits for its
+ready composition and Files entry, then sends the description as the person,
+through the Library's revision workflow. A work run cannot do that on the
+person's behalf. It attaches the picked files within the Library's total limits
+(at most eight references) and names any excess beside the made file. Individual
+file types and sizes were already checked when choosing the route. A hand-off
+failure leaves the file usable and the editor offers Describe document. Nothing
+polls here; closing the window before the hand-off leaves the composition's
+statement for the person to continue from. A Stop that races with file creation
+keeps the file and records that its description was stopped before sending.
 
 ### A starting setup
 
-Other apps can open the Materializer already pointed at a file to make; no app in
-the shell sends one today. The contract is one module,
-`src/items/materialize.ts`, which a sender imports instead of anything under
-`apps/materializer/`, and the tests exercise it against the current composer:
+A sender imports `src/items/materialize.ts`, never `apps/materializer/`:
 
 ```ts
 actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
   format: "markdown",
-  folderId,                                        // a bare id
+  folderId,
   sources: [{ kind: "library_file", ref, label }],
   returnTo: { appId: "files", sectionId: "browse" },
 }));
 ```
 
-- **A SETUP IS A STARTING POINT, NEVER A COMMAND.** The person still names the
-  file, says what they want and chooses an organization; nothing in the intent
-  makes a file by itself. `outputKind: "email_template"` is the one kind a sender
-  can ask for, and it needs the JSON format.
-- **IT IS VALIDATED ON THE WAY IN.** `readComposeIntent` keeps what it can use
-  and drops the rest quietly -- a format this cluster does not write, a source of
-  a kind the Materializer does not take, a return target missing half of its
-  address -- because the sender cannot be told while it is still composing the
-  payload. A payload with no `compose` key is some other instruction and is left
-  standing. Bare ids only, per the identifiers contract.
-- **A SETUP LIVES AND DIES WITH THE FORM IT FILLED IN.** The composer applies it
-  once, over a fresh form: format, sources, folder and return target together.
-  Leaving the composer abandons the form, and the first file made from it uses
-  the folder and the way back up. **Compose another** and **Start over** end the
-  trip.
-- **THE WAY BACK IS A TEXT ACT, ONLY WHERE IT GOES SOMEWHERE.** *Back to Files*
-  sits in front of the primary act on a finished file made from that setup, in a
-  shell that holds the app and for a person who may open it. The bar holds three
-  acts, so Archive gives way while the trip is live and returns when it ends.
-- **SECTION IDS ARE CONTRACT.** `openApp` to a section an app does not declare
-  moves nobody and says nothing; `test/materializer/intent.test.tsx` pins
-  `composer` against the manifest's own list.
+A setup starts no work. `readComposeIntent` keeps supported formats and source
+kinds, complete return addresses, and opaque ids exactly as received. An email
+template uses `outputKind: "email_template"` with JSON. The wizard applies the
+setup together to a fresh draft and opens the next unanswered step; Files' New
+Markdown file opens Name. Leaving abandons the draft. Its first made file keeps
+the way back only for that trip; Start over creates a new draft without it.
+The way back appears only when the shell holds the destination app and the
+person may open it. Section ids are shared constants: `composer` for a setup,
+`materialized` for a composition's page. A running composition intent opens the
+making stage.
 
-### The seam with Files
+### Templates, recipes and Files
 
-Agreed with the Files-places epic (memql#4981) and recorded in both places:
-**a composition has one record and its output has one file.** This app's
-Materialized section answers *what was made, from what, by which models*; the
-Files rail's Materializer place answers *where is the file*. Files carries
-"Open in Materializer" and one sentence; it never edits a composition, and this
-app never shows a file tree. `compositionForOutputFile` is the file-to-record
-direction for a surface that does not already hold the composition set.
+Templates and Recipes use live lists and pages that replace their lists. Add a
+template is a wizard over an existing Library file, its kind, name, optional
+description and organization; ZIPs are excluded. Template pages show their file,
+format, description, organizations and declared inputs, with Archive or Restore.
+Recipes show the saved kind, folder, sources, description, template and
+organization. Run it again starts a fresh composition. Unavailable folders remain
+visible and the cluster can refuse them.
 
-A composition whose bytes never stored is `failed` with an EMPTY
-`outputFileId`, so it is absent from the Files place by construction -- there
-is no file for it to show -- and visible only here, where the failure and its
-reason belong.
+Settings selects the opening tab and starting kind and uses switches for Include
+archived and Offer every record type. File creation does not set goal budgets;
+the engine enforces the goal's accepted ceilings.
 
-### What it deliberately does not do
-
-**There is no document editor, and no copy of the file.** The finished file
-opens in the person's editor from **Open the file**; writing and revising it is
-the editor's and the Library's revision workflow's job, not this window's.
-
-**There is no folder control.** A folder arrives with a starting setup, and a
-refusal tells the person to choose another one with nothing here to choose it
-with. A recipe whose folder has since been archived is refused by the same rule,
-and nothing in the OS edits a recipe's folder.
-
-**There is no Retry on a failed composition**, and Start over is offered
-instead. The record holds the sources it RESOLVED rather than the form that
-produced them, so a retry would silently re-run something slightly different
-from what was asked for; Start over opens the composer where a person can see
-what they are about to re-run.
-
-**A described file's Files entry that never appears is not timed out.** Nothing
-polls in this app, so there is no clock to say the description was never sent;
-the composition keeps the statement and the editor's empty page offers
-**Describe document**.
-
-**Audio and video are named and unoffered.** The brief asks for both. Audio
-wants a compose-then-speak pipeline with a spending ceiling of its own and
-video wants a generation provider this cluster does not have, so the Target
-column says so -- an absent option with no account of itself reads as something
-nobody got round to building, which is the rule the Bin states about its
-missing retention control.
-
-**Nothing in this app sets a budget.** A materialization is a goal, and a
-goal's ceilings are set when the goal is accepted. The Settings section says
-that rather than leaving the gap somebody would go looking in.
+A composition has one record and its output has one file. Materialized answers
+what was made and how; Files answers where the file is. Files' New Markdown file
+sends its current folder and return address. Open in Materializer opens the
+composition's page through `MATERIALIZER_MADE_SECTION`. A failed composition
+without an output has no Files placeholder. This app never edits a file tree;
+Files never edits a composition.
 
 ## Ask conversations and voice
 
