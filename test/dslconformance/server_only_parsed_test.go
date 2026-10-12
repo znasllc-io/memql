@@ -173,14 +173,21 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
-		{Path: "email/queries.memql", Name: "emailSendOperationByProviderId"}:  true,
-		{Path: "email/queries.memql", Name: "emailUnindexedConnections"}:       true,
-		{Path: "email/queries.memql", Name: "emailReadyFeedbackOrganizations"}: true,
-		{Path: "email/mutations.memql", Name: "indexEmailConnectionState"}:     true,
-		{Path: "campaigns/queries.memql", Name: "providerDeliveryById"}:        true,
-		{Path: "campaigns/queries.memql", Name: "providerConsentById"}:         true,
-		{Path: "campaigns/mutations.memql", Name: "recordProviderDelivery"}:    true,
-		{Path: "campaigns/mutations.memql", Name: "recordProviderBounce"}:      true,
+		{Path: "email/queries.memql", Name: "emailSendOperationByProviderId"}:       true,
+		{Path: "email/queries.memql", Name: "emailUnindexedConnections"}:            true,
+		{Path: "email/queries.memql", Name: "emailReadyFeedbackOrganizations"}:      true,
+		{Path: "email/mutations.memql", Name: "indexEmailConnectionState"}:          true,
+		{Path: "campaigns/queries.memql", Name: "providerCountersToRepair"}:         true,
+		{Path: "campaigns/queries.memql", Name: "providerCounterCampaignById"}:      true,
+		{Path: "campaigns/queries.memql", Name: "providerCounterLedger"}:            true,
+		{Path: "campaigns/mutations.memql", Name: "repairProviderCampaignCounters"}: true,
+		{Path: "campaigns/mutations.memql", Name: "markProviderCounterRepair"}:      true,
+		{Path: "campaigns/mutations.memql", Name: "liftOrganizationSuppression"}:    true,
+		{Path: "campaigns/mutations.memql", Name: "clearProviderCounterRepair"}:     true,
+		{Path: "campaigns/queries.memql", Name: "providerDeliveryById"}:             true,
+		{Path: "campaigns/queries.memql", Name: "providerConsentById"}:              true,
+		{Path: "campaigns/mutations.memql", Name: "recordProviderDelivery"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "recordProviderBounce"}:           true,
 		// Durable email automation coordination; public callers use gated capabilities.
 		{Path: "campaigns/queries.memql", Name: "deferredSingleSendById"}:         true,
 		{Path: "campaigns/mutations.memql", Name: "settleDeferredSingleSend"}:     true,
@@ -492,7 +499,6 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// session. Caller ownership cannot prove renewed consent. The verified
 		// preferences handler records that consent under shared locks before
 		// lifting only the token's organization opt-out, never a safety block.
-		{Path: "campaigns/mutations.memql", Name: "liftOrganizationSuppression"}: true,
 		// An actor may request a send, but only the provider adapter can attest
 		// that an attempt began. The receipt and its replay read are private.
 		// Ownership cannot attest locked scheduling or a committed occurrence.

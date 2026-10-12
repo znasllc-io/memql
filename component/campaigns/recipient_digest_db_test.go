@@ -411,6 +411,7 @@ func newGatedWorker(t *testing.T, eng *memql.MemQLEngine, db *bun.DB, sender *re
 	worker := newTestWorker(t, deliveryDBEngine{eng}, sender)
 	wired := NewWorker(deliveryDBEngine{eng}, nil, nil, quietLogger(), gatePoolFor(t))
 	worker.newsletterGate, worker.templateGate, worker.singleSendGate = wired.newsletterGate, wired.templateGate, wired.singleSendGate
+	worker.progressGate, worker.providerLedgerGate = wired.progressGate, wired.providerLedgerGate
 	return worker
 }
 

@@ -59,6 +59,10 @@ func (w *Worker) drainWorkflow(ctx context.Context) error {
 			w.processJob(ctx, systemCtx, job)
 			return nil, nil
 		},
+		"campaignRepairProviderCounters": func(ctx context.Context, _ map[string]any) (any, error) {
+			w.repairProviderCounters(ctx)
+			return nil, nil
+		},
 		"campaignFlushReputation": func(ctx context.Context, _ map[string]any) (any, error) {
 			w.flushReputation(systemCtx)
 			return nil, nil
@@ -88,6 +92,6 @@ func campaignPage(ctx context.Context, ids []string, operation func(context.Cont
 
 func campaignWorkflowCapabilities() []string {
 	return []string{
-		"campaignJourneysToRetire", "campaignActiveJourneys", "campaignRetireJourney", "campaignRunJourney", "campaignJourneyCatalog", "campaignGenerateJourneyProposal", "campaignPromoteSeries", "campaignDrainWelcomes", "campaignRetryDeferredSends", "campaignDrainJourneys", "campaignJourneyExit", "campaignJourneyComplete", "campaignJourneyAdvance", "campaignJourneyWait", "campaignJourneyAwaitConfirmation", "campaignJourneySend", "campaignPromoteSchedules", "campaignApplyWarmup", "campaignDrainableJobs", "campaignDrainJob", "campaignFlushReputation", "campaignProcessSelected",
+		"campaignJourneysToRetire", "campaignActiveJourneys", "campaignRetireJourney", "campaignRunJourney", "campaignJourneyCatalog", "campaignGenerateJourneyProposal", "campaignPromoteSeries", "campaignDrainWelcomes", "campaignRetryDeferredSends", "campaignDrainJourneys", "campaignJourneyExit", "campaignJourneyComplete", "campaignJourneyAdvance", "campaignJourneyWait", "campaignJourneyAwaitConfirmation", "campaignJourneySend", "campaignPromoteSchedules", "campaignApplyWarmup", "campaignDrainableJobs", "campaignDrainJob", "campaignFlushReputation", "campaignRepairProviderCounters", "campaignProcessSelected",
 	}
 }
