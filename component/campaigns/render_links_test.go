@@ -690,18 +690,21 @@ func TestTheNameCapsAreDeclaredWhereTheyAreSaved(t *testing.T) {
 		}
 	}
 
-	// And the mutations that save them refuse an over-long value before the
-	// store sees it, with a message that names the argument.
-	for mutation, args := range map[string]map[string]int{
-		"createCampaign":        {"name": maxCampaignNameRunes, "fromName": maxSenderNameRunes},
-		"updateCampaign":        {"name": maxCampaignNameRunes, "fromName": maxSenderNameRunes},
-		"createCampaignTestRun": {"name": maxCampaignNameRunes, "fromName": maxSenderNameRunes},
-		"createSenderIdentity":  {"fromName": maxSenderNameRunes},
-		"updateSenderIdentity":  {"fromName": maxSenderNameRunes},
+	// The mutations that save them carry no @maxLength of their own. The argument
+	// check runs before the write does, so one would answer first, in the engine's
+	// words (`argument "name": value too long (201 runes, max 200)`), and the
+	// sentence the person is meant to read, from the write guard, would never be
+	// reached. TestAnOverLongNameIsRefusedInAPlainSentence drives the real thing.
+	for mutation, args := range map[string][]string{
+		"createCampaign":        {"name", "fromName"},
+		"updateCampaign":        {"name", "fromName"},
+		"createCampaignTestRun": {"name", "fromName"},
+		"createSenderIdentity":  {"fromName"},
+		"updateSenderIdentity":  {"fromName"},
 	} {
-		for arg, want := range args {
-			if got := mutationArgMaxLength(t, mutation, arg); got != want {
-				t.Errorf("%s declares @maxLength(%d) on %s, want %d", mutation, got, arg, want)
+		for _, arg := range args {
+			if got := mutationArgMaxLength(t, mutation, arg); got != 0 {
+				t.Errorf("%s declares @maxLength(%d) on %s, which makes the engine's own refusal answer before the sentence does", mutation, got, arg)
 			}
 		}
 	}

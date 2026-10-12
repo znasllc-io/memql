@@ -1577,6 +1577,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 	}
 
+	// The names a campaign's mail shows are capped (memql#6033): the view link
+	// carries them and a link token has a size limit. The sentence the person
+	// reads lives here because a mutation cannot state its own refusal, and on
+	// the merged row so a name saved before the cap is told about too. See
+	// campaign_name_guard.go.
+	if conceptMeta.Name == conceptCampaignsCampaign || conceptMeta.Name == conceptCampaignsSenderIdentity {
+		if err := validateCampaignNameLengths(conceptMeta.Name, payload); err != nil {
+			return nil, meta, err
+		}
+	}
+
 	// v1:platform:package tracks ONE source ONCE (2026-09-05 design, D8):
 	// a second active package for the same repository at the same ref would
 	// deploy the same apps and the same MemQL from two records. A cross-row

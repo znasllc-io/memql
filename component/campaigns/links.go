@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // links.go -- the URLs placed in an email (memql#6033).
@@ -241,14 +243,16 @@ func inertLinks(cfg Config) MessageLinks {
 //
 // The view link carries the campaign's name and the sender's, and a token over
 // maxLinkTokenBytes is refused. Both are free text an operator types, so the
-// bound has to come from where they are saved: dsl/campaigns declares these
-// lengths on campaign.name, campaign.fromName and senderIdentity.fromName (and on
-// the mutations that save them), and a test ties each declaration to these
-// constants. At these lengths the longest token possible is about 3 kB, with
-// every character one that JSON writes in six bytes.
+// bound has to come from where they are saved. The numbers are the engine's
+// (memql.CampaignNameMaxRunes and SenderNameMaxRunes, whose write guard refuses a
+// longer name with a sentence for the person who typed it), and
+// dsl/campaigns/concepts.memql declares the same on campaign.name,
+// campaign.fromName and senderIdentity.fromName; a test ties each declaration to
+// these constants. At these lengths the longest token possible is about 3 kB,
+// with every character one that JSON writes in six bytes.
 const (
-	maxCampaignNameRunes = 200
-	maxSenderNameRunes   = 100
+	maxCampaignNameRunes = memql.CampaignNameMaxRunes
+	maxSenderNameRunes   = memql.SenderNameMaxRunes
 )
 
 // clipRunes cuts s to at most limit characters, never in the middle of one.
