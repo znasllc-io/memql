@@ -67,6 +67,20 @@ import (
 // the Campaigns app, which names only the template, cannot both pass the same
 // revision.
 //
+// # Render first, lock after
+//
+// A render reads nothing a lock protects: only the document and the caller's own
+// pictures. It can also take a long time (a slot to wait for, then up to nine
+// reads of storage, each allowed ten seconds), and a lock is a transaction left
+// open on the request pool, whose backends end a transaction that has been idle
+// for a minute (a holder past that loses its lock to the next caller: a lost
+// update) and cancel a statement that waits eight seconds for one. So a save
+// renders BEFORE it takes its locks, and what runs under them is short: read the
+// template fresh, compare, check the revision, write. The organization and the
+// permission are looked at before the render, so somebody who may not save costs
+// no render, and again under the locks, since the render took time. A lock that
+// cannot be taken is a sentence for a person, not the database's words.
+//
 // # Revisions
 //
 // As for every shared write here: one cross-replica lock, the stored row read
@@ -97,6 +111,9 @@ var (
 	errUnknownAction      = errors.New("unknown template action")
 	errNotALibraryFile    = errors.New("The source file isn't a Library file. Choose a file from the Library, or leave the source empty.")
 	errTemplateSaveBusy   = errors.New("Saving is busy right now. Try again in a moment.")
+	errTemplateLocked     = errors.New("Someone else is saving this template. Try again in a moment.")
+	errTemplateNeedsWrite = errors.New("template write permission is required in this organization")
+	errOrganizationClosed = errors.New("organization is not active or accessible")
 	errTemplateNotFound   = errors.New("template not found; create and save it before publishing")
 	errTemplateChanged    = errors.New("this template changed; compare the latest revision before saving or publishing")
 	errUnsavedTemplate    = errors.New("save and review this revision before publishing")
@@ -174,21 +191,43 @@ func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ 
 	if w.templateGate == nil {
 		return nil, errors.New("template write coordination is unavailable")
 	}
+
+	// What takes time comes before any lock. The caller must be able to save in
+	// the organization (so that somebody who may not costs no render), and then the
+	// document is rendered as the caller reads pictures; archive and restore render
+	// nothing.
+	var rendered *renderedTemplate
+	if writing {
+		if err := w.requireOrganization(ctx, req.accountID); err != nil {
+			return nil, err
+		}
+		if !w.mayWriteTemplates(ctx, req.accountID) {
+			return nil, errTemplateNeedsWrite
+		}
+		var err error
+		if rendered, err = w.renderTemplate(ctx, req); err != nil {
+			return nil, err
+		}
+	}
+	return w.saveUnderLocks(ctx, req, rendered)
+}
+
+// saveUnderLocks is what decides a save, and all of it is short: the locks, the
+// organization and the template as they are now, the permission for what is to
+// be done, the comparison with what is stored, the revision, the write.
+// rendered is nil for archive and restore.
+func (w *Worker) saveUnderLocks(ctx context.Context, req templateRequest, rendered *renderedTemplate) ([]memorynodes.MemoryNode, error) {
 	gateKey := req.templateID
 	if req.sourceID != "" {
 		gateKey = "source:" + req.accountID + ":" + req.sourceID
 	}
-	release, err := w.templateGate(ctx, gateKey)
+	release, err := w.lockTemplate(ctx, gateKey)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	accounts, err := w.store.rows(ctx, call("query", "clientAccountById", arg{"accountId", req.accountID}))
-	if err != nil {
+	if err := w.requireOrganization(ctx, req.accountID); err != nil {
 		return nil, err
-	}
-	if len(accounts) != 1 || str(accounts[0], "status") != "active" {
-		return nil, errors.New("organization is not active or accessible")
 	}
 
 	if req.sourceID != "" {
@@ -204,7 +243,7 @@ func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ 
 		case req.templateID == "":
 			req.templateID = sourceTemplateID(req.accountID, req.sourceID)
 		}
-		releaseTemplate, err := w.templateGate(ctx, req.templateID)
+		releaseTemplate, err := w.lockTemplate(ctx, req.templateID)
 		if err != nil {
 			return nil, err
 		}
@@ -220,35 +259,68 @@ func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ 
 		verb = auth.VerbUpdate
 	}
 	if !w.store.engine.OrganizationCapable(ctx, req.accountID, verb, auth.ResourceData) {
-		return nil, errors.New("template write permission is required in this organization")
+		return nil, errTemplateNeedsWrite
 	}
 	if len(rows) == 0 {
-		return w.createTemplate(ctx, req)
+		return w.createTemplate(ctx, req, rendered)
 	}
-	return w.changeTemplate(ctx, req, rows[0])
+	return w.changeTemplate(ctx, req, rows[0], rendered)
+}
+
+// lockTemplate takes one of the template gates. A gate that cannot be taken
+// (the pool cancels a statement that has waited eight seconds for it, or the
+// caller stops waiting) is a sentence that says what to do; the cause is logged.
+func (w *Worker) lockTemplate(ctx context.Context, key string) (func(), error) {
+	release, err := w.templateGate(ctx, key)
+	if err != nil {
+		if w.logger != nil {
+			w.logger.Warn("campaigns: a template gate could not be taken", "gate", key, "error", err)
+		}
+		return nil, errTemplateLocked
+	}
+	return release, nil
+}
+
+// requireOrganization says whether the organization is one the caller may use at
+// all: it is active, and the engine shows it to them (it answers nothing about
+// one they are not in).
+func (w *Worker) requireOrganization(ctx context.Context, accountID string) error {
+	accounts, err := w.store.rows(ctx, call("query", "clientAccountById", arg{"accountId", accountID}))
+	if err != nil {
+		return err
+	}
+	if len(accounts) != 1 || str(accounts[0], "status") != "active" {
+		return errOrganizationClosed
+	}
+	return nil
+}
+
+// mayWriteTemplates is the check made before the render, when it is not known
+// whether the template is new: somebody who can neither create nor update on the
+// organization's data cannot save any template in it. Which of the two it is
+// decides under the locks.
+func (w *Worker) mayWriteTemplates(ctx context.Context, accountID string) bool {
+	return w.store.engine.OrganizationCapable(ctx, accountID, auth.VerbCreate, auth.ResourceData) ||
+		w.store.engine.OrganizationCapable(ctx, accountID, auth.VerbUpdate, auth.ResourceData)
 }
 
 // createTemplate saves a template nobody has saved yet, as a draft.
-func (w *Worker) createTemplate(ctx context.Context, req templateRequest) ([]memorynodes.MemoryNode, error) {
+func (w *Worker) createTemplate(ctx context.Context, req templateRequest, rendered *renderedTemplate) ([]memorynodes.MemoryNode, error) {
 	if req.expected != "" || req.action != "save" {
 		return nil, errTemplateNotFound
 	}
-	content, issues, err := w.renderTemplate(ctx, req)
-	if err != nil {
-		return nil, err
-	}
 	revision := w.templateRevision(time.Time{})
-	values := content.values(req.templateID, revision)
+	values := rendered.content.values(req.templateID, revision)
 	values["accountId"] = req.accountID
 	if err := w.writeTemplate(ctx, "createTemplate", values); err != nil {
 		return nil, err
 	}
-	return templateReceipt(req.templateID, revision, "draft", issues)
+	return templateReceipt(req.templateID, revision, "draft", rendered.issues)
 }
 
 // changeTemplate saves, publishes, archives or restores a template that is
 // stored. row is the stored version, read fresh under the template's gate.
-func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row map[string]any) ([]memorynodes.MemoryNode, error) {
+func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row map[string]any, rendered *renderedTemplate) ([]memorynodes.MemoryNode, error) {
 	if !sameOrganization(req.accountID, str(row, "accountId")) {
 		return nil, errTemplateOrgMoved
 	}
@@ -273,10 +345,7 @@ func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row ma
 		}
 		content = storedTemplate(row)
 	default:
-		var err error
-		if content, issues, err = w.renderTemplate(ctx, req); err != nil {
-			return nil, err
-		}
+		content, issues = rendered.content, rendered.issues
 		if req.action == "publish" && len(issues) > 0 {
 			return nil, publishRefusal(issues)
 		}
@@ -308,9 +377,17 @@ func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row ma
 	return templateReceipt(req.templateID, revision, target, issues)
 }
 
-// renderTemplate renders the document as it will be sent and says what a
-// template made from it holds. issues is never nil.
-func (w *Worker) renderTemplate(ctx context.Context, req templateRequest) (templateContent, []emaildoc.Issue, error) {
+// renderedTemplate is a document rendered as it will be sent: what a template
+// made from it holds, and the issues that keep it from being sent as it is
+// (never nil).
+type renderedTemplate struct {
+	content templateContent
+	issues  []emaildoc.Issue
+}
+
+// renderTemplate renders the document as it will be sent. It holds no lock, and
+// it is slow when pictures are (see the header).
+func (w *Worker) renderTemplate(ctx context.Context, req templateRequest) (*renderedTemplate, error) {
 	// A render can cost a node hundreds of MiB (see email_render.go), so saving
 	// takes one of the same slots a preview does, here, after the organization
 	// has been looked at and the document is known to be admissible.
@@ -319,25 +396,26 @@ func (w *Worker) renderTemplate(ctx context.Context, req templateRequest) (templ
 		if errors.Is(err, errPreviewBusy) {
 			err = errTemplateSaveBusy
 		}
-		return templateContent{}, nil, err
+		return nil, err
 	}
 	defer releaseSlot()
 	result, err := emaildoc.Render(ctx, req.document, &pictureReads{inner: artifactImages{w}, left: maxPictureReads}, emaildoc.RenderOptions{})
 	if err != nil {
 		if errors.Is(err, emaildoc.ErrTooLarge) {
-			return templateContent{}, nil, errPreviewTooLarge
+			return nil, errPreviewTooLarge
 		}
-		return templateContent{}, nil, err
+		return nil, err
 	}
 	document, err := documentObject(req.document)
 	if err != nil {
-		return templateContent{}, nil, err
+		return nil, err
 	}
-	return templateContent{
+	content := templateContent{
 		name: req.name, subject: req.document.Subject, textBody: result.Text, htmlBody: result.HTML,
 		preheader: req.document.Preheader, layoutID: req.document.Layout, sourceArtifactID: req.sourceID,
 		document: document,
-	}, previewIssues(result.Issues), nil
+	}
+	return &renderedTemplate{content: content, issues: previewIssues(result.Issues)}, nil
 }
 
 // storedTemplate is the content of a stored version, to write back as it is. Its

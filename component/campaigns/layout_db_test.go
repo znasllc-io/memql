@@ -45,7 +45,21 @@ func layoutActor(user string, role auth.Role) context.Context {
 
 func newLayoutWorld(t *testing.T) *layoutWorld {
 	t.Helper()
-	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
+	return newLayoutWorldWith(t, nil)
+}
+
+// newLayoutWorldWith is newLayoutWorld over a pool whose sessions carry the given
+// parameters, as the request pool of a node does (component/database sets
+// idle_in_transaction_session_timeout to 60 s and statement_timeout to 8 s on
+// every backend): a test that has to meet those limits meets them, at its own
+// scale.
+func newLayoutWorldWith(t *testing.T, sessionParams map[string]any) *layoutWorld {
+	t.Helper()
+	options := []pgdriver.Option{pgdriver.WithDSN(dbtest.DSN())}
+	if len(sessionParams) > 0 {
+		options = append(options, pgdriver.WithConnParams(sessionParams))
+	}
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(options...)), pgdialect.New())
 	t.Cleanup(func() { _ = db.Close() })
 	ping, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

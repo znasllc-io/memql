@@ -459,23 +459,8 @@ func TestPublishReadsPicturesAsThePublisherThroughTheEngine(t *testing.T) {
 	}
 	uploader, colleague := layoutActor(uploaderID, auth.RoleWriter), layoutActor(colleagueID, auth.RoleWriter)
 
-	// An upload, as the uploader's own act: the bytes in storage, the file row
-	// and the Library's index row for it.
 	data := previewPNG(t, 6, 4)
-	file := w.suffix + "-file"
-	blobURL := "library/" + uploaderID + "/" + file + "/hero.png"
-	blobs := &recordingBlobs{objects: map[string][]byte{blobURL: data}}
-	for _, worker := range w.workers {
-		worker.newBlobReader = func(context.Context) (blobReader, string, error) { return blobs, "memql", nil }
-	}
-	w.run(t, uploader, call("mutation", "createLibraryFile", arg{"fileId", file}, arg{"name", "hero.png"}, arg{"mimeType", "image/png"},
-		arg{"size", len(data)}, arg{"blobUrl", blobURL}, arg{"source", "uploaded"}, arg{"format", "image"}))
-	created, ok := w.run(t, uploader, call("mutation", "createArtifact", arg{"sourceConceptRef", "v1:library:file:" + file}, arg{"ownerUserId", uploaderID},
-		arg{"lens", "artifact"}, arg{"kind", "file"}, arg{"source", "uploaded"}, arg{"title", "hero.png"}, arg{"format", "image"}, arg{"mimeType", "image/png"})).(*memql.ExecuteResult)
-	if !ok || created.Bundle == nil || len(created.Bundle.Nodes) == 0 {
-		t.Fatal("createArtifact answered no row")
-	}
-	artifact := bare(created.Bundle.Nodes[0].Id)
+	artifact, blobs := w.uploadPicture(t, uploader, uploaderID, w.suffix+"-file", data)
 
 	doc := readyConfirmation(t)
 	setBlock(t, doc, "hero", func(b map[string]any) { b["src"] = "artifact:" + artifact })
@@ -541,4 +526,150 @@ func TestPublishReadsPicturesAsThePublisherThroughTheEngine(t *testing.T) {
 			t.Errorf("the stored document does not keep the artifact reference: %v %v", stored, err)
 		}
 	})
+}
+
+// uploadPicture is an upload, as the uploader's own act: the bytes in storage
+// (the recordingBlobs every worker reads), the file row and the Library's index
+// row for it. It returns the artifact id and the storage.
+func (w *layoutWorld) uploadPicture(t *testing.T, uploader context.Context, uploaderID, file string, data []byte) (string, *recordingBlobs) {
+	t.Helper()
+	blobURL := "library/" + uploaderID + "/" + file + "/hero.png"
+	blobs := &recordingBlobs{objects: map[string][]byte{blobURL: data}}
+	for _, worker := range w.workers {
+		worker.newBlobReader = func(context.Context) (blobReader, string, error) { return blobs, "memql", nil }
+	}
+	w.run(t, uploader, call("mutation", "createLibraryFile", arg{"fileId", file}, arg{"name", "hero.png"}, arg{"mimeType", "image/png"},
+		arg{"size", len(data)}, arg{"blobUrl", blobURL}, arg{"source", "uploaded"}, arg{"format", "image"}))
+	created, ok := w.run(t, uploader, call("mutation", "createArtifact", arg{"sourceConceptRef", "v1:library:file:" + file}, arg{"ownerUserId", uploaderID},
+		arg{"lens", "artifact"}, arg{"kind", "file"}, arg{"source", "uploaded"}, arg{"title", "hero.png"}, arg{"format", "image"}, arg{"mimeType", "image/png"})).(*memql.ExecuteResult)
+	if !ok || created.Bundle == nil || len(created.Bundle.Nodes) == 0 {
+		t.Fatal("createArtifact answered no row")
+	}
+	return bare(created.Bundle.Nodes[0].Id), blobs
+}
+
+// A node's request pool ends a transaction that has been idle for a minute and
+// cancels a statement that waits eight seconds (component/database sets both on
+// every backend), and a template gate is a transaction left open. These tests run
+// under the same two limits, at a scale a test can wait for.
+var productionLikeSession = map[string]any{
+	"idle_in_transaction_session_timeout": "2500", // 60 s in production
+	"statement_timeout":                   "1500", // 8 s in production
+}
+
+// A save that renders slowly must not lose another person's save. The reviewer's
+// reproduction: a holder idle past the transaction limit is terminated, and the
+// next caller takes the same lock while the first still works; the first then
+// writes over the second on the revision it had read. Here the render of one save
+// waits for storage for longer than the limit while another save of the same
+// revision lands, and the slow one must be refused for the revision, not win.
+func TestASlowRenderCannotLoseASaveThatLandsMeanwhile(t *testing.T) {
+	w := newLayoutWorldWith(t, productionLikeSession)
+	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	w.engines[0].InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(previousGrants); auth.SetMembershipSource(previousMembers) })
+	account := w.suffix + "-org"
+	w.createOrganization(t, account, "Slow client")
+	uploaderID := w.suffix + "-uploader"
+	w.seedUser(t, uploaderID, "writer")
+	w.seedMember(t, uploaderID, account)
+	uploader := layoutActor(uploaderID, auth.RoleWriter)
+	artifact, blobs := w.uploadPicture(t, uploader, uploaderID, w.suffix+"-file", previewPNG(t, 6, 4))
+	source := "art-" + w.suffix
+
+	fast := readyConfirmation(t)
+	save := func(replica int, ctx context.Context, content map[string]any, revision string) (savedTemplate, error) {
+		nodes, err := w.workers[replica].handleSaveTemplate(ctx, map[string]any{
+			"accountId": account, "name": "Slow email", "content": content, "sourceArtifactId": source,
+			"expectedRevision": revision, "action": "save",
+		}, 0)
+		if err != nil {
+			return savedTemplate{}, err
+		}
+		return decodeSaved(t, nodes), nil
+	}
+	first, err := save(0, uploader, fast, "")
+	if err != nil {
+		t.Fatalf("the first save: %v", err)
+	}
+
+	// The slow save reads its picture from storage, which waits.
+	blobs.hold = make(chan struct{})
+	blobs.entered = make(chan struct{}, 4)
+	slowDoc := readyConfirmation(t)
+	setBlock(t, slowDoc, "hero", func(b map[string]any) { b["src"] = "artifact:" + artifact })
+	slowDoc["subject"] = "The slow save"
+	slow := make(chan error, 1)
+	go func() {
+		_, err := save(0, uploader, slowDoc, first.Revision)
+		slow <- err
+	}()
+	select {
+	case <-blobs.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the render never read the picture")
+	}
+	// Nothing is locked while it waits. And it waits longer than the pool lets a
+	// transaction sit idle, so a lock it held would be gone by now.
+	var advisory int
+	if err := w.db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND classid = 1296387409 AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&advisory); err != nil {
+		t.Fatal(err)
+	}
+	if advisory != 0 {
+		t.Errorf("%d template gates are held while a render waits for storage", advisory)
+	}
+	time.Sleep(3 * time.Second)
+
+	// Another save of the same revision lands meanwhile, on the other replica.
+	landing := fast
+	landing["subject"] = "The save that landed meanwhile"
+	landed, err := save(1, uploader, landing, first.Revision)
+	if err != nil {
+		t.Fatalf("a save during a slow render: %v", err)
+	}
+
+	close(blobs.hold)
+	if err := <-slow; err == nil || !strings.Contains(err.Error(), "changed") {
+		t.Fatalf("the slow save passed the revision it had read (it wrote over the one that landed): %v", err)
+	}
+	row, found, err := w.workers[0].store.TemplateForSource(memql.ContextWithFreshRead(uploader), account, source)
+	if err != nil || !found {
+		t.Fatalf("templateForSource: %v %v", found, err)
+	}
+	stored, err := w.workers[0].store.rows(memql.ContextWithFreshRead(uploader), call("query", "templateById", arg{"templateId", bare(str(row, "id"))}))
+	if err != nil || len(stored) != 1 {
+		t.Fatalf("templateById: %v %v", stored, err)
+	}
+	if str(stored[0], "subject") != landing["subject"] || templateTime(stored[0]["createdAt"]).Format(time.RFC3339Nano) != landed.Revision {
+		t.Errorf("the template is %q at %v, not the save that landed (%q at %s)", stored[0]["subject"], stored[0]["createdAt"], landing["subject"], landed.Revision)
+	}
+}
+
+// A template gate that cannot be taken within the statement limit is a sentence for
+// a person: the pool's own words (canceling statement due to statement timeout)
+// are not.
+func TestAGateThatTimesOutIsASentenceForAPerson(t *testing.T) {
+	w := newLayoutWorldWith(t, productionLikeSession)
+	account := w.suffix + "-org"
+	w.createOrganization(t, account, "Busy client")
+	template := w.suffix + "-template"
+
+	// Somebody else is saving this template: its gate is held.
+	holder, err := memql.AcquireWriteGate(context.Background(), w.db.DB, "campaign-template:"+template)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder()
+
+	started := time.Now()
+	_, err = w.workers[1].handleSaveTemplate(w.owner, map[string]any{
+		"templateId": template, "accountId": account, "name": "Busy email", "content": readyConfirmation(t), "expectedRevision": "", "action": "save",
+	}, 0)
+	if err == nil || err.Error() != "Someone else is saving this template. Try again in a moment." {
+		t.Fatalf("error = %v", err)
+	}
+	if waited := time.Since(started); waited < time.Second || waited > 10*time.Second {
+		t.Errorf("waited %v: the pool should cancel the wait at its statement limit (1.5 s here)", waited)
+	}
 }

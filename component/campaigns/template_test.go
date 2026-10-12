@@ -7,11 +7,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/png"
 	"math"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -1116,6 +1118,270 @@ func TestTemplateReceiptIssuesAreNeverNull(t *testing.T) {
 	}
 }
 
+// lockingGates is the template gate as the database makes it: a key is held by one
+// caller at a time, and the others wait for it (or for their own deadline). It
+// records what is held now and what was ever taken, in order.
+type lockingGates struct {
+	mu    sync.Mutex
+	held  map[string]chan struct{}
+	taken []string
+}
+
+func newLockingGates() *lockingGates { return &lockingGates{held: map[string]chan struct{}{}} }
+
+func (g *lockingGates) acquire(ctx context.Context, key string) (func(), error) {
+	for {
+		g.mu.Lock()
+		if wait, busy := g.held[key]; busy {
+			g.mu.Unlock()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		release := make(chan struct{})
+		g.held[key] = release
+		g.taken = append(g.taken, key)
+		g.mu.Unlock()
+		return func() {
+			g.mu.Lock()
+			delete(g.held, key)
+			g.mu.Unlock()
+			close(release)
+		}, nil
+	}
+}
+
+func (g *lockingGates) holding() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	keys := make([]string, 0, len(g.held))
+	for key := range g.held {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (g *lockingGates) everTaken() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]string(nil), g.taken...)
+}
+
+// parkedRender makes the render of the next save stop at a picture it is reading,
+// as a slow storage does: entered says that a read has begun, and closing release
+// lets it go on. The picture is the hero of readyConfirmation, readable by the
+// caller.
+type parkedRender struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (tw *templateWorld) parkTheRender() *parkedRender {
+	tw.engine.pictureOwner = testOwner
+	tw.addPicture("art-hero", "image/png", previewPNG(tw.t, 5, 3))
+	tw.blobs.hold = make(chan struct{})
+	tw.blobs.entered = make(chan struct{}, 4)
+	return &parkedRender{entered: tw.blobs.entered, release: tw.blobs.hold}
+}
+
+// slowDocument is readyConfirmation with its hero picture read from the Library.
+func slowDocument(t *testing.T) map[string]any {
+	doc := readyConfirmation(t)
+	setBlock(t, doc, "hero", func(b map[string]any) { b["src"] = "artifact:art-hero" })
+	return doc
+}
+
+// A render reads nothing a lock protects (the document and the caller's own
+// pictures), and it can take a long time: a slot to wait for, then nine reads of
+// storage, each allowed ten seconds. A lock is a transaction left open on the
+// request pool, and the pool's backends end a transaction that has been idle for
+// a minute and cancel a statement that waits for eight seconds. So a template is
+// rendered BEFORE it takes its locks, and a slow render holds none.
+func TestASlowRenderDoesNotHoldTheLocks(t *testing.T) {
+	tw := newTemplateWorld(t)
+	gates := newLockingGates()
+	tw.w.templateGate = gates.acquire
+	parked := tw.parkTheRender()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := tw.save(saveTemplateArgs(slowDocument(t), func(a map[string]any) {
+			a["templateId"] = ""
+			a["sourceArtifactId"] = templateSource
+		}))
+		done <- err
+	}()
+
+	select {
+	case <-parked.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the render never read the picture")
+	}
+	if held := gates.holding(); len(held) != 0 {
+		t.Errorf("a render that is waiting for storage holds %v", held)
+	}
+	if taken := gates.everTaken(); len(taken) != 0 {
+		t.Errorf("a render that is waiting for storage had already taken %v", taken)
+	}
+
+	close(parked.release)
+	if err := <-done; err != nil {
+		t.Fatalf("the save: %v", err)
+	}
+	// The locks are taken for the part that decides, in their order: the file's,
+	// then the template's.
+	if taken := gates.everTaken(); len(taken) != 2 || taken[0] != "source:acme:art-9" || len(taken[1]) != 32 {
+		t.Errorf("locks taken = %v", taken)
+	}
+	if held := gates.holding(); len(held) != 0 {
+		t.Errorf("locks still held: %v", held)
+	}
+}
+
+// While one save renders slowly another may save the template, and the slow one
+// must not then pass the revision it read: it takes its locks after its render,
+// reads the template again under them and holds the caller to the revision.
+func TestASaveDuringASlowRenderCannotPassTheSameRevision(t *testing.T) {
+	tw := newTemplateWorld(t)
+	tw.engine.stateful = true
+	gates := newLockingGates()
+	tw.w.templateGate = gates.acquire
+	first := tw.saved(saveTemplateArgs(readyConfirmation(t)))
+	before := len(tw.engine.writes())
+	parked := tw.parkTheRender()
+
+	slow := make(chan error, 1)
+	go func() {
+		_, err := tw.save(saveTemplateArgs(slowDocument(t), revised(first.Revision, "save")))
+		slow <- err
+	}()
+	select {
+	case <-parked.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the render never read the picture")
+	}
+
+	// A quick save of the same revision lands in the meantime, behind no lock.
+	quick, cancel := context.WithTimeout(importCtx(), 3*time.Second)
+	defer cancel()
+	edited := readyConfirmation(t)
+	edited["subject"] = "Saved while the other render waited"
+	nodes, err := tw.w.handleSaveTemplate(quick, saveTemplateArgs(edited, revised(first.Revision, "save")), 0)
+	if err != nil {
+		t.Fatalf("a save during a slow render was held up: %v", err)
+	}
+	landed := decodeSaved(t, nodes)
+
+	close(parked.release)
+	if err := <-slow; err == nil || err.Error() != templateChanged {
+		t.Fatalf("the slow save passed a revision that was no longer the template's: %v", err)
+	}
+	if got := len(tw.engine.writes()); got != before+1 {
+		t.Fatalf("writes = %d, want the quick save's alone after the first (%d)", got, before+1)
+	}
+	if row := tw.engine.fakeEngine.template; templateTime(row["createdAt"]).Format(time.RFC3339Nano) != landed.Revision || row["subject"] != edited["subject"] {
+		t.Errorf("the stored template is not the quick save's: %v", row)
+	}
+}
+
+// A gate that cannot be taken (the database cancels a statement that waits for
+// eight seconds, or a lock is wanted for longer than the call may wait) is not an
+// error text for a person to read: it says what happened and what to do.
+func TestAGateThatCannotBeTakenIsASentence(t *testing.T) {
+	const sentence = "Someone else is saving this template. Try again in a moment."
+	timeout := errors.New("pq: canceling statement due to statement timeout")
+
+	t.Run("the first lock", func(t *testing.T) {
+		tw := newTemplateWorld(t)
+		tw.w.templateGate = func(context.Context, string) (func(), error) { return nil, timeout }
+		_, err := tw.save(saveTemplateArgs(readyConfirmation(t)))
+		if err == nil || err.Error() != sentence {
+			t.Fatalf("error = %v, want %q", err, sentence)
+		}
+		if strings.Contains(err.Error(), "statement") {
+			t.Error("the database's own words reached the person")
+		}
+		if len(tw.engine.writes()) != 0 {
+			t.Error("wrote without the lock")
+		}
+	})
+
+	t.Run("the template's own lock, after the file's", func(t *testing.T) {
+		tw := newTemplateWorld(t)
+		gates := newLockingGates()
+		taken := 0
+		tw.w.templateGate = func(ctx context.Context, key string) (func(), error) {
+			taken++
+			if taken == 2 {
+				return nil, timeout
+			}
+			return gates.acquire(ctx, key)
+		}
+		_, err := tw.save(saveTemplateArgs(readyConfirmation(t), func(a map[string]any) { a["sourceArtifactId"] = templateSource }))
+		if err == nil || err.Error() != sentence {
+			t.Fatalf("error = %v, want %q", err, sentence)
+		}
+		if held := gates.holding(); len(held) != 0 {
+			t.Errorf("the file's lock was kept: %v", held)
+		}
+		if len(tw.engine.writes()) != 0 {
+			t.Error("wrote without the lock")
+		}
+	})
+
+	t.Run("a caller who stops waiting", func(t *testing.T) {
+		tw := newTemplateWorld(t)
+		gates := newLockingGates()
+		tw.w.templateGate = gates.acquire
+		release, err := gates.acquire(context.Background(), "t1") // somebody else's save of t1
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer release()
+		waiting, cancel := context.WithTimeout(importCtx(), 100*time.Millisecond)
+		defer cancel()
+		if _, err := tw.w.handleSaveTemplate(waiting, saveTemplateArgs(readyConfirmation(t)), 0); err == nil || err.Error() != sentence {
+			t.Fatalf("error = %v, want %q", err, sentence)
+		}
+	})
+}
+
+// A person who may not save here costs no render and takes no lock: the
+// organization and the permission are looked at before either.
+func TestSomeoneWhoMayNotSaveCostsNoRenderAndNoLock(t *testing.T) {
+	for name, setup := range map[string]func(tw *templateWorld){
+		"outside the organization": func(tw *templateWorld) { tw.engine.accounts = map[string]map[string]any{} },
+		"an organization that is archived": func(tw *templateWorld) {
+			tw.engine.accounts = map[string]map[string]any{templateOrg: {"id": "v1:accounts:account:" + templateOrg, "status": "archived"}}
+		},
+		"no permission to write": func(tw *templateWorld) { tw.engine.capable = func(string, string, string) bool { return false } },
+	} {
+		t.Run(name, func(t *testing.T) {
+			tw := newTemplateWorld(t)
+			setup(tw)
+			parked := tw.parkTheRender()
+			_ = parked
+			_, err := tw.save(saveTemplateArgs(slowDocument(t)))
+			if err == nil {
+				t.Fatal("saved")
+			}
+			if keys, _ := tw.gate.snapshot(); len(keys) != 0 {
+				t.Errorf("took the locks %v", keys)
+			}
+			if got := tw.engine.calls("query libraryArtifactById"); len(got) != 0 {
+				t.Errorf("rendered: %v", got)
+			}
+			if limited, unbounded := tw.blobs.reads(); limited+unbounded != 0 {
+				t.Error("storage was read")
+			}
+		})
+	}
+}
+
 func TestSaveTemplateRefusalsComeInOrder(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -1200,6 +1466,9 @@ func TestSaveTemplateRefusalsComeInOrder(t *testing.T) {
 	})
 }
 
+// What decides a save is looked at again under the locks; the organization and the
+// permission are looked at before the render as well (see
+// TestSomeoneWhoMayNotSaveCostsNoRenderAndNoLock).
 func TestSaveTemplateRefusalsInsideTheGate(t *testing.T) {
 	t.Run("an inactive or unreadable organization", func(t *testing.T) {
 		for name, accounts := range map[string]map[string]map[string]any{
@@ -1224,20 +1493,29 @@ func TestSaveTemplateRefusalsInsideTheGate(t *testing.T) {
 		}
 	})
 
+	// Before the render it is not known whether the template is new, so somebody who
+	// can neither create nor update is refused there (no render, no lock). Which of
+	// the two a save needs is asked under the locks, on organization data.
 	t.Run("creating asks for create, editing asks for update, both on organization data", func(t *testing.T) {
 		tw := newTemplateWorld(t)
-		tw.engine.capable = func(string, string, string) bool { return false }
+		// Somebody who may update but not create.
+		tw.engine.capable = func(_, verb, _ string) bool { return verb == auth.VerbUpdate }
 		if _, err := tw.save(saveTemplateArgs(readyConfirmation(t))); err == nil || err.Error() != templateNeeds {
 			t.Fatalf("create without permission: %v", err)
 		}
+		if last := tw.engine.asked[len(tw.engine.asked)-1]; last != (layoutAsk{templateOrg, auth.VerbCreate, auth.ResourceData}) {
+			t.Errorf("a new template was decided on %+v, want create on organization data", last)
+		}
+		// Somebody who may create but not update.
+		tw.engine.asked = nil
+		tw.engine.capable = func(_, verb, _ string) bool { return verb == auth.VerbCreate }
 		tw.engine.fakeEngine.template = storedTemplateRow("t1", "draft", nil)
 		args := saveTemplateArgs(readyConfirmation(t), func(a map[string]any) { a["expectedRevision"] = templateStored.Format(time.RFC3339Nano) })
 		if _, err := tw.save(args); err == nil || err.Error() != templateNeeds {
 			t.Fatalf("edit without permission: %v", err)
 		}
-		want := []layoutAsk{{templateOrg, auth.VerbCreate, auth.ResourceData}, {templateOrg, auth.VerbUpdate, auth.ResourceData}}
-		if len(tw.engine.asked) != 2 || tw.engine.asked[0] != want[0] || tw.engine.asked[1] != want[1] {
-			t.Fatalf("asked %+v, want %+v", tw.engine.asked, want)
+		if last := tw.engine.asked[len(tw.engine.asked)-1]; last != (layoutAsk{templateOrg, auth.VerbUpdate, auth.ResourceData}) {
+			t.Errorf("an existing template was decided on %+v, want update on organization data", last)
 		}
 		if len(tw.engine.writes()) != 0 {
 			t.Fatalf("a refused save wrote: %v", tw.engine.writes())
@@ -1285,9 +1563,12 @@ func TestSaveTemplateRefusalsInsideTheGate(t *testing.T) {
 			if len(tw.engine.writes()) != 0 {
 				t.Errorf("%s: wrote", tc.action)
 			}
-			// Nothing was rendered for a template that is not there.
-			if got := tw.engine.calls("query libraryArtifactById"); len(got) != 0 {
-				t.Errorf("%s: rendered", tc.action)
+			// Archive and restore render nothing. A save or a publish is rendered
+			// before the locks, when it is not yet known that the template is not
+			// there, so it is the locks that refuse it.
+			rendered := len(tw.engine.calls("query libraryArtifactById")) != 0
+			if rendered != (tc.action == "save" || tc.action == "publish") {
+				t.Errorf("%s: rendered = %v", tc.action, rendered)
 			}
 		}
 	})
@@ -1339,7 +1620,7 @@ func TestTemplateWritesAreServerOnlyAndReadsAreFresh(t *testing.T) {
 		t.Errorf("%d gates still held", held)
 	}
 	tw.gate.err = fmt.Errorf("gate unavailable")
-	if _, err := tw.save(saveTemplateArgs(doc)); err == nil || err.Error() != "gate unavailable" {
+	if _, err := tw.save(saveTemplateArgs(doc)); err == nil || err.Error() != "Someone else is saving this template. Try again in a moment." {
 		t.Errorf("a gate that cannot be taken: %v", err)
 	}
 	tw.w.templateGate = nil

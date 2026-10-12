@@ -247,6 +247,13 @@ email, an empty list when there are none.
   done answers with its receipt. `restore` returns an archived template to
   draft; it publishes nothing.
 
+A save renders the document before it takes any lock, so a render that is slow
+(a picture to read, a busy node) never holds one. What runs under the locks is
+short: read the template as it is now, compare, check the revision, write. When
+another save of the same template is in progress and the lock cannot be taken in
+time, the answer is "Someone else is saving this template. Try again in a
+moment." and repeating the same call is safe.
+
 Raw template writes and the underlying create/update mutations are internal.
 
 ## Configure Azure once for the cluster
