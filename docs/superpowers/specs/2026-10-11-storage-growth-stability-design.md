@@ -48,20 +48,25 @@ chunk is never reused.
    and falls back to batched deletes only for rows outside a whole chunk.
 4. **Per-tick log lines move to Debug.** The cluster guard's
    duplicate-prevented line, `event trigger fired`, `starting automation
-   execution`, a successful `automation execution completed`, and the seed
+   execution`, a successful or skipped `automation execution completed`, and the seed
    materializer's `global row written`. Failures keep their levels.
 5. **A maintenance page instead of ingress-nginx's 503.** A `memql
    error-pages` subcommand (no database, no mesh) serves, with status 503 and
    `Retry-After`: the MemQL-branded page (mark, wordmark, "MemQL is being
-   updated") for the platform's own hosts (the apex, `api`, `identity`,
-   `mcp`, `os`, `vscode`), a neutral page with no MemQL branding ("This site
-   will be back soon") for every other host (hosted sites, custom domains),
-   and JSON when the client asks for JSON. Every front-door Ingress and every
-   Ingress the engine creates for a custom domain carries
-   `nginx.ingress.kubernetes.io/default-backend: error-pages`, which ingress-nginx
-   uses when the routed Service has no ready endpoints. Upstream 502/503/504
-   responses are NOT intercepted: the API returns some of them deliberately
-   and their bodies matter.
+   updated") for the platform's own hosts (`api`, `identity`, `mcp`, `os`,
+   `vscode`), a neutral page with no MemQL branding ("This site will be back
+   soon") for every other host (the apex, which is the cluster owner's main
+   website, hosted sites, custom domains), and JSON when the client asks for
+   JSON. Every front-door Ingress and every Ingress the engine creates for a
+   custom domain or an account door carries
+   `nginx.ingress.kubernetes.io/default-backend: error-pages` when its backend
+   speaks plain HTTP; ingress-nginx uses it when the routed Service has no
+   ready endpoints. The gRPC and HTTPS-backend Ingresses (the api gRPC door,
+   identity) keep ingress-nginx's own 503 this release: a custom default
+   backend inherits the location's backend protocol, so a plain-HTTP page
+   server behind them would answer 502. Upstream 502/503/504 responses are
+   NOT intercepted: the API returns some of them deliberately and their
+   bodies matter.
 
 ## Not in this release (release 2)
 
