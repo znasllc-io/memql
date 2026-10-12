@@ -203,6 +203,13 @@ func topLevelOrder(order []string) []string {
 	return out
 }
 
+// checkpointOrder keeps any recorded nested history while appending the
+// top-level tail recovered from the journal.
+func (r actRun) checkpointOrder() []string {
+	stored := rowStringSlice(r.row, "stepOrder")
+	return append(stored, r.order[len(topLevelOrder(stored)):]...)
+}
+
 // ---------------------------------------------------------------------------
 // Versions and the head
 // ---------------------------------------------------------------------------
@@ -224,6 +231,38 @@ func (i *Integration) readVersions(ctx context.Context, runId string, order []st
 		return runVersions{}, err
 	}
 	return shapeVersions(rows, order), nil
+}
+
+// readActVersions completes the run's checkpoint from admitted step intents.
+// The journal writes a step before executing it, but advances stepOrder only
+// after the receipt. A lost executor can therefore leave a real, resumable
+// tail absent from the run row. Keep the recorded prefix (including a fork's
+// inherited steps), and add only a contiguous tail in journal sequence order.
+// StepVersions already bounds, sorts and authorizes this read; no local
+// executor state or extra write at every step boundary is needed.
+func (i *Integration) readActVersions(ctx context.Context, run *actRun) (runVersions, error) {
+	rows, err := i.StepVersions(ctx, run.id)
+	if err != nil {
+		return runVersions{}, err
+	}
+	seen := make(map[string]bool, len(run.order))
+	for _, key := range run.order {
+		seen[key] = true
+	}
+	for _, row := range rows {
+		key := rowString(row, "key")
+		if key == "" || strings.Contains(key, "/") || seen[key] {
+			continue
+		}
+		// Do not resurrect an old template's step at an existing position,
+		// invent a missing prefix, or reorder the checkpoint's history.
+		if _, present := row["seq"]; !present || rowInt(row, "seq") != len(run.order) {
+			continue
+		}
+		run.order = append(run.order, key)
+		seen[key] = true
+	}
+	return shapeVersions(rows, run.order), nil
 }
 
 func shapeVersions(rows []map[string]any, order []string) runVersions {
@@ -271,14 +310,15 @@ func (v runVersions) newest(key string) int {
 	return max
 }
 
-// headOf is the run's head: the stored one, or -- for a run written before
-// the head existed -- each top-level step's newest version, which is what
-// every collapsed read already shows as current.
+// headOf preserves each stored version choice and fills only missing entries
+// from the admitted journal. A started tail can be absent from both the run's
+// order and head when its executor dies before writing the receipt.
 func headOf(r actRun, v runVersions) work.Head {
-	if h := work.ParseHead(r.row["head"]); h != nil {
-		return h
+	head := work.NewestHead(r.order, v.byKey)
+	for key, entry := range work.ParseHead(r.row["head"]) {
+		head[key] = entry
 	}
-	return work.NewestHead(r.order, v.byKey)
+	return head
 }
 
 // rowVersion is the version one step row carries: `version`, or `attempt` on
