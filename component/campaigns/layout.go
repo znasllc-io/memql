@@ -80,7 +80,7 @@ func (w *Worker) handleSaveLayout(ctx context.Context, args map[string]any, _ in
 		return nil, errors.New("a layout description is one line of up to 500 characters")
 	}
 	if saving && sourceArtifactID != "" && !layoutIDPattern.MatchString(sourceArtifactID) {
-		return nil, errors.New("the source file is not a valid Library file id")
+		return nil, errors.New("The source file isn't a Library file. Choose a file from the Library, or leave the source empty.")
 	}
 	if action != "save" && action != "archive" && action != "restore" {
 		return nil, errors.New("unknown layout action")
@@ -153,8 +153,15 @@ func (w *Worker) handleSaveLayout(ctx context.Context, args map[string]any, _ in
 			return nil, errors.New("this layout changed; compare the latest revision before saving")
 		}
 		status, mutation = target, "updateEmailLayout"
-	} else if expected != "" || action != "save" {
+	} else if action != "save" {
 		return nil, errors.New("layout not found; save it before archiving or restoring")
+	} else if expected != "" {
+		// An edit names the revision it read. No layout is visible under this id,
+		// so what the person read is not available to them any more: it was never
+		// saved, or it belongs to an organization they are not in (the engine
+		// answers both alike). Archiving and restoring are not what they were
+		// doing, so they are not what they are told.
+		return nil, errors.New("That layout isn't available. Choose another layout or save a new one.")
 	}
 
 	now := time.Now()

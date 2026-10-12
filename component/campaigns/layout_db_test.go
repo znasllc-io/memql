@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -54,6 +55,9 @@ func newLayoutWorld(t *testing.T) *layoutWorld {
 		t.Fatal(err)
 	}
 	w := &layoutWorld{suffix: fmt.Sprintf("layout-%d", time.Now().UnixNano())}
+	// Registered after the connection's own cleanup, so it runs while the
+	// connection is still open.
+	t.Cleanup(func() { removeLayoutRows(t, db, w.suffix) })
 	for n := range w.engines {
 		e, err := memql.New(db)
 		if err != nil {
@@ -80,6 +84,73 @@ func newLayoutWorld(t *testing.T) *layoutWorld {
 	w.owner = layoutActor(w.ownerID, auth.RoleOwner)
 	w.seedUser(t, w.ownerID, "owner")
 	return w
+}
+
+// layoutSuffixPattern is the shape of a run's suffix: "layout-" and the clock's
+// nanoseconds. removeLayoutRows refuses anything else.
+var layoutSuffixPattern = regexp.MustCompile(`^layout-[0-9]{10,}$`)
+
+// removeLayoutRows deletes what one run of these tests left in the database:
+// the users, organizations, groups, memberships and layouts it made, and the
+// rows the engine and other processes made about them (a seeded agent, a
+// notification addressed to one of its users). All of them carry the run's
+// suffix, in their id or in their payload, and nothing else does: the suffix is
+// the clock's nanoseconds, so two runs never share one.
+//
+// The database is shared with other test binaries, and nothing here may touch
+// their rows. So the statement is a plain substring match on the suffix, and a
+// suffix that is not exactly the shape a run makes is refused: an empty one
+// would be contained in every id there is.
+func removeLayoutRows(t testing.TB, db *bun.DB, suffix string) {
+	t.Helper()
+	if !layoutSuffixPattern.MatchString(suffix) {
+		t.Errorf("refusing to clean up after %q: it is not the suffix of a layout test run", suffix)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	res, err := db.ExecContext(ctx, `DELETE FROM "MemoryNodes" WHERE strpos(id, ?) > 0 OR strpos(payload::text, ?) > 0`, suffix, suffix)
+	if err != nil {
+		t.Errorf("removing the rows of %s: %v", suffix, err)
+		return
+	}
+	removed, _ := res.RowsAffected()
+	t.Logf("removed the %d rows of %s", removed, suffix)
+}
+
+// quietTB is a test that records what is reported to it instead of failing.
+type quietTB struct {
+	testing.TB
+	errors []string
+}
+
+func (q *quietTB) Errorf(format string, args ...any) {
+	q.errors = append(q.errors, fmt.Sprintf(format, args...))
+}
+func (q *quietTB) Logf(string, ...any) {}
+func (q *quietTB) Helper()             {}
+
+// The statement that cleans up is a substring match on a shared database, so
+// it must refuse anything that is not a run's suffix: an empty one is inside
+// every id. It is refused before the database is touched (the database here is
+// nil), so this needs no Postgres.
+func TestRemoveLayoutRowsRefusesAnythingButARunsSuffix(t *testing.T) {
+	for _, suffix := range []string{
+		"", "layout-", "layout", "layout-1", "layout-123456789", "x-1791791261136112000",
+		"layout-1791791261136112000-owner", "layout-1791791261136112000%", "layout-1791791261136112000' OR 'a'='a",
+		" layout-1791791261136112000", "LAYOUT-1791791261136112000",
+	} {
+		q := &quietTB{TB: t}
+		removeLayoutRows(q, nil, suffix)
+		if len(q.errors) != 1 || !strings.Contains(q.errors[0], "refusing to clean up") {
+			t.Errorf("suffix %q: reported %v, want one refusal", suffix, q.errors)
+		}
+	}
+	for _, suffix := range []string{"layout-1791791261136112000", "layout-1234567890"} {
+		if !layoutSuffixPattern.MatchString(suffix) {
+			t.Errorf("%q is the shape of a run's suffix and was refused", suffix)
+		}
+	}
 }
 
 func (w *layoutWorld) run(t *testing.T, ctx context.Context, q string) any {

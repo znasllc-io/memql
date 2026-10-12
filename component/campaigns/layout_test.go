@@ -31,6 +31,16 @@ const (
 	// id, which a picker returns, is "org:l1".
 	testLayout = "l1"
 	layoutOrg  = "client-a"
+
+	// Two sentences a person reads, spelled out here and not taken from the
+	// handler so that a change of wording is a change of a test.
+	//
+	// layoutNotAvailable answers a save that names a revision of a layout the
+	// caller cannot see: it was never saved, or it belongs to an organization
+	// the caller is not in. The way on is another layout or a new one.
+	layoutNotAvailable = "That layout isn't available. Choose another layout or save a new one."
+	// badSourceFile answers a source file id that is not the id of a Library file.
+	badSourceFile = "The source file isn't a Library file. Choose a file from the Library, or leave the source empty."
 )
 
 var (
@@ -279,7 +289,7 @@ func TestSaveLayoutRefusalsComeInOrder(t *testing.T) {
 		{"an unknown action without a name", importCtx(), func(a map[string]any) { a["action"] = "delete"; a["name"] = "" }, "unknown layout action"},
 		// The name comes before the document, which comes after the action.
 		{"no name and an invalid document", importCtx(), func(a map[string]any) { a["name"] = ""; a["document"] = "x" }, identifyIt},
-		{"a bad source file id", importCtx(), func(a map[string]any) { a["sourceArtifactId"] = "not a file id!" }, "the source file is not a valid Library file id"},
+		{"a bad source file id", importCtx(), func(a map[string]any) { a["sourceArtifactId"] = "not a file id!" }, badSourceFile},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w, engine, gate := layoutFixture(t)
@@ -523,7 +533,11 @@ func TestSaveLayoutExistingRowFlows(t *testing.T) {
 		{"restore again", storedLayout(t, "active"), only("restore", staleRevision), "", false, "active", stored, false},
 		{"archive what was never saved", nil, only("archive", stored), notFound, false, "", "", false},
 		{"restore what was never saved", nil, only("restore", ""), notFound, false, "", "", false},
-		{"an edit with a revision of what was never saved", nil, func(a map[string]any) { a["expectedRevision"] = stored }, notFound, false, "", "", false},
+		// A save that names a revision is an edit, and the person was not told to
+		// archive or restore anything: the layout is not one they can see (it was
+		// never saved, or it is another organization's), and the way on is to
+		// choose another or save a new one.
+		{"an edit with a revision of what was never saved", nil, func(a map[string]any) { a["expectedRevision"] = stored }, layoutNotAvailable, false, "", "", false},
 		{"another organization's layout", func() map[string]any {
 			row := storedLayout(t, "active")
 			row["accountId"] = "v1:accounts:account:client-b"
