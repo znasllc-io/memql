@@ -9,6 +9,7 @@ vi.mock("../../src/live/connection", () => ({
 }));
 
 import { artifactRow, click, fakeConnection, renderFiles } from "./harness";
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
 
 // THE ROW'S OWN ROUTE INTO THE BIN (memql#4784 AC).
 //
@@ -48,6 +49,7 @@ describe("archiving from a file row", () => {
 
     expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
     // The action KEEPS ITS NAME through the flow.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Move to Bin" }));
     expect(connection.callsNamed("archiveArtifact")).toHaveLength(1);
     expect(connection.callsNamed("archiveArtifact")[0]).toContain('artifactId: "a-1"');
@@ -101,5 +103,46 @@ describe("archiving from a file row", () => {
       expect(connection.callsNamed("restoreArtifact")).toHaveLength(1);
       expect(connection.callsNamed("restoreLibraryFile")).toHaveLength(1);
     });
+  });
+});
+
+// The question opens where the menu item that asked it was (memql#6033), outside
+// any bar: the second click of a double-click on "Move to Bin" used to answer it.
+describe("archiving from a file row, one double-click later", () => {
+  useFakeDate();
+
+  async function ask() {
+    const connection = fakeConnection({
+      artifacts: [artifactRow({ id: "a-1", title: "cut-03.mov" })],
+    });
+    h.connection = connection;
+    await renderFiles({ settings: { confirmBeforeArchive: true } });
+    await rightClickRow(/cut-03\.mov/);
+    await click(screen.getByRole("menuitem", { name: "Move to Bin" }));
+    expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
+    return connection;
+  }
+
+  it("does not move the file on the second click of the click that asked, and does once it is read", async () => {
+    const connection = await ask();
+    betweenTheClicks();
+    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    expect(connection.callsNamed("archiveArtifact")).toHaveLength(0);
+    expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
+
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Move to Bin" }));
+    expect(connection.callsNamed("archiveArtifact")).toHaveLength(1);
+  });
+
+  it("does not cancel on that click either", async () => {
+    const connection = await ask();
+    betweenTheClicks();
+    await click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText('Move "cut-03.mov" to the Bin?')).toBeTruthy();
+    await readTheBar();
+    await click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText('Move "cut-03.mov" to the Bin?')).toBeNull();
+    expect(connection.callsNamed("archiveArtifact")).toHaveLength(0);
   });
 });

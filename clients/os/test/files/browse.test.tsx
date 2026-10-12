@@ -12,7 +12,7 @@ vi.mock("../../src/live/connection", () => ({
 
 import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
 import { artifactRow, click, emit, fakeConnection, folderRow, renderFiles } from "./harness";
-import { readTheBar } from "../readTheBar";
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
 
 // The browse surface (epic #4722): live rows with the arrival cue in both
 // directions, the tree, the filters, the inspector's stories and actions.
@@ -154,6 +154,7 @@ describe("the folder rail", () => {
     const confirm = screen
       .getByText(/Archive "Client videos" and its 2 items\?/)
       .closest(".os-notice") as HTMLElement;
+    await readTheBar();
     await click(within(confirm).getByRole("button", { name: "Archive" }));
     // Contents first, then the folder -- the children-first walk, as real
     // rendered calls.
@@ -164,6 +165,53 @@ describe("the folder rail", () => {
     expect(connection.callsNamed("archiveLibraryFolder")).toEqual([
       'mutation archiveLibraryFolder(folderId: "f-vid")',
     ]);
+  });
+});
+
+// The folder's question opens where the menu item that asked it was (memql#6033):
+// outside any bar, so the second click of a double-click on "Archive" used to
+// answer it before it had been read.
+describe("a folder's archive, one double-click later", () => {
+  useFakeDate();
+
+  async function ask() {
+    const connection = fakeConnection({
+      folders: [folderRow({ id: "f-vid", name: "Client videos" })],
+      artifacts: [
+        artifactRow({ id: "a-1", title: "one.mp4", folderId: "f-vid" }),
+        artifactRow({ id: "a-2", title: "two.mp4", folderId: "f-vid" }),
+      ],
+    });
+    h.connection = connection;
+    await renderFiles();
+    fireEvent.contextMenu(screen.getByRole("button", { name: /Open folder Client videos/ }));
+    await click(screen.getByRole("menuitem", { name: "Archive" }));
+    const confirm = screen.getByText(/Archive "Client videos" and its 2 items\?/).closest(".os-notice") as HTMLElement;
+    return { connection, confirm };
+  }
+
+  it("does not archive on the second click of the click that asked, and does once it is read", async () => {
+    const { connection, confirm } = await ask();
+    betweenTheClicks();
+    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
+    expect(connection.callsNamed("archiveArtifact")).toEqual([]);
+    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+
+    await readTheBar();
+    await click(within(confirm).getByRole("button", { name: "Archive" }));
+    expect(connection.callsNamed("archiveLibraryFolder")).toHaveLength(1);
+  });
+
+  it("does not cancel on that click either", async () => {
+    const { connection, confirm } = await ask();
+    betweenTheClicks();
+    await click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText(/Archive "Client videos" and its 2 items\?/)).toBeTruthy();
+    await readTheBar();
+    await click(within(confirm).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText(/Archive "Client videos" and its 2 items\?/)).toBeNull();
+    expect(connection.callsNamed("archiveLibraryFolder")).toEqual([]);
   });
 });
 

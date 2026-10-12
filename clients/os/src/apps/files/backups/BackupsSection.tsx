@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Caption, Head, RecordRow, listCount, LiveList, Notice, formatBytes, formatFreshness, useLiveView, useNow, type LiveListSource } from "../../../kit";
+import { InPlaceAsk } from "../../../kit/pressHold";
 import { flatten } from "../../../kit/rows";
 import { useMachines } from "../../../live/machines";
 import { isWorkerOnline } from "../../fleet/online";
@@ -287,7 +288,7 @@ function BackupLine({
           sentence={`Stop backing up ${backup.localPath}?`}
           next="The files already here stay, and nothing on the machine is touched. Only the arrangement ends."
         >
-          <div className="os-backup-confirm">
+          <InPlaceAsk className="os-backup-confirm">
             <Button
               tone="danger"
               busy={busy}
@@ -298,7 +299,7 @@ function BackupLine({
               Stop backing up
             </Button>
             <Button onClick={onDismiss}>Keep it</Button>
-          </div>
+          </InPlaceAsk>
         </Notice>
       ) : null}
 

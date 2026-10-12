@@ -1,5 +1,6 @@
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
 import { RecordList, RecordRow } from "../../kit/RecordRow";
+import { InPlaceAsk } from "../../kit/pressHold";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { FileText, GraduationCap, Rocket, Send, UserPlus, UserRound } from "lucide-react";
@@ -664,7 +665,7 @@ function ArchivePanel({
           <Button onClick={() => setAsking(true)}>Archive this client</Button>
         </>
       ) : (
-        <div className="os-account-confirm">
+        <InPlaceAsk className="os-account-confirm">
           <p className="os-account-confirm-line">
             Archive {accountName(account)}?
           </p>
@@ -700,7 +701,7 @@ function ArchivePanel({
               Cancel
             </Button>
           </div>
-        </div>
+        </InPlaceAsk>
       )}
     </Panel>
   );

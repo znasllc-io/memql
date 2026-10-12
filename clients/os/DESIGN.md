@@ -90,7 +90,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    one look, not two. Panel actions align to the right edge in the shared
    `os-panel-actions` row. An action such as Disconnect stays on that same
    edge when it expands into Cancel and confirmation; do not shift the
-   controls left or fill the panel width. Confirmation copy sits above them.
+   controls left or fill the panel width. Confirmation copy sits above them,
+   and the confirmation holds presses for a moment after it appears
+   (`InPlaceAsk`, rule 12), so the second click of a double-click on the act
+   that asked cannot answer it.
    A deliberate MOMENT (the Accounts first-run card's
    eyebrow and headline) may keep its voice; chrome may not.
 
@@ -149,6 +152,13 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     not change, take a press at once. Text that changes on its own (a
     ticking wait, a live figure) goes in the bar's `meta`, never beside the
     acts, where every tick would hold the bar's presses again.
+    **A question answered in place, outside any bar, is held the same way**
+    (a row's Revoke that becomes "Revoke it / Keep it", a panel's
+    Disconnect that expands into Cancel and a confirmation, a dropped
+    file's "Archive / Cancel"): put the question and its buttons in the
+    kit's `InPlaceAsk`, which is the bar's own hold (`kit/pressHold`), held
+    from the moment the question appears. A question in a bar's acts or
+    children needs nothing; the bar holds it.
     Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them

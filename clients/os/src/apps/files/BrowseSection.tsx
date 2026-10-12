@@ -24,6 +24,7 @@ import { MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION } from "../../items/m
 import { kindGlyph } from "./glyphs";
 import { LocalTabs } from "../../kit/LocalTabs";
 import { AddButton } from "../../kit/AddButton";
+import { InPlaceAsk } from "../../kit/pressHold";
 import { FileFolders } from "./FileFolders";
 import {
   Button,
@@ -853,12 +854,12 @@ export function BrowseSection({
                         }. There is nothing to put back, so it is removed from every surface rather than kept in the Bin.`
                   }
                 >
-                  <div className="os-files-confirm">
+                  <InPlaceAsk className="os-files-confirm">
                     <Button tone="danger" onClick={() => void runFolderArchive(pendingArchive)}>
                       {keeping ? "Archive" : "Delete"}
                     </Button>
                     <Button onClick={() => setPendingArchive("")}>Cancel</Button>
-                  </div>
+                  </InPlaceAsk>
                 </Notice>
               );
             })()
@@ -972,12 +973,12 @@ export function BrowseSection({
           sentence={`Move "${artifactName(rowArchive)}" to the Bin?`}
           next="Nothing is deleted -- it keeps its bytes, its history and everywhere it came from, and the Bin can put it back."
         >
-          <div className="os-files-confirm">
+          <InPlaceAsk className="os-files-confirm">
             <Button tone="danger" onClick={() => void archiveOneRow(rowArchive)}>
               Move to Bin
             </Button>
             <Button onClick={() => setRowArchive(null)}>Cancel</Button>
-          </div>
+          </InPlaceAsk>
         </Notice>
       ) : null}
       {rowNote !== null ? (

@@ -9,6 +9,7 @@ import { decideBinDrop } from "../apps/bin/drop";
 import { LocalFilesSettingsStore } from "../apps/files/settings";
 import { useOsConnection } from "../live/connection";
 import { Button, Notice } from "../kit";
+import { InPlaceAsk } from "../kit/pressHold";
 import { dockOrder, isPinned } from "../system/dock";
 import { appById, appsFor, canOpen, fixturesFor, isDockFixture } from "../system/registry";
 import { useActiveDrag, useShellDragClaim } from "./dragScope";
@@ -420,7 +421,7 @@ export function Dock({
         sentence={`Archive "${pending.name}"?`}
         next="It goes to the Bin and keeps its bytes, its history and its provenance. Nothing is deleted."
       >
-        <div className="os-dock-bubble-actions">
+        <InPlaceAsk className="os-dock-bubble-actions">
           <Button
             tone="danger"
             busy={archiving}
@@ -434,7 +435,7 @@ export function Dock({
             Archive
           </Button>
           <Button onClick={() => setPending(null)}>Cancel</Button>
-        </div>
+        </InPlaceAsk>
       </Notice>
     ) : binNote !== null ? (
       <Notice tone={binNote.tone} sentence={binNote.sentence} next={binNote.next} detail={binNote.detail} />

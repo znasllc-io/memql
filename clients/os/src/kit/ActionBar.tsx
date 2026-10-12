@@ -1,6 +1,7 @@
-import { useCallback, useLayoutEffect, useRef, type MouseEvent, type ReactNode } from "react";
+import { useCallback, useRef, type ReactNode } from "react";
 
 import { Button, type ButtonTone } from "./controls";
+import { drawnBy, usePressHold } from "./pressHold";
 
 // ActionBar -- DESIGN.md rule 12, encoded (epic memql#4937).
 //
@@ -65,55 +66,16 @@ import { Button, type ButtonTone } from "./controls";
 // no press at all for `CONFIRM_SETTLE_MS`, wherever the press lands, by
 // pointer or by keyboard, and whatever caused the change: a question is on
 // screen long enough to be read before anything answers it, and nothing a
-// person aimed at one bar is taken by another. One guard, here, for every bar
-// in the shell; nothing a page says turns it on or off. The cost is a
+// person aimed at one bar is taken by another. One guard, in the kit, for every
+// bar in the shell; nothing a page says turns it on or off. The cost is a
 // deliberate press within that moment of a change, which needs a second press.
 //
-// HOW: the acts are read from the props and the children from the page, after
-// every render and whenever the children change on their own (a child that
-// keeps its own state does not render the bar again); and every click inside
-// the bar passes a capture-phase check first, which swallows it while the bar
-// is settling -- the children's own buttons included, which never go through
-// an act.
-//
-// What it leaves alone: a bar whose acts and children did not change (a test
-// sent twice, a save tried again); a bar on its way in, and a bar's FIRST acts
-// -- a page whose record arrives after it opens offered nothing there for a
-// press to have been aimed at. A bar that offered nothing for a moment (a
-// write in flight takes its acts away) remembers what it last offered: the
-// same acts back are not a change, and other acts are. Typing into a field the
-// bar draws is not a change either; what the field asks is.
-
-/** How long a bar whose acts just changed ignores presses. */
-export const CONFIRM_SETTLE_MS = 400;
-
-/** What counts as something to press among a bar's children. */
-const PRESSABLE =
-  "button, a[href], input, select, textarea, summary, [role='button'], [role='link'], [role='checkbox'], [role='switch'], [role='radio'], [role='menuitem'], [role='tab']";
-
-/**
- * What a bar's children offer, read from the page: their words and each
- * control in them, by kind, dress and name. NOT a control's state -- whether it
- * is busy or enabled, or what has been typed into it -- which moves while the
- * person is acting on the very thing being offered.
- */
-function drawnBy(nodes: readonly Node[]): string {
-  const parts: string[] = [];
-  for (const node of nodes) {
-    const words = (node.textContent ?? "").replace(/\s+/g, " ").trim();
-    if (words !== "") parts.push(words);
-    if (!(node instanceof Element)) continue;
-    const controls = node.matches(PRESSABLE) ? [node, ...node.querySelectorAll(PRESSABLE)] : [...node.querySelectorAll(PRESSABLE)];
-    for (const control of controls) {
-      parts.push(
-        ["tagName", "type", "role", "class", "data-tone", "aria-label", "href"]
-          .map((name) => (name === "tagName" ? control.tagName : control.getAttribute(name) ?? ""))
-          .join("\u001d"),
-      );
-    }
-  }
-  return parts.join("\u001f");
-}
+// The guard is the kit's press hold (kit/pressHold), the one implementation a
+// bar shares with every question answered in place outside one (`InPlaceAsk`);
+// how it works, and what it leaves alone, is told there. What the bar adds is
+// WHAT IT OFFERS: the acts from the props, the children from the page. A bar's
+// FIRST acts are not held -- a page whose record arrives after it opens
+// offered nothing there for a press to have been aimed at.
 
 /** One act the current state offers. */
 export interface Act {
@@ -191,48 +153,25 @@ export function ActionBar({ state, detail, tone = "none", meta, live = false, ac
   // WHAT THE ACTS OFFER, from the props: what they are about, and each act's
   // label and dress, in order.
   const offered = acts.length === 0 ? "" : `${scope}\u001e${acts.map((act) => `${act.label}\u001d${act.tone ?? ""}\u001d${act.text ? "text" : "button"}`).join("\u001f")}`;
-  const latest = useRef({ offered, acts: acts.length });
-  // What the bar last offered, and since when. A bar offering nothing has no
-  // arrangement to change, so it keeps the last one it offered, and the first
-  // one it offers holds nothing (see the note above CONFIRM_SETTLE_MS).
-  const shown = useRef({ arrangement: "", since: 0 });
   const row = useRef<HTMLDivElement | null>(null);
 
-  // observe reads what the bar offers NOW -- the acts from the props, the
-  // children from the page -- and starts the moment when that changed. The
-  // acts are the row's last nodes, one element each, after the children.
-  const observe = useCallback(() => {
+  // What the bar offers NOW -- the acts from the props, the children from the
+  // page. The acts are the row's last nodes, one element each, after the
+  // children. A bar offering nothing has no arrangement to change.
+  const hold = usePressHold(() => {
     const nodes = row.current === null ? [] : Array.from(row.current.childNodes);
-    const drawn = drawnBy(nodes.slice(0, Math.max(0, nodes.length - latest.current.acts)));
-    const arrangement = latest.current.offered === "" && drawn === "" ? "" : `${latest.current.offered}\u001e${drawn}`;
-    if (arrangement === "" || arrangement === shown.current.arrangement) return;
-    shown.current = { arrangement, since: shown.current.arrangement === "" ? 0 : Date.now() };
-  }, []);
-
-  useLayoutEffect(() => {
-    latest.current = { offered, acts: acts.length };
-    observe();
+    const drawn = drawnBy(nodes.slice(0, Math.max(0, nodes.length - acts.length)));
+    return offered === "" && drawn === "" ? "" : `${offered}\u001e${drawn}`;
   });
 
   // A CHILD THAT CHANGES ON ITS OWN does not render the bar again (a
   // confirmation row that keeps its own state), so the row is watched too.
-  const watcher = useRef<MutationObserver | null>(null);
   const attach = useCallback(
     (element: HTMLDivElement | null) => {
-      watcher.current?.disconnect();
-      watcher.current = null;
       row.current = element;
-      if (element === null || typeof MutationObserver === "undefined") return;
-      watcher.current = new MutationObserver(observe);
-      watcher.current.observe(element, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-        attributes: true,
-        attributeFilter: ["class", "data-tone", "aria-label", "type", "role", "href"],
-      });
+      hold.watch(element);
     },
-    [observe],
+    [hold.watch],
   );
 
   // NOTHING HAPPENS WHERE NOTHING IS OFFERED. With no state to name and no act
@@ -240,26 +179,8 @@ export function ActionBar({ state, detail, tone = "none", meta, live = false, ac
   // same rule the shell states about right-click.
   if (state === "" && acts.length === 0 && !children) return null;
 
-  /**
-   * EVERY CLICK IN THE BAR PASSES HERE FIRST, in the capture phase: an act's,
-   * a child's own button, a link, and the click a browser makes of Enter or
-   * Space on any of them. One that lands too soon after the bar changed
-   * neither answers, nor asks, nor counts as a press of its own.
-   */
-  function settle(event: MouseEvent<HTMLDivElement>) {
-    // A change made in this same moment is a change just now, whether or not
-    // the watcher has been told yet.
-    observe();
-    const { since } = shown.current;
-    // A clock set back is not a reason to hold the bar until it catches up.
-    const age = Date.now() - since;
-    if (since === 0 || age < 0 || age >= CONFIRM_SETTLE_MS) return;
-    event.preventDefault();
-    event.stopPropagation();
-  }
-
   return (
-    <div className="os-actbar" data-tone={tone} role="group" aria-label="What you can do with this" onClickCapture={settle}>
+    <div className="os-actbar" data-tone={tone} role="group" aria-label="What you can do with this" onClickCapture={hold.onClickCapture}>
       <div className="os-actbar-state" role={live ? "status" : undefined}>
         {tone === "none" ? null : <span className="os-actbar-dot" data-tone={tone} aria-hidden />}
         {state === "" ? null : <span className="os-actbar-word">{state}</span>}

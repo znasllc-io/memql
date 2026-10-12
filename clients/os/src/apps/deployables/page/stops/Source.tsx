@@ -3,6 +3,7 @@ import { Archive, ArrowUpCircle, GitBranch, KeyRound, RotateCcw, Zap } from "luc
 
 import { Button, Caption, ChoiceStack, Chip, Chips, Fact, Facts, FormRow, Input } from "../../../../kit";
 import { formatMoment } from "../../../../kit/format";
+import { InPlaceAsk } from "../../../../kit/pressHold";
 import { usePackageActions } from "../../packages/actions";
 import { ProblemNotice } from "../../packages/ReportView";
 import { shortVersion, sourceLabel, type PackageRow } from "../../packages/rows";
@@ -419,7 +420,7 @@ export function PackageLifecycle({ pkg, apps }: { pkg: PackageRow; apps: readonl
             ) : null}{" "}
             The source can be restored; its apps come back inactive. Type <strong>{pkg.name}</strong> to confirm.
           </Caption>
-          <div className="os-confirm-row">
+          <InPlaceAsk className="os-confirm-row">
             <Input
               id={`os-archive-source-${pkg.id}`}
               label={`Type ${pkg.name} to confirm`}
@@ -438,7 +439,7 @@ export function PackageLifecycle({ pkg, apps }: { pkg: PackageRow; apps: readonl
             >
               Archive
             </Button>
-          </div>
+          </InPlaceAsk>
         </>
       ) : (
         <>

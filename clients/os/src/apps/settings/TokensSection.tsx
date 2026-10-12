@@ -1,4 +1,5 @@
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
+import { InPlaceAsk } from "../../kit/pressHold";
 import { useState } from "react";
 
 import { Button, Caption, formatFreshness, Head, Notice, Panel, RecordList, RecordRow, Subhead, useNow } from "../../kit";
@@ -230,12 +231,12 @@ function TokenLine({
             Anything using it stops working on its next request. A replacement
             is a new token, minted from the CLI.
           </p>
-          <div className="os-refresh-row">
+          <InPlaceAsk className="os-refresh-row">
             <Button tone="danger" onClick={onConfirm}>
               Revoke it
             </Button>
             <Button onClick={onCancel}>Keep it</Button>
-          </div>
+          </InPlaceAsk>
         </Notice>
       ) : null}
     </>
@@ -298,12 +299,12 @@ function NodeTokenLine({
             rejoin until it is re-bootstrapped. If it is serving traffic now, it
             will stop.
           </p>
-          <div className="os-refresh-row">
+          <InPlaceAsk className="os-refresh-row">
             <Button tone="danger" onClick={onConfirm}>
               Revoke it
             </Button>
             <Button onClick={onCancel}>Keep it</Button>
-          </div>
+          </InPlaceAsk>
         </Notice>
       ) : null}
     </>
