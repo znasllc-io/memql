@@ -130,7 +130,7 @@ func (w *Worker) handleConfigureNewsletter(ctx context.Context, args map[string]
 		unchangedReferences = unchangedReferences && bare(str(prior, key)) == bare(str(values, key))
 	}
 	if enabled || !unchangedReferences {
-		if _, err = w.newsletterPreflight(ctx, values, enabled); err != nil {
+		if _, err = w.newsletterPreflight(ctx, values, enabled, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -173,13 +173,16 @@ func newsletterReceipt(row map[string]any) ([]memorynodes.MemoryNode, error) {
 	return resultNode("campaignNewsletterSaved", map[string]any{"saved": true, "newsletterId": bare(str(row, "id")), "revision": templateTime(row["createdAt"]).Format(time.RFC3339Nano), "enabled": row["enabled"]})
 }
 
-func (w *Worker) newsletterPreflight(ctx context.Context, row map[string]any, sending bool) (Template, error) {
+// newsletterPreflight checks the newsletter's binding and returns the welcome
+// template to freeze. known, when the caller has just counted the audience, is that
+// count (see preflightAudienceWith).
+func (w *Worker) newsletterPreflight(ctx context.Context, row map[string]any, sending bool, known *int) (Template, error) {
 	campaign := Campaign{AccountID: bare(str(row, "accountId")), AudienceID: bare(str(row, "audienceId")), TemplateID: bare(str(row, "templateId")), SenderIdentityID: bare(str(row, "senderIdentityId"))}
 	if campaign.SenderIdentityID == "" {
 		return Template{}, fmt.Errorf("select this organization's sender")
 	}
 	if sending {
-		_, snapshot, err := w.preflightAudience(ctx, "newsletter", campaign, true)
+		_, snapshot, err := w.preflightAudienceWith(ctx, "newsletter", campaign, true, known)
 		return snapshot, err
 	}
 	template, found, err := w.store.TemplateByID(ctx, campaign.TemplateID)
@@ -261,14 +264,19 @@ func (w *Worker) signupSettled(ctx context.Context, row map[string]any, signupID
 // out between the read and the write is the window a hand unsubscribe has always
 // had; no lock of the newsletter stops it.
 //
-// The locks are an idle transaction on the request pool, which PostgreSQL ends at
-// idle_in_transaction_session_timeout (60 s by default) and the lock with it, so what
-// runs under them is kept to a handful of reads and the writes, and never a roster
-// walk. For a mailbox about to be added two of those reads are the expensive ones:
-// the engine answers any recipient read, the keyed one and the count alike, from every
-// current recipient in the cluster, so each costs seconds at 200,000 recipients, and a
-// new subscriber holds the locks for the pair. The single-row reads and the writes are
-// milliseconds.
+// The locks are an idle transaction on the gate pool (component/database,
+// gate_pool.go): connections used for nothing else, whose sessions PostgreSQL ends
+// only after minutes idle, so the work under the locks keeps the whole request pool and
+// the locks are not ended under a signup that is still working. Even so the phase under
+// them is bounded (signupLockedPhase) and the gate is asked, before each write, whether
+// the locks are still held. What runs under them is kept to a handful of reads and the
+// writes, and never a roster walk. For a mailbox about to be added two of those reads
+// are the expensive ones: the engine answers any recipient read, the keyed one and the
+// count alike, from every current recipient in the cluster, so each costs seconds at
+// 200,000 recipients, and a new subscriber holds the locks for the pair. The single-row
+// reads and the writes are milliseconds. A signup that cannot take the locks in time, or
+// runs out of its time under them, answers signupsBusy having written nothing it had not
+// written already; consent is written first, keyed by the signup, so asking again is safe.
 func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
 	address := NormalizeEmail(argString(args, "email"))
@@ -317,6 +325,9 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	if optedOut {
 		return accepted()
 	}
+	// The count that decides a new member's ceiling is the one the send preflight
+	// needs too: it is read once and handed to the preflight.
+	var counted *int
 	if !found {
 		// Only a NEW member can take the audience past its ceiling, and what that
 		// asks is the audience's size: a count, not the length of a read.
@@ -327,8 +338,9 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		if size >= w.cfg.MaxAudience {
 			return nil, fmt.Errorf("this newsletter cannot accept more subscribers right now")
 		}
+		counted = &size
 	}
-	snapshot, err := w.newsletterPreflight(ctx, row, true)
+	snapshot, err := w.newsletterPreflight(ctx, row, true, counted)
 	if err != nil {
 		return nil, err
 	}

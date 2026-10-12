@@ -296,3 +296,68 @@ func TestEveryLockedPhaseIsFarInsideTheGateSessionsIdleLimit(t *testing.T) {
 		}
 	}
 }
+
+// sizeCounter counts the audience-size reads a signup makes, and when.
+type sizeCounter struct {
+	Engine
+	held  *atomic.Bool
+	mu    sync.Mutex
+	early int // before the locks
+	under int // while they were held
+}
+
+func (e *sizeCounter) Execute(ctx context.Context, q string) (any, error) {
+	if strings.HasPrefix(q, "query audienceRosterSize") {
+		e.mu.Lock()
+		if e.held.Load() {
+			e.under++
+		} else {
+			e.early++
+		}
+		e.mu.Unlock()
+	}
+	return e.Engine.Execute(ctx, q)
+}
+
+// TestASignupCountsTheAudienceOncePerDecision: a new member's ceiling is decided
+// twice, as it must be -- before the locks, as a fast refusal, and again under the
+// audience's lock, where it is exact -- and the second count before the locks that the
+// send preflight used to make for itself is the same number as the first. Each is a
+// read of every recipient in the cluster.
+func TestASignupCountsTheAudienceOncePerDecision(t *testing.T) {
+	n := newEmptyNewsletter(t, "count-once")
+	actual := n.worker.store.engine
+	var held atomic.Bool
+	counter := &sizeCounter{Engine: actual, held: &held}
+	n.worker.store.engine = counter
+	defer func() { n.worker.store.engine = actual }()
+	defer heldGate(n, &held)()
+
+	n.args["email"] = consentMailbox
+	if _, err := n.worker.handleSubscribe(n.owner, n.args, 0); err != nil {
+		t.Fatal(err)
+	}
+	counter.mu.Lock()
+	early, under := counter.early, counter.under
+	counter.mu.Unlock()
+	if early != 1 || under != 1 {
+		t.Errorf("a new member's signup counted the audience %d times before its locks and %d under them, want 1 and 1", early, under)
+	}
+
+	// A member who is already there needs no room: the preflight counts for itself,
+	// once, and nothing is counted under the locks.
+	counter.mu.Lock()
+	counter.early, counter.under = 0, 0
+	counter.mu.Unlock()
+	again := n.formFor(consentMailbox)
+	again["submissionId"] = "again"
+	if _, err := n.worker.handleSubscribe(n.owner, again, 0); err != nil {
+		t.Fatal(err)
+	}
+	counter.mu.Lock()
+	early, under = counter.early, counter.under
+	counter.mu.Unlock()
+	if early > 1 || under != 0 {
+		t.Errorf("a repeated signup counted the audience %d times before its locks and %d under them, want at most 1 and 0", early, under)
+	}
+}
