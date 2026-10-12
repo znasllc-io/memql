@@ -1392,6 +1392,9 @@ jobs:
             db      work      integrations/work  180s     serial    1
             # Revision workflows exercise two engines and must not compete with other DB suites.
             db      library   integrations/library 180s   serial    1
+            # Campaigns now covers 498 cases, including independent two-engine hops.
+            # Keep each lock/write deadline assertion; give the full suite its own budget.
+            db      campaigns component/campaigns 600s     serial,uncached 1
             db      default   -                   180s     -         2
         run: >-
           go run ./scripts/ci/affected plan

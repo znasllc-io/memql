@@ -17,6 +17,7 @@ db      memql     component/memql     600s     serial    2
 db      packages  component/packages  300s     -         1
 db      work      integrations/work  180s     serial    1
 db      library   integrations/library 180s   serial    1
+db      campaigns component/campaigns 600s     serial,uncached 1
 db      default   -                   180s     -         2
 `
 
@@ -38,6 +39,7 @@ func TestParseClassesReadsTheTable(t *testing.T) {
 		{Lane: "db", Name: "packages", Trees: []string{"component/packages"}, Timeout: "300s", Shards: 1},
 		{Lane: "db", Name: "work", Trees: []string{"integrations/work"}, Timeout: "180s", Serial: true, Shards: 1},
 		{Lane: "db", Name: "library", Trees: []string{"integrations/library"}, Timeout: "180s", Serial: true, Shards: 1},
+		{Lane: "db", Name: "campaigns", Trees: []string{"component/campaigns"}, Timeout: "600s", Serial: true, Uncached: true, Shards: 1},
 		{Lane: "db", Name: "default", Timeout: "180s", Shards: 2},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -104,7 +106,7 @@ func shardByName(shards []Shard, name string) (Shard, bool) {
 func TestPartitionKeepsBudgetsApart(t *testing.T) {
 	classes := mustClasses(t, ciClasses)
 	dbDirs := []string{"component/memql", "component/memql/offline", "component/memql/sense", "component/packages",
-		"component/automations", "component/automations/steps", "integrations/work", "integrations/library", "integrations/library/versionstore", "component/grpc", "app"}
+		"component/campaigns", "component/automations", "component/automations/steps", "integrations/work", "integrations/library", "integrations/library/versionstore", "component/grpc", "app"}
 	shards, err := Partition("db", dbDirs, classes, measured, 4)
 	if err != nil {
 		t.Fatal(err)
@@ -134,6 +136,10 @@ func TestPartitionKeepsBudgetsApart(t *testing.T) {
 	}
 	if library.Parallel != 1 || library.Timeout != "180s" {
 		t.Errorf("library must keep its 180s budget without shard contention, got -p=%d -timeout=%s", library.Parallel, library.Timeout)
+	}
+	campaigns, ok := shardByName(shards, "campaigns")
+	if !ok || !reflect.DeepEqual(campaigns.Dirs, []string{"component/campaigns"}) || campaigns.Parallel != 1 || campaigns.Timeout != "600s" || !campaigns.Uncached {
+		t.Errorf("campaigns must retain every test in its own uncached serial 600s class, got %+v", campaigns)
 	}
 	for _, s := range shards {
 		if s.Class == "default" && (s.Timeout != "180s" || s.Parallel != 4) {
