@@ -3,10 +3,9 @@ package campaigns
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
-	"regexp"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -710,6 +709,47 @@ func TestTheNameCapsAreDeclaredWhereTheyAreSaved(t *testing.T) {
 	}
 }
 
+// TestTheNameCapNotesAreNotInTheSDKDocs: the /// text above a mutation is its
+// documentation, and the generated SDKs copy it into their doc comments, where
+// it is read by people who call the API. Why the caps are declared on the concept
+// and not on the arguments, and which Go file states the refusal, is for whoever
+// edits the DSL, and is a // comment.
+func TestTheNameCapNotesAreNotInTheSDKDocs(t *testing.T) {
+	source, err := os.ReadFile("../../dsl/campaigns/mutations.memql")
+	if err != nil {
+		t.Fatalf("read the campaigns mutations: %v", err)
+	}
+	for _, mutation := range []string{"createCampaign", "updateCampaign", "createCampaignTestRun", "createSenderIdentity", "updateSenderIdentity"} {
+		doc := parsedMutation(t, string(source), mutation).DocComment
+		for _, implementation := range []string{"write guard", "@maxLength", ".go", "argument check", "caps are createCampaign"} {
+			if strings.Contains(doc, implementation) {
+				t.Errorf("%s: its documentation says %q, which is a note about the DSL and not about the API:\n%s", mutation, implementation, doc)
+			}
+		}
+	}
+	// The generated docs are the DSL's, so the same words are not in them.
+	for _, generated := range []string{"../../sdk/go/client/generated_mutations.go", "../../sdk/ts/src/client/generated_mutations.ts"} {
+		body, err := os.ReadFile(generated)
+		if err != nil {
+			t.Fatalf("read %s: %v", generated, err)
+		}
+		if strings.Contains(string(body), "campaign_name_guard") {
+			t.Errorf("%s carries the implementation note about the name guard", generated)
+		}
+	}
+	// The explanation is not lost: it stands in the DSL as a plain comment.
+	explained := false
+	for _, line := range strings.Split(string(source), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//") && !strings.HasPrefix(trimmed, "///") && strings.Contains(trimmed, "campaign_name_guard.go") {
+			explained = true
+		}
+	}
+	if !explained {
+		t.Error("no // comment in the campaigns mutations says where the name caps are stated")
+	}
+}
+
 // conceptMaxLength reads the @maxLength a concept in dsl/campaigns/concepts.memql
 // declares on a field, the way the engine builds it: through the concept
 // parser, out of the JSON schema that validates every write. Zero means none.
@@ -746,40 +786,91 @@ func conceptMaxLength(t *testing.T, concept, field string) int {
 	return 0
 }
 
-var (
-	mutationHeaderPattern = regexp.MustCompile(`^mutation\s+\w+\s+(\w+)\s*\{`)
-	argMaxLengthPattern   = regexp.MustCompile(`^\s+(\w+)\s+\w+!?\s+@maxLength\((\d+)\)`)
-)
-
 // mutationArgMaxLength reads the @maxLength on one argument of one mutation in
-// dsl/campaigns/mutations.memql. Zero means none. A line scan rather than a
-// parse: the annotation is a property of the line that declares the argument.
+// dsl/campaigns/mutations.memql. Zero means none.
 func mutationArgMaxLength(t *testing.T, mutation, arg string) int {
 	t.Helper()
 	source, err := os.ReadFile("../../dsl/campaigns/mutations.memql")
 	if err != nil {
 		t.Fatalf("read the campaigns mutations: %v", err)
 	}
-	inside, found := false, false
-	for _, line := range strings.Split(string(source), "\n") {
-		if m := mutationHeaderPattern.FindStringSubmatch(line); m != nil {
-			inside = m[1] == mutation
-			found = found || inside
-			continue
-		}
-		if !inside {
-			continue
-		}
-		if m := argMaxLengthPattern.FindStringSubmatch(line); m != nil && m[1] == arg {
-			n, err := strconv.Atoi(m[2])
-			if err != nil {
-				t.Fatalf("%s.%s: %v", mutation, arg, err)
-			}
-			return n
+	return argMaxLengthIn(t, string(source), mutation, arg)
+}
+
+// argMaxLengthIn is mutationArgMaxLength over a source it is given. It asks the
+// DSL parser, the way the engine loads a mutation, and not the text: the parser
+// reads @maxLength wherever it stands among the argument's other annotations,
+// which a pattern over the line has to be taught one position at a time (the
+// pattern this replaced found it only straight after the type, so a cap written
+// after @required or a description passed unseen).
+func argMaxLengthIn(t *testing.T, source, mutation, arg string) int {
+	t.Helper()
+	fn := parsedMutation(t, source, mutation)
+	if fn.ArgsSchema == nil {
+		t.Fatalf("mutation %s declares no arguments", mutation)
+	}
+	for _, field := range fn.ArgsSchema.Fields {
+		if field.Name == arg {
+			return field.MaxLength
 		}
 	}
-	if !found {
-		t.Fatalf("mutation %s is not declared in dsl/campaigns/mutations.memql", mutation)
-	}
+	t.Fatalf("mutation %s has no argument %s", mutation, arg)
 	return 0
+}
+
+// parsedMutation parses a campaigns mutations source the way the engine's
+// loader does (struct forms expanded, then parsed) and returns one mutation.
+func parsedMutation(t *testing.T, source, mutation string) *langparser.FunctionDef {
+	t.Helper()
+	expanded, err := langparser.NormaliseAll(source)
+	if err != nil {
+		t.Fatalf("expand the mutations: %v", err)
+	}
+	file, err := langparser.ParseFile(expanded)
+	if err != nil {
+		t.Fatalf("parse the mutations: %v", err)
+	}
+	for _, def := range file.Definitions {
+		if fn, ok := def.(*langparser.FunctionDef); ok && fn.Name == mutation {
+			return fn
+		}
+	}
+	t.Fatalf("mutation %s is not declared", mutation)
+	return nil
+}
+
+// TestAnArgumentCapIsFoundWhereverItStandsAmongTheAnnotations: the check that no
+// mutation caps the names on its arguments (above) must not pass because a cap
+// was written in a form it does not look for. @maxLength may come after
+// @required, after a pattern, between two annotations or last.
+func TestAnArgumentCapIsFoundWhereverItStandsAmongTheAnnotations(t *testing.T) {
+	const mutation = "mutation campaign createThing {\n  args {\n%s    name string%s\n    other string\n  }\n  insert {\n    id: args.name\n  }\n}\n"
+	for name, annotations := range map[string]string{
+		"first":                   ` @maxLength(200)`,
+		"after required":          ` @required @maxLength(200)`,
+		"after a pattern":         ` @pattern("^[a-z]+$") @maxLength(200)`,
+		"after two":               ` @required @pattern("^a") @maxLength(200)`,
+		"between two":             ` @required @maxLength(200) @pattern("^a")`,
+		"before required":         ` @maxLength(200) @required`,
+		"after an enumeration":    ` @enum("a", "b") @maxLength(200)`,
+		"after the bang spelling": `! @maxLength(200)`,
+		"after the bang and more": `! @required @maxLength(200)`,
+	} {
+		source := fmt.Sprintf(mutation, "", annotations)
+		if got := argMaxLengthIn(t, source, "createThing", "name"); got != 200 {
+			t.Errorf("%s: the cap is read as %d, want 200", name, got)
+		}
+		if got := argMaxLengthIn(t, source, "createThing", "other"); got != 0 {
+			t.Errorf("%s: another argument is read as capped at %d", name, got)
+		}
+	}
+	for name, tc := range map[string]struct{ doc, annotations string }{
+		"nothing":                     {``, ``},
+		"only required":               {``, ` @required`},
+		"a doc comment that names it": {"    /// The name, at most @maxLength(200) of it.\n", ``},
+	} {
+		if got := argMaxLengthIn(t, fmt.Sprintf(mutation, tc.doc, tc.annotations), "createThing", "name"); got != 0 {
+			t.Errorf("%s: a cap is read as %d where there is none", name, got)
+		}
+	}
 }

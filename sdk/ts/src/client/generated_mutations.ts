@@ -1549,8 +1549,7 @@ QueryClient.prototype.createCalendarEvent = function (this: QueryClient, args: C
   return this.executeNamed("createCalendarEvent", buildCreateCalendarEvent(args), opts);
 };
 
-/** Create a campaign: one audience, one template, an optional intended time. Lands as a draft with its counters zeroed. Owned.
-The name is at most 200 characters and a fromName at most 100, because the view-in-browser link of every message carries them. They are declared that way on the concept, and the engine's write guard (component/memql/campaign_name_guard.go) is what states the refusal, in a sentence. They are not @maxLength on the arguments here on purpose: the argument check would answer first, in its own words. */
+/** Create a campaign: one audience, one template, an optional intended time. Lands as a draft with its counters zeroed. Owned. */
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["createCampaign"] in generated_concepts.ts).
 export interface CreateCampaignArgs {
   campaignId: string;
@@ -3043,7 +3042,6 @@ QueryClient.prototype.createRoutingPolicy = function (this: QueryClient, args: C
 };
 
 /** Declare a mailbox this deployment may send campaign mail as. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever declare their own.
-The fromName is at most 100 characters (it is shown in every footer and carried in every view link); the engine's write guard states the refusal, as for a campaign's name.
 NO CREDENTIAL CROSSES THIS BOUNDARY, which is why it is an ordinary client-reachable mutation rather than a @serverOnly one. Authentication stays the cluster's single Graph credential; this row says a mailbox exists and may be used. What it CANNOT do is make a mailbox sendable -- that is the tenant's ApplicationAccessPolicy, and an address declared here but missing from that group surfaces as Graph's own 403 on the campaign's lastError. The engine validates the address for RFC shape and header safety before it is stored: it becomes a From header and a URL path segment, and a CR or LF in it would be header injection into every message the identity ever sends. */
 // Bound concept: v1:campaigns:senderIdentity (machine-readable: BoundConcepts["createSenderIdentity"] in generated_concepts.ts).
 export interface CreateSenderIdentityArgs {
@@ -7495,7 +7493,7 @@ QueryClient.prototype.updateCalendarEvent = function (this: QueryClient, args: U
   return this.executeNamed("updateCalendarEvent", buildUpdateCalendarEvent(args), opts);
 };
 
-/** Edit a draft campaign's authoring fields. Deliberately does NOT accept status or any send-state field: lifecycle moves through scheduleCampaign / cancelCampaign, and the counters belong to the sending engine. Owned. The name and fromName caps are createCampaign's. */
+/** Edit a draft campaign's authoring fields. Deliberately does NOT accept status or any send-state field: lifecycle moves through scheduleCampaign / cancelCampaign, and the counters belong to the sending engine. Owned. */
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["updateCampaign"] in generated_concepts.ts).
 export interface UpdateCampaignArgs {
   campaignId: string;
