@@ -20,10 +20,11 @@ function template(over: Partial<TemplateRow> & { id: string }): TemplateRow {
     ownerUserId: "v1:identity:user:me",
     name: "August copy",
     subject: "What we shipped",
-    textBody: "",
-    htmlBody: "",
     status: "ready",
     accountId: "self",
+    layoutId: "",
+    preheader: "",
+    sourceArtifactId: "",
     createdAt: "2026-08-01T00:00:00Z",
     ...over,
   };

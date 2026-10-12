@@ -66,10 +66,11 @@ function template(over: Partial<TemplateRow> = {}): TemplateRow {
     ownerUserId: "v1:identity:user:me",
     name: "Welcome 2",
     subject: "Welcome",
-    textBody: "",
-    htmlBody: "",
     status: "ready",
     accountId: "acme",
+    layoutId: "",
+    preheader: "",
+    sourceArtifactId: "",
     createdAt: "2026-10-01T00:00:00Z",
     ...over,
   };

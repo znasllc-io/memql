@@ -252,7 +252,7 @@ describe("the template editor handoff", () => {
   // restore that saved the row's (absent) body would have written an empty email.
   it("restores an archived template by its revision alone, sending no content", async () => {
     const conn = fakeConnection({ templates: [templateRow({id:"t1",name:"August copy",status:"archived"})] });
-    mount(conn,"templates",fakeUploads(),{ showFiled: true });
+    mount(conn,"templates",fakeUploads(),{ includeArchived: true });
     fireEvent.click(await screen.findByText("August copy"));
     fireEvent.click(screen.getByRole("button",{name:"Restore draft"}));
     await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledTimes(1));
