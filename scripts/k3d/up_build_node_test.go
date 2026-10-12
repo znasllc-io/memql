@@ -21,6 +21,7 @@ type buildNodeWorld struct {
 	boundTo string // the node the pipelines cache's volume is bound to, "" for none
 	cpus    string // docker info NCPU
 	bytes   string // docker info MemTotal
+	memory  string // docker inspect's HostConfig.Memory for the build node
 }
 
 func runUpFunctions(t *testing.T, w buildNodeWorld, body string) (string, string, error) {
@@ -30,7 +31,7 @@ func runUpFunctions(t *testing.T, w buildNodeWorld, body string) (string, string
 	log := filepath.Join(dir, "calls.log")
 	stubs := map[string]string{
 		"k3d": "#!/usr/bin/env bash\necho \"k3d $*\" >> \"$STUB_LOG\"\nif [[ \"$1 $2\" == \"node list\" && \"$STUB_LISTED\" == true ]]; then echo 'k3d-memql-build-0   agent   memql   running'; fi\nexit 0\n",
-		"docker": "#!/usr/bin/env bash\necho \"docker $*\" >> \"$STUB_LOG\"\nif [[ \"$1\" == info && \"$3\" == '{{.NCPU}}' ]]; then echo \"$STUB_CPUS\"; fi\nif [[ \"$1\" == info && \"$3\" == '{{.MemTotal}}' ]]; then echo \"$STUB_BYTES\"; fi\nexit 0\n",
+		"docker": "#!/usr/bin/env bash\necho \"docker $*\" >> \"$STUB_LOG\"\nif [[ \"$1\" == info && \"$3\" == '{{.NCPU}}' ]]; then echo \"$STUB_CPUS\"; fi\nif [[ \"$1\" == info && \"$3\" == '{{.MemTotal}}' ]]; then echo \"$STUB_BYTES\"; fi\nif [[ \"$1\" == inspect ]]; then echo \"$STUB_MEMORY\"; fi\nexit 0\n",
 		"kubectl": "#!/usr/bin/env bash\necho \"kubectl $*\" >> \"$STUB_LOG\"\ncase \"$*\" in\n  *'get node'*'pipeline-pool}'*) printf '%s' \"$STUB_LABEL\" ;;\n  *'get node'*taints*) printf '%s' \"$STUB_TAINT\" ;;\n  *'get pvc memql-pipelines-cache'*) if [[ -n \"$STUB_BOUND\" ]]; then printf pv-cache; fi ;;\n  *'get pv pv-cache'*) printf '%s' \"$STUB_BOUND\" ;;\nesac\nexit 0\n",
 	}
 	for name, body := range stubs {
@@ -46,7 +47,7 @@ func runUpFunctions(t *testing.T, w buildNodeWorld, body string) (string, string
 		"STUB_LOG="+log,
 		"STUB_LISTED="+map[bool]string{true: "true", false: "false"}[w.listed],
 		"STUB_LABEL="+w.label, "STUB_TAINT="+w.taint, "STUB_BOUND="+w.boundTo,
-		"STUB_CPUS="+w.cpus, "STUB_BYTES="+w.bytes)
+		"STUB_CPUS="+w.cpus, "STUB_BYTES="+w.bytes, "STUB_MEMORY="+w.memory)
 	out, err := cmd.CombinedOutput()
 	calls, _ := os.ReadFile(log)
 	return string(out), string(calls), err
@@ -111,6 +112,33 @@ func TestEnsureBuildNodeKeepsAnExistingNodeAndReappliesItsCap(t *testing.T) {
 	}
 	if !strings.Contains(calls, "docker update --cpus 16 k3d-memql-build-0") {
 		t.Errorf("the CPU cap was not re-applied:\n%s", calls)
+	}
+}
+
+// k3d sets a node's memory only when it creates the node, so on an existing
+// build node a different cap asked for is not in force, and must not be
+// reported as if it were: the person asked for it to protect their machine.
+func TestEnsureBuildNodeReportsTheMemoryAnExistingNodeHas(t *testing.T) {
+	world := buildNodeWorld{listed: true, label: "builds", taint: "NoSchedule", cpus: "24", bytes: "66793443328", memory: "42949672960"}
+	out, _, err := runUpFunctions(t, world, "CLUSTER_NAME=memql\nBUILD_NODE_MEMORY=20g\nresolve_build_node\nensure_build_node")
+	if err != nil {
+		t.Fatalf("ensure_build_node failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Build node k3d-memql-build-0: 16 CPUs, 40g,") {
+		t.Errorf("the reported cap is not the node's own:\n%s", out)
+	}
+	if !strings.Contains(out, "keeps its 40g memory cap") || !strings.Contains(out, "k3d node delete k3d-memql-build-0") {
+		t.Errorf("no warning naming the cap in force and its repair:\n%s", out)
+	}
+
+	// THE CONTROL: with nothing asked for, the node's own cap is reported and
+	// nothing is said about the default it differs from (41g on this host).
+	out, _, err = runUpFunctions(t, world, "CLUSTER_NAME=memql\nresolve_build_node\nensure_build_node")
+	if err != nil {
+		t.Fatalf("ensure_build_node failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "Build node k3d-memql-build-0: 16 CPUs, 40g,") || strings.Contains(out, "keeps its") {
+		t.Errorf("a default was reported or warned about instead of the node's cap:\n%s", out)
 	}
 }
 

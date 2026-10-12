@@ -143,6 +143,9 @@ PROJECT_MANIFEST="${MEMQL_K3D_PROJECT_MANIFEST:-}"
 SKIP_BUILD_NODE=""
 BUILD_NODE_CPUS=""
 BUILD_NODE_MEMORY=""
+# The memory the person asked for, empty when it is the default: only an
+# asked-for cap is worth a warning when an existing node has another.
+BUILD_NODE_MEMORY_ASKED=""
 
 # The overlay's COMMITTED Ingress hostname (memql#3593). Patches are emitted
 # only when the operator's domain differs, so the common case carries no
@@ -486,6 +489,7 @@ function resolve_build_node() {
     if [[ -z "${BUILD_NODE_CPUS}" ]]; then
         BUILD_NODE_CPUS="$(default_build_node_cpus "${host_cpus}")"
     fi
+    BUILD_NODE_MEMORY_ASKED="${BUILD_NODE_MEMORY}"
     if [[ -z "${BUILD_NODE_MEMORY}" ]]; then
         BUILD_NODE_MEMORY="$(default_build_node_memory "${host_bytes}")"
     fi
@@ -517,6 +521,20 @@ function warn_cache_bound_elsewhere() {
     if [[ -n "${bound}" && "${bound}" != "${node}" ]]; then
         warn "The pipelines cache is bound to ${bound}, not the build node ${node}; steps pinned to the build pool cannot mount it."
         warn "Repair: kubectl --context ${context} -n memql-pipelines delete pvc memql-pipelines-cache (Argo CD recreates it, and it binds on ${node} at the next step)."
+    fi
+}
+
+# build_node_memory <node> -- the memory cap the node's container really has,
+# in whole gigabytes ("40g"), "unlimited", or "unknown" when Docker cannot say.
+function build_node_memory() {
+    local bytes
+    bytes="$(docker inspect -f '{{.HostConfig.Memory}}' "$1" 2>/dev/null || true)"
+    if [[ "${bytes}" == 0 ]]; then
+        echo "unlimited"
+    elif [[ "${bytes}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "$(( bytes / 1073741824 ))g"
+    else
+        echo "unknown"
     fi
 }
 
@@ -558,12 +576,20 @@ function ensure_build_node() {
     if [[ "${pool}" != "${BUILD_POOL_VALUE}" || "${effect}" != "NoSchedule" ]]; then
         cap_fail 5 "build node ${node} is not labelled and tainted ${BUILD_POOL_LABEL}=${BUILD_POOL_VALUE}:NoSchedule (label: ${pool:-none}, taint: ${effect:-none})"
     fi
+    # k3d sets a node's memory only when it creates the node, so report the cap
+    # the container has, and say how to change it when it is not the one asked.
+    local memory
+    memory="$(build_node_memory "${node}")"
+    if [[ -n "${BUILD_NODE_MEMORY_ASKED}" && "${memory}" != "${BUILD_NODE_MEMORY_ASKED}" ]]; then
+        warn "The build node ${node} keeps its ${memory} memory cap; k3d sets a node's memory only when it creates the node."
+        warn "To give it ${BUILD_NODE_MEMORY_ASKED}: k3d node delete ${node}, then run make up with it again."
+    fi
     warn_cache_bound_elsewhere "${node}" "${context}"
-    info "Build node ${node}: ${BUILD_NODE_CPUS} CPUs, ${BUILD_NODE_MEMORY}, pool ${BUILD_POOL_VALUE}."
+    info "Build node ${node}: ${BUILD_NODE_CPUS} CPUs, ${memory}, pool ${BUILD_POOL_VALUE}."
     cap_result_set_raw buildNode true
     cap_result_set     buildNodeName "${node}"
     cap_result_set_raw buildNodeCpus "${BUILD_NODE_CPUS}"
-    cap_result_set     buildNodeMemory "${BUILD_NODE_MEMORY}"
+    cap_result_set     buildNodeMemory "${memory}"
 }
 
 #=============================================================================

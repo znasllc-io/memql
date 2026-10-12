@@ -219,10 +219,14 @@ make up NO_BUILD_NODE=1                             # no build node; steps then 
 ```
 
 An existing cluster gains the node on its next `make up`. A value larger than
-the Docker host is refused before anything is created. If the pipelines cache
-was bound to another node before the build node existed, `make up` says so and
-prints the repair: delete the `memql-pipelines-cache` claim, which holds only
-caches, and Argo CD recreates it on the build node.
+the Docker host is refused before anything is created. On an existing node,
+`make up` applies a new CPU cap in place, but k3d sets memory only when it
+creates the node: `make up` reports the memory the node has, and when you
+asked for another it names the repair (`k3d node delete
+k3d-<cluster>-build-0`, then `make up` again). If the pipelines cache was bound
+to another node before the build node existed, `make up` says so and prints
+the repair: delete the `memql-pipelines-cache` claim, which holds only caches,
+and Argo CD recreates it on the build node.
 
 ## Choosing a domain
 
