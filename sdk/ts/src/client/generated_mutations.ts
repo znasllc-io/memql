@@ -1750,6 +1750,7 @@ export interface CreateComposeRecipeArgs {
   templateId?: string;
   format: string;
   outputKind?: string;
+  layoutId?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -1763,6 +1764,7 @@ export function buildCreateComposeRecipe(args: CreateComposeRecipeArgs): string 
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation createComposeRecipe(" + parts.join(", ") + ")";
@@ -7602,6 +7604,7 @@ export interface UpdateComposeRecipeArgs {
   templateId?: string;
   format?: string;
   outputKind?: string;
+  layoutId?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -7615,6 +7618,7 @@ export function buildUpdateComposeRecipe(args: UpdateComposeRecipeArgs): string 
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation updateComposeRecipe(" + parts.join(", ") + ")";

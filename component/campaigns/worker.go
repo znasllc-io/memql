@@ -137,6 +137,7 @@ type ExecutionClaimer interface {
 type Worker struct {
 	testGate       func(context.Context, string) (func(), error)
 	templateGate   func(context.Context, string) (func(), error)
+	layoutGate     func(context.Context, string) (func(), error)
 	singleSendGate func(context.Context, string) (func(), error)
 	seriesGate     func(context.Context, string) (func(), error)
 	// newsletterGate takes the locks for the keys it is given -- full keys, from
@@ -259,6 +260,9 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 		},
 		templateGate: func(ctx context.Context, key string) (func(), error) {
 			return gate(ctx, "campaign-template:"+key)
+		},
+		layoutGate: func(ctx context.Context, key string) (func(), error) {
+			return gate(ctx, "campaign-layout:"+key)
 		},
 		store:      NewStore(engine),
 		claimer:    claimer,

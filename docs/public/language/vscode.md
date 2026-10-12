@@ -130,11 +130,16 @@ Image** and a review attachment, stays an upload.
 **Create Email from Examples** starts with an organization and reference images,
 files, or a ZIP of resources, followed by a short brief. MemQL Materializer
 captures the sources, uses its model router for visual understanding and
-composition, and records the work in Nexus. The output is an editable
-`*.email.json` containing a subject, HTML, and plain-text alternative. Source,
-preview, and split modes share the same buffer. Reference processing is explicit;
-opening a ZIP in Files still downloads it intact. Draft generation does not
-publish a template to Campaigns or send an email.
+composition, and records the work in Nexus. It writes the email into a layout,
+the Article unless another is chosen: the subject, the preheader and the
+layout's content blocks are written, and its brand blocks stay as they are. With
+no brief and no sources it files the layout itself, without a model call. The
+output is an editable `*.email.json` email document. Pictures selected for
+inclusion stay references to your own Library files, or are embedded as copies
+when they come from a ZIP or a file you cannot reference. Source, preview, and
+split modes share the same buffer. Reference processing is explicit; opening a
+ZIP in Files still downloads it intact. Draft generation does not publish a
+template to Campaigns or send an email.
 
 The source package is in `editors/productivity`. Build the shared SDK and core
 extension, then run `npm ci`, `npm run compile`, and `npm run package` in that

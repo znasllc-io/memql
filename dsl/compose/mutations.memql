@@ -47,6 +47,7 @@ mutation composition createComposition {
     statement      string
     format         string!
     outputKind     string
+    layoutId       string
     sources        []object
     templateId     string
     folderId       string
@@ -57,7 +58,7 @@ mutation composition createComposition {
     deployableKind string
   }
   insert {
-    accept { name, statement, format, outputKind, sources, templateId, folderId, accountIds, goalId, runId, recipeId, deployableKind }
+    accept { name, statement, format, outputKind, layoutId, sources, templateId, folderId, accountIds, goalId, runId, recipeId, deployableKind }
     stamp {
       id: args.compositionId
       ownerUserId: actor.userId
@@ -254,11 +255,12 @@ mutation recipe createComposeRecipe {
     templateId       string
     format           string!
     outputKind       string
+    layoutId         string
     folderId         string
     accountIds       []string
   }
   insert {
-    accept { name, description, sourceSelectors, templateId, format, outputKind, folderId, accountIds }
+    accept { name, description, sourceSelectors, templateId, format, outputKind, layoutId, folderId, accountIds }
     stamp {
       id: args.recipeId
       ownerUserId: actor.userId
@@ -279,11 +281,12 @@ mutation recipe updateComposeRecipe {
     templateId       string
     format           string
     outputKind       string
+    layoutId         string
     folderId         string
     accountIds       []string
   }
   update {
-    accept { name, description, sourceSelectors, templateId, format, outputKind, folderId, accountIds }
+    accept { name, description, sourceSelectors, templateId, format, outputKind, layoutId, folderId, accountIds }
     stamp {
       id: args.recipeId
       ownerUserId: actor.userId

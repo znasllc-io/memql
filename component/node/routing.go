@@ -852,6 +852,12 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.updated.v1:campaigns:audience", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:template", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:campaigns:template", TargetType: ""},
+		// The organization's saved email layouts. A layout is saved on whichever
+		// bff replica the front door picked and listed by the picker in the Email
+		// app and the VS Code New email page, which may be talking to the other
+		// one; archiving and restoring are updates. No automation triggers on it.
+		{Pattern: "graph.node.created.v1:campaigns:emailLayout", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:campaigns:emailLayout", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:senderIdentity", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:campaigns:senderIdentity", TargetType: ""},
 		{Pattern: "graph.node.created.v1:campaigns:emailRule", TargetType: ""},

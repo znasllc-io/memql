@@ -877,6 +877,32 @@
       }
     },
     {
+      "concept": "v1:campaigns:emailLayout",
+      "file": "campaigns/concepts.memql",
+      "fields": [
+        "accountId",
+        "description",
+        "document",
+        "name",
+        "ownerUserId",
+        "sourceArtifactId",
+        "status"
+      ],
+      "required": [
+        "accountId",
+        "document",
+        "name",
+        "ownerUserId",
+        "status"
+      ],
+      "enums": {
+        "status": [
+          "active",
+          "archived"
+        ]
+      }
+    },
+    {
       "concept": "v1:campaigns:emailRule",
       "file": "campaigns/concepts.memql",
       "fields": [
@@ -1205,9 +1231,13 @@
       "file": "campaigns/concepts.memql",
       "fields": [
         "accountId",
+        "document",
         "htmlBody",
+        "layoutId",
         "name",
         "ownerUserId",
+        "preheader",
+        "sourceArtifactId",
         "status",
         "subject",
         "textBody"
@@ -1766,6 +1796,7 @@
         "folderId",
         "format",
         "goalId",
+        "layoutId",
         "modelsUsed",
         "name",
         "outputFileId",
@@ -1838,6 +1869,7 @@
         "folderId",
         "format",
         "lastRunAt",
+        "layoutId",
         "name",
         "outputKind",
         "ownerUserId",

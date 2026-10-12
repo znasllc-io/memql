@@ -497,19 +497,100 @@ func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs
 	return b.String()
 }
 
-// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.
+// CampaignSaveLayout -- Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision.
+type CampaignSaveLayoutArgs struct {
+	// Stable caller-generated layout id; reuse it on an uncertain creation response.
+	LayoutId string
+	// Owning organization; immutable after creation.
+	AccountId string
+	// Required when saving.
+	Name        string
+	Description string
+	// The layout-mode email document. Required when saving.
+	Document map[string]any
+	// The Library file the layout comes from.
+	SourceArtifactId string
+	// Exact createdAt from emailLayoutById; empty only when creating.
+	ExpectedRevision string
+	// save (default), archive or restore.
+	Action string
+}
+
+// CampaignSaveLayout calls the engine builtin campaignSaveLayout.
+func (qc *QueryClient) CampaignSaveLayout(ctx context.Context, args CampaignSaveLayoutArgs) (*Result, error) {
+	call := CampaignSaveLayoutBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveLayout", call)
+}
+
+func CampaignSaveLayoutBuild(args CampaignSaveLayoutArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveLayout(")
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Name != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.Description != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.Document != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("document: ")
+		b.WriteString(renderMemQLValue(args.Document))
+	}
+	if args.SourceArtifactId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceArtifactId: ")
+		b.WriteString(quoteMemQL(args.SourceArtifactId))
+	}
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if args.Action != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("action: ")
+		b.WriteString(quoteMemQL(args.Action))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. content is the email document (a *.email.json file): a layout document made of blocks, or custom HTML with its plain-text body. The server renders it and stores the subject, the text and HTML parts and the document, and answers {templateId, revision, status, saved, issues}. issues are what keeps the email from being sent as it is: a missing picture or link, a picture the caller cannot read, a missing unsubscribe link, an email that is too large. Saving works with issues and returns the template to draft. Publishing requires the exact saved revision and the exact saved content, and is refused while any issue remains. Archive and restore require only the exact revision; the content in the call is ignored, and restore returns a template to draft. Empty expectedRevision creates a draft. With sourceArtifactId (the Library file the email is written in) there is one template per organization and file: the template already published from that file is updated whatever templateId says, and the first save creates it, so templateId may be left empty. This never sends mail.
 type CampaignSaveTemplateArgs struct {
-	// Stable caller-generated template ID; reuse on an uncertain creation response.
+	// Stable caller-generated template ID; reuse on an uncertain creation response. May be empty only when sourceArtifactId is given.
 	TemplateId string
 	// Owning organization; immutable after creation.
 	AccountId string
 	// Template name.
 	Name string
-	// The reviewed email file: subject, textBody, htmlBody.
+	// The email document: a layout document {subject, preheader, layout, theme, blocks} or custom HTML {subject, preheader, textBody, htmlBody}. Ignored when archiving or restoring.
 	Content map[string]any
-	// Exact createdAt from templateById; empty only when creating.
+	// The Library file the email is written in. Keeps one template per organization and file; see above.
+	SourceArtifactId string
+	// Exact createdAt from templateById or templateForSource; empty only when creating.
 	ExpectedRevision string
-	// save (default), publish, or archive. Publishing is an explicit human action.
+	// save (default), publish, archive or restore. Publishing is an explicit human action.
 	Action string
 }
 
@@ -522,8 +603,10 @@ func (qc *QueryClient) CampaignSaveTemplate(ctx context.Context, args CampaignSa
 func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin campaignSaveTemplate(")
-	b.WriteString("templateId: ")
-	b.WriteString(quoteMemQL(args.TemplateId))
+	if args.TemplateId != "" {
+		b.WriteString("templateId: ")
+		b.WriteString(quoteMemQL(args.TemplateId))
+	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -539,6 +622,13 @@ func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
 	}
 	b.WriteString("content: ")
 	b.WriteString(renderMemQLValue(args.Content))
+	if args.SourceArtifactId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceArtifactId: ")
+		b.WriteString(quoteMemQL(args.SourceArtifactId))
+	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -985,11 +1075,13 @@ type ComposeMaterializeArgs struct {
 	Statement string
 	// markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.
 	Format string
-	// email_template produces a validated .email.json with subject, editable HTML, and plain-text alternative; requires format json. Empty creates an ordinary document. The result is a draft, never published or sent automatically.
+	// email_template writes a .email.json email document into a layout (layoutId); requires format json and one accountIds entry. With no statement, draft or sources it files the layout itself without a model call. The result is a draft, never published or sent.
 	OutputKind string
+	// builtin:confirmation, builtin:letter, builtin:article or builtin:spotlight, or an organization layout's id from emailLayouts. Email templates only; empty means builtin:article.
+	LayoutId string
 	// What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.
 	Sources []map[string]any
-	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly.
+	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly -- except an email template's: an email is only ever its layout, written by the composer, so on a node with no composer its draft is refused.
 	Draft string
 	// Ordered completed text step keys in the CURRENT work run. Renders their saved replies verbatim, separated by blank lines, without another model call. Exclude research-only notes; include every final chapter in delivery order. Preserves recorded model/source provenance. Requires a prose format and no draft, outputKind or deployableKind. Missing, unfinished, duplicate or non-text sections are refused.
 	SectionKeys []string
@@ -1038,6 +1130,13 @@ func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
 		}
 		b.WriteString("outputKind: ")
 		b.WriteString(quoteMemQL(args.OutputKind))
+	}
+	if args.LayoutId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("layoutId: ")
+		b.WriteString(quoteMemQL(args.LayoutId))
 	}
 	if args.Sources != nil {
 		if b.Len() > 27 {
@@ -1621,6 +1720,72 @@ func (qc *QueryClient) EmailInbox(ctx context.Context, args EmailInboxArgs) (*Re
 func EmailInboxBuild(args EmailInboxArgs) string {
 	_ = args
 	return "builtin emailInbox()"
+}
+
+// EmailLayouts -- The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. The id is opaque: pass it to composeMaterialize as layoutId.
+type EmailLayoutsArgs struct {
+	AccountId          string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+}
+
+// EmailLayouts calls the engine builtin emailLayouts.
+func (qc *QueryClient) EmailLayouts(ctx context.Context, args EmailLayoutsArgs) (*Result, error) {
+	call := EmailLayoutsBuild(args)
+	return qc.executeNamed(ctx, "emailLayouts", call)
+}
+
+func EmailLayoutsBuild(args EmailLayoutsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailLayouts(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.IncludeArchivedSet {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailRender -- Render an email document for preview: pictures you can read are embedded, sample merge values are applied, and {subject, html, text, issues} comes back. Never saves or sends anything.
+type EmailRenderArgs struct {
+	// The *.email.json document, in layout or custom mode.
+	Document map[string]any
+	// The organization the email is for. You need read access to its data.
+	AccountId string
+	// Sample values: displayName, email, accountName, campaignName, and fields (an object of column values).
+	Sample map[string]any
+}
+
+// EmailRender calls the engine builtin emailRender.
+func (qc *QueryClient) EmailRender(ctx context.Context, args EmailRenderArgs) (*Result, error) {
+	call := EmailRenderBuild(args)
+	return qc.executeNamed(ctx, "emailRender", call)
+}
+
+func EmailRenderBuild(args EmailRenderArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailRender(")
+	b.WriteString("document: ")
+	b.WriteString(renderMemQLValue(args.Document))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Sample != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sample: ")
+		b.WriteString(renderMemQLValue(args.Sample))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.

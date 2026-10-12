@@ -1,0 +1,13 @@
+Contact us
+Manage preferences: {{preferencesUrl}}
+Unsubscribe: {{unsubscribeUrl}}
+View in browser: {{viewUrl}}
+Acme
+123 Example Street, Springfield
+You're receiving this because you signed up.
+
+Help & support: https://example.com/help?a=1&b=2
+Privacy: https://example.com/privacy
+
+Line with <angle> brackets
+Second line

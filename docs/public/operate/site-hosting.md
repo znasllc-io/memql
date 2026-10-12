@@ -714,6 +714,7 @@ not conventions:
 | Read a concept declaring NOTHING | **refused** |
 | Write anything, anywhere | refused -- there is no anonymous write |
 | Reach the AI, tool, identity or admin messages | refused at the stream |
+| Send a request over 5 MiB through the WebSocket bridge | refused by itself up to 10 MiB, and the session carries on; a larger one closes the connection (a signed-in session may send up to 32 MiB) |
 
 The undeclared row is the one worth reading twice. Most concepts in a
 tree declare no tier at all, and for a signed-in caller those admit

@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
@@ -14,13 +13,21 @@ import (
 	"testing"
 
 	pure "github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	"github.com/znasllc-io/memql/core/common"
 )
 
 func referencePNG(t *testing.T) []byte {
 	t.Helper()
+	return colouredPNG(t, color.RGBA{255, 0, 0, 255})
+}
+
+// colouredPNG is a 2 x 2 PNG whose first pixel is c: a different colour is a
+// different picture, with different bytes.
+func colouredPNG(t *testing.T, c color.RGBA) []byte {
+	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
-	img.Set(0, 0, color.RGBA{255, 0, 0, 255})
+	img.Set(0, 0, c)
 	var b bytes.Buffer
 	if err := png.Encode(&b, img); err != nil {
 		t.Fatal(err)
@@ -148,48 +155,146 @@ func TestRecipeRetainsReferenceProcessingChoice(t *testing.T) {
 	}
 }
 
+// A picture selected for inclusion is captured once, when the request is
+// accepted, and the replica that writes the email uses that capture: as the
+// Library file it is (artifact:<id>) when the caller can read its artifact, and
+// as an embedded copy of the captured bytes when not.
 func TestEmailReferencesSurviveDispatchToAnotherReplica(t *testing.T) {
-	i, e, u := materializeFixture(t)
-	e.account = map[string]any{"id": "client", "status": "active"}
 	png := referencePNG(t)
-	reader := &referenceReader{data: png}
-	i.SetSourceDownloader(reader)
-	e.files["reference"] = map[string]any{"name": "example.png", "blobUrl": "library/u-alice/reference/example.png", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: png}).SHA256()}
-	opener := &directMaterializeGoal{}
-	i.SetGoalOpener(opener)
-	args := materializeArgs{Name: "Client welcome", Statement: "Use our supplied example", OutputKind: "email_template", Format: pure.FormatJSON, AccountIds: []string{"client"}, Sources: []SourceRef{{Kind: KindLibraryFile, Ref: "reference", Label: "Visual example", Content: true, IncludeImages: true}}}
-	result, err := i.materialize(materializeContext(), "u-alice", "", args)
+	for name, tc := range map[string]struct {
+		artifact map[string]any
+		want     string
+	}{
+		"a picture whose artifact the caller can read": {map[string]any{"id": "v1:library:artifact:a1"}, "artifact:a1"},
+		"a picture with no artifact to read":           {nil, "data:image/png;base64," + base64.StdEncoding.EncodeToString(png)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			i, e, u := materializeFixture(t)
+			e.account = map[string]any{"id": "client", "status": "active"}
+			reader := &referenceReader{data: png}
+			i.SetSourceDownloader(reader)
+			e.files["reference"] = map[string]any{"name": "example.png", "blobUrl": "library/u-alice/reference/example.png", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: png}).SHA256()}
+			if tc.artifact != nil {
+				e.artifacts["reference"] = tc.artifact
+			}
+			opener := &directMaterializeGoal{}
+			i.SetGoalOpener(opener)
+			args := materializeArgs{Name: "Client welcome", Statement: "Use our supplied example", OutputKind: "email_template", Format: pure.FormatJSON, AccountIds: []string{"client"}, Sources: []SourceRef{{Kind: KindLibraryFile, Ref: "reference", Label: "Visual example", Content: true, IncludeImages: true}}}
+			result, err := i.materialize(materializeContext(), "u-alice", "", args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reader.data = []byte("changed source after dispatch")
+			// A fresh integration has no reference reader or in-memory input state.
+			worker := New(e, nil)
+			worker.SetUploader(u, "files")
+			handle := "memql-asset:" + (pure.Result{Bytes: png}).SHA256()
+			worker.SetComposer(materializeComposerFunc(func(_ context.Context, req ComposeRequest) (ComposeReply, error) {
+				if req.OutputKind != "email_template" || req.EmailLayout == nil || req.EmailLayout.Layout != "builtin:article" || len(req.Sources) != 1 || !req.Sources[0].Ref.IncludeImages || len(req.Sources[0].Files) != 1 || !bytes.Equal(req.Sources[0].Files[0].Image, png) {
+					t.Fatal("replica did not receive the original reference snapshot and the layout to fill")
+				}
+				alt := "Our shop window"
+				return ComposeReply{EmailContent: &emaildoc.Content{Subject: "Welcome", Blocks: []emaildoc.ContentItem{{ID: "banner", Image: &handle, Alt: &alt}}}}, nil
+			}))
+			ctx := common.ContextWithRun(materializeContext(), common.RunContext{RunId: "v1:work:run:direct", GoalId: "v1:work:goal:direct", StepKey: "compose", OwnerUserId: "u-alice"})
+			if _, err := worker.handleExecute(ctx, opener.goal.Input, 0); err != nil {
+				t.Fatal(err)
+			}
+			row := e.compositions[stringOf(result["compositionId"])]
+			file := e.files[stringOf(row["outputFileId"])]
+			if row["status"] != "ready" || !strings.HasSuffix(stringOf(file["name"]), ".email.json") || stringOf(file["mimeType"]) != "application/json" {
+				t.Fatalf("wrong email output receipt: %+v", file)
+			}
+			doc := filedEmail(t, u)
+			if banner := emailBlock(t, doc, "banner"); banner.Src != tc.want || banner.Alt != "Our shop window" {
+				t.Fatalf("banner src = %.80q (alt %q), want %.80q", banner.Src, banner.Alt, tc.want)
+			}
+			if reader.calls != 1 {
+				t.Fatal("references were read again on another replica")
+			}
+		})
+	}
+}
+
+// Rulings 12: what a handle the model may use becomes in the email. Only the
+// pictures of references selected for inclusion are offered at all; a whole
+// Library image file becomes the file itself when the caller can read its
+// artifact, and anything else (a ZIP member, a file without a readable
+// artifact, a row whose digest says nothing) becomes a copy of the captured
+// bytes. The handle is the digest of those bytes, so a capture that changed
+// offers a different handle.
+func TestEmailImageSourcesOfferOnlyIncludedPictures(t *testing.T) {
+	png := referencePNG(t)
+	other := colouredPNG(t, color.RGBA{0, 0, 255, 255})
+	undigested := colouredPNG(t, color.RGBA{0, 255, 0, 255})
+	handle := func(b []byte) string { return "memql-asset:" + (pure.Result{Bytes: b}).SHA256() }
+	embedded := func(b []byte) string { return "data:image/png;base64," + base64.StdEncoding.EncodeToString(b) }
+	digest := func(b []byte) string { return (pure.Result{Bytes: b}).SHA256() }
+
+	e := newMaterializeEngine(t)
+	e.artifacts["whole"] = map[string]any{"id": "v1:library:artifact:whole-art"}
+	e.artifacts["archive"] = map[string]any{"id": "v1:library:artifact:zip-art"}
+	e.artifacts["undigested"] = map[string]any{"id": "v1:library:artifact:nodigest-art"}
+	i := New(e, nil)
+	resolved := []Resolved{
+		{Ref: SourceRef{Kind: KindLibraryFile, Ref: "whole", Content: true, IncludeImages: true},
+			Rows:  []map[string]any{{"name": "logo.png", "sha256": digest(png)}},
+			Files: []SourceContent{{Name: "logo.png", MimeType: "image/png", Image: png, SHA256: digest(png)}}},
+		{Ref: SourceRef{Kind: KindLibraryFile, Ref: "archive", Content: true, IncludeImages: true},
+			Rows:  []map[string]any{{"name": "brand.zip", "sha256": "0000"}},
+			Files: []SourceContent{{Name: "brand/photo.png", MimeType: "image/png", Image: other, SHA256: digest(other)}, {Name: "brief.md", MimeType: "text/plain", Text: "Brief"}}},
+		{Ref: SourceRef{Kind: KindLibraryFile, Ref: "undigested", Content: true, IncludeImages: true},
+			Rows:  []map[string]any{{"name": "mark.png"}},
+			Files: []SourceContent{{Name: "mark.png", MimeType: "image/png", Image: undigested, SHA256: "not the digest of anything"}}},
+		{Ref: SourceRef{Kind: KindLibraryFile, Ref: "inspiration", Content: true},
+			Rows:  []map[string]any{{"name": "mood.png", "sha256": "1111"}},
+			Files: []SourceContent{{Name: "mood.png", MimeType: "image/png", Image: colouredPNG(t, color.RGBA{9, 9, 9, 255})}}},
+	}
+	sources, err := i.emailImageSources(materializeContext(), resolved)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader.data = []byte("changed source after dispatch")
-	// A fresh integration has no reference reader or in-memory input state.
-	worker := New(e, nil)
-	worker.SetUploader(u, "files")
-	worker.SetComposer(materializeComposerFunc(func(_ context.Context, req ComposeRequest) (ComposeReply, error) {
-		if req.OutputKind != "email_template" || len(req.Sources) != 1 || !req.Sources[0].Ref.IncludeImages || len(req.Sources[0].Files) != 1 || !bytes.Equal(req.Sources[0].Files[0].Image, png) {
-			t.Fatal("replica did not receive the original reference snapshot")
+	want := map[string]string{
+		handle(png):        "artifact:whole-art",
+		handle(other):      embedded(other),
+		handle(undigested): embedded(undigested),
+	}
+	if len(sources) != len(want) {
+		t.Fatalf("offered %d pictures, want %d: %v", len(sources), len(want), keysOf(sources))
+	}
+	for h, src := range want {
+		if sources[h] != src {
+			t.Errorf("%s -> %.80q, want %.80q", h, sources[h], src)
 		}
-		body, _ := json.Marshal(pure.EmailTemplate{Subject: "Welcome", TextBody: "Hello", HTMLBody: `<p>Hello</p><img src="memql-asset:` + (pure.Result{Bytes: png}).SHA256() + `" alt="Logo">`})
-		return ComposeReply{Draft: pure.Draft{Body: string(body)}}, nil
-	}))
-	ctx := common.ContextWithRun(materializeContext(), common.RunContext{RunId: "v1:work:run:direct", GoalId: "v1:work:goal:direct", StepKey: "compose", OwnerUserId: "u-alice"})
-	if _, err := worker.handleExecute(ctx, opener.goal.Input, 0); err != nil {
-		t.Fatal(err)
 	}
-	row := e.compositions[stringOf(result["compositionId"])]
-	file := e.files[stringOf(row["outputFileId"])]
-	if row["status"] != "ready" || !strings.HasSuffix(stringOf(file["name"]), ".email.json") || stringOf(file["mimeType"]) != "application/json" {
-		t.Fatalf("wrong email output receipt: %+v", file)
+	// No artifact is read for a picture that is not the whole file, nor for one
+	// that is not included.
+	for _, call := range e.calls {
+		if call != "libraryArtifactForFile" {
+			t.Fatalf("unexpected read %s", call)
+		}
 	}
-	if _, err := pure.RenderEmailTemplate(string(u.bytes)); err != nil {
-		t.Fatal(err)
+	if n := len(e.calls); n != 1 {
+		t.Fatalf("artifacts read %d times, want once (the whole file's): %v", n, e.calls)
 	}
-	if !strings.Contains(string(u.bytes), base64.StdEncoding.EncodeToString(png)) {
-		t.Fatal("included image bytes did not reach output across replica hop")
+}
+
+func keysOf(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
-	if reader.calls != 1 {
-		t.Fatal("references were read again on another replica")
+	return out
+}
+
+func TestRecipeKeepsAssetPermissionSeparateFromReferencePermission(t *testing.T) {
+	selectors := []any{map[string]any{"kind": "library_file", "selector": "file", "content": true, "includeImages": true}}
+	refs, err := selectorsToSources(selectors)
+	if err != nil || len(refs) != 1 || !refs[0].IncludeImages || !refs[0].Content {
+		t.Fatal(refs, err)
+	}
+	if _, err := parseSourceRefs([]any{map[string]any{"kind": "library_file", "ref": "file", "includeImages": true}}); err == nil {
+		t.Fatal("asset without content permission accepted")
 	}
 }
 

@@ -399,28 +399,73 @@ QueryClient.prototype.campaignRetryNewsletterWelcome = function (this: QueryClie
   return this.executeNamed("campaignRetryNewsletterWelcome", buildCampaignRetryNewsletterWelcome(args), opts);
 };
 
-/** Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail. */
+/** Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision. */
+export interface CampaignSaveLayoutArgs {
+  /** Stable caller-generated layout id; reuse it on an uncertain creation response. */
+  layoutId: string;
+  /** Owning organization; immutable after creation. */
+  accountId: string;
+  /** Required when saving. */
+  name?: string;
+  description?: string;
+  /** The layout-mode email document. Required when saving. */
+  document?: Record<string, unknown>;
+  /** The Library file the layout comes from. */
+  sourceArtifactId?: string;
+  /** Exact createdAt from emailLayoutById; empty only when creating. */
+  expectedRevision: string;
+  /** save (default), archive or restore. */
+  action?: string;
+}
+
+export function buildCampaignSaveLayout(args: CampaignSaveLayoutArgs): string {
+  const parts: string[] = [];
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.document !== undefined) parts.push("document: " + renderMemQLValue(args.document));
+  if (args.sourceArtifactId !== undefined) parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
+  return "builtin campaignSaveLayout(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSaveLayout(args: CampaignSaveLayoutArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSaveLayout = function (this: QueryClient, args: CampaignSaveLayoutArgs = {} as CampaignSaveLayoutArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSaveLayout", buildCampaignSaveLayout(args), opts);
+};
+
+/** Save an organization email template with an exact revision precondition. content is the email document (a *.email.json file): a layout document made of blocks, or custom HTML with its plain-text body. The server renders it and stores the subject, the text and HTML parts and the document, and answers {templateId, revision, status, saved, issues}. issues are what keeps the email from being sent as it is: a missing picture or link, a picture the caller cannot read, a missing unsubscribe link, an email that is too large. Saving works with issues and returns the template to draft. Publishing requires the exact saved revision and the exact saved content, and is refused while any issue remains. Archive and restore require only the exact revision; the content in the call is ignored, and restore returns a template to draft. Empty expectedRevision creates a draft. With sourceArtifactId (the Library file the email is written in) there is one template per organization and file: the template already published from that file is updated whatever templateId says, and the first save creates it, so templateId may be left empty. This never sends mail. */
 export interface CampaignSaveTemplateArgs {
-  /** Stable caller-generated template ID; reuse on an uncertain creation response. */
-  templateId: string;
+  /** Stable caller-generated template ID; reuse on an uncertain creation response. May be empty only when sourceArtifactId is given. */
+  templateId?: string;
   /** Owning organization; immutable after creation. */
   accountId: string;
   /** Template name. */
   name: string;
-  /** The reviewed email file: subject, textBody, htmlBody. */
+  /** The email document: a layout document {subject, preheader, layout, theme, blocks} or custom HTML {subject, preheader, textBody, htmlBody}. Ignored when archiving or restoring. */
   content: Record<string, unknown>;
-  /** Exact createdAt from templateById; empty only when creating. */
+  /** The Library file the email is written in. Keeps one template per organization and file; see above. */
+  sourceArtifactId?: string;
+  /** Exact createdAt from templateById or templateForSource; empty only when creating. */
   expectedRevision: string;
-  /** save (default), publish, or archive. Publishing is an explicit human action. */
+  /** save (default), publish, archive or restore. Publishing is an explicit human action. */
   action?: string;
 }
 
 export function buildCampaignSaveTemplate(args: CampaignSaveTemplateArgs): string {
   const parts: string[] = [];
-  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   parts.push("accountId: " + renderMemQLValue(args.accountId));
   parts.push("name: " + renderMemQLValue(args.name));
   parts.push("content: " + renderMemQLValue(args.content));
+  if (args.sourceArtifactId !== undefined) parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
   parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
   if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
   return "builtin campaignSaveTemplate(" + parts.join(", ") + ")";
@@ -766,11 +811,13 @@ export interface ComposeMaterializeArgs {
   statement?: string;
   /** markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of. */
   format: string;
-  /** email_template produces a validated .email.json with subject, editable HTML, and plain-text alternative; requires format json. Empty creates an ordinary document. The result is a draft, never published or sent automatically. */
+  /** email_template writes a .email.json email document into a layout (layoutId); requires format json and one accountIds entry. With no statement, draft or sources it files the layout itself without a model call. The result is a draft, never published or sent. */
   outputKind?: string;
+  /** builtin:confirmation, builtin:letter, builtin:article or builtin:spotlight, or an organization layout's id from emailLayouts. Email templates only; empty means builtin:article. */
+  layoutId?: string;
   /** What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each. */
   sources?: Record<string, unknown>[];
-  /** A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly. */
+  /** A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly -- except an email template's: an email is only ever its layout, written by the composer, so on a node with no composer its draft is refused. */
   draft?: string;
   /** Ordered completed text step keys in the CURRENT work run. Renders their saved replies verbatim, separated by blank lines, without another model call. Exclude research-only notes; include every final chapter in delivery order. Preserves recorded model/source provenance. Requires a prose format and no draft, outputKind or deployableKind. Missing, unfinished, duplicate or non-text sections are refused. */
   sectionKeys?: string[];
@@ -796,6 +843,7 @@ export function buildComposeMaterialize(args: ComposeMaterializeArgs): string {
   if (args.statement !== undefined) parts.push("statement: " + renderMemQLValue(args.statement));
   parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.sources !== undefined) parts.push("sources: " + renderMemQLValue(args.sources));
   if (args.draft !== undefined) parts.push("draft: " + renderMemQLValue(args.draft));
   if (args.sectionKeys !== undefined) parts.push("sectionKeys: " + renderMemQLValue(args.sectionKeys));
@@ -1214,6 +1262,57 @@ declare module "./query.js" {
 
 QueryClient.prototype.emailInbox = function (this: QueryClient, args: EmailInboxArgs = {} as EmailInboxArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("emailInbox", buildEmailInbox(args), opts);
+};
+
+/** The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. The id is opaque: pass it to composeMaterialize as layoutId. */
+export interface EmailLayoutsArgs {
+  accountId: string;
+  includeArchived?: boolean;
+}
+
+export function buildEmailLayouts(args: EmailLayoutsArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  return "builtin emailLayouts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailLayouts(args: EmailLayoutsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailLayouts = function (this: QueryClient, args: EmailLayoutsArgs = {} as EmailLayoutsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailLayouts", buildEmailLayouts(args), opts);
+};
+
+/** Render an email document for preview: pictures you can read are embedded, sample merge values are applied, and {subject, html, text, issues} comes back. Never saves or sends anything. */
+export interface EmailRenderArgs {
+  /** The *.email.json document, in layout or custom mode. */
+  document: Record<string, unknown>;
+  /** The organization the email is for. You need read access to its data. */
+  accountId: string;
+  /** Sample values: displayName, email, accountName, campaignName, and fields (an object of column values). */
+  sample?: Record<string, unknown>;
+}
+
+export function buildEmailRender(args: EmailRenderArgs): string {
+  const parts: string[] = [];
+  parts.push("document: " + renderMemQLValue(args.document));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.sample !== undefined) parts.push("sample: " + renderMemQLValue(args.sample));
+  return "builtin emailRender(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailRender(args: EmailRenderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailRender = function (this: QueryClient, args: EmailRenderArgs = {} as EmailRenderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailRender", buildEmailRender(args), opts);
 };
 
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */
