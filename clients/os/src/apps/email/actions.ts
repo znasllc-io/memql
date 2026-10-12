@@ -3,11 +3,9 @@ import { newShortId, refusalSentence, type Connection, type Row } from "@znasllc
 
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
-import { lifecycleContent } from "./templates/templateActs";
 import {
   campaignName,
   layoutRecordFromRow,
-  templateRecordFromRow,
   type AudienceRow,
   type CampaignRow,
   type LayoutRow,
@@ -780,10 +778,12 @@ export function useImportRecipients(): ImportState {
 // save builtins in the app -- one hook each, below (pinned by
 // test/email/templates/templateCreation.test.ts).
 //
-// NEITHER IS AN EDIT. The engine takes the exact revision and the action, and
-// ignores the content; what goes back as content is what is STORED, read whole
-// by id for this call -- a list row holds no body, and sending a row's missing
-// body back as an edit is how an email would be written empty.
+// NEITHER IS AN EDIT. The engine takes the exact revision and the action and
+// never reads content for either (it writes the stored content back as it is),
+// so none is sent and nothing is read to send it: a list row holds no body, a
+// row's missing body sent back as an edit is how an email would be written
+// empty, and a read made only to fill an ignored field could fail a change that
+// was never in doubt.
 
 /** A template or a layout put away or brought back: the busy/error pair, and whether the answer was lost. */
 export interface LifecycleState extends WriteState, MayBeLost {}
@@ -799,23 +799,17 @@ export interface TemplateLifecycle extends LifecycleState {
  * Archiving and restoring a template. The revision is the one the page was
  * showing (the list row's `createdAt`), so a template saved somewhere else
  * since is refused in the engine's words rather than archived unseen; the
- * content is the template's own, read by id (`templateById`) for the call.
+ * content is empty, as the engine reads none for these two.
  */
 export function useTemplateLifecycle(): TemplateLifecycle {
-  // Which call a refusal came from, so its sentence loses that call's name.
-  const calling = useRef("");
   const write = useWrite(async (query, template: TemplateRow, action: "archive" | "restore") => {
-    calling.current = "templateById";
-    const stored = (await query.templateById({ templateId: template.id })).rows()[0];
-    if (stored === undefined) throw new Error(WORDS.unavailable.template);
     const base = {
       templateId: template.id,
       name: template.name,
       accountId: template.accountId,
       expectedRevision: template.createdAt,
-      content: lifecycleContent(templateRecordFromRow(stored)),
+      content: {},
     };
-    calling.current = "campaignSaveTemplate";
     const result =
       action === "archive"
         ? await query.campaignSaveTemplate({ ...base, action: "archive" })
@@ -827,7 +821,7 @@ export function useTemplateLifecycle(): TemplateLifecycle {
   }, false);
   return {
     busy: write.busy,
-    error: write.error === "" ? "" : refusalSentence(write.error, calling.current),
+    error: write.error === "" ? "" : refusalSentence(write.error, "campaignSaveTemplate"),
     lost: write.lost,
     reset: write.reset,
     archive: (template) => write.call(template, "archive"),

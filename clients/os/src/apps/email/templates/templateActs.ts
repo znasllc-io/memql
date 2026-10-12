@@ -49,9 +49,9 @@ export function templateEditorURL(domain: string, t: TemplateRow): string {
 /**
  * The email a template holds, as the document it was saved from: the stored
  * document, or -- for a template saved before documents existed -- the custom
- * email its bodies make. What a preview renders, and what Archive and Restore
- * hand back unchanged. From the template read whole, by id: a list row holds
- * none of it.
+ * email its bodies make. What the template's page hands the renderer. From the
+ * template read whole, by id: a list row holds none of it. (Archive and Restore
+ * send none: the engine reads no content for either.)
  */
 export function lifecycleContent(t: TemplateRecord): Record<string, unknown> {
   return t.document ?? { subject: t.subject, textBody: t.textBody, htmlBody: t.htmlBody };

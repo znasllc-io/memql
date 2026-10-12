@@ -238,18 +238,20 @@ describe("a template's page", () => {
     await readTheBar();
     press("Archive");
     await readTheBar();
+    const readsBefore = conn.query.templateById.mock.calls.length;
     press("Archive");
     await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledTimes(1));
-    // The revision of the row on screen, and the content stored under it -- read
-    // by id, never the list row's (it has none).
+    // The revision of the row on screen, and no content: the engine never reads
+    // content for an archive or a restore, so nothing is read to send it either.
     expect(conn.query.campaignSaveTemplate.mock.calls[0]![0]).toEqual({
       templateId: "t1",
       name: "Welcome 2",
       accountId: "self",
       expectedRevision: "2026-10-01T08:00:00Z",
-      content: DOCUMENT,
+      content: {},
       action: "archive",
     });
+    expect(conn.query.templateById.mock.calls.length).toBe(readsBefore);
     // The act stays busy until the change arrives.
     await waitFor(() => expect(barWord()).toBe("Archiving"));
     act(() => conn.subscriptions.emit(TEMPLATE, { ...welcome, status: "archived", createdAt: "2026-10-02T08:00:00Z" }));
@@ -265,9 +267,45 @@ describe("a template's page", () => {
       name: "Welcome 2",
       accountId: "self",
       expectedRevision: "2026-10-02T08:00:00Z",
-      content: DOCUMENT,
+      content: {},
       action: "restore",
     });
+  });
+
+  // The list rows hold no body, so nothing here has one to send back: archiving
+  // and restoring name the revision and the action, and the content is empty. A
+  // restore that saved the row's (absent) body would have written an empty email.
+  it("restores an archived template by its revision alone, sending no content", async () => {
+    const conn = fakeConnection({ templates: [templateRow({ id: "t1", name: "August copy", status: "archived" })] });
+    mount(conn, { includeArchived: true });
+    await openPage("August copy");
+    const readsBefore = conn.query.templateById.mock.calls.length;
+    press("Restore");
+    await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledTimes(1));
+    expect(conn.query.campaignSaveTemplate.mock.calls[0]![0]).toEqual({
+      templateId: "t1",
+      name: "August copy",
+      accountId: "self",
+      expectedRevision: "2026-08-01T00:00:00Z",
+      content: {},
+      action: "restore",
+    });
+    // Nothing is read for it: a read that failed would say the restore failed when nothing was written.
+    expect(conn.query.templateById.mock.calls.length).toBe(readsBefore);
+  });
+
+  it("archives with no content either", async () => {
+    const conn = fakeConnection({ templates: [templateRow({ id: "t1", name: "August copy", status: "draft" })], templateContent: { t1: new Error("templateById: unavailable") } });
+    mount(conn);
+    await openPage("August copy");
+    press("Archive");
+    await waitFor(() => expect(conn.query.campaignSaveTemplate).toHaveBeenCalledTimes(1));
+    const sent = conn.query.campaignSaveTemplate.mock.calls[0]![0] as Record<string, unknown>;
+    expect(sent.content).toEqual({});
+    expect(sent.action).toBe("archive");
+    // A template whose whole could not be read is still archived: the call never needed it.
+    expect(screen.queryByText("The template wasn't archived.")).toBeNull();
+    expect(screen.queryByText(/Couldn't confirm/)).toBeNull();
   });
 
   it("archives a draft without asking, and shows a refusal in the engine's words", async () => {
