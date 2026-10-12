@@ -37,6 +37,7 @@ import {
   senderIsRetired,
   senderLabel,
   senderProjection,
+  seriesFor,
   templateIsArchived,
   templateName,
   templateProjection,
@@ -58,6 +59,7 @@ import {
 } from "../useEmail";
 import { browserZone, elapsedClock, instantToLocal, localToInstant, whenWords } from "../when";
 import { WORDS } from "../words";
+import { useLanding } from "./landing";
 import {
   askingActs,
   campaignNameFor,
@@ -137,6 +139,9 @@ type TestTarget = { kind: "audience"; audience: AudienceRow } | { kind: "me"; ad
 
 /** The write that was refused last, which says what the notice over Review reads. */
 type Refused = "add" | "update" | "send" | "test" | "cancel";
+
+/** What Review's forward act does, once confirmed. */
+type ForwardAct = "send" | "schedule" | "repeat";
 
 export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, onDone }: {
   feeds: EmailFeeds;
@@ -285,6 +290,25 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
   const [asking, setAsking] = useState<"" | "forward" | "cancel">("");
   const [busyId, setBusyId] = useState("");
   const [refused, setRefused] = useState<Refused | null>(null);
+  /** What the forward act did last, so a refusal of it is in that write's words, never an older one's. */
+  const [forwardBy, setForwardBy] = useState<ForwardAct>("send");
+
+  // A CONFIRMED FORWARD ACT HANDS THE CAMPAIGN OVER ONLY ONCE IT HAS LANDED
+  // (`useLanding`): its row has moved on from draft -- sending, scheduled -- or
+  // its series is there. Handed over at once, its page opened on the draft as
+  // it stood, with Send now live over a send already on its way. Until then the
+  // floor holds the act, busy, and nothing else.
+  const landedFor = (act: ForwardAct): string => {
+    if (act === "repeat") return seriesFor(recordFeeds.series.snapshot.rows, campaignId) !== null ? "landed" : "waiting";
+    const row = recordNamed(feeds.campaigns.snapshot.rows, campaignFromRow, campaignId);
+    return row !== null && row.status !== "draft" ? "landed" : "waiting";
+  };
+  const flight = useLanding<ForwardAct>({
+    marker: landedFor,
+    reread: (act) => (act === "repeat" ? recordFeeds.series.refresh(campaignId) : feeds.campaigns.reseed()),
+    onLanded: () => onDone(campaignId),
+  });
+  const landing = flight.landing;
   const [tested, setTested] = useState<TestTarget | null>(null);
   const working = useRef(false);
 
@@ -363,10 +387,17 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
     }
   }
 
-  const goForward = () =>
+  const goForward = (spec: ActSpec) =>
     once("forward-confirmed", async () => {
-      if (!(await ensureDraft())) return;
       const when = draft.when ?? { kind: "now" };
+      const act: ForwardAct = when.kind === "now" ? "send" : when.kind === "schedule" ? "schedule" : "repeat";
+      setAsking("");
+      setForwardBy(act);
+      flight.begin(act, spec);
+      if (!(await ensureDraft())) {
+        flight.drop();
+        return;
+      }
       const instant = when.kind === "now" ? "" : (localToInstant(when.at) ?? "");
       const done =
         when.kind === "now"
@@ -375,11 +406,13 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
             ? await controls.schedule(campaignId, instant)
             : await series.save({ campaignId, intervalWeeks: when.weeks, firstSendAt: instant, timeZone: zone });
       if (!done) {
+        flight.drop();
         setRefused("send");
-        setAsking("");
         return;
       }
-      onDone(campaignId);
+      // Taken: handed over once it lands, or after LANDING_MS with what was read again.
+      flight.taken();
+      if (act === "repeat") recordFeeds.series.refresh(campaignId);
     });
 
   const sendTest = () =>
@@ -453,6 +486,8 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
   const name = campaignNameFor(draft, template);
 
   function floor(): { status: WizardStatus; specs: ActSpec[]; question: ReactNode } {
+    // A change on its way holds the floor: the act it was, busy, and nothing else.
+    if (landing !== null) return { status: { word: WORDS.changing[landing.act], tone: "busy" }, specs: [landing.spec], question: null };
     // A question asked in the bar holds the floor, whichever step is showing.
     const askingNow = asking === "forward" && reading.forward === null ? "" : asking;
     if (askingNow === "forward") {
@@ -532,7 +567,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
         setAsking("");
         return;
       case "forward-confirmed":
-        void goForward();
+        void goForward(specs.find((spec) => spec.id === id) ?? { id, label: id });
         return;
       case "test":
         void sendTest();
@@ -822,7 +857,12 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
         case "update":
           return <Notice tone="error" sentence="The draft wasn't updated, so nothing was sent." detail={update.error} />;
         case "send":
-          return <Notice tone="error" sentence="The campaign was saved as a draft but not sent." detail={controls.error || series.error} />;
+          // In the words of the write it made last: a send refused earlier is not why repeating didn't start.
+          return forwardBy === "repeat" ? (
+            <Notice tone="error" sentence="The campaign was saved as a draft, but repeating didn't start." detail={series.error} />
+          ) : (
+            <Notice tone="error" sentence="The campaign was saved as a draft but not sent." detail={controls.error} />
+          );
         case "test":
           return <Notice tone="error" sentence="The test wasn't sent." detail={testSend.error} />;
         case "cancel":
@@ -882,7 +922,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
         }
       }}
       status={status}
-      acts={toKitActs(specs, run, busyId)}
+      acts={toKitActs(specs, run, landing !== null ? landing.spec.id : busyId)}
       confirm={question === null ? null : <div className="os-actbar-confirm">{question}</div>}
       context={{ page: "Add a campaign", step: open }}
     >

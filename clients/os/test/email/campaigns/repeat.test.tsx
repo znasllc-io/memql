@@ -258,8 +258,9 @@ describe("what an edit of a repeating campaign saves", () => {
     // The engine keeps a saved series' status, so what comes back is still paused.
     await act(async () => conn.subscriptions.emit(SERIES, { ...paused, intervalWeeks: 3, createdAt: "2027-10-02T09:00:00Z" }));
     expect(await screen.findByRole("heading", { level: 3, name: "Weekly digest" })).toBeTruthy();
-    await waitFor(() => expect(barDetail()).toBe("Every 3 weeks"));
+    await waitFor(() => expect(screen.getByText("Every 3 weeks from Tue, Oct 14 at 9:00 (America/Phoenix)")).toBeTruthy());
     expect(barWord()).toBe("Repeating paused");
+    expect(barDetail()).toBe("");
     expect(barActs()).toEqual(["Edit", "Send a test", "Resume"]);
     // Nothing but Resume restarts it, and nobody pressed Resume.
     expect(conn.query.campaignConfigureSeries.mock.calls.map(([args]) => (args as { action: string }).action)).toEqual(["save"]);

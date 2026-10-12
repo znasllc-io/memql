@@ -211,8 +211,13 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
   const controls = useSendControls();
   const [asking, setAsking] = useState<"" | "cancel" | "repeat">("");
   const [busyId, setBusyId] = useState("");
-  /** The last write that did not go as asked: refused, or with its answer lost (it may have been done). */
-  const [refused, setRefused] = useState<{ write: Refused; campaignSaved: boolean; lost: boolean } | null>(null);
+  /**
+   * The last write that did not go as asked: refused, or with its answer lost
+   * (it may have been done). `seen` is the campaign and series versions it was
+   * said over: once either is read back newer, a lost answer has its answer.
+   */
+  const [refused, setRefused] = useState<{ write: Refused; campaignSaved: boolean; lost: boolean; seen: string } | null>(null);
+  const versions = `${campaign.createdAt}|${series?.createdAt ?? ""}`;
   const working = useRef(false);
 
   // A CHANGE ON ITS WAY HOLDS THE BAR (`useLanding`): Start repeating until the
@@ -226,7 +231,7 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
 
   /** A write that did not go as asked; one whose answer was lost has its subject read again. */
   function failed(write: Refused, campaignSaved: boolean, lost: boolean) {
-    setRefused({ write, campaignSaved, lost });
+    setRefused({ write, campaignSaved, lost, seen: versions });
     if (lost) reread(write);
   }
 
@@ -400,8 +405,10 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
   function outcome(): ReactNode {
     if (refused === null) return null;
     // AN ANSWER THAT NEVER CAME BACK IS NOT A REFUSAL: the write may have been
-    // done. What it moves is being read again, and the page will show it.
+    // done. What it moves is being read again, and once it is back, newer, the
+    // page shows what happened and the notice has nothing left to say.
     if (refused.lost) {
+      if (refused.seen !== versions) return null;
       switch (refused.write) {
         case "update":
           return <Notice tone="warn" sentence="Couldn't confirm that your changes were saved." next="What you changed is still here." detail={edit.error} />;

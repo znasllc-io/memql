@@ -175,7 +175,8 @@ function seriesReading(series: SeriesRow, zone: string): CampaignReading {
         tone: "live",
       };
     case "paused":
-      return { word: WORDS.repeating.paused!, detail: WORDS.every(series.intervalWeeks), tone: "paused" };
+      // Nothing goes next: how often and from when is the page's When fact, said there once.
+      return { word: WORDS.repeating.paused!, detail: "", tone: "paused" };
     case "blocked":
       return { word: WORDS.repeating.blocked!, detail: series.lastError, tone: "none" };
     default:
@@ -196,7 +197,8 @@ export function campaignReading(f: CampaignFacts): CampaignReading {
       return { word, detail: savedTime(f) === "past" ? "Its time has passed." : "", tone: "none" };
     }
     case "scheduled":
-      return { word, detail: barSentence(blocker(f)) || (campaign.scheduledAt === "" ? "" : momentWords(campaign.scheduledAt, zone)), tone: "none" };
+      // When it goes is the page's When fact, with its zone: said there once.
+      return { word, detail: barSentence(blocker(f)), tone: "none" };
     case "sending":
       return { word, detail: progress(campaign), tone: "live" };
     case "paused":

@@ -177,6 +177,26 @@ describe("editing a campaign", () => {
     await waitFor(() => expect(barWord()).toBe("Cancelled"));
   });
 
+  it("a save whose answer never came back says so until the campaign is read back", async () => {
+    const conn = seed();
+    conn.query.updateCampaign.mockRejectedValueOnce(Object.assign(new Error("stream closed"), { reason: "transport" }));
+    mountWindow(conn);
+    await openEdit();
+    const reads = conn.query.campaigns.mock.calls.length;
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "September update" } });
+    press("Save");
+    expect(await screen.findByText("Couldn't confirm that your changes were saved.")).toBeTruthy();
+    expect(screen.queryByText("Your changes weren't saved.")).toBeNull();
+    await waitFor(() => expect(conn.query.campaigns.mock.calls.length).toBeGreaterThan(reads));
+    // It went: the campaign comes back as it was saved, and what could not be confirmed no longer needs saying.
+    act(() =>
+      conn.subscriptions.emit(CAMPAIGN, campaignRow({ id: "c1", name: "September update", audienceId: "a1", templateId: "t1", senderIdentityId: "s1", createdAt: "2026-08-02T00:00:00Z" })),
+    );
+    await waitFor(() => expect(screen.queryByText("Couldn't confirm that your changes were saved.")).toBeNull());
+    // And nothing is left to save.
+    expect(barActs()).toEqual(["Cancel campaign"]);
+  });
+
   it("a cancel whose answer never came back says so, and reads the campaign again", async () => {
     const conn = seed();
     conn.query.cancelCampaign.mockRejectedValueOnce(Object.assign(new Error("stream closed"), { reason: "transport" }));

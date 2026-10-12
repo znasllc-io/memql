@@ -126,6 +126,9 @@ const barWord = () => bar().querySelector(".os-actbar-word")?.textContent ?? "";
 const barDetail = () => bar().querySelector(".os-actbar-detail")?.textContent ?? "";
 const barActs = () => within(bar()).queryAllByRole("button").map((button) => button.textContent);
 const press = (name: string) => fireEvent.click(within(bar()).getByRole("button", { name }));
+/** The bar's acts that can be pressed now: not disabled. */
+const pressable = () => within(bar()).queryAllByRole("button").filter((button) => !(button as HTMLButtonElement).disabled).map((button) => button.textContent);
+const SERIES = "v1:campaigns:campaignSeries";
 
 /** The buttons a person could press that do nothing: disabled, and not because they are working. */
 function deadButtons(): string[] {
@@ -454,10 +457,21 @@ describe("Add a campaign, on Review", () => {
     expect(created).not.toHaveProperty("ownerUserId");
     expect(conn.query.campaignStartSend.mock.calls[0]![0]).toEqual({ campaignId: created.campaignId });
 
-    // The campaign's page opens when its row arrives.
-    act(() => conn.subscriptions.emit(CAMPAIGN, campaignRow({ id: created.campaignId as string, name: "August copy", audienceId: "a1", templateId: "t1", status: "sending" }), "NODE_CREATED"));
+    // Taken, not landed: the floor holds the act it was, busy, and nothing else -- no Not yet.
+    await waitFor(() => expect(barWord()).toBe("Starting"));
+    expect(barActs()).toEqual(["Send now"]);
+    expect(pressable()).toEqual([]);
+    // The draft's row arrives first, as it is: the wizard still holds.
+    const row = campaignRow({ id: created.campaignId as string, name: "August copy", audienceId: "a1", templateId: "t1", senderIdentityId: "s1" });
+    act(() => conn.subscriptions.emit(CAMPAIGN, row, "NODE_CREATED"));
+    expect(screen.getByRole("heading", { level: 3, name: "Add a campaign" })).toBeTruthy();
+    expect(barWord()).toBe("Starting");
+    // The send lands; the campaign's page opens on it, sending -- never on the draft with Send now live.
+    act(() => conn.subscriptions.emit(CAMPAIGN, { ...row, status: "sending" }));
     expect(await screen.findByRole("heading", { level: 3, name: "August copy" })).toBeTruthy();
     expect(screen.queryByRole("heading", { level: 3, name: "Add a campaign" })).toBeNull();
+    await waitFor(() => expect(barWord()).toBe("Sending"));
+    expect(barActs()).not.toContain("Send now");
   });
 
   it("keeps the draft and says so when the send is refused", async () => {
@@ -518,10 +532,21 @@ describe("Add a campaign, on Review", () => {
     expect(created.scheduledAt).toBe("2031-10-14T16:00:00Z");
     expect(conn.query.campaignScheduleSend).toHaveBeenCalledWith({ campaignId: created.campaignId, scheduledAt: "2031-10-14T16:00:00Z" });
     expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
+    // Held until it is scheduled, then handed to its page.
+    await waitFor(() => expect(barWord()).toBe("Scheduling"));
+    expect(pressable()).toEqual([]);
+    const row = campaignRow({ id: created.campaignId as string, name: "August copy", audienceId: "a1", templateId: "t1", senderIdentityId: "s1", scheduledAt: "2031-10-14T16:00:00Z" });
+    act(() => conn.subscriptions.emit(CAMPAIGN, row, "NODE_CREATED"));
+    expect(barWord()).toBe("Scheduling");
+    act(() => conn.subscriptions.emit(CAMPAIGN, { ...row, status: "scheduled" }));
+    expect(await screen.findByRole("heading", { level: 3, name: "August copy" })).toBeTruthy();
+    await waitFor(() => expect(barWord()).toBe("Scheduled"));
   });
 
   it("starts repeating", async () => {
-    const conn = seed();
+    // What the cluster's series reads answer: nothing yet, then the series it starts.
+    const seriesRows: Record<string, unknown>[] = [];
+    const conn = seed({ campaignSeries: seriesRows });
     mountWindow(conn);
     await walkToWhen();
     choose(/^Repeat/);
@@ -549,6 +574,59 @@ describe("Add a campaign, on Review", () => {
       timeZone: ZONE,
     });
     expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
+    // Held until its series is there, then handed to its page, repeating.
+    await waitFor(() => expect(barWord()).toBe("Starting"));
+    expect(pressable()).toEqual([]);
+    const id = created.campaignId as string;
+    await act(async () => conn.subscriptions.emit(CAMPAIGN, campaignRow({ id, name: "August copy", audienceId: "a1", templateId: "t1", senderIdentityId: "s1" }), "NODE_CREATED"));
+    // The new draft's series is read: there is none yet, and the wizard still holds.
+    await waitFor(() => expect(conn.query.campaignSeriesForCampaign.mock.calls.some(([args]) => (args as { campaignId: string }).campaignId === id)).toBe(true));
+    await act(async () => {});
+    expect(barWord()).toBe("Starting");
+    const started = {
+      id: "series",
+      sourceCampaignId: id,
+      accountId: "self",
+      name: "August copy",
+      status: "active",
+      intervalWeeks: 2,
+      timeZone: ZONE,
+      anchorAt: "2031-10-14T16:00:00Z",
+      nextAt: "2031-10-14T16:00:00Z",
+      createdAt: "2027-10-01T12:00:00Z",
+      lastError: "",
+    };
+    seriesRows.push(started);
+    await act(async () => conn.subscriptions.emit(SERIES, started));
+    expect(await screen.findByRole("heading", { level: 3, name: "August copy" })).toBeTruthy();
+    await waitFor(() => expect(barWord()).toBe("Repeating"));
+  });
+
+  it("says the refusal of the write it tried last, never an older one", async () => {
+    const conn = seed();
+    conn.query.campaignStartSend.mockRejectedValueOnce(new Error("no email sender is registered on this node"));
+    conn.query.campaignConfigureSeries.mockRejectedValueOnce(new Error("choose a first send in the future, within five years"));
+    mountWindow(conn);
+    await walkToReview();
+    await waitFor(() => expect(barActs()).toContain("Send now"));
+    press("Send now");
+    await readTheQuestion();
+    press("Send now");
+    expect(await screen.findByText("no email sender is registered on this node")).toBeTruthy();
+
+    // Back to When: it repeats instead, and starting it is refused for a reason of its own.
+    fireEvent.click(railLine("When"));
+    choose(/^Repeat/);
+    chooseOption(screen.getByLabelText("Every"), "2 weeks");
+    fireEvent.change(screen.getByLabelText("Starting · America/Phoenix"), { target: { value: "2031-10-14T09:00" } });
+    press("Next");
+    await waitFor(() => expect(barActs()).toContain("Start repeating"));
+    press("Start repeating");
+    await readTheQuestion();
+    press("Start repeating");
+    expect(await screen.findByText("choose a first send in the future, within five years")).toBeTruthy();
+    expect(screen.getByText("The campaign was saved as a draft, but repeating didn't start.")).toBeTruthy();
+    expect(screen.queryByText("no email sender is registered on this node")).toBeNull();
   });
 
   it("saves a draft with the time it was meant for, and opens it", async () => {

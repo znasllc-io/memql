@@ -185,7 +185,9 @@ describe("a campaign's page", () => {
     expect(fact("Sender").textContent).toBe("This cluster's sender");
     expect(fact("Reply to").textContent).toBe("help@acme.com");
     await waitFor(() => expect(barWord()).toBe("Scheduled"));
-    expect(barDetail()).toBe("Tue, Oct 14 at 9:00");
+    // When it goes is said once: by the fact, with its zone. The bar does not repeat it.
+    expect(barDetail()).toBe("");
+    expect(screen.getAllByText(/Oct 14 at 9:00/)).toHaveLength(1);
   });
 
   it("a campaign with no organization says so instead of loading", async () => {
@@ -857,6 +859,19 @@ describe("each thing said once, where it can be read", () => {
     await waitFor(() => expect(barDetail()).toBe("Every 2 weeks · next Tue, Oct 14 at 9:00 (America/Phoenix)"));
     const details = screen.getByRole("region", { name: "Campaign details" });
     expect(within(details).queryByText("When", { selector: "dt" })).toBeNull();
+    expect(screen.getAllByText(/Every 2 weeks/)).toHaveLength(1);
+  });
+
+  it("a paused repeat says how often and from when once, in its facts", async () => {
+    const conn = seed({
+      campaigns: [draft()],
+      campaignSeries: [{ id: "series", sourceCampaignId: "c1", accountId: "self", name: "August update", status: "paused", intervalWeeks: 2, timeZone: ZONE, anchorAt: OCT_14, nextAt: OCT_14, createdAt: "2027-10-01T12:00:00Z", lastError: "" }],
+    });
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barWord()).toBe("Repeating paused"));
+    expect(barDetail()).toBe("");
+    expect(fact("When").textContent).toBe("Every 2 weeks from Tue, Oct 14 at 9:00 (America/Phoenix)");
     expect(screen.getAllByText(/Every 2 weeks/)).toHaveLength(1);
   });
 

@@ -206,8 +206,8 @@ describe("what a campaign's bar offers", () => {
     // Nothing to send with: no Send now, and the bar says why.
     const blocked = facts({ status: "scheduled", scheduledAt: OCT_14 }, { sendingReady: false });
     expect(labels(campaignActs(blocked))).toEqual(["Cancel", "Send a test"]);
-    // Sending is the page's to say; the bar keeps saying when it was meant to go.
-    expect(campaignReading(blocked).detail).toBe("Tue, Oct 14 at 9:00");
+    // Sending is the page's to say, and when it goes is its When fact's.
+    expect(campaignReading(blocked).detail).toBe("");
   });
 
   it("a send in progress: Send a test, Pause", () => {
@@ -258,7 +258,8 @@ describe("what a campaign's bar offers", () => {
 describe("what a campaign's bar says", () => {
   it("in each state", () => {
     expect(campaignReading(facts())).toEqual({ word: "Draft", detail: "", tone: "none" });
-    expect(campaignReading(facts({ status: "scheduled", scheduledAt: OCT_14 }))).toEqual({ word: "Scheduled", detail: "Tue, Oct 14 at 9:00", tone: "none" });
+    // When it goes is said once, by the page's When fact, with its zone.
+    expect(campaignReading(facts({ status: "scheduled", scheduledAt: OCT_14 }))).toEqual({ word: "Scheduled", detail: "", tone: "none" });
     expect(campaignReading(facts({ status: "sending", recipientCount: 1250, sentCount: 1204 }))).toEqual({ word: "Sending", detail: "1,204 of 1,250 sent", tone: "live" });
     expect(campaignReading(facts({ status: "paused" }))).toMatchObject({ word: "Paused", tone: "paused" });
     expect(campaignReading(facts({ status: "sent", completedAt: "2031-10-15T17:30:00Z" }))).toEqual({ word: "Sent", detail: "Wed, Oct 15 at 10:30", tone: "none" });
@@ -277,7 +278,8 @@ describe("what a campaign's bar says", () => {
       tone: "live",
     });
     expect(campaignReading(facts({}, { series: series({ intervalWeeks: 1 }) })).detail).toBe("Every week · next Tue, Oct 14 at 9:00 (America/Phoenix)");
-    expect(campaignReading(facts({}, { series: series({ status: "paused" }) }))).toMatchObject({ word: "Repeating paused", tone: "paused" });
+    // Paused, nothing goes next: how often and from when is the page's When fact.
+    expect(campaignReading(facts({}, { series: series({ status: "paused" }) }))).toEqual({ word: "Repeating paused", detail: "", tone: "paused" });
     expect(campaignReading(facts({}, { series: series({ status: "blocked", lastError: "The next occurrence has no valid date." }) }))).toMatchObject({
       word: "Repeating stopped",
       detail: "The next occurrence has no valid date.",

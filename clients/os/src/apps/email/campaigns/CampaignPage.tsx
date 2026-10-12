@@ -540,8 +540,10 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
   const senderFact = campaign.senderIdentityId === "" ? (isOperatorOrganization(campaign.accountId) ? capitalized(WORDS.clusterSender) : "") : sender ? senderLabel(sender) : "";
   // A time still to come names its zone; one that has passed is when it went, on this clock.
   const tz = series?.timeZone || zone;
-  // A repeating draft's bar says how often and when next: the facts do not say it again.
-  const barSaysTheSchedule = campaign.status === "draft" && series !== null && (series.status === "active" || series.status === "paused");
+  // A draft that repeats has its bar say how often and when it goes next: the
+  // facts do not say it again. Paused or stopped, nothing goes next, and the
+  // facts are where its schedule is said.
+  const barSaysTheSchedule = campaign.status === "draft" && series !== null && series.status === "active";
   const whenFact = series
     ? `${WORDS.every(series.intervalWeeks)} from ${momentWords(series.anchorAt, tz)} (${tz})`
     : campaign.startedAt !== ""
