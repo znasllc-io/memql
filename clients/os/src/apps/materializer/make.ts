@@ -423,18 +423,27 @@ function filedStem(stem: string): string {
   return kept === "" ? "composition" : kept;
 }
 
+// How an email template is filed (the filing site in integrations/compose/materialize.go).
+const JSON_EXTENSION = ".json";
+const EMAIL_TEMPLATE_SUFFIX = ".email.json";
+
 /**
- * The name the file is filed under, as outputFileName in integrations/compose/materialize.go
- * makes it: the extension is md for Markdown, zip for a package and otherwise the format; the
- * stem is the name without one trailing extension of the kind (fileNameStem); and a stem that
- * already ends with the extension does not get it twice. Meaningful once the name can be
- * used (fileNameProblem finds nothing wrong with it).
+ * The name the file is filed under, as the filing site in integrations/compose/materialize.go
+ * makes it (outputFileName, and for an email template the suffix after it): the extension is
+ * md for Markdown, zip for a package and otherwise the format; the stem is the name without
+ * one trailing extension of the kind (fileNameStem); and a stem that already ends with the
+ * extension does not get it twice. AN EMAIL TEMPLATE IS FILED AS <stem>.email.json: the name
+ * made that way for any JSON file has its ".json" taken off, case-sensitively, and
+ * ".email.json" put on. Meaningful once the name can be used (fileNameProblem finds nothing
+ * wrong with it).
  */
 export function filedName(draft: MakeDraft): string {
   const format = formatOf(draft.fileKind);
   const extension = draft.fileKind.kind === "package" ? "zip" : format === "markdown" ? "md" : format;
   const stem = filedStem(fileNameStem(draft.name, format));
-  return stem.toLowerCase().endsWith(`.${extension}`) ? stem : `${stem}.${extension}`;
+  const filed = stem.toLowerCase().endsWith(`.${extension}`) ? stem : `${stem}.${extension}`;
+  if (draft.fileKind.kind !== "emailTemplate") return filed;
+  return (filed.endsWith(JSON_EXTENSION) ? filed.slice(0, -JSON_EXTENSION.length) : filed) + EMAIL_TEMPLATE_SUFFIX;
 }
 
 // ---------------------------------------------------------------------------

@@ -379,6 +379,7 @@ describe("answerOf", () => {
     expect(answer("name", draft({ name: "a/b" }))).toBeUndefined();
     expect(answer("name", draft({ name: "Plan" }))).toBe("Plan.md");
     expect(answer("name", staticSite({ name: "Site" }))).toBe("Site.zip");
+    expect(answer("name", email({ name: "Welcome" }))).toBe("Welcome.email.json");
   });
 
   it("says Library for the top level, the folder's name, Unavailable folder once the list has loaded without it, and nothing while it loads", () => {
@@ -564,6 +565,11 @@ describe("readyWords", () => {
       word: "Ready to make Plan.md", detail: "A model writes it.",
     });
     expect(readyWords(staticSite({ name: "Site", statement: "A landing page" }), facts())).toEqual({ word: "Ready to make Site.zip", detail: "A model writes it." });
+  });
+
+  it("says an email template is filed as .email.json", () => {
+    const welcome = email({ name: "Welcome", statement: "A welcome email", accountId: "acct-1" });
+    expect(readyWords(welcome, facts())).toEqual({ word: "Ready to make Welcome.email.json", detail: "A model writes it." });
   });
 });
 
@@ -778,7 +784,7 @@ describe("filedName", () => {
     expect(filed("Settings", { kind: "document", format: "json" })).toBe("Settings.json");
     expect(filed("Letter", { kind: "document", format: "docx" })).toBe("Letter.docx");
     expect(filed("Report", { kind: "document", format: "pdf" })).toBe("Report.pdf");
-    expect(filed("Welcome", { kind: "emailTemplate" })).toBe("Welcome.json");
+    expect(filed("Welcome", { kind: "emailTemplate" })).toBe("Welcome.email.json");
   });
 
   it("does not add a second extension when the name already ends with the kind's", () => {
@@ -791,6 +797,29 @@ describe("filedName", () => {
   it("keeps another format's extension as part of the name", () => {
     expect(filed("Report.pdf")).toBe("Report.pdf.md");
     expect(filed("Plan.md.md")).toBe("Plan.md");
+  });
+
+  // The engine files an email template as <stem>.email.json (the filing site in
+  // integrations/compose/materialize.go): it makes the .json file name as it does for any JSON
+  // document, takes a ".json" off it, case-sensitively, and adds ".email.json".
+  it("files an email template as .email.json", () => {
+    const email = { kind: "emailTemplate" } as const;
+    expect(filed("Welcome", email)).toBe("Welcome.email.json");
+    expect(filed("Welcome.json", email)).toBe("Welcome.email.json");
+    expect(filed("Welcome.JSON", email)).toBe("Welcome.email.json");
+    expect(filed("Mixed.Json", email)).toBe("Mixed.email.json");
+    expect(filed("Plan.md.json", email)).toBe("Plan.md.email.json");
+  });
+
+  it("takes only a lower-case .json off an email template's stem, as the engine does", () => {
+    const email = { kind: "emailTemplate" } as const;
+    // The name's own ".JSON" is cleaned away first, and the one before it stays: not lower case.
+    expect(filed("a.JSON.JSON", email)).toBe("a.JSON.email.json");
+    // After the cleaning, a lower-case .json is still on the stem, and it goes too.
+    expect(filed("x.json.JSON", email)).toBe("x.email.json");
+    // A person who knows the engine's suffix still gets it added.
+    expect(filed("Welcome.email", email)).toBe("Welcome.email.email.json");
+    expect(filed("Welcome.email.json", email)).toBe("Welcome.email.email.json");
   });
 
   it("files a package as a ZIP", () => {
