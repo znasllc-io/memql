@@ -737,9 +737,15 @@ export function useAudienceRecipients(audienceId: string): Reading<Row[]> {
  * A COUNT STOPS AT THE ENGINE'S WINDOW (5,000 by default), and the breakdown
  * does not say yet when one did: the engine marks such a count `atLeast`, but
  * the campaigns store reads only the number (component/campaigns/store.go), so
- * a bucket past the window arrives as the window, a floor drawn as a number.
- * Carrying the floor through campaignStats is engine work carried to the
- * automations track (memql#6033); this reads it as it comes until then.
+ * a count bucket past the window arrives as the window, a floor drawn as a
+ * number. Those are the roster size, pending, delivered, skipped (and why),
+ * failed, hard bounces, spam reports, unsubscribes and the opens and clicks
+ * TOTALS -- the campaign page's Breakdown, its engagement totals and the
+ * delivery ledger's "of N". Carrying the floor through campaignStats is engine
+ * work carried to the automations track (memql#6033); this reads it as it
+ * comes until then. The UNIQUE opens and clicks are not counts: the engine
+ * folds them from a bounded read and withholds them at its bound
+ * (`uniqueUnmeasured`), so they are measured or absent, never a floor.
  *
  * It is refreshed while it is seen, including after a send finishes because
  * opens, clicks and unsubscribes can arrive later. The main bar also receives

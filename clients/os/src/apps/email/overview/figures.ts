@@ -18,20 +18,20 @@ import { WORDS } from "../words";
 //   Sent, 30 days       the campaigns' own `sentCount`, over those started in the
 //                       window. The counters are the drain worker's own
 //                       tallies, and the campaigns feed walks every page.
-//   Open / Click rate   the engine's `campaignStats` (counts computed
-//                       server-side -- never a client's tally of a capped page of
+//   Open / Click rate   the engine's `campaignStats` (computed server-side --
+//                       never a client's tally of a capped page of
 //                       deliveries): unique openers (clickers) over what was
-//                       SENT, summed across the campaigns that counted them.
-//                       NOT EXACT PAST THE ENGINE'S WINDOW, and not yet able to
-//                       say so: campaignStats counts through `count`, which
-//                       stops at the window (5,000 by default) and marks that
-//                       with `atLeast`, but the campaigns store reads only the
-//                       number (component/campaigns/store.go), so a campaign
-//                       with more openers than the window reports the window
-//                       and the rate reads low. Carrying the floor through
-//                       campaignStats is engine work carried to the automations
-//                       track (memql#6033); until it lands nothing here can tell
-//                       a floor from a count, so these are drawn as they come.
+//                       SENT, the campaigns' own `sentCount`, summed across the
+//                       campaigns that counted them. A unique figure is never a
+//                       floor: the engine folds it from a bounded read of the
+//                       engagement references and, when that read reaches its
+//                       bound, WITHHOLDS it (`uniqueUnmeasured`) rather than
+//                       truncate it, and the rate is then unmeasured, with that
+//                       reason. The breakdown's COUNT buckets are what can stop
+//                       at the engine's window unflagged -- delivered, skipped
+//                       and failed, bounces, spam reports, unsubscribes, the
+//                       opens and clicks totals -- and no figure here reads one
+//                       (see useCampaignStats).
 //   Subscriptions       the engine's `audienceSubscriberCount` per active audience,
 //                       added up: a person on two audiences is two subscriptions,
 //                       so it is not called subscribers. A count that reached

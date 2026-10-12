@@ -77,7 +77,10 @@ export function OverviewSection({ feeds }: { feeds: EmailFeeds }) {
   // The breakdowns of the campaigns a rate can be made of, and the subscribers
   // of the audiences that can be mailed, both counted by the engine. A
   // subscriber count that reached its window comes back a floor and is drawn as
-  // one; a breakdown cannot say so yet (figures.ts, "Open / Click rate").
+  // one. A rate reads only a breakdown's unique figures, which the engine
+  // withholds at their bound rather than truncates; the breakdown's count
+  // buckets are the ones that can stop at the window unflagged, and they are
+  // drawn on the campaign page, not here (useCampaignStats).
   const wanted = useMemo(() => statsWanted(campaigns, now).map((campaign) => campaign.id), [campaigns, now]);
   const { stats, reload: reloadStats } = useCampaignStatsFor(wanted);
   const { counts, refusals: countRefusals, reload: reloadCounts } = useSubscriberCounts(activeAudiences);
