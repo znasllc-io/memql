@@ -144,6 +144,7 @@ concept missingCapability {
 @displayCard(primary="target", secondary="subject", tertiary="medium", status="status")
 @rowAuthz(clusterOwner)
 concept outboundRequest {
+  htmlBody string @description("For email, the HTML alternative sent alongside the text body. Limited to 2 MiB by the outbound worker.")
   medium        enum("email", "webhook")! @description("Delivery transport. 'email' delivers via the engine email integration (Graph/SMTP/log per deployment). 'webhook' POSTs the payload as JSON to the target URL.")
   target        string! @description("Where to deliver: a recipient email address for medium='email', an absolute URL for medium='webhook'. Must match the deployment's per-medium allowlist or the row fails fast.")
   subject       string  @description("Email subject line. Ignored for medium='webhook'.")

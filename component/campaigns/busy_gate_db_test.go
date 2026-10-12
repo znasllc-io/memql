@@ -243,7 +243,7 @@ func (f *digestFixture) TestAnAttemptIsRecordedOnlyAfterTheTransportsLockIsReser
 // gate's transaction is not the caller's, and is not rolled back -- the lock with it
 // -- under the write by the caller's leaving.
 func TestASingleSendWhoseCallerLeavesDuringItsAttemptKeepsItsLockUntilItCommits(t *testing.T) {
-	n := newEmptyNewsletter(t, "single-caller-leaves")
+	n := newDigestFixture(t).newEmptyNewsletter(t, "single-caller-leaves")
 	recipient := n.suffix + "-rcp"
 	n.execute(t, n.owner, call("mutation", "addRecipient", arg{"recipientId", recipient}, arg{"audienceId", n.audience}, arg{"accountId", n.org}, arg{"email", "leaves@example.test"}))
 	args := map[string]any{"templateId": n.suffix + "-tpl", "recipientId": recipient, "senderIdentityId": n.suffix + "-sender", "requestId": "caller-leaves-once"}
@@ -276,7 +276,7 @@ func TestASingleSendWhoseCallerLeavesDuringItsAttemptKeepsItsLockUntilItCommits(
 // the lock since would read no receipt and send the message again. Here nothing is
 // recorded and nothing is sent, and the same request, made again, goes out once.
 func TestASingleSendRecordsNoAttemptAfterItsLockWasLost(t *testing.T) {
-	n := newEmptyNewsletter(t, "single-lost-first")
+	n := newDigestFixture(t).newEmptyNewsletter(t, "single-lost-first")
 	recipient := n.suffix + "-rcp"
 	n.execute(t, n.owner, call("mutation", "addRecipient", arg{"recipientId", recipient}, arg{"audienceId", n.audience}, arg{"accountId", n.org}, arg{"email", "lost@example.test"}))
 	args := map[string]any{"templateId": n.suffix + "-tpl", "recipientId": recipient, "senderIdentityId": n.suffix + "-sender", "requestId": "lost-before-attempt"}

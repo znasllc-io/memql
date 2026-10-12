@@ -230,7 +230,7 @@ builtin campaignConfigureSeries {
 builtin campaignConfigureNewsletter {
   siteId string!
   audienceId string!
-  templateId string!
+  templateId string
   senderIdentityId string!
   consentText string!
   enabled bool!
@@ -308,3 +308,68 @@ builtin campaignFlushReputation {  }
 @executor("integration.campaigns.campaignProcessSelected")
 @args(profile="object")
 builtin campaignProcessSelected { id string! }
+
+/// Render a published operational rule template and stage one authorized cluster recipient in the server outbox.
+@executor("integration.campaigns.stageOperationalEmail")
+builtin campaignStageOperationalEmail {
+ requestId string!
+ templateId string!
+ to string!
+ displayName string
+ dedupeKey string!
+ emailRuleId string!
+}
+
+/// Retry due single-recipient sends inside the campaign drain scope.
+@executor("integration.campaigns.campaignRetryDeferredSends")
+builtin campaignRetryDeferredSends { }
+
+@sdk
+@description("Save an email automation with an exact revision. Omit expectedRevision to create one under a new caller-generated id. Editable while draft or paused. Never sends mail; returns the revision and what still blocks turning it on.")
+@executor("integration.campaigns.saveJourney")
+builtin campaignSaveJourney {
+  journeyId         string!   @description("Stable caller-generated id; reuse it after an uncertain create.")
+  accountId         string!   @description("Owning organization; immutable after creation.")
+  name              string!
+  description       string
+  trigger           object!   @description("{kind: joined | confirmed, audienceId}")
+  steps             []object! @description("Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, timeoutDays?}")
+  expectedRevision  string    @description("Exact revision from journeyById; omit when creating.")
+}
+
+@sdk
+@description("Turn an email automation on, pause it, or archive it. Turning on checks templates, senders and the audience first; archiving is permanent and exits everyone still in it.")
+@executor("integration.campaigns.setJourneyState")
+builtin campaignSetJourneyState {
+  journeyId         string!
+  action            enum("activate", "pause", "archive")!
+  expectedRevision  string!
+}
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignDrainJourneys")
+builtin campaignDrainJourneys {  }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneyExit")
+builtin campaignJourneyExit { reason string! }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneyComplete")
+builtin campaignJourneyComplete {  }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneyAdvance")
+builtin campaignJourneyAdvance {  }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneyWait")
+builtin campaignJourneyWait {  }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneyAwaitConfirmation")
+builtin campaignJourneyAwaitConfirmation {  }
+
+/// One authorized automation enrollment operation, available only inside its native scope.
+@executor("integration.campaigns.campaignJourneySend")
+builtin campaignJourneySend {  }

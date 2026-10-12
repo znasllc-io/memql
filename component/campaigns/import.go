@@ -217,12 +217,23 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 	// same for all of them and reading it per row would be one query per
 	// address. Empty is the ordinary answer and stamps nothing.
 	accountID := w.store.AudienceAccountID(ctx, audienceID)
+	audience, _, err := w.store.AudienceByID(ctx, audienceID)
+	if err != nil {
+		return nil, err
+	}
+	subscription := "subscribed"
+	if audience.Confirmation == "required" {
+		subscription = "pending"
+	}
 	for _, row := range pending {
 		recipientID := id.NewShortId()
-		if err := w.store.AddRecipient(ctx, recipientID, audienceID, row.normalized, row.displayName, importSourceValue, accountID, row.fields); err != nil {
+		if err := w.store.AddRecipient(ctx, recipientID, audienceID, row.normalized, row.displayName, importSourceValue, accountID, subscription, row.fields); err != nil {
 			return nil, fmt.Errorf("campaigns.importRecipients: adding %s: %w", redactAddress(row.normalized), err)
 		}
 		result.Added++
+		if subscription == "pending" {
+			continue
+		}
 		// A consent GRANT per added recipient, source "import". The stream is
 		// what an export answers "when did this person opt in, and how" from,
 		// and an import that added rows without one leaves every imported

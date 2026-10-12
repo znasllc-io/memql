@@ -178,10 +178,10 @@ func TestEveryRenderedCallParses(t *testing.T) {
 			return err
 		}},
 		{"addRecipient (no fields)", func() error {
-			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, nil)
+			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, "subscribed", nil)
 		}},
 		{"addRecipient (awkward field keys)", func() error {
-			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, map[string]string{
+			return store.AddRecipient(ctx, awkward, awkward, awkward, awkward, "import", awkward, "subscribed", map[string]string{
 				// The header shapes a real spreadsheet produces. A bare key
 				// here is a parse error, which is memql#4265's whole shape.
 				"Company Name": awkward,

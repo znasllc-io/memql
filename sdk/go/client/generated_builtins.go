@@ -248,11 +248,13 @@ func CampaignConfigureNewsletterBuild(args CampaignConfigureNewsletterArgs) stri
 	}
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
-	if b.Len() > 36 {
-		b.WriteString(", ")
+	if args.TemplateId != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("templateId: ")
+		b.WriteString(quoteMemQL(args.TemplateId))
 	}
-	b.WriteString("templateId: ")
-	b.WriteString(quoteMemQL(args.TemplateId))
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
@@ -497,6 +499,71 @@ func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs
 	return b.String()
 }
 
+// CampaignSaveJourney -- Save an email automation with an exact revision. Omit expectedRevision to create one under a new caller-generated id. Editable while draft or paused. Never sends mail; returns the revision and what still blocks turning it on.
+type CampaignSaveJourneyArgs struct {
+	// Stable caller-generated id; reuse it after an uncertain create.
+	JourneyId string
+	// Owning organization; immutable after creation.
+	AccountId   string
+	Name        string
+	Description string
+	// {kind: joined | confirmed, audienceId}
+	Trigger map[string]any
+	// Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, timeoutDays?}
+	Steps []map[string]any
+	// Exact revision from journeyById; omit when creating.
+	ExpectedRevision string
+}
+
+// CampaignSaveJourney calls the engine builtin campaignSaveJourney.
+func (qc *QueryClient) CampaignSaveJourney(ctx context.Context, args CampaignSaveJourneyArgs) (*Result, error) {
+	call := CampaignSaveJourneyBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveJourney", call)
+}
+
+func CampaignSaveJourneyBuild(args CampaignSaveJourneyArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveJourney(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Description != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("trigger: ")
+	b.WriteString(renderMemQLValue(args.Trigger))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("steps: ")
+	b.WriteString(renderMemQLValue(args.Steps))
+	if args.ExpectedRevision != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.
 type CampaignSaveTemplateArgs struct {
 	// Stable caller-generated template ID; reuse on an uncertain creation response.
@@ -617,6 +684,39 @@ func CampaignSendingReadinessBuild(args CampaignSendingReadinessArgs) string {
 		b.WriteString("senderIdentityId: ")
 		b.WriteString(quoteMemQL(args.SenderIdentityId))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSetJourneyState -- Turn an email automation on, pause it, or archive it. Turning on checks templates, senders and the audience first; archiving is permanent and exits everyone still in it.
+type CampaignSetJourneyStateArgs struct {
+	JourneyId string
+	// Enum: activate | pause | archive
+	Action           string
+	ExpectedRevision string
+}
+
+// CampaignSetJourneyState calls the engine builtin campaignSetJourneyState.
+func (qc *QueryClient) CampaignSetJourneyState(ctx context.Context, args CampaignSetJourneyStateArgs) (*Result, error) {
+	call := CampaignSetJourneyStateBuild(args)
+	return qc.executeNamed(ctx, "campaignSetJourneyState", call)
+}
+
+func CampaignSetJourneyStateBuild(args CampaignSetJourneyStateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSetJourneyState(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
 	b.WriteString(")")
 	return b.String()
 }

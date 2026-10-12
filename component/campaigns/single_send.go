@@ -37,13 +37,15 @@ type singleSendReceipt struct {
 // after the provider accepted it. This is at-most-once submission, not a claim
 // that SMTP or a provider can guarantee exactly-once mailbox delivery.
 func (w *Worker) handleSendToRecipient(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	return w.sendToRecipientOnce(ctx, args, singleSend{})
+	return w.sendToRecipientOnce(ctx, args, singleSend{deferWhenLimited: true})
 }
 
 // singleSend is what only an internal, durable caller can say about a single send,
 // and never wire args: the reviewed template snapshot a welcome froze at signup, and
 // the digest of the address its consent covered. The zero value is an ordinary send.
 type singleSend struct {
+	deferWhenLimited bool
+	confirm          bool
 	// snapshot, when set, is the template the send must carry: the copy frozen when
 	// the person signed up, checked against the stored template's identity.
 	snapshot *Template
@@ -81,6 +83,9 @@ func singleSendReceiptFor(ctx context.Context, args map[string]any, opts singleS
 	}
 	if opts.emailDigest != "" {
 		values["emailDigest"] = opts.emailDigest
+	}
+	if opts.confirm {
+		values["confirm"] = "true"
 	}
 	encoded, _ := json.Marshal(values)
 	return &singleSendReceipt{id: singleSendReceiptID(owner, requestID), fingerprint: sha256Hex(string(encoded))}, true, nil
