@@ -153,7 +153,7 @@ export const VSCODE_THEME_VARS: Readonly<Record<GalleryTheme, Readonly<Record<st
  * of these has no such property and the page's own fallback applies; the
  * gallery leaves them out for the same reason.
  */
-export const VSCODE_UNSET_VARS: readonly string[] = ["--vscode-contrastBorder"];
+export const VSCODE_UNSET_VARS: readonly string[] = ["--vscode-contrastActiveBorder", "--vscode-contrastBorder"];
 
 /** VS Code's default webview stylesheet (src/vs/workbench/contrib/webview/browser/pre/index.html). */
 const VSCODE_DEFAULT_STYLES = `

@@ -287,6 +287,9 @@ test("the selected block's ring shows on any email, and goes around a block too 
   // The focus colour with a white line inside it: on white the colour shows, on a brand colour close to it or a dark email the white does.
   assert.match(css, /\[data-block\]\[data-selected\]\{outline:2px solid #0078d4!important;outline-offset:-2px;box-shadow:inset 0 0 0 4px #fff!important\}/);
   assert.match(css, /\[data-block\]\[data-selected=around\]\{outline-offset:2px;box-shadow:none!important\}/);
+  // The hover's dashed outline is for the other blocks: under the pointer the selected one keeps its ring.
+  assert.match(css, /\[data-block\]:not\(\[data-selected\]\):hover:not\(:has\(\[data-block\]:hover\)\)\{outline:1px dashed #0078d4!important;outline-offset:-1px\}/);
+  assert.equal(css.match(/:hover/g)?.length, 2, "no other hover rule can reach the selected block");
   const block = (id: string) => frame.contentDocument!.querySelector(`[data-block="${id}"]`)!;
   const tall = (id: string, height: number) => Object.assign(block(id), { getBoundingClientRect: () => ({ height }) });
   tall("headline", 40);
@@ -301,8 +304,14 @@ test("the selected block's ring shows on any email, and goes around a block too 
 
 test("the inspector is one quiet column: one mark on the selected row, no word said twice, room for the focus outline", () => {
   const html = emailPage({ title: "Welcome.email.json", script: "view.js", nonce: "abc123" });
-  // The row's background marks it; the ring in the preview says which block it is.
-  assert.equal(/\.outline \[aria-selected=true\]\{([^}]*)\}/.exec(html)?.[1], "background:var(--vscode-list-inactiveSelectionBackground)");
+  // The row's background marks it; the ring in the preview says which block it is. Its rule is as specific as the
+  // hover's (one class, two attributes against one class, an attribute and :hover) and comes after it, so the row stays
+  // marked under the pointer; a high contrast theme, which has no selection background, outlines it instead, and the
+  // outline gives way to the focus ring.
+  const hover = html.indexOf(".outline [role=treeitem]:hover{"), chosen = html.indexOf(".outline [role=treeitem][aria-selected=true]{");
+  assert.ok(hover > 0 && chosen > hover, "the selected row's rule comes after the hover's");
+  assert.equal(/\.outline \[role=treeitem\]\[aria-selected=true\]\{([^}]*)\}/.exec(html)?.[1], "background:var(--vscode-list-inactiveSelectionBackground)");
+  assert.equal(/\.outline \[role=treeitem\]\[aria-selected=true\]:not\(:focus-visible\)\{([^}]*)\}/.exec(html)?.[1], "outline:1px solid var(--vscode-contrastActiveBorder,transparent);outline-offset:-1px");
   // A picture's block title already says Picture: the row's own name is for a screen reader alone.
   const doc = new JSDOM(html).window.document;
   assert.equal(doc.getElementById("field-src-label")?.className, "sr-only");

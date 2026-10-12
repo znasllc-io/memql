@@ -46,8 +46,10 @@ const scriptJSON = (value: unknown) => JSON.stringify(value).replace(/</g, "\\u0
 export interface Then {
   /** Click this block's row in the outline, which brings the block into view in the preview. */
   reveal?: string;
-  /** Scroll the element with this id into view, as the person scrolls the inspector to it. */
+  /** Scroll the first element this selector matches into view, as the person scrolls to it (a scrolled window is photographed by moving the content; see the script). */
   show?: string;
+  /** How far: the least distance (the default), or until the element's top is at the top. */
+  align?: "nearest" | "start";
 }
 
 /**
@@ -65,7 +67,23 @@ export function withHostMessages(html: string, messages: readonly unknown[], the
       var row = Array.prototype.find.call(document.querySelectorAll('[role="treeitem"]'), function (item) { return item.dataset.block === then.reveal; });
       if (row) row.click();
     }
-    if (then.show) { var shown = document.getElementById(then.show); if (shown) shown.scrollIntoView({ block: "start" }); }
+    if (then.show) {
+      var shown = document.querySelector(then.show);
+      if (shown) shown.scrollIntoView({ block: then.align || "nearest" });
+      // Headless Chrome's --screenshot clips the page from its top, not from where the window is scrolled, so a
+      // scrolled window photographs blank above. The window goes back to the top and the content moves up instead:
+      // the same picture, with sticky parts (the action bar) where they were. It lays the page out in the window
+      // less its chrome (innerHeight) but photographs the whole window (outerHeight), so the content moves up no
+      // further than a window that tall could scroll.
+      var by = Math.min(window.scrollY, Math.max(0, document.scrollingElement.scrollHeight - Math.max(window.innerHeight, window.outerHeight)));
+      window.scrollTo(0, 0);
+      if (by > 0) {
+        Array.prototype.forEach.call(document.body.children, function (child) {
+          var position = getComputedStyle(child).position;
+          if (position !== "sticky" && position !== "fixed") child.style.transform = "translateY(" + -by + "px)";
+        });
+      }
+    }
   }
   var pending = document.querySelector('iframe[data-pending="1"]');
   if (pending) pending.addEventListener("load", act); else act();

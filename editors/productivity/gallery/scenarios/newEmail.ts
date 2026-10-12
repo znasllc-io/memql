@@ -4,7 +4,7 @@
 
 import { GALLERY_NONCE, type Scenario } from "../../../vscode/gallery/harness.js";
 import { newEmailPage } from "../../src/newEmailPage.js";
-import { email, withHostMessages, type EmailFixture, type Fixtures } from "../fixtures.js";
+import { email, withHostMessages, type EmailFixture, type Fixtures, type Then } from "../fixtures.js";
 
 const GROUP = "New email";
 const DOMAIN = "memql.localhost";
@@ -32,7 +32,7 @@ export function scenarios(fixtures: Fixtures): Scenario[] {
     layouts: builtIn.map(fixture => listed(fixture)), dictation: true, ...extra,
   });
   const thumbnails = (list: readonly { id: string; html: string }[]) => list.map(item => ({ type: "thumbnail", id: item.id, html: item.html }));
-  const page = (messages: readonly unknown[]) => withHostMessages(newEmailPage({ script: "new-email-view.js", nonce: GALLERY_NONCE }), messages);
+  const page = (messages: readonly unknown[], then?: Then) => withHostMessages(newEmailPage({ script: "new-email-view.js", nonce: GALLERY_NONCE }), messages, then);
 
   return [
     {
@@ -50,7 +50,7 @@ export function scenarios(fixtures: Fixtures): Scenario[] {
         { type: "restore", draft: DRAFT },
         { type: "references", items: [{ label: "Morning routine notes.md", kind: "file" }, { label: "Breakfast table.png", kind: "picture", include: true }] },
         ...thumbnails([{ id: founderNote.id, html: email(fixtures, "letter-finished").html }, ...builtIn]),
-      ]),
+      ], { show: '[role="radio"][aria-checked="true"]', align: "start" }),
     },
     {
       id: "new-email-writing",

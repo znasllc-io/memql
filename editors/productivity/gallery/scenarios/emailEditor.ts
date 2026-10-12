@@ -45,13 +45,13 @@ export function scenarios(fixtures: Fixtures): Scenario[] {
       id: "email-issues",
       group: GROUP,
       title: "An issue: the Confirmation’s hero picture still to choose",
-      render: () => page("Please confirm.email.json", [restore({ width: "desktop", selected: "hero" }), CONNECTED, bar(C.issuesOne, ["saveLayout"], "Please confirm"), shown(heroMissing), rendered(heroMissing)], { reveal: "hero" }),
+      render: () => page("Please confirm.email.json", [restore({ width: "desktop", selected: "hero" }), CONNECTED, bar(C.issuesOne, ["saveLayout"], "Please confirm"), shown(heroMissing), rendered(heroMissing)], { reveal: "hero", show: "#field-src" }),
     },
     {
       id: "email-published",
       group: GROUP,
       title: "Published, with the theme open",
-      render: () => page("A note from our founder.email.json", [restore({ width: "desktop", themeOpen: true }), CONNECTED, bar(fill(C.published, { organization: ACME.name }), ["saveLayout"], "A note from our founder"), shown(letter), rendered(letter)], { show: "theme" }),
+      render: () => page("A note from our founder.email.json", [restore({ width: "desktop", themeOpen: true }), CONNECTED, bar(fill(C.published, { organization: ACME.name }), ["saveLayout"], "A note from our founder"), shown(letter), rendered(letter)], { show: "#theme" }),
     },
     {
       id: "email-custom",

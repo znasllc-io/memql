@@ -505,12 +505,13 @@ function focusColour(): string {
 
 /**
  * The frame's own style: a pointer over blocks, a dashed outline on the innermost one hovered, and a ring on the
- * selected one. The ring is the focus colour with a white line inside it, so it shows on any email: white, tinted, a
- * brand colour near the focus colour, or dark. A block too thin to hold it is ringed around its edge (markFrame).
+ * selected one, which the hover leaves alone. The ring is the focus colour with a white line inside it, so it shows on
+ * any email: white, tinted, a brand colour near the focus colour, or dark. A block too thin to hold it is ringed around
+ * its edge (markFrame).
  */
 function frameStyle(): string {
   const colour = focusColour();
-  return `<style>[data-block]{cursor:pointer}[data-block]:hover:not(:has([data-block]:hover)){outline:1px dashed ${colour}!important;outline-offset:-1px}[data-block][data-selected]{outline:2px solid ${colour}!important;outline-offset:-2px;box-shadow:inset 0 0 0 4px #fff!important}[data-block][data-selected=around]{outline-offset:2px;box-shadow:none!important}</style>`;
+  return `<style>[data-block]{cursor:pointer}[data-block]:not([data-selected]):hover:not(:has([data-block]:hover)){outline:1px dashed ${colour}!important;outline-offset:-1px}[data-block][data-selected]{outline:2px solid ${colour}!important;outline-offset:-2px;box-shadow:inset 0 0 0 4px #fff!important}[data-block][data-selected=around]{outline-offset:2px;box-shadow:none!important}</style>`;
 }
 
 /** Loads a render into the frame behind the one on screen; they swap once it has loaded. */
