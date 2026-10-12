@@ -26,6 +26,9 @@ import (
 // repository they can reach and a smaller page only adds round trips.
 const RepositoriesPerPage = 100
 
+// BranchPagesMax bounds how many pages Branches reads: 1,000 branches.
+const BranchPagesMax = 10
+
 // User is who a grant belongs to.
 //
 // Id is the STABLE key and Login is the display string. They are separate
@@ -193,20 +196,27 @@ func (c *Client) PendingInstallationRequests(ctx context.Context) ([]Installatio
 
 // Branches lists a repository's branch names under whatever bearer is handed
 // in -- a user token for a probe, an installation token for anything the app
-// does on its own account.
+// does on its own account. GitHub answers a page at a time, sorted by name, so
+// every page up to BranchPagesMax is read: a list cut at the first page drops
+// every branch that sorts after it. A short page is the last one.
 func (c *Client) Branches(ctx context.Context, bearer, owner, repo string) ([]string, error) {
 	endpoint := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) +
 		"/branches?per_page=" + strconv.Itoa(RepositoriesPerPage)
-	var payload []struct {
-		Name string `json:"name"`
-	}
-	if _, err := c.call(ctx, http.MethodGet, endpoint, bearer, &payload); err != nil {
-		return nil, reauthorizeOn401(err)
-	}
-	out := make([]string, 0, len(payload))
-	for _, b := range payload {
-		if name := strings.TrimSpace(b.Name); name != "" {
-			out = append(out, name)
+	out := []string{}
+	for page := 1; page <= BranchPagesMax; page++ {
+		var payload []struct {
+			Name string `json:"name"`
+		}
+		if _, err := c.call(ctx, http.MethodGet, endpoint+"&page="+strconv.Itoa(page), bearer, &payload); err != nil {
+			return nil, reauthorizeOn401(err)
+		}
+		for _, b := range payload {
+			if name := strings.TrimSpace(b.Name); name != "" {
+				out = append(out, name)
+			}
+		}
+		if len(payload) < RepositoriesPerPage {
+			break
 		}
 	}
 	return out, nil

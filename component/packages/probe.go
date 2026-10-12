@@ -85,10 +85,11 @@ type SourceProbeResult struct {
 	// Reason is exactly one of the ProbeReason* values.
 	Reason string `json:"reason"`
 
-	// Branches is every branch the repository has, DEFAULT BRANCH FIRST, and
-	// it is answered only under a grant (epic memql#4912). It fills the ref
-	// picker on the Source stop, so a person chooses a branch that exists
-	// instead of typing one that does not.
+	// Branches is every branch the repository has, up to the first 1,000
+	// (githubapp.BranchPagesMax pages), DEFAULT BRANCH FIRST, and it is
+	// answered only under a grant (epic memql#4912). It fills the ref picker on
+	// the Source stop and Other branch on a pipeline, so a person chooses a
+	// branch that exists instead of typing one that does not.
 	Branches []string `json:"branches"`
 	// Manifest is what memql-package.yaml says about itself, read through the
 	// contents API before anything is fetched. It is a PREVIEW: the What-it-is
