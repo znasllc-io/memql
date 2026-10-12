@@ -38,8 +38,6 @@ const C = EMAIL_COPY.newEmail;
 const ACT_WORDS: Readonly<Record<Act, string>> = { connect: C.connect, retry: C.retry, cancel: C.cancel, start: C.start, write: C.write };
 /** The description's limit, in UTF-16 code units as the field's maxlength counts. */
 const DESCRIPTION_LIMIT = 8000;
-/** A layout's render is 600 pixels wide; a card shows it scaled to the card. */
-const RENDER_WIDTH = 600;
 /** The shape drawn while an email is written in a layout the page does not know. */
 const SOME_EMAIL: EmailBlock[] = [{ id: "a", type: "heading" }, { id: "b", type: "text", text: " ".repeat(210) }, { id: "c", type: "button" }];
 // The drawings the shared set lacks: a file, and the square that stops a dictation. Constant markup, nothing from a message.
@@ -315,7 +313,6 @@ function drawLayouts(): void {
   const owner = setup?.organizations.find(choice => choice.id === setup?.organizationId)?.name ?? C.organization;
   if (sets.organization.head.textContent !== owner) sets.organization.head.textContent = owner;
   markCards();
-  fitRenders();
 }
 
 /** The chosen card, and the one tab stop of the group: the chosen card, else the first. */
@@ -354,14 +351,6 @@ function cardKey(card: HTMLElement, event: KeyboardEvent): void {
   if (next !== card) next.focus();
   choose(next.dataset.id!);
 }
-
-/** Scales every render to its card: the cards share one width, so one measure does. */
-function fitRenders(): void {
-  const thumb = layoutsBox.querySelector<HTMLElement>(".card .thumb");
-  const width = thumb?.clientWidth ?? 0;
-  if (width > 0) layoutsBox.style.setProperty("--thumb-scale", String(width / RENDER_WIDTH));
-}
-if (typeof ResizeObserver !== "undefined") new ResizeObserver(fitRenders).observe(layoutsBox);
 
 /**
  * A layout's render, in its own frame: sandboxed with no tokens (nothing runs,

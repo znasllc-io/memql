@@ -264,6 +264,30 @@ test("thumbnails replace each card's skeleton as they arrive", () => {
   f.dom.window.close();
 });
 
+test("the layout cards keep their size: 168 pixel columns from the left, each render shown at 168 by 218", () => {
+  const f = fixture();
+  f.send(setup({ layouts: [...ACME_LAYOUTS, ...BUILTINS] }));
+  const style = (element: Element) => f.dom.window.getComputedStyle(element);
+  const flat = (value: string) => value.replace(/\s+/g, "");
+  // The organization's cards, the built-in ones and the shapes that stand in while they load: the same fixed tracks, never stretched.
+  for (const id of ["cards-organization", "cards-builtin", "placeholders"]) {
+    const grid = style(f.el(id));
+    assert.equal(grid.display, "grid", id);
+    assert.equal(flat(grid.getPropertyValue("grid-template-columns")), "repeat(auto-fill,168px)", id);
+    assert.equal(grid.getPropertyValue("gap"), "16px", id);
+    assert.equal(grid.getPropertyValue("justify-content"), "start", `${id} is left aligned`);
+  }
+  // A render is 600 by 780 pixels, shown at 0.28: exactly 168 by 218, the same for every card at every width.
+  const card = f.card("builtin:article");
+  const thumb = style(card.querySelector(".thumb")!), canvas = style(card.querySelector(".canvas")!);
+  assert.deepEqual([thumb.width, thumb.height], ["168px", "218px"]);
+  assert.deepEqual([canvas.width, canvas.height], ["600px", "780px"]);
+  assert.match(flat(canvas.getPropertyValue("transform")), /^scale\(0?\.28\)$/);
+  const tile = style(f.el("placeholders").querySelector(".tile")!);
+  assert.deepEqual([tile.width, tile.height], ["168px", "218px"], "the loading shape is a card's size too");
+  f.dom.window.close();
+});
+
 test("references show as chips; pictures and ZIPs have a switch; removing posts the index", () => {
   const f = fixture();
   f.send(setup());
