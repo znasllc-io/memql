@@ -23,8 +23,8 @@ var builtinCatalog = []struct {
 // builtinTheme is the neutral example brand's palette and fonts, which the
 // four layouts share; the Confirmation puts its second colour on the canvas.
 var builtinTheme = Theme{
-	Page: "#eef0f3", Canvas: "#ffffff", Primary: "#1f5f8b", Secondary: "#5b8fb9", Accent: "#d9534f",
-	Tint: "#f6f4ef", Text: "#2b2b2b", Muted: "#8a8f98", HeadingFont: "Georgia", BodyFont: "Arial",
+	Page: "#eef0f3", Canvas: "#ffffff", Primary: "#1f5f8b", Secondary: "#5b8fb9", Accent: "#d2322d",
+	Tint: "#f6f4ef", Text: "#1c1c1c", Muted: "#696e77", HeadingFont: "Georgia", BodyFont: "Arial",
 }
 
 func TestLayoutsCatalog(t *testing.T) {
@@ -60,7 +60,7 @@ func TestLayoutsCatalog(t *testing.T) {
 // document that nothing in layouts.go has had a hand in, to compare with.
 func fileDocument(t *testing.T, id string) Document {
 	t.Helper()
-	data, err := layoutFiles.ReadFile("layouts/" + strings.TrimPrefix(id, "builtin:") + ".email.json")
+	data, err := builtinLayoutFS.ReadFile("layouts/" + strings.TrimPrefix(id, "builtin:") + ".email.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +359,7 @@ func TestLayoutsGolden(t *testing.T) {
 // Document.JSON writes for it: a blank email is filed from a layout, and a
 // person who opens it and saves it without a change must not see a diff.
 func TestLayoutFilesAreCanonical(t *testing.T) {
-	entries, err := layoutFiles.ReadDir("layouts")
+	entries, err := builtinLayoutFS.ReadDir("layouts")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +368,7 @@ func TestLayoutFilesAreCanonical(t *testing.T) {
 	}
 	for _, want := range builtinCatalog {
 		name := "layouts/" + strings.TrimPrefix(want.id, "builtin:") + ".email.json"
-		data, err := layoutFiles.ReadFile(name)
+		data, err := builtinLayoutFS.ReadFile(name)
 		if err != nil {
 			t.Errorf("%s: %v", want.id, err)
 			continue

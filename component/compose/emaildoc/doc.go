@@ -24,6 +24,10 @@
 // past MaxRenderBytes); values Parse would refuse are otherwise written as
 // they are.
 //
+// Layouts and Layout hand out the four built-in layouts, ready-made documents
+// in a neutral example brand to start an email from. Layouts says what they
+// hold and what they leave to whoever uses them.
+//
 // This package lives in the component/compose module. It may import only what
 // that module already requires plus the parent package, and the parent must
 // never import it: the parent's renderer sources travel inside rebuilt source
