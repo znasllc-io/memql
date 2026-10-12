@@ -155,7 +155,7 @@ describe("one subscription per concept", () => {
 
     // A campaign page: its series (it repeats) and its organization's testing settings.
     fireEvent.click(await within(pane("campaigns")).findByText("August update"));
-    expect(await within(pane("campaigns")).findByText(/^Every 2 weeks from/)).toBeTruthy();
+    expect(await within(bar("campaigns")).findByText(/^Every 2 weeks · next/)).toBeTruthy();
     await waitFor(() => expect(liveSubscriptions(conn).get(TEST_SETTINGS)).toBe(1));
     noConceptHasTwo(conn);
 
@@ -242,7 +242,7 @@ describe("composed feeds", () => {
 
     // Opening a draft reads nothing more: its page reads the root's feed.
     fireEvent.click(within(pane("campaigns")).getByText("Welcome series"));
-    expect(await within(pane("campaigns")).findByText(/^Every 3 weeks from/)).toBeTruthy();
+    expect(await within(bar("campaigns")).findByText(/^Every 3 weeks · next/)).toBeTruthy();
     expect(conn.query.campaignSeriesForCampaign).toHaveBeenCalledTimes(2);
     expect(opened(conn, SERIES)).toBe(1);
   });
@@ -278,8 +278,8 @@ describe("one campaign page", () => {
     });
     mount(conn);
     fireEvent.click(await within(pane("campaigns")).findByText("August update"));
-    // The bar, the page and the test all say so -- from the one answer.
-    await waitFor(() => expect(within(bar("campaigns")).getByText("Sending isn't set up for Operator organization.")).toBeTruthy());
+    // The page says so once, the bar offers nothing that would send, and the test is absent -- from the one answer.
+    await waitFor(() => expect(within(pane("campaigns")).getByText("Sending isn't set up for Operator organization.")).toBeTruthy());
     expect(within(pane("campaigns")).getByText("Verify the sending domain first.")).toBeTruthy();
     expect(barActs("campaigns")).not.toContain("Send a test");
     await act(async () => {});

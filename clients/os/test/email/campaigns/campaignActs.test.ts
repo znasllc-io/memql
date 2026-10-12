@@ -105,9 +105,11 @@ describe("what a campaign's bar offers", () => {
     expect(labels(campaignActs(draftTemplate))).toEqual(["Edit", "Send a test"]);
     expect(campaignReading(draftTemplate)).toEqual({ word: "Draft", detail: "Publish “Welcome 2” before sending.", tone: "none" });
 
+    // Sending that is not set up is said once, by the page, beside the way to
+    // set it up (Ruling 6): the bar offers no way forward and says nothing more.
     const unset = facts({}, { sendingReady: false, sendingReason: "Verify the sending domain first." });
     expect(labels(campaignActs(unset))).toEqual(["Edit", "Send a test"]);
-    expect(campaignReading(unset).detail).toBe("Sending isn't set up for Acme.");
+    expect(campaignReading(unset).detail).toBe("");
 
     const nobody = facts({}, { subscribers: figureOf(0) });
     expect(labels(campaignActs(nobody))).toEqual(["Edit", "Send a test"]);
@@ -123,7 +125,8 @@ describe("what a campaign's bar offers", () => {
       subscribers: figureOf(0),
     });
     expect(campaignReading(everything).detail).toBe("Publish “Welcome 2” before sending.");
-    expect(campaignReading({ ...everything, template: facts().template }).detail).toBe("Sending isn't set up for Acme.");
+    // Sending is the page's to say; the bar does not jump past it to the next one.
+    expect(campaignReading({ ...everything, template: facts().template }).detail).toBe("");
     expect(campaignReading({ ...everything, template: facts().template, sendingReady: true }).detail).toBe("Newsletter has no subscribers.");
   });
 
@@ -139,17 +142,23 @@ describe("what a campaign's bar offers", () => {
     for (const f of [
       facts({}, { sendingKnown: false, sendingReady: false, sendingReason: "Sending readiness is not confirmed." }),
       facts({}, { templateKnown: false, template: undefined }),
-      facts({}, { seriesKnown: false }),
     ]) {
       expect(labels(campaignActs(f))).toEqual(["Edit", "Send a test"]);
       expect(campaignReading(f)).toEqual({ word: "Draft", detail: "", tone: "none" });
     }
   });
 
-  it("a sending check that failed is not sending that was never set up", () => {
+  it("offers no Edit while its series is still being read: which page Edit opens is not known yet", () => {
+    // A draft's Edit asks when it goes; a repeat's asks how often and from when.
+    const f = facts({}, { seriesKnown: false });
+    expect(labels(campaignActs(f))).toEqual(["Send a test"]);
+    expect(campaignReading(f)).toEqual({ word: "Draft", detail: "", tone: "none" });
+  });
+
+  it("a sending check that failed is not sending that was never set up -- and is the page's to say", () => {
     const f = facts({}, { sendingReady: false, sendingFailed: true, sendingReason: "the connection was reset" });
     expect(labels(campaignActs(f))).toEqual(["Edit", "Send a test"]);
-    expect(campaignReading(f).detail).toBe("Couldn't check sending for Acme.");
+    expect(campaignReading(f).detail).toBe("");
   });
 
   it("a count it could not read does not block a send", () => {
@@ -167,7 +176,8 @@ describe("what a campaign's bar offers", () => {
   it("a draft with no organization says what to do", () => {
     const f = facts({ accountId: "" }, { canTest: false, organizationName: "" });
     expect(labels(campaignActs(f))).toEqual(["Edit"]);
-    expect(campaignReading(f).detail).toBe("Edit it to choose an organization.");
+    // The page's notice says it, and how: the bar does not say it again.
+    expect(campaignReading(f).detail).toBe("");
   });
 
   it("a draft a series repeats from: Pause while it repeats, Resume when it is paused", () => {
@@ -196,7 +206,8 @@ describe("what a campaign's bar offers", () => {
     // Nothing to send with: no Send now, and the bar says why.
     const blocked = facts({ status: "scheduled", scheduledAt: OCT_14 }, { sendingReady: false });
     expect(labels(campaignActs(blocked))).toEqual(["Cancel", "Send a test"]);
-    expect(campaignReading(blocked).detail).toBe("Sending isn't set up for Acme.");
+    // Sending is the page's to say; the bar keeps saying when it was meant to go.
+    expect(campaignReading(blocked).detail).toBe("Tue, Oct 14 at 9:00");
   });
 
   it("a send in progress: Send a test, Pause", () => {
@@ -211,6 +222,7 @@ describe("what a campaign's bar offers", () => {
     expect(labels(specs)).toEqual(["Cancel", "Send a test", "Resume"]);
     wellFormed(specs);
     expect(labels(campaignActs(facts({ status: "paused" }, { sendingReady: false })))).toEqual(["Cancel", "Send a test"]);
+    expect(campaignReading(facts({ status: "paused" }, { sendingReady: false })).detail).toBe("");
     // Its template was pinned when it started: a later draft of it does not stop a resume.
     expect(labels(campaignActs(facts({ status: "paused" }, { template: templateFromRow(templateRow({ id: "t1", accountId: "acme", status: "draft" })) })))).toEqual(["Cancel", "Send a test", "Resume"]);
   });

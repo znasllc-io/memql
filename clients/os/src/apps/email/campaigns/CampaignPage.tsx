@@ -480,20 +480,19 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
       if (sending.failed) {
         notices.push(<Notice key="sending" tone="warn" sentence={WORDS.sendingNotChecked(organization)} detail={sending.reason} />);
       } else if (!sending.ready) {
+        // ONE SENTENCE FOR IT (Ruling 6), the engine's reason beneath, and the
+        // way to fix it beside it. The bar does not say it again.
         notices.push(
-          <Notice
-            key="sending"
-            tone="warn"
-            sentence={mayConfigure ? `Set up sending for ${organization} in Settings.` : `An owner or developer sets up sending for ${organization}.`}
-            detail={sending.reason}
-          >
+          <Notice key="sending" tone="warn" sentence={WORDS.sendingNotSetUp(organization)} detail={sending.reason}>
             {mayConfigure ? (
               <p className="os-caption">
                 <button type="button" className="os-link" onClick={() => openSettings(campaign.accountId)}>
                   Open Settings
                 </button>
               </p>
-            ) : null}
+            ) : (
+              <p className="os-caption">An owner or developer sets it up.</p>
+            )}
           </Notice>,
         );
       }
@@ -512,9 +511,15 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
         </Notice>,
       );
     }
-    // A failed send says why in the bar; one still going, or paused, says it here.
-    if (campaign.lastError !== "" && campaign.status !== "failed") {
-      notices.push(<Notice key="last-error" tone="warn" sentence="The send reported a problem." detail={campaign.lastError} />);
+    // The engine's reason, whole: the bar's detail is one line, and cuts a long one off.
+    if (campaign.lastError !== "") {
+      notices.push(
+        campaign.status === "failed" ? (
+          <Notice key="last-error" tone="error" sentence="The send failed." detail={campaign.lastError} />
+        ) : (
+          <Notice key="last-error" tone="warn" sentence="The send reported a problem." detail={campaign.lastError} />
+        ),
+      );
     }
     return notices;
   }
@@ -535,6 +540,8 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
   const senderFact = campaign.senderIdentityId === "" ? (isOperatorOrganization(campaign.accountId) ? capitalized(WORDS.clusterSender) : "") : sender ? senderLabel(sender) : "";
   // A time still to come names its zone; one that has passed is when it went, on this clock.
   const tz = series?.timeZone || zone;
+  // A repeating draft's bar says how often and when next: the facts do not say it again.
+  const barSaysTheSchedule = campaign.status === "draft" && series !== null && (series.status === "active" || series.status === "paused");
   const whenFact = series
     ? `${WORDS.every(series.intervalWeeks)} from ${momentWords(series.anchorAt, tz)} (${tz})`
     : campaign.startedAt !== ""
@@ -568,7 +575,7 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
             />
             <Fact label="Sender" value={senderFact} />
             <Fact label="Organization" value={organization} />
-            <Fact label="When" value={whenFact} />
+            {barSaysTheSchedule ? null : <Fact label="When" value={whenFact} />}
             {campaign.replyTo === "" ? null : <Fact label="Reply to" value={campaign.replyTo} />}
           </Facts>
         </Panel>
@@ -577,7 +584,7 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
           <>
             <AutoRefresh onRefresh={stats.reload} busy={stats.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
             <Results campaign={campaign} stats={stats} />
-            <Breakdown stats={stats} />
+            <Breakdown campaign={campaign} stats={stats} />
             <WhoGotIt campaignId={campaign.id} total={ledgerTotal(campaign, stats.value)} />
           </>
         ) : null}
@@ -734,7 +741,10 @@ function Tests({
                     tone={testRun.status === "sending" ? "accent" : testRun.status === "failed" || testRun.lastError !== "" ? "warn" : "muted"}
                     onOpen={() => onOpenRun(testRun.id)}
                   >
-                    <span className="os-caption">{`${testRun.sentCount.toLocaleString("en-US")} sent, ${testRun.skippedCount.toLocaleString("en-US")} skipped, ${testRun.failedCount.toLocaleString("en-US")} failed`}</span>
+                    {/* The latest run's figures are the band's, just above: its row does not say them again. */}
+                    {testRun === latest ? null : (
+                      <span className="os-caption">{`${testRun.sentCount.toLocaleString("en-US")} sent, ${testRun.skippedCount.toLocaleString("en-US")} skipped, ${testRun.failedCount.toLocaleString("en-US")} failed`}</span>
+                    )}
                   </RecordRow>
                 );
               })}

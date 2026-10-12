@@ -194,6 +194,8 @@ describe("a campaign's page", () => {
     await openCampaign();
     expect(await screen.findByText("This campaign has no organization. Edit it to choose one.")).toBeTruthy();
     await waitFor(() => expect(barActs()).toEqual(["Edit"]));
+    // Said once, where the way to fix it is: the bar does not say it again.
+    expect(barDetail()).toBe("");
     // Nothing is drawn as loading: there is nothing to wait for.
     expect(document.querySelectorAll('[aria-busy="true"]')).toHaveLength(0);
     expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
@@ -600,7 +602,10 @@ describe("what decides whether it can be sent", () => {
     const conn = seed({ campaigns: [draft()], sendingReadiness: [{ ready: false, reason: "Verify the sending domain first." }] });
     const { navigate } = mountWindow(conn);
     await openCampaign();
-    await waitFor(() => expect(barDetail()).toBe("Sending isn't set up for Operator organization."));
+    // One sentence (Ruling 6), the engine's reason beneath it, and the way to fix it beside it.
+    expect(await screen.findByText("Sending isn't set up for Operator organization.")).toBeTruthy();
+    expect(screen.getAllByText(/Sending isn't set up|Set up sending/)).toHaveLength(1);
+    expect(barDetail()).toBe("");
     // Nothing can go out, a test included: no act for it, rather than one that does nothing.
     expect(barActs()).toEqual(["Edit"]);
     expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
@@ -614,9 +619,21 @@ describe("what decides whether it can be sent", () => {
     const conn = seed({ campaigns: [draft()], sendingReadiness: new Error("the readiness check timed out") });
     mountWindow(conn);
     await openCampaign();
-    await waitFor(() => expect(barDetail()).toBe("Couldn't check sending for Operator organization."));
+    expect(await screen.findByText("Couldn't check sending for Operator organization.")).toBeTruthy();
+    expect(screen.getAllByText(/Couldn't check sending/)).toHaveLength(1);
+    expect(barDetail()).toBe("");
     expect(screen.queryByText(/Sending isn't set up/)).toBeNull();
     expect(screen.getByText("the readiness check timed out")).toBeTruthy();
+  });
+
+  it("tells someone who cannot set up sending who can, in the same notice", async () => {
+    installSeededAccess("writer");
+    const conn = seed({ campaigns: [draft()], sendingReadiness: [{ ready: false, reason: "Verify the sending domain first." }] });
+    mountWindow(conn, { role: "writer" });
+    await openCampaign();
+    expect(await screen.findByText("Sending isn't set up for Operator organization.")).toBeTruthy();
+    expect(screen.getByText("An owner or developer sets it up.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open Settings" })).toBeNull();
   });
 
   it("does not mistake the cluster's own mailbox report for every organization's sending", async () => {
@@ -829,6 +846,72 @@ describe("what happened when it went out", () => {
 // Tests
 // ---------------------------------------------------------------------------
 
+describe("each thing said once, where it can be read", () => {
+  it("a repeating draft's schedule is said by its bar, not again in its facts", async () => {
+    const conn = seed({
+      campaigns: [draft()],
+      campaignSeries: [{ id: "series", sourceCampaignId: "c1", accountId: "self", name: "August update", status: "active", intervalWeeks: 2, timeZone: ZONE, anchorAt: OCT_14, nextAt: OCT_14, createdAt: "2027-10-01T12:00:00Z", lastError: "" }],
+    });
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barDetail()).toBe("Every 2 weeks · next Tue, Oct 14 at 9:00 (America/Phoenix)"));
+    const details = screen.getByRole("region", { name: "Campaign details" });
+    expect(within(details).queryByText("When", { selector: "dt" })).toBeNull();
+    expect(screen.getAllByText(/Every 2 weeks/)).toHaveLength(1);
+  });
+
+  it("a stopped series' bar says why it stopped, so its schedule is in its facts", async () => {
+    const reason = "Publish the template before resuming this schedule.";
+    const conn = seed({
+      campaigns: [draft()],
+      campaignSeries: [{ id: "series", sourceCampaignId: "c1", accountId: "self", name: "August update", status: "blocked", intervalWeeks: 2, timeZone: ZONE, anchorAt: OCT_14, nextAt: OCT_14, createdAt: "2027-10-01T12:00:00Z", lastError: reason }],
+    });
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barDetail()).toBe(reason));
+    expect(fact("When").textContent).toBe("Every 2 weeks from Tue, Oct 14 at 9:00 (America/Phoenix)");
+  });
+
+  it("the breakdown's recipients are the band's: the roster frozen for the send, not the audience today", async () => {
+    const conn = seed({
+      campaigns: [draft({ id: "c1", status: "sent", recipientCount: 1204, sentCount: 1180, skippedCount: 24 })],
+      // The audience has grown since: the server counts today's roster.
+      campaignStats: [{ ...STATS, recipients: 1250 }],
+    });
+    mountWindow(conn);
+    await openCampaign();
+    const results = screen.getByRole("region", { name: "Results" });
+    expect(within(results).getByRole("img").getAttribute("aria-label")).toContain("1204 recipients");
+    const breakdown = screen.getByRole("region", { name: "Breakdown" });
+    await waitFor(() => expect(breakdown.querySelectorAll("dt").length).toBeGreaterThan(0));
+    expect(fact("Recipients", breakdown).textContent).toBe("1,204");
+  });
+
+  it("a failed send says why in a notice too, where the whole sentence can be read", async () => {
+    const reason = "The sending service refused the sender address because its domain is not verified.";
+    const conn = seed({ campaigns: [draft({ id: "c1", status: "failed", lastError: reason })] });
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barWord()).toBe("Failed"));
+    const notice = (await screen.findByText("The send failed.")).closest(".os-notice") as HTMLElement;
+    expect(within(notice).getByText(reason)).toBeTruthy();
+  });
+
+  it("the latest test's figures are its band's: its row does not say them again", async () => {
+    const latest = campaignRow({ id: "run-2", name: "August update · Test", testSourceCampaignId: "c1", audienceId: "a-test", status: "sent", recipientCount: 3, sentCount: 2, skippedCount: 1, startedAt: "2031-10-14T17:00:00Z" });
+    const older = campaignRow({ id: "run-1", name: "August update · Test", testSourceCampaignId: "c1", audienceId: "a-test", status: "sent", recipientCount: 3, sentCount: 3, startedAt: "2031-10-13T17:00:00Z" });
+    const conn = seed({ campaigns: [draft({ id: "c1", status: "sent", recipientCount: 1, sentCount: 1 })], testRuns: [latest, older], campaignStats: [{ sent: 1 }] });
+    mountWindow(conn);
+    await openCampaign();
+    const band = await screen.findByRole("group", { name: "Test results" });
+    expect(within(band).getByRole("img").getAttribute("aria-label")).toContain("2 sent, 1 skipped");
+    const rows = within(screen.getByRole("list", { name: "Test runs" })).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]!).queryByText(/sent, .* skipped/)).toBeNull();
+    expect(within(rows[1]!).getByText("3 sent, 0 skipped, 0 failed")).toBeTruthy();
+  });
+});
+
 describe("testing a campaign", () => {
   it("shows the latest test and opens a run on its own page", async () => {
     const first = campaignRow({ id: "run-1", name: "August update · Test", testSourceCampaignId: "c1", audienceId: "a-test", status: "sent", recipientCount: 1, sentCount: 1, startedAt: "2031-10-14T16:00:00Z" });
@@ -907,7 +990,7 @@ describe("testing a campaign", () => {
     // The same request, so the run it may already have made is the run it gets.
     expect(conn.query.campaignTestAudienceSend.mock.calls[0]).toEqual(conn.query.campaignTestAudienceSend.mock.calls[1]);
     expect(conn.query.campaignTestAudienceSend.mock.calls[0]![0]).toMatchObject({ campaignId: "c1", audienceId: "a-test" });
-    expect(await screen.findByText("2 sent, 1 skipped, 0 failed")).toBeTruthy();
+    expect(within(await screen.findByRole("group", { name: "Test results" })).getByRole("img").getAttribute("aria-label")).toContain("2 sent, 1 skipped, 0 failed");
     expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
     expect(conn.query.campaignConfigureSeries).not.toHaveBeenCalled();
   });

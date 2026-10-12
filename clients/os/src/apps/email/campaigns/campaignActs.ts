@@ -15,7 +15,8 @@ import type { When } from "./wizardModel";
 //
 //   draft, no time             Edit, Send a test, Send now
 //   draft, a time to come      Edit, Send a test, Schedule
-//   draft, something missing   Edit, Send a test        (the bar names it)
+//   draft, something missing   Edit, Send a test        (the bar, or the page, names it)
+//   draft, series being read   Send a test
 //   draft a series repeats     Edit, Send a test, Pause | Resume
 //   ... and it stopped         Edit, Resume             (the series' sentence)
 //   scheduled                  Cancel (asks), Send a test, Send now
@@ -27,6 +28,12 @@ import type { When } from "./wizardModel";
 // state the engine accepts one. WHAT IS STILL BEING READ OFFERS NOTHING: while
 // the template, the series or sending readiness is unknown the bar says nothing
 // about it and offers no act that depends on it -- a step knows before it offers.
+// That includes Edit while the series is read: a draft's Edit page asks when it
+// goes, a repeat's how often and from when, and which one it is is not known.
+//
+// THE BAR SAYS ONLY WHAT THE PAGE DOES NOT. A missing organization, and sending
+// that is not set up or could not be checked, are said once -- in the page's
+// notice, beside the way to fix them (Ruling 6) -- and not again here.
 
 export interface CampaignFacts {
   campaign: CampaignRow;
@@ -76,31 +83,43 @@ const CANCEL: ActSpec = { id: "cancel", label: "Cancel", text: true };
 const DUPLICATE: ActSpec = { id: "duplicate", label: "Duplicate", text: true };
 
 /**
- * What stops the campaign going out, in the order a person would fix it: no
- * organization, a template that cannot be sent, sending, an audience nobody is
- * subscribed to. "" when nothing does; null while something before the first
+ * What stops the campaign going out: nothing (`clear`), something the bar says
+ * (`said`, with its sentence), or something the page says in a notice with the
+ * way to fix it (`noted`) -- a missing organization, or sending.
+ */
+type Blocker = { kind: "clear" } | { kind: "noted" } | { kind: "said"; sentence: string };
+
+const CLEAR: Blocker = { kind: "clear" };
+const NOTED: Blocker = { kind: "noted" };
+
+/**
+ * The first thing that stops the campaign going out, in the order a person
+ * would fix it: no organization, a template that cannot be sent, sending, an
+ * audience nobody is subscribed to. Null while something before the first
  * blocker is still being read, because then the first one is not known yet.
  */
-function blocker(f: CampaignFacts): string | null {
+function blocker(f: CampaignFacts): Blocker | null {
   const { campaign } = f;
-  if (campaign.accountId === "") return "Edit it to choose an organization.";
+  if (campaign.accountId === "") return NOTED;
   if (f.templateKnown === false) return null;
   const template = f.template;
-  if (template === undefined || template.accountId !== campaign.accountId || template.status === "archived") return "Choose a published template.";
-  if (template.status !== "ready") return `Publish “${templateName(template)}” before sending.`;
+  if (template === undefined || template.accountId !== campaign.accountId || template.status === "archived") return { kind: "said", sentence: "Choose a published template." };
+  if (template.status !== "ready") return { kind: "said", sentence: `Publish “${templateName(template)}” before sending.` };
   const sending = sendingBlocker(f);
-  if (sending !== "") return sending;
-  if (f.subscribers?.kind === "measured" && f.subscribers.value === 0) return `${f.audienceName || "Its audience"} has no subscribers.`;
-  return "";
+  if (sending !== CLEAR) return sending;
+  if (f.subscribers?.kind === "measured" && f.subscribers.value === 0) return { kind: "said", sentence: `${f.audienceName || "Its audience"} has no subscribers.` };
+  return CLEAR;
 }
 
-/** Sending alone: unknown (null), a sentence, or "" when it is ready. */
-function sendingBlocker(f: CampaignFacts): string | null {
+/** Sending alone: unknown (null), not ready or not checked (the page's to say), or clear. */
+function sendingBlocker(f: CampaignFacts): Blocker | null {
   if (f.sendingKnown === false) return null;
-  if (f.sendingFailed === true) return WORDS.sendingNotChecked(f.organizationName);
-  if (!f.sendingReady) return WORDS.sendingNotSetUp(f.organizationName);
-  return "";
+  if (f.sendingFailed === true || !f.sendingReady) return NOTED;
+  return CLEAR;
 }
+
+/** What the bar says about a blocker: its sentence, or nothing when the page says it. */
+const barSentence = (blocked: Blocker | null): string => (blocked?.kind === "said" ? blocked.sentence : "");
 
 /** Where a draft's saved time stands: none, still to come, or gone. */
 function savedTime(f: CampaignFacts): "none" | "future" | "past" {
@@ -122,18 +141,18 @@ export function campaignActs(f: CampaignFacts): ActSpec[] {
   const test = f.canTest ? [TEST] : [];
   switch (campaign.status) {
     case "draft": {
-      if (f.seriesKnown === false) return [EDIT, ...test];
+      if (f.seriesKnown === false) return test;
       if (series !== null) return series.status === "blocked" ? [EDIT, ...seriesAct(series)] : [EDIT, ...test, ...seriesAct(series)];
-      if (blocker(f) !== "") return [EDIT, ...test];
+      if (blocker(f)?.kind !== "clear") return [EDIT, ...test];
       return [EDIT, ...test, savedTime(f) === "future" ? SCHEDULE : SEND];
     }
     case "scheduled":
-      return [CANCEL, ...test, ...(blocker(f) === "" ? [SEND] : [])];
+      return [CANCEL, ...test, ...(blocker(f)?.kind === "clear" ? [SEND] : [])];
     case "sending":
       return [...test, PAUSE];
     case "paused":
       // Its template was pinned when the send began: only sending decides a resume.
-      return [CANCEL, ...test, ...(campaign.accountId !== "" && sendingBlocker(f) === "" ? [RESUME] : [])];
+      return [CANCEL, ...test, ...(campaign.accountId !== "" && sendingBlocker(f)?.kind === "clear" ? [RESUME] : [])];
     case "sent":
     case "cancelled":
     case "failed":
@@ -173,18 +192,16 @@ export function campaignReading(f: CampaignFacts): CampaignReading {
       if (f.seriesKnown === false) return { word, detail: "", tone: "none" };
       if (series !== null) return seriesReading(series, zone);
       const blocked = blocker(f);
-      if (blocked === null) return { word, detail: "", tone: "none" };
-      if (blocked !== "") return { word, detail: blocked, tone: "none" };
+      if (blocked?.kind !== "clear") return { word, detail: barSentence(blocked), tone: "none" };
       return { word, detail: savedTime(f) === "past" ? "Its time has passed." : "", tone: "none" };
     }
-    case "scheduled": {
-      const blocked = blocker(f);
-      return { word, detail: blocked || (campaign.scheduledAt === "" ? "" : momentWords(campaign.scheduledAt, zone)), tone: "none" };
-    }
+    case "scheduled":
+      return { word, detail: barSentence(blocker(f)) || (campaign.scheduledAt === "" ? "" : momentWords(campaign.scheduledAt, zone)), tone: "none" };
     case "sending":
       return { word, detail: progress(campaign), tone: "live" };
     case "paused":
-      return { word, detail: campaign.accountId === "" ? "" : sendingBlocker(f) ?? "", tone: "paused" };
+      // What stops a resume is sending, and the page says that.
+      return { word, detail: "", tone: "paused" };
     case "sent":
       return { word, detail: campaign.completedAt === "" ? "" : momentWords(campaign.completedAt, zone), tone: "none" };
     case "failed":

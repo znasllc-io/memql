@@ -305,7 +305,6 @@ export interface Figure {
 export const NOT_MEASURED: Figure = { value: null, absentBecause: "" };
 
 export interface CampaignStats {
-  recipients: Figure;
   pending: Figure;
   sent: Figure;
   failed: Figure;
@@ -379,7 +378,6 @@ export function statsFromPayload(row: Row): CampaignStats {
   };
 
   return {
-    recipients: figureOf(flat, "recipients"),
     pending: figureOf(flat, "pending"),
     sent: figureOf(flat, "sent"),
     failed: figureOf(flat, "failed"),

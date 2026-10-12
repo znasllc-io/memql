@@ -113,9 +113,10 @@ function StatFact({ label, figure }: { label: string; figure: Figure }) {
  * sent is the legend's, right above; a second copy here would be a second
  * place to read it and, between two refreshes, a second answer. The breakdown
  * keeps the whole (Recipients), why people were skipped, and what happened
- * after delivery.
+ * after delivery. RECIPIENTS IS THE BAND'S WHOLE -- the roster frozen for the
+ * send -- not the audience as it is today, which grows and shrinks after.
  */
-export function Breakdown({ stats }: { stats: Reading<CampaignStats | null> }) {
+export function Breakdown({ campaign, stats }: { campaign: CampaignRow; stats: Reading<CampaignStats | null> }) {
   const value = stats.value;
   // Answered with no breakdown at all: there is nothing to show, and a box of
   // em dashes would read as one.
@@ -129,7 +130,7 @@ export function Breakdown({ stats }: { stats: Reading<CampaignStats | null> }) {
       ) : (
         <>
           <Facts>
-            <StatFact label="Recipients" figure={value.recipients} />
+            <Fact label="Recipients" value={sendBreakdown(campaign).total.toLocaleString("en-US")} />
             <StatFact label="Skipped: on the do-not-mail list" figure={value.skippedSuppressed} />
             <StatFact label="Skipped: unsubscribed" figure={value.skippedUnsubscribed} />
             <StatFact label="Skipped: some other reason" figure={value.skippedOther} />
