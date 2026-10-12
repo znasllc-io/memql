@@ -107,12 +107,14 @@ type draftUploaderProbe struct {
 	fail bool
 }
 
-func (p *draftUploaderProbe) Upload(_ context.Context, _, objectName string, data []byte, _ string) (string, error) {
+func (p *draftUploaderProbe) Upload(_ context.Context, container, objectName string, data []byte, _ string) (string, error) {
 	if p.fail {
 		return "", fmt.Errorf("storage unavailable")
 	}
 	p.data = append([]byte(nil), data...)
-	return "https://test.invalid/" + objectName, nil
+	// The shape the Azure client returns -- host, container, object -- which
+	// the Library's key check reads before the file row is written.
+	return "https://test.invalid/" + container + "/" + objectName, nil
 }
 
 func (p *draftTurnProbe) ResolveOwnerAgent(_ context.Context, owner string) (string, error) {

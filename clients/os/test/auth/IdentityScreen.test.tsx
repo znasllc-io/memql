@@ -1,7 +1,8 @@
 import { StrictMode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IdentityScreen } from "../../src/auth/IdentityScreen";
+import { readTheBarNow } from "../readTheBar";
 
 // Match AuthProvider's memoized dependencies. Keep nativeIdentity real so these
 // tests exercise the POST body, CSRF header, JSON errors, and redirect fetch.
@@ -20,11 +21,19 @@ const setup = {
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.removeItem("memql-os-theme"); document.documentElement.removeAttribute("data-theme"); });
+// The setup wizard's Continue and Back move it to another step, and a bar that
+// has just changed takes no press for a moment (kit ActionBar): each step is
+// read before the next press, on a fake Date so reading costs nothing.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); localStorage.removeItem("memql-os-theme"); document.documentElement.removeAttribute("data-theme"); });
+
+/** Presses an act of the wizard's bar once it has been read. */
+const pressBar = (name: string) => { readTheBarNow(); fireEvent.click(screen.getByRole("button", { name })); };
 
 async function reachSubmission() {
   await screen.findByRole("button", { name: "Continue" });
-  for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  for (let i = 0; i < 3; i++) pressBar("Continue");
+  readTheBarNow();
   return screen.getByRole("button", { name: "Continue to passkey" });
 }
 
@@ -55,10 +64,10 @@ describe("ownership setup through IdentityScreen and native transport", () => {
     fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Grace" } });
     fireEvent.click(screen.getByRole("radio", { name: "Light" }));
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    pressBar("Continue");
     fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    pressBar("Back");
     expect((screen.getByLabelText("First name") as HTMLInputElement).value).toBe("Grace");
     fireEvent.click(screen.getByRole("radio", { name: "System" }));
     expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
@@ -84,7 +93,7 @@ describe("ownership setup through IdentityScreen and native transport", () => {
     expect((await screen.findByRole("alert")).textContent).toBe(message);
     expect(screen.getByRole("button", { name: "Continue to passkey" })).toBeTruthy();
     expect(screen.getByText("Grace Owner")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Continue to passkey" }));
+    pressBar("Continue to passkey");
     await screen.findByRole("button", { name: "Create passkey and finish" });
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(attempts).toBe(2);

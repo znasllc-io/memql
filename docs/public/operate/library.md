@@ -43,6 +43,20 @@ with a fresh key per upload, so no upload can ever write over another's bytes.
 **`sha256` is a dedup hint and never an access key.** Knowing a file's hash
 grants nothing; every read re-resolves ownership.
 
+**`blobUrl` is the server's to write, and every read holds it to its owner.**
+The node reads a file's bytes with its own storage credential, so the path on
+the row decides whose bytes come back. `createLibraryFile` is `@serverOnly`: a
+client files bytes through `POST /artifacts` or the chunked routes, and the
+server's writers create the row through `component/server/libraryfile`, which
+refuses a key outside the creator's own `library/{owner}/` prefix. Every
+server path that streams a file's bytes -- the content route, document history
+and review, skill scripts, Materializer references and templates, campaign
+imports, package and site deploys from a Library zip -- refuses a row whose key
+is not under its owner's prefix (`core/librarykey`) before it reads a byte; the
+content route answers 404, as for any file the caller cannot see. A row written
+before the mutation was `@serverOnly` therefore cannot hand over somebody
+else's bytes.
+
 **The MemQL copy is independent and durable** (memql#4781, design D12). A file
 uploaded from a machine survives that machine's deletion of the original and
 survives the machine disconnecting; archiving in MemQL never touches the

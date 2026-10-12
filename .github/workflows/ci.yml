@@ -372,6 +372,12 @@ jobs:
               # fail-open this block exists to close.
               - 'brand/**'
               - 'component/mcp/*.svg'
+              # The error pages' two templates, brand mark and wordmark face
+              # (after the 2026-10-11 outage): embed_inventory_test.go pins the
+              # four, so they are routed as a TREE, for the reason above. The
+              # package's own tests read them too, which the `go` bucket below
+              # routes.
+              - 'component/errorpages/**'
               - 'dsl/**'
               - 'examples/deploypack/dsl/**'
               - 'examples/referencepack/dsl/**'
@@ -520,6 +526,15 @@ jobs:
               # Embedded browser runtime and Node tests execute in component/edge.
               - 'component/edge/site_refresh.js'
               - 'component/edge/site_refresh_test.cjs'
+              # The error pages' embedded assets (after the 2026-10-11 outage):
+              # two HTML templates, the brand mark and the wordmark face, read by
+              # component/errorpages's own tests through go:embed -- the pages'
+              # sizes, the stylesheet hash their Content-Security-Policy pins and
+              # the byte copies of brand/. The gate-inputs step does not run that
+              # package, and the `gates` entry above reaches only the embed
+              # inventory in the root package, so `go` is the bucket that reaches
+              # these tests. A PR editing only a template touches no .go file.
+              - 'component/errorpages/**'
               - 'go.mod'
               - 'go.sum'
               - 'go.work'
@@ -1019,7 +1034,16 @@ jobs:
         # the render halves self-skip without kustomize or kubectl on the
         # runner, and the text-level halves, which are the ones that must not
         # skip, do not.
-        run: go test -count=1 -timeout=300s ./ ./integrations ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+        #
+        # `./integrations/customdomain` holds the gate that reads
+        # docs/public/operate/front-door.md and pins its upgrade backfill to
+        # what the custom-domain and door builders label and annotate
+        # (TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel). It
+        # lives beside the builders, and `./integrations` alone is that
+        # module's root package, not its subpackages, so a docs-only PR
+        # changing the command reached no lane that checks it. DB-free and
+        # under a second.
+        run: go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       #
@@ -1304,7 +1328,7 @@ jobs:
           # import graph can see: added for every change, including Go source.
           # The SAME list as go-checks' gate-inputs step, held to it by
           # scripts/dev/gate_inputs_lane_scope_test.go.
-          GATE_PACKAGES: ./ ./integrations ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+          GATE_PACKAGES: ./ ./integrations ./integrations/customdomain ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
           # The trees whose packages the node-tag passes test. A selected
           # package under one of them (or a changed file only a node tag
           # compiles) runs the tag passes; scripts/ci/selection's live test

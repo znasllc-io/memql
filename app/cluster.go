@@ -604,7 +604,7 @@ func (a *App) cluster() {
 // MarkNodeReady flips this node's lifecycle from Starting to Ready
 // (memql#1268), advertised on the next gossip heartbeat and consulted by the
 // readiness handler. Called from the Run lifecycle once every dependency has
-// started (EmitSystemStartup), i.e. the node is actually able to serve.
+// reported ready, before EmitSystemStartup.
 // No-op on non-mesh binaries (no PeerManager / lifecycle). Idempotent.
 func (a *App) MarkNodeReady() {
 	if a.nodeLifecycle == nil {
@@ -789,10 +789,8 @@ func (a *App) EmitSystemStartup() {
 		return
 	}
 
-	// Wait for automation scheduler to finish registering event subscriptions.
-	// Dependencies start asynchronously, so the scheduler may still be loading
-	// automations when this is called. A brief delay ensures subscriptions are registered.
-	time.Sleep(500 * time.Millisecond)
+	// Run waits for the scheduler's Ready channel before publishing. A fixed
+	// sleep cannot establish that its event subscriptions are installed.
 
 	nodePayload := map[string]any{
 		"id":      a.nodeIdentity.ID,

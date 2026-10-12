@@ -466,8 +466,14 @@ func TestRetentionRefusesToDeleteWithoutAnArchive(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "records preserved") {
 					t.Fatalf("want a refusal saying the records were preserved, got %v", err)
 				}
-				if last := results[len(results)-1]; last.Concept != population.concept || last.Env != EnvPipelinesRunRetentionDays {
-					t.Fatalf("refused by the %s policy on %s, want %s's own", last.Concept, last.Env, population.concept)
+				// Every policy runs and reports its row whatever an earlier one did,
+				// so the refusal is told by the error, which names its policy.
+				own := "retention policy " + population.concept + " on " + EnvPipelinesRunRetentionDays + ":"
+				if !strings.Contains(err.Error(), own) || strings.Count(err.Error(), "retention policy ") != 1 {
+					t.Fatalf("refused with %q, want %s's own policy alone", err, population.concept)
+				}
+				if len(results) != len(operationalPolicies) {
+					t.Fatalf("%d result rows, want one for each of the %d policies", len(results), len(operationalPolicies))
 				}
 				if after := storedKeys(t, db, ids...); !maps.Equal(after, before) {
 					t.Fatalf("deleted without a verified archive: %d of %d versions left", len(after), len(before))

@@ -81,7 +81,7 @@ func (i *Integration) revisionContent(ctx context.Context, doc reviewDocument) (
 		if i.blobFetcher == nil {
 			return "", fmt.Errorf("document storage is unavailable on this node")
 		}
-		stream, err := i.blobFetcher.DownloadStreamURL(ctx, stringField(doc.backing, "blobUrl"))
+		stream, err := i.openFileBytes(ctx, doc.owner, stringField(doc.backing, "blobUrl"))
 		if err != nil {
 			return "", fmt.Errorf("could not read the saved document")
 		}

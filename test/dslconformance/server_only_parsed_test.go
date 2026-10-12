@@ -1195,6 +1195,16 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// version would put that back in a caller's hands.
 		{Path: "library/mutations.memql", Name: "createLibraryFileVersion"}: true,
 		{Path: "library/mutations.memql", Name: "supersedeLibraryFileHead"}: true,
+		// The HEAD row's create, on the same asset: blobUrl is the storage
+		// path every reader of the file streams with the node's credential,
+		// and while this was client-reachable any signed-in caller could
+		// write a file row of their own naming another user's object and
+		// read it back through GET /artifacts/{id}/content. actor-scoping
+		// was already in place and was never the question -- the row was the
+		// caller's; the bytes were not. Its writers reach it through
+		// component/server/libraryfile, which refuses a key outside the
+		// actor's own library/{owner}/ prefix before stamping.
+		{Path: "library/mutations.memql", Name: "createLibraryFile"}: true,
 
 		// Ownership does not attest storage: only the internal finalizer may
 		// record the durable journal's verified bytes and reserved file id.

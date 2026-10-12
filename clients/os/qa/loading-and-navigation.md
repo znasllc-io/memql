@@ -16,7 +16,7 @@ verification is tracked separately from a passing typecheck.
 | Campaigns | Shared live collections; audience members, template sample, delivery ledger and breakdown reads. Recipient filters remain filters. |
 | Concepts | Registry, concept details, initial rows and additional pages. Schema and row inspectors retain their split view. |
 | Logs | Search/tail data and settings reads; loaded virtual rows remain usable on refresh. |
-| Materializer | Live collections and composer prerequisite form. |
+| Materializer | Live collections and composer prerequisite form. A starting setup from another app moves the window to the Composer section with the form filled in; the form is local state, so it has no placeholder. A described file's Files entry is awaited on a live feed, and the notices that follow it appear in place and are announced, never as a placeholder. |
 | Nexus | Live lists, maps, step histories, automation catalog and journal. Execution and approval status remains visible. |
 | Training | Review queue, knowledge domains and shared live collections. Document ingestion is an operation, with its own progress. |
 | Settings | Access roster, rules, decisions, language, cluster/mail facts, benchmark, tokens, keys, policies, integration reports and provider registry. Access's two sibling views use `LocalTabs`; saved preferences remain form choices. |

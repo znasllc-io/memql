@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -427,6 +428,8 @@ describe("the Head's action, by state", () => {
     expect(deploy?.textContent).toBe("Deploy");
     expect(deploy?.disabled).toBe(false);
     expect(deploy?.getAttribute("data-tone")).toBe("primary");
+    // The acts joined the bar as the page was read, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(deploy);
     // IT NAMES THE RUN IT IS CONFIRMING (memql#4954). This test used to assert
     // the call WITHOUT it -- written from what the button did rather than from
@@ -450,6 +453,7 @@ describe("the Head's action, by state", () => {
     // never on screen together.
     const retry = headAction(page);
     expect(retry?.textContent).toBe("Retry the deploy");
+    await readTheBar();
     await click(retry);
     // NO deploymentId AND NO fromDeploymentId, and both absences are the
     // promise (memql#4955). This word means "deploy the source again": the
@@ -1022,6 +1026,7 @@ describe("the Live stop", () => {
     const paused = siteRow({ ...SHOP, id: "site-shop", status: "disabled" });
     const { connection } = await mountAndOpen({ sites: [paused] }, "shop.memql.example.com");
     const bar = document.querySelector(".os-actbar") as HTMLElement;
+    await readTheBar();
     await click(within(bar).getByRole("button", { name: /^Archive/ }));
     // THE CONFIRMATION TAKES THE BAR OVER, so the sentence, the field and the
     // act are the one thing on screen that is being decided -- and it asks
@@ -1032,6 +1037,8 @@ describe("the Live stop", () => {
     expect(within(bar).getByText(/name stays yours/)).toBeTruthy();
     await typeInto(within(bar).getByLabelText("Type shop to confirm") as HTMLInputElement, "shop");
     expect(archive.disabled).toBe(false);
+    // The bar just turned into the confirmation, and takes no press until it is read.
+    await readTheBar();
     await click(archive);
     expect(connection.callsNamed("siteArchive")).toEqual(['builtin siteArchive(siteId: "site-shop", confirmHostname: "shop")']);
   });

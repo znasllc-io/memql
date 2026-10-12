@@ -1,24 +1,31 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { OwnershipWizard } from "../../src/auth/OwnershipWizard";
+import { readTheBarNow } from "../readTheBar";
 
-afterEach(cleanup);
+// Each Continue and Back moves the wizard to another step, and a bar that has
+// just changed takes no press for a moment (kit ActionBar): the steps are read
+// before the next press, on a fake Date so reading costs nothing.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 function installation(prefill = "") {
   const submit = vi.fn();
   render(<OwnershipWizard data={{ Local: true, PrefillOrgName: "Example", PrefillOwnerFirstName: "Ada",
     PrefillOwnerLastName: "Owner", PrefillOwnerEmail: "ada@example.test", PrefillDomain: "memql.localhost",
     PrefillInternalDomains: prefill }} busy={false} error="" submit={submit} />);
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  next();
+  next();
   if (!prefill) fireEvent.click(screen.getByText("Internal team defaults"));
   return submit;
 }
 
 const entry = () => screen.getByRole("textbox", { name: "Internal email domains (optional)" });
 const type = (value: string) => fireEvent.change(entry(), { target: { value } });
-const next = () => fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-const back = () => fireEvent.click(screen.getByRole("button", { name: "Back" }));
+/** Presses an act of the wizard's bar once it has been read. */
+const pressBar = (name: string) => { readTheBarNow(); fireEvent.click(screen.getByRole("button", { name })); };
+function next() { pressBar("Continue"); }
+function back() { pressBar("Back"); }
 
 it("adds by Enter or plus, deduplicates, removes and submits the existing wire format", () => {
   const submit = installation(" Example.test, EXAMPLE.test, old.test ");
@@ -37,7 +44,7 @@ it("adds by Enter or plus, deduplicates, removes and submits the existing wire f
   back();
   expect(within(list()).getAllByRole("listitem")).toHaveLength(2);
   next();
-  fireEvent.click(screen.getByRole("button", { name: "Continue to passkey" }));
+  pressBar("Continue to passkey");
   expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({ internal_domains: "example.test, team.example.test" }));
 });
 
@@ -75,6 +82,6 @@ it("allows an empty optional list after removing its last domain", () => {
   fireEvent.keyDown(entry(), { key: "Enter" });
   expect(screen.queryByRole("alert")).toBeNull();
   next();
-  fireEvent.click(screen.getByRole("button", { name: "Continue to passkey" }));
+  pressBar("Continue to passkey");
   expect(submit).toHaveBeenCalledWith("/setup", expect.objectContaining({ internal_domains: "" }));
 });

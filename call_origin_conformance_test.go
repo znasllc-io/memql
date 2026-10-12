@@ -581,7 +581,23 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// read runs unstamped through component/server's own store, under
 		// the caller's actor -- which is the strongest form of the third
 		// property its sibling asserts.
-		"component/server/fileversion":      "library file-version supersede store -- REQUEST-DERIVED; preconditions (stamp is required by @serverOnly, dies inside one call, no write names an owner, and the package holds no reads) asserted by component/server/fileversion/store_internal_origin_test.go, memql#4806",
+		"component/server/fileversion": "library file-version supersede store -- REQUEST-DERIVED; preconditions (stamp is required by @serverOnly, dies inside one call, no write names an owner, and the package holds no reads) asserted by component/server/fileversion/store_internal_origin_test.go, memql#4806",
+		// REQUEST-DERIVED, the fileversion shape one write earlier: the HEAD
+		// row's create. createLibraryFile is @serverOnly because blobUrl is the
+		// storage path every reader streams with the node's credential, and
+		// while it was client-reachable a signed-in caller could point a row
+		// they own at another user's object. Its server writers -- the upload
+		// route, the chunked complete, skills capture, the app-session recorder
+		// and the pipeline store -- all reach it through this package, which
+		// holds nothing but the one stamp. Asserted in
+		// component/server/libraryfile/store_internal_origin_test.go: the
+		// construct is @serverOnly (and keeps ownerUserId and blobUrl
+		// @createOnly) in the loaded registry; no Store method returns a
+		// context; no write names ownerUserId or status; and -- the property
+		// that keeps a forwarded caller value from riding the stamp -- a key
+		// outside the actor's own library/{owner}/ prefix is refused before the
+		// engine is reached.
+		"component/server/libraryfile":      "library file create store -- REQUEST-DERIVED; preconditions (stamp is required by @serverOnly, dies inside one call, no write names an owner or status, and blobUrl must be under the actor's own library/{owner}/ prefix before the stamp is applied) asserted by component/server/libraryfile/store_internal_origin_test.go",
 		"integrations/library/reviewstore":  "document feedback store -- REQUEST-DERIVED; library first admits the current artifact AND backing document under the original caller. Comment storage and version receipts borrow that verified document owner; one fixed artifact-scoped server-only approval read uses the system actor so collaborators cannot erase applied history. Revision and author are checked under the shared document lock. Cross-replica and access-denial tests in integrations/library/review_remove_test.go and review_replica_test.go",
 		"integrations/library/versionstore": "document version store -- REQUEST-DERIVED; original caller ownership reads stay outside the package, the two writes are serverOnly and accept no owner; preconditions in integrations/library/versionstore/store_test.go",
 		// THE AUDIT WRITERS (memql#5624). v1:identity:auditEvent is a
@@ -871,10 +887,13 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// component/worker's store, it borrows nobody's authority, because
 		// everything it writes is the caller's own. So the composite owner
 		// tier still decides every row, the caller can only ever write
-		// compositions they own, and what the stamp buys is exactly the
-		// three @serverOnly writers -- which are @serverOnly because
+		// compositions they own, and what the stamp buys is exactly its
+		// @serverOnly writers -- the composition ones, @serverOnly because
 		// `provenanceEmbedded` and `modelsUsed` ARE the provenance, and a
-		// record a caller can author says nothing.
+		// record a caller can author says nothing; and createLibraryFile for
+		// the output, @serverOnly because blobUrl is a storage path the node's
+		// credential reads back, which store.createLibraryFile holds to the
+		// caller's own library/{owner}/ prefix before the stamp.
 		//
 		// Every id it writes is engine-minted (`id.NewShortId`) or copied
 		// off a row the caller already read under their own actor: the
@@ -888,7 +907,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// integrations/compose/capabilities_test.go's
 		// TestTheStampNeverEscapesItsCall counts the site with comments
 		// stripped.
-		"integrations/compose": "the Materializer's writers -- the stamp opens three @serverOnly mutations and changes no actor, so the composite owner tier still decides every row and a caller can only ever write their own (epic memql#4977)",
+		"integrations/compose": "the Materializer's writers -- the stamp opens its @serverOnly mutations (the composition writers, and createLibraryFile once its key is held to the caller's own library/{owner}/ prefix) and changes no actor, so the composite owner tier still decides every row and a caller can only ever write their own (epic memql#4977)",
 	}
 
 	// The wire path. These must never appear, allowlist or not: every handler

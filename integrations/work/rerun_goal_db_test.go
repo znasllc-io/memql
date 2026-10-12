@@ -41,3 +41,29 @@ func TestRerunCancelledGoalAcrossReplicas(t *testing.T) {
 	require.Equal(t, false, run["cancelRequested"])
 	require.Equal(t, float64(3), rowMap(run, "spent")["modelCalls"])
 }
+
+func TestRerunInterruptedIntentAcrossReplicas(t *testing.T) {
+	a, b := openActsDB(t), openActsDB(t)
+	b.owner = a.owner
+	runID := a.openRun(t, nil)
+	a.writeVersion(t, runID, runID, "research", 0, 1, nil, "retained research", nil)
+	a.finishRun(t, runID, []string{"research"}, nil)
+	// Crash after intent persistence and before the receipt/run checkpoint.
+	a.write(t, "createWorkStep", map[string]any{
+		"stepId": bareRunId(runID) + "-draft", "runId": runID, "key": "draft", "seq": 1,
+		"stepType": "function", "kind": "reasoning", "status": "running", "attempt": 1, "version": 1,
+		"idempotencyKey": runID + ":draft:1", "startedAt": rfc(time.Now()),
+	})
+	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "status": runStatusAbandoned})
+	_, err := b.i.handleRerunStep(actorCtx("another-owner"), map[string]any{"runId": runID, "stepKey": "draft"}, 0)
+	require.Error(t, err)
+	_, err = b.i.handleRerunStep(actorCtx(a.owner), map[string]any{"runId": runID, "stepKey": "draft"}, 0)
+	require.NoError(t, err)
+	run, err := a.i.store().runForOwner(memql.ContextWithFreshRead(actorCtx(a.owner)), runID)
+	require.NoError(t, err)
+	require.Equal(t, runStatusRunning, run["status"])
+	require.Equal(t, []string{"research", "draft"}, rowStringSlice(run, "stepOrder"))
+	require.Equal(t, []string{"draft"}, rowStringSlice(run, "staleSteps"))
+	require.Equal(t, float64(2), rowMap(rowMap(run, "rerun"), "versions")["draft"])
+	require.NotContains(t, rowMap(rowMap(run, "rerun"), "versions"), "research")
+}

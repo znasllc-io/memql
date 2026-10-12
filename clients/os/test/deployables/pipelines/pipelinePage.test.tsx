@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -117,6 +118,8 @@ describe("pipeline settings", () => {
     expect(bar().buttons).toEqual(["Disconnect"]);
     expect(document.querySelector(".os-actbar-acts .os-button")?.getAttribute("data-tone")).toBe("danger");
     expect(connection.callsNamed("pipelinesDisconnect")).toEqual([]);
+    // The bar just turned into the question, and takes no press until it is read.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Keep" }));
     expect(bar().word).toBe("Checks on");
     expect(connection.callsNamed("pipelinesDisconnect")).toEqual([]);
@@ -127,6 +130,7 @@ describe("pipeline settings", () => {
     mount(connection);
     await openSettings();
     await click(screen.getByRole("button", { name: "Disconnect" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Disconnect" }));
     expect(connection.callsNamed("pipelinesDisconnect")).toEqual(['builtin pipelinesDisconnect(pipelineId: "pl-shop")']);
     // The cluster said yes; the pipeline row has not arrived yet.
@@ -145,6 +149,7 @@ describe("pipeline settings", () => {
     mount(connection);
     const page = await openSettings();
     await click(screen.getByRole("button", { name: "Disconnect" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Disconnect" }));
     expect(await within(page).findByText("This needs a part of Deployables you have not been granted")).toBeTruthy();
     expect(within(page).getByText("the caller does not hold execute on app:deployables/connect")).toBeTruthy();

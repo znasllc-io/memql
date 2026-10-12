@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -126,6 +127,8 @@ describe("the run page", () => {
     mount(connection);
     await screen.findByLabelText("The last lines of tests.unit's log");
     expect(barActs()).toEqual(["Open on GitHub", "Re-run", "Re-run failed"]);
+    // The acts joined the bar as the run was read, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Re-run failed" }));
     expect(connection.calls).toContain('builtin pipelinesRerun(runId: "r-1", failedOnly: true)');
   });
@@ -136,9 +139,11 @@ describe("the run page", () => {
     mount(connection);
     await screen.findByRole("heading", { name: "Show the cart" });
     await waitFor(() => expect(barActs()).toEqual(["Open on GitHub", "Cancel"]));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("Cancel this run?")).toBeTruthy();
     expect(connection.calls.some((c) => c.startsWith("builtin pipelinesCancel("))).toBe(false);
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Cancel the run" }));
     expect(connection.calls).toContain('builtin pipelinesCancel(runId: "r-1")');
   });

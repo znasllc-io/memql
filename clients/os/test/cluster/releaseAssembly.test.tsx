@@ -1,8 +1,16 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Result } from "@znasllc-io/memql-sdk-core/client";
 import { ReleaseBrowser } from "../../src/apps/cluster/releases/ReleasesSection";
+import { readTheBar } from "../readTheBar";
 import { buildRun, releaseFixture, releaseResult } from "./releaseFixtures";
+
+// A fake Date, so reading a bar costs nothing: the release reads poll on real timers.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { vi.useRealTimers(); });
+
+/** Presses a bar act once the bar has been read: a step that opens changes the bar, and a bar that has just changed takes no press for a moment. */
+async function pressBar(label: string) { await screen.findByRole("button", { name: label }); await readTheBar(); fireEvent.click(screen.getByRole("button", { name: label })); }
 
 async function start() {
   fireEvent.click(await screen.findByRole("button", { name: "Prepare release" }));
@@ -20,7 +28,7 @@ describe("release preparation", () => {
     expect(screen.queryByRole("button", { name: "Use run failed" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Use run affected" })).toBeNull();
     await choose();
-    fireEvent.click(screen.getByRole("button", { name: "Prepare release" }));
+    await pressBar("Prepare release");
     await screen.findByText("Versions");
     expect(f.state.calls.filter((c) => c.kind === "assemble")).toEqual([{ kind: "assemble", args: { planName: "engine-release", runs: { build: "work-build-1" } } }]);
     expect(f.state.calls.some((c) => c.kind === "approve" || c.kind === "publish")).toBe(false);
@@ -30,7 +38,7 @@ describe("release preparation", () => {
     f.state.assemblies[0]!.components[0]!.artifacts[0]!.run = "plan";
     render(<ReleaseBrowser query={f.query} connected />);
     await start(); await choose();
-    fireEvent.click(screen.getByRole("button", { name: "Prepare release" }));
+    await pressBar("Prepare release");
     await screen.findByText("Versions");
     expect(f.state.calls.find((c) => c.kind === "assemble")?.args).toEqual({ planName: "engine-release", runs: { plan: "work-build-1" } });
   });
@@ -38,7 +46,7 @@ describe("release preparation", () => {
     const f = releaseFixture();
     render(<ReleaseBrowser query={f.query} connected />);
     await start();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await pressBar("Cancel");
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Prepare release" }));
   });
   it("keeps same-commit inputs distinct within each component", async () => {
@@ -51,7 +59,7 @@ describe("release preparation", () => {
     expect(screen.queryByRole("button", { name: "Use run pipeline-1" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Use run different-commit" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Use run tests-1" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Prepare release" }));
+    await pressBar("Prepare release");
     await screen.findByText("Versions");
     expect(f.state.calls.find((c) => c.kind === "assemble")?.args).toEqual({ planName: "engine-release", runs: { build: "work-build-1", tests: "work-tests" } });
   });
@@ -71,7 +79,7 @@ describe("release preparation", () => {
     const f = releaseFixture(); f.state.lostAssemblyReply = true;
     const view = render(<ReleaseBrowser query={f.query} connected />);
     await start(); await choose();
-    fireEvent.click(screen.getByRole("button", { name: "Prepare release" }));
+    await pressBar("Prepare release");
     await screen.findByText("Preparation reply was lost");
     expect(screen.getByText(/Check Releases before preparing again/)).toBeTruthy();
     view.unmount(); render(<ReleaseBrowser query={f.query} connected />);

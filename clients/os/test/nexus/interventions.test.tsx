@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { readTheBar } from "../readTheBar";
+
 // Stepping into a run (epic memql#5414, issue #5419): the bar that follows the
 // selection, the one composer behind Run again and Branch from here, Make
 // current, the verdicts, and the validator beside them -- through the REAL app
@@ -155,6 +157,8 @@ async function selectStep(key: string) {
 }
 
 async function composer(name: "Run again" | "Branch from here"): Promise<HTMLElement> {
+  // Picking a step changed the bar, and a bar that has just changed takes no press for a moment.
+  await readTheBar();
   fireEvent.click(within(bar()).getByRole("button", { name: new RegExp(`^${name === "Run again" ? "Run" : "Branch"}`) }));
   return screen.findByRole("dialog", { name: new RegExp(name) });
 }
@@ -197,6 +201,31 @@ describe("the bar follows the selection (rule 12)", () => {
     expect(within(bar()).getByText("running draft again as version 4")).toBeTruthy();
     await selectStep("draft");
     expect(acts()).toEqual([]);
+  });
+
+  it.each(["failed", "abandoned", "cancelled", "succeeded"])("allows another attempt after a %s re-run retains its request", async (status) => {
+    const conn = await openRun({
+      runs: [reportRun({ status, rerun: { requestId: "old", reason: "rerun", stepKey: "publish", requestedAt: "t" } })],
+    });
+    expect(acts()).toEqual(["Replay"]);
+    expect(bar().textContent).not.toContain("running publish again");
+    await selectStep("publish");
+    expect(acts()).toEqual(["Branch from here", "Run again"]);
+    expect(within(bar()).getByText("publish")).toBeTruthy();
+    const dialog = await composer("Run again");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Run again" }));
+    await waitFor(() => expect(conn.query.rerunStep).toHaveBeenCalledTimes(1));
+    expect(conn.query.rerunStep.mock.calls[0]?.[0]).toEqual({ runId: RUN, stepKey: "publish" });
+  });
+
+  it("shows the approval pause instead of claiming a parked re-run is running", async () => {
+    await openRun({
+      runs: [reportRun({ status: "waiting", waitingOn: { kind: "approval", subject: "publish" }, finishedAt: "", rerun: { requestId: "old", reason: "rerun", stepKey: "publish", requestedAt: "t" } })],
+      approvals: [approvalRow({ id: "a1", runId: RUN })],
+    });
+    await selectStep("publish");
+    expect(acts()).toEqual(["Answer it"]);
+    expect(bar().textContent).not.toContain("running publish again");
   });
 
   it("never offers Make current for a version that failed", async () => {
@@ -362,6 +391,7 @@ describe("Make current", () => {
     const conn = await openRun();
     await selectStep("draft");
     fireEvent.click(screen.getByRole("radio", { name: /^Version 1/ }));
+    await readTheBar();
     fireEvent.click(within(bar()).getByRole("button", { name: /^Make version 1 of draft current/ }));
     await waitFor(() => expect(conn.query.moveRunHead).toHaveBeenCalled());
     expect(conn.query.moveRunHead.mock.calls[0]?.[0]).toEqual({ runId: RUN, stepKey: "draft", version: 1 });
@@ -371,6 +401,7 @@ describe("Make current", () => {
     await openRun({ writeError: new Error("version_not_found: draft has no version 1") });
     await selectStep("draft");
     fireEvent.click(screen.getByRole("radio", { name: /^Version 1/ }));
+    await readTheBar();
     fireEvent.click(within(bar()).getByRole("button", { name: /^Make version 1/ }));
     expect(await within(bar()).findByText("version_not_found: draft has no version 1")).toBeTruthy();
   });

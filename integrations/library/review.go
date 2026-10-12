@@ -313,7 +313,8 @@ func validateReviewAnchor(value any) (map[string]any, error) {
 
 // Check saved bytes while holding the same cross-replica version lock as file
 // saves. A client-supplied revision alone cannot attest a passage. Blob URLs
-// come only from the authorized backing row and use the configured store.
+// come only from the authorized backing row, are held to its owner's own
+// library/ prefix (openFileBytes), and use the configured store.
 func (i *Integration) verifyReviewPassage(ctx context.Context, doc reviewDocument, anchor map[string]any) error {
 	if anchor["kind"] == "document-end" || anchor["kind"] == "document" {
 		return nil
@@ -324,7 +325,7 @@ func (i *Integration) verifyReviewPassage(ctx context.Context, doc reviewDocumen
 		if i.blobFetcher == nil {
 			return fmt.Errorf("document storage is unavailable on this node")
 		}
-		stream, err := i.blobFetcher.DownloadStreamURL(ctx, stringField(doc.backing, "blobUrl"))
+		stream, err := i.openFileBytes(ctx, doc.owner, stringField(doc.backing, "blobUrl"))
 		if err != nil {
 			return fmt.Errorf("could not read the saved document; try again")
 		}

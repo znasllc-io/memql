@@ -1075,6 +1075,11 @@ journal-detail windows honors an existing global setting, including the legacy
 `WORKER_INVOCATION_RETENTION_DAYS` global variable. Invalid/nonpositive values
 use the documented defaults.
 
+The sweep reads each window's records one UTC day at a time, oldest first, and
+spends at most four minutes, shared among the policies; a backlog older than
+that is retired over several nights, and the sweep's result marks the policies
+that ran out of their share with `budgetExhausted`.
+
 `MEMQL_WORK_ARCHIVE_CONTAINER` defaults to `MEMQL_AZURE_BLOB_CONTAINER`.
 Archives use `retention/<UTC-day>/<sha256>.ndjson.gz`, with the original node
 identity, timestamps, schema, metadata, provenance and payload. Archive lifecycle

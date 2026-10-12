@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -294,5 +295,298 @@ func TestEmailMaterializeDBUsesClientOrganizationRegistry(t *testing.T) {
 	}
 	if _, err := i.materialize(ctx, owner, "", a); err == nil {
 		t.Fatal("archived organization accepted an email composition")
+	}
+}
+
+// waitComposition polls a composition until it reaches status and returns that
+// row, failing with the last row it saw. A run's writes land on the engine that
+// executed it, so a reader on another replica asks until it sees them.
+func waitComposition(t *testing.T, i *Integration, ctx context.Context, compositionId, status string) map[string]any {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	var last map[string]any
+	for {
+		row, err := i.store().compositionById(ctx, compositionId)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row != nil {
+			last = row
+			if stringOf(row["status"]) == status {
+				return row
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("composition %s did not reach %q within 20s; last row: %v", compositionId, status, last)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// blankOutcome is what a request that was filed blank left behind once its run
+// finished.
+type blankOutcome struct {
+	row     map[string]any
+	file    map[string]any
+	upload  *materializeUploader
+	journal *automations.RunJournal
+}
+
+// materializeBlankDB drives one blank request of the given format through the
+// real engine (see materializeRequestDB).
+func materializeBlankDB(t *testing.T, format pure.Format) blankOutcome {
+	t.Helper()
+	return materializeRequestDB(t, materializeArgs{Name: "Blank", Format: format})
+}
+
+// materializeRequestDB drives one request that is filed blank through the real
+// engine the way two replicas would: one accepts it (and opens the goal),
+// another adopts the run and executes it. Opening a goal dispatches nothing by
+// itself -- the run's own `running` event is what reaches an agent replica -- so
+// a test that only accepts would wait on a composition nothing is working on.
+//
+// The request is made the way a person's client makes it: outside any work run,
+// as an actor with no run on its context.
+//
+// No composer is wired on the executing node on purpose: a request that is filed
+// blank must never need a model, and a stray call would fail the run loudly.
+func materializeRequestDB(t *testing.T, args materializeArgs) blankOutcome {
+	t.Helper()
+	accepting := materializeDBEngine(t)
+	executing := materializeDBEngine(t)
+	accept := New(accepting, accepting.Logger)
+	accept.SetGoalOpener(work.New(accepting, accepting.Logger))
+	worker := New(executing, executing.Logger)
+	if err := executing.RegisterIntegration(worker); err != nil {
+		t.Fatal(err)
+	}
+	upload := &materializeUploader{}
+	worker.SetUploader(upload, "files")
+	loader := automations.NewLoader(automations.LoaderOptions{Logger: executing.Logger})
+	auto, err := loader.LoadByName("materializeFile")
+	if err != nil || auto == nil {
+		t.Fatalf("template: %v", err)
+	}
+	exec := automations.NewExecutor(automations.ExecutorOptions{Engine: executing, Logger: executing.Logger, StepRegistry: steps.NewRegistry()})
+	t.Cleanup(exec.Close)
+
+	owner := fmt.Sprintf("compose-blank-%s-%d", args.Format, time.Now().UnixNano())
+	ctx := auth.ContextWithUserActor(context.Background(), owner)
+	args.RequestId = "r-" + owner
+	accepted, err := accept.materialize(ctx, owner, "", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compositionId, goalId, runId := stringOf(accepted["compositionId"]), stringOf(accepted["goalId"]), stringOf(accepted["runId"])
+
+	// The same request again -- a double click, a retried call -- is the same
+	// composition, on the real engine's reads and not just the fake's.
+	again, err := accept.materialize(ctx, owner, "", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stringOf(again["compositionId"]) != compositionId || stringOf(again["goalId"]) != goalId || stringOf(again["runId"]) != runId {
+		t.Fatalf("a repeated request id started another composition: first=%v again=%v", accepted, again)
+	}
+
+	journal, err := automations.LoadRunJournal(ctx, executing, runId)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if journal.AutomationName != "materializeFile" || journal.Status != "running" {
+		t.Fatalf("a blank request did not open the materializer's own run: %+v", journal)
+	}
+	runCtx, err := auth.ContextWithPersistedOwner(context.Background(), journal.OwnerUserId, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx = common.ContextWithRun(runCtx, common.RunContext{RunId: journal.RunId, GoalId: journal.GoalId, OwnerUserId: journal.OwnerUserId, Mode: journal.Mode})
+	result, runErr := exec.ExecuteAdopted(runCtx, auto, automations.RunAdoption{RunId: runId, Variables: journal.Variables, Journal: journal})
+	if runErr != nil {
+		t.Fatalf("the blank run failed: result=%+v err=%v", result, runErr)
+	}
+	row := waitComposition(t, worker, runCtx, compositionId, "ready")
+	journal, err = automations.LoadRunJournal(runCtx, executing, runId)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := worker.store().libraryFileById(runCtx, stringOf(row["outputFileId"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return blankOutcome{row: row, file: file, upload: upload, journal: journal}
+}
+
+// The real engine accepts everything a blank file writes: the composition row
+// (no models, no embedded provenance, no source package), the one-byte Library
+// file and the work run that finishes around them.
+func TestMaterializeDB_BlankMarkdownIsReadyWithOneFile(t *testing.T) {
+	out := materializeBlankDB(t, pure.FormatMarkdown)
+	if stringOf(out.row["outputFileId"]) == "" || stringOf(out.row["sourceFileId"]) != "" {
+		t.Fatalf("a blank file is one file with no source package: %v", out.row)
+	}
+	if out.upload.calls != 1 || string(out.upload.bytes) != "\n" {
+		t.Fatalf("blank db run uploaded %q in %d uploads, want a single newline once", out.upload.bytes, out.upload.calls)
+	}
+	if out.row["provenanceNote"] != "Created blank. Its history is kept on its composition, not in the file." {
+		t.Fatalf("blank composition note = %q", out.row["provenanceNote"])
+	}
+	if out.file == nil || out.file["name"] != "Blank.md" || out.file["status"] != "ready" || runCountOf(out.file["size"]) != 1 {
+		t.Fatalf("the filed blank markdown is not a ready one-byte Blank.md: %v", out.file)
+	}
+	if out.journal.Status != "succeeded" {
+		t.Fatalf("the blank run did not succeed: %+v", out.journal)
+	}
+}
+
+// Text and CSV blanks are zero bytes. A required size of 0 and an empty blob are
+// the two things only the real engine and the real filing can vouch for.
+func TestMaterializeDB_BlankTextIsReadyAsAZeroByteFile(t *testing.T) {
+	out := materializeBlankDB(t, pure.FormatText)
+	if out.upload.calls != 1 || len(out.upload.bytes) != 0 {
+		t.Fatalf("blank text uploaded %q in %d uploads, want one empty file", out.upload.bytes, out.upload.calls)
+	}
+	// A size the row does not carry, or carries as something else, is not zero:
+	// runCountOf answers 0 for both, which would make this check pass on a file
+	// the engine never sized.
+	size, err := filedSize(out.file)
+	if err != nil || size != 0 {
+		t.Fatalf("the filed blank text does not have a size of exactly 0: %d, %v (%v)", size, err, out.file)
+	}
+	if out.file == nil || out.file["name"] != "Blank.txt" || out.file["status"] != "ready" {
+		t.Fatalf("the filed blank text is not a ready empty Blank.txt: %v", out.file)
+	}
+	if out.journal.Status != "succeeded" {
+		t.Fatalf("the blank run did not succeed: %+v", out.journal)
+	}
+}
+
+// A person's description reaches the real engine as a saved request, and every
+// replica must read it the same way: that it is filed blank is part of what the
+// adopting replica loads from the database, not something the accepting replica
+// remembered. The executing node has no composer, so a described request that
+// went to the model would fail the run instead of passing.
+func TestMaterializeDB_DescribedMarkdownIsReadyAsABlankFile(t *testing.T) {
+	statement := "A one-page launch brief for the autumn release"
+	out := materializeRequestDB(t, materializeArgs{Name: "Launch brief", Format: pure.FormatMarkdown, Statement: statement})
+	if stringOf(out.row["outputFileId"]) == "" || stringOf(out.row["sourceFileId"]) != "" {
+		t.Fatalf("a described file is one file with no source package: %v", out.row)
+	}
+	if out.upload.calls != 1 || string(out.upload.bytes) != "\n" {
+		t.Fatalf("described db run uploaded %q in %d uploads, want a single newline once", out.upload.bytes, out.upload.calls)
+	}
+	// The description stays on the record: it is what the person's client hands to
+	// the revision workflow, and what is left if the client never does.
+	if out.row["statement"] != statement {
+		t.Fatalf("composition statement = %q, want the request's own", out.row["statement"])
+	}
+	if out.row["provenanceNote"] != "Created blank. Its history is kept on its composition, not in the file." {
+		t.Fatalf("described composition note = %q", out.row["provenanceNote"])
+	}
+	if out.file == nil || out.file["name"] != "Launch brief.md" || out.file["status"] != "ready" || runCountOf(out.file["size"]) != 1 || out.file["summary"] != "Created blank." {
+		t.Fatalf("the filed file is not a ready one-byte Launch brief.md summarised as created blank: %v", out.file)
+	}
+	if out.journal.Status != "succeeded" {
+		t.Fatalf("the described run did not succeed: %+v", out.journal)
+	}
+}
+
+// Every other format with an empty document is filed as one on the real engine,
+// as Markdown and text are above: one Library file holding exactly what the blank
+// writer writes, named with the format's extension once, beside a ready
+// composition that reached no model and embedded nothing.
+func TestMaterializeDB_BlankHTMLCSVAndJSONAreReadyWithOneFile(t *testing.T) {
+	for _, tc := range []struct {
+		format pure.Format
+		name   string
+	}{
+		{pure.FormatHTML, "Blank.html"},
+		{pure.FormatCSV, "Blank.csv"},
+		{pure.FormatJSON, "Blank.json"},
+	} {
+		t.Run(string(tc.format), func(t *testing.T) {
+			want, err := pure.RenderBlank(tc.format, "Blank")
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := materializeBlankDB(t, tc.format)
+			if out.upload.calls != 1 || string(out.upload.bytes) != string(want.Bytes) {
+				t.Fatalf("blank %s uploaded %q in %d uploads, want %q once", tc.format, out.upload.bytes, out.upload.calls, want.Bytes)
+			}
+			size, err := filedSize(out.file)
+			if err != nil || size != len(want.Bytes) {
+				t.Fatalf("the filed blank %s does not have a size of exactly %d: %d, %v (%v)", tc.format, len(want.Bytes), size, err, out.file)
+			}
+			if out.file["name"] != tc.name || out.file["status"] != "ready" || out.file["summary"] != "Created blank." {
+				t.Fatalf("the filed blank %s is not a ready %s summarised as created blank: %v", tc.format, tc.name, out.file)
+			}
+			if stringOf(out.row["outputFileId"]) == "" || stringOf(out.row["sourceFileId"]) != "" {
+				t.Fatalf("a blank file is one file with no source package: %v", out.row)
+			}
+			if out.row["provenanceEmbedded"] != false || out.row["provenanceNote"] != "Created blank. Its history is kept on its composition, not in the file." {
+				t.Fatalf("blank %s composition provenance = %v / %q", tc.format, out.row["provenanceEmbedded"], out.row["provenanceNote"])
+			}
+			if models, _ := out.row["modelsUsed"].([]any); len(models) != 0 {
+				t.Fatalf("a blank %s reached a model: %v", tc.format, out.row["modelsUsed"])
+			}
+			if out.journal.Status != "succeeded" {
+				t.Fatalf("the blank %s run did not succeed: %+v", tc.format, out.journal)
+			}
+		})
+	}
+}
+
+// A FOLDER IS CHECKED AGAINST THE LIBRARY ITSELF. The unit tests stand a map in
+// for libraryFolderById; this asks the shipped query on the real engine, as the
+// caller, for each way a folder cannot be filed into -- archived (here on another
+// replica, which the accepting node has never asked about), somebody else's, no
+// such folder -- and through both ways a folder reaches the Materializer today: a
+// request that names one, and a recipe run, which files where the recipe was
+// saved to file. Nothing is written for a refused one, and a live folder is filed
+// into.
+func TestMaterializeDB_RefusesAFolderTheCallerCannotUse(t *testing.T) {
+	accepting := materializeDBEngine(t)
+	other := materializeDBEngine(t)
+	accept := New(accepting, accepting.Logger)
+	accept.SetGoalOpener(work.New(accepting, accepting.Logger))
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	owner, stranger := "compose-folder-owner-"+suffix, "compose-folder-stranger-"+suffix
+	ownerCtx := auth.ContextWithUserActor(context.Background(), owner)
+	mutate := func(e *memql.MemQLEngine, ctx context.Context, name string, args map[string]any) {
+		t.Helper()
+		if _, err := e.Execute(ctx, "mutation "+call(name, args)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	live, archived, theirs := "folder-live-"+suffix, "folder-archived-"+suffix, "folder-theirs-"+suffix
+	mutate(accepting, ownerCtx, "createLibraryFolder", map[string]any{"folderId": live, "name": "Reports"})
+	mutate(accepting, ownerCtx, "createLibraryFolder", map[string]any{"folderId": archived, "name": "Old reports"})
+	mutate(other, ownerCtx, "archiveLibraryFolder", map[string]any{"folderId": archived})
+	mutate(accepting, auth.ContextWithUserActor(context.Background(), stranger), "createLibraryFolder", map[string]any{"folderId": theirs, "name": "Not yours"})
+
+	for name, folderId := range map[string]string{"archived": archived, "someone else's": theirs, "no such folder": "folder-none-" + suffix} {
+		a := materializeArgs{Name: "Notes", Format: pure.FormatMarkdown, FolderId: folderId, RequestId: "r-" + strings.ReplaceAll(name, " ", "-") + "-" + suffix}
+		if _, err := accept.materialize(ownerCtx, owner, "", a); !errors.Is(err, errFolderUnavailable) {
+			t.Fatalf("%s folder: refusal = %v, want %q", name, err, errFolderUnavailable)
+		}
+		written, err := accept.store().compositionById(ownerCtx, stableMaterializeID("request", memql.BareShortId(owner), a.RequestId))
+		if err != nil || written != nil {
+			t.Fatalf("%s folder: refused, but a composition was written: %v (%v)", name, written, err)
+		}
+	}
+
+	filed, err := accept.materialize(ownerCtx, owner, "", materializeArgs{Name: "Notes", Format: pure.FormatMarkdown, FolderId: live, RequestId: "r-live-" + suffix})
+	if err != nil {
+		t.Fatalf("a live folder of the caller's own was refused: %v", err)
+	}
+	row, err := accept.store().compositionById(ownerCtx, stringOf(filed["compositionId"]))
+	if err != nil || row == nil || !sameRowID(stringOf(row["folderId"]), live) {
+		t.Fatalf("the composition does not file into the live folder: %v (%v)", row, err)
+	}
+
+	recipeId := "compose-folder-recipe-" + suffix
+	mutate(accepting, ownerCtx, "createComposeRecipe", map[string]any{"recipeId": recipeId, "name": "Weekly notes", "description": "The week's notes", "format": "markdown", "folderId": archived})
+	if _, err := accept.handleRunRecipe(ownerCtx, map[string]any{"recipeId": recipeId}, 0); !errors.Is(err, errFolderUnavailable) {
+		t.Fatalf("a recipe saved to file into an archived folder ran: refusal = %v, want %q", err, errFolderUnavailable)
 	}
 }
