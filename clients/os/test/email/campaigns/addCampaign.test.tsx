@@ -197,20 +197,30 @@ describe("Add a campaign", () => {
     expect(screen.getByRole("radio", { name: /^news@acme\.com/ }).textContent).toContain("Acme News");
     choose(/^news@acme\.com/);
     expect(openStep()).toBe("When");
+    // An address is read back as it is spelled.
+    expect(railLine("Sender").textContent).toContain("news@acme.com");
 
     expect(optionNames()).toEqual(["Send now", "Schedule", "Repeat"]);
     choose(/^Send now/);
     expect(openStep()).toBe("Review");
 
-    // Review says the whole campaign as one sentence, then its facts.
-    expect(screen.getByText("Send “August copy” to Newsletter as news@acme.com now.")).toBeTruthy();
-    expect(await screen.findByText("Newsletter · 1,204 subscribers")).toBeTruthy();
+    // Review says each answer once: the rail lists them, and one sentence adds
+    // only what the rail cannot -- how many people it reaches.
+    expect(await screen.findByText("Send “August copy” to Newsletter (1,204 subscribers) as news@acme.com now.")).toBeTruthy();
+    expect(document.querySelector(".os-facts")).toBeNull();
     // The name defaults to the template's; the tracking to the preference.
     expect((screen.getByLabelText("Name") as HTMLInputElement).placeholder).toBe("August copy");
     expect((screen.getByRole("switch", { name: "Count who opens it" }) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByRole("switch", { name: "Count who clicks a link" }) as HTMLInputElement).checked).toBe(true);
     await waitFor(() => expect(barWord()).toBe("Ready to send"));
     expect(barActs()).toEqual(["Send a test", "Save as draft", "Send now"]);
+
+    // The cluster's own sender: capitalized where it starts a line, not inside the sentence.
+    fireEvent.click(railLine("Sender"));
+    choose(/^This cluster's sender/);
+    expect(openStep()).toBe("Review");
+    expect(railLine("Sender").textContent).toContain("This cluster's sender");
+    expect(screen.getByText("Send “August copy” to Newsletter (1,204 subscribers) as this cluster's sender now.")).toBeTruthy();
     // Nothing has been written by asking.
     expect(conn.query.createCampaign).not.toHaveBeenCalled();
   });
@@ -244,6 +254,19 @@ describe("Add a campaign", () => {
     expect(screen.getByRole("radio", { name: /^Acme list/ })).toBeTruthy();
     expect(screen.queryByRole("radio", { name: /^Newsletter/ })).toBeNull();
     expect(railLine("Audience").textContent).not.toContain("Newsletter");
+  });
+
+  it("names the organization in Review's sentence only when there is a choice", async () => {
+    const conn = seed({
+      accounts: [
+        { id: "self", name: "Operator organization", status: "active" },
+        { id: "acme", name: "Acme", status: "active" },
+      ],
+    });
+    mountWindow(conn);
+    await walkToReview();
+    expect(await screen.findByText("Send “August copy” for Operator organization to Newsletter (1,204 subscribers) as news@acme.com now.")).toBeTruthy();
+    expect(document.querySelector(".os-facts")).toBeNull();
   });
 
   it("leaves for Audiences when the organization has none, and is still there on return", async () => {
@@ -569,6 +592,19 @@ describe("Add a campaign, on Review", () => {
     expect(toMe.query.createCampaign).toHaveBeenCalledTimes(1);
   });
 
+  it("sends no test to the audience the campaign goes to, and says where it went instead", async () => {
+    // The organization's testing audience is the one this campaign is for: a
+    // "test" to it would be the send. It goes to the person's own address.
+    const conn = seed({ testSettings: [{ id: "ts", accountId: "self", audienceId: "a1", createdAt: "2026-10-01T00:00:00Z" }] });
+    mountWindow(conn);
+    await walkToReview();
+    await waitFor(() => expect(barActs()).toContain("Send a test"));
+    press("Send a test");
+    await waitFor(() => expect(conn.query.campaignTestSend).toHaveBeenCalledWith({ campaignId: createdCampaign(conn).campaignId, to: "owner@example.com" }));
+    expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
+    expect(await screen.findByText("Test sent to owner@example.com.")).toBeTruthy();
+  });
+
   it("points a captured test to Inbox only for people who can open it", async () => {
     const captured = () => seed({ sendingReadiness: [{ ready: true, capture: true, reason: "" }] });
     const owner = mountWindow(captured());
@@ -639,7 +675,9 @@ describe("Add a campaign, on Review", () => {
 
     await waitFor(() => expect(barWord()).toBe("Publish “Autumn draft” before sending."));
     expect(within(bar()).queryByRole("button", { name: "Send now" })).toBeNull();
-    expect(screen.getByText("Autumn draft · Draft")).toBeTruthy();
+    // Said once, in the bar: Review's sentence is the campaign, not a list of its facts.
+    expect(screen.getByText("Send “Autumn draft” to Newsletter (1,204 subscribers) as news@acme.com now.")).toBeTruthy();
+    expect(document.querySelector(".os-facts")).toBeNull();
     // A draft can still be saved, and a test to me reads a draft template.
     expect(barActs()).toEqual(["Send a test", "Save as draft"]);
     press("Save as draft");

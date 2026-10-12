@@ -43,6 +43,13 @@ export const WORDS = {
   /** A template that is not published yet. */
   templateDraft: "Draft",
 
-  /** The cluster's own sender, which only the operator organization may send as. */
-  clusterSender: "This cluster's sender",
+  /**
+   * The cluster's own sender, which only the operator organization may send as.
+   * Spelled as it reads inside a sentence ("as this cluster's sender"); a line
+   * that starts with it capitalizes it.
+   */
+  clusterSender: "this cluster's sender",
+
+  /** How many people an audience reaches now: "1,204 subscribers", "1 subscriber". */
+  subscribers: (count: number): string => `${count.toLocaleString("en-US")} ${count === 1 ? "subscriber" : "subscribers"}`,
 } as const;

@@ -8,8 +8,6 @@ import {
   AutoRefresh,
   ChoiceStack,
   DateTimeInput,
-  Fact,
-  Facts,
   Field,
   Input,
   Notice,
@@ -20,7 +18,7 @@ import {
   type ChoiceOption,
 } from "../../../kit";
 import { ContentSkeleton, InlineSkeleton } from "../../../kit/ContentSkeleton";
-import { absent, type Figure } from "../../../kit/measure";
+import { absent } from "../../../kit/measure";
 import type { Stop } from "../../../kit/Rail";
 import { Wizard, type WizardStatus } from "../../../kit/Wizard";
 import { accessAdmits } from "../../../system/registry";
@@ -128,12 +126,6 @@ const INBOX_REQUIRES = EMAIL_SECTIONS.find((section) => section.id === "inbox")?
 
 /** A sentence's first letter in capitals: a rail line or a fact starts a sentence of its own. */
 const capitalized = (words: string) => words.charAt(0).toUpperCase() + words.slice(1);
-
-/** "1,204 subscribers", or nothing for a count that is not a measurement. */
-function subscriberWords(figure: Figure): string {
-  if (figure.kind !== "measured") return "";
-  return `${figure.value.toLocaleString("en-US")} ${figure.value === 1 ? "subscriber" : "subscribers"}`;
-}
 
 /** Whether two writes would leave the same draft. */
 function sameFacts(a: CampaignFacts, b: CampaignFacts): boolean {
@@ -588,6 +580,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
   }
 
   // ---- the steps -----------------------------------------------------------
+  // The sender as a sentence says it; a line that starts with it capitalizes it.
   const senderWords = draft.senderIdentityId === "" ? WORDS.clusterSender : sender ? senderLabel(sender) : "";
 
   function answerOf(step: CampaignStep): string | undefined {
@@ -600,7 +593,8 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
       case "template":
         return template ? templateName(template) : undefined;
       case "sender":
-        return senderWords || undefined;
+        // An address is said as it is spelled; only the cluster's phrase starts a line.
+        return draft.senderIdentityId === "" ? capitalized(WORDS.clusterSender) : senderWords || undefined;
       case "when":
         return draft.when === null ? undefined : capitalized(whenWords(draft.when, zone));
       case "review":
@@ -686,7 +680,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
           );
         }
         const options: ChoiceOption[] = [
-          ...(operator ? [{ value: CLUSTER_SENDER, label: WORDS.clusterSender }] : []),
+          ...(operator ? [{ value: CLUSTER_SENDER, label: capitalized(WORDS.clusterSender) }] : []),
           ...senders.map((s): ChoiceOption => ({ value: s.id, label: senderLabel(s), description: s.fromName || undefined })),
         ];
         return (
@@ -770,42 +764,35 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
         </>
       );
     }
-    const parts = [subscriberWords(figure), confirms].filter((part) => part !== "");
+    const parts = [figure.kind === "measured" ? WORDS.subscribers(figure.value) : "", confirms].filter((part) => part !== "");
     return parts.length === 0 ? undefined : parts.join(" · ");
   }
 
+  /**
+   * REVIEW SAYS EACH ANSWER ONCE. The rail beside it lists every answer; the one
+   * sentence here adds only what the rail cannot -- how many people it reaches,
+   * and whose campaign it is when there was a choice of organization. Then the
+   * two things only Review asks: what to call it, and what to count.
+   */
   function reviewBody(): ReactNode {
-    const subscribers = facts.subscribers;
-    const audienceFact =
-      subscribers.kind === "absent" && subscribers.reason === "unread" ? (
-        <>
-          {facts.audienceName} · <InlineSkeleton label="Counting subscribers" />
-        </>
-      ) : subscriberWords(subscribers) === "" ? (
-        facts.audienceName
-      ) : (
-        `${facts.audienceName} · ${subscriberWords(subscribers)}`
-      );
-    const templateWords = template ? (template.status === "ready" ? templateName(template) : `${templateName(template)} · ${WORDS.templateDraft}`) : "";
     return (
       <>
         {outcome()}
         {draft.when === null ? null : (
           <p>
             {campaignSentence(
-              { template: template ? templateName(template) : "", audience: facts.audienceName, sender: draft.senderIdentityId === "" ? "this cluster's sender" : senderWords },
+              {
+                template: template ? templateName(template) : "",
+                audience: facts.audienceName,
+                sender: senderWords,
+                subscribers: facts.subscribers,
+                organization: chooseOrganization ? organization : undefined,
+              },
               draft.when,
               zone,
             )}
           </p>
         )}
-        <Facts>
-          <Fact label="Organization" value={organization} />
-          <Fact label="Audience" value={audienceFact} />
-          <Fact label="Template" value={templateWords} />
-          <Fact label="Sender" value={senderWords} />
-          <Fact label="When" value={draft.when === null ? "" : capitalized(whenWords(draft.when, zone))} />
-        </Facts>
         <Field label="Name">
           <Input
             id="email-campaign-name"

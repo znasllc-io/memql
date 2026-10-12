@@ -230,14 +230,32 @@ describe("the acts on Review", () => {
 });
 
 describe("the campaign as a sentence", () => {
-  const names = { template: "Welcome 2", audience: "Newsletter", sender: "news@acme.com" };
+  // Review says each answer once: the rail lists them, and the sentence adds only
+  // what the rail cannot -- how many people the audience reaches, and, when the
+  // person chooses between organizations, whose campaign it is.
+  const names = { template: "Welcome 2", audience: "Newsletter", sender: "news@acme.com", subscribers: figureOf(1204) };
 
-  it("says what goes, to whom, as whom and when", () => {
-    expect(campaignSentence(names, NOW_WHEN, ZONE)).toBe("Send “Welcome 2” to Newsletter as news@acme.com now.");
-    expect(campaignSentence(names, SCHEDULE, ZONE)).toBe("Send “Welcome 2” to Newsletter as news@acme.com on Tue, Oct 14 at 9:00 (America/Phoenix).");
-    expect(campaignSentence(names, REPEAT, ZONE)).toBe(
-      "Send “Welcome 2” to Newsletter as news@acme.com every 2 weeks from Tue, Oct 14 at 9:00 (America/Phoenix).",
+  it("says what goes, to whom and how many, as whom and when", () => {
+    expect(campaignSentence(names, NOW_WHEN, ZONE)).toBe("Send “Welcome 2” to Newsletter (1,204 subscribers) as news@acme.com now.");
+    expect(campaignSentence(names, SCHEDULE, ZONE)).toBe(
+      "Send “Welcome 2” to Newsletter (1,204 subscribers) as news@acme.com on Tue, Oct 14 at 9:00 (America/Phoenix).",
     );
+    expect(campaignSentence(names, REPEAT, ZONE)).toBe(
+      "Send “Welcome 2” to Newsletter (1,204 subscribers) as news@acme.com every 2 weeks from Tue, Oct 14 at 9:00 (America/Phoenix).",
+    );
+    expect(campaignSentence({ ...names, subscribers: figureOf(1) }, NOW_WHEN, ZONE)).toBe("Send “Welcome 2” to Newsletter (1 subscriber) as news@acme.com now.");
+  });
+
+  it("names the organization only when it was a choice", () => {
+    expect(campaignSentence({ ...names, organization: "Operator organization" }, NOW_WHEN, ZONE)).toBe(
+      "Send “Welcome 2” for Operator organization to Newsletter (1,204 subscribers) as news@acme.com now.",
+    );
+  });
+
+  it("leaves out a count it could not read rather than inventing one", () => {
+    for (const subscribers of [absent("unread"), absent("failed", "No."), absent("unmeasured")]) {
+      expect(campaignSentence({ ...names, subscribers }, NOW_WHEN, ZONE)).toBe("Send “Welcome 2” to Newsletter as news@acme.com now.");
+    }
   });
 });
 

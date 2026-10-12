@@ -722,6 +722,9 @@ const VIEWS: Record<
   // way a person reaches it, `&click=Add a campaign|Newsletter|...`.
   "email-campaigns": emailCampaignsView(true),
   "email-campaigns-empty": emailCampaignsView(false),
+  // The same, for somebody who chooses between organizations: Review's sentence
+  // then says whose campaign it is.
+  "email-campaigns-organizations": emailCampaignsView(true, true),
   "campaign-newsletter-empty": { connect: () => newsletterQaConnection(false), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
   "campaign-newsletter-active": { connect: () => newsletterQaConnection(true), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
   "campaign-repeat-empty": {
@@ -1239,7 +1242,7 @@ function CampaignSettingsPane() {
 // The campaigns a list is judged with: one in every state, a draft a series
 // repeats from, and the audiences, templates and sender Add a campaign offers.
 // Generic names and addresses only (acme.com, client.example).
-function emailCampaignsView(populated: boolean) {
+function emailCampaignsView(populated: boolean, organizations = false) {
   const audiences = [
     campaignAudience({ id: "qa-newsletter", name: "Newsletter" }),
     campaignAudience({ id: "qa-signups", name: "Signups" }),
@@ -1261,6 +1264,12 @@ function emailCampaignsView(populated: boolean) {
   ] : [];
   return {
     connect: () => campaignConnection({
+      ...(organizations ? {
+        accounts: [
+          { id: "self", name: "Operator organization", status: "active" },
+          { id: "qa-client", name: "Client Studio", status: "active" },
+        ],
+      } : {}),
       campaigns,
       campaignSeries: populated ? [{ id: "qa-series", sourceCampaignId: "qa-c-repeat", status: "active", intervalWeeks: 1, timeZone: "America/Phoenix", anchorAt: "2031-10-14T16:00:00Z", nextAt: "2031-10-21T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" }] : [],
       audiences,

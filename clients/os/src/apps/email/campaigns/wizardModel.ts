@@ -182,13 +182,32 @@ export function askingActs(asking: "forward" | "cancel", forward: Forward | null
   ];
 }
 
+/** "1,204 subscribers", or nothing for a count that is not a measurement. */
+function subscriberWords(subscribers: Figure | undefined): string {
+  return subscribers?.kind === "measured" ? WORDS.subscribers(subscribers.value) : "";
+}
+
 /**
- * The whole campaign as the sentence Review opens with: "Send “Welcome 2” to
- * Newsletter as news@acme.com on Tue, Oct 14 at 9:00 (America/Phoenix)."
+ * The whole campaign as the one sentence Review says: "Send “Welcome 2” to
+ * Newsletter (1,204 subscribers) as news@acme.com on Tue, Oct 14 at 9:00
+ * (America/Phoenix)."
+ *
+ * REVIEW SAYS EACH ANSWER ONCE. The rail beside it already lists every answer,
+ * so the sentence adds only what the rail cannot: how many people the audience
+ * reaches (left out while it cannot be counted, never guessed), and whose
+ * campaign it is -- `organization`, given only when the person chose between
+ * organizations, since sending for the wrong client is the costly mistake.
  */
-export function campaignSentence(names: { template: string; audience: string; sender: string }, when: When, zone: string): string {
+export function campaignSentence(
+  names: { template: string; audience: string; sender: string; subscribers?: Figure; organization?: string },
+  when: When,
+  zone: string,
+): string {
   const at = when.kind === "now" ? "now" : `${whenWords(when, zone)} (${zone})`;
-  return `Send “${names.template}” to ${names.audience} as ${names.sender} ${at}.`;
+  const whose = names.organization ? ` for ${names.organization}` : "";
+  const count = subscriberWords(names.subscribers);
+  const audience = count === "" ? names.audience : `${names.audience} (${count})`;
+  return `Send “${names.template}”${whose} to ${audience} as ${names.sender} ${at}.`;
 }
 
 /** The name the campaign is created with: what was typed, else its template's. */
@@ -196,12 +215,6 @@ export function campaignNameFor(draft: CampaignDraft, template: TemplateRow | un
   const typed = draft.name.trim();
   if (typed !== "") return typed;
   return template ? templateName(template) : "";
-}
-
-/** "1,204 subscribers", or nothing for a count that could not be read. */
-function subscriberWords(subscribers: Figure): string {
-  if (subscribers.kind !== "measured") return "";
-  return `${subscribers.value.toLocaleString("en-US")} ${subscribers.value === 1 ? "subscriber" : "subscribers"}`;
 }
 
 /**
