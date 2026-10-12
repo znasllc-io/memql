@@ -59,6 +59,7 @@ export interface Ingredient {
 }
 
 export interface MakeDraft {
+  /** Change it with withKind and never by assigning: a kind change has consequences for the template and the organization. */
   fileKind: FileKind;
   /** "" for no template. */
   templateId: string;
@@ -84,6 +85,12 @@ export type MakeStepId = "kind" | "template" | "from" | "describe" | "name" | "f
  */
 export interface MakeFacts {
   templates: readonly TemplateRow[];
+  /**
+   * Whether `templates` is the person's whole list, settled: false while the feed has not
+   * answered, and between two reads of it. Until then nothing can be said of a template from
+   * its absence, so a template the draft holds is kept (keepUsableTemplate).
+   */
+  templatesLoaded: boolean;
   /** Whether readiness reports Inference set up: null while that is not known, which does not block. */
   inference: boolean | null;
   files: LibraryFileLookup;
@@ -186,7 +193,14 @@ export function formatOf(kind: FileKind): ComposeFormat {
 
 const holds = (text: string): boolean => text.trim() !== "";
 
-/** The picked things once each: the same file listed twice is one ingredient, as it is when a person picks it twice. */
+/**
+ * The picked things once each: the same file listed twice is one ingredient, as it is when a
+ * person picks it twice. Two are the same when they have the same kind and the same ref, the
+ * ref trimmed and otherwise as given. That is the right comparison under the bare-ids contract:
+ * a ref is the id the cluster gave (or the query it was asked), spelled one way wherever it
+ * comes from, so there is no canonical form to reconcile; sameEntityId is for comparing an id
+ * from one source with an id from another (a template row against a draft's templateId).
+ */
 function distinct(items: readonly { kind: string; ref: string; label: string }[], accept: (kind: string) => kind is Ingredient["kind"]): Ingredient[] {
   const seen = new Set<string>();
   const out: Ingredient[] = [];
@@ -272,14 +286,34 @@ export function templatesFor(draft: MakeDraft, facts: MakeFacts): TemplateRow[] 
 /**
  * The draft without a template that no longer makes its kind. The Template step shows only
  * the templates that do, so a stale choice would be sent from a step that cannot show it.
- * Apply it when the kind changes, and to a draft made from a record (whose template may
- * since have been archived) once the templates have been read: until then no template makes
- * any kind. The draft itself is returned when there is nothing to let go.
+ * Apply it when the kind changes (withKind does), and to a draft made from a record, whose
+ * template may since have been archived. While the templates are not loaded
+ * (`facts.templatesLoaded`) the choice is kept whatever the list says: an absent list proves
+ * nothing, and a valid choice must never be lost to a feed that has not settled or is between
+ * reads. The component applies this again once the templates have loaded. The draft itself is
+ * returned when there is nothing to let go.
  */
 export function keepUsableTemplate(draft: MakeDraft, facts: MakeFacts): MakeDraft {
-  if (draft.templateId === "") return draft;
+  if (draft.templateId === "" || !facts.templatesLoaded) return draft;
   const usable = templatesFor(draft, facts).some((template) => sameEntityId(template.id, draft.templateId));
   return usable ? draft : { ...draft, templateId: "" };
+}
+
+/**
+ * The draft with its kind changed: THE ONLY WAY A KIND CHANGES. Choosing a kind has two
+ * consequences the model owns, because requestOf holds no facts and sends whatever the draft
+ * holds:
+ *
+ *  - a template that does not make the new kind is let go (keepUsableTemplate's rule). The
+ *    Template step goes with it, so a template left behind would be sent from a step that is
+ *    no longer there, and the floor would speak of a template the rail does not show;
+ *  - the organization an email template carried is dropped when it becomes an ordinary file
+ *    (D9: ordinary files ask for no organization). A draft that is not an email template and
+ *    already carries one, as an older record's does, keeps it.
+ */
+export function withKind(draft: MakeDraft, kind: FileKind, facts: MakeFacts): MakeDraft {
+  const leavingEmailTemplate = draft.fileKind.kind === "emailTemplate" && kind.kind !== "emailTemplate";
+  return keepUsableTemplate({ ...draft, fileKind: kind, accountId: leavingEmailTemplate ? "" : draft.accountId }, facts);
 }
 
 /**
@@ -356,12 +390,13 @@ export function ingredientsPhrase(ingredients: readonly Ingredient[]): string {
 }
 
 /**
- * The first line of what was described, cut at a word within 60 characters and marked with an
+ * The first line of what was described (a line ends at a line feed, a carriage return, or a Unicode
+ * line or paragraph separator), cut at a word within 60 characters and marked with an
  * ellipsis when cut; "Not described" for nothing. A line with no space in it is cut where the
  * limit falls. Characters are counted as the person sees them, so a cut never splits one.
  */
 export function describeAnswer(statement: string): string {
-  const line = (statement.trim().split(/\r\n|\r|\n/, 1)[0] ?? "").trimEnd();
+  const line = (statement.trim().split(/\r\n|[\r\n\u2028\u2029]/, 1)[0] ?? "").trimEnd();
   if (line === "") return "Not described";
   const letters = Array.from(line);
   if (letters.length <= DESCRIBE_LIMIT) return line;

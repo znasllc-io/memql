@@ -24,6 +24,7 @@ import {
   stepState,
   stepsOf,
   templatesFor,
+  withKind,
   type AnswerNames,
   type FileKind,
   type Ingredient,
@@ -53,7 +54,7 @@ const LIBRARY: Record<string, LibraryFileFacts | null> = {
 };
 const known: LibraryFileLookup = (id) => LIBRARY[id];
 
-const facts = (over: Partial<MakeFacts> = {}): MakeFacts => ({ templates: [], inference: null, files: known, ...over });
+const facts = (over: Partial<MakeFacts> = {}): MakeFacts => ({ templates: [], templatesLoaded: true, inference: null, files: known, ...over });
 const template = (id: string, name: string, format = "", over: Partial<TemplateRow> = {}): TemplateRow => ({
   id, createdAt: "2026-10-01T09:00:00Z", name, description: `The ${name} look`, fileId: `${id}-file`, format,
   placeholders: [], accountIds: [], archived: false, ...over,
@@ -877,6 +878,13 @@ describe("describeAnswer", () => {
     expect(describeAnswer("\n\n  Summarise Q3  \nand mention churn")).toBe("Summarise Q3");
   });
 
+  // A text area keeps the characters it was pasted: the Unicode line and paragraph separators end a line too.
+  it("ends the first line at a Unicode line or paragraph separator", () => {
+    expect(describeAnswer("Summarise Q3\u2028and mention churn")).toBe("Summarise Q3");
+    expect(describeAnswer("Summarise Q3\u2029and mention churn")).toBe("Summarise Q3");
+    expect(describeAnswer("\u2028Summarise Q3\u2029and mention churn")).toBe("Summarise Q3");
+  });
+
   it("cuts a long line at a word within 60 characters and says it was cut", () => {
     expect(describeAnswer("Draft a one-page summary of the Q3 results for the board, covering revenue, churn and hiring"))
       .toBe("Draft a one-page summary of the Q3 results for the board,…");
@@ -955,6 +963,103 @@ describe("templatesFor and keepUsableTemplate", () => {
   it("changes only the template", () => {
     const d = makeDoc("html", { templateId: "t1", name: "Plan", statement: "A summary", ingredients: [NOTES] });
     expect(keepUsableTemplate(d, all)).toEqual({ ...d, templateId: "" });
+  });
+
+  // A feed that has not settled, or that is between two reads, lists nothing; no template can be
+  // judged unusable from that, and a valid choice must not be lost to it.
+  it("keeps the choice while the templates are not loaded", () => {
+    const unsettled = facts({ templates: [], templatesLoaded: false });
+    const chosen = draft({ templateId: "t1" });
+    expect(keepUsableTemplate(chosen, unsettled)).toBe(chosen);
+    expect(keepUsableTemplate(makeDoc("html", { templateId: "t1" }), unsettled).templateId).toBe("t1");
+    // Loaded, and listing nothing that makes the kind, it is let go.
+    expect(keepUsableTemplate(chosen, facts({ templates: [], templatesLoaded: true })).templateId).toBe("");
+  });
+
+  it("does not treat a partly listed feed as loaded", () => {
+    expect(keepUsableTemplate(draft({ templateId: "t1" }), facts({ templates: [house], templatesLoaded: false })).templateId).toBe("t1");
+  });
+});
+
+// A kind changes only through withKind. requestOf holds no facts, so it sends whatever template the
+// draft holds, and the Template step shows only the templates that make the kind: a kind change that
+// left the template behind would send one from a step that is no longer there.
+describe("withKind", () => {
+  const board = template("t1", "Board pack", "markdown");
+  const house = template("t2", "House style", "");
+  const loaded = facts({ templates: [board, house] });
+  const PDF: FileKind = { kind: "document", format: "pdf" };
+
+  // The only template there is makes Markdown: a PDF has none to offer, so the step goes.
+  const onlyBoard = facts({ templates: [board] });
+
+  it("takes a template away everywhere when the new kind cannot use it", () => {
+    const chosen = draft({ name: "Report", statement: "A summary", templateId: "t1" });
+    // Before: the step is there, the rail names the template, the request sends it.
+    expect(stepsOf(chosen, onlyBoard)).toContain("template");
+    expect(answerOf("template", chosen, names)).toBe("Board pack");
+    expect(requestOf(chosen).templateId).toBe("t1");
+
+    const changed = withKind(chosen, PDF, onlyBoard);
+    // After: no step, no answer, nothing sent.
+    expect(changed.fileKind).toEqual(PDF);
+    expect(changed.templateId).toBe("");
+    expect(stepsOf(changed, onlyBoard)).not.toContain("template");
+    expect(answerOf("template", changed, names)).toBe("No template");
+    expect(requestOf(changed)).toStrictEqual({ name: "Report", format: "pdf", statement: "A summary" });
+    // Left to the caller, the draft is as the review found it: the step gone and the template still sent.
+    const careless = { ...chosen, fileKind: PDF };
+    expect(stepsOf(careless, onlyBoard)).not.toContain("template");
+    expect(requestOf(careless).templateId).toBe("t1");
+  });
+
+  it("stops the floor speaking of a template the rail no longer shows", () => {
+    const needsSomething = draft({ name: "Report", templateId: "t1" });
+    expect(blocker(needsSomething, onlyBoard)?.words.detail).toBe("A template needs something to fill it.");
+    expect(blocker(withKind(needsSomething, PDF, onlyBoard), onlyBoard)?.words.detail).toBe("A blank file can be Markdown, text, HTML, CSV or JSON.");
+  });
+
+  it("keeps a template the new kind can use", () => {
+    expect(withKind(draft({ templateId: "t2" }), PDF, loaded).templateId).toBe("t2");
+    const page = template("t3", "Landing", "html");
+    const withPage = facts({ templates: [page] });
+    expect(withKind(makeDoc("html", { templateId: "t3" }), { kind: "package", deployableKind: "static" }, withPage).templateId).toBe("t3");
+    expect(withKind(makeDoc("html", { templateId: "t3" }), { kind: "document", format: "txt" }, withPage).templateId).toBe("");
+  });
+
+  it("keeps the choice while the templates are not loaded", () => {
+    const unsettled = facts({ templates: [], templatesLoaded: false });
+    expect(withKind(draft({ templateId: "t1" }), PDF, unsettled).templateId).toBe("t1");
+    // Loaded, the same change lets it go.
+    expect(withKind(draft({ templateId: "t1" }), PDF, onlyBoard).templateId).toBe("");
+  });
+
+  it("drops the organization an email template carried when it becomes an ordinary file", () => {
+    const welcome = email({ name: "Welcome", statement: "A welcome email", accountId: "acct-1" });
+    expect(stepsOf(welcome, loaded)).toContain("organization");
+    expect(requestOf(welcome).accountIds).toEqual(["acct-1"]);
+
+    for (const ordinary of [PDF, { kind: "document", format: "markdown" }, { kind: "package", deployableKind: "static" }] as const) {
+      const changed = withKind(welcome, ordinary, loaded);
+      expect(changed.accountId).toBe("");
+      expect(stepsOf(changed, loaded)).not.toContain("organization");
+      expect(requestOf(changed)).not.toHaveProperty("accountIds");
+      expect(requestOf(changed)).not.toHaveProperty("outputKind");
+    }
+  });
+
+  it("keeps the organization of an ordinary file that already carried one, as an older record's does", () => {
+    const older = draft({ name: "Q3 summary", accountId: "acct-1" });
+    expect(withKind(older, PDF, loaded).accountId).toBe("acct-1");
+    expect(withKind(older, { kind: "package", deployableKind: "spa" }, loaded).accountId).toBe("acct-1");
+    // And an email template that stays one keeps its own.
+    const welcome = email({ accountId: "acct-1" });
+    expect(withKind(welcome, { kind: "emailTemplate" }, loaded).accountId).toBe("acct-1");
+  });
+
+  it("changes nothing else the person has answered", () => {
+    const answered = draft({ name: "Plan", statement: "A summary", ingredients: [NOTES], folderId: "f-projects", templateId: "t1", passed: { from: true, describe: true } });
+    expect(withKind(answered, PDF, loaded)).toEqual({ ...answered, fileKind: PDF, templateId: "" });
   });
 });
 
