@@ -79,6 +79,36 @@ func TestRevisionPatchesRefuseSelfOverlappingOccurrence(t *testing.T) {
 	}
 }
 
+func TestRevisionOverlapExplainsConflictingAnswerPositions(t *testing.T) {
+	// Source order differs from answer order, and normalized CRLF/UTF-8 bytes
+	// differ from original byte offsets. Diagnostics still identify the edits
+	// the model must repair, without returning a partial proposal or source text.
+	source := "# Private chapter\r\n\r\nCafé alpha beta gamma\r\n"
+	captured := capturedRevision(source, "alpha", 2, 3)
+	for _, tc := range []struct {
+		name, first, second, want string
+	}{
+		{"contained in earlier source", "beta", "alpha beta gamma", "edit 2's before contains edit 1's before"},
+		{"partial intersection", "beta gamma", "alpha beta", "edit 2's before partially overlaps edit 1's before"},
+		{"identical spans", "alpha beta", "alpha beta", "edit 1's before contains edit 2's before"},
+		{"multiline normalized source", "beta", "# Private chapter\n\nCafé alpha beta gamma", "edit 2's before contains edit 1's before"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			edits := []revisionReplacement{}
+			for _, before := range []string{tc.first, tc.second} {
+				edits = append(edits, revisionReplacement{Before: before, After: "Replacement", Reason: "Requested edit", CommentIDs: []string{"note-1"}})
+			}
+			proposal, err := buildRevisionProposal(captured, revisionAnswer{Summary: "Revise", Edits: edits})
+			if proposal != nil || err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("unsafe proposal or unhelpful diagnostic: %v, %v", proposal, err)
+			}
+			if strings.Contains(err.Error(), "Private chapter") || strings.Contains(err.Error(), "alpha") {
+				t.Fatal("diagnostic copied private document text")
+			}
+		})
+	}
+}
+
 func TestRevisionPatchesPreserveFormattingWithoutUserReminders(t *testing.T) {
 	source := "---\r\ntitle: Workshop\n---\r\n# Activities\n\n- **Draft Sharing**: Read excerpts.\r\n- [Peer feedback](https://example.com/review): Give comments.\n\nCafé notes.\r\n"
 	captured := capturedRevision(source, "Sharing", 5, 6)

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -45,14 +46,10 @@ const DefaultShutdownDrainDelay = 5 * time.Second
 // negative value skips the in-flight wait entirely.
 const DefaultShutdownGracePeriod = 25 * time.Second
 
-// DefaultStartupReadyTimeout bounds how long Run waits for every dependency's
-// Ready() to fire before it flips the node lifecycle to Ready (memql#1269
-// clean startup: readiness != liveness, so a node only advertises Ready once
-// its dependencies -- DB, engine, mesh registration -- are actually up, not
-// merely once Start was invoked). On timeout Run logs and proceeds (the
-// per-component /healthz + /readyz invariants remain the runtime gate), so a
-// single slow dependency can't wedge boot forever.
-const DefaultStartupReadyTimeout = 30 * time.Second
+// DefaultStartupReadyWarningInterval reports a slow dependency without treating
+// elapsed time as readiness. A shutdown signal can cancel the wait; the platform's
+// startup probe owns the maximum startup window.
+const DefaultStartupReadyWarningInterval = 30 * time.Second
 
 // RunConfig configures Run. Every field has a sensible default the
 // app package supplies when omitted -- the only required fields in
@@ -114,13 +111,10 @@ type RunConfig struct {
 	// app package doesn't import component/server. (memql#1269)
 	ActiveWork func() int64
 
-	// WaitForReady blocks until every dependency reports Ready (or a
-	// bounded timeout fires), so the node flips lifecycle Ready only once
-	// its deps are actually up -- clean startup, readiness != liveness
-	// (memql#1269). Zero falls back to the package default (waits on each
-	// dep's Ready() channel up to DefaultStartupReadyTimeout). Tests
-	// override to assert ordering or inject a never-ready dependency.
-	WaitForReady func(deps []common.Dependency)
+	// WaitForReady blocks until dependencies are ready or ctx is cancelled.
+	// Returning an error prevents Ready and system.startup, then drains the app.
+	// Overrides must observe ctx so shutdown also works during startup.
+	WaitForReady func(ctx context.Context, deps []common.Dependency) error
 
 	// Start is the per-dependency start hook. Zero falls back to
 	// the package default, which calls dep.Start(context.Background())
@@ -134,12 +128,11 @@ type RunConfig struct {
 	// to capture ordering or inject hangs.
 	Stop func(ctx context.Context, deps ...common.Dependency)
 
-	// WaitForSignal blocks until a shutdown signal arrives + returns
-	// the signal that fired. Zero falls back to the package default
-	// (SIGINT + SIGTERM). Tests override to fire a synthetic signal
-	// immediately so Run's body exercises end-to-end without parking
-	// on a real syscall.
-	WaitForSignal func() os.Signal
+	// WaitForSignal optionally replaces the OS signal source. It must return
+	// when ctx is cancelled (with nil if no signal arrived), so an operator
+	// drain or failed startup can release the waiter. Nil registers SIGINT and
+	// SIGTERM synchronously before starting dependencies.
+	WaitForSignal func(ctx context.Context) os.Signal
 
 	// SetHealth is invoked with the live dependency slice after the
 	// app builds. Zero is a no-op. The standalone helper that mints
@@ -175,6 +168,12 @@ func Run(cfg RunConfig) {
 		panic("app.Run: Version is required")
 	}
 
+	runApplication(cfg, Build(cfg.Logger, cfg.Version, cfg.Overrides))
+}
+
+// runApplication keeps lifecycle orchestration testable with a dependency graph
+// whose readiness and event subscriptions can be delayed independently.
+func runApplication(cfg RunConfig, application *App) {
 	timeout := cfg.ShutdownTimeout
 	if timeout <= 0 {
 		timeout = DefaultRunShutdownTimeout
@@ -187,16 +186,14 @@ func Run(cfg RunConfig) {
 	if stop == nil {
 		stop = DefaultStopDependencies
 	}
-	wait := cfg.WaitForSignal
-	if wait == nil {
-		wait = DefaultWaitForShutdownSignal
-	}
 	waitForReady := cfg.WaitForReady
 	if waitForReady == nil {
-		waitForReady = DefaultWaitForDependenciesReady
+		waitForReady = func(ctx context.Context, deps []common.Dependency) error {
+			return waitForDependenciesReady(ctx, deps, cfg.Logger)
+		}
 	}
-
-	application := Build(cfg.Logger, cfg.Version, cfg.Overrides)
+	runCtx, shutdown, stopWatching := watchShutdownTrigger(cfg.WaitForSignal, application.OperatorDrainSignal())
+	defer stopWatching()
 
 	if cfg.SetHealth != nil {
 		cfg.SetHealth(application.Dependencies)
@@ -210,7 +207,23 @@ func Run(cfg RunConfig) {
 	// Ready. Otherwise the node would advertise Ready (and readiness 200) the
 	// instant Start returned, while deps were still wiring up, and route
 	// traffic onto a not-yet-serving pod.
-	waitForReady(application.Dependencies)
+	readyErr := waitForReady(runCtx, application.Dependencies)
+	if readyErr == nil {
+		readyErr = runCtx.Err()
+	}
+	if readyErr != nil {
+		cfg.Logger.Warn("startup interrupted before dependencies were ready", "error", readyErr)
+		application.BeginNodeDrain()
+		if cfg.BeginDrain != nil {
+			cfg.BeginDrain()
+		}
+		application.MarkNodeStopped()
+		application.releaseDatabasePools(timeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		stop(shutdownCtx, application.Dependencies...)
+		return
+	}
 
 	// The node's dependencies are now actually serving: flip its lifecycle
 	// Starting -> Ready (memql#1268) so the next gossip heartbeat advertises
@@ -286,7 +299,7 @@ func Run(cfg RunConfig) {
 	// request (memql#1270, RequestOperatorDrain closes the channel from
 	// the owner/admin-gated gRPC handler). Whichever fires first wins; the
 	// drain orchestration that follows is identical for both.
-	trigger := waitForShutdownTrigger(wait, application.OperatorDrainSignal())
+	trigger := <-shutdown
 	cfg.Logger.Info("shutdown triggered", "trigger", trigger,
 		"reason", application.OperatorDrainReason())
 
@@ -450,35 +463,36 @@ func waitForInflightDrain(logger *slog.Logger, activeWork func() int64, grace ti
 	}
 }
 
-// DefaultWaitForDependenciesReady is the package default for
-// RunConfig.WaitForReady. It blocks until every dependency's Ready() channel
-// closes (the parallel-startup signal every component exposes) or a bounded
-// DefaultStartupReadyTimeout fires, whichever comes first -- the clean-startup
-// half of memql#1269 (the node flips lifecycle Ready only once its deps are
-// actually up). On timeout it logs which dependency was still not ready and
-// returns so a single slow/stuck dependency can't wedge boot forever; the
-// per-component /healthz + /readyz invariants remain the runtime gate.
-func DefaultWaitForDependenciesReady(deps []common.Dependency) {
-	if len(deps) == 0 {
-		return
-	}
+// DefaultWaitForDependenciesReady waits for actual readiness, never for a
+// timeout that impersonates success. Cancellation names the unfinished dependency.
+func DefaultWaitForDependenciesReady(ctx context.Context, deps []common.Dependency) error {
+	return waitForDependenciesReady(ctx, deps, slog.Default())
+}
 
-	deadline := time.NewTimer(DefaultStartupReadyTimeout)
-	defer deadline.Stop()
-
+func waitForDependenciesReady(ctx context.Context, deps []common.Dependency, logger *slog.Logger) error {
+	warning := time.NewTicker(DefaultStartupReadyWarningInterval)
+	defer warning.Stop()
 	for _, dep := range deps {
 		if dep == nil {
 			continue
 		}
-		select {
-		case <-dep.Ready():
-			// This dependency is up; move on.
-		case <-deadline.C:
-			// Bounded budget exhausted: stop waiting on the remaining deps so
-			// boot proceeds. The runtime readiness probes still gate traffic.
-			return
+		ready := dep.Ready()
+		waiting := true
+		for waiting {
+			if err := ctx.Err(); err != nil {
+				return fmt.Errorf("waiting for %s: %w", dep.ComponentName(), err)
+			}
+			select {
+			case <-ready:
+				waiting = false
+			case <-ctx.Done():
+				return fmt.Errorf("waiting for %s: %w", dep.ComponentName(), ctx.Err())
+			case <-warning.C:
+				logger.Warn("startup is waiting for a dependency", "dependency", dep.ComponentName())
+			}
 		}
 	}
+	return ctx.Err()
 }
 
 // DefaultStartDependencies is the package default for RunConfig.Start.
@@ -533,46 +547,60 @@ func DefaultStopDependencies(ctx context.Context, dependencies ...common.Depende
 	}
 }
 
-// DefaultWaitForShutdownSignal is the package default for
-// RunConfig.WaitForSignal. Blocks on SIGINT + SIGTERM + returns the
-// signal that fired. Tests pass a custom WaitForSignal to fire
-// immediately so Run's body exercises end-to-end without parking on
-// a real syscall.
-func DefaultWaitForShutdownSignal() os.Signal {
+// DefaultWaitForShutdownSignal waits for an OS signal or context cancellation.
+func DefaultWaitForShutdownSignal(ctx context.Context) os.Signal {
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
-	return <-signals
+	select {
+	case sig := <-signals:
+		return sig
+	case <-ctx.Done():
+		return nil
+	}
 }
 
-// waitForShutdownTrigger blocks until EITHER the OS shutdown signal fires
-// (via the injected wait, which parks on a real syscall by default) OR the
-// operator maintenance drain channel closes (memql#1270). It returns a
-// short label naming which trigger won, for log context. Both triggers
-// lead into the identical drain sequence in Run -- this only multiplexes
-// the two wait sources.
-//
-// The OS-signal wait blocks on a syscall, so it runs on its own goroutine
-// and reports via a buffered channel; that goroutine is left parked when
-// the operator trigger wins first (the process is shutting down either
-// way, so leaking the one goroutine for the brief teardown window is
-// harmless and avoids racing signal.Notify teardown). When opDrain is nil
-// (non-mesh binary, no operator entrypoint) this degenerates to the plain
-// OS-signal wait.
-func waitForShutdownTrigger(wait func() os.Signal, opDrain <-chan struct{}) string {
-	if opDrain == nil {
-		sig := wait()
-		return "signal:" + sig.String()
+// watchShutdownTrigger registers the signal source before Start, cancels the
+// readiness wait when shutdown begins, and joins its goroutines on cleanup.
+// Both a signal and an operator request still enter the same drain sequence.
+func watchShutdownTrigger(wait func(context.Context) os.Signal, opDrain <-chan struct{}) (context.Context, <-chan string, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	signals := make(chan os.Signal, 1)
+	waitDone := make(chan struct{})
+	if wait == nil {
+		signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+		close(waitDone)
+	} else {
+		go func() {
+			defer close(waitDone)
+			if sig := wait(ctx); sig != nil {
+				signals <- sig
+			}
+		}()
 	}
-
-	sigCh := make(chan os.Signal, 1)
-	go func() { sigCh <- wait() }()
-
-	select {
-	case sig := <-sigCh:
-		return "signal:" + sig.String()
-	case <-opDrain:
-		return "operator"
+	trigger := make(chan string, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer close(trigger)
+		label := "cancelled"
+		select {
+		case sig := <-signals:
+			label = "signal:" + sig.String()
+		case <-opDrain:
+			label = "operator"
+		case <-ctx.Done():
+		}
+		cancel()
+		if wait == nil {
+			signal.Stop(signals)
+		}
+		<-waitDone
+		trigger <- label
+	}()
+	return ctx, trigger, func() {
+		cancel()
+		<-done
 	}
 }
 
