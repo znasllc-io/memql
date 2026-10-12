@@ -340,6 +340,17 @@ patches:
       # shape, so these differ only in storage.
       - { op: replace, path: /spec/storage/size, value: 10Gi }
       - { op: replace, path: /spec/walStorage/size, value: 2Gi }
+      # ROOM FOR TWO REPLICAS OF EVERY NODE (`make up SERVERS=2` + `make scale N=2`),
+      # the topology this overlay exists to reproduce. A process here opens up to 8
+      # (main, patches/db-pool-local.yaml) + 4 (direct) + 1 (migration) + 4 (write
+      # gate) = 17 connections; seven nodes at two replicas are 238, 289 while bff
+      # rolls. The component's 200 leaves 190 usable and the cluster would refuse the
+      # rest (SQLSTATE 53300); 400, the value the mid and top presets carry, leaves
+      # 390. A value, not a shape: the Cluster is the same one every environment
+      # runs, and render_connections_test.go holds this number to the arithmetic.
+      # max_connections is a restart-only parameter: applying this restarts the
+      # local Postgres once.
+      - { op: replace, path: /spec/postgresql/parameters/max_connections, value: "400" }
 
   - target: { kind: ObjectStore, name: memql-db-backup }
     patch: |

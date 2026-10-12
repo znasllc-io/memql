@@ -795,6 +795,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	if (conceptMeta.Name == "v1:email:connectionState" || conceptMeta.Name == "v1:email:sendOperation") && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("email connection state requires internal origin from the authorized connection capability")
 	}
+	if (conceptMeta.Name == "v1:campaigns:journey" || conceptMeta.Name == "v1:campaigns:journeyEnrollment") && !auth.OriginFromContext(ctx).IsInternal() {
+		return nil, meta, fmt.Errorf("automation writes require campaignSaveJourney, campaignSetJourneyState or the automation drain")
+	}
 	if (conceptMeta.Name == "v1:campaigns:newsletterBinding" || conceptMeta.Name == "v1:campaigns:newsletterSignup") && !auth.OriginFromContext(ctx).IsInternal() {
 		return nil, meta, fmt.Errorf("newsletter writes require their configuration, signup or progress capability")
 	}
@@ -1576,6 +1579,17 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// neither expressible in a mutation body. See shopify_store_guard.go.
 	if conceptMeta.Name == conceptShopifyStore {
 		if err := validateShopifyStoreWrite(payload, id, meta.priorExisted, meta.priorStorefrontTokenRef); err != nil {
+			return nil, meta, err
+		}
+	}
+
+	// The names a campaign's mail shows are capped (memql#6033): the view link
+	// carries them and a link token has a size limit. The sentence the person
+	// reads lives here because a mutation cannot state its own refusal, and on
+	// the merged row so a name saved before the cap is told about too. See
+	// campaign_name_guard.go.
+	if conceptMeta.Name == conceptCampaignsCampaign || conceptMeta.Name == conceptCampaignsSenderIdentity {
+		if err := validateCampaignNameLengths(conceptMeta.Name, payload); err != nil {
 			return nil, meta, err
 		}
 	}

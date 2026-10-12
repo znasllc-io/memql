@@ -173,6 +173,26 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Durable email automation coordination; public callers use gated capabilities.
+		{Path: "campaigns/queries.memql", Name: "deferredSingleSends"}:            true,
+		{Path: "campaigns/queries.memql", Name: "activeJourneys"}:                 true,
+		{Path: "campaigns/queries.memql", Name: "journeysToRetire"}:               true,
+		{Path: "campaigns/queries.memql", Name: "dueEnrollmentsForJourney"}:       true,
+		{Path: "campaigns/queries.memql", Name: "openEnrollmentsForJourney"}:      true,
+		{Path: "campaigns/queries.memql", Name: "newestJourneyEnrollment"}:        true,
+		{Path: "campaigns/queries.memql", Name: "journeyEnrollmentById"}:          true,
+		{Path: "campaigns/queries.memql", Name: "audienceJoinersSince"}:           true,
+		{Path: "campaigns/queries.memql", Name: "audienceConfirmationsSince"}:     true,
+		{Path: "campaigns/queries.memql", Name: "waitingEnrollmentsForRecipient"}: true,
+		{Path: "campaigns/mutations.memql", Name: "confirmRecipientSubscription"}: true,
+		{Path: "campaigns/mutations.memql", Name: "createJourney"}:                true,
+		{Path: "campaigns/mutations.memql", Name: "updateJourney"}:                true,
+		{Path: "campaigns/mutations.memql", Name: "setJourneyStatus"}:             true,
+		{Path: "campaigns/mutations.memql", Name: "recordJourneyDrain"}:           true,
+		{Path: "campaigns/mutations.memql", Name: "enrollJourneyRecipient"}:       true,
+		{Path: "campaigns/mutations.memql", Name: "advanceJourneyEnrollment"}:     true,
+		{Path: "campaigns/mutations.memql", Name: "nudgeJourneyEnrollment"}:       true,
+
 		// Webhook resolution has no signed-in user. The connector's internal
 		// cluster-owner actor walks the installation directory at one snapshot;
 		// per-user scoping would silently discard other configured stores.

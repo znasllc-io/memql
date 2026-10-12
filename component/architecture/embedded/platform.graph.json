@@ -1041,6 +1041,8 @@
 {"from":"concept:v1:campaigns:delivery","to":"concept:v1:campaigns:campaign","kind":"relates","attrs":{"direction":"outgoing","field":"campaignId","type":"parent"}},
 {"from":"concept:v1:campaigns:delivery","to":"concept:v1:campaigns:emailRule","kind":"relates","attrs":{"as":"sentByRule","direction":"outgoing","field":"emailRuleId","type":"references"}},
 {"from":"concept:v1:campaigns:delivery","to":"concept:v1:campaigns:recipient","kind":"relates","attrs":{"direction":"outgoing","field":"recipientId","type":"references"}},
+{"from":"concept:v1:campaigns:delivery","to":"concept:v1:campaigns:senderIdentity","kind":"relates","attrs":{"as":"sentAs","direction":"outgoing","field":"senderIdentityId","type":"references"}},
+{"from":"concept:v1:campaigns:delivery","to":"concept:v1:campaigns:template","kind":"relates","attrs":{"direction":"outgoing","field":"templateId","type":"references"}},
 {"from":"concept:v1:campaigns:delivery","to":"concept:v1:identity:user","kind":"relates","attrs":{"direction":"outgoing","field":"ownerUserId","type":"parent"}},
 {"from":"concept:v1:campaigns:delivery","to":"concept:v1:platform:outboundRequest","kind":"relates","attrs":{"direction":"outgoing","field":"outboundRequestId","type":"references"}},
 {"from":"concept:v1:campaigns:emailLayout","to":"concept:v1:accounts:account","kind":"relates","attrs":{"as":"forAccount","direction":"outgoing","field":"accountId","type":"references"}},

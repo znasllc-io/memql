@@ -2,12 +2,14 @@ package campaigns
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/email"
 )
@@ -73,6 +75,9 @@ func (f *digestFixture) TestAWelcomeWhoseTimeRunsOutBeforeItsSendBeginsStaysPend
 			n.worker.store.engine = engine
 			restoreGate := heldGate(n, &held)
 			margin, sendTimeout := welcomePhaseMargin, n.worker.cfg.SendTimeout
+			// Restored whatever the test answers: a Fatalf below must not leave the
+			// next test a phase of a second and a half.
+			t.Cleanup(func() { welcomePhaseMargin, n.worker.cfg.SendTimeout = margin, sendTimeout })
 			welcomePhaseMargin, n.worker.cfg.SendTimeout = 1500*time.Millisecond, 100*time.Millisecond
 			system := n.worker.systemActorContext(context.Background())
 
@@ -227,5 +232,246 @@ func (f *digestFixture) TestAWelcomeWritesNoVerdictAfterItsLocksWereLost(t *test
 	}
 	if n.sender.count() != 1 {
 		t.Errorf("%d messages were sent after the next pass, want still 1: the receipt answers for the send", n.sender.count())
+	}
+}
+
+// failWhileHeld fails the first query that starts with prefix (and carries
+// contains) while the storefront's locks are held, the way the request pool's
+// statement timeout fails a read, or a write, that took too long.
+type failWhileHeld struct {
+	Engine
+	held     *atomic.Bool
+	prefix   string
+	contains string
+	hits     atomic.Int32
+}
+
+func (e *failWhileHeld) Execute(ctx context.Context, q string) (any, error) {
+	if e.held.Load() && strings.HasPrefix(q, e.prefix) && strings.Contains(q, e.contains) && e.hits.Add(1) == 1 {
+		return nil, errors.New("canceling statement due to statement timeout")
+	}
+	return e.Engine.Execute(ctx, q)
+}
+
+// TestAWelcomeWhoseSendCouldNotReadStaysPending: a read the welcome's send needs
+// fails while the welcome's phase is still alive -- the request pool's statement
+// timeout, say. That decided nothing about the welcome: it is not refused, only
+// early. It was written "blocked", and a blocked welcome is never retried. It stays
+// pending -- no verdict, no receipt, no mail -- and the next pass sends it.
+func TestAWelcomeWhoseSendCouldNotReadStaysPending(t *testing.T) {
+	for _, failing := range []string{
+		"query campaignSingleSendById", // the send's first read, before any attempt
+		"query templateById",
+		"query recipientById",
+		"query senderIdentityById",
+		"query suppressionByDigest", // the do-not-mail list: unread is not "not suppressed"
+	} {
+		t.Run(strings.TrimPrefix(failing, "query "), func(t *testing.T) {
+			n := newDigestFixture(t).newEmptyNewsletter(t, "welcome-unread")
+			signup := pendingWelcome(t, n)
+			receiptID := welcomeReceiptID(signup)
+			actual := n.worker.store.engine
+			var held atomic.Bool
+			engine := &failWhileHeld{Engine: actual, held: &held, prefix: failing}
+			n.worker.store.engine = engine
+			restoreGate := heldGate(n, &held)
+			system := n.worker.systemActorContext(context.Background())
+
+			err := n.worker.sendNewsletterWelcome(context.Background(), system, signup)
+
+			if engine.hits.Load() == 0 {
+				t.Fatalf("%s was never read under the locks; the test is not testing what it says", failing)
+			}
+			row := n.signupRow(t)
+			if got := str(row, "status"); got != "pending" {
+				t.Errorf("a welcome whose send could not read is %q (%q), want pending: nothing was attempted", got, str(row, "lastError"))
+			}
+			if err == nil {
+				t.Error("a welcome whose send could not read answered nil; the drain would not know it stayed pending")
+			}
+			if n.sender.count() != 0 {
+				t.Errorf("%d messages were sent", n.sender.count())
+			}
+			if receipt := n.singleSendReceipt(t, receiptID); receipt != nil {
+				t.Errorf("an attempt was recorded for a send that never began: %v", receipt)
+			}
+
+			// The next pass reads what it needs, and sends it.
+			n.worker.store.engine = actual
+			restoreGate()
+			if err := n.worker.sendNewsletterWelcome(context.Background(), system, signup); err != nil {
+				t.Fatal(err)
+			}
+			if got := str(n.signupRow(t), "status"); got != "sent" {
+				t.Errorf("the welcome is %q on the next pass, want sent", got)
+			}
+			if n.sender.count() != 1 {
+				t.Errorf("%d messages were sent, want 1", n.sender.count())
+			}
+		})
+	}
+}
+
+// TestAWelcomeWhoseAttemptCouldNotBeRecordedStaysPending: the write that records
+// that an attempt began fails. No attempt began -- the transport was not contacted --
+// so the welcome is not blocked; it stays pending and goes out on the next pass.
+func TestAWelcomeWhoseAttemptCouldNotBeRecordedStaysPending(t *testing.T) {
+	n := newDigestFixture(t).newEmptyNewsletter(t, "welcome-unrecorded")
+	signup := pendingWelcome(t, n)
+	receiptID := welcomeReceiptID(signup)
+	actual := n.worker.store.engine
+	var held atomic.Bool
+	engine := &failWhileHeld{Engine: actual, held: &held, prefix: "mutation recordCampaignSingleSend", contains: "attempting"}
+	n.worker.store.engine = engine
+	restoreGate := heldGate(n, &held)
+	system := n.worker.systemActorContext(context.Background())
+
+	err := n.worker.sendNewsletterWelcome(context.Background(), system, signup)
+
+	if engine.hits.Load() == 0 {
+		t.Fatal("the attempt was never recorded under the locks; the test is not testing what it says")
+	}
+	row := n.signupRow(t)
+	if got := str(row, "status"); got != "pending" {
+		t.Errorf("a welcome whose attempt could not be recorded is %q (%q), want pending: nothing was attempted", got, str(row, "lastError"))
+	}
+	if err == nil {
+		t.Error("a welcome whose attempt could not be recorded answered nil; the drain would not know it stayed pending")
+	}
+	if n.sender.count() != 0 {
+		t.Errorf("%d messages were sent without a recorded attempt", n.sender.count())
+	}
+	if receipt := n.singleSendReceipt(t, receiptID); receipt != nil {
+		t.Errorf("an attempt was recorded by a write that failed: %v", receipt)
+	}
+
+	n.worker.store.engine = actual
+	restoreGate()
+	if err := n.worker.sendNewsletterWelcome(context.Background(), system, signup); err != nil {
+		t.Fatal(err)
+	}
+	if got := str(n.signupRow(t), "status"); got != "sent" {
+		t.Errorf("the welcome is %q on the next pass, want sent", got)
+	}
+	if n.sender.count() != 1 {
+		t.Errorf("%d messages were sent, want 1", n.sender.count())
+	}
+}
+
+// TestAWelcomeRecordsNoAttemptAfterItsLocksWereLost: PostgreSQL ends the welcome's
+// gate session after the transport's lock was reserved and before the attempt is
+// recorded, and the locks go with it. The receipt that says an attempt began is a
+// write the locks protect, and is made as a signup's writes are: only if the gate
+// says they are still held. Here it is not made -- no receipt, no mail -- and the
+// welcome stays pending; the next pass takes the locks afresh and sends it once.
+func TestAWelcomeRecordsNoAttemptAfterItsLocksWereLost(t *testing.T) {
+	n := newDigestFixture(t).newEmptyNewsletter(t, "welcome-lost-first")
+	signup := pendingWelcome(t, n)
+	receiptID := welcomeReceiptID(signup)
+	ender := &sessionEnder{admin: n.db.DB, key: newsletterLock("audience", n.audience), t: t}
+	reserving := &reservingSender{recordingSender: n.sender}
+	reserving.probe = func(string) bool { ender.endOnce(); return false }
+	n.worker.resolve = func() email.Sender { return reserving }
+	system := n.worker.systemActorContext(context.Background())
+
+	err := n.worker.sendNewsletterWelcome(context.Background(), system, signup)
+
+	if !ender.ended.Load() {
+		t.Fatal("the test never ended the gate's session; it is not testing what it says")
+	}
+	if !errors.Is(err, memql.ErrWriteGateLost) {
+		t.Errorf("a welcome whose locks were lost before its attempt answered %v, want ErrWriteGateLost", err)
+	}
+	if got := str(n.signupRow(t), "status"); got != "pending" {
+		t.Errorf("a welcome whose locks were lost before its attempt is %q, want pending", got)
+	}
+	if receipt := n.singleSendReceipt(t, receiptID); receipt != nil {
+		t.Errorf("an attempt was recorded without the locks that protect it: %v", receipt)
+	}
+	if n.sender.count() != 0 {
+		t.Errorf("%d messages were sent without a recorded attempt", n.sender.count())
+	}
+
+	n.worker.resolve = func() email.Sender { return n.sender }
+	if err := n.worker.sendNewsletterWelcome(context.Background(), system, signup); err != nil {
+		t.Fatal(err)
+	}
+	if got := str(n.signupRow(t), "status"); got != "sent" {
+		t.Errorf("the welcome is %q on the next pass, want sent", got)
+	}
+	if n.sender.count() != 1 {
+		t.Errorf("%d messages were sent, want 1", n.sender.count())
+	}
+}
+
+// TestAWelcomesAttemptCommitsUnderItsLocksEvenWhenItsPhaseEndsDuringTheWrite: the
+// phase's deadline lands while the receipt that says an attempt began is being
+// written. A write on the phase's context was cut there -- the client stopped
+// waiting and the server went on and committed it, after the welcome had given its
+// locks back, beside whichever replica had taken them since. Started under the locks,
+// the write is waited for and commits while they are held.
+func TestAWelcomesAttemptCommitsUnderItsLocksEvenWhenItsPhaseEndsDuringTheWrite(t *testing.T) {
+	n := newDigestFixture(t).newEmptyNewsletter(t, "welcome-attempt-straddle")
+	signup := pendingWelcome(t, n)
+	receiptID := welcomeReceiptID(signup)
+	actual := n.worker.store.engine
+	// The phase leaves the reads before the write ample time (a shared database may
+	// be slow), and the write outlasts it.
+	engine := &straddlingWrite{Engine: actual, prefix: "mutation recordCampaignSingleSend", contains: "attempting", delay: 3 * time.Second, locked: n.audienceLockHeld(t)}
+	n.worker.store.engine = engine
+	margin, sendTimeout := welcomePhaseMargin, n.worker.cfg.SendTimeout
+	t.Cleanup(func() { welcomePhaseMargin, n.worker.cfg.SendTimeout = margin, sendTimeout })
+	welcomePhaseMargin, n.worker.cfg.SendTimeout = 2*time.Second, 100*time.Millisecond
+
+	_ = n.worker.sendNewsletterWelcome(context.Background(), n.worker.systemActorContext(context.Background()), signup)
+	engine.wg.Wait()
+
+	engine.mu.Lock()
+	held := append([]bool(nil), engine.held...)
+	engine.mu.Unlock()
+	if len(held) != 1 {
+		t.Fatalf("the attempt was recorded %d times; the test is not testing what it says", len(held))
+	}
+	if !held[0] {
+		t.Error("the attempt's receipt committed after the welcome had given its locks back")
+	}
+	if n.singleSendReceipt(t, receiptID) == nil {
+		t.Error("the receipt the welcome waited for is not there")
+	}
+}
+
+// TestAWelcomeIsLedgeredUnderItsOwnRequest (memql#6022, F7): a welcome is sent under
+// the request newsletter-<signup>, and the delivery row it leaves is the one that
+// request names -- not a version of a row every other message to the person shares --
+// carrying the request, the template and the sender it went out with.
+func TestAWelcomeIsLedgeredUnderItsOwnRequest(t *testing.T) {
+	n := newDigestFixture(t).newEmptyNewsletter(t, "welcome-ledger")
+	signup := pendingWelcome(t, n)
+
+	if err := n.worker.sendNewsletterWelcome(context.Background(), n.worker.systemActorContext(context.Background()), signup); err != nil {
+		t.Fatal(err)
+	}
+	if got := str(n.signupRow(t), "status"); got != "sent" {
+		t.Fatalf("the welcome is %q, want sent", got)
+	}
+
+	request := "newsletter-" + bare(str(signup, "id"))
+	id := "v1:campaigns:delivery:" + singleDeliveryRowID(request, bare(str(signup, "recipientId")))
+	var rows []memorynodes.MemoryNode
+	if err := n.db.NewSelect().Model(&rows).Where("concept = ?", "v1:campaigns:delivery").Where("id = ?", id).Scan(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("%d ledger rows for the welcome's request, want 1 (%s)", len(rows), id)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(rows[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["status"] != "sent" || payload["requestId"] != request {
+		t.Errorf("the row does not record the welcome's request as sent: %v", payload)
+	}
+	if bare(str(payload, "templateId")) != bare(str(signup, "templateId")) || bare(str(payload, "senderIdentityId")) != bare(str(signup, "senderIdentityId")) {
+		t.Errorf("the row does not name the template and sender the welcome went out with: %v (signup %v / %v)", payload, str(signup, "templateId"), str(signup, "senderIdentityId"))
 	}
 }

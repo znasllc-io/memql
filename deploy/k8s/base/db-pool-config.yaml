@@ -25,8 +25,14 @@
 # once), and a warm one closes after two minutes unused. With main=4, allow up to
 # 4 + 4 + 1 + 4 = 13 connections per process; other independent pools add to
 # that bound. The engine's six DB-connecting Deployments at two replicas are
-# 6 x 2 x 13 = 156 against the smallest preset's 200 - 10 reserved = 190.
-# scripts/deploy/conn-headroom-check.sh counts all four pools.
+# 6 x 2 x 13 = 156 at steady state, against the smallest preset's 200 - 10
+# reserved = 190: they fit, with 34 to spare. A roll is more than that: the
+# conservative rolling bound below is 6 x (2 x 2 + 0) x 13 = 312 for the same six,
+# which only the 400 presets hold (390 usable). The base rolls with maxSurge 0 and
+# maxUnavailable 1, so the overlap is one terminating process per Deployment: on
+# the smallest preset roll at most two Deployments at a time (156 + 2 x 13 = 182;
+# three reach 195). scripts/deploy/conn-headroom-check.sh counts all four pools
+# and adds maxSurge for a roll, which is zero here; it does not count terminating pods.
 #
 # Count every engine and product workload sharing the database, active Jobs,
 # scheduled monitors, operator/backup headroom, and PostgreSQL reserved slots.

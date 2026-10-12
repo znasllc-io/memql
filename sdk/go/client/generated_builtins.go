@@ -248,11 +248,13 @@ func CampaignConfigureNewsletterBuild(args CampaignConfigureNewsletterArgs) stri
 	}
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
-	if b.Len() > 36 {
-		b.WriteString(", ")
+	if args.TemplateId != "" {
+		if b.Len() > 36 {
+			b.WriteString(", ")
+		}
+		b.WriteString("templateId: ")
+		b.WriteString(quoteMemQL(args.TemplateId))
 	}
-	b.WriteString("templateId: ")
-	b.WriteString(quoteMemQL(args.TemplateId))
 	if b.Len() > 36 {
 		b.WriteString(", ")
 	}
@@ -497,6 +499,71 @@ func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs
 	return b.String()
 }
 
+// CampaignSaveJourney -- Save an email automation with an exact revision. Omit expectedRevision to create one under a new caller-generated id. Editable while draft or paused. Never sends mail; returns the revision and what still blocks turning it on.
+type CampaignSaveJourneyArgs struct {
+	// Stable caller-generated id; reuse it after an uncertain create.
+	JourneyId string
+	// Owning organization; immutable after creation.
+	AccountId   string
+	Name        string
+	Description string
+	// {kind: joined | confirmed, audienceId}
+	Trigger map[string]any
+	// Ordered steps: {id, kind: send | confirm | wait, templateId?, senderIdentityId?, days?, hours?, timeoutDays?}
+	Steps []map[string]any
+	// Exact revision from journeyById; omit when creating.
+	ExpectedRevision string
+}
+
+// CampaignSaveJourney calls the engine builtin campaignSaveJourney.
+func (qc *QueryClient) CampaignSaveJourney(ctx context.Context, args CampaignSaveJourneyArgs) (*Result, error) {
+	call := CampaignSaveJourneyBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveJourney", call)
+}
+
+func CampaignSaveJourneyBuild(args CampaignSaveJourneyArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveJourney(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("name: ")
+	b.WriteString(quoteMemQL(args.Name))
+	if args.Description != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("trigger: ")
+	b.WriteString(renderMemQLValue(args.Trigger))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("steps: ")
+	b.WriteString(renderMemQLValue(args.Steps))
+	if args.ExpectedRevision != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("expectedRevision: ")
+		b.WriteString(quoteMemQL(args.ExpectedRevision))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignSaveLayout -- Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision.
 type CampaignSaveLayoutArgs struct {
 	// Stable caller-generated layout id; reuse it on an uncertain creation response.
@@ -711,6 +778,39 @@ func CampaignSendingReadinessBuild(args CampaignSendingReadinessArgs) string {
 	return b.String()
 }
 
+// CampaignSetJourneyState -- Turn an email automation on, pause it, or archive it. Turning on checks templates, senders and the audience first; archiving is permanent and exits everyone still in it.
+type CampaignSetJourneyStateArgs struct {
+	JourneyId string
+	// Enum: activate | pause | archive
+	Action           string
+	ExpectedRevision string
+}
+
+// CampaignSetJourneyState calls the engine builtin campaignSetJourneyState.
+func (qc *QueryClient) CampaignSetJourneyState(ctx context.Context, args CampaignSetJourneyStateArgs) (*Result, error) {
+	call := CampaignSetJourneyStateBuild(args)
+	return qc.executeNamed(ctx, "campaignSetJourneyState", call)
+}
+
+func CampaignSetJourneyStateBuild(args CampaignSetJourneyStateArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSetJourneyState(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("action: ")
+	b.WriteString(quoteMemQL(args.Action))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignStartSend -- Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Requires a readable campaign and update permission on data in its organization. Returns the recipient count the send will work through.
 type CampaignStartSendArgs struct {
 	// The campaign to send. The caller needs update permission in its organization.
@@ -786,7 +886,7 @@ func CampaignTestAudienceSendBuild(args CampaignTestAudienceSendArgs) string {
 	return b.String()
 }
 
-// CampaignTestSend -- Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer carries an obviously-inert token. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of.
+// CampaignTestSend -- Send one test copy of a campaign to a named address (memql#4822). Renders the campaign's template against a synthetic recipient -- display name 'Test Recipient', the address you name, and the `fields` of the audience's first real recipient when one exists, so {{fields.*}} show the shape they will actually have. The subject is prefixed '[Test] ', the message goes through the campaign's resolved sending identity, and the unsubscribe footer and the four link tags ({{unsubscribeUrl}}, {{preferencesUrl}}, {{viewUrl}}, {{confirmUrl}}) carry an obviously-inert token, so every link renders and none of them does anything. It writes NO delivery row and touches NO counter, so a test send can never make a campaign look partly sent; it does consume the ordinary send-rate token bucket, because a test is a real message to a real mailbox. Returns the list of merge tags it could not resolve -- the check that catches a typo'd {{fields.compnay}} before the whole audience gets it. `to` is REQUIRED and never defaults to the caller's own address: a builtin that mails somewhere you did not name is one you have to remember the default of.
 type CampaignTestSendArgs struct {
 	// The campaign to render. The caller must be able to read it.
 	CampaignId string
