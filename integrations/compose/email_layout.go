@@ -42,6 +42,12 @@ const defaultEmailLayout = "builtin:article"
 // rule for both).
 var bareIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,160}$`)
 
+// emailDraftWithoutComposer is why an email draft the caller supplied is
+// refused: an email is only ever its layout, and on a node with no composer
+// there is nothing to write the draft into it. A sentence for the person whose
+// draft it is, recorded on the composition as it stands.
+const emailDraftWithoutComposer = "An email is written into its layout. This node has no composer to write the draft you supplied into it."
+
 // The refusals of a layout, each before anything is written.
 var (
 	errLayoutMalformed    = errors.New("compose: layoutId must be builtin:<name> or org:<id>")

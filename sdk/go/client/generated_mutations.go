@@ -3142,6 +3142,7 @@ type CreateComposeRecipeArgs struct {
 	TemplateId      string
 	Format          string
 	OutputKind      string
+	LayoutId        string
 	FolderId        string
 	AccountIds      []string
 }
@@ -3194,6 +3195,13 @@ func CreateComposeRecipeBuild(args CreateComposeRecipeArgs) string {
 		}
 		b.WriteString("outputKind: ")
 		b.WriteString(quoteMemQL(args.OutputKind))
+	}
+	if args.LayoutId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("layoutId: ")
+		b.WriteString(quoteMemQL(args.LayoutId))
 	}
 	if args.FolderId != "" {
 		if b.Len() > 29 {
@@ -13374,6 +13382,7 @@ type UpdateComposeRecipeArgs struct {
 	TemplateId      string
 	Format          string
 	OutputKind      string
+	LayoutId        string
 	FolderId        string
 	AccountIds      []string
 }
@@ -13430,6 +13439,13 @@ func UpdateComposeRecipeBuild(args UpdateComposeRecipeArgs) string {
 		}
 		b.WriteString("outputKind: ")
 		b.WriteString(quoteMemQL(args.OutputKind))
+	}
+	if args.LayoutId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("layoutId: ")
+		b.WriteString(quoteMemQL(args.LayoutId))
 	}
 	if args.FolderId != "" {
 		if b.Len() > 29 {

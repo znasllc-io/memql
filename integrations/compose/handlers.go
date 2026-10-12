@@ -69,6 +69,10 @@ func (i *Integration) handleRunRecipe(ctx context.Context, args map[string]any, 
 		Statement:  stringOf(row["description"]),
 		Format:     format,
 		OutputKind: stringOf(row["outputKind"]),
+		// The layout its emails are written into. materialize checks it as it
+		// would a request's: refused for anything but an email, and refused
+		// loudly when it has been archived or belongs to another organization.
+		LayoutId:   strings.TrimSpace(stringOf(row["layoutId"])),
 		Sources:    refs,
 		TemplateId: strings.TrimSpace(stringOf(row["templateId"])),
 		FolderId:   strings.TrimSpace(stringOf(row["folderId"])),

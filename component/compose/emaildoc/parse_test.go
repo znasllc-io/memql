@@ -320,10 +320,11 @@ func TestParseRefusesBadPicturesAndLinks(t *testing.T) {
 		{"link with a space", button("https://example.com/a b"), `block "b": a link cannot contain spaces or control characters`},
 		{"link with a line break", button(`https://example.com/a\nb`), `block "b": a link cannot contain spaces or control characters`},
 		{"link of 2001 bytes", button("https://example.com/" + strings.Repeat("a", 1981)), `block "b": a link can be at most 2000 bytes`},
-		{"tag with a suffix", button("{{unsubscribeUrl}}?x=1"), `block "b": a link must be`},
-		{"tag with a prefix", button("x{{viewUrl}}"), `block "b": a link must be`},
-		{"tag with a space", button(" {{viewUrl}}"), `block "b": a link cannot contain spaces or control characters`},
-		{"two tags", button("{{viewUrl}}{{confirmUrl}}"), `block "b": a link must be`},
+		// A link tag is the whole link or nothing (TestParseKeepsLinkTagsWholeLinks).
+		{"tag with a suffix", button("{{unsubscribeUrl}}?x=1"), `block "b": {{unsubscribeUrl}} must be the whole link, never part of another address`},
+		{"tag with a prefix", button("x{{viewUrl}}"), `block "b": {{viewUrl}} must be the whole link, never part of another address`},
+		{"tag with a space", button(" {{viewUrl}}"), `block "b": {{viewUrl}} must be the whole link, never part of another address`},
+		{"two tags", button("{{viewUrl}}{{confirmUrl}}"), `block "b": {{viewUrl}} must be the whole link, never part of another address`},
 		{"an unknown link tag", button("{{unsubscribe}}"), `block "b": a link must be`},
 		{"scheme only", button("https://"), `block "b": a link must be`},
 		{"mailto only", button("mailto:"), `block "b": a link must be`},
@@ -1202,7 +1203,7 @@ func TestParseKeepsMergeTagsOutOfTheHost(t *testing.T) {
 		{"https:////{{fields.host}}/x", host},
 		{"mailto:{{email}}", mail},
 		{"mailto:a@example.com?subject={{fields.subject}}", mail},
-		{"mailto:{{unsubscribeUrl}}", mail},
+		{"mailto:{{unsubscribeUrl}}", "{{unsubscribeUrl}} must be the whole link"},
 		{"MAILTO:{{email}}", mail},
 		{"tel:{{fields.phone}}", mail},
 		{"tel:+1555{{fields.extension}}", mail},
@@ -1243,6 +1244,58 @@ func TestParseKeepsMergeTagsOutOfTheHost(t *testing.T) {
 				t.Errorf("%s %q: %v", where.name, href, err)
 			}
 		}
+	}
+}
+
+// A link tag becomes the recipient's own signed link when the email is sent. As
+// the whole link it is theirs to click; inside another address it would be
+// handed to that site when they click it (https://x.test/?u={{unsubscribeUrl}}
+// gives x.test their unsubscribe link). So a link tag is a whole link or plain
+// text, never part of another address. Other merge tags may still sit in the
+// path, query or fragment of a fixed web address.
+func TestParseKeepsLinkTagsWholeLinks(t *testing.T) {
+	for _, tag := range LinkTags() {
+		want := tag + " must be the whole link, never part of another address"
+		for _, href := range []string{
+			"https://x.test/?u=" + tag,
+			"https://x.test/" + tag,
+			"https://x.test/a#" + tag,
+			"http://x.test/a?next=" + tag + "&b=1",
+			"https://" + tag + "/",
+			tag + "?a=1",
+			"x" + tag,
+			tag + tag,
+			"mailto:a@x.test?body=" + tag,
+		} {
+			for _, where := range addressContexts {
+				t.Run(where.name+" "+href, func(t *testing.T) {
+					if _, err := Parse([]byte(where.doc(href))); err == nil || !strings.Contains(err.Error(), want) {
+						t.Fatalf("want %q, got %v", want, err)
+					}
+				})
+			}
+		}
+		for _, link := range []string{
+			`{"id":"s","type":"social","links":[{"network":"n","href":"https://x.test/?u=` + tag + `"}]}`,
+			`{"id":"f","type":"footer","links":[{"label":"l","href":"https://x.test/?u=` + tag + `"}]}`,
+			`{"id":"i","type":"image","width":10,"href":"https://x.test/?u=` + tag + `"}`,
+		} {
+			if _, err := Parse([]byte(layoutJSON(link))); err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: got %v", link, err)
+			}
+		}
+		// The whole link, and the tag as plain text, are what a tag is for.
+		for _, where := range addressContexts {
+			if _, err := Parse([]byte(where.doc(tag))); err != nil {
+				t.Errorf("%s %s as the whole link: %v", where.name, tag, err)
+			}
+		}
+		if _, err := Parse([]byte(layoutJSON(`{"id":"t","type":"text","text":"Your link: ` + tag + `"},{"id":"h","type":"heading","text":"` + tag + `"}`))); err != nil {
+			t.Errorf("%s as plain text: %v", tag, err)
+		}
+	}
+	if _, err := Parse([]byte(layoutJSON(`{"id":"b","type":"button","label":"Go","href":"https://x.test/?e={{email}}&n={{fields.name}}"}`))); err != nil {
+		t.Errorf("other merge tags in a fixed web address are still allowed: %v", err)
 	}
 }
 

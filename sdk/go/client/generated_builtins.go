@@ -1081,7 +1081,7 @@ type ComposeMaterializeArgs struct {
 	LayoutId string
 	// What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.
 	Sources []map[string]any
-	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly.
+	// A draft to start from, when the person has already written one. Empty means the compose step writes it from the sources. Supplying one seeds the configured composer. With no composer available, the supplied draft can be rendered directly -- except an email template's: an email is only ever its layout, written by the composer, so on a node with no composer its draft is refused.
 	Draft string
 	// Ordered completed text step keys in the CURRENT work run. Renders their saved replies verbatim, separated by blank lines, without another model call. Exclude research-only notes; include every final chapter in delivery order. Preserves recorded model/source provenance. Requires a prose format and no draft, outputKind or deployableKind. Missing, unfinished, duplicate or non-text sections are refused.
 	SectionKeys []string

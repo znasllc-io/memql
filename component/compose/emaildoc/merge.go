@@ -135,8 +135,9 @@ func ContentSlots(d Document) []Slot {
 //   - a link that is one of the link tags (LinkTags) is kept: it is replaced per
 //     recipient when the email is sent, and an address in its place would send
 //     the person somewhere else. That is a button's or a picture's link, and a
-//     link in a text block's Markdown: new text must link to each tag as often
-//     as the layout's did.
+//     tag in a heading's, a highlight's or a text block's text: new text must
+//     mention each tag as often as the layout's did, and a text block's
+//     Markdown must link to it as often (droppedLinkTag).
 //
 // A field that is not set leaves the layout's value. The subject is required;
 // the preheader is the draft's own, and an empty one leaves the email without
@@ -247,13 +248,26 @@ func linkTagOf(href string) string {
 	return ""
 }
 
-// droppedLinkTag returns a link tag that a text block's Markdown links to and
-// text, written in its place, links to fewer times, or "" when it keeps them
-// all. A link tag in a text block is a link like a button's (an organization's
-// layout may carry its confirm link in a sentence), and the same rule keeps it.
-// Text whose Markdown cannot be read is left to Parse, which refuses it with a
-// sentence that says why.
+// droppedLinkTag returns a link tag that text, written in place of a block's
+// own, keeps fewer of, or "" when it keeps them all. A link tag in a heading, a
+// highlight or a text block is the recipient's own link like a button's (an
+// organization's layout may carry its confirm link in a sentence), and the
+// same rule keeps it: the new text mentions each tag at least as often as the
+// block's did, and a text block's Markdown links to it at least as often, so a
+// tag may become a link to itself but a link may not become bare text, and
+// neither may go. Markdown that cannot be read is left to Parse, which refuses
+// it with a sentence that says why.
 func droppedLinkTag(b *Block, text string) string {
+	switch b.Type {
+	case typeHeading, typeHighlight, typeText:
+	default:
+		return ""
+	}
+	for _, tag := range linkTags {
+		if strings.Count(text, tag) < strings.Count(b.Text, tag) {
+			return tag
+		}
+	}
 	if b.Type != typeText {
 		return ""
 	}

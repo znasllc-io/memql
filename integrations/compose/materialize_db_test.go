@@ -23,6 +23,7 @@ import (
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	work "github.com/znasllc-io/memql/integrations/work"
@@ -715,5 +716,99 @@ func TestMaterializeDB_EmailFromAnOrganizationLayout(t *testing.T) {
 		if err != nil || written != nil {
 			t.Fatalf("%s: refused, but a composition was written: %v (%v)", c.layoutId, written, err)
 		}
+	}
+}
+
+// A LAYOUT IS ITS ORGANIZATION'S, and the organization boundary on the real
+// engine decides who reads one. A member of the layout's organization writes an
+// email into it; a member of another organization, asking for an email of their
+// own organization, cannot read it at all and is told so exactly as if it did
+// not exist. Membership is the engine's own: a group of the organization, with
+// grant resolution installed, as the Email app's layout tests set it up.
+func TestMaterializeDB_AnOrganizationLayoutIsReadOnlyByItsMembers(t *testing.T) {
+	e := materializeDBEngine(t)
+	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	e.InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(previousGrants); auth.SetMembershipSource(previousMembers) })
+	accept := New(e, e.Logger)
+	accept.SetGoalOpener(&directMaterializeGoal{})
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	owner, colleague, rival := "compose-org-owner-"+suffix, "compose-org-colleague-"+suffix, "compose-org-rival-"+suffix
+	ours, theirs := "compose-org-ours-"+suffix, "compose-org-theirs-"+suffix
+	actor := func(user string, role auth.Role) context.Context {
+		return auth.ContextWithToken(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: user, Role: role}), &auth.TokenInfo{Subject: user})
+	}
+	ownerCtx := actor(owner, auth.RoleOwner)
+	seed := auth.ContextWithInternalOrigin(ownerCtx)
+	exec := func(ctx context.Context, q string) {
+		t.Helper()
+		if _, err := e.Execute(ctx, q); err != nil {
+			t.Fatalf("%s: %v", firstConstruct(q), err)
+		}
+	}
+	for user, role := range map[string]string{owner: "owner", colleague: "writer", rival: "writer"} {
+		payload, _ := json.Marshal(map[string]any{"displayName": user, "primaryEmail": user + "@example.test", "role": role, "active": true})
+		exec(seed, `insert("v1:identity:user", id=`+langparser.QuoteString(user)+`, payload=`+string(payload)+`)`)
+	}
+	for member, account := range map[string]string{colleague: ours, rival: theirs} {
+		exec(ownerCtx, "mutation "+call("createClientAccount", map[string]any{"accountId": account, "name": "Email client"}))
+		group := "g-" + account
+		exec(seed, "mutation "+call("writeGroup", map[string]any{"groupId": group, "name": account, "kind": "account", "accountId": account, "status": "active"}))
+		exec(seed, "mutation "+call("writeGroupMembership", map[string]any{"membershipId": group + "-" + member, "groupId": group, "userId": member, "accountId": account, "origin": "added", "status": "active"}))
+	}
+	letter, _ := emaildoc.Layout("builtin:letter")
+	letter.Subject = "Our house letter"
+	raw, err := letter.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	layout, theirLayout := "compose-org-layout-"+suffix, "compose-org-their-layout-"+suffix
+	for id, account := range map[string]string{layout: ours, theirLayout: theirs} {
+		exec(seed, "mutation "+call("createEmailLayout", map[string]any{"layoutId": id, "accountId": account, "name": "House letter", "document": document,
+			"versionTime": time.Now().UTC().Format(time.RFC3339Nano)}))
+	}
+
+	// A member of the layout's organization writes an email into it.
+	member := actor(colleague, auth.RoleWriter)
+	mine := materializeArgs{Name: "Welcome", Format: pure.FormatJSON, OutputKind: "email_template", AccountIds: []string{ours}, LayoutId: "org:" + layout, RequestId: "r-member-" + suffix}
+	if _, err := accept.materialize(member, colleague, "", mine); err != nil {
+		t.Fatalf("a member could not write an email into their organization's layout: %v", err)
+	}
+	input, err := accept.store().compositionInputById(member, stableMaterializeID("request", memql.BareShortId(colleague), mine.RequestId))
+	if err != nil || input == nil {
+		t.Fatalf("the member's request was not saved: %v %v", input, err)
+	}
+	encoded, err := json.Marshal(input["request"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved executionRequest
+	if err := json.Unmarshal(encoded, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if doc, err := savedEmailLayout(saved); err != nil || doc.Layout != "org:"+layout || doc.Subject != "Our house letter" {
+		t.Fatalf("the member's request does not carry the organization's layout: %q %q %v", doc.Layout, doc.Subject, err)
+	}
+
+	// A member of another organization cannot read it, for an email of their own.
+	outsider := actor(rival, auth.RoleWriter)
+	theirsArgs := materializeArgs{Name: "Welcome", Format: pure.FormatJSON, OutputKind: "email_template", AccountIds: []string{theirs}, LayoutId: "org:" + layout, RequestId: "r-rival-" + suffix}
+	if _, err := accept.materialize(outsider, rival, "", theirsArgs); err == nil || err.Error() != "compose: that layout is not readable by you" {
+		t.Fatalf("a member of another organization: refusal = %v, want the layout to be unreadable", err)
+	}
+	if written, err := accept.store().compositionById(outsider, stableMaterializeID("request", memql.BareShortId(rival), theirsArgs.RequestId)); err != nil || written != nil {
+		t.Fatalf("refused, but a composition was written: %v (%v)", written, err)
+	}
+	// What refused them is the boundary between the organizations: a layout of
+	// their own organization they use like the member above.
+	ownArgs := theirsArgs
+	ownArgs.LayoutId, ownArgs.RequestId = "org:"+theirLayout, "r-rival-own-"+suffix
+	if _, err := accept.materialize(outsider, rival, "", ownArgs); err != nil {
+		t.Fatalf("a member could not use a layout of their own organization: %v", err)
 	}
 }

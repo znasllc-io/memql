@@ -2006,15 +2006,9 @@ func TestLayoutRefusalsWriteNothing(t *testing.T) {
 		}
 	}
 
-	// A layout belongs to an email template and nothing else.
-	for _, args := range []map[string]any{
-		{"name": "Notes", "format": "markdown", "layoutId": "builtin:letter"},
-		{"name": "Data", "format": "json", "layoutId": "builtin:letter"},
-	} {
-		if _, err := parseMaterializeArgs(args); err == nil || err.Error() != "compose: layoutId applies only to email templates" {
-			t.Fatalf("layoutId on %v: refusal = %v", args, err)
-		}
-	}
+	// A layout belongs to an email template and nothing else: refused where
+	// every entry point arrives (TestALayoutOutsideAnEmailIsRefusedEverywhere),
+	// and read here for an email.
 	a, err := parseMaterializeArgs(map[string]any{"name": "Welcome", "format": "json", "outputKind": "email_template", "layoutId": " builtin:letter "})
 	if err != nil || a.LayoutId != "builtin:letter" {
 		t.Fatalf("layoutId = %q (%v), want builtin:letter", a.LayoutId, err)
@@ -2151,5 +2145,287 @@ func TestBlankEmailMeansALayoutAndNothingToWriteItFrom(t *testing.T) {
 	// what a blank email files.
 	if emailArgs("builtin:letter").blank() {
 		t.Fatal("a blank email must not be filed as the empty JSON document")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (#6032): what an email may be filed as, when a layout is looked
+// at, recipes, and refusals that no retry changes
+// ---------------------------------------------------------------------------
+
+// houseLayout is an organization's own layout: the Spotlight with a subject of
+// its own.
+func houseLayout(t *testing.T) emaildoc.Document {
+	t.Helper()
+	house, _ := builtinLayout(t, "builtin:spotlight")
+	house.Subject = "Our house layout"
+	return house
+}
+
+// failedWith reads a composition that must have failed for good, with reason,
+// and checks that nothing was filed for it.
+func failedWith(t *testing.T, e *materializeEngine, u *materializeUploader, compositionId, reason string, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), terminalFailureCode) {
+		t.Fatalf("the composition must fail terminally, got %v", err)
+	}
+	row := e.compositions[compositionId]
+	if row["status"] != "failed" || stringOf(row["failureReason"]) != reason {
+		t.Fatalf("composition = %v / %q, want failed with %q", row["status"], row["failureReason"], reason)
+	}
+	for _, call := range e.calls {
+		if call == "createLibraryFile" {
+			t.Fatalf("a refused email was filed: %v", e.calls)
+		}
+	}
+	if u.calls != 0 {
+		t.Fatalf("a refused email was stored: %d uploads", u.calls)
+	}
+}
+
+// An email is only ever its layout: filed as it is, or with the composer's
+// content merged into it. A draft the caller supplies is no way past that: on
+// a node with no composer it used to be filed as written, with whatever
+// pictures, links and markup it held, in whatever layout it named.
+func TestEmailDraftWithoutAComposerIsRefused(t *testing.T) {
+	letter, _ := builtinLayout(t, "builtin:letter")
+	smuggled := letter
+	smuggled.Layout = "builtin:spotlight"
+	smuggled.Blocks = append([]emaildoc.Block(nil), letter.Blocks...)
+	for n := range smuggled.Blocks {
+		if smuggled.Blocks[n].ID == "logo" {
+			smuggled.Blocks[n].Src = "artifact:somebody-elses-artifact"
+		}
+	}
+	smuggledJSON, err := smuggled.JSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, draft := range map[string]string{
+		"custom HTML with a remote picture and active content":      `{"subject":"Hi","textBody":"Hi","htmlBody":"<p onclick=\"x()\" style=\"background:url(https://tracker.test/b.gif)\">Hi</p><img src=\"https://tracker.test/p.gif\"><a href=\"javascript:alert(1)\">Go</a><script>x()</script>"}`,
+		"a layout naming another layout and someone else's picture": string(smuggledJSON),
+	} {
+		t.Run(name, func(t *testing.T) {
+			i, e, u := emailFixture(t)
+			a := emailArgs("builtin:letter")
+			a.Draft = draft
+			compositionId, input := acceptAsAPerson(t, i, a)
+			// The replica that executes the run has no composer.
+			err := adoptTheRun(anotherReplica(e, u, nil), input)
+			failedWith(t, e, u, compositionId, "An email is written into its layout. This node has no composer to write the draft you supplied into it.", err)
+		})
+	}
+}
+
+// With a composer, a supplied draft is what it always was: something to start
+// from. The composer is given it, and what is filed is the layout with the
+// composer's content, never the draft.
+func TestEmailDraftIsOnlyAStartingPointForTheComposer(t *testing.T) {
+	i, e, u := emailFixture(t)
+	a := emailArgs("builtin:letter")
+	a.Draft = `{"subject":"Hi","textBody":"Hi","htmlBody":"<img src=\"https://tracker.test/p.gif\">"}`
+	compositionId, input := acceptAsAPerson(t, i, a)
+	var asked []ComposeRequest
+	worker := anotherReplica(e, u, contentComposer(&asked, emaildoc.Content{Subject: "Welcome", Blocks: []emaildoc.ContentItem{{ID: "headline", Text: text("Welcome aboard")}}}))
+	if err := adoptTheRun(worker, input); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0].Draft != a.Draft {
+		t.Fatalf("the composer was not given the draft to start from: %+v", asked)
+	}
+	if e.compositions[compositionId]["status"] != "ready" {
+		t.Fatalf("composition = %v", e.compositions[compositionId])
+	}
+	doc := filedEmail(t, u)
+	if doc.Layout != "builtin:letter" || emailBlock(t, doc, "headline").Text != "Welcome aboard" || strings.Contains(string(u.bytes), "tracker.test") {
+		t.Fatalf("the filed email is not the letter with the composer's words: %s", u.bytes)
+	}
+}
+
+// The organization and the layout are looked at after a repeat has had its
+// chance to find what the first call made, as the folder is: an email that was
+// accepted (or filed) is not refused later because its layout, or its
+// organization, was put away since.
+func TestEmailRepeatsFindTheirCompositionAfterTheLayoutIsArchived(t *testing.T) {
+	putAway := func(e *materializeEngine) {
+		e.layouts["house"]["status"] = "archived"
+		e.account["status"] = "archived"
+	}
+	t.Run("a repeat of the request id", func(t *testing.T) {
+		i, e, _ := emailFixture(t)
+		i.SetGoalOpener(&directMaterializeGoal{})
+		e.layouts["house"] = layoutRow(t, "house", emailAccount, "active", houseLayout(t))
+		a := emailArgs("org:house")
+		a.RequestId = "req-1"
+		first, err := i.materialize(materializeContext(), "u-alice", "", a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		putAway(e)
+		again, err := i.materialize(materializeContext(), "u-alice", "", a)
+		if err != nil || again["compositionId"] != first["compositionId"] || len(e.compositions) != 1 {
+			t.Fatalf("the repeat did not find its composition: %v %v (rows %d)", again, err, len(e.compositions))
+		}
+	})
+	t.Run("a retry of a step that was interrupted", func(t *testing.T) {
+		e := newMaterializeEngine(t)
+		e.account = map[string]any{"id": emailAccount, "status": "active"}
+		e.layouts["house"] = layoutRow(t, "house", emailAccount, "active", houseLayout(t))
+		flaky := &failOnce{materializeEngine: e, construct: "createLibraryFile", message: "connection reset by peer"}
+		u := &materializeUploader{}
+		first := New(flaky, nil)
+		first.SetUploader(u, "files")
+		if _, err := first.materialize(nestedMaterializeContext(), "u-alice", "", emailArgs("org:house")); err == nil || strings.Contains(err.Error(), terminalFailureCode) {
+			t.Fatalf("the interruption must stay resumable, got %v", err)
+		}
+		putAway(e)
+		sibling := New(flaky, nil)
+		sibling.SetUploader(u, "files")
+		out, err := sibling.materialize(nestedMaterializeContext(), "u-alice", "", emailArgs("org:house"))
+		if err != nil {
+			t.Fatalf("the retry was refused: %v", err)
+		}
+		if row := e.compositions[stringOf(out["compositionId"])]; row["status"] != "ready" {
+			t.Fatalf("the retry did not finish: %v", row)
+		}
+		if doc := filedEmail(t, u); doc.Layout != "org:house" || doc.Subject != "Our house layout" {
+			t.Fatalf("the retry filed %q / %q, want the layout the request was accepted with", doc.Layout, doc.Subject)
+		}
+	})
+	t.Run("a replay of a completed run", func(t *testing.T) {
+		i, e, u := emailFixture(t)
+		e.layouts["house"] = layoutRow(t, "house", emailAccount, "active", houseLayout(t))
+		first, err := i.materialize(nestedMaterializeContext(), "u-alice", "", emailArgs("org:house"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		putAway(e)
+		ctx := common.ContextWithRun(materializeContext(), common.RunContext{RunId: "replay", GoalId: "nexus", SourceRunId: "nexus", SourceGoalId: "v1:work:goal:nexus", StepKey: "file", Mode: common.RunModeReplay, OwnerUserId: "u-alice"})
+		again, err := i.materialize(ctx, "u-alice", "", emailArgs("org:house"))
+		if err != nil || again["outputFileId"] != first["outputFileId"] || u.calls != 1 {
+			t.Fatalf("the replay did not serve its completed file: %v %v (uploads %d)", again, err, u.calls)
+		}
+	})
+}
+
+// The composition records the layout its email was written into, so the record
+// says which one and a recipe saved from it can keep it.
+func TestTheCompositionRecordsItsLayout(t *testing.T) {
+	for _, c := range []struct {
+		args materializeArgs
+		want string
+	}{
+		{emailArgs("builtin:letter"), "builtin:letter"},
+		{emailArgs(""), "builtin:article"},
+		{materializeDraft(), ""},
+	} {
+		i, e, _ := emailFixture(t)
+		out, err := i.materialize(nestedMaterializeContext(), "u-alice", "", c.args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stringOf(e.compositions[stringOf(out["compositionId"])]["layoutId"]); got != c.want {
+			t.Fatalf("%+v recorded layout %q, want %q", c.args, got, c.want)
+		}
+	}
+}
+
+// A recipe keeps the layout its emails are written into, and a run of it is
+// refused as loudly as a request would be when that layout cannot be used.
+func TestRecipeRunWritesIntoItsLayout(t *testing.T) {
+	i, e, _ := emailFixture(t)
+	opener := &directMaterializeGoal{}
+	i.SetGoalOpener(opener)
+	e.recipe = map[string]any{"id": "welcome-recipe", "name": "Welcome", "format": "json", "outputKind": "email_template", "layoutId": "builtin:letter",
+		"description": "A welcome for new subscribers.", "accountIds": []any{emailAccount}}
+	if _, err := i.handleRunRecipe(materializeContext(), map[string]any{"recipeId": "welcome-recipe"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if opener.calls != 1 || len(e.inputs) != 1 {
+		t.Fatalf("the recipe did not start one composition: opens=%d inputs=%d", opener.calls, len(e.inputs))
+	}
+	for id, input := range e.inputs {
+		raw, err := json.Marshal(input["request"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		var saved executionRequest
+		if err := json.Unmarshal(raw, &saved); err != nil {
+			t.Fatal(err)
+		}
+		layout, err := savedEmailLayout(saved)
+		if err != nil || saved.Args.LayoutId != "builtin:letter" || layout.Layout != "builtin:letter" {
+			t.Fatalf("the recipe run lost its layout: args %q, saved %q (%v)", saved.Args.LayoutId, layout.Layout, err)
+		}
+		if got := stringOf(e.compositions[id]["layoutId"]); got != "builtin:letter" {
+			t.Fatalf("the composition records layout %q", got)
+		}
+	}
+}
+
+func TestRecipeRunRefusesALayoutItCannotUse(t *testing.T) {
+	letter, _ := builtinLayout(t, "builtin:letter")
+	for name, c := range map[string]struct {
+		recipe map[string]any
+		want   string
+	}{
+		"an archived layout": {map[string]any{"outputKind": "email_template", "format": "json", "layoutId": "org:old"},
+			"compose: that layout is archived; restore it first"},
+		"another organization's layout": {map[string]any{"outputKind": "email_template", "format": "json", "layoutId": "org:theirs"},
+			"compose: that layout belongs to another organization"},
+		"a layout that does not exist": {map[string]any{"outputKind": "email_template", "format": "json", "layoutId": "org:gone"},
+			"compose: that layout is not readable by you"},
+		"a layout on a recipe that is not an email": {map[string]any{"format": "markdown", "layoutId": "builtin:letter"},
+			"compose: layoutId applies only to email templates"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			i, e, _ := emailFixture(t)
+			opener := &directMaterializeGoal{}
+			i.SetGoalOpener(opener)
+			e.layouts["old"] = layoutRow(t, "old", emailAccount, "archived", letter)
+			e.layouts["theirs"] = layoutRow(t, "theirs", "other-client", "active", letter)
+			e.recipe = map[string]any{"id": "r1", "name": "Welcome", "description": "A welcome.", "accountIds": []any{emailAccount}}
+			maps.Copy(e.recipe, c.recipe)
+			if _, err := i.handleRunRecipe(materializeContext(), map[string]any{"recipeId": "r1"}, 0); err == nil || err.Error() != c.want {
+				t.Fatalf("refusal = %v, want %q", err, c.want)
+			}
+			if opener.calls != 0 || len(e.compositions) != 0 || len(e.inputs) != 0 {
+				t.Fatalf("a refused recipe run wrote rows: opens=%d %v %v", opener.calls, e.compositions, e.inputs)
+			}
+		})
+	}
+}
+
+// A layout belongs to an email template, and the check is made where every
+// entry point arrives: the capability and a recipe run alike.
+func TestALayoutOutsideAnEmailIsRefusedEverywhere(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	for _, args := range []map[string]any{
+		{"name": "Notes", "format": "markdown", "layoutId": "builtin:letter"},
+		{"name": "Data", "format": "json", "layoutId": "builtin:letter"},
+	} {
+		if _, err := i.handleMaterialize(nestedMaterializeContext(), args, 0); err == nil || err.Error() != "compose: layoutId applies only to email templates" {
+			t.Fatalf("layoutId on %v: refusal = %v", args, err)
+		}
+	}
+	if len(e.calls) != 0 {
+		t.Fatalf("the refusal reached the engine: %v", e.calls)
+	}
+}
+
+// What the composer wrote, and what Parse makes of it, is the same on every
+// attempt: a refusal is final. It is never read as a passing fault because the
+// words in it happen to look like one (a block id with "eof" or "429" in it).
+func TestARefusalIsNeverRetriedAsTransient(t *testing.T) {
+	for _, id := range []string{"geofence", "promo-429", "timeout-banner"} {
+		t.Run(id, func(t *testing.T) {
+			i, e, u := emailFixture(t)
+			a := emailArgs("builtin:letter")
+			a.Statement = "A welcome"
+			compositionId, input := acceptAsAPerson(t, i, a)
+			var asked []ComposeRequest
+			err := adoptTheRun(anotherReplica(e, u, contentComposer(&asked, emaildoc.Content{Subject: "Hi", Blocks: []emaildoc.ContentItem{{ID: id, Text: text("x")}}})), input)
+			failedWith(t, e, u, compositionId, `compose: the email draft could not be used: the draft wrote to a block this layout does not have: "`+id+`"`, err)
+		})
 	}
 }

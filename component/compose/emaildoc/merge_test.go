@@ -218,6 +218,43 @@ func TestMergeKeepsLinkTagsInText(t *testing.T) {
 	}
 }
 
+// A link tag can also stand in text as itself ("Your own link: {{viewUrl}}"),
+// and it is kept there too: new text must mention each tag as often as the
+// layout's did, and link to it as often. A bare tag may become a link to
+// itself; a link may not become bare text, and neither may go.
+func TestMergeKeepsBareLinkTagsInText(t *testing.T) {
+	layout, err := Parse([]byte(layoutJSON(`{"id":"note","type":"text","text":"Your own copy: {{viewUrl}}"},` +
+		`{"id":"head","type":"heading","text":"Confirm at {{confirmUrl}}"},{"id":"plain","type":"text","text":"Nothing linked here."}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := []struct{ id, text, want string }{
+		{"note", "Read it in your browser.", `the draft tried to replace the {{viewUrl}} link on "note"`},
+		{"note", "Your own copy: https://evil.test/view", `the draft tried to replace the {{viewUrl}} link on "note"`},
+		{"head", "Welcome aboard", `the draft tried to replace the {{confirmUrl}} link on "head"`},
+	}
+	for _, c := range refused {
+		if _, err := Merge(layout, Content{Subject: "S", Blocks: []ContentItem{{ID: c.id, Text: textPtr(c.text)}}}, nil); err == nil || err.Error() != c.want {
+			t.Errorf("%s -> %q: refusal = %v, want %q", c.id, c.text, err, c.want)
+		}
+	}
+	for id, text := range map[string]string{
+		"note": "Prefer a browser? Open [your own copy]({{viewUrl}}).",
+		"head": "Almost there: {{confirmUrl}}",
+	} {
+		got, err := Merge(layout, Content{Subject: "S", Blocks: []ContentItem{{ID: id, Text: textPtr(text)}}}, nil)
+		if err != nil || blockByID(t, got, id).Text != text {
+			t.Errorf("%s -> %q keeps its tag and was refused: %v", id, text, err)
+		}
+	}
+	// Nor can a draft put a link tag inside an address of its own, anywhere:
+	// Parse refuses it with the rest of the document.
+	if _, err := Merge(layout, Content{Subject: "S", Blocks: []ContentItem{{ID: "plain", Text: textPtr("[Leave](https://x.test/?u={{unsubscribeUrl}})")}}}, nil); err == nil ||
+		!strings.Contains(err.Error(), "{{unsubscribeUrl}} must be the whole link") {
+		t.Fatalf("a link tag inside a drafted address: %v", err)
+	}
+}
+
 func TestMergeRefusesACustomDocument(t *testing.T) {
 	custom, err := Parse([]byte(`{"subject":"Plain","textBody":"Hello","htmlBody":""}`))
 	if err != nil {
