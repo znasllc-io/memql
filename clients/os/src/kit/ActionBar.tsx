@@ -115,10 +115,14 @@ export interface ActionBarProps {
   detail?: string;
   tone?: ActionBarTone;
   /**
-   * A MEASURE OF A WAIT, and nothing else: "0:42", "checked 40s ago". A bar
-   * that says "Waiting" with no figure beside it cannot answer the one thing
-   * a person waiting wants to know -- whether this has been a moment or ten
-   * minutes. Tabular, quiet, last in the state group. Drawn only when given.
+   * WHERE TEXT THAT CHANGES ON ITS OWN GOES: the measure of a wait ("0:42",
+   * "checked 40s ago"), or a live figure. A bar that says "Waiting" with no
+   * figure beside it cannot answer the one thing a person waiting wants to
+   * know -- whether this has been a moment or ten minutes. It stands in the
+   * state group, outside the row the press hold watches, so a figure that ticks
+   * never holds the bar's presses; the same text beside the acts (`children`)
+   * would, on every tick. Tabular, quiet, last in the state group. Drawn only
+   * when given.
    */
   meta?: string;
   /**
@@ -135,8 +139,8 @@ export interface ActionBarProps {
    * Drawn beside the acts: the question an ask turns the bar into, or the typed
    * confirmation a delete takes. What it draws is part of what the bar offers,
    * so a change to it holds every press (`CONFIRM_SETTLE_MS`): text that
-   * changes on its own -- a ticking wait, a live figure -- belongs in `meta`,
-   * where it would not keep the bar holding presses.
+   * changes on its own -- a ticking wait, a live figure -- goes in `meta`, not
+   * here, where every tick would hold the bar's presses again.
    */
   children?: ReactNode;
   /**

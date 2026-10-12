@@ -149,9 +149,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     first click put there. An ask is the bar's acts (the way out a text
     act, the act itself the button) with the question drawn beside them.
     Every bar, decided in the kit; a bar's first acts, and a bar that did
-    not change, take a press at once. Text that changes on its own (a
-    ticking wait, a live figure) goes in the bar's `meta`, never beside the
-    acts, where every tick would hold the bar's presses again.
+    not change, take a press at once. Text that changes on its own (the
+    measure of a wait, a live figure) goes in the bar's `meta`, in the state
+    group outside what the hold watches, never beside the acts, where every
+    tick would hold the bar's presses again.
     **A question answered in place, outside any bar, is held the same way**
     (a row's Revoke that becomes "Revoke it / Keep it", a panel's
     Disconnect that expands into Cancel and a confirmation, a dropped
@@ -507,8 +508,9 @@ surface in the shell that read as a single thought.
   runs, hide Retry; offer Done only after every required check passes.
 - **A wait is visible.** When it is the cluster's turn (`tone: "busy"`) there
   is no forward act, the bar's top hairline becomes a moving thread, the dot
-  becomes a spinner, the state takes the accent, and `meta` measures the wait
-  ("0:42", "checked 40s ago"). Waiting for a record somebody has not created
+  becomes a spinner, the state takes the accent, and `meta` carries the measure
+  of the wait ("0:42", "checked 40s ago") -- the one place text that ticks
+  belongs (rule 12). Waiting for a record somebody has not created
   yet is a wait and is drawn as one, not as a failure. Reduced motion keeps the
   held line and the held dot.
 - **The floor has two verbs and one button.** *Cancel* undoes the whole thing:

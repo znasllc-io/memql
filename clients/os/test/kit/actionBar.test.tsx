@@ -558,6 +558,48 @@ describe("everything pressable in a bar, not only its acts", () => {
   });
 });
 
+// ONE RULE, IN BOTH PLACES (ActionBar's `meta` and `children`, DESIGN.md rule 12):
+// text that changes on its own goes in `meta`. It stands in the state group,
+// outside what the hold watches, so a figure that ticks never holds the bar;
+// the same text drawn beside the acts is part of what the bar offers, and every
+// tick of it would hold every press again.
+describe("text that changes on its own", () => {
+  it("in meta never holds the bar, however often it ticks", () => {
+    const stop = vi.fn();
+    const tick = (seconds: number) => (
+      <ActionBar state="Waiting for studio-mac-mini" tone="busy" meta={`0:${String(seconds).padStart(2, "0")}`} acts={[{ label: "Stop waiting", text: true, onAct: stop }]} />
+    );
+    const view = render(tick(41));
+    later(1_000);
+    view.rerender(tick(42));
+    // A press the moment after a tick is taken: the figure is not what the bar offers.
+    press("Stop waiting");
+    expect(stop).toHaveBeenCalledTimes(1);
+    later(1_000);
+    view.rerender(tick(43));
+    press("Stop waiting");
+    expect(stop).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("0:43")).toBeTruthy();
+  });
+
+  it("beside the acts holds the bar on every change of it: that is the other place", () => {
+    const stop = vi.fn();
+    const tick = (seconds: number) => (
+      <ActionBar state="Waiting for studio-mac-mini" tone="busy" acts={[{ label: "Stop waiting", text: true, onAct: stop }]}>
+        <span>{`0:${String(seconds).padStart(2, "0")}`}</span>
+      </ActionBar>
+    );
+    const view = render(tick(41));
+    later(1_000);
+    view.rerender(tick(42));
+    press("Stop waiting");
+    expect(stop).not.toHaveBeenCalled();
+    later(400);
+    press("Stop waiting");
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("a text act that cannot be undone", () => {
   it("reads as one, not as the muted way out", () => {
     // "Cancel campaign" on an Edit page is a label beside the button, and a
