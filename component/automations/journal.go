@@ -127,8 +127,8 @@ type workJournal struct {
 
 	// hold, when set, keeps every write until release: a directly called
 	// logic's journal, whose run opens only if the logic writes, and a
-	// scheduled firing's (heldUntilWrite), whose run opens at its first write
-	// or its failure.
+	// scheduled firing's (heldUntilWrite), whose run opens at its first write,
+	// its failure, or a park on a human wait.
 	hold *heldWrites
 }
 
@@ -419,7 +419,8 @@ func (j *workJournal) persistApproval(ctx context.Context, exec *AutomationExecu
 // heldWrites keeps a journal's writes until the run they belong to opens: a
 // directly called logic's run, which opens at the logic's first write
 // (logic_statements.go), and a scheduled firing's, which opens at the run's
-// first write or when it fails (heldUntilWrite, closeRun). A journal whose run
+// first write, when it fails, or when it parks on a human wait
+// (heldUntilWrite, closeRun, sequence.go). A journal whose run
 // never opens writes nothing. Held writes are kept unrendered; they cost a
 // render only if they are written.
 type heldWrites struct {
@@ -826,9 +827,9 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 		// its failure is the one record it can leave. Everything below reads or
 		// updates the run's row, so the row has to exist first: release writes it,
 		// then the steps held behind it, in order. It is a no-op on a journal that
-		// is not held, and only a failure opens a hold -- a firing cancelled before
-		// it wrote anything (a shutdown, a superseded `restart` run) stays
-		// unrecorded.
+		// is not held. Short of a write, only a failure here or a park on a human
+		// wait (sequence.go) opens a hold -- a firing cancelled before it wrote
+		// anything (a shutdown, a superseded `restart` run) stays unrecorded.
 		j.release()
 		// Integration/mesh errors may retain the message but lose their Go
 		// type. The shared Stop receipt is authoritative on every replica;

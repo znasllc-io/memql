@@ -234,7 +234,12 @@ func TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel(t *testing.T) {
 		t.Fatalf("reading the front-door page: %v", err)
 	}
 	doc := string(raw)
-	for _, want := range []string{customDomainSelector, doorSelector, protocolPath, "'" + protocolFilter, "default-backend=error-pages"} {
+	// The selectors must be the loop's values AND reach `get` as its -l: a
+	// strings.Contains on the selectors alone stays green when the -l is
+	// dropped, and the same loop then annotates every plain-HTTP Ingress in the
+	// namespace, the front door's own (mcp-front-door included).
+	loop := "for sel in " + customDomainSelector + " " + doorSelector + "; do"
+	for _, want := range []string{loop, `get ingress -l "$sel"`, protocolPath, "'" + protocolFilter, "default-backend=error-pages"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("docs/public/operate/front-door.md does not contain %q; the upgrade backfill the page gives must select exactly what the builders annotate", want)
 		}
