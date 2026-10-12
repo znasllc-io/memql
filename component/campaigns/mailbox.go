@@ -20,8 +20,8 @@ import (
 // see, and the rule that matters: ANY row that opted out, opts the mailbox out.
 
 const (
-	// digestWindow mirrors the `paginate` on recipientInAudienceByDigest: wider
-	// than the duplicates any one mailbox holds. Kept as a named constant so a
+	// digestWindow mirrors the `paginate` on recipientInAudienceByDigest. A full
+	// page is refused because it can hide an opted-out duplicate. Kept so a
 	// reader comparing the Go and the DSL finds one value, and held to it by a test.
 	digestWindow = 50
 
@@ -51,9 +51,10 @@ const (
 var mailboxRosterScanPages = 10
 
 // ErrMailboxUndecidable is what MailboxMembers returns when it cannot rule out
-// that a mailbox opted out: the audience holds a page of rows without a digest and
-// more pages of roster than the scan will read. The caller must not read it as "no
-// such mailbox" -- a public form says it cannot take the subscription for now.
+// that a mailbox opted out: either its digest lookup filled a page, or the audience
+// holds a page of rows without a digest and more roster than the scan will read.
+// The caller must not read it as "no such mailbox" -- a public form says it cannot
+// take the subscription for now.
 var ErrMailboxUndecidable = errors.New("campaigns: cannot rule out an earlier opt-out for this address")
 
 // MailboxMembers returns every row of the audience that holds this mailbox,

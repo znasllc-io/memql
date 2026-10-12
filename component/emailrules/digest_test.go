@@ -92,13 +92,9 @@ func TestAddressDigestIsTheMailboxNotItsSpelling(t *testing.T) {
 	}
 }
 
-// TestTheDigestLessWindowMirrorsItsQuery: digestLessWindow decides when the page of
-// rows without a digest is full, and so whether a firing can say the mailbox is not
-// among them. It is the `paginate` of recipientsWithoutDigestInAudience, written
-// twice; a query that returned more than this package believes would never be
-// "full" and a firing would take a page for the whole set, and one that returned
-// less would refuse every firing. campaigns pins its own copy the same way.
-func TestTheDigestLessWindowMirrorsItsQuery(t *testing.T) {
+// Both windows must match their query's paginate: an incomplete page cannot be
+// treated as the whole mailbox. Campaigns pins its copies the same way.
+func TestTheDigestWindowsMirrorTheirQueries(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("no caller")
@@ -108,19 +104,26 @@ func TestTheDigestLessWindowMirrorsItsQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 	queries := string(raw)
-	i := strings.Index(queries, "query recipient recipientsWithoutDigestInAudience {")
-	if i < 0 {
-		t.Fatal("query recipientsWithoutDigestInAudience is not in queries.memql")
-	}
-	rest := queries[i:]
-	if end := strings.Index(rest, "\n}\n"); end > 0 {
-		rest = rest[:end]
-	}
-	m := regexp.MustCompile(`paginate\s+(\d+)`).FindStringSubmatch(rest)
-	if m == nil {
-		t.Fatal("recipientsWithoutDigestInAudience declares no paginate")
-	}
-	if got, _ := strconv.Atoi(m[1]); got != digestLessWindow {
-		t.Errorf("recipientsWithoutDigestInAudience paginates %d, digestLessWindow says %d", got, digestLessWindow)
+	for name, window := range map[string]int{
+		"recipientInAudienceByDigest":       digestWindow,
+		"recipientsWithoutDigestInAudience": digestLessWindow,
+	} {
+		t.Run(name, func(t *testing.T) {
+			i := strings.Index(queries, "query recipient "+name+" {")
+			if i < 0 {
+				t.Fatalf("query %s is not in queries.memql", name)
+			}
+			rest := queries[i:]
+			if end := strings.Index(rest, "\n}\n"); end > 0 {
+				rest = rest[:end]
+			}
+			m := regexp.MustCompile(`paginate\s+(\d+)`).FindStringSubmatch(rest)
+			if m == nil {
+				t.Fatalf("%s declares no paginate", name)
+			}
+			if got, _ := strconv.Atoi(m[1]); got != window {
+				t.Errorf("%s paginates %d, lookup window says %d", name, got, window)
+			}
+		})
 	}
 }

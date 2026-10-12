@@ -89,10 +89,12 @@ type firingReplica struct {
 	// how the test drives a rule into its breaker.
 	failRuns atomic.Bool
 
-	mu    sync.Mutex
-	ran   map[string]int // automation name -> firings handed to the runner here
-	gated map[string]int // owner -> owner gate consultations here
-	trips []error        // the error of each pause a trip ran here
+	mu        sync.Mutex
+	ran       map[string]int // automation name -> firings handed to the runner here
+	claimed   map[string]int // automation name -> execution claims won here
+	prevented map[string]int // automation name -> duplicate execution claims refused here
+	gated     map[string]int // owner -> owner gate consultations here
+	trips     []error        // the error of each pause a trip ran here
 	// tripOutcomes is what each of those pauses did.
 	tripOutcomes []memql.AuthoredTripOutcome
 }
@@ -107,6 +109,19 @@ func (r *firingReplica) read(counter map[string]int, key string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return counter[key]
+}
+
+// Claim records counters for the named automation. Reconciliation may arm other
+// tests' active bundles from the shared database; their claims must not affect
+// this rule's once-per-event assertion.
+func (r *firingReplica) Claim(ctx context.Context, name, key string) bool {
+	claimed := r.guard.Claim(ctx, name, key)
+	if claimed {
+		r.bump(r.claimed, name)
+	} else {
+		r.bump(r.prevented, name)
+	}
+	return claimed
 }
 
 func quietFiringLogger() *slog.Logger {
@@ -158,6 +173,7 @@ func newFiringReplica(t *testing.T, dsn string, ownsTheOwner bool) *firingReplic
 		db: db, bus: events.NewBus(), eng: eng, registry: memql.NewAuthoredRuntimeRegistry(),
 		guard: automations.NewClusterExecutionGuard(func() *bun.DB { return db }, logger),
 		ran:   map[string]int{}, gated: map[string]int{},
+		claimed: map[string]int{}, prevented: map[string]int{},
 	}
 	t.Cleanup(r.bus.Close)
 	eng.SetEventBus(r.bus)
@@ -165,7 +181,7 @@ func newFiringReplica(t *testing.T, dsn string, ownsTheOwner bool) *firingReplic
 
 	run := automations.NewAuthoredRunner(automations.AuthoredRunnerOptions{
 		Logger: logger, Engine: eng, EventBus: r.bus,
-		StepRegistry: automationSteps.NewRegistry(), ClusterGuard: r.guard,
+		StepRegistry: automationSteps.NewRegistry(), ClusterGuard: r,
 	})
 	// As app/engine_authored.go wires it: a trip pauses the version that
 	// failed through the engine, off the failing run's goroutine, unless the
@@ -387,8 +403,8 @@ func TestAnEmailRuleFiresOnceWhereItsWriteHappened(t *testing.T) {
 			"payload": map[string]any{"title": "Water the plants"},
 		})
 	}
-	claimedBefore := a.guard.Claimed() + b.guard.Claimed()
-	preventedBefore := a.guard.DuplicatesPrevented() + b.guard.DuplicatesPrevented()
+	claimedBefore := a.read(a.claimed, name) + b.read(b.claimed, name)
+	preventedBefore := a.read(a.prevented, name) + b.read(b.prevented, name)
 	var wg sync.WaitGroup
 	for _, r := range []*firingReplica{a, b} {
 		wg.Add(1)
@@ -396,8 +412,8 @@ func TestAnEmailRuleFiresOnceWhereItsWriteHappened(t *testing.T) {
 	}
 	wg.Wait()
 	got = waitFired(3)
-	claimed := a.guard.Claimed() + b.guard.Claimed() - claimedBefore
-	prevented := a.guard.DuplicatesPrevented() + b.guard.DuplicatesPrevented() - preventedBefore
+	claimed := a.read(a.claimed, name) + b.read(b.claimed, name) - claimedBefore
+	prevented := a.read(a.prevented, name) + b.read(b.prevented, name) - preventedBefore
 	if got.firedCount != 3 || claimed != 1 || prevented != 1 {
 		t.Fatalf("one event observed on both nodes: fired count %d (want 3), execution claims won %d and duplicates prevented %d "+
 			"(want 1 and 1)", got.firedCount, claimed, prevented)

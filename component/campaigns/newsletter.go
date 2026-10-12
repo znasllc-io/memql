@@ -335,9 +335,9 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	// made by hand sets only the row, and there is no suppression entry to find.
 	members, err := w.store.MailboxMembers(ctx, audienceID, address)
 	if errors.Is(err, ErrMailboxUndecidable) {
-		// An audience too large to search to the end while some of its rows still
-		// have no digest. Guessing "not there" could welcome a mailbox that opted
-		// out; the sweep makes the question answerable, and the visitor can ask again.
+		// A full digest page or an incomplete search of rows without a digest
+		// cannot rule out an opt-out. Refuse until the sweep or consolidation of
+		// duplicate memberships makes the whole mailbox readable.
 		w.logger.Warn("campaigns: a signup could not be checked against the audience's opt-outs, so it was not taken",
 			"audience", audienceID, "error", err)
 		return nil, fmt.Errorf("this newsletter cannot take new subscriptions right now; please try again later")
@@ -460,6 +460,9 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		//
 		// Both come before the consent is written, so a refused signup leaves nothing.
 		fresh, err := w.store.RecipientsInAudienceByDigest(locked, audienceID, EmailDigest(address))
+		if errors.Is(err, ErrMailboxUndecidable) {
+			return nil, signupsBusy
+		}
 		if err != nil {
 			return fail(err)
 		}

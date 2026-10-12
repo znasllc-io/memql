@@ -422,11 +422,10 @@ func (s *Store) RecipientsForAudience(ctx context.Context, audienceID string) ([
 // were enrolled again as subscribed), and a mailbox beyond the hundred was enrolled
 // a second time.
 //
-// complete is false when the page of rows with no digest was FULL: it proves
-// nothing about the rows beyond it, an audience nobody has stamped yet holds more
-// of them than a page, and the caller must not read "not among them" as "not a
-// member". The campaigns package reads the whole roster in that case; a rule has
-// no roster read, so it refuses the firing and says why.
+// complete is false when EITHER page is full: there may be an opted-out row
+// beyond it, so the caller must not treat the page as the whole mailbox. The
+// campaigns package can fall back to the roster for rows without a digest; a
+// rule has no roster read, so it refuses the firing and says why.
 //
 // Every read here decides a write, so the caller's ctx must be a fresh read.
 func (s *Store) MailboxMembers(ctx context.Context, audienceID, address string) (members []map[string]any, complete bool, err error) {
@@ -450,7 +449,7 @@ func (s *Store) MailboxMembers(ctx context.Context, audienceID, address string) 
 			}
 		}
 	}
-	return members, len(unstamped) < digestLessWindow, nil
+	return members, len(stamped) < digestWindow && len(unstamped) < digestLessWindow, nil
 }
 
 // TemplateByID reads the copy both lanes send.

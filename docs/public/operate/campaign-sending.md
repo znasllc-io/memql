@@ -301,6 +301,12 @@ sending it a welcome, including a row opted out by hand and a row beside a
 duplicate for the same mailbox. The lookup is not an index read: the cost of
 each signup grows with the number of recipients in the cluster.
 
+The digest lookup returns at most 50 memberships. If it fills that page, the
+signup and row-address email rule refuse to proceed: an opted-out duplicate
+could be beyond the page. No consent, enrollment or send follows that incomplete
+answer. Consolidate duplicate memberships while preserving any opt-out before
+retrying; the digest sweep does not remove duplicates.
+
 **Rolling out the digest.** The digest is put on existing recipients by a sweep
 in the campaigns worker, not by a migration. A recipient record refuses a field
 it does not declare, so a replica still running the previous release cannot

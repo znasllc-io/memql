@@ -1237,15 +1237,9 @@ func (s *Store) RecipientByID(ctx context.Context, recipientID string) (Recipien
 // digest of the row's own address, so a caller compares each row's address
 // before it believes the match. MailboxMembers does.
 //
-// This does not see rows that carry no digest (RecipientsWithoutDigestInAudience
-// is the other half), and it is NOT a keyed read in the database's sense. The
-// engine collapses every current recipient version in the cluster to its newest
-// before it applies a payload filter, so the cost grows with the cluster's
-// recipients, not with the audience: about a second at 200,000. A partial
-// expression index on (audienceId, emailDigest) was tried and does not help --
-// the plan is the same with it, because the filter sits above that collapse and
-// cannot use it -- so none ships; an index would pay only once the engine pushes a
-// payload filter into the collapse.
+// Rows that carry no digest are checked by RecipientsWithoutDigestInAudience.
+// A full page returns ErrMailboxUndecidable: an opted-out duplicate may follow
+// it. The page bounds the result, not the number of rows the planner examines.
 //
 // A digest of "" matches NOTHING and is not sent: EmailDigest answers "" for an
 // address that cannot be a mailbox, and as a filter value "" would select every
@@ -1257,6 +1251,12 @@ func (s *Store) RecipientsInAudienceByDigest(ctx context.Context, audienceID, di
 	rows, err := s.rows(ctx, call("query", "recipientInAudienceByDigest", arg{"audienceId", audienceID}, arg{"emailDigest", digest}))
 	if err != nil {
 		return nil, err
+	}
+	// A full page can hide an opted-out duplicate. This read also runs under
+	// the signup lock, so refuse an incomplete answer instead of walking more
+	// pages while holding the lock.
+	if len(rows) >= digestWindow {
+		return nil, fmt.Errorf("%w: the mailbox filled the digest lookup's %d-row window", ErrMailboxUndecidable, digestWindow)
 	}
 	return recipientsFromRows(rows), nil
 }

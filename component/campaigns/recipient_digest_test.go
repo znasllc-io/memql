@@ -186,6 +186,28 @@ func mailboxRow(short, email, status string) map[string]any {
 	return map[string]any{"id": "v1:campaigns:recipient:" + short, "email": email, "subscriptionStatus": status}
 }
 
+func TestDigestLookupRefusesAPartialMailbox(t *testing.T) {
+	const address = "member@example.test"
+	rows := make([]map[string]any, digestWindow)
+	for i := range rows {
+		rows[i] = mailboxRow(fmt.Sprintf("sibling-%d", i), address, "subscribed")
+	}
+	engine := &mailboxEngine{byDigest: rows}
+	store := NewStore(engine)
+	// Another duplicate may have opted out beyond this first page. Both the
+	// preflight and the locked recheck must refuse to use a partial answer.
+	if _, err := store.MailboxMembers(context.Background(), "aud-1", address); !errors.Is(err, ErrMailboxUndecidable) {
+		t.Fatalf("mailbox preflight accepted a full digest page: %v", err)
+	}
+	if _, err := store.RecipientsInAudienceByDigest(context.Background(), "aud-1", EmailDigest(address)); !errors.Is(err, ErrMailboxUndecidable) {
+		t.Fatalf("locked digest lookup accepted a full page: %v", err)
+	}
+	engine.byDigest = rows[:digestWindow-1]
+	if got, err := store.MailboxMembers(context.Background(), "aud-1", address); err != nil || len(got) != digestWindow-1 {
+		t.Fatalf("complete digest page: got %d members, error %v", len(got), err)
+	}
+}
+
 func ids(rs []Recipient) []string {
 	var out []string
 	for _, r := range rs {

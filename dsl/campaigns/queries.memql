@@ -414,11 +414,11 @@ query recipient recipientById {
 
 /// The memberships for one mailbox in one audience, by address digest. Organization-authorized.
 /// The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a
-/// signup or a row-address rule finds the rows a mailbox holds without walking the roster. EVERY
-/// match comes back, in any subscription state, oldest first: the same mailbox can hold more than
-/// one row (a manual add beside an earlier row, a race), one of them can have opted out by hand
-/// while another has not, and the caller must see all of them to refuse for the one that did. The
-/// window is far wider than any mailbox's duplicates. A row carries a digest only if it was written
+/// signup or a row-address rule finds a page of the rows a mailbox holds without walking the roster.
+/// Matches are in any subscription state, oldest first: the same mailbox can hold more than one row
+/// (a manual add beside an earlier row, a race), and one can have opted out while another has not.
+/// A FULL page cannot rule out another opted-out row beyond it; the caller must refuse rather than
+/// assume it saw every membership. A row carries a digest only if it was written
 /// by addRecipient or filled in by the digest sweep, so a mailbox can also hold rows this does not
 /// return: recipientsWithoutDigestInAudience is the other half. The caller checks each row's own
 /// address before it believes the key; a raw write can set a digest that is not its address's.

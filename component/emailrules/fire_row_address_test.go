@@ -182,6 +182,27 @@ func fireForContact(t *testing.T, address string, audience audienceAnswers) (*ro
 	return e, out
 }
 
+func TestRowAddressRefusesAFullDigestPage(t *testing.T) {
+	rows := make([]map[string]any, digestWindow)
+	for i := range rows {
+		rows[i] = memberRow(fmt.Sprintf("sibling-%d", i), "member@example.test", "subscribed")
+	}
+	// The query's first page can hide an opted-out duplicate after these rows.
+	e, out := fireForContact(t, "member@example.test", audienceAnswers{byDigest: rows})
+	if len(out.Refusals) == 0 || out.Sent != 0 {
+		t.Fatalf("a partial mailbox was used for a send: %+v", out)
+	}
+	for _, prefix := range []string{"mutation addRecipient(", "builtin campaignSendToRecipient("} {
+		if calls := e.callsWithPrefix(prefix); len(calls) != 0 {
+			t.Errorf("incomplete digest lookup reached %s: %v", prefix, calls)
+		}
+	}
+	_, out = fireForContact(t, "member@example.test", audienceAnswers{byDigest: rows[:digestWindow-1]})
+	if out.Sent != 1 || len(out.Refusals) != 0 {
+		t.Fatalf("a complete mailbox should still send: %+v", out)
+	}
+}
+
 // sendsTo returns the recipient ids the firing sent to, bare.
 func (e *rowAddressEngine) sendsTo() []string {
 	var ids []string
@@ -351,8 +372,8 @@ func TestRowAddressRefusesWhenTheRowsWithNoDigestCannotRuleTheMailboxOut(t *test
 	}
 
 	e, out := fireForContact(t, "new@example.test", audienceAnswers{withoutDigest: page(digestLessWindow)})
-	if len(out.Refusals) != 1 || !strings.Contains(out.Refusals[0], "older recipients") || !strings.Contains(out.Refusals[0], "Nothing was sent") {
-		t.Errorf("refusals = %q, want one that says older recipients are still being indexed and that nothing was sent", out.Refusals)
+	if len(out.Refusals) != 1 || !strings.Contains(out.Refusals[0], "could not check every membership") || !strings.Contains(out.Refusals[0], "Nothing was sent") {
+		t.Errorf("refusals = %q, want one that says the membership lookup was incomplete and nothing was sent", out.Refusals)
 	}
 	for _, prefix := range []string{"mutation addRecipient(", "builtin campaignSendToRecipient("} {
 		if calls := e.callsWithPrefix(prefix); len(calls) != 0 {
@@ -414,7 +435,7 @@ func TestARefusedRowAddressFiringKeepsTheCreatedRulesClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Refusals) != 1 || !strings.Contains(out.Refusals[0], "older recipients") || out.Sent != 0 {
+	if len(out.Refusals) != 1 || !strings.Contains(out.Refusals[0], "could not check every membership") || out.Sent != 0 {
 		t.Fatalf("the firing was not refused for want of an answer: %+v", out)
 	}
 

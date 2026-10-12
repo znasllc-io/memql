@@ -47,6 +47,10 @@ import (
 // and decides when a page is full: a full page says nothing about the rows beyond it.
 const digestLessWindow = 50
 
+// digestWindow mirrors recipientInAudienceByDigest. A full page may hide an
+// opted-out duplicate, even when every recipient already carries a digest.
+const digestWindow = 50
+
 // normalizeAddress returns the form an address is compared and digested under,
 // or "" when the text cannot be a mailbox.
 func normalizeAddress(addr string) string {

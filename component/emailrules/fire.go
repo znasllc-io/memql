@@ -419,7 +419,7 @@ func (f *Firer) planRowAddress(ctx context.Context, rule Rule, event map[string]
 	}
 	if !complete {
 		out.Refusals = append(out.Refusals, fmt.Sprintf(
-			"could not tell whether %q is already in the audience: older recipients are still being indexed. Nothing was sent; make the change again later",
+			"could not check every membership for %q in the audience. Nothing was sent; try again later",
 			rule.RecipientField))
 		return plan, nil
 	}

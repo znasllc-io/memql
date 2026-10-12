@@ -102,6 +102,20 @@ func (n *digestNewsletter) assertTheFormDidNothing(t *testing.T, rosterBefore in
 	}
 }
 
+func TestAnOptOutBeyondTheDigestPageCannotBeWelcomed(t *testing.T) {
+	n := newEmptyNewsletter(t, "consent-digest-page")
+	for i := 0; i < digestWindow; i++ {
+		n.addStamped(t, fmt.Sprintf("sibling-%d", i), consentMailbox, "subscribed")
+	}
+	n.addStamped(t, "opted-out-last", consentMailbox, "unsubscribed")
+	n.args["email"] = consentMailbox
+	_, err := n.worker.handleSubscribe(n.owner, n.args, 0)
+	if err == nil || !strings.Contains(err.Error(), "try again later") {
+		t.Fatalf("signup with an unseen opted-out duplicate: %v", err)
+	}
+	n.assertTheFormDidNothing(t, digestWindow+1)
+}
+
 // TestAHandOptedOutDuplicateRefusesTheFormWhicheverRowComesFirst: a mailbox can
 // hold more than one row (a manual add beside an earlier row, a race), and the
 // engine lists them by the time of their last write. The form refuses when ANY
