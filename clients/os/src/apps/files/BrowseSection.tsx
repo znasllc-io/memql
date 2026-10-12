@@ -18,6 +18,7 @@ import { downloadArtifact } from "./actions/download";
 import { editorFilename, isZipArtifact } from "../../items/editorPreference";
 import { useOsConnection } from "../../live/connection";
 import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
+import { FolderSelect, folderOptions } from "../../items/FolderSelect";
 import { planArchive, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
 
 import { MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION } from "../../items/materialize";
@@ -1010,19 +1011,14 @@ export function BrowseSection({
         <Notice tone="warn" sentence={`Move "${artifactName(rowMove)}" to another folder`}>
           <div className="os-files-confirm">
             <span className="os-files-move-pick">
-            <Select
-              id={`files-move-${rowMove.id}`}
-              label="Move to folder"
-              value={rowMove.folderId}
-              onChange={(folderId) => void moveRowTo(rowMove, folderId)}
-            >
-              <option value="">Library (top level)</option>
-              {flatFolderOptions(tree).map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </Select>
+              {/* The rail's own tree, as the picker's rows: every folder the tree placed is a live one. */}
+              <FolderSelect
+                id={`files-move-${rowMove.id}`}
+                label="Move to folder"
+                value={rowMove.folderId}
+                onChange={(folderId) => void moveRowTo(rowMove, folderId)}
+                options={folderOptions([...tree.byId.values()].map((node) => node.folder))}
+              />
             </span>
             <Button onClick={() => setRowMove(null)}>Cancel</Button>
           </div>
@@ -1172,17 +1168,6 @@ function AddMenu({
       ) : null}
     </div>
   );
-}
-
-/** The tree flattened for the move picker, depth as indentation. */
-function flatFolderOptions(tree: FolderTree): Array<{ id: string; label: string }> {
-  const out: Array<{ id: string; label: string }> = [];
-  const walk = (node: TreeNode, depth: number) => {
-    out.push({ id: node.folder.id, label: `${"  ".repeat(depth)}${node.folder.name}` });
-    for (const child of node.children) walk(child, depth + 1);
-  };
-  for (const root of tree.roots) walk(root, 0);
-  return out;
 }
 
 function UploadPlaceholder({ task }: { task: UploadTask }) {

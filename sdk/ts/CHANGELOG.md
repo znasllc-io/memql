@@ -12,13 +12,23 @@ starts a composition, follows it until the file has its Files entry (the first
 look 300 ms after the start, the rest one `intervalMs` apart, two seconds by
 default), and returns `{ compositionId, fileId, artifactId, name }`. `startMaterialize` and
 `followComposition` are its two halves, for a client that follows its own live
-feed or polls; `isDescribedMarkdown` says which requests the cluster files empty;
-`handOffDescription` gives such a file's description to the Library's revision
-workflow as the person (a document-level comment with the `library_file` sources
-the Library accepts attached, then a revision request) and returns `revisionId` or
-`revisionFailure` without throwing, with the references it could not attach in
-`unattached`. `composeMaterialize` gains `requestId`: repeating it returns the
-same composition, so mint a new one for every person action. An aborted signal
+feed or polls; `isDescribedMarkdown(request, files)` says which requests the
+cluster files empty: a Markdown request with a statement and nothing of its own to
+compose from, whose picked files are all ones the Library can attach to a review
+comment (a `.md` file up to 32 KiB, or a PNG, JPEG, GIF or WebP picture up to
+8 MiB), judged on each file row's name and size through `files`, a
+`LibraryFileLookup` over `LibraryFileFacts` (`libraryFileFacts(row)` makes them
+from a file row). Any other picked file keeps the composer, which reads it, so a
+file is used and never dropped. `readDescribedMarkdown(execute, request, known?)`
+answers the same by reading the rows it is not told, one `libraryFileById` per
+picked file and nothing for a request that cannot be described, and `materialize`
+reads the picked files' rows before it starts. `handOffDescription` gives such a
+file's description to the Library's revision workflow as the person (a
+document-level comment with the `library_file` sources the Library accepts
+attached, then a revision request) and returns `revisionId` or `revisionFailure`
+without throwing, with the references it could not attach in `unattached`.
+`composeMaterialize` gains `requestId`: repeating it returns the same
+composition, so mint a new one for every person action. An aborted signal
 cancels a composition that is still being made. Stopping never deletes a file
 that was already made: it stays in Files, and `materialize` returns it when it is
 already in Files at the moment of the stop (a described request then carries

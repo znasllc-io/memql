@@ -1,4 +1,5 @@
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
+import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
 import { LocalFilesSettingsStore } from "../src/apps/files/settings";
 import { fakeConnection as filesConnection, artifactRow as filesArtifact, folderRow as filesFolder, fileRow as filesFile, versionRow as filesVersion, watchedFolderRow, withSession as filesSession } from "../test/files/harness";
@@ -688,6 +689,7 @@ const VIEWS: Record<
     render: () => JSX.Element;
   }
 > = {
+  ...MATERIALIZER_VIEWS,
   "files": filesPreview("browse"),
   "files-empty": filesPreview("browse", true),
   "files-backups": filesPreview("backups"),

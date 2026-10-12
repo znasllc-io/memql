@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	pure "github.com/znasllc-io/memql/component/compose"
@@ -104,33 +105,36 @@ func (a materializeArgs) blankEmail() bool {
 		len(a.Sources) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.DeployableKind == ""
 }
 
-// describedMarkdown is a Markdown file asked for by DESCRIBING it: a statement,
-// and nothing of the document's own to compose from -- no draft, sections,
-// template, recipe or special output. Library files may come with it; they are
-// references the revision workflow can read, and they are passed on with the
-// description.
+// describedMarkdown is a Markdown file asked for by DESCRIBING it: a statement, and
+// nothing of the document's own to compose from -- no draft, sections, template, recipe or
+// special output -- and every picked thing a Library file the Library can attach to a review
+// comment (attachableSource, described.go: a ".md" file up to 32 KiB, or a PNG, JPEG, GIF or
+// WebP picture up to 8 MiB, judged on its file row's name and size). Nothing picked
+// qualifies too. `resolved` is what the request's sources resolved to.
 //
-// Such a request is filed as the empty page with its statement kept on the
-// composition. Writing the document is the Library's revision workflow, and the
-// person's own client hands the description to it: a work run may not (see
-// fromARun).
+// Such a request is filed as the empty page with its statement kept on the composition.
+// Writing the document is the Library's revision workflow, and the person's own client
+// hands it the description together with the files: a work run may not (see fromARun).
 //
-// A DATA SOURCE KEEPS THE COMPOSER. The revision workflow reads Markdown and
-// images and cannot read the graph, so a request to write a document from
-// records (a query, a concept row) has something of its own to compose from and
-// only the composer can read it. Filing that request blank would throw the
-// records away. The SDK's isDescribedMarkdown says the same thing; the two move
-// together.
-func (a materializeArgs) describedMarkdown() bool {
-	return a.Format == pure.FormatMarkdown && a.Statement != "" && strings.TrimSpace(a.Draft) == "" &&
-		len(a.SectionKeys) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == "" &&
-		onlyLibraryFiles(a.Sources)
-}
-
-// onlyLibraryFiles says every source is a Library file, or there are none.
-func onlyLibraryFiles(sources []SourceRef) bool {
-	for _, source := range sources {
-		if source.Kind != KindLibraryFile {
+// ANY OTHER SOURCE KEEPS THE COMPOSER. The revision workflow reads Markdown and pictures
+// within the Library's limits, and nothing else: not the graph, and not a spreadsheet, a
+// JSON, text or web page file, an archive, a PDF, a Markdown file past 32 KiB, a file in the
+// Bin or one nobody can read. A request to write a document from any of those has something
+// of its own to compose from and only the composer can read it; filing it blank would drop
+// what the person picked. So a record, a query, or a Library file the Library cannot attach
+// sends the whole request to the composer, which reads every picked thing. The SDK's
+// isDescribedMarkdown says the same thing from the same rows, so the person's client hands
+// on exactly the files this server filed blank; the two move together, and the Library's
+// drift guard holds both copies to its constants.
+//
+// IT IS A DECISION ON THE ROWS, MADE BEFORE ANY CONTENT IS READ (see materialize).
+func (a materializeArgs) describedMarkdown(resolved []Resolved) bool {
+	if !(a.Format == pure.FormatMarkdown && a.Statement != "" && strings.TrimSpace(a.Draft) == "" &&
+		len(a.SectionKeys) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == "") {
+		return false
+	}
+	for _, source := range resolved {
+		if !attachableSource(source) {
 			return false
 		}
 	}
@@ -173,6 +177,91 @@ func (i *Integration) requireUsableFolder(ctx context.Context, folderId string) 
 	}
 	if folder == nil || boolOf(folder["archived"]) {
 		return errFolderUnavailable
+	}
+	return nil
+}
+
+// errTemplateArchived is the refusal for a template that has been archived, and it is a sentence a
+// person reads (the Materializer returns it as written), which is why it is capitalised and
+// punctuated like one.
+//
+//nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
+var errTemplateArchived = errors.New("That template is archived. Restore it or choose another.")
+
+// formatWords names a format as the Materializer names it to a person ("Web page", not "html"), in the
+// words of formatWord in clients/os/src/apps/materializer/words.ts, so a refusal speaks as the screen
+// does. A format that is none of the seven is named as it is written.
+func formatWords(f pure.Format) string {
+	switch f {
+	case pure.FormatMarkdown:
+		return "Markdown"
+	case pure.FormatHTML:
+		return "Web page"
+	case pure.FormatText:
+		return "Plain text"
+	case pure.FormatCSV:
+		return "Spreadsheet (CSV)"
+	case pure.FormatJSON:
+		return "Data (JSON)"
+	case pure.FormatDOCX:
+		return "Word document"
+	case pure.FormatPDF:
+		return "PDF"
+	}
+	return string(f)
+}
+
+// kindWords names the KIND of file a request asks for as the Materializer's kind choice does ("Static
+// site package", "Email template", "Web page"), for a refusal to say to the person who chose it. A
+// package is made of HTML pages and an email template is JSON, so naming the format would name
+// something they did not ask for. The words are those of fileKindEntry in
+// clients/os/src/apps/materializer/make.ts (a package's, deployableWord in words.ts).
+func kindWords(format pure.Format, deployableKind, outputKind string) string {
+	switch {
+	case outputKind == "email_template":
+		return "Email template"
+	case deployableKind != "":
+		switch pure.DeployableKind(deployableKind) {
+		case pure.DeployableSPA:
+			return "Single-page app package"
+		case pure.DeployableStatic:
+			return "Static site package"
+		case pure.DeployableStorefront:
+			return "Shopify storefront package"
+		}
+		return deployableKind + " package"
+	}
+	return formatWords(format)
+}
+
+// requireUsableTemplate refuses a template that cannot make this request's file: one that has been
+// archived, and one that makes another format than the request asked for. A template that names no
+// format fits any. The refusal names the template's format and the KIND the request asked for
+// (kindWords), which for a package or an email template is not the format it is made in.
+//
+// IT IS A READ, NOT A TRUST. composeTemplateById answers any template its owner holds, and the render
+// step applies whatever it is given: an archived binding, or a PDF template under a Markdown file, was
+// applied without a word. The request is refused here instead, before anything is written. The read runs
+// as the caller and fresh (materialize asks for fresh reads), so a template archived a moment ago on
+// another replica is not applied on this node's cache.
+//
+// A template the caller cannot read is not refused here. The render step has always said so ("that
+// template is not readable by you"), and the failed composition is the record of it; this check adds to
+// what is refused, and changes nothing that was.
+func (i *Integration) requireUsableTemplate(ctx context.Context, a materializeArgs) error {
+	template, err := i.store().templateById(ctx, a.TemplateId)
+	if err != nil {
+		return fmt.Errorf("compose: checking the template: %w", err)
+	}
+	if template == nil {
+		return nil
+	}
+	if boolOf(template["archived"]) {
+		return errTemplateArchived
+	}
+	if made := strings.TrimSpace(stringOf(template["format"])); made != "" && !strings.EqualFold(made, string(a.Format)) {
+		//nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
+		return fmt.Errorf("That template makes %s files. Choose a template for %s.", formatWords(pure.Format(strings.ToLower(made))), kindWords(a.Format, a.DeployableKind, a.OutputKind))
 	}
 	return nil
 }
@@ -324,8 +413,9 @@ type executionRequest struct {
 	// as the empty page (see describedMarkdown). It is decided ONCE, when the
 	// request is accepted, and saved with the request: the replica that executes
 	// the run is usually not the one that accepted it, and only the accepting call
-	// knows whether a person or a run made it. omitempty keeps every other saved
-	// request exactly as it was.
+	// knows whether a person or a run made it. It also says no reference was read:
+	// the path is decided before any content is, so a described request's sources
+	// carry no Files. omitempty keeps every other saved request exactly as it was.
 	Described bool `json:"described,omitempty"`
 	// EmailLayout is the layout an email template is written into, as the
 	// document it was when the request was accepted (resolveEmailLayout), its
@@ -433,6 +523,13 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 			return nil, err
 		}
 	}
+	// THE TEMPLATE IS CHECKED NEXT, for the same reasons and at the same point: a repeat of an accepted
+	// request finds its composition first, and a refusal comes before anything is read or written.
+	if a.TemplateId != "" {
+		if err := i.requireUsableTemplate(ctx, a); err != nil {
+			return nil, err
+		}
+	}
 	// AN EMAIL'S ORGANIZATION AND LAYOUT ARE READ HERE, for the folder's reasons:
 	// a repeat, a retry or a replay of an email that was accepted finds what it
 	// made even when the organization or the layout has been put away since,
@@ -456,10 +553,14 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	if err != nil {
 		return nil, fmt.Errorf("compose: the sources could not be read: %w", err)
 	}
-	if err := i.captureSourceContents(ctx, resolved); err != nil {
-		return nil, err
-	}
-	request := executionRequest{Args: a, Resolved: resolved, Started: i.clock().UTC()}
+	// THE PATH IS DECIDED HERE, ON THE ROWS THE SOURCES RESOLVED TO, BEFORE ANY CONTENT IS
+	// READ, and the contents are read only for a file the composer will write. A described
+	// file is filed empty, so nothing it names is read: not now, and not on the replica that
+	// executes the run. Reading first (as this once did) downloaded files nothing used, and
+	// could refuse a whole request over a reference nobody would have looked at. Every
+	// picked Library file may therefore say `content: true`: it costs nothing on the
+	// described path and is what lets the composer read it on the other.
+	//
 	// FILED BLANK ONLY WHEN A PERSON ASKED. The empty page is the first half of a
 	// hand-off: the person's client reads the description off the composition and
 	// gives it to the Library's revision workflow. The second half cannot be done
@@ -467,8 +568,15 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	// a call made BY a run (the planner's file delivery, an agent's composeFile:
 	// both say "write this" in a statement) has no client to finish it, and filing
 	// it blank would end the run with an empty document and nobody to write it.
-	// Those keep the composer.
-	request.Described = a.describedMarkdown() && !fromARun(ctx)
+	// Those keep the composer, and so read their references.
+	described := !fromARun(ctx) && a.describedMarkdown(resolved)
+	if !described {
+		if err := i.captureSourceContents(ctx, resolved); err != nil {
+			return nil, err
+		}
+	}
+	request := executionRequest{Args: a, Resolved: resolved, Started: i.clock().UTC()}
+	request.Described = described
 	if len(a.SectionKeys) > 0 {
 		request.Sections, err = i.captureSections(ctx, rc, a.SectionKeys)
 		if err != nil {
@@ -996,10 +1104,7 @@ func (i *Integration) executePipeline(ctx context.Context, userId, userEmail, co
 				return fail("materialization stopped", err)
 			}
 			fileId = stableMaterializeID("materialized-file", compositionId)
-			fileName = outputFileName(a.Name, a.Format, a.DeployableKind)
-			if a.OutputKind == "email_template" {
-				fileName = strings.TrimSuffix(fileName, ".json") + ".email.json"
-			}
+			fileName = filedFileName(a.Name, a.Format, a.DeployableKind, a.OutputKind)
 			mimeType = a.Format.MimeType()
 			if a.DeployableKind != "" {
 				mimeType = "application/zip"
@@ -1311,6 +1416,35 @@ func outputFileName(name string, format pure.Format, deployableKind string) stri
 	return stem + "." + ext
 }
 
+// filedFileName is the name a composition's file is filed under, from the composition's name (as
+// parseMaterializeArgs cleaned it) and what it was asked to make. The filing site calls it, and it is the
+// ONE place the rule lives.
+//
+// The Materializer app tells a person this name before the file exists (clients/os/src/apps/materializer/
+// make.ts, filedName), so the app holds a copy, and integrations/compose/testdata/filed_names.json is the
+// table both are held to: os_copies_test.go computes every row through this function, and the app's tests
+// through theirs. Change the rule here and the table, then the app's copy follows it.
+//
+// An email template is filed as <stem>.email.json: the .json file name is made as for any JSON file, its
+// ".json" is taken off (case-sensitively, so an upper-case one that the stem kept stays) and ".email.json"
+// put on.
+func filedFileName(name string, format pure.Format, deployableKind, outputKind string) string {
+	fileName := outputFileName(name, format, deployableKind)
+	if outputKind == "email_template" {
+		fileName = strings.TrimSuffix(fileName, ".json") + ".email.json"
+	}
+	return fileName
+}
+
+// maxFileStemBytes is the most a filed name's stem keeps, in bytes (the app tells a person the same
+// number: clients/os/src/apps/materializer/make.ts, MAX_STEM_BYTES).
+const maxFileStemBytes = 120
+
+// sanitiseFileStem is the stem of a filed name from what a person typed: path separators and NUL
+// become "-", control characters and DEL go, dots at either end go, and at most maxFileStemBytes are
+// kept. THE CUT IS ON A CHARACTER: when the limit falls in the middle of one, that whole character is
+// left out (cutOnACharacter), so the name stays text. (It was cut at the byte, which filed a name with
+// the start of a character at its end, and a client shows that as a replacement character.)
 func sanitiseFileStem(name string) string {
 	var b strings.Builder
 	for _, r := range strings.TrimSpace(name) {
@@ -1324,10 +1458,23 @@ func sanitiseFileStem(name string) string {
 		}
 	}
 	out := strings.Trim(strings.TrimSpace(b.String()), ".")
-	if len(out) > 120 {
-		out = strings.TrimSpace(out[:120])
+	if len(out) > maxFileStemBytes {
+		out = strings.TrimSpace(cutOnACharacter(out, maxFileStemBytes))
 	}
 	return out
+}
+
+// cutOnACharacter is the longest prefix of s that is at most limit bytes and ends between two
+// characters. s is text: sanitiseFileStem builds it from runes, so an invalid byte has already
+// become U+FFFD.
+func cutOnACharacter(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit]
 }
 
 // libraryFormatFor maps onto v1:library:file.format, the Library's own

@@ -21,10 +21,14 @@ import {
   followComposition,
   handOffDescription,
   isDescribedMarkdown,
+  libraryFileFacts,
   materialize,
+  readDescribedMarkdown,
   startMaterialize,
   MaterializeCancelled,
   MaterializeFailed,
+  type LibraryFileFacts,
+  type LibraryFileLookup,
   type MaterializeExecute,
   type MaterializeRequest,
   type MaterializeSource,
@@ -603,7 +607,7 @@ test("the id is trimmed once, and the file and its description are asked for und
   const f = fake(describedScript());
   const out = await materialize({ execute: f.execute, intervalMs: 1 }, { ...described, requestId: "  req-0004  " });
   assert.equal(out.revisionId, "req-0004-revision");
-  assert.equal(requestIdIn(f.calls[0]?.call ?? ""), "req-0004");
+  assert.equal(requestIdIn(f.named("composeMaterialize")[0]?.call ?? ""), "req-0004");
   assert.deepEqual(f.calls.filter(c => /^library(Add|Request)/.test(c.name)).map(c => requestIdIn(c.call)), ["req-0004-comment", "req-0004-revision"]);
   const direct = fake(handOffScript());
   await handOffDescription(direct.execute, { artifactId: "a1", statement: "A one page brief", requestId: " req-0007 " });
@@ -1026,6 +1030,11 @@ function describedScript(extra: Record<string, Answer> = {}): Record<string, Ans
   });
 }
 
+// describedScript with more files in the Library: the new file's Files entry stays, and these are added to it.
+function describedScriptWith(files: Record<string, Stored>, extra: Record<string, Answer> = {}): Record<string, Answer> {
+  return describedScript({ ...library({ f1: { artifact: { id: "a1", title: "Brief.md" } }, ...files }), ...extra });
+}
+
 const described: MaterializeRequest = {
   name: "Brief", format: "markdown", requestId: "req-0004", statement: "A one page brief for the launch",
   sources: [{ kind: "library_file", ref: "f-notes", label: "Notes" }],
@@ -1036,7 +1045,8 @@ test("materialize on a described Markdown request returns the revision once the 
   const out = await materialize({ execute: f.execute, intervalMs: 1 }, described);
   assert.deepEqual(out, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md", revisionId: "req-0004-revision" });
   const names = f.calls.map(c => c.name);
-  assert.deepEqual(names.slice(0, 3), ["composeMaterialize", "compositionById", "libraryArtifactForFile"]);
+  // The picked file's row is read first: it decides whether this request is described at all.
+  assert.deepEqual(names.slice(0, 4), ["libraryFileById", "composeMaterialize", "compositionById", "libraryArtifactForFile"]);
   assert.deepEqual(names.slice(-2), ["libraryAddDocumentComment", "libraryRequestDocumentRevision"]);
   assert.equal(f.named("libraryAddDocumentComment")[0]?.call, buildLibraryAddDocumentComment({
     artifactId: "a1", expectedVersion: 1, expectedRevision: "file:1",
@@ -1044,14 +1054,73 @@ test("materialize on a described Markdown request returns the revision once the 
     attachments: [{ artifactId: "att-notes", version: 2, revision: "file:2" }],
   }));
   // The request the server sees is the person's own words, filed blank there.
-  assert.match(f.calls[0]?.call ?? "", /statement:\s*"A one page brief for the launch"/);
+  assert.match(f.named("composeMaterialize")[0]?.call ?? "", /statement:\s*"A one page brief for the launch"/);
 });
 
-test("materialize puts the references the Library could not take on its result", async () => {
+// A file the Library cannot attach keeps the composer, so what a described file's hand-off can leave
+// off is only what the Library's totals, or what only its bytes can show, rule out. Three Markdown
+// files of 30 KiB are each one it attaches, and together pass its 64 KiB of Markdown.
+test("materialize puts the references past the Library's Markdown total on its result", async () => {
+  const f = fake(describedScriptWith({
+    "f-1": stored("att-1", "one.md", 30 * KiB), "f-2": stored("att-2", "two.md", 30 * KiB), "f-3": stored("att-3", "three.md", 30 * KiB),
+  }));
+  const sources: MaterializeSource[] = [reference("f-1", "First"), reference("f-2", "Second"), reference("f-3", "Third")];
+  const out = await materialize({ execute: f.execute, intervalMs: 1 }, { ...described, sources });
+  assert.deepEqual(out, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md", revisionId: "req-0004-revision", unattached: ["Third"] });
+  assert.equal(f.named("libraryAddDocumentComment")[0]?.call, buildLibraryAddDocumentComment({
+    artifactId: "a1", expectedVersion: 1, expectedRevision: "file:1",
+    anchor: { kind: "document", quote: "Entire document" }, body: "A one page brief for the launch", requestId: "req-0004-comment",
+    attachments: [attachmentOf(1), attachmentOf(2)],
+  }));
+});
+
+test("materialize hands nothing on when a picked file is one the Library cannot attach", async () => {
+  // A PDF beside the Markdown file: the revision workflow could not read it, so the composer writes
+  // the file (which reads it), and no description is sent anywhere.
   const f = fake(describedScript());
   const sources: MaterializeSource[] = [reference("f-notes", "Notes"), reference("f-spec", "Spec")];
   const out = await materialize({ execute: f.execute, intervalMs: 1 }, { ...described, sources });
-  assert.deepEqual(out, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md", revisionId: "req-0004-revision", unattached: ["Spec"] });
+  assert.deepEqual(out, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md" });
+  assert.equal("revisionId" in out || "revisionFailure" in out || "unattached" in out, false);
+  const names = f.calls.map(c => c.name);
+  assert.ok(names.indexOf("composeMaterialize") > names.lastIndexOf("libraryFileById"), "the path was not decided before the file was made");
+  assert.deepEqual(f.named("libraryFileById").map(c => fileIdIn(c.call)).sort(), ["f-notes", "f-spec"]);
+  for (const name of ["libraryAddDocumentComment", "libraryRequestDocumentRevision", "libraryDocumentReview"]) {
+    assert.equal(f.named(name).length, 0, `${name} was called`);
+  }
+  // The server is asked for the file as the person described it, every picked file with it.
+  assert.match(f.named("composeMaterialize")[0]?.call ?? "", /statement:\s*"A one page brief for the launch"/);
+  assert.match(f.named("composeMaterialize")[0]?.call ?? "", /ref:\s*"f-spec"/);
+});
+
+test("a picked file with no row makes it a file the composer writes", async () => {
+  // Nobody can read it: the revision workflow could not attach it, and the server will say so if it
+  // matters. Nothing here guesses that it is a Markdown file.
+  const f = fake(describedScript());
+  const sources: MaterializeSource[] = [reference("f-notes", "Notes"), reference("f-gone", "Gone")];
+  const out = await materialize({ execute: f.execute, intervalMs: 1 }, { ...described, sources });
+  assert.deepEqual(out, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md" });
+  assert.equal(f.named("composeMaterialize").length, 1);
+  assert.equal(f.named("libraryAddDocumentComment").length, 0);
+  assert.equal(await readDescribedMarkdown(f.execute, { ...described, sources }), false);
+});
+
+test("a refused read is the cluster's sentence, and materialize starts nothing", async () => {
+  const f = fake(describedScript({ libraryFileById: refusedAs("libraryFileById", "you cannot read that file") }));
+  await assert.rejects(materialize({ execute: f.execute, intervalMs: 1 }, described), (e: Error) => e.message === "you cannot read that file" && !(e instanceof MaterializeFailed));
+  assert.equal(f.named("composeMaterialize").length, 0, "a file was made after the read was refused");
+  assert.deepEqual(f.calls.map(c => c.name), ["libraryFileById"]);
+  await assert.rejects(readDescribedMarkdown(f.execute, described), (e: Error) => e.message === "you cannot read that file");
+});
+
+test("a stop during the read starts nothing", async () => {
+  const controller = new AbortController();
+  const f = fake(describedScript({
+    libraryFileById: call => { controller.abort(); return fileIdIn(call) === "f-notes" ? [{ name: "notes.md", size: 1200 }] : []; },
+  }));
+  await assert.rejects(materialize({ execute: f.execute, signal: controller.signal, intervalMs: 1 }, described), MaterializeCancelled);
+  assert.equal(f.named("composeMaterialize").length, 0, "a file was made after the stop");
+  assert.equal(f.named("composeCancel").length, 0, "there was nothing to cancel");
 });
 
 test("materialize waits for the Files entry before it hands the description over", async () => {
@@ -1085,7 +1154,7 @@ test("stopping after the file exists keeps the file, sends nothing, and says the
   assert.deepEqual(out, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md", revisionFailure: STOPPED_BEFORE_SENT });
   assert.equal(f.named("libraryAddDocumentComment").length, 0);
   assert.equal(f.named("libraryRequestDocumentRevision").length, 0);
-  assert.equal(f.named("libraryFileById").length, 0, "the references were not even looked up");
+  assert.equal(f.named("libraryFileById").length, 1, "the file is read once, to decide the path, and not again for a hand-off that was never made");
   assert.equal(f.named("composeCancel").length, 0, "a ready composition is not cancelled");
 });
 
@@ -1164,27 +1233,204 @@ for (const [label, request] of notDescribed) {
     const f = fake(describedScript());
     const out = await materialize({ execute: f.execute, intervalMs: 1 }, request);
     assert.deepEqual(out, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md" });
-    assert.equal(isDescribedMarkdown(request), false);
+    // Not even a lookup that takes every file in the world makes it one: the request itself cannot be described.
+    assert.equal(isDescribedMarkdown(request, () => facts("notes.md", 100)), false);
     for (const name of ["libraryAddDocumentComment", "libraryRequestDocumentRevision", "libraryFileById", "libraryDocumentReview"]) {
       assert.equal(f.named(name).length, 0, `${name} was called`);
     }
   });
 }
 
-test("isDescribedMarkdown matches the server's rule for a request filed blank", () => {
-  assert.equal(isDescribedMarkdown(described), true);
-  assert.equal(isDescribedMarkdown({ format: "markdown", statement: " Write it " }), true);
-  assert.equal(isDescribedMarkdown({ format: "markdown", statement: "Write it", templateId: "  " }), true, "a template of only spaces is no template, as on the server");
-  assert.equal(isDescribedMarkdown({ format: "html", statement: "Write it" }), false);
+// ---------------------------------------------------------------------------
+// isDescribedMarkdown: the server's rule, on the picked files' rows
+// ---------------------------------------------------------------------------
+//
+// Case for case with the server's (integrations/compose, described_test.go): a described Markdown
+// request takes the Library's revision workflow only when every picked file is a Library file the
+// Library can attach, judged on its file row's name and size, or when nothing is picked. Any other
+// picked file keeps the composer, which reads it.
+
+const facts = (name: string, size: number | null = 100, archived = false): LibraryFileFacts => ({ name, size, archived });
+// A lookup over the files a test names by ref. A ref it does not list is one it does not know.
+const knowing = (known: Record<string, LibraryFileFacts | null>): LibraryFileLookup => ref => known[ref];
+const ASKED = { format: "markdown", statement: "Write it" } as const;
+const fileSource = (ref: string): MaterializeSource => ({ kind: "library_file", ref, label: ref, content: true });
+
+const THE_LIBRARY_TAKES: [string, string, number | null][] = [
+  ["a Markdown file of 1200 bytes", "notes.md", 1200],
+  ["a Markdown file of exactly 32 KiB", "notes.md", 32 * KiB],
+  ["a Markdown file of one byte", "notes.md", 1],
+  ["a name in capitals", "NOTES.MD", 1200],
+  ["a Markdown file whose row says no size", "notes.md", null],
+  ["a picture of exactly 8 MiB", "logo.png", 8 * MiB],
+  ["a .jpg", "photo.jpg", 1000],
+  ["a .jpeg", "photo.jpeg", 1000],
+  ["a .gif", "anim.gif", 1000],
+  ["a .webp", "pic.webp", 1000],
+  ["a fraction of a byte", "notes.md", 0.25],
+  // Go lower-cases the dotted capital I of a Turkish locale to "i", so the Library takes this for a GIF.
+  ["a .gif capitalised in a Turkish locale", "anim.G\u0130F", 1000],
+];
+const THE_LIBRARY_REFUSES: [string, string, number | null][] = [
+  ["a Markdown file of 32 KiB and a byte", "notes.md", 32 * KiB + 1],
+  ["a Markdown file of no bytes", "notes.md", 0],
+  ["a picture of 8 MiB and a byte", "logo.png", 8 * MiB + 1],
+  ["a picture of no bytes", "logo.png", 0],
+  ["a .markdown file", "notes.markdown", 100],
+  ["a .txt file", "notes.txt", 100],
+  ["a .csv file", "numbers.csv", 100],
+  ["a .json file", "data.json", 100],
+  ["a .html file", "page.html", 100],
+  ["a .zip file", "site.zip", 100],
+  ["a .svg file", "vector.svg", 100],
+  ["a .pdf file", "spec.pdf", 100],
+  ["a name with no extension", "README", 100],
+  ["a .pdf file whose row says no size", "spec.pdf", null],
+  ["a fraction of a byte past the limit", "notes.md", 32 * KiB + 0.5],
+];
+
+test("isDescribedMarkdown holds when nothing is picked, and for each file the Library takes", () => {
+  assert.equal(isDescribedMarkdown(ASKED, () => undefined), true, "nothing picked");
+  assert.equal(isDescribedMarkdown({ ...ASKED, sources: [] }, () => undefined), true, "an empty list is nothing picked");
+  assert.equal(isDescribedMarkdown(described, knowing({ "f-notes": facts("notes.md", 1200) })), true);
+  for (const [label, name, size] of THE_LIBRARY_TAKES) {
+    const request = { ...ASKED, sources: [fileSource("f1")] };
+    assert.equal(isDescribedMarkdown(request, knowing({ f1: facts(name, size) })), true, label);
+    assert.equal(isDescribedMarkdown({ ...request, sources: [fileSource("f0"), ...request.sources] }, knowing({ f0: facts("notes.md", 10), f1: facts(name, size) })), true, `${label}, beside a Markdown file`);
+  }
+  assert.equal(isDescribedMarkdown({ ...ASKED, sources: [fileSource("f1"), fileSource("f2")] }, knowing({ f1: facts("notes.md", 2048), f2: facts("logo.png", 40 * KiB) })), true, "a Markdown file and a picture");
 });
 
-test("isDescribedMarkdown holds for Library files and keeps the composer for anything else", () => {
-  const base = { format: "markdown", statement: "Write it" } as const;
-  assert.equal(isDescribedMarkdown({ ...base, sources: [] }), true, "no sources is still described");
-  assert.equal(isDescribedMarkdown({ ...base, sources: [{ kind: "library_file", ref: "f1", label: "Notes", content: true }] }), true, "files are references the revision workflow can read");
-  assert.equal(isDescribedMarkdown({ ...base, sources: [{ kind: "query", ref: "query q()", label: "Q" }] }), false);
-  assert.equal(isDescribedMarkdown({ ...base, sources: [{ kind: "concept_row", ref: "r1", label: "R" }] }), false);
-  assert.equal(isDescribedMarkdown({ ...base, sources: [{ kind: "library_file", ref: "f1", label: "F" }, { kind: "query", ref: "query q()", label: "Q" }] }), false, "one data source among the files is enough");
+test("isDescribedMarkdown keeps the composer for any file the Library refuses, alone or beside one it takes", () => {
+  for (const [label, name, size] of THE_LIBRARY_REFUSES) {
+    const known = { f0: facts("notes.md", 10), f1: facts(name, size) };
+    assert.equal(isDescribedMarkdown({ ...ASKED, sources: [fileSource("f1")] }, knowing(known)), false, label);
+    assert.equal(isDescribedMarkdown({ ...ASKED, sources: [fileSource("f0"), fileSource("f1")] }, knowing(known)), false, `${label}, after a Markdown file`);
+    assert.equal(isDescribedMarkdown({ ...ASKED, sources: [fileSource("f1"), fileSource("f0")] }, knowing(known)), false, `${label}, before a Markdown file`);
+  }
+});
+
+test("isDescribedMarkdown keeps the composer for a file in the Bin, one it does not know, and one it cannot read", () => {
+  const asked = (...refs: string[]) => ({ ...ASKED, sources: refs.map(fileSource) });
+  const known = { "f-ok": facts("notes.md", 100), "f-archived": facts("old.md", 100, true), "f-unreadable": null };
+  assert.equal(isDescribedMarkdown(asked("f-archived"), knowing(known)), false, "an archived Markdown file");
+  assert.equal(isDescribedMarkdown(asked("f-ok", "f-archived"), knowing(known)), false, "an archived file beside a live one");
+  assert.equal(isDescribedMarkdown(asked("f-unknown"), knowing(known)), false, "a file the lookup does not know");
+  assert.equal(isDescribedMarkdown(asked("f-ok", "f-unknown"), knowing(known)), false, "an unknown file beside a live one");
+  assert.equal(isDescribedMarkdown(asked("f-unreadable"), knowing(known)), false, "a file whose row could not be read");
+  assert.equal(isDescribedMarkdown(asked("f-ok", "f-unreadable"), knowing(known)), false, "an unreadable file beside a live one");
+});
+
+test("isDescribedMarkdown keeps the composer for a record or a query among the files", () => {
+  const everything = () => facts("notes.md", 100);
+  const query: MaterializeSource = { kind: "query", ref: "query q()", label: "Q" };
+  const row: MaterializeSource = { kind: "concept_row", ref: "r1", label: "R" };
+  assert.equal(isDescribedMarkdown({ ...ASKED, sources: [query] }, everything), false);
+  assert.equal(isDescribedMarkdown({ ...ASKED, sources: [row] }, everything), false);
+  assert.equal(isDescribedMarkdown({ ...ASKED, sources: [fileSource("f1"), query] }, everything), false, "one data source among the files is enough");
+  assert.equal(isDescribedMarkdown({ ...ASKED, sources: [query, fileSource("f1")] }, everything), false);
+});
+
+test("isDescribedMarkdown matches the server's shape rule, whatever the files", () => {
+  const takesAll: LibraryFileLookup = () => facts("notes.md", 100);
+  assert.equal(isDescribedMarkdown({ format: "markdown", statement: " Write it " }, takesAll), true);
+  assert.equal(isDescribedMarkdown({ format: "markdown", statement: "Write it", templateId: "  " }, takesAll), true, "a template of only spaces is no template, as on the server");
+  assert.equal(isDescribedMarkdown({ format: "markdown" }, takesAll), false, "no statement");
+  assert.equal(isDescribedMarkdown({ format: "markdown", statement: "   " }, takesAll), false, "a statement of only spaces");
+  for (const format of ["html", "txt", "csv", "json", "docx", "pdf"] as const) assert.equal(isDescribedMarkdown({ format, statement: "Write it" }, takesAll), false, format);
+  const files = { sources: [fileSource("f1")] };
+  assert.equal(isDescribedMarkdown({ ...ASKED, ...files, templateId: "t1" }, takesAll), false, "a template");
+  assert.equal(isDescribedMarkdown({ ...ASKED, ...files, recipeId: "rc1" }, takesAll), false, "a recipe");
+  assert.equal(isDescribedMarkdown({ ...ASKED, ...files, outputKind: "email_template" }, takesAll), false, "an output kind");
+  assert.equal(isDescribedMarkdown({ ...ASKED, ...files, deployableKind: "spa" }, takesAll), false, "a deployable kind");
+});
+
+test("isDescribedMarkdown asks the lookup for each file by its ref as it was given", () => {
+  const asked: string[] = [];
+  const request = { ...ASKED, sources: [fileSource(" f-notes "), fileSource("v1:library:file:f-logo")] };
+  isDescribedMarkdown(request, ref => { asked.push(ref); return facts("notes.md", 100); });
+  assert.deepEqual(asked, [" f-notes ", "v1:library:file:f-logo"]);
+});
+
+// ---------------------------------------------------------------------------
+// libraryFileFacts and readDescribedMarkdown: the facts, and reading them
+// ---------------------------------------------------------------------------
+
+test("libraryFileFacts reads a file row's name, size and whether it is archived", () => {
+  assert.deepEqual(libraryFileFacts({ id: "f1", name: "notes.md", size: 2048, archived: false, versionNumber: 3 }), { name: "notes.md", size: 2048, archived: false });
+  assert.deepEqual(libraryFileFacts({ name: "old.md", size: 10, archived: true }), { name: "old.md", size: 10, archived: true });
+  assert.deepEqual(libraryFileFacts({ name: "notes.md", size: 0 }), { name: "notes.md", size: 0, archived: false }, "a size of 0 is a size");
+  assert.deepEqual(libraryFileFacts({ name: "notes.md" }), { name: "notes.md", size: null, archived: false }, "a row that says no size");
+  for (const size of ["2048", null, Number.NaN, Number.POSITIVE_INFINITY, {}, true]) {
+    assert.equal(libraryFileFacts({ name: "notes.md", size })?.size, null, `${String(size)} is no size`);
+  }
+  assert.deepEqual(libraryFileFacts({ size: 10 }), { name: "", size: 10, archived: false }, "a row with no name");
+  assert.equal(libraryFileFacts(null), null);
+  assert.equal(libraryFileFacts(undefined), null);
+});
+
+test("readDescribedMarkdown reads each picked file's row once, and only those it is not told", async () => {
+  const f = fake(handOffScript(library({ "f-notes": stored("att-notes", "notes.md", 1200) })));
+  const request = { ...ASKED, sources: [fileSource("f-notes"), fileSource("f-logo"), fileSource("f-notes")] };
+  const told: LibraryFileLookup = ref => (ref === "f-logo" ? facts("logo.png", 40 * KiB) : undefined);
+  assert.equal(await readDescribedMarkdown(f.execute, request, told), true);
+  assert.equal(f.calls.length, 1, "more was read than the one file it was not told about");
+  assert.equal(f.calls[0]?.name, "libraryFileById");
+  assert.equal(fileIdIn(f.calls[0]?.call ?? ""), "f-notes");
+});
+
+test("readDescribedMarkdown trusts what it is told, even that a file cannot be read", async () => {
+  const f = fake(handOffScript(library({ "f-notes": stored("att-notes", "notes.md", 1200) })));
+  const told: LibraryFileLookup = ref => (ref === "f-gone" ? null : undefined);
+  assert.equal(await readDescribedMarkdown(f.execute, { ...ASKED, sources: [fileSource("f-notes"), fileSource("f-gone")] }, told), false);
+  assert.deepEqual(f.calls.map(c => fileIdIn(c.call)), ["f-notes"], "the file it was told it cannot read was read all the same");
+});
+
+test("readDescribedMarkdown reads a file by its ref with the spaces taken off", async () => {
+  const f = fake(handOffScript(library({ "f-notes": stored("att-notes", "notes.md", 1200) })));
+  assert.equal(await readDescribedMarkdown(f.execute, { ...ASKED, sources: [fileSource(" f-notes ")] }), true);
+  assert.deepEqual(f.calls.map(c => fileIdIn(c.call)), ["f-notes"]);
+});
+
+test("readDescribedMarkdown reads nothing for a request that cannot be described", async () => {
+  const f = fake(handOffScript(library({ "f-notes": stored("att-notes", "notes.md", 1200) })));
+  const files = [fileSource("f-notes")];
+  const requests: [string, Parameters<typeof readDescribedMarkdown>[1]][] = [
+    ["a template", { ...ASKED, sources: files, templateId: "t1" }],
+    ["a recipe", { ...ASKED, sources: files, recipeId: "rc1" }],
+    ["an output kind", { ...ASKED, sources: files, outputKind: "email_template" }],
+    ["a package", { ...ASKED, sources: files, deployableKind: "spa" }],
+    ["a query among the files", { ...ASKED, sources: [...files, { kind: "query", ref: "query q()", label: "Q" }] }],
+    ["a record before the files", { ...ASKED, sources: [{ kind: "concept_row", ref: "r1", label: "R" }, ...files] }],
+    ["no statement", { format: "markdown", sources: files }],
+    ["a statement of only spaces", { format: "markdown", statement: "  ", sources: files }],
+    ["a file that is not Markdown", { format: "txt", statement: "Write it", sources: files }],
+    ["a file with no ref", { ...ASKED, sources: [{ kind: "library_file", ref: "  ", label: "Nameless" }] }],
+  ];
+  for (const [label, request] of requests) {
+    assert.equal(await readDescribedMarkdown(f.execute, request), false, label);
+  }
+  assert.deepEqual(f.calls, [], "something was read for a request that cannot be described");
+});
+
+test("readDescribedMarkdown reads nothing when nothing is picked, and says the request is described", async () => {
+  const f = fake({});
+  assert.equal(await readDescribedMarkdown(f.execute, ASKED), true);
+  assert.equal(await readDescribedMarkdown(f.execute, { ...ASKED, sources: [] }), true);
+  assert.deepEqual(f.calls, []);
+});
+
+test("readDescribedMarkdown says a file the Library cannot attach, one in the Bin and one with no row are not described", async () => {
+  const f = fake(handOffScript(library({
+    "f-notes": stored("att-notes", "notes.md", 1200), "f-sheet": stored("att-sheet", "numbers.csv", 300),
+    "f-old": stored("att-old", "old.md", 100, { archived: true }), "f-big": stored("att-big", "big.md", 40 * KiB),
+  })));
+  const readFor = (...refs: string[]) => readDescribedMarkdown(f.execute, { ...ASKED, sources: refs.map(fileSource) });
+  assert.equal(await readFor("f-notes"), true);
+  assert.equal(await readFor("f-notes", "f-sheet"), false, "a spreadsheet");
+  assert.equal(await readFor("f-notes", "f-old"), false, "a file in the Bin");
+  assert.equal(await readFor("f-notes", "f-big"), false, "a Markdown file past 32 KiB");
+  assert.equal(await readFor("f-notes", "f-gone"), false, "a file with no row");
 });
 
 // ---------------------------------------------------------------------------
@@ -1192,7 +1438,7 @@ test("isDescribedMarkdown holds for Library files and keeps the composer for any
 // ---------------------------------------------------------------------------
 
 test("the client barrel exports the materialize surface", () => {
-  for (const name of ["materialize", "startMaterialize", "followComposition", "handOffDescription", "isDescribedMarkdown", "fileNameProblem", "fileNameStem", "refusalSentence"] as const) {
+  for (const name of ["materialize", "startMaterialize", "followComposition", "handOffDescription", "isDescribedMarkdown", "readDescribedMarkdown", "libraryFileFacts", "fileNameProblem", "fileNameStem", "refusalSentence"] as const) {
     assert.equal(typeof client[name], "function", `${name} is not exported from the client barrel`);
   }
   assert.equal(client.MaterializeCancelled, MaterializeCancelled);

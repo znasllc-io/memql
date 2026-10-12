@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { readTheBar } from "../readTheBar";
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { Layers } from "lucide-react";
@@ -5,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Concepts, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import type { OsAppManifest } from "../../src/system/registry";
-
 
 const h = vi.hoisted(() => ({ connection: null as unknown, os: null as unknown, openApp: vi.fn() }));
 
@@ -62,52 +62,62 @@ function mount(
   opts: { sectionId?: string; intent?: { id: string; payload: Record<string, unknown> }; settings?: Record<string, unknown> } = {},
 ): Mounted {
   h.connection = conn;
-  const navigate = vi.fn();
+  let go!: (section: string) => void;
+  const navigate = vi.fn((section: string) => go(section));
   const consumeIntent = vi.fn();
   const store = memoryStore(opts.settings);
-  const tree = (intent?: { id: string; payload: Record<string, unknown> }) =>
-    withSession(
-      <MaterializerApp
-        sectionId={opts.sectionId ?? "composer"}
-        navigate={navigate}
-        askContext={() => {}}
-        intent={intent}
-        consumeIntent={consumeIntent}
-        store={store}
-      />,
-    );
-  const view = render(tree(opts.intent));
-  return { navigate, consumeIntent, deliver: (intent) => view.rerender(tree(intent)) };
+  const ports = { reserve: vi.fn(() => ({ navigate: vi.fn(), close: vi.fn() })), navigate: vi.fn(), schedule: vi.fn(() => () => {}) };
+  function Harness({ intent }: { intent?: { id: string; payload: Record<string, unknown> } }) {
+    const [section, setSection] = useState(opts.sectionId ?? "composer");
+    go = setSection;
+    return withSession(<MaterializerApp sectionId={section} navigate={navigate} askContext={() => {}}
+      intent={intent} consumeIntent={consumeIntent} store={store} handoffPorts={ports} />);
+  }
+  const view = render(<Harness intent={opts.intent} />);
+  return { navigate, consumeIntent, deliver: intent => view.rerender(<Harness intent={intent} />) };
 }
 
 const setupIntent = (id: string, setup: Parameters<typeof composeIntent>[0]) => ({ id, payload: composeIntent(setup) });
 
+function openStep(step: string) {
+  const header = screen.getByRole("button", { name: new RegExp(`^${step}(?:$| )`) });
+  if (header.getAttribute("aria-expanded") !== "true") fireEvent.click(header);
+}
+function field(label: string) {
+  openStep(label === "Describe what you want" ? "Describe" : label);
+  return screen.getByLabelText(label);
+}
+async function pickedSources() {
+  openStep("From");
+  return screen.findByRole("list", { name: "Picked things" });
+}
 async function chooseOrganization() {
-  fireEvent.click(screen.getByLabelText("Organization"));
+  if (!screen.queryByRole("button", { name: /^Organization(?:$| )/ })) return;
+  fireEvent.click(field("Organization"));
   fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
 }
-
-/**
- * Fill the brief and press Materialize.
- *
- * `afterChange` is for a form the bar has just come back to (Compose another):
- * a bar whose acts have just changed takes no press for a moment, so a person
- * starting the second file reads it first, as `readTheBar` does.
- */
-async function materializeNotes(over: { name?: string; statement?: string; afterChange?: boolean } = {}) {
-  fireEvent.change(screen.getByLabelText("Name"), { target: { value: over.name ?? "Notes" } });
-  fireEvent.change(screen.getByLabelText("What do you want made?"), { target: { value: over.statement ?? "A one page brief" } });
+async function makeFile() {
+  await readTheBar();
+  fireEvent.click(await screen.findByRole("button", { name: "Make the file" }));
+}
+async function startAnother() {
+  await screen.findByRole("button", { name: "Open in editor" });
+  fireEvent.click(await screen.findByRole("button", { name: "Materialized" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Make a file" }));
+}
+/** Fill the wizard through its named steps, then make the file. */
+async function materializeNotes(over: { name?: string; statement?: string } = {}) {
+  fireEvent.change(field("Name"), { target: { value: over.name ?? "Notes" } });
+  fireEvent.change(field("Describe what you want"), { target: { value: over.statement ?? "A one page brief" } });
   await chooseOrganization();
-  const press = await screen.findByRole("button", { name: "Materialize" });
-  if (over.afterChange) await readTheBar();
-  fireEvent.click(press);
+  await makeFile();
 }
 
 const sent = (conn: Conn, index = 0): Record<string, unknown> => conn.query.composeMaterialize.mock.calls[index]?.[0] ?? {};
 // A notice's sentence as it is SHOWN. The live region repeats the words for assistive technology, so a plain
 // text search finds the announcement too; this finds only the sentence line of the visible notice.
 const shown = (text: string) => screen.findByText(text, { selector: ".os-notice-line" });
-const kindOfFile = () => screen.getByLabelText("Kind of file").textContent ?? "";
+const kindOfFile = () => screen.getByRole("button", { name: /^Kind of file/ }).textContent ?? "";
 
 // ---------------------------------------------------------------------------
 // The starting setup: another app opens the composer already pointed somewhere
@@ -155,15 +165,15 @@ describe("a starting setup opens the composer pre-filled", () => {
         ],
       }),
     });
-    const picked = await screen.findByRole("list", { name: "Picked sources" });
+    const picked = await pickedSources();
     // A source listed twice is one source, as it is when a person picks it twice.
     expect(within(picked).getAllByRole("listitem")).toHaveLength(2);
     expect(within(picked).getByText("notes.md")).toBeTruthy();
     expect(within(picked).getByText("INV-1001")).toBeTruthy();
 
     await chooseOrganization();
-    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Inventory" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
+    fireEvent.change(field("Name"), { target: { value: "Inventory" } });
+    await makeFile();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     expect(sent(conn)).toMatchObject({
       name: "Inventory",
@@ -178,12 +188,12 @@ describe("a starting setup opens the composer pre-filled", () => {
   it("starts a new composition from a setup that arrives over a half-typed one", async () => {
     const conn = fakeConnection();
     const { deliver } = mount(conn);
-    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "Old name" } });
-    fireEvent.change(screen.getByLabelText("What do you want made?"), { target: { value: "Old brief" } });
+    fireEvent.change(field("Name"), { target: { value: "Old name" } });
+    fireEvent.change(field("Describe what you want"), { target: { value: "Old brief" } });
     deliver(setupIntent("i2", { format: "html" }));
     await waitFor(() => expect(kindOfFile()).toContain("Web page"));
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
-    expect((screen.getByLabelText("What do you want made?") as HTMLInputElement).value).toBe("");
+    expect((field("Name") as HTMLInputElement).value).toBe("");
+    expect((field("Describe what you want") as HTMLInputElement).value).toBe("");
   });
 
   it("applies a setup once: leaving the composer and coming back is a blank form, as it always was", async () => {
@@ -199,7 +209,7 @@ describe("a starting setup opens the composer pre-filled", () => {
     await waitFor(() => expect(kindOfFile()).toContain("Spreadsheet (CSV)"));
     view.rerender(tree("materialized"));
     view.rerender(tree("composer"));
-    await screen.findByLabelText("Kind of file");
+    await screen.findByRole("button", { name: /^Kind of file/ });
     expect(kindOfFile()).toContain("Markdown");
   });
 
@@ -215,7 +225,7 @@ describe("a starting setup opens the composer pre-filled", () => {
   it("leaves an intent that is not a setup, and not a composition, standing", async () => {
     const conn = fakeConnection();
     const { consumeIntent } = mount(conn, { intent: { id: "i3", payload: { somethingElse: "x" } } });
-    await screen.findByText(/Describe what to make/);
+    await screen.findByRole("heading", { name: "Make a file" });
     expect(consumeIntent).not.toHaveBeenCalled();
   });
 });
@@ -242,21 +252,20 @@ describe("the section a window opens on", () => {
     const { navigate, consumeIntent } = mount(conn, { settings: { defaultSection: "materialized" }, intent: { id: "open", payload: { compositionId: `${COMPOSITION}:c9` } } });
     await waitFor(() => expect(consumeIntent).toHaveBeenCalledWith("open"));
     await act(async () => {});
-    expect(navigate).not.toHaveBeenCalledWith("materialized");
-    expect(navigate).toHaveBeenLastCalledWith("composer");
+    expect(navigate).toHaveBeenLastCalledWith("materialized");
   });
 
   it("is the person's default section when nothing asked for one", async () => {
-    const { navigate } = mount(fakeConnection(), { settings: { defaultSection: "materialized" } });
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("materialized"));
+    const { navigate } = mount(fakeConnection(), { sectionId: "materialized", settings: { defaultSection: "templates" } });
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("templates"));
   });
 
   // Only an instruction the Materializer acts on is a sender saying where the window
   // goes. One addressed to something else is left standing, and the window opens
   // where the person prefers, as one nobody asked anything of does.
   it("is the person's default section when the instruction pending is not one the Materializer acts on", async () => {
-    const { navigate, consumeIntent } = mount(fakeConnection(), { settings: { defaultSection: "materialized" }, intent: { id: "i3", payload: { somethingElse: "x" } } });
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("materialized"));
+    const { navigate, consumeIntent } = mount(fakeConnection(), { sectionId: "materialized", settings: { defaultSection: "templates" }, intent: { id: "i3", payload: { somethingElse: "x" } } });
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("templates"));
     expect(consumeIntent).not.toHaveBeenCalled();
   });
 });
@@ -271,7 +280,7 @@ describe("the folder a setup names", () => {
   const returnTo = { appId: "files", sectionId: "browse" };
   const start = async (conn: Conn, folderId: string) => {
     const { consumeIntent } = mount(conn, { intent: setupIntent("i1", { format: "markdown", folderId }) });
-    await screen.findByLabelText("Kind of file");
+    await screen.findByRole("button", { name: /^Kind of file/ });
     // However the folder fares, the setup itself is taken and the form pre-filled.
     await waitFor(() => expect(consumeIntent).toHaveBeenCalledWith("i1"));
     expect(kindOfFile()).toContain("Markdown");
@@ -291,7 +300,7 @@ describe("the folder a setup names", () => {
   it("sends no folder when the setup named none", async () => {
     const conn = fakeConnection({ materializeReply: reply });
     mount(conn, { intent: setupIntent("i1", { format: "markdown" }) });
-    await screen.findByLabelText("Kind of file");
+    await screen.findByRole("button", { name: /^Kind of file/ });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     expect(sent(conn)).not.toHaveProperty("folderId");
@@ -303,7 +312,7 @@ describe("the folder a setup names", () => {
     await start(conn, "folder-gone");
     await materializeNotes();
     expect(await screen.findByText(REFUSAL)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Materialize" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Make the file" })).toBeTruthy();
     // Nothing was made, and nothing was made somewhere else.
     expect(conn.query.composeMaterialize).toHaveBeenCalledOnce();
   });
@@ -314,7 +323,7 @@ describe("the folder a setup names", () => {
     await start(conn, "folder-gone");
     await materializeNotes();
     await screen.findByText(REFUSAL);
-    fireEvent.click(screen.getByRole("button", { name: "Materialize" }));
+    await makeFile();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
     expect(sent(conn, 1)["folderId"]).toBe("folder-gone");
     expect(sent(conn, 1)["requestId"]).toBe(sent(conn, 0)["requestId"]);
@@ -323,13 +332,13 @@ describe("the folder a setup names", () => {
   it("is the first file's folder only: a second composition in the window files where the person files", async () => {
     const conn = fakeConnection({ materializeReply: reply, compositions: [] });
     mount(conn, { intent: setupIntent("i1", { folderId: "folder-1" }) });
-    await screen.findByLabelText("Kind of file");
+    await screen.findByRole("button", { name: /^Kind of file/ });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     // The first composition arrives, the person starts another.
     conn.subscriptions.emit(COMPOSITION, compositionRow({ id: "c1", status: "ready", format: "markdown" }), "NODE_CREATED");
-    fireEvent.click(await screen.findByRole("button", { name: "Compose another" }));
-    await materializeNotes({ name: "Second", afterChange: true });
+    await startAnother();
+    await materializeNotes({ name: "Second" });
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
     expect(sent(conn, 0)["folderId"]).toBe("folder-1");
     expect(sent(conn, 1)).not.toHaveProperty("folderId");
@@ -344,22 +353,26 @@ describe("the folder a setup names", () => {
     h.os = shell([FILES]);
     const store = memoryStore();
     const intent = setupIntent("i1", { format: "csv", folderId: "folder-1", returnTo });
+    let go!: (section: string) => void;
+    function Harness({ initialSection }: { initialSection: string }) {
+      const [sectionId, setSection] = useState(initialSection); go = setSection; return tree(sectionId);
+    }
     const tree = (sectionId: string) =>
       withSession(
-        <MaterializerApp sectionId={sectionId} navigate={() => {}} askContext={() => {}} intent={intent} consumeIntent={() => {}} store={store} />,
+        <MaterializerApp sectionId={sectionId} navigate={section => go(section)} askContext={() => {}} intent={intent} consumeIntent={() => {}} store={store} />,
       );
-    const view = render(tree("composer"));
+    render(<Harness initialSection="composer" />);
     await waitFor(() => expect(kindOfFile()).toContain("Spreadsheet (CSV)"));
-    view.rerender(tree("materialized"));
-    view.rerender(tree("composer"));
-    await screen.findByLabelText("Kind of file");
+    act(() => go("materialized"));
+    act(() => go("composer"));
+    await screen.findByRole("button", { name: /^Kind of file/ });
 
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     expect(sent(conn)).not.toHaveProperty("folderId");
     conn.subscriptions.emit(COMPOSITION, compositionRow({ id: "c1", name: "Notes", status: "ready", format: "markdown", sources: [] }), "NODE_UPDATED");
-    await screen.findByRole("button", { name: "Open Notes" });
-    expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
+    await screen.findByRole("button", { name: "Open in editor" });
+    expect(screen.queryByRole("button", { name: "Back to Files" })).toBeNull();
   });
 
   it("is the folder of the newest setup, and the reply to an older ask does not take it away", async () => {
@@ -369,12 +382,12 @@ describe("the folder a setup names", () => {
       () => new Promise((resolve) => { answer = () => resolve(rowsResult([{ compositionId: "c1" } as unknown as Row])); }),
     );
     const { deliver } = mount(conn, { intent: setupIntent("i1", { folderId: "folder-a", returnTo }) });
-    await screen.findByLabelText("Kind of file");
+    await screen.findByRole("button", { name: /^Kind of file/ });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     // While the first file is being asked for, another app sends a new setup.
     deliver(setupIntent("i2", { folderId: "folder-b" }));
-    await waitFor(() => expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe(""));
+    await waitFor(() => expect((field("Name") as HTMLInputElement).value).toBe(""));
     answer();
     await act(async () => {});
     await materializeNotes({ name: "Second" });
@@ -382,6 +395,23 @@ describe("the folder a setup names", () => {
     expect(sent(conn, 0)["folderId"]).toBe("folder-a");
     expect(sent(conn, 1)["folderId"]).toBe("folder-b");
   });
+  it("a refusal from an abandoned ask cannot replace the new setup's words", async () => {
+    const conn = fakeConnection({ compositions: [] });
+    let reject!: (error: Error) => void;
+    conn.query.composeMaterialize.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const { deliver } = mount(conn);
+    await materializeNotes();
+    await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+    deliver(setupIntent("new", { format: "csv", folderId: "next" }));
+    fireEvent.change(field("Name"), { target: { value: "New ask" } });
+    await act(async () => reject(refused("composeMaterialize", "The old ask was refused.")));
+    expect((field("Name") as HTMLInputElement).value).toBe("New ask");
+    expect(screen.queryByText("The old ask was refused.")).toBeNull();
+    await makeFile();
+    await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
+    expect(sent(conn, 1)).toMatchObject({ name: "New ask", folderId: "next", format: "csv" });
+  });
+
 });
 
 // ---------------------------------------------------------------------------
@@ -394,7 +424,7 @@ describe("the email template kind", () => {
   it("is carried to the Materializer with the format it needs", async () => {
     const conn = fakeConnection({ materializeReply: reply });
     mount(conn, { intent: setupIntent("i1", { outputKind: "email_template" }) });
-    await waitFor(() => expect(kindOfFile()).toContain("Data (JSON)"));
+    await waitFor(() => expect(kindOfFile()).toContain("Email template"));
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     expect(sent(conn)).toMatchObject({ format: "json", outputKind: "email_template" });
@@ -403,9 +433,9 @@ describe("the email template kind", () => {
   it("is dropped when the person chooses a kind of file that cannot be a template", async () => {
     const conn = fakeConnection({ materializeReply: reply });
     mount(conn, { intent: setupIntent("i1", { outputKind: "email_template" }) });
-    await waitFor(() => expect(kindOfFile()).toContain("Data (JSON)"));
-    fireEvent.click(screen.getByLabelText("Kind of file"));
-    fireEvent.click(await screen.findByRole("option", { name: "Plain text" }));
+    await waitFor(() => expect(kindOfFile()).toContain("Email template"));
+    openStep("Kind of file");
+    fireEvent.click(await screen.findByRole("radio", { name: "Plain text" }));
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     expect(sent(conn)).toMatchObject({ format: "txt" });
@@ -434,7 +464,7 @@ describe("creating a file", () => {
     mount(conn);
     await materializeNotes();
     expect(await screen.findByText(/dropped the connection/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Materialize" }));
+    await makeFile();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
     expect(String(sent(conn, 0)["requestId"])).toMatch(REQUEST_ID);
     expect(sent(conn, 1)["requestId"]).toBe(sent(conn, 0)["requestId"]);
@@ -446,8 +476,8 @@ describe("creating a file", () => {
     mount(conn);
     await materializeNotes();
     expect(await screen.findByText(/refused/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("What do you want made?"), { target: { value: "A different brief" } });
-    fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
+    fireEvent.change(field("Describe what you want"), { target: { value: "A different brief" } });
+    await makeFile();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
     expect(sent(conn, 1)["requestId"]).not.toBe(sent(conn, 0)["requestId"]);
   });
@@ -458,11 +488,9 @@ describe("creating a file", () => {
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, compositionRow({ id: "c1", status: "ready", format: "markdown" }), "NODE_CREATED");
-    fireEvent.click(await screen.findByRole("button", { name: "Compose another" }));
+    await startAnother();
     // The very same facts: only a fresh id tells the cluster this is another file.
-    const again = await screen.findByRole("button", { name: "Materialize" });
-    await readTheBar();
-    fireEvent.click(again);
+    await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
     expect(sent(conn, 1)["requestId"]).not.toBe(sent(conn, 0)["requestId"]);
   });
@@ -476,15 +504,17 @@ describe("creating a file", () => {
     h.connection = conn;
     const { result } = renderHook(() => useMaterialize());
     const facts = {
-      name: "Notes", statement: "A brief", format: "markdown", sources: [], templateId: "",
-      folderId: "", accountIds: ["client-a"], deployableKind: "", outputKind: "",
+      name: "Notes", statement: "A brief", format: "markdown" as const, accountIds: ["client-a"],
     };
     let first!: Promise<string>;
     let second!: Promise<string>;
     act(() => {
-      first = result.current.materialize(facts);
-      second = result.current.materialize(facts);
+      first = result.current.start(facts);
+      second = result.current.start(facts);
     });
+    // The press decides the path first (it reads the picked files' rows, and none are picked here), so
+    // the request leaves a moment after the press rather than within it: wait for it, then answer.
+    await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     answer();
     await expect(Promise.all([first, second])).resolves.toEqual(["c1", "c1"]);
     expect(conn.query.composeMaterialize).toHaveBeenCalledOnce();
@@ -496,12 +526,11 @@ describe("creating a file", () => {
     h.connection = conn;
     const { result } = renderHook(() => useMaterialize());
     const facts = {
-      name: "Notes", statement: "A brief", format: "markdown", sources: [], templateId: "",
-      folderId: "", accountIds: ["client-a"], deployableKind: "", outputKind: "",
+      name: "Notes", statement: "A brief", format: "markdown" as const, accountIds: ["client-a"],
     };
-    await act(async () => { await result.current.materialize(facts); });
+    await act(async () => { await result.current.start(facts); });
     act(() => result.current.reset());
-    await act(async () => { await result.current.materialize(facts); });
+    await act(async () => { await result.current.start(facts); });
     expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2);
     expect(sent(conn, 1)["requestId"]).not.toBe(sent(conn, 0)["requestId"]);
   });
@@ -525,29 +554,32 @@ describe("creating a file", () => {
 
 describe("a name and a refusal, as a person reads them", () => {
   const reply = { compositionId: "c1" } as unknown as Row;
-  const problem = () => document.querySelector(".os-mz-name-problem")?.textContent ?? "";
-  const typeName = (value: string) => fireEvent.change(screen.getByLabelText("Name"), { target: { value } });
+  const problem = () => document.querySelector(".os-caption[role=status]")?.textContent ?? "";
+  const typeName = (value: string) => fireEvent.change(field("Name"), { target: { value } });
 
   it("checks a name as it is typed, in the editor's words, and sends nothing until it can be used", async () => {
     const conn = fakeConnection({ materializeReply: reply });
     mount(conn);
-    await materializeNotes({ name: "Notes 10/11" });
+    fireEvent.change(field("Describe what you want"), { target: { value: "A one page brief" } });
+    await chooseOrganization();
+    typeName("Notes 10/11");
     expect(problem()).toBe("Enter a file name, without a folder path.");
     expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
     typeName("Notes");
     expect(problem()).toBe("");
-    fireEvent.click(screen.getByRole("button", { name: "Materialize" }));
+    await makeFile();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     expect(sent(conn)["name"]).toBe("Notes");
   });
 
-  it("says nothing about a name before one is typed, and asks for one when Materialize is pressed without it", async () => {
+  it("says nothing before a name is typed and offers no Make act without a name", async () => {
     const conn = fakeConnection({ materializeReply: reply });
     mount(conn);
-    fireEvent.change(screen.getByLabelText("What do you want made?"), { target: { value: "A one page brief" } });
+    fireEvent.change(field("Describe what you want"), { target: { value: "A one page brief" } });
     await chooseOrganization();
     expect(problem()).toBe("");
-    fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
+    expect(screen.queryByRole("button", { name: "Make the file" })).toBeNull();
+    typeName(" ");
     expect(problem()).toBe("Enter a file name.");
     expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
   });
@@ -570,7 +602,7 @@ describe("a name and a refusal, as a person reads them", () => {
     conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", "Enter a name without slashes."));
     mount(conn);
     await materializeNotes();
-    expect(await shown("Enter a name without slashes.")).toBeTruthy();
+    expect(await screen.findByText("Enter a name without slashes.")).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/composeMaterialize|MemQL engine|Details:/);
   });
 
@@ -578,8 +610,10 @@ describe("a name and a refusal, as a person reads them", () => {
     const conn = fakeConnection({ compositions: [compositionRow({ id: `${COMPOSITION}:c9`, status: "composing", outputFileId: "" })] });
     conn.query.composeCancel.mockRejectedValueOnce(refused("composeCancel", "compose: no composition with that id is readable by you"));
     mount(conn, { intent: { id: "open", payload: { compositionId: `${COMPOSITION}:c9` } } });
-    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
-    expect(await shown("no composition with that id is readable by you")).toBeTruthy();
+    await screen.findByRole("button", { name: "Stop" });
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(await screen.findByText("no composition with that id is readable by you")).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/composeCancel|MemQL engine|Details:|compose:/);
   });
 });
@@ -601,6 +635,7 @@ describe("a Markdown file asked for by describing it", () => {
     compositions: [] as Row[],
     outputArtifact: ARTIFACT,
     ...over,
+    ...(over.filesById ? { libraryFiles: Object.values(over.filesById as Record<string, Row>) } : {}),
   });
   const requestId = (conn: Conn) => String(sent(conn)["requestId"]);
 
@@ -638,7 +673,7 @@ describe("a Markdown file asked for by describing it", () => {
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, ready({ status: "rendering" }), "NODE_UPDATED");
-    await screen.findByText("Writing the file");
+    await screen.findByText("Writing the file", { selector: ".os-actbar-detail" });
     await act(async () => {});
     expect(conn.query.libraryArtifactForFile).not.toHaveBeenCalled();
     expect(conn.query.libraryAddDocumentComment).not.toHaveBeenCalled();
@@ -655,7 +690,7 @@ describe("a Markdown file asked for by describing it", () => {
     await waitFor(() => expect(conn.query.libraryRequestDocumentRevision).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, ready({ name: "Notes, renamed" }), "NODE_UPDATED");
     conn.subscriptions.emit(Concepts.LIBRARY_ARTIFACT, ARTIFACT, "NODE_UPDATED");
-    await screen.findByText("Notes, renamed");
+    await screen.findByRole("heading", { name: "Notes, renamed" });
     await act(async () => {});
     expect(conn.query.libraryAddDocumentComment).toHaveBeenCalledOnce();
     expect(conn.query.libraryRequestDocumentRevision).toHaveBeenCalledOnce();
@@ -705,14 +740,14 @@ describe("a Markdown file asked for by describing it", () => {
     // sentence already says the description was not sent, so the SDK's lead-in saying so again is gone.
     expect(document.querySelector(".os-notice-detail")?.textContent).toBe("revision budget exhausted");
     // And the file is still there to open.
-    expect(screen.getByRole("button", { name: "Open Notes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open in editor" })).toBeTruthy();
   });
 
   // WHAT THE FILE IS, under what was asked for. A described file is empty until the
   // person approves the Library's draft, so "the composed text is in the file" would
   // be false; the caption follows what this window knows of the hand-off.
   describe("the caption says what the file is", () => {
-    const caption = () => document.querySelector(".os-mz-col-brief .os-caption")?.textContent ?? "";
+    const caption = () => document.querySelector(".os-deploy-scroll > .os-caption")?.textContent ?? "";
     const NOT_COMPOSED = /composed text/;
 
     it("says the description was sent, once this window has sent it", async () => {
@@ -721,7 +756,7 @@ describe("a Markdown file asked for by describing it", () => {
       await materializeNotes();
       await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
       conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
-      await waitFor(() => expect(caption()).toBe("Your description was sent to be written. Open the file to review and approve the draft."));
+      await waitFor(() => expect(caption()).toBe("Your description was sent to be written. Open it in the editor to review and approve the draft."));
       expect(document.body.textContent).not.toMatch(NOT_COMPOSED);
     });
 
@@ -740,8 +775,8 @@ describe("a Markdown file asked for by describing it", () => {
     it("says only that it was created from a description when it is opened later, from the list", async () => {
       const conn = fakeConnection(seed({ compositions: [ready({ id: "c-elsewhere" })] }));
       mount(conn, { intent: { id: "open", payload: { compositionId: "c-elsewhere" } } });
-      await screen.findByRole("button", { name: "Open Notes" });
-      expect(caption()).toBe("This file was created from a description. Open it to continue.");
+      await screen.findByRole("button", { name: "Open in editor" });
+      expect(caption()).toBe("This file was created from a description. Open it in the editor to continue.");
       expect(document.body.textContent).not.toMatch(NOT_COMPOSED);
     });
 
@@ -752,32 +787,32 @@ describe("a Markdown file asked for by describing it", () => {
       await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
       // Ready, but its Files entry has not been written, so nothing has been sent yet.
       conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
-      await screen.findByRole("button", { name: "Open Notes" });
-      expect(caption()).toBe("This file was created from a description. Open it to continue.");
+      await screen.findByRole("button", { name: "Open in editor" });
+      expect(caption()).toBe("This file was created from a description. Open it in the editor to continue.");
       expect(conn.query.libraryAddDocumentComment).not.toHaveBeenCalled();
     });
   });
 
+  // THE LIBRARY'S TOTALS ARE WHAT LEAVES A REFERENCE OFF. A file it cannot attach at all (a PDF, a
+  // spreadsheet) keeps the composer, so it never reaches this hand-off; what can still go without being
+  // attached is a reference past the Library's eight files, 16 MiB, or 64 KiB of Markdown. These are
+  // Markdown files of 30 KiB: each is one it attaches, and the third passes its 64 KiB.
+  const MARKDOWN_FILE = 30 * 1024;
+  /** `count` Markdown files of 30 KiB, as the Library holds them: a file row and a Files entry each. */
+  const markdownFiles = (names: string[]) => ({
+    artifactsByFile: Object.fromEntries(names.map((_, n) => [`f-${n + 1}`, { id: `a-${n + 1}` } as unknown as Row])),
+    filesById: Object.fromEntries(names.map((name, n) => [`f-${n + 1}`, { id: `f-${n + 1}`, name, size: MARKDOWN_FILE, versionNumber: n === 0 ? 2 : 1 } as unknown as Row])),
+  });
+  const pickedMarkdown = (names: string[]) =>
+    setupIntent("i1", { format: "markdown", sources: names.map((name, n) => ({ kind: "library_file" as const, ref: `f-${n + 1}`, label: name })) });
+  const attached = (...files: number[]) =>
+    files.map((n) => ({ artifactId: `a-${n}`, version: n === 1 ? 2 : 1, revision: `file:${n === 1 ? 2 : 1}` }));
+
   it("names each reference that went without being attached, on its own", async () => {
-    const conn = fakeConnection(
-      seed({
-        artifactsByFile: { "f-spec": { id: "a-spec" } as unknown as Row, "f-sheet": { id: "a-sheet" } as unknown as Row },
-        filesById: {
-          "f-spec": { id: "f-spec", name: "spec.pdf", size: 900, versionNumber: 1 } as unknown as Row,
-          "f-sheet": { id: "f-sheet", name: "numbers.csv", size: 300, versionNumber: 1 } as unknown as Row,
-        },
-      }),
-    );
-    mount(conn, {
-      intent: setupIntent("i1", {
-        format: "markdown",
-        sources: [
-          { kind: "library_file", ref: "f-spec", label: "spec.pdf" },
-          { kind: "library_file", ref: "f-sheet", label: "numbers.csv" },
-        ],
-      }),
-    });
-    await screen.findByRole("list", { name: "Picked sources" });
+    const names = ["first.md", "second.md", "third.md", "fourth.md"];
+    const conn = fakeConnection(seed(markdownFiles(names)));
+    mount(conn, { intent: pickedMarkdown(names) });
+    await pickedSources();
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
@@ -787,9 +822,11 @@ describe("a Markdown file asked for by describing it", () => {
       notice.querySelector(".os-notice-detail")?.textContent,
     ]);
     expect(notices).toEqual([
-      ["This reference wasn't attached.", "spec.pdf"],
-      ["This reference wasn't attached.", "numbers.csv"],
+      ["This reference wasn't attached.", "third.md"],
+      ["This reference wasn't attached.", "fourth.md"],
     ]);
+    // The first two, in the order they were picked, went with the revision.
+    expect(conn.query.libraryAddDocumentComment.mock.calls[0]?.[0]).toMatchObject({ attachments: attached(1, 2) });
   });
 
   // What arrives a moment after "Ready" is not something the person did, so it
@@ -800,7 +837,7 @@ describe("a Markdown file asked for by describing it", () => {
   // element laid out with `display: contents`, which is how this region used to
   // be hidden from the grid.
   describe("what arrives after Ready is announced", () => {
-    const announcer = () => document.querySelector(".os-mz-announce");
+    const announcer = () => document.querySelector(".mz-announce");
 
     it("in a visually hidden live region of its own, mounted before there is anything to say", async () => {
       const conn = fakeConnection(seed());
@@ -820,7 +857,7 @@ describe("a Markdown file asked for by describing it", () => {
       // The same element took the words: a new one appearing with its text would not be announced.
       expect(announcer()).toBe(region);
       expect(region?.textContent).toContain("The file was created, but the description was not sent for writing.");
-      expect(region?.textContent).toContain("Open the file and choose Describe document to send it again.");
+      expect(region?.textContent).toContain("Open it in the editor and choose Describe document to send it again.");
       expect(region?.textContent).toContain("revision budget exhausted");
       // Each part is spoken as a sentence. The cluster's reason has no full stop of its own, and
       // without one a screen reader runs it into whatever comes next.
@@ -844,29 +881,14 @@ describe("a Markdown file asked for by describing it", () => {
       expect(document.querySelector(".os-mz-status")).toBeNull();
       const notice = line.closest(".os-notice");
       expect(notice?.closest("[role=status]")).toBeNull();
-      expect(notice?.parentElement?.classList.contains("os-mz")).toBe(true);
+      expect(notice?.parentElement?.classList.contains("os-deploy-scroll")).toBe(true);
     });
 
     it("including the references that could not be attached, which arrive instead of a failure", async () => {
-      const conn = fakeConnection(
-        seed({
-          artifactsByFile: { "f-notes": { id: "a-notes" } as unknown as Row, "f-spec": { id: "a-spec" } as unknown as Row },
-          filesById: {
-            "f-notes": { id: "f-notes", name: "notes.md", size: 120, versionNumber: 2 } as unknown as Row,
-            "f-spec": { id: "f-spec", name: "spec.pdf", size: 900, versionNumber: 1 } as unknown as Row,
-          },
-        }),
-      );
-      mount(conn, {
-        intent: setupIntent("i1", {
-          format: "markdown",
-          sources: [
-            { kind: "library_file", ref: "f-notes", label: "notes.md" },
-            { kind: "library_file", ref: "f-spec", label: "spec.pdf" },
-          ],
-        }),
-      });
-      await screen.findByRole("list", { name: "Picked sources" });
+      const names = ["first.md", "second.md", "third.md"];
+      const conn = fakeConnection(seed(markdownFiles(names)));
+      mount(conn, { intent: pickedMarkdown(names) });
+      await pickedSources();
       await materializeNotes();
       await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
       const region = announcer();
@@ -874,7 +896,8 @@ describe("a Markdown file asked for by describing it", () => {
       conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
       await shown("This reference wasn't attached.");
       expect(announcer()).toBe(region);
-      expect(region?.textContent).toBe("This reference wasn't attached. spec.pdf.");
+      expect(region?.textContent).toBe("This reference wasn't attached. third.md.");
+      expect(conn.query.libraryAddDocumentComment.mock.calls[0]?.[0]).toMatchObject({ attachments: attached(1, 2) });
     });
 
     it("and goes quiet again when the file is left", async () => {
@@ -886,7 +909,7 @@ describe("a Markdown file asked for by describing it", () => {
       const region = announcer();
       conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
       await shown("The file was created, but the description was not sent for writing.");
-      fireEvent.click(screen.getByRole("button", { name: "Compose another" }));
+      await startAnother();
       await waitFor(() => expect(screen.queryByText(/not sent for writing/)).toBeNull());
       expect(announcer()).toBe(region);
       expect(region?.textContent).toBe("");
@@ -905,39 +928,22 @@ describe("a Markdown file asked for by describing it", () => {
   });
 
   it("names the references that could not be attached, after opening the revision with the ones that could", async () => {
-    const conn = fakeConnection(
-      seed({
-        artifactsByFile: { "f-notes": { id: "a-notes" } as unknown as Row, "f-spec": { id: "a-spec" } as unknown as Row },
-        filesById: {
-          "f-notes": { id: "f-notes", name: "notes.md", size: 120, versionNumber: 2 } as unknown as Row,
-          "f-spec": { id: "f-spec", name: "spec.pdf", size: 900, versionNumber: 1 } as unknown as Row,
-        },
-      }),
-    );
+    const names = ["first.md", "second.md", "third.md"];
+    const conn = fakeConnection(seed(markdownFiles(names)));
     // The new file itself has no entry in `artifactsByFile`: it falls back to ARTIFACT.
-    mount(conn, {
-      intent: setupIntent("i1", {
-        format: "markdown",
-        sources: [
-          { kind: "library_file", ref: "f-notes", label: "notes.md" },
-          { kind: "library_file", ref: "f-spec", label: "spec.pdf" },
-        ],
-      }),
-    });
-    await screen.findByRole("list", { name: "Picked sources" });
+    mount(conn, { intent: pickedMarkdown(names) });
+    await pickedSources();
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
 
     // Each reference left off is named on its own, by the label the person gave it. The SDK does not say
-    // why one was left off (its kind, its size, the Library's limits, not being found), so nor does this.
+    // why one was left off (the Library's totals, or what only its bytes show), so nor does this.
     const notice = (await shown("This reference wasn't attached.")).closest(".os-notice");
-    expect(notice?.querySelector(".os-notice-detail")?.textContent).toBe("spec.pdf");
+    expect(notice?.querySelector(".os-notice-detail")?.textContent).toBe("third.md");
     expect(document.querySelectorAll(".os-notice-line")).toHaveLength(1);
     expect(document.body.textContent).not.toMatch(/Only Markdown and images/);
-    expect(conn.query.libraryAddDocumentComment.mock.calls[0]?.[0]).toMatchObject({
-      attachments: [{ artifactId: "a-notes", version: 2, revision: "file:2" }],
-    });
+    expect(conn.query.libraryAddDocumentComment.mock.calls[0]?.[0]).toMatchObject({ attachments: attached(1, 2) });
     await waitFor(() => expect(conn.query.libraryRequestDocumentRevision).toHaveBeenCalledOnce());
     expect(screen.queryByText(/description was not sent/)).toBeNull();
   });
@@ -951,14 +957,14 @@ describe("a Markdown file asked for by describing it", () => {
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
     await shown("The file was created, but the description was not sent for writing.");
     deliver({ id: "open-other", payload: { compositionId: "c-other" } });
-    expect(await screen.findByRole("button", { name: "Open Another file" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Open in editor" })).toBeTruthy();
     expect(screen.queryByText(/description was not sent/)).toBeNull();
   });
 
   it("does not hand on the request for a spreadsheet: only Markdown is written from a description", async () => {
     const conn = fakeConnection(seed());
     mount(conn, { intent: setupIntent("i1", { format: "csv" }) });
-    await screen.findByLabelText("Kind of file");
+    await screen.findByRole("button", { name: /^Kind of file/ });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, ready({ format: "csv" }), "NODE_UPDATED");
@@ -971,8 +977,9 @@ describe("a Markdown file asked for by describing it", () => {
   it("does not hand on a Markdown request that names a template: the template decides what is written", async () => {
     const conn = fakeConnection(seed({ templates: [templateRow({ id: "t1", name: "House style", format: "markdown" })] }));
     mount(conn);
-    fireEvent.click(await screen.findByLabelText("Template"));
-    fireEvent.click(await screen.findByRole("option", { name: "House style" }));
+    await screen.findByRole("button", { name: /^Template/ });
+    openStep("Template");
+    fireEvent.click(await screen.findByRole("radio", { name: /^House style/ }));
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     expect(sent(conn)).toMatchObject({ templateId: "t1", format: "markdown" });
@@ -991,7 +998,7 @@ describe("a Markdown file asked for by describing it", () => {
         sources: [{ kind: "query", ref: "query openInvoices()", label: "Open invoices" }],
       }),
     });
-    await screen.findByRole("list", { name: "Picked sources" });
+    await pickedSources();
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     // It is sent as it was asked for: the statement AND the records. The cluster keeps the composer for it.
@@ -1003,15 +1010,67 @@ describe("a Markdown file asked for by describing it", () => {
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
     await screen.findByText("Ready");
     await act(async () => {});
-    expect(conn.query.libraryArtifactForFile).not.toHaveBeenCalled();
+    expect(conn.query.libraryArtifactForFile).toHaveBeenCalledWith({ fileId: "f-new" }, expect.anything());
     expect(conn.query.libraryAddDocumentComment).not.toHaveBeenCalled();
     expect(conn.query.libraryRequestDocumentRevision).not.toHaveBeenCalled();
+  });
+
+  // THE FILES DECIDE THE PATH, AND THE PATH IS DECIDED BEFORE THE PRESS SENDS ANYTHING. The Library
+  // attaches Markdown and pictures to a review comment and nothing else, so a spreadsheet among the
+  // files sends the whole request to the composer, which reads every file it is given. Each file's row
+  // is read once, before the request goes, and a window that read them hands nothing on afterwards.
+  it("does not hand on a Markdown request with a spreadsheet among its files: the composer reads it", async () => {
+    const conn = fakeConnection(
+      seed({
+        artifactsByFile: { "f-notes": { id: "a-notes" } as unknown as Row, "f-sheet": { id: "a-sheet" } as unknown as Row },
+        filesById: {
+          "f-notes": { id: "f-notes", name: "notes.md", size: 120, versionNumber: 2 } as unknown as Row,
+          "f-sheet": { id: "f-sheet", name: "numbers.csv", size: 300, versionNumber: 1 } as unknown as Row,
+        },
+      }),
+    );
+    mount(conn, {
+      intent: setupIntent("i1", {
+        format: "markdown",
+        sources: [
+          { kind: "library_file", ref: "f-notes", label: "notes.md" },
+          { kind: "library_file", ref: "f-sheet", label: "numbers.csv" },
+        ],
+      }),
+    });
+    await pickedSources();
+    await materializeNotes();
+    await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+    // The retained Library feed supplies both files before the press; no extra point reads are needed.
+    expect(conn.query.libraryFileById).not.toHaveBeenCalled();
+    // Both files go with the request as it was asked for: the composer reads them.
+    expect(sent(conn)).toMatchObject({
+      format: "markdown",
+      statement: "A one page brief",
+      sources: [
+        { kind: "library_file", ref: "f-notes", label: "notes.md" },
+        { kind: "library_file", ref: "f-sheet", label: "numbers.csv" },
+      ],
+    });
+    // As the composer writes a file: a model was used and the provenance is in the file.
+    conn.subscriptions.emit(
+      COMPOSITION,
+      ready({ modelsUsed: [{ provider: "anthropic", model: "claude-sonnet-5", calls: 1, tokens: 900 }], provenanceEmbedded: true, provenanceNote: "Provenance is in this file's front matter." }),
+      "NODE_UPDATED",
+    );
+    await screen.findByText("Ready");
+    await act(async () => {});
+    expect(conn.query.libraryArtifactForFile).toHaveBeenCalledWith({ fileId: "f-new" }, expect.anything());
+    expect(conn.query.libraryAddDocumentComment).not.toHaveBeenCalled();
+    expect(conn.query.libraryRequestDocumentRevision).not.toHaveBeenCalled();
+    // And the files were not read a second time for a hand-off that was never made.
+    expect(conn.query.libraryFileById).not.toHaveBeenCalled();
   });
 
   it("does not hand on a composition this window did not start", async () => {
     const conn = fakeConnection(seed({ compositions: [ready({ id: "c-elsewhere" })] }));
     mount(conn, { intent: { id: "open", payload: { compositionId: "c-elsewhere" } } });
-    await screen.findByRole("button", { name: "Open Notes" });
+    await screen.findByRole("button", { name: "Open in editor" });
     await act(async () => {});
     expect(conn.query.libraryAddDocumentComment).not.toHaveBeenCalled();
   });
@@ -1039,7 +1098,7 @@ describe("returning to the app that sent the person", () => {
     compositionRow({ id: "c1", name: "Notes", status: "ready", format: "csv", sources: [], ...over });
   const create = async (conn: Conn, setup: Parameters<typeof composeIntent>[0] = { format: "csv", returnTo }) => {
     mount(conn, { intent: setupIntent("i1", setup) });
-    await screen.findByLabelText("Kind of file");
+    await screen.findByRole("button", { name: /^Kind of file/ });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, finished(), "NODE_UPDATED");
@@ -1050,7 +1109,7 @@ describe("returning to the app that sent the person", () => {
     h.os = shell([FILES]);
     await create(seed());
     const back = await screen.findByRole("button", { name: "Back to Files" });
-    expect(screen.getByRole("button", { name: "Open Notes" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open in editor" })).toBeTruthy();
     await readTheBar();
     fireEvent.click(back);
     expect(h.openApp).toHaveBeenCalledExactlyOnceWith("files", "browse");
@@ -1061,21 +1120,21 @@ describe("returning to the app that sent the person", () => {
     await create(seed());
     await screen.findByRole("button", { name: "Back to Files" });
     const bar = screen.getByRole("group", { name: "What you can do with this" });
-    expect(within(bar).getAllByRole("button").map((button) => button.textContent)).toEqual(["Save as recipe", "Back to Files", "Open the file"]);
+    expect(within(bar).getAllByRole("button").map((button) => button.textContent)).toEqual(["Back to Files", "Save as recipe", "Open in editor"]);
   });
 
   it("offers no way back when the setup named none", async () => {
     h.os = shell([FILES]);
     await create(seed(), { format: "csv" });
-    await screen.findByRole("button", { name: "Open Notes" });
-    expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
+    await screen.findByRole("button", { name: "Open in editor" });
+    expect(screen.queryByRole("button", { name: "Back to Files" })).toBeNull();
   });
 
   it("offers no way back to an app the shell does not hold, rather than a control that does nothing", async () => {
     h.os = shell([]);
     await create(seed());
-    await screen.findByRole("button", { name: "Open Notes" });
-    expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
+    await screen.findByRole("button", { name: "Open in editor" });
+    expect(screen.queryByRole("button", { name: "Back to Files" })).toBeNull();
   });
 
   it("offers no way back to an app this person is not admitted to, though the shell holds it", async () => {
@@ -1083,15 +1142,15 @@ describe("returning to the app that sent the person", () => {
     // person's capabilities do not open it.
     h.os = shell([{ ...FILES, requires: "app:never-granted" }]);
     await create(seed());
-    await screen.findByRole("button", { name: "Open Notes" });
-    expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
+    await screen.findByRole("button", { name: "Open in editor" });
+    expect(screen.queryByRole("button", { name: "Back to Files" })).toBeNull();
   });
 
   it("offers no way back where there is no shell to go back in", async () => {
     h.os = null;
     await create(seed());
-    await screen.findByRole("button", { name: "Open Notes" });
-    expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
+    await screen.findByRole("button", { name: "Open in editor" });
+    expect(screen.queryByRole("button", { name: "Back to Files" })).toBeNull();
   });
 
   it("belongs to the file this window made from that setup, and to no other the person opens afterwards", async () => {
@@ -1101,49 +1160,49 @@ describe("returning to the app that sent the person", () => {
       compositions: [finished({ id: "c-old", name: "Older file" })],
     });
     const { deliver } = mount(conn, { intent: setupIntent("i1", { format: "csv", returnTo }) });
-    await screen.findByLabelText("Kind of file");
+    await screen.findByRole("button", { name: /^Kind of file/ });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, finished(), "NODE_UPDATED");
     await screen.findByRole("button", { name: "Back to Files" });
     deliver({ id: "open-old", payload: { compositionId: "c-old" } });
-    expect(await screen.findByRole("button", { name: "Open Older file" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Open in editor" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back to Files" })).toBeNull();
   });
 
   it("is not carried to a second file made in the same window", async () => {
     h.os = shell([FILES]);
     const conn = seed();
     mount(conn, { intent: setupIntent("i1", { format: "csv", returnTo }) });
-    await screen.findByLabelText("Kind of file");
+    await screen.findByRole("button", { name: /^Kind of file/ });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, finished(), "NODE_UPDATED");
     await screen.findByRole("button", { name: "Back to Files" });
-    fireEvent.click(screen.getByRole("button", { name: "Compose another" }));
+    await startAnother();
     conn.query.composeMaterialize.mockResolvedValueOnce(rowsResult([{ compositionId: "c2" } as unknown as Row]));
-    await materializeNotes({ name: "Second", afterChange: true });
+    await materializeNotes({ name: "Second" });
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
     conn.subscriptions.emit(COMPOSITION, finished({ id: "c2", name: "Second" }), "NODE_UPDATED");
-    await screen.findByRole("button", { name: "Open Second" });
-    expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
+    await screen.findByRole("button", { name: "Open in editor" });
+    expect(screen.queryByRole("button", { name: "Back to Files" })).toBeNull();
   });
 
   it("ends when the person starts another file, because that is no longer the trip that began elsewhere", async () => {
     h.os = shell([FILES]);
     const conn = seed();
     const { deliver } = mount(conn, { intent: setupIntent("i1", { format: "csv", returnTo }) });
-    await screen.findByLabelText("Kind of file");
+    await screen.findByRole("button", { name: /^Kind of file/ });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, finished(), "NODE_UPDATED");
     await screen.findByRole("button", { name: "Back to Files" });
-    fireEvent.click(screen.getByRole("button", { name: "Compose another" }));
-    await screen.findByLabelText("Kind of file");
+    await startAnother();
+    await screen.findByRole("button", { name: /^Kind of file/ });
     // Coming back to that same file later is not coming back from Files.
     deliver({ id: "reopen", payload: { compositionId: "c1" } });
-    expect(await screen.findByRole("button", { name: "Open Notes" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Back to/ })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Open in editor" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back to Files" })).toBeNull();
     // Archive gave way to the way back only while the trip was live; it is
     // offered again now that it is over.
     expect(screen.getByRole("button", { name: "Archive" })).toBeTruthy();
