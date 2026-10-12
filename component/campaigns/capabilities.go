@@ -53,6 +53,9 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 		ops[name] = nil
 	}
 	return append([]memql.IntegrationCapability{
+		{Name: "saveJourney", Description: "Save a revision of an email automation.", Handler: w.handleSaveJourney},
+		{Name: "setJourneyState", Description: "Turn an email automation on, pause or archive it.", Handler: w.handleSetJourneyState},
+		{Name: "stageOperationalEmail", Description: "Render a published operational rule template into the server outbox.", Handler: w.handleStageOperationalEmail},
 		{Name: "configureTestAudience", Description: "Configure the organization testing audience.", Handler: w.handleConfigureTestAudience},
 		{Name: "testAudienceSend", Description: "Queue a test through the normal campaign worker.", Handler: w.handleTestAudienceSend},
 		{Name: "sendingReadiness", Description: "Check the selected organization's sender and unsubscribe setup without sending mail.", Handler: w.handleSendingReadiness},

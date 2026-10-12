@@ -206,6 +206,7 @@ func (s SenderIdentity) Disabled() bool { return s.Status == "disabled" }
 
 // Template is the authored content.
 type Template struct {
+	Name      string `json:"name"`
 	AccountID string `json:"accountId"`
 	ID        string `json:"id"`
 	Subject   string `json:"subject"`
@@ -225,8 +226,10 @@ type Template struct {
 
 // Recipient is one address in the audience roster.
 type Recipient struct {
-	AccountID string
-	ID        string
+	JoinedAt, ConfirmedAt time.Time
+	AudienceID            string
+	AccountID             string
+	ID                    string
 	// CanonicalID is the stored `v1:campaigns:recipient:<short>` form. Kept
 	// alongside the bare id because the ledger page read compares a LIST of
 	// recipient ids, and the engine's relationship-canonicalizing pre-walk
@@ -447,6 +450,7 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 	r := rows[0]
 	return Template{
 		Revision:  templateTime(r["createdAt"]).Format(time.RFC3339Nano),
+		Name:      str(r, "name"),
 		AccountID: bare(str(r, "accountId")),
 		ID:        bare(str(r, "id")),
 		Subject:   str(r, "subject"),
@@ -510,7 +514,9 @@ func (s *Store) RosterPage(ctx context.Context, audienceID, cursor string) ([]Re
 func recipientFromRow(r map[string]any) Recipient {
 	canonical := str(r, "id")
 	return Recipient{
-		AccountID:          bare(str(r, "accountId")),
+		AccountID:  bare(str(r, "accountId")),
+		AudienceID: bare(str(r, "audienceId")),
+		JoinedAt:   templateTime(r["joinedAt"]), ConfirmedAt: templateTime(r["confirmedAt"]),
 		ID:                 bare(canonical),
 		CanonicalID:        canonical,
 		Email:              str(r, "email"),
@@ -859,6 +865,18 @@ type Delivery struct {
 	// until the concept gained the field -- meant the answer existed for the
 	// length of one HTTP response.
 	EmailRuleID string
+
+	// RequestID, TemplateID and SenderIdentityID describe a SINGLE send (memql#6022,
+	// F7), and are EMPTY on a campaign delivery, whose template and sender are its
+	// campaign's. RequestID is the stable request the message was sent under, and it
+	// is the ledger key of a send with no campaign: the row's id derives from
+	// (RequestID, RecipientID), so each message to a person has a row of its own
+	// (singleDeliveryRowID). TemplateID and SenderIdentityID say what the message
+	// was and who it went out as, which the rule or journey that sent it may no
+	// longer say once it has been edited. Each is rendered only when set.
+	RequestID        string
+	TemplateID       string
+	SenderIdentityID string
 }
 
 // RecordDelivery writes the ledger row. OWNED tier: issue under the
@@ -880,6 +898,15 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	}
 	if d.EmailRuleID != "" {
 		args = append(args, arg{"emailRuleId", d.EmailRuleID})
+	}
+	if d.RequestID != "" {
+		args = append(args, arg{"requestId", d.RequestID})
+	}
+	if d.TemplateID != "" {
+		args = append(args, arg{"templateId", d.TemplateID})
+	}
+	if d.SenderIdentityID != "" {
+		args = append(args, arg{"senderIdentityId", d.SenderIdentityID})
 	}
 	if d.LastError != "" {
 		args = append(args, arg{"lastError", truncateError(d.LastError)})
@@ -991,11 +1018,12 @@ func (s *Store) SetRecipientSubscription(ctx context.Context, recipientID, statu
 // more often than it is an identifier -- and a bare key there is a parse
 // error at call time, which is the failure mode a fake-engine test suite
 // cannot see (memql#3035's shape).
-func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, source, accountID string, fields map[string]string) error {
+func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, source, accountID, status string, fields map[string]string) error {
 	args := []arg{
 		{"recipientId", recipientID},
 		{"audienceId", audienceID},
 		{"email", email},
+		{"subscriptionStatus", status},
 	}
 	if displayName != "" {
 		args = append(args, arg{"displayName", displayName})
@@ -1431,33 +1459,7 @@ func (s *Store) rowsPage(ctx context.Context, cursor, q string) ([]map[string]an
 	if err != nil {
 		return nil, "", fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
-	return memql.MaterializeRows(res), cursorFromResult(res), nil
-}
-
-// cursorFromResult lifts the continuation token off whatever the engine seam
-// handed back. Two shapes, and both are real: the in-process engine returns
-// an *ExecuteResult carrying ResultMeta, and the package's tests fake flat row
-// envelopes (the seam is `Execute(ctx, string) (any, error)` precisely so they
-// can). A result with neither is an exhausted page, which is the safe reading
-// -- it ends the walk rather than continuing from a position nobody supplied.
-func cursorFromResult(res any) string {
-	type metaCarrier interface{ GetMeta() *memql.ResultMeta }
-	if carrier, ok := res.(metaCarrier); ok {
-		if meta := carrier.GetMeta(); meta != nil {
-			return strings.TrimSpace(meta.Cursor)
-		}
-	}
-	if envelope, ok := res.(map[string]any); ok {
-		if raw, ok := envelope["cursor"].(string); ok {
-			return strings.TrimSpace(raw)
-		}
-		if meta, ok := envelope["meta"].(map[string]any); ok {
-			if raw, ok := meta["cursor"].(string); ok {
-				return strings.TrimSpace(raw)
-			}
-		}
-	}
-	return ""
+	return memql.MaterializeRows(res), memql.ResultCursor(res), nil
 }
 
 func (s *Store) exec(ctx context.Context, q string) error {
@@ -1812,4 +1814,18 @@ func templateSnapshot(value any) *Template {
 		return &Template{}
 	}
 	return &snapshot
+}
+
+type Audience struct{ ID, AccountID, Name, Status, Confirmation string }
+
+func (s *Store) AudienceByID(ctx context.Context, id string) (Audience, bool, error) {
+	rows, err := s.rows(ctx, call("query", "audienceById", arg{"audienceId", bare(id)}))
+	if err != nil || len(rows) == 0 {
+		return Audience{}, false, err
+	}
+	r := rows[0]
+	return Audience{ID: bare(str(r, "id")), AccountID: bare(str(r, "accountId")), Name: str(r, "name"), Status: str(r, "status"), Confirmation: str(r, "confirmation")}, true, nil
+}
+func (s *Store) ConfirmRecipient(ctx context.Context, id string, at time.Time) error {
+	return s.execServerOnly(ctx, call("mutation", "confirmRecipientSubscription", arg{"recipientId", bare(id)}, arg{"confirmedAt", at.UTC().Format(time.RFC3339Nano)}))
 }

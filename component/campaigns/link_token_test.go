@@ -2,6 +2,8 @@ package campaigns
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -15,26 +17,33 @@ import (
 	"time"
 )
 
-// link_token_test.go -- the signed tokens behind the three email-link pages:
+// link_token_test.go -- the sealed tokens behind the three email-link pages:
 // confirm a subscription, change preferences, view a message in a browser
 // (memql#6033).
 //
 // What these tests protect, in order of how badly it hurts to lose them:
 //
-//   - a token minted for one page must not open another. The context is part
-//     of the MAC and is not in the token, so the only thing that can refuse a
-//     cross-page token is the MAC. TestALinkTokenForOnePageIsRefusedByAnother
-//     uses a payload that is valid on EVERY page, which is what makes the MAC
+//   - a token is opaque. It holds the recipient, the organization, a digest of
+//     the address and the names the message showed, and links like these are
+//     forwarded and posted, so none of it may be readable from the token. The
+//     payload is sealed (AES-256-GCM), not just signed;
+//   - a token minted for one page must not open another. The page's context is
+//     authenticated data, not part of the token, so the only thing that can
+//     refuse a cross-page token is the seal. TestALinkTokenForOnePageIsRefusedByAnother
+//     uses a payload that is valid on EVERY page, which is what makes the seal
 //     the only possible reason for the refusal;
-//   - nothing in the payload can be changed without the secret;
+//   - nothing can be changed without the secret: one flipped byte anywhere in a
+//     token is refused;
 //   - rotating the secret strands no link already in a mailbox, and a key this
 //     node does not hold is told apart from a forgery (the log line differs);
 //   - only a confirm link expires. A preferences link is where a person goes to
 //     opt out, so an expiry there would be a compliance failure.
 //
-// The wire format is also checked against signLinkByHand below, which builds a
-// token straight from the written design with nothing but crypto primitives.
-// The implementation's own constants are not trusted to check themselves.
+// The wire format is also checked against sealLinkByHand and openLinkByHand
+// below, which build and open a token straight from the written design with
+// nothing but crypto primitives and literal labels (HKDF included, written out
+// from RFC 5869 rather than called). The implementation's own constants are not
+// trusted to check themselves.
 
 const (
 	linkSecretA = "link-signing-secret-a-for-tests"
@@ -47,7 +56,7 @@ var (
 	linkTestDigest = EmailDigest("reader@example.test")
 	linkKinds      = []LinkKind{LinkConfirm, LinkPreferences, LinkView}
 
-	// linkOracleContexts are the three MAC contexts, spelled out here and not
+	// linkOracleContexts are the three page contexts, spelled out here and not
 	// read from the implementation.
 	linkOracleContexts = map[LinkKind]string{
 		LinkConfirm:     "memql/email/confirm/v1",
@@ -99,11 +108,13 @@ func mustMintLink(t *testing.T, secret string, kind LinkKind, p LinkPayload) str
 	return token
 }
 
+// splitLinkToken returns the three segments of a token: the version, the key id
+// and the sealed payload.
 func splitLinkToken(t *testing.T, token string) []string {
 	t.Helper()
 	parts := strings.Split(token, ".")
-	if len(parts) != 4 {
-		t.Fatalf("token %q has %d segments, want 4", token, len(parts))
+	if len(parts) != 3 {
+		t.Fatalf("token %q has %d segments, want 3", token, len(parts))
 	}
 	return parts
 }
@@ -117,34 +128,99 @@ func decodeLinkSegment(t *testing.T, segment string) []byte {
 	return raw
 }
 
-// signLinkByHand builds a token from the written format using only crypto
-// primitives and literal strings:
-//
-//	l1.<keyId>.<base64url(payload)>.<base64url(tag)>
-//	keyId = hex(HMAC-SHA256(secret, "memql/email/link/key-id")[:4])
-//	tag   = HMAC-SHA256(secret, context + "\x00" + "l1.<keyId>.<payload>")[:16]
-//
-// It takes the payload as raw bytes so a test can sign something MintLinkToken
-// would refuse, which is how the parser's own checks are exercised past the MAC.
-func signLinkByHand(secret, macContext string, rawPayload []byte) string {
-	idMAC := hmac.New(sha256.New, []byte(secret))
-	idMAC.Write([]byte("memql/email/link/key-id"))
-	keyID := hex.EncodeToString(idMAC.Sum(nil)[:4])
-
-	body := "l1." + keyID + "." + base64.RawURLEncoding.EncodeToString(rawPayload)
-
-	tagMAC := hmac.New(sha256.New, []byte(secret))
-	tagMAC.Write([]byte(macContext + "\x00" + body))
-	return body + "." + base64.RawURLEncoding.EncodeToString(tagMAC.Sum(nil)[:16])
+// otherPage is a page that is not kind.
+func otherPage(kind LinkKind) LinkKind {
+	if kind == LinkView {
+		return LinkPreferences
+	}
+	return LinkView
 }
 
-func signPayloadByHand(t *testing.T, secret string, kind LinkKind, p LinkPayload) string {
-	t.Helper()
-	raw, err := json.Marshal(p)
+// rejoinLinkToken puts a token back together around a different sealed segment.
+func rejoinLinkToken(parts []string, sealed []byte) string {
+	return strings.Join([]string{parts[0], parts[1], base64.RawURLEncoding.EncodeToString(sealed)}, ".")
+}
+
+// hkdfSHA256ByHand is HKDF-SHA256 (RFC 5869) with no salt, for one 32-byte
+// block, written from HMAC alone so that a mistake in how the implementation
+// calls the standard library's HKDF is not shared by the check on it.
+//
+//	PRK  = HMAC-SHA256(salt = 32 zero bytes, IKM)     (an absent salt is HashLen zeros, section 2.2)
+//	T(1) = HMAC-SHA256(PRK, info || 0x01)             (the first block is the whole 32-byte key)
+func hkdfSHA256ByHand(secret, info string) []byte {
+	extract := hmac.New(sha256.New, make([]byte, sha256.Size))
+	extract.Write([]byte(secret))
+	expand := hmac.New(sha256.New, extract.Sum(nil))
+	expand.Write([]byte(info))
+	expand.Write([]byte{0x01})
+	return expand.Sum(nil)
+}
+
+// linkKeyIDByHand: hex(HMAC-SHA256(secret, "memql/email/link/key-id")[:4]).
+func linkKeyIDByHand(secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte("memql/email/link/key-id"))
+	return hex.EncodeToString(mac.Sum(nil)[:4])
+}
+
+func linkAEADByHand(secret string) cipher.AEAD {
+	block, err := aes.NewCipher(hkdfSHA256ByHand(secret, "memql/email/link/v1"))
 	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
+		panic(err)
 	}
-	return signLinkByHand(secret, linkOracleContexts[kind], raw)
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		panic(err)
+	}
+	return gcm
+}
+
+// sealLinkByHand builds a token from the written format using only crypto
+// primitives and literal strings:
+//
+//	l1.<keyId>.<base64url(nonce || ciphertext || tag)>
+//	keyId = hex(HMAC-SHA256(secret, "memql/email/link/key-id")[:4])
+//	key   = HKDF-SHA256(secret, no salt, info "memql/email/link/v1") -> 32 bytes
+//	seal  = AES-256-GCM(key, 12-byte nonce, plaintext, aad = context + "\x00" + "l1.<keyId>")
+//
+// It takes the plaintext as raw bytes so a test can seal something MintLinkToken
+// would refuse, which is how the parser's own checks are exercised past the seal.
+func sealLinkByHand(secret, pageContext string, nonce, plaintext []byte) string {
+	header := "l1." + linkKeyIDByHand(secret)
+	sealed := linkAEADByHand(secret).Seal(append([]byte(nil), nonce...), nonce, plaintext, []byte(pageContext+"\x00"+header))
+	return header + "." + base64.RawURLEncoding.EncodeToString(sealed)
+}
+
+func sealPayloadByHand(t *testing.T, secret string, kind LinkKind, nonce []byte, p LinkPayload) string {
+	t.Helper()
+	return sealLinkByHand(secret, linkOracleContexts[kind], nonce, mustJSON(t, p))
+}
+
+// openLinkByHand opens a token the way the written format says, with the
+// context of the page the test names. It is the oracle for what MintLinkToken
+// produced.
+func openLinkByHand(secret, pageContext, token string) ([]byte, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return nil, errors.New("not three segments")
+	}
+	sealed, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return nil, err
+	}
+	if len(sealed) < 12+16 {
+		return nil, errors.New("shorter than a nonce and a tag")
+	}
+	return linkAEADByHand(secret).Open(nil, sealed[:12], sealed[12:], []byte(pageContext+"\x00"+parts[0]+"."+parts[1]))
+}
+
+// testNonce is a 12-byte nonce for the hand-sealed tokens; n makes them differ.
+func testNonce(n byte) []byte {
+	nonce := make([]byte, 12)
+	for i := range nonce {
+		nonce[i] = n + byte(i)
+	}
+	return nonce
 }
 
 func TestLinkTokensRoundTripPerKind(t *testing.T) {
@@ -173,16 +249,61 @@ func TestLinkTokensRoundTripPerKind(t *testing.T) {
 	}
 }
 
-// TestLinkTokenFormatMatchesTheSpecification pins the exact labels, contexts
-// and tag length. A token that round-trips with ITSELF proves nothing about
-// these: swap a label for another and every other test here still passes.
+// TestLinkTokenFormatMatchesTheSpecification pins the exact labels, contexts,
+// key derivation and layout. A token that round-trips with ITSELF proves nothing
+// about these: swap a label for another and every other test here still passes.
+// So the token MintLinkToken makes is opened by the oracle, and the token the
+// oracle seals is the very token MintLinkToken makes from the same nonce.
 func TestLinkTokenFormatMatchesTheSpecification(t *testing.T) {
+	keys := []string{linkSecretA}
 	for _, kind := range linkKinds {
 		for _, p := range []LinkPayload{fullLinkPayload(), minimalLinkPayload(kind)} {
-			got := mustMintLink(t, linkSecretA, kind, p)
-			want := signPayloadByHand(t, linkSecretA, kind, p)
-			if got != want {
-				t.Errorf("%s: minted token differs from the one built by hand from the specification.\n got %s\nwant %s", kind, got, want)
+			plaintext := mustJSON(t, p)
+
+			// What MintLinkToken makes opens, by hand, to the payload and to nothing else.
+			minted := mustMintLink(t, linkSecretA, kind, p)
+			opened, err := openLinkByHand(linkSecretA, linkOracleContexts[kind], minted)
+			if err != nil {
+				t.Fatalf("%s: the oracle cannot open the token MintLinkToken made: %v", kind, err)
+			}
+			if !bytes.Equal(opened, plaintext) {
+				t.Errorf("%s: the sealed payload is %s, want %s", kind, opened, plaintext)
+			}
+			parts := splitLinkToken(t, minted)
+			if parts[0] != "l1" || parts[1] != linkKeyIDByHand(linkSecretA) {
+				t.Errorf("%s: the header is %q, want l1.%s", kind, parts[0]+"."+parts[1], linkKeyIDByHand(linkSecretA))
+			}
+			if sealed := decodeLinkSegment(t, parts[2]); len(sealed) != 12+len(plaintext)+16 {
+				t.Errorf("%s: the sealed segment is %d bytes, want a 12-byte nonce, the %d payload bytes and a 16-byte tag", kind, len(sealed), len(plaintext))
+			}
+			// The page's context is authenticated, so no other page opens it.
+			for _, other := range linkKinds {
+				if other == kind {
+					continue
+				}
+				if _, err := openLinkByHand(linkSecretA, linkOracleContexts[other], minted); err == nil {
+					t.Errorf("%s: the oracle opened a %s token with the %s page's context", kind, kind, other)
+				}
+			}
+			// And only its own secret does.
+			if _, err := openLinkByHand(linkSecretB, linkOracleContexts[kind], minted); err == nil {
+				t.Errorf("%s: the oracle opened the token with another secret", kind)
+			}
+
+			// From one nonce, the implementation and the oracle make the same token.
+			nonce := testNonce(7)
+			byHand := sealLinkByHand(linkSecretA, linkOracleContexts[kind], nonce, plaintext)
+			fromNonce, err := mintLinkToken(bytes.NewReader(nonce), linkSecretA, kind, p)
+			if err != nil {
+				t.Fatalf("%s: mintLinkToken: %v", kind, err)
+			}
+			if fromNonce != byHand {
+				t.Errorf("%s: the token differs from the one sealed by hand from the specification.\n got %s\nwant %s", kind, fromNonce, byHand)
+			}
+			// ...and the verifier takes the oracle's token.
+			got, err := ParseLinkToken(keys, kind, byHand, linkTestNow)
+			if err != nil || got != p {
+				t.Errorf("%s: the token sealed by hand was refused or changed: %+v, %v", kind, got, err)
 			}
 		}
 	}
@@ -200,17 +321,19 @@ func TestLinkKeyIDIsDerivedFromTheSecretAndLabelledApart(t *testing.T) {
 	if strings.Contains(LinkKeyID(linkSecretA), linkSecretA) {
 		t.Fatal("the key id echoes the secret")
 	}
-	// One secret signs all three families. Each must name it differently, or
+	// One secret keys all three families. Each must name it differently, or
 	// each parser would recognise the others' tokens as naming a key it holds
-	// and fall through to the MAC instead of stopping at the label.
+	// and go on to check the signature (or try to open the seal) instead of
+	// stopping at the label.
 	if LinkKeyID(linkSecretA) == UnsubscribeKeyID(linkSecretA) || LinkKeyID(linkSecretA) == TrackingKeyID(linkSecretA) {
 		t.Error("the link key-id label produces the same id as another token family's for one secret")
 	}
 }
 
 // TestALinkTokenForOnePageIsRefusedByAnother -- the page a request arrives at
-// chooses the MAC context, so a token for one page is a bad MAC on another.
-// The payload is valid on every page, so no payload check can be what refuses it.
+// chooses the associated data the seal is opened with, so a token for one page
+// does not open on another. The payload is valid on every page, so no payload
+// check can be what refuses it.
 func TestALinkTokenForOnePageIsRefusedByAnother(t *testing.T) {
 	keys := []string{linkSecretA}
 	for _, minted := range linkKinds {
@@ -234,55 +357,93 @@ func TestALinkTokenForOnePageIsRefusedByAnother(t *testing.T) {
 	}
 }
 
-// TestAForgedLinkTokenIsRefused -- every way of editing a token without the
-// secret ends in errBadLinkToken, and never returns any of the payload.
+// TestAFlippedByteAnywhereInALinkTokenIsRefused -- the seal covers the nonce,
+// the ciphertext and the tag, and the header is authenticated data, so there is
+// no byte of a token that can be changed. Every refusal is errBadLinkToken, and
+// none returns any of the payload; the one exception is a change to the key id,
+// which can also name a key this node does not hold.
+func TestAFlippedByteAnywhereInALinkTokenIsRefused(t *testing.T) {
+	keys := []string{linkSecretA, linkSecretB}
+	for _, kind := range linkKinds {
+		good := mustMintLink(t, linkSecretA, kind, fullLinkPayload())
+		parts := splitLinkToken(t, good)
+		sealed := decodeLinkSegment(t, parts[2])
+
+		// Every byte of nonce || ciphertext || tag, three bits of each.
+		for i := range sealed {
+			for _, bit := range []byte{0x01, 0x10, 0x80} {
+				edited := append([]byte(nil), sealed...)
+				edited[i] ^= bit
+				got, err := ParseLinkToken(keys, kind, rejoinLinkToken(parts, edited), linkTestNow)
+				if !errors.Is(err, errBadLinkToken) {
+					t.Errorf("%s: byte %d of the sealed segment with bit %#x flipped: err = %v, want errBadLinkToken", kind, i, bit, err)
+				}
+				if got != (LinkPayload{}) {
+					t.Errorf("%s: byte %d flipped: returned payload %+v", kind, i, got)
+				}
+			}
+		}
+
+		// Every character of the token as it is written, replaced by another.
+		headerLen := len(parts[0]) + 1 + len(parts[1]) + 1
+		for i := 0; i < len(good); i++ {
+			replacement := byte('A')
+			if good[i] == 'A' {
+				replacement = 'B'
+			}
+			edited := good[:i] + string(replacement) + good[i+1:]
+			got, err := ParseLinkToken(keys, kind, edited, linkTestNow)
+			if err == nil {
+				t.Errorf("%s: character %d of the token replaced: still verified", kind, i)
+				continue
+			}
+			if i >= headerLen && !errors.Is(err, errBadLinkToken) {
+				t.Errorf("%s: character %d of the sealed segment replaced: err = %v, want errBadLinkToken", kind, i, err)
+			}
+			if got != (LinkPayload{}) {
+				t.Errorf("%s: character %d replaced: returned payload %+v", kind, i, got)
+			}
+		}
+	}
+}
+
+// TestAForgedLinkTokenIsRefused -- the shapes of forgery that are not a single
+// flipped bit: parts of one genuine token put together with parts of another.
 func TestAForgedLinkTokenIsRefused(t *testing.T) {
 	keys := []string{linkSecretA, linkSecretB}
 	for _, kind := range linkKinds {
 		good := mustMintLink(t, linkSecretA, kind, fullLinkPayload())
 		parts := splitLinkToken(t, good)
-		goodPayload := decodeLinkSegment(t, parts[2])
-		goodTag := decodeLinkSegment(t, parts[3])
+		sealed := decodeLinkSegment(t, parts[2])
 
-		// keepTag re-encodes an edited payload and leaves the original tag, which
-		// is exactly what an attacker without the secret can do.
-		keepTag := func(edit func(payload []byte) []byte) string {
-			edited := edit(append([]byte(nil), goodPayload...))
-			return strings.Join([]string{parts[0], parts[1], base64.RawURLEncoding.EncodeToString(edited), parts[3]}, ".")
-		}
-		replace := func(from, to string) func([]byte) []byte {
-			return func(payload []byte) []byte {
-				if !strings.Contains(string(payload), from) {
-					t.Fatalf("%s: precondition: payload %s does not contain %q", kind, payload, from)
-				}
-				return []byte(strings.Replace(string(payload), from, to, 1))
-			}
-		}
-		withTag := func(tag []byte) string {
-			return strings.Join([]string{parts[0], parts[1], parts[2], base64.RawURLEncoding.EncodeToString(tag)}, ".")
-		}
-		flippedTag := append([]byte(nil), goodTag...)
-		flippedTag[0] ^= 0x01
 		other := fullLinkPayload()
-		other.OwnerUserID = "owner-2"
+		other.OwnerUserID = "owner-2" // aiming the impersonation
 		otherToken := mustMintLink(t, linkSecretA, kind, other)
+		otherSealed := decodeLinkSegment(t, splitLinkToken(t, otherToken)[2])
 
+		withNonceOf := func(donor []byte) []byte {
+			return append(append([]byte(nil), donor[:12]...), sealed[12:]...)
+		}
 		forgeries := map[string]string{
-			"one payload byte flipped": keepTag(func(p []byte) []byte { p[len(p)/2] ^= 0x01; return p }),
-			// The shapes below are VALID payloads: only the MAC stands in the way.
-			"the owner swapped (aiming the impersonation)": keepTag(replace("owner-1", "owner-2")),
-			"the recipient swapped":                        keepTag(replace("recipient-1", "recipient-2")),
-			"the organization swapped":                     keepTag(replace("account-1", "account-2")),
-			"the digest swapped for another valid one":     keepTag(replace(linkTestDigest, EmailDigest("someone-else@example.test"))),
-			"the expiry pushed out":                        keepTag(replace(`"x":`, `"x":9`)),
-			"another token's payload under this tag":       strings.Join([]string{parts[0], parts[1], splitLinkToken(t, otherToken)[2], parts[3]}, "."),
-			"one tag bit flipped":                          withTag(flippedTag),
-			"the tag zeroed":                               withTag(make([]byte, len(goodTag))),
-			"the tag truncated":                            strings.TrimSuffix(good, good[len(good)-1:]),
-			"the tag removed":                              strings.Join(parts[:3], ".") + ".",
-			// The ring holds both keys, so naming the OTHER one is "known key,
-			// wrong MAC" and must be a forgery, not an unknown key.
-			"the key id of the other held key": strings.Join([]string{parts[0], LinkKeyID(linkSecretB), parts[2], parts[3]}, "."),
+			// (Another token's whole sealed segment is not a forgery: under the same
+			// header it IS that genuine token. What a holder of one token cannot do is
+			// move it to another page, or mix two.)
+			"another page's sealed segment":            rejoinLinkToken(parts, decodeLinkSegment(t, splitLinkToken(t, mustMintLink(t, linkSecretA, otherPage(kind), fullLinkPayload()))[2])),
+			"another token's nonce on this ciphertext": rejoinLinkToken(parts, withNonceOf(otherSealed)),
+			"this nonce on another token's ciphertext": rejoinLinkToken(parts, append(append([]byte(nil), sealed[:12]...), otherSealed[12:]...)),
+			"the nonce zeroed":                         rejoinLinkToken(parts, append(make([]byte, 12), sealed[12:]...)),
+			"the tag zeroed":                           rejoinLinkToken(parts, append(append([]byte(nil), sealed[:len(sealed)-16]...), make([]byte, 16)...)),
+			"the tag removed":                          rejoinLinkToken(parts, sealed[:len(sealed)-16]),
+			"one byte short":                           rejoinLinkToken(parts, sealed[:len(sealed)-1]),
+			"one byte long":                            rejoinLinkToken(parts, append(append([]byte(nil), sealed...), 0)),
+			"the ciphertext doubled":                   rejoinLinkToken(parts, append(append([]byte(nil), sealed...), sealed[12:]...)),
+			"shorter than a nonce and a tag":           rejoinLinkToken(parts, sealed[:27]),
+			"no sealed bytes at all":                   parts[0] + "." + parts[1] + ".",
+			// The ring holds both keys, so naming the OTHER one is "known key, wrong
+			// key" and must be a forgery, not an unknown key. The header is
+			// authenticated data, so it fails the seal even before the key is wrong.
+			"the key id of the other held key": strings.Join([]string{parts[0], LinkKeyID(linkSecretB), parts[2]}, "."),
+			"another version":                  strings.Join([]string{"l2", parts[1], parts[2]}, "."),
 		}
 		for name, forged := range forgeries {
 			got, err := ParseLinkToken(keys, kind, forged, linkTestNow)
@@ -310,18 +471,20 @@ func TestParseRefusesShapesThatAreNotLinkTokens(t *testing.T) {
 	}
 
 	cases := map[string]string{
-		"empty":                       "",
-		"whitespace":                  "   ",
-		"the version only":            "l1",
-		"dots only":                   "...",
-		"empty segments":              "l1...",
-		"three segments":              strings.Join(parts[:3], "."),
-		"five segments":               good + ".extra",
-		"another version":             "l2." + strings.Join(parts[1:], "."),
-		"no version":                  strings.Join(parts[1:], "."),
-		"a payload that is no base64": strings.Join([]string{parts[0], parts[1], "!!!!", parts[3]}, "."),
-		"an unsubscribe token":        unsub,
-		"a tracking token":            track,
+		"empty":                              "",
+		"whitespace":                         "   ",
+		"the version only":                   "l1",
+		"dots only":                          "...",
+		"empty segments":                     "l1..",
+		"two segments":                       strings.Join(parts[:2], "."),
+		"four segments":                      good + ".extra",
+		"the old four-segment shape":         good + "." + parts[2][:22],
+		"another version":                    "l2." + strings.Join(parts[1:], "."),
+		"no version":                         strings.Join(parts[1:], "."),
+		"a sealed segment that is no base64": strings.Join([]string{parts[0], parts[1], "!!!!"}, "."),
+		"a sealed segment of padding":        strings.Join([]string{parts[0], parts[1], parts[2] + "=="}, "."),
+		"an unsubscribe token":               unsub,
+		"a tracking token":                   track,
 	}
 	for name, token := range cases {
 		got, err := ParseLinkToken(keys, LinkView, token, linkTestNow)
@@ -350,29 +513,33 @@ func TestParseRefusesShapesThatAreNotLinkTokens(t *testing.T) {
 	}
 }
 
-// TestParseChecksTheLinkPayloadItselfPastTheMAC -- a validly signed token that
+// TestParseChecksTheLinkPayloadItselfPastTheSeal -- a validly sealed token that
 // this code would never have minted is refused anyway. It cannot come from
-// MintLinkToken, so the fixtures are signed by hand.
-func TestParseChecksTheLinkPayloadItselfPastTheMAC(t *testing.T) {
+// MintLinkToken, so the fixtures are sealed by hand.
+func TestParseChecksTheLinkPayloadItselfPastTheSeal(t *testing.T) {
 	keys := []string{linkSecretA}
-	sign := func(kind LinkKind, p LinkPayload) string { return signPayloadByHand(t, linkSecretA, kind, p) }
+	nonce := testNonce(1)
+	seal := func(kind LinkKind, p LinkPayload) string { return sealPayloadByHand(t, linkSecretA, kind, nonce, p) }
+	sealRaw := func(kind LinkKind, raw []byte) string {
+		return sealLinkByHand(linkSecretA, linkOracleContexts[kind], nonce, raw)
+	}
 
 	cases := map[string]struct {
 		kind  LinkKind
 		token string
 	}{
-		"no owner":     {LinkPreferences, sign(LinkPreferences, LinkPayload{RecipientID: "r", EmailDigest: linkTestDigest})},
-		"no recipient": {LinkPreferences, sign(LinkPreferences, LinkPayload{OwnerUserID: "o", EmailDigest: linkTestDigest})},
-		"no digest":    {LinkPreferences, sign(LinkPreferences, LinkPayload{OwnerUserID: "o", RecipientID: "r"})},
-		"an uppercase digest": {LinkPreferences, sign(LinkPreferences,
+		"no owner":     {LinkPreferences, seal(LinkPreferences, LinkPayload{RecipientID: "r", EmailDigest: linkTestDigest})},
+		"no recipient": {LinkPreferences, seal(LinkPreferences, LinkPayload{OwnerUserID: "o", EmailDigest: linkTestDigest})},
+		"no digest":    {LinkPreferences, seal(LinkPreferences, LinkPayload{OwnerUserID: "o", RecipientID: "r"})},
+		"an uppercase digest": {LinkPreferences, seal(LinkPreferences,
 			LinkPayload{OwnerUserID: "o", RecipientID: "r", EmailDigest: strings.ToUpper(linkTestDigest)})},
-		"a confirm link with no expiry": {LinkConfirm, sign(LinkConfirm, minimalLinkPayloadWithout(LinkConfirm, func(p *LinkPayload) { p.ExpiresAt = 0 }))},
-		"a view link with no template":  {LinkView, sign(LinkView, minimalLinkPayloadWithout(LinkView, func(p *LinkPayload) { p.TemplateID = "" }))},
-		"a view link with no revision":  {LinkView, sign(LinkView, minimalLinkPayloadWithout(LinkView, func(p *LinkPayload) { p.TemplateRevision = "" }))},
-		"a payload that is not JSON":    {LinkPreferences, signLinkByHand(linkSecretA, linkOracleContexts[LinkPreferences], []byte("not json"))},
-		"a JSON null":                   {LinkPreferences, signLinkByHand(linkSecretA, linkOracleContexts[LinkPreferences], []byte("null"))},
-		"an empty payload":              {LinkPreferences, signLinkByHand(linkSecretA, linkOracleContexts[LinkPreferences], nil)},
-		"a payload with trailing bytes": {LinkPreferences, signLinkByHand(linkSecretA, linkOracleContexts[LinkPreferences], append(mustJSON(t, minimalLinkPayload(LinkPreferences)), []byte(`{}`)...))},
+		"a confirm link with no expiry": {LinkConfirm, seal(LinkConfirm, minimalLinkPayloadWithout(LinkConfirm, func(p *LinkPayload) { p.ExpiresAt = 0 }))},
+		"a view link with no template":  {LinkView, seal(LinkView, minimalLinkPayloadWithout(LinkView, func(p *LinkPayload) { p.TemplateID = "" }))},
+		"a view link with no revision":  {LinkView, seal(LinkView, minimalLinkPayloadWithout(LinkView, func(p *LinkPayload) { p.TemplateRevision = "" }))},
+		"a payload that is not JSON":    {LinkPreferences, sealRaw(LinkPreferences, []byte("not json"))},
+		"a JSON null":                   {LinkPreferences, sealRaw(LinkPreferences, []byte("null"))},
+		"an empty payload":              {LinkPreferences, sealRaw(LinkPreferences, nil)},
+		"a payload with trailing bytes": {LinkPreferences, sealRaw(LinkPreferences, append(mustJSON(t, minimalLinkPayload(LinkPreferences)), []byte(`{}`)...))},
 	}
 	for name, tc := range cases {
 		got, err := ParseLinkToken(keys, tc.kind, tc.token, linkTestNow)
@@ -384,11 +551,11 @@ func TestParseChecksTheLinkPayloadItselfPastTheMAC(t *testing.T) {
 		}
 	}
 
-	// Control: the same hand-signed route accepts a good payload, so the cases
-	// above fail because of what they carry and not because of how they were signed.
+	// Control: the same hand-sealed route accepts a good payload, so the cases
+	// above fail because of what they carry and not because of how they were sealed.
 	for _, kind := range linkKinds {
-		if _, err := ParseLinkToken(keys, kind, sign(kind, minimalLinkPayload(kind)), linkTestNow); err != nil {
-			t.Errorf("control: a good %s payload signed by hand was refused: %v", kind, err)
+		if _, err := ParseLinkToken(keys, kind, seal(kind, minimalLinkPayload(kind)), linkTestNow); err != nil {
+			t.Errorf("control: a good %s payload sealed by hand was refused: %v", kind, err)
 		}
 	}
 }
@@ -408,7 +575,7 @@ func mustJSON(t *testing.T, v any) []byte {
 	return raw
 }
 
-func TestALinkSignedByThePreviousSecretVerifies(t *testing.T) {
+func TestALinkSealedByThePreviousSecretVerifies(t *testing.T) {
 	// A rotation in progress: B is the new current secret and A is the previous one.
 	rotated := Config{UnsubscribeSecret: linkSecretB, UnsubscribeSecretPrevious: linkSecretA}
 	for _, kind := range linkKinds {
@@ -452,7 +619,7 @@ func TestAnUnknownLinkKeyIsReportedDistinctly(t *testing.T) {
 
 		got, err := ParseLinkToken(keys, kind, token, linkTestNow)
 		if !errors.Is(err, errUnknownLinkKey) {
-			t.Errorf("%s: a token signed by a key this node does not hold: err = %v, want errUnknownLinkKey", kind, err)
+			t.Errorf("%s: a token sealed under a key this node does not hold: err = %v, want errUnknownLinkKey", kind, err)
 		}
 		if errors.Is(err, errBadLinkToken) {
 			t.Errorf("%s: an unknown key must not also read as a forgery", kind)
@@ -469,7 +636,7 @@ func TestAnUnknownLinkKeyIsReportedDistinctly(t *testing.T) {
 		parts := splitLinkToken(t, good)
 		flipped := decodeLinkSegment(t, parts[2])
 		flipped[0] ^= 0x01
-		forged := strings.Join([]string{parts[0], parts[1], base64.RawURLEncoding.EncodeToString(flipped), parts[3]}, ".")
+		forged := rejoinLinkToken(parts, flipped)
 		if _, err := ParseLinkToken(keys, kind, forged, linkTestNow); errors.Is(err, errUnknownLinkKey) {
 			t.Errorf("%s: a forgery under a held key was reported as an unknown key", kind)
 		}
@@ -480,11 +647,12 @@ func TestAnUnknownLinkKeyIsReportedDistinctly(t *testing.T) {
 	for name, token := range map[string]string{
 		"not a token":                  "not-a-token",
 		"empty":                        "",
-		"a key id that is not hex":     "l1.zzzzzzzz.a.b",
-		"a key id of the wrong length": "l1.deadbeef00.a.b",
+		"a key id that is not hex":     "l1.zzzzzzzz.a",
+		"a key id of the wrong length": "l1.deadbeef00.a",
+		"too few segments":             "l1." + LinkKeyID(linkSecretA),
 		"too many segments":            good + ".x",
 		"another version":              "l2." + strings.Join(splitLinkToken(t, good)[1:], "."),
-		"oversized":                    "l1." + LinkKeyID(linkSecretA) + "." + strings.Repeat("a", 5000) + ".b",
+		"oversized":                    "l1." + LinkKeyID(linkSecretA) + "." + strings.Repeat("a", 5000),
 	} {
 		if id := linkKeyIDOf(token); id != "" {
 			t.Errorf("linkKeyIDOf(%s) = %q, want empty", name, id)
@@ -558,15 +726,16 @@ func TestOnlyConfirmLinksExpire(t *testing.T) {
 	}
 }
 
-// TestAnExpiredLinkIsNotReportedForAForgery -- the MAC is checked before the
-// expiry, so a forged token never reaches the expiry check: only a token this
-// code signed can be reported as expired.
+// TestAnExpiredLinkIsNotReportedForAForgery -- the seal is opened before the
+// expiry is looked at, so a forged token never reaches the expiry check: only a
+// token this code sealed can be reported as expired.
 func TestAnExpiredLinkIsNotReportedForAForgery(t *testing.T) {
 	keys := []string{linkSecretA}
 	good := mustMintLink(t, linkSecretA, LinkConfirm, fullLinkPayload())
 	parts := splitLinkToken(t, good)
-	edited := strings.Replace(string(decodeLinkSegment(t, parts[2])), "owner-1", "owner-2", 1)
-	forged := strings.Join([]string{parts[0], parts[1], base64.RawURLEncoding.EncodeToString([]byte(edited)), parts[3]}, ".")
+	edited := decodeLinkSegment(t, parts[2])
+	edited[len(edited)/2] ^= 0x01
+	forged := rejoinLinkToken(parts, edited)
 	late := linkTestNow.Add(5 * 365 * 24 * time.Hour)
 
 	got, err := ParseLinkToken(keys, LinkConfirm, forged, late)
@@ -587,23 +756,25 @@ func TestLinkTokensAreURLSafe(t *testing.T) {
 	keys := []string{linkSecretA}
 	sawStandardEncoding := map[string]bool{}
 
-	for n := 0; n < 9; n++ {
+	// Fixed nonces, so the bytes sealed are the same on every run, and names of
+	// every length, so the sealed segment passes through every remainder mod 3
+	// and padding ("=") would appear in standard base64.
+	for n := 0; n < 240; n++ {
 		p := fullLinkPayload()
-		// Runs of "?" and "~" are the bytes that standard base64 turns into "/" and
-		// "+" at the right alignment; the other names push the length through every
-		// remainder so padding ("=") appears too.
-		p.SenderName = strings.Repeat("?", n) + strings.Repeat("~", n+1) + " & caf\u00e9 / 100% +1 =x \u2013 news"
-		p.CampaignName = strings.Repeat("\u00ff", n) + "?" + strings.Repeat("a", n)
-
-		standard := base64.StdEncoding.EncodeToString(mustJSON(t, p))
-		for _, special := range []string{"/", "+", "="} {
-			if strings.Contains(standard, special) {
-				sawStandardEncoding[special] = true
-			}
-		}
+		p.SenderName = strings.Repeat("?", n%5) + strings.Repeat("~", n%7) + " & café / 100% +1 =x – news"
+		p.CampaignName = strings.Repeat("ÿ", n%3) + "?" + strings.Repeat("a", n%11)
 
 		for _, kind := range linkKinds {
-			token := mustMintLink(t, linkSecretA, kind, p)
+			token, err := mintLinkToken(bytes.NewReader(testNonce(byte(n))), linkSecretA, kind, p)
+			if err != nil {
+				t.Fatalf("%s (n=%d): %v", kind, n, err)
+			}
+			standard := base64.StdEncoding.EncodeToString(decodeLinkSegment(t, splitLinkToken(t, token)[2]))
+			for _, special := range []string{"/", "+", "="} {
+				if strings.Contains(standard, special) {
+					sawStandardEncoding[special] = true
+				}
+			}
 			if strings.ContainsAny(token, "/+=") {
 				t.Errorf("%s (n=%d): token contains a character that is not URL-safe: %q", kind, n, token)
 			}
@@ -622,7 +793,7 @@ func TestLinkTokensAreURLSafe(t *testing.T) {
 	}
 	for _, special := range []string{"/", "+", "="} {
 		if !sawStandardEncoding[special] {
-			t.Errorf("none of the test payloads would have put %q in standard base64, so this test proves nothing about it", special)
+			t.Errorf("none of the test tokens would have put %q in standard base64, so this test proves nothing about it", special)
 		}
 	}
 }
@@ -673,12 +844,13 @@ func TestMintRefusesAnIncompletePayload(t *testing.T) {
 }
 
 // TestLinkTokensOverTheSizeLimitAreRefusedBothWays -- 4096 bytes is the limit.
-// The parser refuses an oversized token whatever its MAC says (the fixtures are
-// signed by hand and are valid in every other respect), and the minter never
+// The parser refuses an oversized token whatever its seal says (the fixtures are
+// sealed by hand and are valid in every other respect), and the minter never
 // issues a token the parser would refuse, so a message cannot ship with a link
 // that can never work.
 func TestLinkTokensOverTheSizeLimitAreRefusedBothWays(t *testing.T) {
 	keys := []string{linkSecretA}
+	nonce := testNonce(3)
 	withPad := func(pad int) LinkPayload {
 		p := fullLinkPayload()
 		p.CampaignName = strings.Repeat("n", pad)
@@ -688,7 +860,7 @@ func TestLinkTokensOverTheSizeLimitAreRefusedBothWays(t *testing.T) {
 	// Find where the limit falls, then look at both sides of it.
 	firstOver := 0
 	for pad := 0; ; pad++ {
-		if len(signPayloadByHand(t, linkSecretA, LinkView, withPad(pad))) > 4096 {
+		if len(sealPayloadByHand(t, linkSecretA, LinkView, nonce, withPad(pad))) > 4096 {
 			firstOver = pad
 			break
 		}
@@ -699,8 +871,8 @@ func TestLinkTokensOverTheSizeLimitAreRefusedBothWays(t *testing.T) {
 	sawFits, sawOver := false, false
 	for pad := firstOver - 4; pad <= firstOver+2; pad++ {
 		p := withPad(pad)
-		byHand := signPayloadByHand(t, linkSecretA, LinkView, p)
-		minted, mintErr := MintLinkToken(linkSecretA, LinkView, p)
+		byHand := sealPayloadByHand(t, linkSecretA, LinkView, nonce, p)
+		minted, mintErr := mintLinkToken(bytes.NewReader(nonce), linkSecretA, LinkView, p)
 		parsed, parseErr := ParseLinkToken(keys, LinkView, byHand, linkTestNow)
 
 		if len(byHand) <= 4096 {
@@ -718,7 +890,7 @@ func TestLinkTokensOverTheSizeLimitAreRefusedBothWays(t *testing.T) {
 			t.Errorf("pad %d (%d bytes): minted a token the parser would refuse", pad, len(byHand))
 		}
 		if !errors.Is(parseErr, errBadLinkToken) {
-			t.Errorf("pad %d (%d bytes): a validly signed oversized token: err = %v, want errBadLinkToken", pad, len(byHand), parseErr)
+			t.Errorf("pad %d (%d bytes): a validly sealed oversized token: err = %v, want errBadLinkToken", pad, len(byHand), parseErr)
 		}
 		if parsed != (LinkPayload{}) {
 			t.Errorf("pad %d: an oversized token returned a payload", pad)
@@ -732,7 +904,7 @@ func TestLinkTokensOverTheSizeLimitAreRefusedBothWays(t *testing.T) {
 func TestParseLinkNeedsAKeyAndAKnownPage(t *testing.T) {
 	good := mustMintLink(t, linkSecretA, LinkView, fullLinkPayload())
 	if _, err := ParseLinkToken(nil, LinkView, good, linkTestNow); err == nil {
-		t.Error("a node holding no signing keys verified a token")
+		t.Error("a node holding no keys opened a token")
 	}
 	if _, err := ParseLinkToken([]string{linkSecretA}, LinkKind("admin"), good, linkTestNow); err == nil {
 		t.Error("a page that does not exist verified a token")
@@ -744,8 +916,9 @@ func TestParseLinkNeedsAKeyAndAKnownPage(t *testing.T) {
 
 // --- fix round 1: the exported verifier fails closed ---------------------------
 
-// TestABlankKeyInTheLinkRingVerifiesNothing -- HMAC accepts an empty key, so a
-// ring that held one would verify any token its forger signed under that key.
+// TestABlankKeyInTheLinkRingVerifiesNothing -- an empty secret derives a key
+// like any other (HMAC and HKDF both take an empty input), so a ring that held
+// one would verify any token its forger sealed under that key.
 // Config.UnsubscribeKeys never yields a blank, but ParseLinkToken is exported
 // and the ring is its argument, so it fails closed on its own.
 func TestABlankKeyInTheLinkRingVerifiesNothing(t *testing.T) {
@@ -757,15 +930,15 @@ func TestABlankKeyInTheLinkRingVerifiesNothing(t *testing.T) {
 			"a real key then the blank one": {linkSecretA, blank},
 		}
 		for _, kind := range linkKinds {
-			// Signed under the blank key by hand: MintLinkToken refuses to sign with one.
-			forged := signPayloadByHand(t, blank, kind, fullLinkPayload())
+			// Sealed under the blank key by hand: MintLinkToken refuses to seal with one.
+			forged := sealPayloadByHand(t, blank, kind, testNonce(5), fullLinkPayload())
 			for name, ring := range rings {
 				got, err := ParseLinkToken(ring, kind, forged, linkTestNow)
 				if err == nil {
-					t.Errorf("%s link signed under the blank key %q verified against %s", kind, blank, name)
+					t.Errorf("%s link sealed under the blank key %q verified against %s", kind, blank, name)
 				}
 				if got != (LinkPayload{}) {
-					t.Errorf("%s link signed under the blank key %q, %s: returned payload %+v", kind, blank, name, got)
+					t.Errorf("%s link sealed under the blank key %q, %s: returned payload %+v", kind, blank, name, got)
 				}
 			}
 		}
@@ -837,71 +1010,78 @@ func TestPreferencesAndViewLinksNeedNoClock(t *testing.T) {
 	}
 }
 
-// TestARespelledLinkTagIsRefused -- the tag is compared as decoded bytes, and
-// Go's base64 decoder is lenient: it ignores CR and LF anywhere in its input and
-// does not insist that the unused bits of the last character are zero. Without
-// a check on the spelling, several different strings carry the same tag. Exactly
-// one spelling of a token verifies.
-func TestARespelledLinkTagIsRefused(t *testing.T) {
+// TestARespelledSealedSegmentIsRefused -- the sealed segment is opened as
+// decoded bytes, and Go's base64 decoder is lenient: it ignores CR and LF
+// anywhere in its input and does not insist that the unused bits of the last
+// character are zero. Without a check on the spelling, several different
+// strings open to the same bytes, and the seal itself cannot tell them apart.
+// Exactly one spelling of a token verifies.
+func TestARespelledSealedSegmentIsRefused(t *testing.T) {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 	keys := []string{linkSecretA}
 	for _, kind := range linkKinds {
-		good := mustMintLink(t, linkSecretA, kind, fullLinkPayload())
-		parts := splitLinkToken(t, good)
-		tag := parts[3]
-		goodTagBytes := decodeLinkSegment(t, tag)
-		if len(tag) != 22 {
-			t.Fatalf("precondition: tag %q is %d characters, want 22", tag, len(tag))
-		}
-		// 16 bytes are 128 bits: 21 full characters and a 22nd carrying 2 bits and
-		// 4 bits of padding, which a minted tag leaves zero.
-		last := strings.IndexByte(alphabet, tag[21])
-		if last < 0 || last&0x0f != 0 {
-			t.Fatalf("precondition: the last character of %q does not have zero padding bits", tag)
-		}
+		for _, remainder := range []int{0, 1, 2} {
+			// The sealed segment is the payload and 28 bytes; padding the campaign
+			// name moves it through the three remainders mod 3. 1 leaves four unused
+			// bits in the last character, 2 leaves two, and 0 leaves none.
+			p := fullLinkPayload()
+			for (len(mustJSON(t, p))+28)%3 != remainder {
+				p.CampaignName += "x"
+			}
+			good := mustMintLink(t, linkSecretA, kind, p)
+			parts := splitLinkToken(t, good)
+			sealed := parts[2]
+			goodBytes := decodeLinkSegment(t, sealed)
+			if len(goodBytes)%3 != remainder {
+				t.Fatalf("precondition: %d sealed bytes, want a remainder of %d", len(goodBytes), remainder)
+			}
 
-		respellings := map[string]string{
-			"one padding bit set":                    tag[:21] + string(alphabet[last|0x01]),
-			"every padding bit set":                  tag[:21] + string(alphabet[last|0x0f]),
-			"a line feed inside the tag":             tag[:10] + "\n" + tag[10:],
-			"a carriage return and line feed inside": tag[:10] + "\r\n" + tag[10:],
-			"padding characters added":               tag + "==",
-		}
-		for name, respelled := range respellings {
-			// The point of the test: Go's decoder reads these as the very same tag.
-			// (The padded one it already rejects.)
-			if name != "padding characters added" {
-				decoded, err := base64.RawURLEncoding.DecodeString(respelled)
-				if err != nil || !bytes.Equal(decoded, goodTagBytes) {
-					t.Fatalf("precondition: %s no longer decodes to the same tag (err %v)", name, err)
+			respellings := map[string]string{
+				"a line feed inside the segment":         sealed[:10] + "\n" + sealed[10:],
+				"a carriage return and line feed inside": sealed[:10] + "\r\n" + sealed[10:],
+				"padding characters added":               sealed + "==",
+			}
+			last := strings.IndexByte(alphabet, sealed[len(sealed)-1])
+			switch remainder {
+			case 1:
+				respellings["one unused bit set"] = sealed[:len(sealed)-1] + string(alphabet[last|0x01])
+				respellings["every unused bit set"] = sealed[:len(sealed)-1] + string(alphabet[last|0x0f])
+			case 2:
+				respellings["one unused bit set"] = sealed[:len(sealed)-1] + string(alphabet[last|0x01])
+				respellings["every unused bit set"] = sealed[:len(sealed)-1] + string(alphabet[last|0x03])
+			}
+			for name, respelled := range respellings {
+				// The point of the test: Go's decoder reads these as the very same
+				// bytes (the padded one it already rejects), and the seal opens them.
+				if name != "padding characters added" {
+					decoded, err := base64.RawURLEncoding.DecodeString(respelled)
+					if err != nil || !bytes.Equal(decoded, goodBytes) {
+						t.Fatalf("precondition: %s no longer decodes to the same bytes (err %v)", name, err)
+					}
+					if _, err := openLinkByHand(linkSecretA, linkOracleContexts[kind], parts[0]+"."+parts[1]+"."+respelled); err != nil {
+						t.Fatalf("precondition: the seal does not open %s: %v", name, err)
+					}
+				}
+				token := strings.Join([]string{parts[0], parts[1], respelled}, ".")
+				got, err := ParseLinkToken(keys, kind, token, linkTestNow)
+				if !errors.Is(err, errBadLinkToken) {
+					t.Errorf("%s link (remainder %d) with %s: err = %v, want errBadLinkToken", kind, remainder, name, err)
+				}
+				if got != (LinkPayload{}) {
+					t.Errorf("%s link (remainder %d) with %s: returned payload %+v", kind, remainder, name, got)
 				}
 			}
-			token := strings.Join([]string{parts[0], parts[1], parts[2], respelled}, ".")
-			got, err := ParseLinkToken(keys, kind, token, linkTestNow)
-			if !errors.Is(err, errBadLinkToken) {
-				t.Errorf("%s link with %s: err = %v, want errBadLinkToken", kind, name, err)
-			}
-			if got != (LinkPayload{}) {
-				t.Errorf("%s link with %s: returned payload %+v", kind, name, got)
-			}
-		}
 
-		// A line feed inside the PAYLOAD was never accepted: the MAC covers its text.
-		payload := parts[2]
-		inPayload := strings.Join([]string{parts[0], parts[1], payload[:10] + "\n" + payload[10:], parts[3]}, ".")
-		if _, err := ParseLinkToken(keys, kind, inPayload, linkTestNow); !errors.Is(err, errBadLinkToken) {
-			t.Errorf("%s link with a line feed inside the payload: err = %v, want errBadLinkToken", kind, err)
-		}
-
-		// Control: the spelling we mint still verifies.
-		if _, err := ParseLinkToken(keys, kind, good, linkTestNow); err != nil {
-			t.Errorf("%s link in its canonical spelling was refused: %v", kind, err)
+			// Control: the spelling we mint still verifies.
+			if _, err := ParseLinkToken(keys, kind, good, linkTestNow); err != nil {
+				t.Errorf("%s link (remainder %d) in its canonical spelling was refused: %v", kind, remainder, err)
+			}
 		}
 	}
 }
 
 // TestALinkCarriesTheBareOrganizationId -- as the u3 unsubscribe token does,
-// the organization id is signed in its bare form. What ParseLinkToken returns is
+// the organization id is sealed in its bare form. What ParseLinkToken returns is
 // then the id the pages compare against, and a canonical id never lengthens the URL.
 func TestALinkCarriesTheBareOrganizationId(t *testing.T) {
 	keys := []string{linkSecretA}
@@ -920,11 +1100,119 @@ func TestALinkCarriesTheBareOrganizationId(t *testing.T) {
 		if got != want {
 			t.Errorf("%s: payload = %+v, want the organization as %q", kind, got, "acct-42")
 		}
-		if raw := string(decodeLinkSegment(t, splitLinkToken(t, token)[2])); strings.Contains(raw, "v1:common") {
-			t.Errorf("%s: the token carries the canonical id: %s", kind, raw)
+		opened, err := openLinkByHand(linkSecretA, linkOracleContexts[kind], token)
+		if err != nil {
+			t.Fatalf("%s: the oracle cannot open the token: %v", kind, err)
+		}
+		if strings.Contains(string(opened), "v1:common") {
+			t.Errorf("%s: the sealed payload carries the canonical id: %s", kind, opened)
 		}
 		if p.AccountID != canonical {
 			t.Errorf("%s: minting changed the caller's payload to %q", kind, p.AccountID)
 		}
+	}
+}
+
+// TestNoPartOfALinkTokenReadsAsItsContents -- the payload names the recipient,
+// the organization, a digest of the address and what the message showed, and
+// these links are forwarded and posted. The digest in particular is an unkeyed
+// hash: whoever holds it can confirm a guessed address offline. So nothing in a
+// token, as written or as decoded, may contain any of it.
+func TestNoPartOfALinkTokenReadsAsItsContents(t *testing.T) {
+	p := fullLinkPayload()
+	p.OwnerUserID = "owner-2f6c1d90a7"
+	p.RecipientID = "recipient-8e3b44c5d1"
+	p.AccountID = "account-17a9e0b6c2"
+	p.CampaignID = "campaign-5d02f87e3a"
+	p.TemplateID = "template-c4719b2e08"
+
+	digest, err := hex.DecodeString(p.EmailDigest)
+	if err != nil {
+		t.Fatalf("precondition: the digest is not hex: %v", err)
+	}
+	secrets := map[string][]byte{
+		"the digest, as hex":            []byte(p.EmailDigest),
+		"the digest, as its 32 bytes":   digest,
+		"the owner":                     []byte(p.OwnerUserID),
+		"the recipient":                 []byte(p.RecipientID),
+		"the organization":              []byte(p.AccountID),
+		"the campaign":                  []byte(p.CampaignID),
+		"the template":                  []byte(p.TemplateID),
+		"the template revision":         []byte(p.TemplateRevision),
+		"the sender's name":             []byte(p.SenderName),
+		"the campaign's name":           []byte(p.CampaignName),
+		"the JSON field names":          []byte(`"o":`),
+		"the digest, base64 of its hex": []byte(base64.StdEncoding.EncodeToString([]byte(p.EmailDigest))[:40]),
+		"the owner, base64":             []byte(base64.RawURLEncoding.EncodeToString([]byte(p.OwnerUserID))),
+		"the recipient, base64":         []byte(base64.RawURLEncoding.EncodeToString([]byte(p.RecipientID))),
+		"the organization, base64":      []byte(base64.RawURLEncoding.EncodeToString([]byte(p.AccountID))),
+	}
+
+	for _, kind := range linkKinds {
+		// Many tokens, so that a leak that depends on the nonce cannot hide in one.
+		for n := 0; n < 40; n++ {
+			token, err := mintLinkToken(bytes.NewReader(testNonce(byte(n*5))), linkSecretA, kind, p)
+			if err != nil {
+				t.Fatalf("%s: %v", kind, err)
+			}
+			views := map[string][]byte{"the token as written": []byte(token)}
+			for i, segment := range strings.Split(token, ".") {
+				views[segment[:min(len(segment), 6)]+"... as written"] = []byte(segment)
+				if raw, err := base64.RawURLEncoding.DecodeString(segment); err == nil {
+					views[segment[:min(len(segment), 6)]+"... decoded from base64url"] = raw
+				}
+				if raw, err := hex.DecodeString(segment); err == nil {
+					views["segment "+string(rune('0'+i))+" decoded from hex"] = raw
+				}
+			}
+			for what, secret := range secrets {
+				for view, data := range views {
+					if bytes.Contains(data, secret) {
+						t.Errorf("%s (n=%d): %s appears in %s of the token", kind, n, what, view)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestTwoTokensForOnePayloadDiffer -- every token carries a fresh random nonce,
+// so the same payload sealed twice is two unrelated strings: a link in one
+// message says nothing about whether a link in another is for the same person.
+func TestTwoTokensForOnePayloadDiffer(t *testing.T) {
+	for _, kind := range linkKinds {
+		first, second := mustMintLink(t, linkSecretA, kind, fullLinkPayload()), mustMintLink(t, linkSecretA, kind, fullLinkPayload())
+		if first == second {
+			t.Fatalf("%s: two tokens for one payload are the same string", kind)
+		}
+		a, b := decodeLinkSegment(t, splitLinkToken(t, first)[2]), decodeLinkSegment(t, splitLinkToken(t, second)[2])
+		if bytes.Equal(a[:12], b[:12]) {
+			t.Errorf("%s: two tokens share a nonce", kind)
+		}
+		if bytes.Equal(a[12:], b[12:]) || bytes.Equal(a[12:len(a)-16], b[12:len(b)-16]) {
+			t.Errorf("%s: two tokens share ciphertext, so the nonce is not reaching the cipher", kind)
+		}
+	}
+
+	// And across many: no nonce repeats.
+	seen := map[string]bool{}
+	for n := 0; n < 2000; n++ {
+		nonce := string(decodeLinkSegment(t, splitLinkToken(t, mustMintLink(t, linkSecretA, LinkPreferences, minimalLinkPayload(LinkPreferences)))[2])[:12])
+		if seen[nonce] {
+			t.Fatalf("a nonce repeated after %d tokens", n)
+		}
+		seen[nonce] = true
+	}
+}
+
+// TestTheNonceComesFromTheRandomSource -- MintLinkToken reads its nonce from the
+// operating system's random source and refuses to mint if that fails, rather
+// than sealing under a nonce it could not get.
+func TestTheNonceComesFromTheRandomSource(t *testing.T) {
+	if _, err := mintLinkToken(bytes.NewReader(nil), linkSecretA, LinkView, fullLinkPayload()); err == nil {
+		t.Error("a token was minted although no nonce could be read")
+	}
+	if _, err := mintLinkToken(bytes.NewReader(make([]byte, 11)), linkSecretA, LinkView, fullLinkPayload()); err == nil {
+		t.Error("a token was minted from a nonce one byte short")
 	}
 }

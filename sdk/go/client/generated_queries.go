@@ -4230,6 +4230,90 @@ func InvocationsForWorkerAsOperatorBuild(args InvocationsForWorkerAsOperatorArgs
 	return b.String()
 }
 
+// JourneyById -- Organization-authorized email automation read.
+//
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeyById"] in generated_concepts.go).
+type JourneyByIdArgs struct {
+	JourneyId string
+}
+
+// JourneyById calls the engine query journeyById.
+func (qc *QueryClient) JourneyById(ctx context.Context, args JourneyByIdArgs) (*Result, error) {
+	call := JourneyByIdBuild(args)
+	return qc.executeNamed(ctx, "journeyById", call)
+}
+
+func JourneyByIdBuild(args JourneyByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeyById(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// JourneyEnrollmentCounts -- Organization-authorized email automation read.
+//
+// Bound concept: v1:campaigns:journeyEnrollment (machine-readable: BoundConcepts["journeyEnrollmentCounts"] in generated_concepts.go).
+type JourneyEnrollmentCountsArgs struct {
+	JourneyId string
+	Status    string
+	StepId    string
+}
+
+// JourneyEnrollmentCounts calls the engine query journeyEnrollmentCounts.
+func (qc *QueryClient) JourneyEnrollmentCounts(ctx context.Context, args JourneyEnrollmentCountsArgs) (*Result, error) {
+	call := JourneyEnrollmentCountsBuild(args)
+	return qc.executeNamed(ctx, "journeyEnrollmentCounts", call)
+}
+
+func JourneyEnrollmentCountsBuild(args JourneyEnrollmentCountsArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeyEnrollmentCounts(")
+	b.WriteString("journeyId: ")
+	b.WriteString(quoteMemQL(args.JourneyId))
+	if args.Status != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	if args.StepId != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("stepId: ")
+		b.WriteString(quoteMemQL(args.StepId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// Journeys -- Organization-authorized email automation read.
+//
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeys"] in generated_concepts.go).
+type JourneysArgs struct {
+	Status string
+}
+
+// Journeys calls the engine query journeys.
+func (qc *QueryClient) Journeys(ctx context.Context, args JourneysArgs) (*Result, error) {
+	call := JourneysBuild(args)
+	return qc.executeNamed(ctx, "journeys", call)
+}
+
+func JourneysBuild(args JourneysArgs) string {
+	var b strings.Builder
+	b.WriteString("query journeys(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // KnowledgeDomainsAll -- Every knowledge domain this cluster holds.
 // The read the Training app's domain cards have never had (epic memql#4800). Until this landed, that page was entirely CHUNK-derived: it rolled domains up out of `v1:knowledge:documentChunk.domainId` and labelled each card with the raw id, because the domain row itself had no client read surface and no concept declaration behind it. With this, a card can say the domain's name and render the account it is tagged with.
 // NO ACTOR TERM, and now that is a declaration rather than an omission (memql#4809). The concept declares `@rowAuthz(public, requiresIdentity)`: its rows carry no row-level distinction to draw -- the catalog is the same population for every caller -- so there is no tier conjunct to AND in here and nothing for one to narrow.

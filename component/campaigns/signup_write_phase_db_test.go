@@ -37,16 +37,19 @@ func TestSignupWritePhaseDB(t *testing.T) {
 type straddlingWrite struct {
 	Engine
 	prefix string
-	delay  time.Duration
-	locked func() bool
-	during func()
-	mu     sync.Mutex
-	held   []bool // per commit: was the lock held when the write committed?
-	wg     sync.WaitGroup
+	// contains, when set, narrows the write to the statements that carry it: one
+	// receipt of a send among its several writes.
+	contains string
+	delay    time.Duration
+	locked   func() bool
+	during   func()
+	mu       sync.Mutex
+	held     []bool // per commit: was the lock held when the write committed?
+	wg       sync.WaitGroup
 }
 
 func (e *straddlingWrite) Execute(ctx context.Context, q string) (any, error) {
-	if !strings.HasPrefix(q, e.prefix) {
+	if !strings.HasPrefix(q, e.prefix) || !strings.Contains(q, e.contains) {
 		return e.Engine.Execute(ctx, q)
 	}
 	if e.during != nil {
@@ -77,10 +80,15 @@ func (e *straddlingWrite) Execute(ctx context.Context, q string) (any, error) {
 
 // audienceLockHeld asks Postgres whether a session holds the audience's lock.
 func (n *digestNewsletter) audienceLockHeld(t *testing.T) func() bool {
+	return n.lockHeld(t, newsletterLock("audience", n.audience))
+}
+
+// lockHeld asks Postgres whether a session holds the advisory lock of a full key.
+func (n *digestNewsletter) lockHeld(t *testing.T, key string) func() bool {
 	return func() bool {
 		var held int
 		if err := n.db.DB.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted
-			AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid`, newsletterLock("audience", n.audience)).Scan(&held); err != nil {
+			AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid`, key).Scan(&held); err != nil {
 			t.Errorf("pg_locks: %v", err)
 		}
 		return held > 0
@@ -196,10 +204,12 @@ func (f *digestFixture) TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocks
 
 // TestALockedWriteOutlastsTheServersStatementTimeout: a write under the locks is
 // waited for up to lockedWriteLimit, which is above the request pool's statement
-// timeout -- the server ends a slow write before the client stops waiting for it,
-// so the answer is read before the locks are given back -- and the longest a
-// holder then keeps its locks (its phase, and one write begun at its very end)
-// stays far inside the gate session's idle limit.
+// timeout -- the server ends a slow statement before the client stops waiting for
+// it, so its answer is read before the locks are given back (a write of several
+// statements, or a stalled network, can still outlast the wait: it is a wait, not a
+// cancel) -- and the longest a holder then keeps its locks (its phase, and the
+// writes it can still be making when the phase ends) stays far inside the gate
+// session's idle limit.
 func TestALockedWriteOutlastsTheServersStatementTimeout(t *testing.T) {
 	if lockedWriteLimit <= database.DefaultRequestStatementTimeout {
 		t.Errorf("a locked write is waited for %s, not above the request pool's statement timeout (%s): the client could stop waiting for a write the server then commits",
@@ -212,7 +222,12 @@ func TestALockedWriteOutlastsTheServersStatementTimeout(t *testing.T) {
 	w := newTestWorker(t, &fakeEngine{}, &recordingSender{})
 	for _, sendTimeout := range []time.Duration{5 * time.Second, 30 * time.Second, time.Hour} {
 		w.cfg.SendTimeout = sendTimeout
-		if held := w.welcomeLockedPhase() + lockedWriteLimit; held*2 > database.DefaultGateIdleInTxTimeout {
+		// After its phase a welcome can still be writing: the receipt of an accepted
+		// send (completeReceiptLimit) and then its verdict (lockedWriteLimit), or the
+		// receipt that says an attempt began, begun at the phase's last instant, and
+		// then a verdict (two writes of lockedWriteLimit).
+		after := max(completeReceiptLimit+lockedWriteLimit, 2*lockedWriteLimit)
+		if held := w.welcomeLockedPhase() + after; held*2 > database.DefaultGateIdleInTxTimeout {
 			t.Errorf("with a send timeout of %s a welcome may hold its locks %s; the gate session is ended after %s idle",
 				sendTimeout, held, database.DefaultGateIdleInTxTimeout)
 		}

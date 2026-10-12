@@ -184,7 +184,7 @@ func (f *digestFixture) TestAddRecipientStampsTheMailboxDigest(t *testing.T) {
 	d := f.newDigestTenant(t, "digest-stamp")
 	recipient := d.suffix + "-rec"
 
-	if err := d.store.AddRecipient(d.owner, recipient, d.audience, " Foo@Example.TEST ", "", "manual", d.org, nil); err != nil {
+	if err := d.store.AddRecipient(d.owner, recipient, d.audience, " Foo@Example.TEST ", "", "manual", d.org, "subscribed", nil); err != nil {
 		t.Fatal(err)
 	}
 	want := EmailDigest("foo@example.test")

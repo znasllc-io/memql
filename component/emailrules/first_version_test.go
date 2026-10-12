@@ -168,7 +168,9 @@ func (e *fireEngine) Execute(_ context.Context, q string) (any, error) {
 	case strings.HasPrefix(q, "query emailRuleById"):
 		return rowsEnvelope([]map[string]any{e.rule}), nil
 	case strings.HasPrefix(q, "query templateById"):
-		return rowsEnvelope([]map[string]any{{"id": "v1:campaigns:template:t1", "subject": "Welcome", "textBody": "Hello"}}), nil
+		return rowsEnvelope([]map[string]any{{"id": "v1:campaigns:template:t1", "subject": "Welcome", "textBody": "Hello", "status": "ready"}}), nil
+	case strings.HasPrefix(q, "query audienceById"):
+		return rowsEnvelope([]map[string]any{{"id": "a1", "confirmation": "none"}}), nil
 	case strings.HasPrefix(q, "query activeUsers"):
 		return rowsEnvelope([]map[string]any{{"id": "v1:identity:user:owner1", "role": "owner", "primaryEmail": "owner@acme.com"}}), nil
 	}
@@ -193,7 +195,7 @@ func (e *fireEngine) stagedIDs() []string {
 	defer e.mu.Unlock()
 	var ids []string
 	for _, c := range e.calls {
-		if strings.HasPrefix(c, "mutation stageOutboundRequest") {
+		if strings.HasPrefix(c, "builtin campaignStageOperationalEmail") {
 			start := strings.Index(c, `requestId: "`) + len(`requestId: "`)
 			ids = append(ids, c[start:start+strings.Index(c[start:], `"`)])
 		}
@@ -246,7 +248,7 @@ func TestRacingFirstWritesSendOnce(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	if got := e.count("mutation stageOutboundRequest"); got != 1 {
+	if got := e.count("builtin campaignStageOperationalEmail"); got != 1 {
 		t.Fatalf("two firings for one new row staged %d sends, want 1", got)
 	}
 	if got := e.count("mutation recordEmailRuleFiring"); got != 1 {
@@ -260,7 +262,7 @@ func TestRacingFirstWritesSendOnce(t *testing.T) {
 		"v1:campaigns:emailRule:ab12cd34", "v1:identity:user:finn", map[string]any{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.count("mutation stageOutboundRequest"); got != 2 {
+	if got := e.count("builtin campaignStageOperationalEmail"); got != 2 {
 		t.Errorf("a second new row staged %d sends in all, want 2", got)
 	}
 }
@@ -273,7 +275,7 @@ func TestCreatedRuleWithNoClaimSendsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !out.Duplicate || e.count("mutation stageOutboundRequest") != 0 {
+	if !out.Duplicate || e.count("builtin campaignStageOperationalEmail") != 0 {
 		t.Fatalf("with no claim wired a created rule sent: %+v", out)
 	}
 }

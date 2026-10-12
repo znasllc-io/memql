@@ -203,11 +203,13 @@ func TestConnHeadroomDefaultsAreTheCodes(t *testing.T) {
 	}
 }
 
-// TestConnHeadroomTheShippedBaseFitsTheLocalPreset: the engine's own manifests --
+// TestConnHeadroomTheShippedBaseFitsTheSmallestPreset: the engine's own manifests --
 // six DB-connecting Deployments of two replicas, every process at main 4 + direct
-// 4 + migration 1 + gate 4 -- fit the smallest preset's max_connections (200, ten
-// reserved) with every pool counted.
-func TestConnHeadroomTheShippedBaseFitsTheLocalPreset(t *testing.T) {
+// 4 + migration 1 + gate 4 -- fit the smallest preset's max_connections (the entry
+// preset's 200, ten reserved) at steady state, with every pool counted. (A roll
+// adds a terminating process per Deployment, which the gate does not count; see
+// docs/public/operate/db-connection-budget.md.)
+func TestConnHeadroomTheShippedBaseFitsTheSmallestPreset(t *testing.T) {
 	if !pythonYAMLAvailable() {
 		t.Skip("python3 + PyYAML not available")
 	}

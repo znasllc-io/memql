@@ -15,6 +15,7 @@
 /// portal's audience list and the audience picker in the campaign editor.
 @row
 shape audience audienceFull {
+  confirmation
   row.id
   ownerUserId
   name
@@ -28,6 +29,8 @@ shape audience audienceFull {
 /// gates on the caller.
 @row
 shape recipient recipientFull {
+  joinedAt
+  confirmedAt
   row.id
   ownerUserId
   accountId
@@ -148,6 +151,9 @@ shape delivery deliveryFull {
   lastError
   sentAt
   emailRuleId
+  requestId
+  templateId
+  senderIdentityId
   row.createdAt
 }
 
@@ -401,4 +407,72 @@ shape testSettings campaignTestSettingsFull {
   accountId
   audienceId
   row.createdAt
+}
+
+/// References needed to retry a deferred send under its recorded owner.
+@row
+shape delivery deferredSendRef {
+ row.id
+ ownerUserId
+ accountId
+ recipientId
+ emailRuleId
+ templateId
+ senderIdentityId
+ requestId
+ attempts
+ nextAttemptAt
+ row.createdAt
+}
+
+/// Automation state without the recipient mailbox.
+@row
+shape journey journeyFull {
+ row.id
+ ownerUserId
+ accountId
+ name
+ description
+ trigger
+ steps
+ status
+ activatedAt
+ retiredAt
+ lastError
+ row.createdAt
+}
+
+/// Automation state without the recipient mailbox.
+@row
+shape journeyEnrollment journeyEnrollmentFull {
+ row.id
+ ownerUserId
+ accountId
+ journeyId
+ recipientId
+ emailDigest
+ stepId
+ stepIndex
+ nextAt
+ status
+ exitReason
+ enrolledAt
+ triggeredAt
+ completedAt
+ lastError
+ attempts
+ row.createdAt
+}
+
+/// Automation state without the recipient mailbox.
+@row
+shape recipient recipientEnrollmentRef {
+ row.id
+ accountId
+ audienceId
+ emailDigest
+ subscriptionStatus
+ joinedAt
+ confirmedAt
+ row.createdAt
 }

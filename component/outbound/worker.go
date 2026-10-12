@@ -391,7 +391,12 @@ func (w *Worker) mediumEnabledHere(medium string) bool {
 // Target is the URL the named secret holds. The caller keeps req for every
 // stamp and log line, so the row, its audit and its errors carry the
 // descriptor secret:<NAME> and never the URL.
+const maxOutboundHTMLBytes = 2 << 20
+
 func (w *Worker) admit(ctx context.Context, req Request) (Transport, Request, error) {
+	if len(req.HTMLBody) > maxOutboundHTMLBytes {
+		return nil, req, fmt.Errorf("email HTML exceeds the 2 MiB limit")
+	}
 	transport, ok := w.transports[req.Medium]
 	if !ok || transport == nil {
 		return nil, req, fmt.Errorf("medium %q has no transport wired", req.Medium)
@@ -544,6 +549,7 @@ func requestFromRow(row map[string]any) Request {
 		Target:       getString(row, "target"),
 		Subject:      getString(row, "subject"),
 		Payload:      getString(row, "body"),
+		HTMLBody:     getString(row, "htmlBody"),
 		TargetSecret: getString(row, "targetSecret"),
 		DedupeKey:    getString(row, "dedupeKey"),
 		Attempts:     getInt(row, "attempts"),

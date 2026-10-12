@@ -4191,6 +4191,76 @@ QueryClient.prototype.invocationsForWorkerAsOperator = function (this: QueryClie
   return this.executeNamed("invocationsForWorkerAsOperator", buildInvocationsForWorkerAsOperator(args), opts);
 };
 
+/** Organization-authorized email automation read. */
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeyById"] in generated_concepts.ts).
+export interface JourneyByIdArgs {
+  journeyId: string;
+}
+
+export function buildJourneyById(args: JourneyByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("journeyId: " + renderMemQLValue(args.journeyId));
+  return "query journeyById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    journeyById(args: JourneyByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.journeyById = function (this: QueryClient, args: JourneyByIdArgs = {} as JourneyByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("journeyById", buildJourneyById(args), opts);
+};
+
+/** Organization-authorized email automation read. */
+// Bound concept: v1:campaigns:journeyEnrollment (machine-readable: BoundConcepts["journeyEnrollmentCounts"] in generated_concepts.ts).
+export interface JourneyEnrollmentCountsArgs {
+  journeyId: string;
+  status?: string;
+  stepId?: string;
+}
+
+export function buildJourneyEnrollmentCounts(args: JourneyEnrollmentCountsArgs): string {
+  const parts: string[] = [];
+  parts.push("journeyId: " + renderMemQLValue(args.journeyId));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  if (args.stepId !== undefined) parts.push("stepId: " + renderMemQLValue(args.stepId));
+  return "query journeyEnrollmentCounts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    journeyEnrollmentCounts(args: JourneyEnrollmentCountsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.journeyEnrollmentCounts = function (this: QueryClient, args: JourneyEnrollmentCountsArgs = {} as JourneyEnrollmentCountsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("journeyEnrollmentCounts", buildJourneyEnrollmentCounts(args), opts);
+};
+
+/** Organization-authorized email automation read. */
+// Bound concept: v1:campaigns:journey (machine-readable: BoundConcepts["journeys"] in generated_concepts.ts).
+export interface JourneysArgs {
+  status?: string;
+}
+
+export function buildJourneys(args: JourneysArgs): string {
+  const parts: string[] = [];
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query journeys(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    journeys(args: JourneysArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.journeys = function (this: QueryClient, args: JourneysArgs = {} as JourneysArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("journeys", buildJourneys(args), opts);
+};
+
 /** Every knowledge domain this cluster holds.
 The read the Training app's domain cards have never had (epic memql#4800). Until this landed, that page was entirely CHUNK-derived: it rolled domains up out of `v1:knowledge:documentChunk.domainId` and labelled each card with the raw id, because the domain row itself had no client read surface and no concept declaration behind it. With this, a card can say the domain's name and render the account it is tagged with.
 NO ACTOR TERM, and now that is a declaration rather than an omission (memql#4809). The concept declares `@rowAuthz(public, requiresIdentity)`: its rows carry no row-level distinction to draw -- the catalog is the same population for every caller -- so there is no tier conjunct to AND in here and nothing for one to narrow.
