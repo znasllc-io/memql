@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/database"
+	"github.com/znasllc-io/memql/component/database/dbtest"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/secret"
 	"github.com/znasllc-io/memql/core/id"
@@ -77,6 +80,19 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 	state("azure-feedback:"+n.org, map[string]any{"accountId": n.org, "planId": str(rows[0], "planId"), "topic": topic, "subscription": "synthetic-subscription", "secret": credential, "status": "ready"})
 	campaign := n.suffix + "-campaign"
 	n.execute(t, n.owner, call("mutation", "createCampaign", arg{"campaignId", campaign}, arg{"name", "Provider receipt"}, arg{"audienceId", n.audience}, arg{"templateId", n.suffix + "-tpl"}, arg{"accountId", n.org}))
+	if err := n.store.SetCampaignStatus(n.owner, "startCampaign", campaign); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.store.EnqueueSend(n.system, SendJob{CampaignID: campaign, CampaignOwnerUserID: n.user, CampaignAccountID: n.org, AudienceID: n.audience, TemplateID: n.suffix + "-tpl", Status: "running"}); err != nil {
+		t.Fatal(err)
+	}
+	five, zero := 5, 0
+	if err := n.store.UpdateJob(n.system, campaign, SendJobPatch{FailedCount: &five}); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.store.UpdateCampaignProgress(n.owner, campaign, CampaignProgress{FailedCount: &five}); err != nil {
+		t.Fatal(err)
+	}
 	handler := email.NewAzureFeedbackHandler(func() *email.Integration { return providers[1] }, func(ctx context.Context, report email.AzureDeliveryReport) error {
 		err := w2.ApplyAzureDelivery(ctx, report)
 		if err != nil {
@@ -159,6 +175,102 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 	summary := values["delivery"].(map[string]any)
 	if values["sent"] != float64(5) || summary["confirmed"] != float64(1) || summary["failed"] != float64(3) || summary["expanded"] != float64(1) || summary["unconfirmed"] != float64(0) {
 		t.Fatalf("stats %v", values)
+	}
+
+	// These five reports repaired genuinely unknown provider receipts, while
+	// the original worker may still be completing other recipients. Preserve a
+	// durable request until a terminal job can be recounted safely.
+	pendingRows := func() []map[string]any {
+		t.Helper()
+		rows, err := w2.store.rows(n.system, call("query", "providerCounterLedger", arg{"campaignId", campaign}, arg{"accountId", n.org}, arg{"ownerUserId", n.user}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rows
+	}
+	pending := pendingRows()
+	if len(pending) != 5 {
+		t.Fatalf("repair ledger has %d rows", len(pending))
+	}
+	for _, row := range pending {
+		if !boolean(row, "providerCountersPending") {
+			t.Fatal("unknown receipt recovery did not request counter repair")
+		}
+	}
+	w2.repairProviderCounters(context.Background())
+	job, found, err := w2.store.JobByID(memql.ContextWithFreshRead(n.system), campaign)
+	if err != nil || !found || job.FailedCount != five || job.SentCount != zero {
+		t.Fatalf("running job was repaired: %+v %v", job, err)
+	}
+	stale := job
+
+	// Replica 2 waits behind replica 1's progress gate, then re-reads the
+	// terminal state from the database rather than its earlier running state.
+	hold, err := n.worker.progressGate(context.Background(), campaign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both repair locks must fit on one connection; nested gate acquisition
+	// would wait on itself even after the peer releases its progress lock.
+	tiny, err := database.NewGatePool(dbtest.DSN(), 1)
+	if err != nil {
+		hold.Release()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tiny.Close() })
+	w2.newsletterGate = NewWorker(deliveryDBEngine{e2}, nil, nil, quietLogger(), func() *sql.DB { return tiny }).newsletterGate
+	entered, done := make(chan struct{}), make(chan error, 1)
+	originalGate := w2.newsletterGate
+	w2.newsletterGate = func(ctx context.Context, keys ...string) (gateHold, error) {
+		close(entered)
+		return originalGate(ctx, keys...)
+	}
+	go func() { done <- w2.repairProviderCampaign(context.Background(), pending[0]) }()
+	<-entered
+	select {
+	case err := <-done:
+		hold.Release()
+		t.Fatalf("repair passed peer progress gate: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	completed := "completed"
+	if err := n.store.UpdateJob(n.system, campaign, SendJobPatch{Status: &completed}); err != nil {
+		hold.Release()
+		t.Fatal(err)
+	}
+	sentStatus := "sent"
+	if err := n.store.UpdateCampaignProgress(n.owner, campaign, CampaignProgress{Status: &sentStatus}); err != nil {
+		hold.Release()
+		t.Fatal(err)
+	}
+	hold.Release()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("repair did not resume after peer released gate")
+	}
+	w2.newsletterGate = originalGate
+	job, found, err = w2.store.JobByID(memql.ContextWithFreshRead(n.system), campaign)
+	if err != nil || !found || job.FailedCount != zero || job.SentCount != five {
+		t.Fatalf("terminal job not repaired: %+v %v", job, err)
+	}
+	rows, err = n.store.rows(memql.ContextWithFreshRead(n.owner), call("query", "campaignById", arg{"campaignId", campaign}))
+	if err != nil || len(rows) != 1 || integer(rows[0], "sentCount") != five || integer(rows[0], "failedCount") != zero || str(rows[0], "status") != "sent" || bare(str(rows[0], "ownerUserId")) != n.user {
+		t.Fatalf("campaign repair: %v %v", rows, err)
+	}
+	for _, row := range pendingRows() {
+		if boolean(row, "providerCountersPending") {
+			t.Fatal("completed repair left queue marker")
+		}
+	}
+	n.worker.stampProgress(n.system, n.owner, stale)
+	n.worker.completeJob(n.system, n.owner, stale, Campaign{ID: campaign})
+	job, _, _ = w2.store.JobByID(memql.ContextWithFreshRead(n.system), campaign)
+	if job.SentCount != five || job.FailedCount != zero {
+		t.Fatal("older worker overwrote provider repair")
 	}
 	if err := w2.ApplyAzureDelivery(n.system, email.AzureDeliveryReport{OperationID: "forged", AccountID: n.org, Email: "forged@example.test", Status: "bounced"}); err == nil {
 		t.Fatal("constructed report suppressed an address")

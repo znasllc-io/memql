@@ -489,10 +489,12 @@ func senderIdentityRow(id, address, fromName, status string) map[string]any {
 func newTestWorker(t *testing.T, engine Engine, sender email.Sender) *Worker {
 	t.Helper()
 	w := &Worker{
-		store:   NewStore(engine),
-		claimer: nil, // single "replica" in a test; the claim is exercised separately
-		resolve: func() email.Sender { return sender },
-		logger:  quietLogger(),
+		progressGate:       func(context.Context, string) (gateHold, error) { return openGate{}, nil },
+		providerLedgerGate: func(context.Context, string) (gateHold, error) { return openGate{}, nil },
+		store:              NewStore(engine),
+		claimer:            nil, // single "replica" in a test; the claim is exercised separately
+		resolve:            func() email.Sender { return sender },
+		logger:             quietLogger(),
 		cfg: Config{
 			Enabled:            true,
 			BatchSize:          50,

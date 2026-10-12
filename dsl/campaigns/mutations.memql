@@ -464,6 +464,7 @@ mutation campaign resumeCampaign {
 @serverOnly
 mutation campaign updateCampaignProgress {
   args {
+    versionTime datetime
     campaignId      string!
     status          string
     recipientCount  int
@@ -476,6 +477,7 @@ mutation campaign updateCampaignProgress {
   update {
     accept { status, recipientCount, sentCount, skippedCount, failedCount, lastError, completedAt }
     stamp {
+      createdAt: args.versionTime ?? now
       id: args.campaignId
       ownerUserId: actor.userId
     }
@@ -515,6 +517,8 @@ mutation campaign updateCampaignProgress {
 @serverOnly
 mutation delivery recordCampaignDelivery {
   args {
+    versionTime datetime
+    providerCountersPending bool
     campaignId         string
     recipientId        string!
     email              string!
@@ -532,8 +536,9 @@ mutation delivery recordCampaignDelivery {
     senderIdentityId   string
   }
   insert {
-    accept { campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId, emailRuleId, requestId, templateId, senderIdentityId }
+    accept { providerCountersPending, campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId, emailRuleId, requestId, templateId, senderIdentityId }
     stamp {
+      createdAt: args.versionTime ?? now
       // A single send is keyed by its request; a campaign delivery and a send with no request
       // keep the existing identity, per rule when there is one, without inventing a campaign
       // reference.
@@ -597,6 +602,7 @@ mutation sendJob enqueueCampaignSend {
 /// each batch and on every terminal outcome. clusterOwner tier.
 mutation sendJob updateSendJob {
   args {
+    versionTime datetime
     sendJobId       string!
     status          string
     recipientCount  int
@@ -613,6 +619,7 @@ mutation sendJob updateSendJob {
   update {
     accept { status, recipientCount, sentCount, skippedCount, failedCount, lastError, startedAt, completedAt, throttledUntil, rosterCursor, rosterOutstanding }
     stamp {
+      createdAt: args.versionTime ?? now
       id: args.sendJobId
     }
   }
@@ -1590,5 +1597,50 @@ mutation consentEvent recordProviderBounce {
   insert {
     accept { emailDigest, ownerUserId, accountId, recipientId, campaignId, occurredAt }
     stamp { id: args.eventId, kind: "bounce", source: "provider" }
+  }
+}
+
+/// Internal historical outcome repair under the progress and provider-ledger gates. Counter-only;
+/// actor.userId must not replace the original owner when current sender authority has been revoked.
+@actor
+@serverOnly
+mutation campaign repairProviderCampaignCounters {
+  args {
+    campaignId string!
+    sentCount int!
+    skippedCount int!
+    failedCount int!
+    versionTime datetime!
+  }
+  update {
+    accept { sentCount, skippedCount, failedCount }
+    stamp { id: args.campaignId, createdAt: args.versionTime }
+  }
+}
+
+/// Internal queue acknowledgement after BOTH counter rows were written under their shared gate.
+/// actor.userId cannot represent a revoked sender. Preserve the delivery's original attribution.
+@actor
+@serverOnly
+mutation delivery clearProviderCounterRepair {
+  args {
+    deliveryId string!
+    versionTime datetime!
+  }
+  update {
+    stamp { id: args.deliveryId, providerCountersPending: false, createdAt: args.versionTime }
+  }
+}
+
+/// Internal late worker acknowledgement. actor.userId cannot replace the attribution of a provider-proven row.
+@actor
+@serverOnly
+mutation delivery markProviderCounterRepair {
+  args {
+    deliveryId string!
+    versionTime datetime!
+  }
+  update {
+    stamp { id: args.deliveryId, providerCountersPending: true, createdAt: args.versionTime }
   }
 }

@@ -94,6 +94,7 @@ func NewStore(engine Engine) *Store { return &Store{engine: engine} }
 
 // SendJob is one row of v1:campaigns:sendJob.
 type SendJob struct {
+	CreatedAt           time.Time
 	TemplateSnapshot    *Template
 	ID                  string
 	CampaignID          string
@@ -145,6 +146,7 @@ func (j SendJob) Progress() int { return j.SentCount + j.SkippedCount + j.Failed
 
 // Campaign is the subset of v1:campaigns:campaign the sender reads.
 type Campaign struct {
+	CreatedAt            time.Time
 	TestSourceCampaignID string
 	ID                   string
 	OwnerUserID          string
@@ -335,6 +337,7 @@ func (s *Store) CampaignByID(ctx context.Context, campaignID string) (Campaign, 
 	}
 	r := rows[0]
 	return Campaign{
+		CreatedAt:            templateTime(r["createdAt"]),
 		TestSourceCampaignID: bare(str(r, "testSourceCampaignId")),
 		ID:                   bare(str(r, "id")),
 		OwnerUserID:          bare(str(r, "ownerUserId")),
@@ -832,6 +835,7 @@ func (s *Store) EnqueueSend(ctx context.Context, job SendJob) error {
 // requests -- `updateSendJob` accepts every field it is handed, so a
 // zero-valued struct would blank the counters on every progress stamp.
 type SendJobPatch struct {
+	VersionTime    *time.Time
 	Status         *string
 	RecipientCount *int
 	SentCount      *int
@@ -851,6 +855,9 @@ type SendJobPatch struct {
 // UpdateJob stamps a patch onto a send job. clusterOwner-tier.
 func (s *Store) UpdateJob(ctx context.Context, sendJobID string, patch SendJobPatch) error {
 	args := []arg{{"sendJobId", sendJobID}}
+	if patch.VersionTime != nil {
+		args = append(args, arg{"versionTime", patch.VersionTime.UTC().Format(time.RFC3339Nano)})
+	}
 	args = appendStr(args, "status", patch.Status)
 	args = appendInt(args, "recipientCount", patch.RecipientCount)
 	args = appendInt(args, "sentCount", patch.SentCount)
@@ -867,15 +874,17 @@ func (s *Store) UpdateJob(ctx context.Context, sendJobID string, patch SendJobPa
 
 // Delivery is one per-recipient outcome to record.
 type Delivery struct {
-	CampaignID    string
-	RecipientID   string
-	Email         string
-	Status        string
-	SkipReason    string
-	LastError     string
-	SentAt        time.Time
-	Attempts      int
-	NextAttemptAt time.Time
+	VersionTime             *time.Time
+	ProviderCountersPending bool
+	CampaignID              string
+	RecipientID             string
+	Email                   string
+	Status                  string
+	SkipReason              string
+	LastError               string
+	SentAt                  time.Time
+	Attempts                int
+	NextAttemptAt           time.Time
 
 	// AccountID is the client this row is for, copied from its PARENT at
 	// write (epic memql#5165, section J). Denormalized rather than joined
@@ -924,6 +933,12 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 		{"status", d.Status},
 		{"attempts", d.Attempts},
 	}
+	if d.VersionTime != nil {
+		args = append(args, arg{"versionTime", d.VersionTime.UTC().Format(time.RFC3339Nano)})
+	}
+	if d.ProviderCountersPending {
+		args = append(args, arg{"providerCountersPending", true})
+	}
 	if d.CampaignID != "" {
 		args = append(args, arg{"campaignId", d.CampaignID})
 	}
@@ -959,6 +974,7 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 
 // CampaignProgress is the counter set stamped onto the campaign row.
 type CampaignProgress struct {
+	VersionTime    *time.Time
 	Status         *string
 	RecipientCount *int
 	SentCount      *int
@@ -982,6 +998,9 @@ type CampaignProgress struct {
 // tier: campaign owner's identity.
 func (s *Store) UpdateCampaignProgress(ctx context.Context, campaignID string, p CampaignProgress) error {
 	args := []arg{{"campaignId", campaignID}}
+	if p.VersionTime != nil {
+		args = append(args, arg{"versionTime", p.VersionTime.UTC().Format(time.RFC3339Nano)})
+	}
 	args = appendStr(args, "status", p.Status)
 	args = appendInt(args, "recipientCount", p.RecipientCount)
 	args = appendInt(args, "sentCount", p.SentCount)
@@ -1537,6 +1556,7 @@ func firstWords(q string) string {
 
 func sendJobFromRow(r map[string]any) SendJob {
 	return SendJob{
+		CreatedAt:           templateTime(r["createdAt"]),
 		TemplateSnapshot:    templateSnapshot(r["templateSnapshot"]),
 		ID:                  bare(str(r, "id")),
 		CampaignID:          bare(str(r, "campaignId")),
