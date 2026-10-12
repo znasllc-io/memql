@@ -131,6 +131,18 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 		return out, nil
 	}
 
+	// A ROW-ADDRESS RULE LOOKS AT THE MAILBOX BEFORE IT CLAIMS THE ROW (below). The
+	// claim is the row's one chance, and a firing that ends in a refusal -- "could not
+	// tell yet", or a read that failed and will be retried -- has not used it: claimed
+	// first, it would leave the row with a claim taken and no mail, and nothing could
+	// ever fire for it again.
+	var plan rowAddressPlan
+	if rule.RecipientMode == ModeRowAddress {
+		if plan, err = f.planRowAddress(ctx, rule, event, &out); err != nil {
+			return out, err
+		}
+	}
+
 	// A CREATED RULE SENDS ONCE PER ROW. Its trigger already admits only the
 	// write that materialised a row's first version (firstVersionGuard); this
 	// closes the one gap the trigger cannot see. Two writes racing on a new id
@@ -139,20 +151,22 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 	// claim is a primary-key insert, so exactly one firing -- on any replica,
 	// with no local state -- wins. The loser is a duplicate of a creation that
 	// already fired: it sends nothing and is not recorded as a firing.
-	if strings.TrimSpace(rule.EventKind) == "created" {
+	if !plan.refused && strings.TrimSpace(rule.EventKind) == "created" {
 		if f.claim == nil || !f.claim(ctx, rule.ID, nodeID) {
 			out.Duplicate = true
 			return out, nil
 		}
 	}
 
-	switch rule.RecipientMode {
-	case ModeClusterRoles:
+	switch {
+	case plan.refused:
+		// Said while planning; the firing is recorded below, with the reason.
+	case rule.RecipientMode == ModeClusterRoles:
 		err = f.fireOperational(ctx, rule, nodeID, event, &out)
-	case ModeAudience:
+	case rule.RecipientMode == ModeAudience:
 		err = f.fireAudience(ctx, rule, nodeID, event, &out)
-	case ModeRowAddress:
-		err = f.fireRowAddress(ctx, rule, nodeID, event, &out)
+	case rule.RecipientMode == ModeRowAddress:
+		err = f.fireRowAddress(ctx, rule, nodeID, event, plan, &out)
 	default:
 		err = fmt.Errorf("emailrules: rule %q has recipient mode %q, which this engine does not know", ruleID, rule.RecipientMode)
 	}
@@ -326,14 +340,22 @@ func (f *Firer) fireAudience(ctx context.Context, rule Rule, nodeID string, even
 	return nil
 }
 
-// fireRowAddress mails one address read off the TRIGGERING EVENT.
+// rowAddressPlan is what a row-address firing settles before it claims anything:
+// the address, and whom to mail for it.
+type rowAddressPlan struct {
+	// refused: the firing ends here, with the reason already in the outcome.
+	refused bool
+	address string
+	// target is the recipient the send is addressed to; found is false when the
+	// address is in no row of the audience and has to be enrolled first.
+	target string
+	found  bool
+}
+
+// planRowAddress reads the address off the TRIGGERING EVENT and finds its
+// mailbox in the rule's audience. It writes nothing.
 //
-// Off the event, not off the row: see this file's header. The address is
-// enrolled into the rule's audience first, because an unsubscribe token is
-// minted from (owner, recipient, campaign) -- an address with no recipient row
-// has no way to opt out, and marketing mail nobody can unsubscribe from is the
-// one thing this engine will not send. The enrolment names the rule's
-// organization, because the send refuses a recipient outside the campaign's.
+// Off the event, not off the row: see this file's header.
 //
 // Whether the address is a member already is found by its digest and, for the
 // rows that carry none, by comparing addresses (Store.MailboxMembers), not by
@@ -344,36 +366,50 @@ func (f *Firer) fireAudience(ctx context.Context, rule Rule, nodeID string, even
 // The reads are fresh ones, because they decide whether to write: a cached
 // "nobody" from before another replica's enrolment would enrol the mailbox a
 // second time.
-func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, event map[string]any, out *FireOutcome) error {
+func (f *Firer) planRowAddress(ctx context.Context, rule Rule, event map[string]any, out *FireOutcome) (rowAddressPlan, error) {
+	plan := rowAddressPlan{refused: true}
 	address := strings.TrimSpace(payloadField(event, rule.RecipientField))
 	if address == "" {
 		out.Refusals = append(out.Refusals, fmt.Sprintf("the triggering row carries no %q, so there is nobody to mail", rule.RecipientField))
-		return nil
+		return plan, nil
 	}
 	// An address with no digest cannot be looked up, deduplicated or suppressed,
 	// and the send would refuse it anyway: say so before anything is written.
 	if addressDigest(address) == "" {
 		out.Refusals = append(out.Refusals, fmt.Sprintf("%q is not an address", rule.RecipientField))
-		return nil
+		return plan, nil
 	}
 
 	members, complete, err := f.store.MailboxMembers(memql.ContextWithFreshRead(ctx), rule.AudienceID, address)
 	if err != nil {
-		return err
+		return plan, err
 	}
 	if !complete {
 		out.Refusals = append(out.Refusals, fmt.Sprintf(
 			"could not tell whether %q is already in the audience: older recipients are still being indexed. Nothing was sent; make the change again later",
 			rule.RecipientField))
-		return nil
+		return plan, nil
 	}
-	target, found := mailboxTarget(members)
-	if !found {
+	plan.refused, plan.address = false, address
+	plan.target, plan.found = mailboxTarget(members)
+	return plan, nil
+}
+
+// fireRowAddress mails one address read off the TRIGGERING EVENT, as planned.
+//
+// The address is enrolled into the rule's audience first, because an unsubscribe
+// token is minted from (owner, recipient, campaign) -- an address with no
+// recipient row has no way to opt out, and marketing mail nobody can unsubscribe
+// from is the one thing this engine will not send. The enrolment names the rule's
+// organization, because the send refuses a recipient outside the campaign's.
+func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, event map[string]any, plan rowAddressPlan, out *FireOutcome) error {
+	target := plan.target
+	if !plan.found {
 		// Not in the audience yet. Enrol, then send -- and note that the
 		// enrolment is what an unsubscribe later acts on, so a second firing
 		// for the same address consults the state the first one gave it.
-		target = "rcp" + dedupeKey(rule.AudienceID, address, "")
-		if err := f.store.AddRecipient(ctx, target, rule.AudienceID, address, payloadField(event, "displayName"), memql.BareShortId(rule.AccountID)); err != nil {
+		target = "rcp" + dedupeKey(rule.AudienceID, plan.address, "")
+		if err := f.store.AddRecipient(ctx, target, rule.AudienceID, plan.address, payloadField(event, "displayName"), memql.BareShortId(rule.AccountID)); err != nil {
 			return err
 		}
 	}

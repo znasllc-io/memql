@@ -11,6 +11,8 @@ package emailrules
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -35,6 +37,8 @@ type rowAddressEngine struct {
 	// made under a fresh-read context: both decide whether to write, so both must be.
 	lookupFresh        []bool
 	withoutDigestFresh []bool
+	// failMailboxReads makes the lookups fail, as a database that is not answering does.
+	failMailboxReads bool
 }
 
 func (e *rowAddressEngine) Execute(ctx context.Context, q string) (any, error) {
@@ -43,8 +47,11 @@ func (e *rowAddressEngine) Execute(ctx context.Context, q string) (any, error) {
 	case strings.HasPrefix(q, "query recipientInAudienceByDigest"):
 		e.mu.Lock()
 		e.lookupFresh = append(e.lookupFresh, memql.FreshReadFromContext(ctx))
-		rows := e.byDigest
+		rows, failing := e.byDigest, e.failMailboxReads
 		e.mu.Unlock()
+		if failing {
+			return nil, errors.New("the database is not answering")
+		}
 		return rowsEnvelope(rows), nil
 	case strings.HasPrefix(q, "query recipientsWithoutDigestInAudience"):
 		e.mu.Lock()
@@ -378,5 +385,74 @@ func TestRowAddressRefusesAnAddressWithNoUsableDigest(t *testing.T) {
 		if out.Recipients != 0 || out.Sent != 0 {
 			t.Errorf("%q: %+v", address, out)
 		}
+	}
+}
+
+// TestARefusedRowAddressFiringKeepsTheCreatedRulesClaim: a created rule claims its
+// row, once, before it sends, and the loser of that claim sends nothing. The
+// refusal that says "could not tell yet" is not a send, so it must not use the
+// claim up: the row's one creation would be gone with its mail, and the change it
+// asks for -- try again later -- could never fire.
+func TestARefusedRowAddressFiringKeepsTheCreatedRulesClaim(t *testing.T) {
+	rule := rowAddressRule()
+	rule["eventKind"] = "created"
+	page := func(n int) []map[string]any {
+		var rows []map[string]any
+		for i := 0; i < n; i++ {
+			rows = append(rows, memberRow(fmt.Sprintf("stranger%02d", i), fmt.Sprintf("stranger%02d@example.test", i), "subscribed"))
+		}
+		return rows
+	}
+	e := &rowAddressEngine{fireEngine: fireEngine{rule: rule}, withoutDigest: page(digestLessWindow)}
+	firer := NewFirer(e).WithFirstFireClaim(keyClaim())
+	event := map[string]any{
+		"timestamp": "2026-10-01T01:00:00.000001Z",
+		"payload":   map[string]any{"primaryContactEmail": "new@example.test"},
+	}
+
+	out, err := firer.Fire(context.Background(), "v1:campaigns:emailRule:ab12cd34", "v1:accounts:account:org-1", event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Refusals) != 1 || !strings.Contains(out.Refusals[0], "older recipients") || out.Sent != 0 {
+		t.Fatalf("the firing was not refused for want of an answer: %+v", out)
+	}
+
+	// The sweep has been through: the page is short, and the same row fires.
+	e.withoutDigest = page(digestLessWindow - 1)
+	out, err = firer.Fire(context.Background(), "v1:campaigns:emailRule:ab12cd34", "v1:accounts:account:org-1", event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Duplicate || out.Sent != 1 || len(out.Refusals) != 0 {
+		t.Errorf("the row could not fire once it could be decided: %+v (a refused firing used up the claim)", out)
+	}
+}
+
+// TestARowAddressRuleThatCannotReadTheMailboxKeepsTheClaimToo: the same for a read
+// that fails -- the firing returns the error, the automation may retry it, and a
+// retry that found the claim already taken would lose the row's mail for good.
+func TestARowAddressRuleThatCannotReadTheMailboxKeepsTheClaimToo(t *testing.T) {
+	rule := rowAddressRule()
+	rule["eventKind"] = "created"
+	e := &rowAddressEngine{fireEngine: fireEngine{rule: rule}}
+	claim := keyClaim()
+	firer := NewFirer(e).WithFirstFireClaim(claim)
+	event := map[string]any{
+		"timestamp": "2026-10-01T01:00:00.000001Z",
+		"payload":   map[string]any{"primaryContactEmail": "new@example.test"},
+	}
+
+	e.failMailboxReads = true
+	if _, err := firer.Fire(context.Background(), "v1:campaigns:emailRule:ab12cd34", "v1:accounts:account:org-1", event); err == nil {
+		t.Fatal("a firing that could not read the mailbox reported no error")
+	}
+	e.failMailboxReads = false
+	out, err := firer.Fire(context.Background(), "v1:campaigns:emailRule:ab12cd34", "v1:accounts:account:org-1", event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Duplicate || out.Sent != 1 {
+		t.Errorf("the retry found the claim taken: %+v", out)
 	}
 }
