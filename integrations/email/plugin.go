@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -50,7 +52,25 @@ func init() {
 			}
 			return application.ClientID, err
 		}
+		installation, err := readEmailInstallation(os.Getenv(emailInstallationEnv))
+		if err != nil {
+			return nil, err
+		}
+		azure.installation = installation
 		envSender, err := NewSenderFromEnv("", pctx.Logger)
+		if installation != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			setupErr := azure.bootstrapInstallation(ctx)
+			cancel()
+			if setupErr != nil {
+				if errors.Is(err, ErrLogOnlyRefused) {
+					return nil, fmt.Errorf("email installation is not ready: %w", setupErr)
+				}
+				if pctx.Logger != nil {
+					pctx.Logger.Warn("Email installation will continue after startup", "error", setupErr)
+				}
+			}
+		}
 		if errors.Is(err, ErrLogOnlyRefused) {
 			// A saved operator-organization ACS connection satisfies the
 			// existing boot requirement. Client credentials never do.

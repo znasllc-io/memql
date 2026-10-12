@@ -15,6 +15,7 @@ import (
 // A plan is saved before any Azure mutation. Repeated provisioning calls use
 // the same named resources, so a dropped response cannot create another set.
 type azurePlan struct {
+	ManagedDomain         bool   `json:"managedDomain,omitempty"`
 	ClusterID             string `json:"clusterId"`
 	CreateResourceGroup   bool   `json:"createResourceGroup"`
 	ResourceGroupLocation string `json:"resourceGroupLocation"`
@@ -84,6 +85,7 @@ type azureResource struct {
 		ProvisioningState   string                    `json:"provisioningState"`
 		DataLocation        string                    `json:"dataLocation"`
 		DomainManagement    string                    `json:"domainManagement"`
+		FromSenderDomain    string                    `json:"fromSenderDomain"`
 		HostName            string                    `json:"hostName"`
 		LinkedDomains       []string                  `json:"linkedDomains"`
 		DisableLocalAuth    bool                      `json:"disableLocalAuth"`
@@ -147,13 +149,21 @@ func (a *azureProtocol) domain(ctx context.Context, token string, plan azurePlan
 	var resource azureResource
 	err := a.arm(ctx, http.MethodGet, azureVersion(plan.domainPath()), token, nil, &resource)
 	if azureNotFound(err) && create {
-		body := map[string]any{"location": "Global", "properties": map[string]any{"domainManagement": "CustomerManaged", "userEngagementTracking": "Disabled"}}
+		management := "CustomerManaged"
+		if plan.ManagedDomain {
+			management = "AzureManaged"
+		}
+		body := map[string]any{"location": "Global", "properties": map[string]any{"domainManagement": management, "userEngagementTracking": "Disabled"}}
 		err = a.arm(ctx, http.MethodPut, azureVersion(plan.domainPath()), token, body, &resource)
 	}
 	if err != nil {
 		return resource, err
 	}
-	if resource.Properties.DomainManagement != "CustomerManaged" {
+	if plan.ManagedDomain {
+		if plan.Domain != "AzureManagedDomain" || resource.Properties.DomainManagement != "AzureManaged" {
+			return resource, fmt.Errorf("the installation's Azure-managed email domain does not match")
+		}
+	} else if resource.Properties.DomainManagement != "CustomerManaged" {
 		return resource, fmt.Errorf("choose a customer-owned email domain")
 	}
 	return resource, nil
@@ -162,6 +172,10 @@ func (a *azureProtocol) domain(ctx context.Context, token string, plan azurePlan
 func azureDomainVerified(resource azureResource) bool {
 	if resource.Properties.ProvisioningState != "Succeeded" {
 		return false
+	}
+	if resource.Properties.DomainManagement == "AzureManaged" {
+		domain := resource.Properties.FromSenderDomain
+		return strings.HasSuffix(domain, ".azurecomm.net") && len(domain) <= 253 && !strings.ContainsAny(domain, "@/ :\r\n")
 	}
 	for _, kind := range []string{"Domain", "SPF", "DKIM", "DKIM2"} {
 		if resource.Properties.VerificationStates[kind].Status != "Verified" {
@@ -225,13 +239,20 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 	path := plan.domainPath() + "/senderUsernames/" + username
 	var sender azureResource
 	err = a.arm(ctx, http.MethodGet, azureVersion(path), token, nil, &sender)
-	if azureNotFound(err) {
+	if azureNotFound(err) && !plan.ManagedDomain {
 		err = a.arm(ctx, http.MethodPut, azureVersion(path), token, map[string]any{"properties": map[string]string{"username": username, "displayName": name}}, &sender)
 	}
 	if err != nil {
 		return empty, "", err
 	}
-	if sender.Properties.Username != username || sender.Properties.DisplayName != name {
+	if plan.ManagedDomain {
+		// Azure creates this fixed username. Managed domains cannot add or
+		// personalize usernames; use the actual provider display name too.
+		if username != "donotreply" || !strings.EqualFold(sender.Properties.Username, username) || sender.Properties.DisplayName == "" {
+			return empty, "", fmt.Errorf("Azure has not prepared the installation's default sender")
+		}
+		name = sender.Properties.DisplayName
+	} else if sender.Properties.Username != username || sender.Properties.DisplayName != name {
 		return empty, "", fmt.Errorf("this sender already has a different display name; choose another sender name")
 	}
 	var service azureResource
@@ -275,7 +296,11 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 	if err = a.arm(ctx, http.MethodPost, azureVersion(plan.communicationPath()+"/listKeys"), token, nil, &keys); err != nil {
 		return empty, "", err
 	}
-	address := strings.ToLower(username + "@" + plan.Domain)
+	sendingDomain := plan.Domain
+	if plan.ManagedDomain {
+		sendingDomain = domain.Properties.FromSenderDomain
+	}
+	address := strings.ToLower(username + "@" + sendingDomain)
 	cfg := ACSConfig{AccountID: account, Endpoint: "https://" + service.Properties.HostName, AccessKey: keys.PrimaryKey, Senders: map[string]string{address: name}, Default: address, ReplyTo: replyTo}
 	usernames, err := a.list(ctx, azureVersion(plan.domainPath()+"/senderUsernames"), token)
 	if err != nil {
@@ -285,7 +310,7 @@ func (a *azureProtocol) finish(ctx context.Context, token, account string, plan 
 		props, _ := row["properties"].(map[string]any)
 		user, display := argString(props, "username"), argString(props, "displayName")
 		if azureSenderName.MatchString(user) {
-			cfg.Senders[strings.ToLower(user+"@"+plan.Domain)] = display
+			cfg.Senders[strings.ToLower(user+"@"+sendingDomain)] = display
 		}
 	}
 	if _, err = NewACSSender(cfg); err != nil {

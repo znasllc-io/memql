@@ -16,12 +16,13 @@ const azureClusterKey = "azure-cluster"
 // their own resources, verified domains and sending keys. This sealed record
 // never crosses the client boundary; every replica reads the same version.
 type azureClusterConnection struct {
-	TenantID string       `json:"tenantId,omitempty"`
-	ID       string       `json:"id"`
-	Revision string       `json:"revision"`
-	Status   string       `json:"status"`
-	Plan     azurePlan    `json:"plan"`
-	Session  azureSession `json:"session"`
+	WorkloadClientID string       `json:"workloadClientId,omitempty"`
+	TenantID         string       `json:"tenantId,omitempty"`
+	ID               string       `json:"id"`
+	Revision         string       `json:"revision"`
+	Status           string       `json:"status"`
+	Plan             azurePlan    `json:"plan"`
+	Session          azureSession `json:"session"`
 }
 
 func azureClusterSummary(c azureClusterConnection) map[string]any {
@@ -122,6 +123,11 @@ func (a *azureSetup) saveCluster(ctx context.Context, session azureSession, opti
 		cluster.Status, cluster.Plan = "connected", plan
 		cluster.Revision = id.NewShortId()
 		cluster.Session = session
+		cluster.WorkloadClientID = ""
+		cluster.TenantID = ""
+		if azureUUID.MatchString(session.Tenant) {
+			cluster.TenantID = session.Tenant
+		}
 		cluster.Session.DeviceCode, cluster.Session.UserCode = "", ""
 		cluster.Session.ExpiresAt = time.Time{}
 		return nil
@@ -141,6 +147,15 @@ func (a *azureSetup) withCluster(ctx context.Context, account string, run func(a
 	err := a.store.change(ctx, azureClusterKey, &cluster, func(found bool) error {
 		if !found || cluster.Status != "connected" {
 			return fmt.Errorf("connect Microsoft Azure for this cluster before configuring an organization's email domain")
+		}
+		if cluster.WorkloadClientID != "" {
+			session, err := a.workloadSession(ctx, cluster)
+			if err != nil {
+				return err
+			}
+			session.AccountID = account
+			output, operationErr = run(session)
+			return nil
 		}
 		protocol := &azureProtocol{clientID: cluster.Session.ClientID, client: a.protocol.client}
 		if !a.clock().Add(time.Minute).Before(cluster.Session.TokenExpiresAt) {

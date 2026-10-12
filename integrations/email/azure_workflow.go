@@ -107,7 +107,7 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 			if err := a.claimResources(ctx, session.AccountID, plan); err != nil {
 				return err
 			}
-			ready, err := a.protocol.ensureSubscription(ctx, session.AccessToken, session.ClusterID, plan)
+			ready, err := a.protocol.ensureSubscription(ctx, session.AccessToken, session.ClusterID, plan, session.WorkloadClientID != "")
 			if err != nil {
 				return err
 			}

@@ -16,6 +16,8 @@ import (
 )
 
 type azureSetup struct {
+	installation    *emailInstallation
+	readAssertion   func(string) ([]byte, error)
 	packageDefaults func() (*emailconfig.Campaigns, error)
 	store           *connectionStore
 	protocol        *azureProtocol
@@ -26,23 +28,24 @@ type azureSetup struct {
 }
 
 type azureSession struct {
-	ID              string    `json:"id"`
-	ClusterRevision string    `json:"clusterRevision"`
-	ClientID        string    `json:"clientId"`
-	OwnerID         string    `json:"ownerId"`
-	AccountID       string    `json:"accountId"`
-	ClusterID       string    `json:"clusterId,omitempty"`
-	Tenant          string    `json:"tenant"`
-	Status          string    `json:"status"`
-	DeviceCode      string    `json:"deviceCode,omitempty"`
-	UserCode        string    `json:"userCode,omitempty"`
-	VerificationURI string    `json:"verificationUri,omitempty"`
-	ExpiresAt       time.Time `json:"expiresAt"`
-	NextPollAt      time.Time `json:"nextPollAt"`
-	Interval        int       `json:"interval"`
-	AccessToken     string    `json:"accessToken,omitempty"`
-	RefreshToken    string    `json:"refreshToken,omitempty"`
-	TokenExpiresAt  time.Time `json:"tokenExpiresAt"`
+	WorkloadClientID string    `json:"workloadClientId,omitempty"`
+	ID               string    `json:"id"`
+	ClusterRevision  string    `json:"clusterRevision"`
+	ClientID         string    `json:"clientId"`
+	OwnerID          string    `json:"ownerId"`
+	AccountID        string    `json:"accountId"`
+	ClusterID        string    `json:"clusterId,omitempty"`
+	Tenant           string    `json:"tenant"`
+	Status           string    `json:"status"`
+	DeviceCode       string    `json:"deviceCode,omitempty"`
+	UserCode         string    `json:"userCode,omitempty"`
+	VerificationURI  string    `json:"verificationUri,omitempty"`
+	ExpiresAt        time.Time `json:"expiresAt"`
+	NextPollAt       time.Time `json:"nextPollAt"`
+	Interval         int       `json:"interval"`
+	AccessToken      string    `json:"accessToken,omitempty"`
+	RefreshToken     string    `json:"refreshToken,omitempty"`
+	TokenExpiresAt   time.Time `json:"tokenExpiresAt"`
 }
 
 func (a *azureSetup) clock() time.Time {
