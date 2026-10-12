@@ -27,3 +27,5 @@ export const workspace = { fs: {
 export const ProgressLocation = { Notification: 15 };
 export const ConfigurationTarget = {Global:1};
 export const ColorThemeKind = {Light:1,Dark:2,HighContrast:3,HighContrastLight:4};
+export const ViewColumn = {Active:-1,Beside:-2};
+export const env = { clipboard: { writeText: async (_text: string): Promise<void> => {} }, openExternal: async (_target: Uri): Promise<boolean> => true };
