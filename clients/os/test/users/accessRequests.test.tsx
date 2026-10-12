@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 const h = vi.hoisted(() => ({ rows: [] as Record<string, string>[], review: vi.fn() }));
 vi.mock("@znasllc-io/memql-sdk-core/identityadmin", () => ({ IdentityAdminClient: class { reviewAccessRequest = h.review; } }));
 const connection = { dispatcher: {}, subscriptions: null, query: { pendingAccessRequests: async () => ({ rows: () => h.rows, meta: () => null }) } };
@@ -23,6 +24,8 @@ it("opens a request, requires a rejection note, and submits its verified ID", as
   fireEvent.click(await screen.findByRole("button", { name: /Ada/ }));
   expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
   fireEvent.change(screen.getByRole("textbox", { name: "Review note" }), { target: { value: "No available access" } });
+  // Reject just joined the bar, and a bar that has just changed takes no press for a moment.
+  await readTheBar();
   fireEvent.click(screen.getByRole("button", { name: "Reject" }));
   await waitFor(() => expect(h.review).toHaveBeenCalledWith("request-1", "reject", "", "No available access"));
 });

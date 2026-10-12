@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheBarNow } from "../readTheBar";
 
 // ONE REVISION FOR ROUTES AND RULES.
 //
@@ -36,6 +37,18 @@ function use() {
 }
 
 const bar = () => screen.getByRole("group", { name: "What you can do with this" });
+
+// A bar that has just changed takes no press for a moment (kit ActionBar), and
+// a step, a choice or a write changes the routing bars: each press reads the
+// bar first, on a fake Date so reading costs nothing.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); });
+afterEach(() => { vi.useRealTimers(); });
+
+/** Presses one of a bar's acts once the bar has been read. */
+function pressBar(group: () => HTMLElement, name: string | RegExp) {
+  readTheBarNow();
+  fireEvent.click(within(group()).getByRole("button", { name }));
+}
 const tabs = () => within(screen.getByRole("navigation", { name: "Routing views" }));
 const tray = (name: RegExp) => within(screen.getByLabelText("Sources you can add")).getByRole("button", { name });
 
@@ -61,7 +74,7 @@ async function addVendorAndSave() {
   fireEvent.click(await screen.findByRole("button", { name: /^Open Mine,/ }));
   await settle();
   fireEvent.click(tray(/^Cheapest vendor:/));
-  fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+  pressBar(bar, "Save route");
   await settle();
 }
 
@@ -107,9 +120,9 @@ describe("a write in one Routing tab, then a write in the other", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add a rule" }));
     fireEvent.click(screen.getByRole("radio", { name: "A tag" }));
     fireEvent.change(screen.getByLabelText("Tag"), { target: { value: "nightly" } });
-    fireEvent.click(within(bar()).getByRole("button", { name: "Next" }));
+    pressBar(bar, "Next");
     fireEvent.click(screen.getByRole("radio", { name: /^Mine/ }));
-    fireEvent.click(within(bar()).getByRole("button", { name: "Add rule" }));
+    pressBar(bar, "Add rule");
     await settle();
     expect(made.calls.routingRuleValidate).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 8 }));
     expect(made.calls.routingRuleSave).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 8 }));
@@ -127,7 +140,7 @@ describe("a route page whose routing changed elsewhere", () => {
     made.state.revision = 12;
     const reads = made.calls.routerListPolicies.mock.calls.length;
     fireEvent.click(tray(/^Cheapest vendor:/));
-    fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+    pressBar(bar, "Save route");
     await settle();
 
     const notice = screen.getByText("Routing changed since this page read it.").closest(".os-notice") ?? document.body;
@@ -137,7 +150,7 @@ describe("a route page whose routing changed elsewhere", () => {
     expect(made.calls.routerListPolicies.mock.calls.length).toBeGreaterThan(reads);
     expect(within(bar()).getByText("Unsaved")).toBeTruthy();
 
-    fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+    pressBar(bar, "Save route");
     await settle();
     expect(made.calls.routingPolicySave).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 12 }));
     expect(made.state.revision).toBe(13);
@@ -152,9 +165,9 @@ describe("a route page whose routing changed elsewhere", () => {
     made.state.revision = 12;
     made.state.routes = [routeRow("mine", "app:claude-code", [], { shipped: false })];
     fireEvent.click(tray(/^Cheapest vendor:/));
-    fireEvent.click(within(bar()).getByRole("button", { name: "Save route" }));
+    pressBar(bar, "Save route");
     await settle();
-    fireEvent.click(within(bar()).getByRole("button", { name: "Cancel" }));
+    pressBar(bar, "Cancel");
     await settle();
     const names = [...document.querySelectorAll(".fleet-slot-body .fleet-slot-name")].map((n) => n.textContent);
     expect(names).toEqual(["Claude Code"]);

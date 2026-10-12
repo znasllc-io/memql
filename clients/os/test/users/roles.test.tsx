@@ -1,5 +1,6 @@
 import { act, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -203,6 +204,8 @@ describe("a role's page", () => {
     await screen.findByText("Permissions");
 
     await click(screen.getByRole("checkbox", { name: "Delete People" }));
+    // Save permissions just joined the bar, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Save permissions" }));
 
     // The code's own copy, and the server's sentence verbatim beneath it.
@@ -227,6 +230,8 @@ describe("a role's page", () => {
     await click(await screen.findByRole("button", { name: /Acme lead/ }));
     await screen.findByText("Permissions");
     await click(screen.getByRole("checkbox", { name: "Delete People" }));
+    // Save permissions just joined the bar, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Save permissions" }));
 
     expect(await screen.findByText(/the cluster said this/)).toBeTruthy();

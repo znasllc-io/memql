@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -594,6 +595,8 @@ describe("a budget approval", () => {
     expect(screen.queryByText("resumeKind")).toBeNull();
     expect(screen.queryByText("internal recovery diagnostic")).toBeNull();
     fireEvent.change(screen.getByLabelText("New total model calls"), { target: { value: "96" } });
+    // Raise limit just joined the bar, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Raise limit" }));
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "budget-replan", decision: "approved", answer: { newLimit: 96 } }));
   });
@@ -611,6 +614,7 @@ describe("a budget approval", () => {
     fireEvent.click(await screen.findByText("More time needed"));
     expect(screen.queryByRole("button", { name: "Raise limit" })).toBeNull();
     fireEvent.change(screen.getByLabelText("New total time (minutes)"), { target: { value: "240" } });
+    await readTheBar();
     fireEvent.click(screen.getByRole("button", { name: "Raise limit" }));
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "budget", decision: "approved", answer: { newLimit: 14_400_000 } }));
     // A live update may retain the decided row for history. It must stop

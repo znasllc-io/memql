@@ -1,3 +1,4 @@
+import { readTheBar } from "../readTheBar";
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { Layers } from "lucide-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -90,7 +91,9 @@ async function materializeNotes(over: { name?: string; statement?: string } = {}
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: over.name ?? "Notes" } });
   fireEvent.change(screen.getByLabelText("What do you want made?"), { target: { value: over.statement ?? "A one page brief" } });
   await chooseOrganization();
-  fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
+  await screen.findByRole("button", { name: "Materialize" });
+  await readTheBar();
+  fireEvent.click(screen.getByRole("button", { name: "Materialize" }));
 }
 
 const sent = (conn: Conn, index = 0): Record<string, unknown> => conn.query.composeMaterialize.mock.calls[index]?.[0] ?? {};
@@ -450,6 +453,7 @@ describe("creating a file", () => {
     conn.subscriptions.emit(COMPOSITION, compositionRow({ id: "c1", status: "ready", format: "markdown" }), "NODE_CREATED");
     fireEvent.click(await screen.findByRole("button", { name: "Compose another" }));
     // The very same facts: only a fresh id tells the cluster this is another file.
+    await readTheBar();
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
     expect(sent(conn, 1)["requestId"]).not.toBe(sent(conn, 0)["requestId"]);
@@ -1039,6 +1043,7 @@ describe("returning to the app that sent the person", () => {
     await create(seed());
     const back = await screen.findByRole("button", { name: "Back to Files" });
     expect(screen.getByRole("button", { name: "Open Notes" })).toBeTruthy();
+    await readTheBar();
     fireEvent.click(back);
     expect(h.openApp).toHaveBeenCalledExactlyOnceWith("files", "browse");
   });
