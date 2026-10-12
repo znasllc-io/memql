@@ -240,6 +240,15 @@ describe("the section a window opens on", () => {
     const { navigate } = mount(fakeConnection(), { settings: { defaultSection: "materialized" } });
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("materialized"));
   });
+
+  // Only an instruction the Materializer acts on is a sender saying where the window
+  // goes. One addressed to something else is left standing, and the window opens
+  // where the person prefers, as one nobody asked anything of does.
+  it("is the person's default section when the instruction pending is not one the Materializer acts on", async () => {
+    const { navigate, consumeIntent } = mount(fakeConnection(), { settings: { defaultSection: "materialized" }, intent: { id: "i3", payload: { somethingElse: "x" } } });
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("materialized"));
+    expect(consumeIntent).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
