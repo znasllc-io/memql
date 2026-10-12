@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ProblemReporter, ReportedError, UserInputError, userMessage } from "../src/problems.js";
+import * as vscode from "vscode";
+import { configureProblems, ProblemReporter, ReportedError, UserInputError, userMessage } from "../src/problems.js";
+import { setProblemOutput, showProblem } from "../src/problemUI.js";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
 test("unexpected failures give safe messages and searchable, redacted diagnostics", async () => {
@@ -71,4 +73,47 @@ test("diagnostic concurrency remains bounded when the transport stalls",async()=
   const reporter=new ProblemReporter(api,()=>{});
   for(let n=0;n<250;n++)reporter.report(new Error(`failure ${n}`),"save");
   await new Promise(resolve=>setImmediate(resolve));assert.equal(sends,8);
+});
+
+test("Show details reveals the output instead of a modal", async () => {
+  const toasts: { message: string; buttons: string[] }[] = [], dialogs: unknown[][] = [], shown: unknown[][] = [], lines: string[] = [];
+  const channel = { appendLine: (line: string) => { lines.push(line); }, show: (...args: unknown[]) => { shown.push(args); } };
+  const window = vscode.window as unknown as Record<string, (...args: any[]) => unknown>;
+  const original = { showErrorMessage: window.showErrorMessage, showInformationMessage: window.showInformationMessage, showWarningMessage: window.showWarningMessage };
+  // The person's answer: a toast can only return a button it offered.
+  let answer: string | undefined = "Show details";
+  window.showErrorMessage = async (message: string, ...buttons: string[]) => { toasts.push({ message, buttons }); return answer !== undefined && buttons.includes(answer) ? answer : undefined; };
+  window.showInformationMessage = async (...args: unknown[]) => { dialogs.push(args); };
+  window.showWarningMessage = async (...args: unknown[]) => { dialogs.push(args); };
+  const reporter = new ProblemReporter({ current: () => undefined } as unknown as EditorConnectionAPI, line => channel.appendLine(line));
+  configureProblems(reporter);
+  setProblemOutput(channel as unknown as vscode.OutputChannel);
+  try {
+    await showProblem(new Error("PDF parser failed"), "open the PDF");
+    assert.equal(toasts.length, 1);
+    assert.match(toasts[0].message, /^Couldn’t open the PDF\./);
+    assert.deepEqual(toasts[0].buttons, ["Show details"], "one toast, one button");
+    assert.equal(shown.length, 1, "Show details reveals the output channel");
+    const reference = /\[(tools-[^\]]+)\]/.exec(lines[0] ?? "")?.[1];
+    assert.ok(reference, "the output channel holds a line with the reference");
+    assert.match(lines[0], new RegExp(`\\[${reference}\\] open the PDF: .*PDF parser failed`));
+    assert.deepEqual(dialogs, [], "no second dialog opens, modal or not");
+
+    // Dismissing the toast reveals nothing.
+    answer = undefined;
+    shown.length = 0;
+    await showProblem(new Error("PDF parser failed"), "open the PDF");
+    assert.equal(toasts.length, 2);
+    assert.equal(shown.length, 0);
+
+    // A problem with no reference, an input the person can fix, has nothing to show: the toast carries no button.
+    answer = "Show details";
+    await showProblem(new UserInputError("Select a passage first."), "save");
+    assert.deepEqual(toasts[2], { message: "Select a passage first.", buttons: [] });
+    assert.equal(shown.length, 0);
+    assert.deepEqual(dialogs, []);
+  } finally {
+    for (const [name, replaced] of Object.entries(original)) { if (replaced === undefined) delete window[name]; else window[name] = replaced; }
+    reporter.dispose();
+  }
 });

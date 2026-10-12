@@ -1,7 +1,7 @@
 {
   "name": "memql-productivity-tools",
   "displayName": "MemQL Productivity Tools",
-  "description": "Documents, campaign templates, PDFs and human-reviewed suggestions connected to MemQL.",
+  "description": "Documents, emails, PDFs and human-reviewed suggestions connected to MemQL.",
   "version": "0.1.3",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
@@ -40,86 +40,87 @@
       {
         "command": "memql.productivity.newTemplate",
         "title": "New Email Template",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.previewTemplate",
         "title": "Preview Email Template",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.openFile",
         "title": "Open File from MemQL",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.compareLatest",
         "title": "Compare with Latest Revision",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.useComparedRevision",
         "title": "Use Compared Revision as Save Base",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.markdown.source",
         "title": "Markdown Source",
-        "category": "MemQL Productivity",
+        "category": "MemQL",
         "icon": "$(code)"
       },
       {
         "command": "memql.productivity.markdown.reading",
         "title": "Markdown Reading View",
-        "category": "MemQL Productivity",
+        "category": "MemQL",
         "icon": "$(preview)"
       },
       {
         "command": "memql.productivity.markdown.review",
-        "title": "Markdown: Review",
+        "title": "Markdown Review",
         "shortTitle": "Review",
+        "category": "MemQL",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "memql.productivity.markdown.split",
         "title": "Markdown Split View",
-        "category": "MemQL Productivity",
+        "category": "MemQL",
         "icon": "$(open-preview)"
       },
       {
         "command": "memql.productivity.markdown.copy",
         "title": "Copy",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.markdown.feedback",
         "title": "Feedback",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.template.source",
         "title": "Email Template Source",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.template.preview",
         "title": "Email Template Preview",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.template.split",
         "title": "Email Template Split View",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.templateFromExamples",
         "title": "Create Email from Examples",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.resumeEmailComposition",
         "title": "Open Last Email Composition",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.checkTools",
@@ -129,17 +130,17 @@
       {
         "command": "memql.productivity.markdown.note",
         "title": "Add note",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.newMarkdown",
         "title": "New Markdown Document",
-        "category": "MemQL Productivity"
+        "category": "MemQL"
       },
       {
         "command": "memql.productivity.markdown.insertImage",
-        "title": "Markdown: Insert Image",
-        "category": "MemQL Productivity",
+        "title": "Insert Image into Markdown",
+        "category": "MemQL",
         "icon": "$(file-media)"
       }
     ],

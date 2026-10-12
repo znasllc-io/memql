@@ -21,7 +21,7 @@ export class TemplatePublisher {
     return operation;
   }
   private async publishDocument(document: vscode.TextDocument): Promise<void> {
-    if (document.isDirty && !await document.save()) throw new UserInputError("Save this email before using it in Campaigns.");
+    if (document.isDirty && !await document.save()) throw new UserInputError("Save this email before publishing it.");
     const content = readTemplate(document.getText());
     const version = document.version;
     const source = document.uri.scheme === "memql-file" ? await this.load(document.uri) : undefined;
@@ -32,13 +32,13 @@ export class TemplatePublisher {
     const key = `memql.campaignPublication:${document.uri.toString()}`;
     if (!publication) {
       publication = this.context.workspaceState.get<Publication>(key);
-      if (publication && publication.domain !== lease.domain) throw new UserInputError("This document's Campaigns draft belongs to a different cluster. Reconnect to that cluster.");
+      if (publication && publication.domain !== lease.domain) throw new UserInputError("This document's draft belongs to a different cluster. Reconnect to that cluster.");
       if (!publication) {
         const accounts = await this.api.execute(lease, "clientAccountsAll", buildClientAccountsAll({}));
         const organization = await vscode.window.showQuickPick(accounts.map(row => ({ label: text(row,"name") || text(row,"id"), id: text(row,"id") })),
-          { title: "Use in Campaigns · Organization", placeHolder: "Choose the organization this email will represent", ignoreFocusOut: true });
+          { title: "Publish email · Organization", placeHolder: "Choose the organization this email will represent", ignoreFocusOut: true });
         if (!organization) return;
-        const name = await vscode.window.showInputBox({ title: "Use in Campaigns · Name", value: source?.resource.name.replace(/\.email\.json$/i, "") || "Email template", ignoreFocusOut: true,
+        const name = await vscode.window.showInputBox({ title: "Publish email · Name", value: source?.resource.name.replace(/\.email\.json$/i, "") || "Email template", ignoreFocusOut: true,
           // The name is at most 200 bytes; the person reads only that it is missing or too long.
           validateInput: value => !value.trim() ? "Enter a name." : new TextEncoder().encode(value.trim()).length > 200 ? "Enter a shorter name." : /[\u0000-\u001f\u007f-\u009f]/.test(value) ? "Enter a name without control characters." : undefined });
         if (!name) return;
@@ -69,6 +69,6 @@ export class TemplatePublisher {
     }
     const uri = vscode.Uri.from({ scheme: "memql-file", authority: lease.domain, path: `/templates/${publication.templateId}/${publication.name.replace(/[\\/]/g,"_")}.email.json` });
     await vscode.commands.executeCommand("vscode.openWith", uri, "memql.productivity.email", { preview: false });
-    void vscode.window.showInformationMessage(choice === "Publish template for campaigns" ? "Template published. Choose it in this organization's campaigns." : "Draft saved in Campaigns.");
+    void vscode.window.showInformationMessage(choice === "Publish template for campaigns" ? "Template published. Choose it in this organization's campaigns." : "Draft saved.");
   }
 }

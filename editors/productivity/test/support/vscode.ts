@@ -16,6 +16,7 @@ export const window = {
   showQuickPick: async (_items: unknown[], _options?: unknown): Promise<any> => undefined,
   showInputBox: async (_options?: unknown): Promise<string | undefined> => undefined,
   showInformationMessage: async (_message: string): Promise<void> => {},
+  showErrorMessage: async (_message: string, ..._buttons: string[]): Promise<string | undefined> => undefined,
 };
 export const commands = { registerCommand: (_name:string,_handler:(...args:any[])=>any)=>({dispose(){}}), getCommands:async()=>[] as string[], executeCommand: async (_name: string, ..._args: unknown[]): Promise<void> => {} };
 export const workspace = { fs: {

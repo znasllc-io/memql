@@ -54,7 +54,7 @@ and **Write in Source** instead of the revision and extension circle buttons.
 Describe the content, add it to review, then propose and approve the draft.
 While preparation is running, the empty state opens that existing review;
 it does not start another generation. Read keeps creation behind **Start in Review**.
-**Markdown: Insert Image** in Source uploads a PNG, JPEG, GIF, or WebP (up to
+**Insert Image into Markdown** in Source uploads a PNG, JPEG, GIF, or WebP (up to
 8 MiB and 24 million pixels) to the same cluster and inserts its Markdown link with an accessible
 description. Save the document to retain that link in its version history.
 Images stay in Files if you later remove their link; removing text never deletes
@@ -285,13 +285,15 @@ revision currently supports Markdown; email composition uses separate controls.
 
 
 Unexpected errors throughout Productivity Tools use a short message and a
-**Details** action containing a troubleshooting reference. Search that reference
+troubleshooting reference. In a notification, **Show details** opens the
+**MemQL Productivity Tools** Output channel, which holds the reference; in a
+panel, **Details** shows it beside **Copy reference**. Search that reference
 in **MemQL OS → Logs** to find the technical error and related backend events.
 Logs access keeps its existing permissions. File-save errors include the
 reference in the native VS Code notification. When offline or when cluster
-logging is unavailable, the **MemQL Productivity Tools** Output channel retains
-the same reference locally. Diagnostic messages redact credentials; polling
-errors are deduplicated and logging never retries the failed user action.
+logging is unavailable, the Output channel retains the same reference locally.
+Diagnostic messages redact credentials; polling errors are deduplicated and
+logging never retries the failed user action.
 
 Review distinguishes an automatic retry from a paused preparation. Details stay
 expanded across status updates and disappear when the request recovers. The
