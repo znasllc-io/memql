@@ -87,6 +87,43 @@ beforeEach(() => {
   for (const r of [BFF, AGENT, DEAF_EDGE, IDENTITY, UNREPORTED]) strip(r);
 });
 
+// A REPLICA'S HISTORY IS COLLAPSED TO ITS NEWEST VERSION (memql#6033). The row is
+// append-only, so a read answers every version of a node, and the seed keeps
+// the latest by the version time each carries. The engine writes that time as
+// RFC 3339 with the fraction's trailing zeros trimmed, so as a STRING
+// `.3251Z` is greater than `.325101Z` -- and it is the earlier instant.
+describe("a node that has several versions", () => {
+  const EARLIER = clusterNodeRow({ id: "bff-a", address: "10.0.0.1:50058", createdAt: "2026-10-12T09:00:00.3251Z" });
+  const LATER = clusterNodeRow({ id: "bff-a", address: "10.0.0.2:50058", createdAt: "2026-10-12T09:00:00.325101Z" });
+
+  it.each([
+    ["the earlier version read first", [EARLIER, LATER]],
+    ["the later version read first", [LATER, EARLIER]],
+  ])("keeps the later one as an instant, not as a string: %s", async (_order, rows) => {
+    mount(fakeConnection({ clusterNodes: rows }));
+    expect(await screen.findByText("10.0.0.2:50058")).toBeTruthy();
+    expect(screen.queryByText("10.0.0.1:50058")).toBeNull();
+  });
+
+  it("keeps the later one across whole seconds as well", async () => {
+    const older = clusterNodeRow({ id: "bff-a", address: "10.0.0.1:50058", createdAt: "2026-10-12T09:00:00.999999Z" });
+    const newer = clusterNodeRow({ id: "bff-a", address: "10.0.0.2:50058", createdAt: "2026-10-12T09:00:01Z" });
+    mount(fakeConnection({ clusterNodes: [newer, older] }));
+    expect(await screen.findByText("10.0.0.2:50058")).toBeTruthy();
+    expect(screen.queryByText("10.0.0.1:50058")).toBeNull();
+  });
+
+  it("lets the later row read win where a version has no time to compare", async () => {
+    // Without a time on either side there is no order to apply, and the arrival
+    // wins -- as the live list does.
+    const first = clusterNodeRow({ id: "bff-a", address: "10.0.0.1:50058", createdAt: "" });
+    const second = clusterNodeRow({ id: "bff-a", address: "10.0.0.2:50058", createdAt: "" });
+    mount(fakeConnection({ clusterNodes: [first, second] }));
+    expect(await screen.findByText("10.0.0.2:50058")).toBeTruthy();
+    expect(screen.queryByText("10.0.0.1:50058")).toBeNull();
+  });
+});
+
 describe("the list", () => {
   it("groups the running nodes by type and says each one's state in words", async () => {
     mount(fakeConnection({ clusterNodes: [BFF, AGENT, DEAF_EDGE, IDENTITY, UNREPORTED] }));
