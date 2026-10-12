@@ -31,24 +31,29 @@ const ROOT = join(__dirname, "..", "src");
 
 // Rule 1. The SDK's helpers call composeMaterialize and are its one caller; createLibraryFile,
 // createArtifact and createGeneratedOutput are raw writes that nothing in a client has any
-// business with. Each is matched in the three ways it can be reached:
+// business with. Each is matched in the three ways it can be reached, and a call is matched when it
+// is made optionally (`?.(`) too:
 //   query.composeMaterialize({ ... })               a call
 //   api.execute(lease, "composeMaterialize", ...)   the quoted name (how email drafts used to start)
 //   buildComposeMaterialize({ ... })                the generated call builder
 const RAW_CONSTRUCTS = ["composeMaterialize", "createLibraryFile", "createArtifact", "createGeneratedOutput"];
 const builder = (name: string) => `build${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+// An opening parenthesis, directly or after `?.`.
+const CALLED = "\\s*(?:\\?\\.\\s*)?\\(";
 const RAW_CONSTRUCT = new RegExp(
-  RAW_CONSTRUCTS.flatMap(name => [`\\b${name}\\s*\\(`, `["'\`]${name}["'\`]`, `\\b${builder(name)}\\s*\\(`]).join("|"),
+  RAW_CONSTRUCTS.flatMap(name => [`\\b${name}${CALLED}`, `["'\`]${name}["'\`]`, `\\b${builder(name)}${CALLED}`]).join("|"),
 );
 
 // Rule 2. A File the person picked arrives from the platform; the only way to make one up is the
-// constructor, so nothing under src may call it.
-const FABRICATED_FILE = /\bnew\s+File\s*\(/;
+// constructor, so nothing under src may call it, by its name or through the global object
+// (window.File, globalThis.File, self.File).
+const FABRICATED_FILE = /\bnew\s+(?:(?:window|globalThis|self)\s*\.\s*)?File\s*\(/;
 
 // Rule 3: putting a file the person already has into the Library.
 //   api.uploadFile(lease, name, mime, bytes)   the connection's upload (editors/vscode/src/connection/api.ts)
 //   files.createFile(lease, name, mime, bytes) Documents.createFile, which wraps it (documents.ts)
-const UPLOAD = /\b(?:uploadFile|createFile)\s*\(/;
+// each called directly or optionally (`?.(`).
+const UPLOAD = /\b(?:uploadFile|createFile)\s*(?:\?\.\s*)?\(/;
 
 // Every module that uploads, and what the person handed it. None of them makes a file out of
 // text: each sends bytes the person picked.
@@ -120,13 +125,22 @@ test("catches a planted violation", () => {
     assert.match(`await api.execute(lease, "${name}", call)`, RAW_CONSTRUCT, `${name} by its quoted name`);
     assert.match(`await api.execute(lease, 'x', ${builder(name)}(args))`, RAW_CONSTRUCT, `${name} through its builder`);
   }
+  // An optional call is still a call.
+  for (const name of RAW_CONSTRUCTS) {
+    assert.match(`await query.${name}?.({ name })`, RAW_CONSTRUCT, `${name} as an optional call`);
+    assert.match(`await api.execute(lease, 'x', ${builder(name)}?.(args))`, RAW_CONSTRUCT, `${name} through its builder, called optionally`);
+  }
   // Email drafts before they moved onto the helper.
   assert.match('await this.api.execute(lease, "composeMaterialize", buildComposeMaterialize({ name }))', RAW_CONSTRUCT);
   assert.match('const file = new File(["\\n"], "Untitled.md")', FABRICATED_FILE);
+  // The constructor reached through the global object is the same constructor.
+  assert.match('const file = new window.File(["\\n"], "Untitled.md")', FABRICATED_FILE);
+  assert.match("const file = new globalThis.File(parts, name)", FABRICATED_FILE);
   for (const line of [
     // New Markdown before it moved onto the helper.
     'const uri = await files.createFile(lease, "Untitled.md", "text/markdown", new TextEncoder().encode("\\n"))',
     "const uploaded = await this.api.uploadFile(lease, name, mime, bytes)",
+    "const uri = await files.createFile?.(lease, name, mime, bytes)",
   ]) {
     assert.match(line, UPLOAD, line);
   }

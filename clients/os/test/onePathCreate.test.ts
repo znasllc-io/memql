@@ -29,26 +29,30 @@ const ROOT = join(__dirname, "..", "src");
 // Rule 1. The SDK's helpers call composeMaterialize and are its one caller; createLibraryFile,
 // createArtifact and createGeneratedOutput are raw writes that nothing in a client has any
 // business with (the server's upload routes call createLibraryFile). Each is matched in the three
-// ways it can be reached:
+// ways it can be reached, and a call is matched when it is made optionally (`?.(`) too:
 //   query.composeMaterialize({ ... })         a call
 //   executeNamed("composeMaterialize", ...)   the quoted name
 //   buildComposeMaterialize({ ... })          the generated call builder
 const RAW_CONSTRUCTS = ["composeMaterialize", "createLibraryFile", "createArtifact", "createGeneratedOutput"];
 const builder = (name: string) => `build${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+// An opening parenthesis, directly or after `?.`.
+const CALLED = "\\s*(?:\\?\\.\\s*)?\\(";
 const RAW_CONSTRUCT = new RegExp(
-  RAW_CONSTRUCTS.flatMap((name) => [`\\b${name}\\s*\\(`, `["'\`]${name}["'\`]`, `\\b${builder(name)}\\s*\\(`]).join("|"),
+  RAW_CONSTRUCTS.flatMap((name) => [`\\b${name}${CALLED}`, `["'\`]${name}["'\`]`, `\\b${builder(name)}${CALLED}`]).join("|"),
 );
 
 // Rule 2. A File the person picked, dropped or pasted arrives from the browser; the only way to
-// make one up is the constructor, so nothing under src may call it. Without this, an allowlisted
-// uploader could send provider.upload(new File(["\n"], "Untitled.md")) and pass.
-const FABRICATED_FILE = /\bnew\s+File\s*\(/;
+// make one up is the constructor, so nothing under src may call it, by its name or through the
+// global object (window.File, globalThis.File, self.File). Without this, an allowlisted uploader
+// could send provider.upload(new File(["\n"], "Untitled.md")) and pass.
+const FABRICATED_FILE = /\bnew\s+(?:(?:window|globalThis|self)\s*\.\s*)?File\s*\(/;
 
 // Rule 3: putting a file the person already has into the Library.
 //   uploads.upload(file)    the edge upload port, UploadProvider.upload (items/upload.ts)
 //   ports.uploadFile(file)  the folder-upload port (apps/files/uploadTree.ts)
 //   createFile(...)         what the editors call their upload wrapper; no OS module has one
-const UPLOAD = /\.upload\s*\(|\b(?:uploadFile|createFile)\s*\(/;
+// each called directly or optionally (`?.(`).
+const UPLOAD = /\.upload\s*(?:\?\.\s*)?\(|\b(?:uploadFile|createFile)\s*(?:\?\.\s*)?\(/;
 
 // Every module that uploads, and what the person handed it. None of them makes a file out of
 // text: each sends a File the person picked or dropped.
@@ -111,12 +115,22 @@ describe("one creation path", () => {
       expect(RAW_CONSTRUCT.test(`await query.executeNamed("${name}", call)`), `${name} by its quoted name`).toBe(true);
       expect(RAW_CONSTRUCT.test(`const call = ${builder(name)}(args)`), `${name} through its builder`).toBe(true);
     }
+    // An optional call is still a call.
+    for (const name of RAW_CONSTRUCTS) {
+      expect(RAW_CONSTRUCT.test(`await query.${name}?.({ name })`), `${name} as an optional call`).toBe(true);
+      expect(RAW_CONSTRUCT.test(`const call = ${builder(name)}?.(args)`), `${name} through its builder, called optionally`).toBe(true);
+    }
     expect(FABRICATED_FILE.test('provider.upload(new File(["\\n"], "Untitled.md"))')).toBe(true);
     expect(FABRICATED_FILE.test("const file = new  File (parts, name)")).toBe(true);
+    // The constructor reached through the global object is the same constructor.
+    expect(FABRICATED_FILE.test('provider.upload(new window.File(["\\n"], "Untitled.md"))')).toBe(true);
+    expect(FABRICATED_FILE.test("const file = new globalThis.File(parts, name)")).toBe(true);
     for (const line of [
       'await uploads.upload(new File(["\\n"], "New.md")).done',
       "await ports.uploadFile(file, folderId)",
       "const uri = await files.createFile(lease, name, mime, bytes)",
+      "await uploads.upload?.(file).done",
+      "await ports.uploadFile?.(file, folderId)",
     ]) {
       expect(UPLOAD.test(line), line).toBe(true);
     }
