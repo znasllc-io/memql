@@ -1,3 +1,4 @@
+import { emailState } from "../words";
 import { EMAIL_REFRESH_MS } from "../useEmail";
 import { useEffect, useRef, useState } from "react";
 import { refusalSentence, versionOrder } from "@znasllc-io/memql-sdk-core/client";
@@ -46,7 +47,7 @@ export function RulePage({ rule, feeds, writes, onBack }: { rule: EmailRuleRow; 
       setAsking("");
     } finally { working.current = false; setBusy(false); }
   }
-  const status = dirty ? "Unsaved changes" : ({ draft: "Draft", active: "On", paused: "Paused", failed: "Refused" }[rule.status] || "");
+  const status = dirty ? "Unsaved changes" : emailState("rule", rule.status);
   return <div className="os-action-pane"><div className="os-action-body os-app-stack"><Head title={rule.name} back={{ label: "Automations", onSelect: onBack }} /><AutomationSwitch />
     <Panel label="Automation details"><Facts><Fact label="Organization" value={organizationName(accounts, rule.accountId)} /></Facts></Panel>
     {failure ? <Notice tone="warn" sentence={failure} /> : null}{error && refusalSentence(error) !== failure ? <Notice tone="warn" sentence={refusalSentence(error)} /> : null}

@@ -49,7 +49,7 @@ export function AddAutomationWizard({ feeds, writes, onBack, onDone }: { feeds: 
     if (working.current) return; working.current = true; setBusy(true); setAsking("");
     try {
       if (choice === "event") {
-        if (!savedRule) { const created = await writes.createRule.create(ruleDraft, id); if (!created) return; setSavedRule(true); }
+        if (!savedRule) { const created = await writes.createRule.create(ruleDraft, id); if (!created) return; setSavedRule(true); } else if (!await writes.updateRule.update(id, ruleDraft)) return;
         if (activate && !await writes.ruleArming.activate(id)) return;
         feeds.rules.reseed(); onDone(id); return;
       }
@@ -74,7 +74,7 @@ export function AddAutomationWizard({ feeds, writes, onBack, onDone }: { feeds: 
   const valid = open === "what" ? !!rule.triggerConcept : open === "who" ? rule.recipientMode === "cluster_roles" || (rule.recipientMode === "audience" ? !!rule.audienceId : !!rule.recipientField.trim()) : open === "template" ? !!rule.templateId : open === "sender" ? isOperatorOrganization(accountId) || !!rule.senderIdentityId : true;
   const acts: Act[] = busy ? [] : asking ? [{ label: "Not yet", text: true, onAct: () => setAsking("") }, { label: asking === "cancel" ? "Retire draft" : "Turn on", tone: asking === "cancel" ? "danger" : "primary", onAct: () => { if (asking === "cancel") void cancel(); else void save(true); } }] : open === "review" ? [...(name.trim() || revision || savedRule ? [{ label: revision || savedRule ? "Cancel" : "Save as draft", text: true, onAct: () => { if (revision || savedRule) void cancel(); else void save(false); } }] : []), ...(clean ? [{ label: "Turn on", tone: "primary" as const, onAct: () => setAsking("turn-on") }] : [])] : [{ label: "Cancel", text: true, onAct: () => { void cancel(); } }, ...(open === "audience" && known && !audiences.length ? [{ label: "Add an audience", tone: "primary" as const, onAct: () => openRecord("audiences", { add: true }) }] : !["organization", "trigger", "audience"].includes(open) && valid ? [{ label: "Next", tone: "primary" as const, onAct: () => setStep(order[order.indexOf(open) + 1]!) }] : [])];
   if (describing) return <DescribeAutomationPage accountId={accountId} feeds={feeds} onBack={() => setDescribing(false)} onEdit={editProposal} onDone={onDone} />;
-  const error = journeyWrites.save.error || journeyWrites.setState.error || writes.createRule.error || writes.ruleArming.error || confirms.error;
+  const error = journeyWrites.save.error || journeyWrites.setState.error || writes.createRule.error || writes.updateRule.error || writes.ruleArming.error || confirms.error;
   const stops: Stop[] = order.map((id, i) => ({ id, name: label[id], state: id === open ? "open" : i < order.indexOf(open) ? "done" : "ahead", body: body(id) }));
   return <Wizard title="Add an automation" icon={<Workflow size={20} aria-hidden />} label="Adding an automation" back={{ label: "Automations", onSelect: onBack }} steps={stops} open={open} onOpen={id => setStep(id as AddStep)} status={{ word: busy ? "Saving" : revision ? "Saved as a draft" : open === "review" ? "Review the automation" : label[open], tone: busy ? "busy" : undefined }} acts={acts} confirm={asking ? asking === "cancel" ? "Retire this draft? It stays in history." : `Turn on “${name}”? It sends email to people automatically from now on.` : undefined} notices={<>{serverIssues.length ? <Notice tone="warn" sentence="Saved as a draft. It wasn't turned on." /> : null}{error ? <Notice tone="warn" sentence={refusalSentence(error)} /> : null}</>} />;
 }

@@ -21,7 +21,7 @@ function mount(page = false, required = false) {
   const conn = fakeConnection({ audiences: [audienceRow({ id: "audience", accountId: "client" })], sites: [site, { id: "foreign", accountId: "other", title: "Other storefront", status: "live" }], templates: [templateRow({ id: "t1", accountId: "client", name: "Welcome" }), templateRow({ id: "t2", accountId: "other", name: "Other welcome" })], senderIdentities: [senderRow({ id: "s1", accountId: "client", address: "hello@client.test" })], newsletters: page ? [binding] : [], welcomes: [{ id: "signup", status: "blocked", createdAt: "revision", lastError: "Sender needs attention." }] });
   h.connection = conn; render(withSession(<Surface page={page} required={required} />)); return conn;
 }
-async function press(name: string) { await readTheBar(); fireEvent.click(screen.getByRole("button", { name, exact: true })); }
+async function press(name: string) { await readTheBar(); fireEvent.click(screen.getByRole("button", { name })); }
 describe("Signup forms", () => {
   it.each([false, true])("connects within the organization, with optional welcome; confirmation=%s", async required => {
     const conn = mount(false, required);
@@ -32,8 +32,9 @@ describe("Signup forms", () => {
     expect(within(options).queryByRole("option", { name: "Other welcome" })).toBeNull();
     expect(!!within(options).queryByRole("option", { name: "Welcome" })).toBe(!required);
     chooseOption(select, required ? "No welcome email" : "Welcome"); await press("Next");
-    chooseOption(screen.getByLabelText("Sender"), "hello@client.test"); await press("Next"); await press("Next"); await press("Connect");
-    await waitFor(() => expect(conn.query.campaignConfigureNewsletter).toHaveBeenCalledWith(expect.objectContaining({ siteId: "site", audienceId: "audience", templateId: required ? undefined : "t1", senderIdentityId: "s1", enabled: true })));
+    if (!required) { chooseOption(screen.getByLabelText("Sender"), "hello@client.test"); await press("Next"); } else expect(screen.queryByLabelText("Sender")).toBeNull();
+    await press("Next"); await press("Connect");
+    await waitFor(() => expect(conn.query.campaignConfigureNewsletter).toHaveBeenCalledWith(expect.objectContaining({ siteId: "site", audienceId: "audience", templateId: required ? undefined : "t1", senderIdentityId: required ? undefined : "s1", enabled: true })));
   });
   it("uses the shown revision to stop accepting and rechecks a blocked welcome", async () => {
     const conn = mount(true);

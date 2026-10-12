@@ -71,6 +71,13 @@ export const WORDS = {
     pending: "Not yet sent",
   } as Readonly<Record<string, string>>,
 
+  audience: { active: "Active", archived: "Archived" },
+  sender: { active: "Active", disabled: "Archived" },
+  layout: { active: "Active", archived: "Archived" },
+  journey: { draft: "Draft", active: "On", paused: "Paused", archived: "Retired" },
+  rule: { draft: "Draft", active: "On", paused: "Paused", archived: "Retired", failed: "Refused" },
+  recipient: { subscribed: "Subscribed", pending: "Pending confirmation", unsubscribed: "Unsubscribed", bounced: "Bounced", complained: "Reported as spam" },
+
   /** How often a campaign repeats: "Every week", "Every 2 weeks". */
   every: (weeks: number): string => (weeks === 1 ? "Every week" : `Every ${weeks} weeks`),
 
@@ -137,4 +144,9 @@ export const WORDS = {
 /** A template's state in a word, or "" for a status this build does not know. */
 export function templateState(status: string): string {
   return (WORDS.template as Readonly<Record<string, string>>)[status] ?? "";
+}
+
+/** Unknown states carry no invented label. Built-in layouts carry no state. */
+export function emailState(noun: "campaign" | "template" | "audience" | "sender" | "layout" | "journey" | "rule" | "recipient" | "delivery", state: string, builtIn = false): string {
+  return builtIn ? "" : (WORDS[noun] as Readonly<Record<string, string>>)[state] ?? "";
 }

@@ -639,3 +639,14 @@ describe("whether a template is published", () => {
     }
   });
 });
+
+
+describe("bounded campaign statistics", () => {
+  it("labels lower bounds and suppresses rates from either bounded side", () => {
+    const stats = statsFromPayload({ sent: 5000, opens: { unique: 40, total: 5000 }, atLeast: { sent: true, "opens.total": true } });
+    expect(stats.sent.atLeast).toBe(true);
+    expect(formatFigure(stats.opensTotal)).toBe("≥5000");
+    expect(rateOf(stats.opensUnique, 5000, !!stats.sent.atLeast)).toBeNull();
+    expect(rateOf(stats.opensTotal, 5000)).toBeNull();
+  });
+});

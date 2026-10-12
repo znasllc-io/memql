@@ -55,7 +55,7 @@ export function AutomationPage({ journey, feeds, onBack }: { journey: JourneyRow
   const specs = journeyActs(journey, dirty, issues, asking).filter(a => a.id !== "turn-on" || known).filter(a => a.id !== "save" || !!draft.name.trim());
   return <div className="os-action-pane"><div className="os-action-body os-app-stack"><Head title={journey.name} back={{ label: "Automations", onSelect: onBack }} />
     <AutoRefresh intervalMs={EMAIL_REFRESH_MS} onRefresh={counts.reload} busy={counts.state === "loading"} />
-    <Panel label="Automation details"><Facts><Fact label="Organization" value={organizationName(accounts, journey.accountId)} /><Fact label="Starts" value={triggerSentence(journey.trigger, audience)} />{journey.activatedAt ? <Fact label="Turned on" value={formatMoment(journey.activatedAt)} /> : null}</Facts></Panel>
+    <Panel label="Automation details"><Facts><Fact label="Organization" value={organizationName(accounts, journey.accountId)} />{journey.activatedAt ? <Fact label="Turned on" value={formatMoment(journey.activatedAt)} /> : null}</Facts></Panel>
     {journey.lastError ? <Notice tone="warn" sentence={refusalSentence(journey.lastError)} /> : null}
     {failure && refusalSentence(failure) !== refusalSentence(journey.lastError) ? <Notice tone="warn" sentence={refusalSentence(failure)} /> : null}
     {confirms.error ? <Notice tone="warn" sentence={refusalSentence(confirms.error)}><Button onClick={() => { void confirms.reload(); }}>Try again</Button></Notice> : null}

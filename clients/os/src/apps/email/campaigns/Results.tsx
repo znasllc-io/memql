@@ -32,7 +32,7 @@ import { SendBar } from "./SendBar";
 
 /** A measured figure as a person reads a count ("1,204"), or the em dash. */
 function count(figure: Figure): string {
-  return figure.value === null ? "--" : figure.value.toLocaleString("en-US");
+  return figure.value === null ? "--" : `${figure.atLeast ? "≥" : ""}${figure.value.toLocaleString("en-US")}`;
 }
 
 /** The band and the engagement beneath it. */
@@ -50,7 +50,7 @@ export function Results({ campaign, stats }: { campaign: CampaignRow; stats: Rea
  * Opens and clicks, BELOW the band and smaller than it.
  *
  * A DIFFERENT QUESTION, about the sent slice only, so it is not a fifth
- * segment: opens are a share of what was DELIVERED, not of the audience, and a
+ * segment: opens are a share of what was accepted for sending, not of the audience, and a
  * band whose slices meant two different things could not be read at all. The
  * rate leads because it is the comparable figure; the unique-of-total pair
  * follows because a rate with no counts behind it cannot be checked.
@@ -68,27 +68,28 @@ function Engagement({ campaign, stats }: { campaign: CampaignRow; stats: Reading
   return (
     <div className="os-send-engagement">
       {campaign.trackOpens ? (
-        <EngagementFigure label="Opened" unique={value?.opensUnique ?? null} total={value?.opensTotal ?? null} sent={sent} reading={reading} />
+        <EngagementFigure label="Opened" unique={value?.opensUnique ?? null} total={value?.opensTotal ?? null} sent={sent} bounded={!!value?.sent.atLeast} reading={reading} />
       ) : null}
       {campaign.trackClicks ? (
-        <EngagementFigure label="Clicked" unique={value?.clicksUnique ?? null} total={value?.clicksTotal ?? null} sent={sent} reading={reading} />
+        <EngagementFigure label="Clicked" unique={value?.clicksUnique ?? null} total={value?.clicksTotal ?? null} sent={sent} bounded={!!value?.sent.atLeast} reading={reading} />
       ) : null}
     </div>
   );
 }
 
-function EngagementFigure({ label, unique, total, sent, reading }: {
+function EngagementFigure({ label, unique, total, sent, bounded, reading }: {
   label: string;
   /** Null when the breakdown has not been read (or was refused): no figure, and no sentence about one. */
   unique: Figure | null;
   total: Figure | null;
   sent: number;
+  bounded: boolean;
   reading: boolean;
 }) {
   return (
     <div className="os-send-engagement-item">
       <span className="os-send-engagement-rate">
-        {reading ? <InlineSkeleton label={`Counting who ${label.toLowerCase()}`} /> : unique === null ? "--" : formatRate(rateOf(unique, sent))}
+        {reading ? <InlineSkeleton label={`Counting who ${label.toLowerCase()}`} /> : unique === null ? "--" : formatRate(rateOf(unique, sent, bounded))}
       </span>
       <span className="os-send-engagement-label">{label}</span>
       {total === null || total.value === null ? null : (
@@ -113,7 +114,7 @@ function StatFact({ label, figure }: { label: string; figure: Figure }) {
  * sent is the legend's, right above; a second copy here would be a second
  * place to read it and, between two refreshes, a second answer. The breakdown
  * keeps the whole (Recipients), why people were skipped, and what happened
- * after delivery. RECIPIENTS IS THE BAND'S WHOLE -- the roster frozen for the
+ * after sending. RECIPIENTS IS THE BAND'S WHOLE -- the roster frozen for the
  * send -- not the audience as it is today, which grows and shrinks after.
  */
 export function Breakdown({ campaign, stats }: { campaign: CampaignRow; stats: Reading<CampaignStats | null> }) {

@@ -15,7 +15,7 @@ function mount(conn: ReturnType<typeof fakeConnection>, provider = uploads(), ar
   const settings = { ...store.load(), includeArchived: archived };
   render(withSession(<EmailApp sectionId="audiences" navigate={() => {}} askContext={() => {}} uploads={provider} store={{ load: () => settings, save: () => {} }} />));
 }
-async function press(name: string) { await readTheBar(); fireEvent.click(screen.getByRole("button", { name, exact: true })); }
+async function press(name: string) { await readTheBar(); fireEvent.click(screen.getByRole("button", { name })); }
 describe("Email audiences", () => {
   it("shows subscriber counts and confirmation, refines, and hides archived audiences", async () => {
     const conn = fakeConnection({ audiences: [audienceRow({ id: "a", name: "Newsletter", confirmation: "required" }), audienceRow({ id: "b", name: "Club" }), audienceRow({ id: "c", name: "Old", status: "archived" })], subscriberCounts: { a: 1204, b: 3 } });
@@ -34,7 +34,7 @@ describe("Email audiences", () => {
     mount(conn);
     fireEvent.click(await screen.findByText("Newsletter"));
     await press("Archive");
-    fireEvent.click(screen.getByRole("button", { name: "Archive", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
     expect(conn.query.archiveAudience).not.toHaveBeenCalled();
     await press("Archive");
     await screen.findByRole("button", { name: "Restore" });

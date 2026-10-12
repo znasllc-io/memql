@@ -1,3 +1,4 @@
+import { emailState } from "../words";
 import { EMAIL_REFRESH_MS } from "../useEmail";
 import { useMemo, useRef, useState } from "react";
 import { refusalSentence, type Row } from "@znasllc-io/memql-sdk-core/client";
@@ -58,5 +59,5 @@ export function AudiencePage({ audience, feeds, recordFeeds, writes, uploads, si
     {feeds.journeys.snapshot.rows.map(journeyFromRow).filter(j => j.status === "active" && j.trigger.kind === "joined" && j.trigger.audienceId === audience.id).map(j => <p className="os-caption" key={j.id}>People you add join “{j.name}”.</p>)}
     <SignupForms audience={audience} signupForms={recordFeeds.signupForms} sites={sites} onAdd={() => setView("connect")} onOpen={setView} />
     {error ? <Notice tone="warn" sentence={refusalSentence(lifecycle.error || writes.archiveAudience.error) || error} /> : null}
-  </div><ActionBar state={busy ? "Saving" : audience.status === "archived" ? "Archived" : "Active"} tone={busy ? "busy" : "none"} acts={busy ? [] : toKitActs(audienceActs(audience, asking), id => { void change(id); })}>{question ? <span className="os-actbar-confirm">{question}</span> : null}</ActionBar></div>;
+  </div><ActionBar state={busy ? "Saving" : emailState("audience", audience.status)} tone={busy ? "busy" : "none"} acts={busy ? [] : toKitActs(audienceActs(audience, asking), id => { void change(id); })}>{question ? <span className="os-actbar-confirm">{question}</span> : null}</ActionBar></div>;
 }

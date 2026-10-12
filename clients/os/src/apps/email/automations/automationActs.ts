@@ -1,3 +1,4 @@
+import { emailState } from "../words";
 import type { ActSpec } from "../acts";
 import type { EmailRuleRow, JourneyRow } from "../rows";
 import type { Issue } from "./issues";
@@ -12,7 +13,7 @@ export function journeyActs(j: JourneyRow, dirty: boolean, issues: readonly Issu
   return [{ id: "retire", label: "Retire", text: true }, ...(j.status === "active" ? [{ id: "pause", label: "Pause", tone: "primary" as const }] : !issues.length ? [{ id: "turn-on", label: "Turn on", tone: "primary" as const }] : [])];
 }
 export function journeyReading(j: JourneyRow, dirty: boolean, issues: readonly Issue[]): { word: string; detail: string; tone: ActionBarTone } {
-  return { word: dirty ? "Unsaved changes" : ({ draft: "Draft", active: "On", paused: "Paused", archived: "Retired" }[j.status] || ""), detail: issues.length ? `${issues.length} ${issues.length === 1 ? "thing" : "things"} to fix before turning on` : "", tone: j.status === "active" ? "live" : j.status === "paused" ? "paused" : "none" };
+  return { word: dirty ? "Unsaved changes" : emailState("journey", j.status), detail: issues.length ? `${issues.length} ${issues.length === 1 ? "thing" : "things"} to fix before turning on` : "", tone: j.status === "active" ? "live" : j.status === "paused" ? "paused" : "none" };
 }
 export function ruleActs(r: EmailRuleRow, dirty: boolean, asking: Asking): ActSpec[] {
   if (dirty) return dirtyActs;

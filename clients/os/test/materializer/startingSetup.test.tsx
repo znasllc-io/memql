@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Concepts, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import type { OsAppManifest } from "../../src/system/registry";
-import { readTheBar } from "../readTheBar";
+
 
 const h = vi.hoisted(() => ({ connection: null as unknown, os: null as unknown, openApp: vi.fn() }));
 

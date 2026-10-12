@@ -1184,7 +1184,7 @@ export interface JourneyDraft { journeyId: string; accountId: string; name: stri
 export interface JourneyReceipt { revision: string; issues: Issue[] }
 export function useJourneyWrites() {
   const save = useWrite(async (query, draft: JourneyDraft): Promise<JourneyReceipt> => {
-    const row = flatten((await query.campaignSaveJourney({ ...draft, steps: wireSteps(draft.steps) })).rows()[0] ?? {});
+    const row = flatten((await query.campaignSaveJourney({ ...draft, trigger: { ...draft.trigger }, steps: wireSteps(draft.steps) })).rows()[0] ?? {});
     return { revision: typeof row.revision === "string" ? row.revision : "", issues: Array.isArray(row.issues) ? row.issues as Issue[] : [] };
   }, null);
   const setState = useWrite(async (query, journeyId: string, action: "activate" | "pause" | "archive", expectedRevision: string): Promise<JourneyReceipt> => {

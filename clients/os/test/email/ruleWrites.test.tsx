@@ -1,7 +1,6 @@
-import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { chooseOption, openSelect } from "../selectControl";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -21,8 +20,6 @@ const { LocalEmailSettingsStore } = await import("../../src/apps/email/settings"
 const {
   audienceRow,
   fakeConnection,
-  recipientRow,
-  rowsResult,
   ruleRow,
   senderRow,
   templateRow,

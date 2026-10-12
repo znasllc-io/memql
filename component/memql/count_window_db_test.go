@@ -8,8 +8,8 @@ package memql
 // default). Before this, a set larger than the window answered the window as
 // if it were exact -- an audience of 12,000 subscribers read "5,000" -- and a
 // caller could not tell that from an audience of exactly 5,000. The count path
-// now reads one row past the window, so it can tell: past it, the answer is
-// the window and `atLeast` is true.
+// records source completeness as it reads, so it can tell: a truncated
+// source sets `atLeast` true; an exhausted source omits that marker.
 //
 // The window is narrowed to three on a PRIVATE engine (readMergeTestEngine,
 // because the test changes engine-level config), so the boundary is reached
@@ -62,7 +62,11 @@ func TestExecuteCount_SaysWhenTheWindowWasReached(t *testing.T) {
 				require.NoError(t, err, query)
 				out, ok := res.FlatOutput()
 				require.True(t, ok, "a count answers a flat aggregate, not rows: %s", query)
-				require.Equal(t, map[string]any{"count": tc.count, "atLeast": tc.atLeast}, out, query)
+				expected := map[string]any{"count": tc.count}
+				if tc.atLeast {
+					expected["atLeast"] = true
+				}
+				require.Equal(t, expected, out, query)
 				require.Equal(t, tc.count, res.GetMeta().Count, "the result's meta carries the same figure: %s", query)
 			}
 		})

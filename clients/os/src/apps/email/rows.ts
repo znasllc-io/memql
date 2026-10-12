@@ -301,6 +301,8 @@ export interface Figure {
   value: number | null;
   /** Why there is no number, in the surface's own voice. "" when there is. */
   absentBecause: string;
+  /** This is a lower bound from a capped read, never an exact total. */
+  atLeast?: boolean;
 }
 
 export const NOT_MEASURED: Figure = { value: null, absentBecause: "" };
@@ -378,7 +380,7 @@ export function statsFromPayload(row: Row): CampaignStats {
     return figureOf(flat, flatKey, absent);
   };
 
-  return {
+  const stats: CampaignStats = {
     pending: figureOf(flat, "pending"),
     sent: figureOf(flat, "sent"),
     failed: figureOf(flat, "failed"),
@@ -395,6 +397,12 @@ export function statsFromPayload(row: Row): CampaignStats {
     clicksTotal: nested("clicks", "total", "clicksTotal"),
     clicksUnique: nested("clicks", "unique", "clicksUnique", UNIQUE_UNMEASURED),
   };
+  const bounds = flat.atLeast;
+  if (bounds && typeof bounds === "object" && !Array.isArray(bounds)) {
+    const keys: Partial<Record<keyof CampaignStats, string>> = { pending: "pending", sent: "sent", failed: "failed", skipped: "skipped.total", skippedSuppressed: "skipped.suppressed", skippedUnsubscribed: "skipped.unsubscribed", skippedOther: "skipped.other", hardBounces: "bounces.hard", complaints: "complaints", unsubscribes: "unsubscribed", opensTotal: "opens.total", opensUnique: "opens.unique", clicksTotal: "clicks.total", clicksUnique: "clicks.unique" };
+    for (const [key, wire] of Object.entries(keys)) if ((bounds as Row)[wire] === true) stats[key as keyof CampaignStats].atLeast = true;
+  }
+  return stats;
 }
 
 /**
@@ -404,8 +412,8 @@ export function statsFromPayload(row: Row): CampaignStats {
  * silently punishes a campaign for its suppressions, which is the opposite of
  * what suppressing was for. A zero denominator has no rate -- not 0%.
  */
-export function rateOf(numerator: Figure, delivered: number): number | null {
-  if (numerator.value === null || delivered <= 0) return null;
+export function rateOf(numerator: Figure, delivered: number, denominatorAtLeast = false): number | null {
+  if (numerator.value === null || numerator.atLeast || denominatorAtLeast || delivered <= 0) return null;
   return numerator.value / delivered;
 }
 
@@ -418,7 +426,7 @@ export function formatRate(rate: number | null): string {
 
 /** A measured figure, or the em dash. Never a zero standing in for silence. */
 export function formatFigure(figure: Figure): string {
-  return figure.value === null ? "--" : String(figure.value);
+  return figure.value === null ? "--" : `${figure.atLeast ? "≥" : ""}${figure.value}`;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../../readTheBar";
 import { chooseOption } from "../../selectControl";
@@ -16,7 +16,7 @@ function mount(conn: ReturnType<typeof fakeConnection>, intent?: { id: string; p
   h.connection = conn; const store = new LocalEmailSettingsStore({ getItem: () => null, setItem: () => {} });
   return render(withSession(<EmailApp sectionId="automations" navigate={() => {}} askContext={() => {}} uploads={{ upload: vi.fn() }} store={store} intent={intent} consumeIntent={() => {}} />));
 }
-async function press(name: string) { await readTheBar(); fireEvent.click(screen.getByRole("button", { name, exact: true })); }
+async function press(name: string) { await readTheBar(); fireEvent.click(screen.getByRole("button", { name })); }
 describe("Automation pages", () => {
   it("merges journeys and event rules, keeps paused and filters by trigger", async () => {
     mount(setup({ journeys: [journey, { ...journey, id: "retired", name: "Old", status: "archived" }, { ...journey, id: "paused", name: "Paused series", status: "paused" }], emailRules: [ruleRow({ id: "r", name: "New admin" })] }));
@@ -57,9 +57,27 @@ describe("Adding and describing", () => {
     expect(screen.getByRole("button", { name: "Describe it instead" })).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: "Someone joins an audience" })); fireEvent.click(await screen.findByRole("radio", { name: "Newsletter" }));
     fireEvent.click(screen.getByRole("button", { name: /Send an email: choose a template/ })); chooseOption(screen.getByLabelText("Template"), "Welcome"); await press("Next");
-    await press("Turn on"); fireEvent.click(screen.getByRole("button", { name: "Turn on", exact: true })); expect(conn.query.campaignSaveJourney).not.toHaveBeenCalled(); await press("Turn on");
+    await press("Turn on"); fireEvent.click(screen.getByRole("button", { name: "Turn on" })); expect(conn.query.campaignSaveJourney).not.toHaveBeenCalled(); await press("Turn on");
     await waitFor(() => expect(conn.query.campaignSetJourneyState).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: "2026-10-12T00:00:00Z", action: "activate" })));
     expect(conn.query.campaignSaveJourney).toHaveBeenCalledOnce(); expect(conn.query.campaignSetJourneyState.mock.calls[0]?.[0].journeyId).toBe(conn.query.campaignSaveJourney.mock.calls[0]?.[0].journeyId);
+  });
+  it("keeps one event-rule draft after activation refusal and saves later edits before retrying", async () => {
+    const conn = setup({ concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }] });
+    conn.query.campaignActivateEmailRule.mockRejectedValueOnce(new Error("Publish the selected template before turning this on."));
+    mount(conn); fireEvent.click(await screen.findByRole("button", { name: "Add an automation" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Something happens in MemQL" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "user (identity)" }));
+    await press("Next"); await press("Next"); await press("Next"); await press("Next");
+    chooseOption(screen.getByLabelText("Template"), "Welcome"); await press("Next");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "A new person" } });
+    await press("Turn on"); await press("Turn on");
+    await screen.findByText("Publish the selected template before turning this on.");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "New people" } });
+    await press("Turn on"); await press("Turn on");
+    await waitFor(() => expect(conn.query.campaignActivateEmailRule).toHaveBeenCalledTimes(2));
+    expect(conn.query.createEmailRule).toHaveBeenCalledOnce();
+    expect(conn.query.updateEmailRule).toHaveBeenCalledWith(expect.objectContaining({ name: "New people" }));
+    expect(conn.query.campaignActivateEmailRule.mock.calls[1]?.[0]).toEqual(conn.query.campaignActivateEmailRule.mock.calls[0]?.[0]);
   });
   it("starts a confirming audience with a Confirm card, and missing confirmation tag blocks activation", async () => {
     const conn = setup({ audiences: [audienceRow({ id: "a1", accountId: "self", confirmation: "required" })] }); mount(conn);

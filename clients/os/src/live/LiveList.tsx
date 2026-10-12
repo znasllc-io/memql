@@ -90,7 +90,7 @@ export function LiveList<T>({
           );
         })}
       </ul>
-      {snapshot.rows.length === 0 && snapshot.state === "live" ? (
+      {snapshot.rows.length === 0 && snapshot.state === "live" && !snapshot.error ? (
         emptyContent ?? (emptyText ? <Caption>{emptyText}</Caption> : null)
       ) : null}
       {snapshot.state === "seeding" && snapshot.rows.length === 0

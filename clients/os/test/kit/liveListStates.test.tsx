@@ -115,6 +115,14 @@ describe("LiveList states", () => {
     expect(container.querySelector(".os-notice")).toBeNull();
   });
 
+  it("does not claim an empty result when a joined live source carries a failed read", () => {
+    render(<LiveList<Row> source={held(snapshot([], "live", "Could not read recovered files."))}
+      rowId={row => row.id} fingerprint={row => row.name} label="Files" renderRow={row => <span>{row.name}</span>}
+      emptyContent={<EmptyState title="No files yet">Make a file.</EmptyState>} />);
+    expect(screen.getByText("Could not read recovered files.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "No files yet" })).toBeNull();
+  });
+
   it("an empty live list needs only its empty content", () => {
     render(
       <LiveList<Row>

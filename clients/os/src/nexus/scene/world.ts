@@ -526,7 +526,7 @@ export function latestAttempts(steps: readonly StepRow[]): Map<string, StepRow> 
 
 function wins(candidate: StepRow, held: StepRow): boolean {
   if (candidate.attempt !== held.attempt) return candidate.attempt > held.attempt;
-  if (versionOrder(candidate.createdAt, held.createdAt) !== 0) return (versionOrder(candidate.createdAt, held.createdAt) ?? 0) > 0;
+  if ((versionOrder(candidate.createdAt, held.createdAt) ?? 0) !== 0) return (versionOrder(candidate.createdAt, held.createdAt) ?? 0) > 0;
   return candidate.id > held.id;
 }
 
