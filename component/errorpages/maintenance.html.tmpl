@@ -1,11 +1,14 @@
 {{- /*
-  The page the platform's own hosts get while the platform is down: the apex
-  and api, identity, mcp, os and vscode under it. errorpages.go says why.
+  The page the platform's own hosts get while the platform is down: api,
+  identity, mcp, os and vscode under the domain. Not the bare domain itself,
+  which is the cluster owner's main website and gets the neutral page.
+  errorpages.go says why.
 
   Everything is inline because nothing else may be reachable while this page
-  is up: one stylesheet, the mark in the markup, no font file, no script, no
-  image. The Content-Security-Policy the server sends allows this one
-  stylesheet by hash and nothing else.
+  is up: one stylesheet, the mark in the markup, the wordmark face as a data:
+  URI inside that stylesheet, no script, no image. The Content-Security-Policy
+  the server sends allows this one stylesheet by hash, and a data: font, and
+  nothing else.
 */ -}}
 <!DOCTYPE html>
 <html lang="en">
@@ -50,10 +53,25 @@
 html { -webkit-text-size-adjust: 100%; }
 
 /*
-  The brand's type stack, faces first. Nothing here can be fetched, so a
-  machine without Inter or Squada One wears the system face; the wordmark
-  is the only place that matters.
+  The wordmark face, Squada One, carried inline: nothing here can be fetched,
+  and the identity pages set their wordmark in this face, so a page that is to
+  look like the platform carries it. It is the brand's own latin file, 5,632
+  bytes, and errorpages_test.go fails the build when the copy drifts from
+  brand/fonts. It is the only font in the page: the body text takes the
+  system face, so a machine without Inter reads it in its own. The block
+  period is the right one for inline data, where there is nothing to wait for
+  and a flash of the wrong face on the one word that names the product would
+  be the only thing to see.
 */
+@font-face {
+  font-family: "Squada One";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("data:font/woff2;base64,{{.Wordmark}}") format("woff2");
+}
+
+/* The brand's body stack, faces first; only the system faces can be reached from here. */
 body {
   margin: 0;
   padding: 1.5rem;
@@ -94,10 +112,11 @@ main {
   color: var(--accent);
 }
 .mark svg { display: block; width: 100%; height: 100%; }
+/* The face has the one weight, which is what identity's .brand-name sets it at. */
 .name {
   font-family: "Squada One", "InterVariable", "Inter", ui-sans-serif, sans-serif;
   font-size: 2rem;
-  font-weight: 600;
+  font-weight: 400;
   line-height: 1;
   letter-spacing: 0.04em;
 }

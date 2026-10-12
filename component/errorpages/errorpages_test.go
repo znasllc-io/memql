@@ -1,6 +1,7 @@
 package errorpages
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -22,8 +23,9 @@ import (
 // On 2026-10-11 the whole mesh was down and every host answered ingress-nginx's
 // bare "503 Service Temporarily Unavailable". These tests hold the replacement
 // to its three promises: the platform's own hosts get the MemQL page, every
-// other host (a customer's site, a custom domain) gets a page that never says
-// whose platform it runs on, and an API client gets JSON it can parse.
+// other host (a customer's site, a custom domain, the bare domain) gets a page
+// that never says whose platform it runs on, and an API client gets JSON it can
+// parse.
 
 const testDomain = "memql.example"
 
@@ -72,21 +74,26 @@ func TestClassifyHost(t *testing.T) {
 		domain string
 		want   Kind
 	}{
-		// The platform's own hosts: the apex and the five labels under it.
-		{"the apex", "memql.example", testDomain, KindPlatform},
-		{"the apex in upper case with a port", "OS.Memql.Example:443", testDomain, KindPlatform},
+		// The platform's own hosts: the five labels the front door serves under
+		// the domain. NOT the domain itself: the apex is the cluster owner's main
+		// website (docs/public/operate/front-door.md, component/frontdoor's Apex),
+		// so it is a site and gets the neutral page, whatever the platform says
+		// about itself on the hosts below.
 		{"api", "api.memql.example", testDomain, KindPlatform},
 		{"identity", "identity.memql.example", testDomain, KindPlatform},
 		{"mcp", "mcp.memql.example", testDomain, KindPlatform},
 		{"os", "os.memql.example", testDomain, KindPlatform},
 		{"vscode", "vscode.memql.example", testDomain, KindPlatform},
-		{"a fully qualified apex", "memql.example.", testDomain, KindPlatform},
+		{"os in upper case with a port", "OS.Memql.Example:443", testDomain, KindPlatform},
 		{"a fully qualified host with a port", "api.memql.example.:8443", testDomain, KindPlatform},
 		{"a padded host", "  os.memql.example  ", testDomain, KindPlatform},
 		{"a domain value in upper case", "os.memql.example", "MemQL.Example", KindPlatform},
 		{"a domain value with padding and a trailing dot", "os.memql.example", " memql.example. ", KindPlatform},
 
 		// Everything else is somebody's site, and a site must never be branded.
+		{"the apex", "memql.example", testDomain, KindSite},
+		{"the apex in upper case with a port", "MemQL.Example:443", testDomain, KindSite},
+		{"a fully qualified apex", "memql.example.", testDomain, KindSite},
 		{"a site under the domain", "shop.memql.example", testDomain, KindSite},
 		{"another domain", "customer.com", testDomain, KindSite},
 		{"www on another domain", "www.customer.com", testDomain, KindSite},
@@ -118,27 +125,79 @@ func TestClassifyHost(t *testing.T) {
 
 // TestClassifyHostFollowsTheFrontDoorHostSet holds the maintenance page's idea
 // of "the platform's own hosts" to component/frontdoor, the one place the host
-// set is derived: every host the front door serves, bar the sites wildcard, is
-// the platform's. ClassifyHost reads that set instead of keeping a list of its
-// own, so a platform site added there is branded here.
+// set is derived: the roles and the platform sites it serves are the platform's.
+// ClassifyHost reads that set instead of keeping a list of its own, so a
+// platform site added there is branded here. Two entries of the front door's
+// host list are not the platform's and are asserted as sites: the sites wildcard
+// (an Ingress rule, not a host a request carries) and the apex (the cluster
+// owner's main website, which is a site row like any other).
 func TestClassifyHostFollowsTheFrontDoorHostSet(t *testing.T) {
 	hosts := frontdoor.Hosts(testDomain)
 	if len(hosts) < 6 {
 		t.Fatalf("the front door composed %d hosts for %s; the guard would prove nothing", len(hosts), testDomain)
 	}
+	apex := frontdoor.Apex(testDomain)
+	sawApex := false
 	for _, h := range hosts {
 		want := KindPlatform
-		if h.Wildcard {
-			// `*.<domain>` is the Ingress RULE that reaches every site, not a
-			// host a request can carry.
+		switch {
+		case h.Wildcard:
 			want = KindSite
+		case h.Name == apex:
+			want = KindSite
+			sawApex = true
 		}
 		if got := ClassifyHost(h.Name, testDomain); got != want {
 			t.Errorf("front-door host %q classified %v, want %v", h.Name, got, want)
 		}
 	}
+	if !sawApex {
+		t.Fatalf("the front door no longer lists the apex %q; the guard that it is a site would prove nothing", apex)
+	}
+	for _, role := range frontdoor.Roles() {
+		if got := ClassifyHost(frontdoor.RoleHost(role, testDomain), testDomain); got != KindPlatform {
+			t.Errorf("role host %q classified %v, want platform", frontdoor.RoleHost(role, testDomain), got)
+		}
+	}
+	for _, site := range frontdoor.PlatformSites() {
+		if got := ClassifyHost(frontdoor.PlatformSiteHost(site, testDomain), testDomain); got != KindPlatform {
+			t.Errorf("platform site host %q classified %v, want platform", frontdoor.PlatformSiteHost(site, testDomain), got)
+		}
+	}
 	if got := ClassifyHost(frontdoor.SiteHost("shop", testDomain), testDomain); got != KindSite {
 		t.Errorf("a site the wildcard routes (shop.%s) classified %v, want site", testDomain, got)
+	}
+}
+
+// TestZeroKindIsASite: a Kind nobody set must never brand anything.
+func TestZeroKindIsASite(t *testing.T) {
+	var k Kind
+	if k != KindSite {
+		t.Errorf("the zero Kind is %v, want site", k)
+	}
+	if KindPlatform == KindSite {
+		t.Error("KindPlatform and KindSite are the same value")
+	}
+}
+
+// TestTheApexGetsTheNeutralPage: the bare domain is the cluster owner's main
+// website. It is a deployable like any other, so it shows nothing of the
+// platform, in HTML or in JSON.
+func TestTheApexGetsTheNeutralPage(t *testing.T) {
+	for _, host := range []string{"memql.example", "MemQL.Example:443", "memql.example."} {
+		for _, accept := range []string{"text/html", "application/json"} {
+			rec := serve(t, testDomain, http.MethodGet, host, "/", http.Header{"Accept": {accept}})
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("%s (Accept %s) answered %d, want 503", host, accept, rec.Code)
+			}
+			body := rec.Body.String()
+			if strings.Contains(strings.ToLower(body), "memql") || strings.Contains(body, "<svg") {
+				t.Errorf("the apex %s (Accept %s) was branded:\n%s", host, accept, body)
+			}
+			if !strings.Contains(body, siteMessage) {
+				t.Errorf("the apex %s (Accept %s) did not get the neutral message:\n%s", host, accept, body)
+			}
+		}
 	}
 }
 
@@ -325,49 +384,34 @@ func TestAcceptsJSON(t *testing.T) {
 	}
 }
 
-func TestHealthz(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodHead} {
-		rec := serve(t, testDomain, method, "10.42.1.7:8080", "/healthz", nil)
-		if rec.Code != http.StatusOK {
-			t.Errorf("%s /healthz answered %d, want 200", method, rec.Code)
-		}
-		if method == http.MethodGet && rec.Body.String() != "ok" {
-			t.Errorf("GET /healthz body = %q, want ok", rec.Body.String())
-		}
-		if method == http.MethodHead && rec.Body.Len() != 0 {
-			t.Errorf("HEAD /healthz wrote a body: %q", rec.Body.String())
-		}
+// TestHealthzIsAPathLikeAnyOther: the handler answers the 503 page for
+// /healthz, on every host, for every method, whoever sent it. This server is the
+// default backend of every front door, so `https://api.<domain>/healthz` reaches
+// it whenever the real node cannot answer, and a 200 there would make `curl`, an
+// uptime monitor and the post-roll /healthz gate read the middle of an outage as
+// healthy. The kubelet's probe is answered on a listener of its own, which the
+// Service does not list and which the handler never sees (subcommand_error_pages.go,
+// and its tests in the root package).
+func TestHealthzIsAPathLikeAnyOther(t *testing.T) {
+	headers := map[string]http.Header{
+		"no headers":    nil,
+		"a forwarded":   {"X-Forwarded-For": {"203.0.113.9"}, "X-Request-ID": {"abc"}},
+		"a JSON client": {"Accept": {"application/json"}},
 	}
-}
-
-// TestHealthzIsNotAnsweredForTheOutsideWorld is the false-green guard. This
-// server is the default backend of every front door, so a request for
-// `https://api.<domain>/healthz` that finds no endpoint reaches it too. The
-// kubelet probes it directly and carries none of the headers ingress-nginx adds
-// to every request it forwards; the outside world always does. If the forwarded
-// request were answered 200 ok, `curl https://api.<domain>/healthz`, an uptime
-// monitor and the post-sync endpoint probe would all read the middle of an
-// outage as healthy. That is the one answer a maintenance page must not give.
-func TestHealthzIsNotAnsweredForTheOutsideWorld(t *testing.T) {
-	for _, header := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP", "X-Request-ID", "Forwarded"} {
-		t.Run(header, func(t *testing.T) {
-			rec := serve(t, testDomain, http.MethodGet, "api.memql.example", "/healthz", http.Header{header: {"203.0.113.9"}})
-			if rec.Code != http.StatusServiceUnavailable {
-				t.Fatalf("a /healthz forwarded with %s answered %d, want 503", header, rec.Code)
+	for _, host := range []string{"10.42.1.7:8080", platformHost, siteHost, "api.memql.example", ""} {
+		for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
+			for name, header := range headers {
+				rec := serve(t, testDomain, method, host, "/healthz", header)
+				if rec.Code != http.StatusServiceUnavailable {
+					t.Errorf("%s /healthz on %q (%s) answered %d, want 503", method, host, name, rec.Code)
+				}
+				if rec.Header().Get("Retry-After") != "120" {
+					t.Errorf("%s /healthz on %q (%s): Retry-After = %q, want 120", method, host, name, rec.Header().Get("Retry-After"))
+				}
+				if rec.Body.String() == "ok" {
+					t.Errorf("%s /healthz on %q (%s) answered ok", method, host, name)
+				}
 			}
-			if rec.Header().Get("Retry-After") != "120" {
-				t.Errorf("Retry-After = %q, want 120", rec.Header().Get("Retry-After"))
-			}
-		})
-	}
-	// A POST to /healthz is not a probe whoever sends it.
-	if rec := serve(t, testDomain, http.MethodPost, "10.42.1.7:8080", "/healthz", nil); rec.Code != http.StatusServiceUnavailable {
-		t.Errorf("POST /healthz answered %d, want 503", rec.Code)
-	}
-	// Only the exact path is the probe.
-	for _, target := range []string{"/healthz/", "/healthz/extra", "/Healthz", "/healthz.json"} {
-		if rec := serve(t, testDomain, http.MethodGet, "10.42.1.7:8080", target, nil); rec.Code != http.StatusServiceUnavailable {
-			t.Errorf("GET %s answered %d, want 503", target, rec.Code)
 		}
 	}
 }
@@ -377,7 +421,7 @@ func TestEveryPathAndMethodGets503(t *testing.T) {
 		http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
 		http.MethodPatch, http.MethodDelete, http.MethodOptions,
 	}
-	targets := []string{"/", "/a/b/c", "/favicon.ico", "/robots.txt", "/healthz/", "/index.html?x=1", "/%20", "//"}
+	targets := []string{"/", "/a/b/c", "/favicon.ico", "/robots.txt", "/healthz", "/healthz/", "/index.html?x=1", "/%20", "//"}
 	for _, host := range []string{platformHost, siteHost, "api.memql.example", ""} {
 		for _, method := range methods {
 			for _, target := range targets {
@@ -447,19 +491,37 @@ func TestHandlerNormalisesTheDomain(t *testing.T) {
 	}
 }
 
+// dataFontURL matches the one thing a page may carry that is not markup or
+// style: the wordmark face, inline as a data: URI.
+var dataFontURL = regexp.MustCompile(`url\("data:font/woff2;base64,([A-Za-z0-9+/=]+)"\)`)
+
 // TestPagesAreSelfContained holds the pages to the rule that makes them safe to
 // serve while everything else is down: nothing to fetch, nothing to run.
 func TestPagesAreSelfContained(t *testing.T) {
 	externalURL := regexp.MustCompile(`(?i)(?:https?:)?//[a-z0-9.-]+`)
 	for name, host := range map[string]string{"platform": platformHost, "site": siteHost} {
 		t.Run(name, func(t *testing.T) {
-			body := page(t, host)
-			if len(body) >= maxPageBytes {
-				t.Errorf("the page is %d bytes; the budget is under %d", len(body), maxPageBytes)
+			full := page(t, host)
+			if len(full) >= maxPageBytes {
+				t.Errorf("the page is %d bytes; the budget is under %d", len(full), maxPageBytes)
+			}
+			// The platform page carries its wordmark face inline, as a data: URI
+			// (TestPlatformPageEmbedsTheBrandWordmarkFace holds it to the brand's
+			// file). Everything else is checked on the page without it, because a
+			// base64 payload is full of slashes and plus signs that would read as
+			// URLs, and so that a url() that is NOT that data: URI still fails.
+			faces := len(dataFontURL.FindAllString(full, -1))
+			body := dataFontURL.ReplaceAllString(full, "DATA_FONT")
+			wantFaces := 0
+			if name == "platform" {
+				wantFaces = 1
+			}
+			if faces != wantFaces || strings.Count(body, "@font-face") != wantFaces {
+				t.Errorf("the page has %d data: faces and %d @font-face rules, want %d of each", faces, strings.Count(body, "@font-face"), wantFaces)
 			}
 			for _, banned := range []string{
 				"<script", "<link", "<img", "<iframe", "<object", "<embed", "<form", "<base",
-				"@import", "url(", " src=", "href=", "@font-face",
+				"@import", "url(", " src=", "href=",
 			} {
 				if strings.Contains(strings.ToLower(body), banned) {
 					t.Errorf("the page contains %q; it must be fully self-contained", banned)
@@ -472,10 +534,10 @@ func TestPagesAreSelfContained(t *testing.T) {
 					t.Errorf("the page references %q", u)
 				}
 			}
-			if n := strings.Count(body, "<style>"); n != 1 {
+			if n := strings.Count(full, "<style>"); n != 1 {
 				t.Errorf("the page has %d <style> elements, want exactly one", n)
 			}
-			for i, r := range body {
+			for i, r := range full {
 				if r > unicode.MaxASCII {
 					t.Errorf("non-ASCII character %q at byte %d; the pages carry no emoji or symbols", r, i)
 					break
@@ -512,7 +574,10 @@ func styleElement(t *testing.T, body string) string {
 // TestPagesPinTheirInlineStyleWithACSPHash makes "no external resource" a rule
 // the browser enforces and not only a promise the test above checks: the policy
 // allows nothing but this page's own stylesheet, by hash, so a page that grew a
-// script or a remote font would be blocked rather than quietly working.
+// script or a remote font would be blocked rather than quietly working. The
+// platform page also carries its wordmark face as a data: URI, so its policy
+// adds `font-src data:` and nothing wider; the neutral page loads no font and its
+// policy does not mention one.
 func TestPagesPinTheirInlineStyleWithACSPHash(t *testing.T) {
 	for name, host := range map[string]string{"platform": platformHost, "site": siteHost} {
 		t.Run(name, func(t *testing.T) {
@@ -524,6 +589,13 @@ func TestPagesPinTheirInlineStyleWithACSPHash(t *testing.T) {
 				if !strings.Contains(csp, want) {
 					t.Errorf("Content-Security-Policy %q lacks %q", csp, want)
 				}
+			}
+			if name == "platform" {
+				if !strings.Contains(csp, "font-src data:;") {
+					t.Errorf("the platform page's Content-Security-Policy %q does not allow its inline wordmark face with `font-src data:`", csp)
+				}
+			} else if strings.Contains(csp, "font-src") {
+				t.Errorf("the neutral page's Content-Security-Policy %q mentions a font; it loads none", csp)
 			}
 			for _, banned := range []string{"unsafe-inline", "unsafe-eval", "http:", "https:", "*"} {
 				if strings.Contains(csp, banned) {
@@ -618,6 +690,89 @@ func TestPalettesMatchBrandTokens(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// brandFace reads the wordmark face from brand/fonts, the one source.
+func brandFace(t *testing.T) []byte {
+	t.Helper()
+	face, err := os.ReadFile(filepath.Join("..", "..", "brand", "fonts", wordmarkFace))
+	if err != nil {
+		t.Fatalf("reading brand/fonts/%s: %v", wordmarkFace, err)
+	}
+	return face
+}
+
+// TestWordmarkFaceMatchesBrand pins the second deliberate copy, as
+// TestMarkMatchesBrand pins the first: //go:embed cannot reach ../../brand, so
+// the face is copied beside the package, and the copy drifting is a build
+// failure.
+func TestWordmarkFaceMatchesBrand(t *testing.T) {
+	copied, err := os.ReadFile(wordmarkFace)
+	if err != nil {
+		t.Fatalf("reading component/errorpages/%s: %v", wordmarkFace, err)
+	}
+	if !bytes.Equal(brandFace(t), copied) {
+		t.Errorf("component/errorpages/%[1]s has drifted from brand/fonts/%[1]s.\n"+
+			"Copy the brand file over it: cp brand/fonts/%[1]s component/errorpages/%[1]s", wordmarkFace)
+	}
+}
+
+// TestPlatformPageEmbedsTheBrandWordmarkFace reads the face from brand/, not
+// from the embedded copy, and compares it with what the page actually carries
+// once the data: URI is decoded, so a page whose payload drifted from the brand
+// fails here even while TestWordmarkFaceMatchesBrand is green. The owner asked
+// that the platform page look like MemQL, and its wordmark is set in the face the
+// identity pages set theirs in, at that face's only weight.
+func TestPlatformPageEmbedsTheBrandWordmarkFace(t *testing.T) {
+	body := page(t, platformHost)
+	found := dataFontURL.FindAllStringSubmatch(body, -1)
+	if len(found) != 1 {
+		t.Fatalf("the platform page has %d data: font URIs, want exactly one", len(found))
+	}
+	payload, err := base64.StdEncoding.DecodeString(found[0][1])
+	if err != nil {
+		t.Fatalf("the data: URI is not base64: %v", err)
+	}
+	if !bytes.Equal(payload, brandFace(t)) {
+		t.Errorf("the face inlined in the platform page (%d bytes) is not brand/fonts/%s", len(payload), wordmarkFace)
+	}
+
+	css := styleElement(t, body)
+	face := regexp.MustCompile(`@font-face\s*\{[^}]*\}`).FindString(css)
+	if face == "" {
+		t.Fatal("no @font-face rule in the platform page")
+	}
+	for _, want := range []string{`font-family: "Squada One"`, `font-weight: 400`, `format("woff2")`} {
+		if !strings.Contains(face, want) {
+			t.Errorf("the @font-face rule lacks %q:\n%s", want, face)
+		}
+	}
+	name := regexp.MustCompile(`\.name\s*\{[^}]*\}`).FindString(css)
+	if name == "" {
+		t.Fatal("no .name rule in the platform page")
+	}
+	for _, want := range []string{`font-family: "Squada One"`, `font-weight: 400`} {
+		if !strings.Contains(name, want) {
+			t.Errorf("the .name rule lacks %q (identity's .brand-name is this face at its only weight):\n%s", want, name)
+		}
+	}
+	if regexp.MustCompile(`font-weight:\s*[1-9][0-9]{2}`).FindString(name) != "font-weight: 400" {
+		t.Errorf("the .name rule sets a weight other than 400:\n%s", name)
+	}
+}
+
+// TestSitePageCarriesNoFont: the neutral page stays font-free, and so says
+// nothing a font file could.
+func TestSitePageCarriesNoFont(t *testing.T) {
+	body := page(t, siteHost)
+	for _, banned := range []string{"@font-face", "font/woff2", "base64", "data:", "Squada"} {
+		if strings.Contains(body, banned) {
+			t.Errorf("the neutral page contains %q", banned)
+		}
+	}
+	if len(body) > 4*1024 {
+		t.Errorf("the neutral page is %d bytes; with no face in it, it should stay small", len(body))
 	}
 }
 

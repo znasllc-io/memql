@@ -18,8 +18,12 @@ import (
 )
 
 const (
-	// errorPagesDefaultAddr is where the Deployment's probes and Service look.
+	// errorPagesDefaultAddr is the public listener: the one the Service lists,
+	// so the one every front door's default backend reaches.
 	errorPagesDefaultAddr = ":8080"
+	// errorPagesDefaultHealthAddr is the probe listener: the one the kubelet
+	// reaches at the pod's own address and the Service does not list.
+	errorPagesDefaultHealthAddr = ":8081"
 	// errorPagesShutdownTimeout bounds how long in-flight responses get to
 	// finish once the drain is over. A response is a few kilobytes.
 	errorPagesShutdownTimeout = 10 * time.Second
@@ -30,22 +34,26 @@ func printErrorPagesUsage(w io.Writer) {
 
 Serves the 503 maintenance pages a front door falls back to when the host it
 was asked for has nothing ready behind it: a MemQL page for the platform's own
-hosts, a neutral page for every other host, and JSON for an API client. Reads
-no database and no secret.
+hosts, a neutral page for every other host (the bare domain included), and JSON
+for an API client. Reads no database and no secret.
 
 Environment:
-  MEMQL_ERROR_PAGES_ADDR  address to listen on (default %s)
-  MEMQL_DOMAIN            the cluster's domain; decides which hosts are the platform's
+  MEMQL_ERROR_PAGES_ADDR         public address to listen on (default %s)
+  MEMQL_ERROR_PAGES_HEALTH_ADDR  probe address to listen on (default %s)
+  MEMQL_DOMAIN                   the cluster's domain; decides which hosts are the platform's
 
 Endpoints:
-  GET /healthz            200 ok, for the kubelet's readiness and liveness probes
-  anything else           503 with Retry-After: 120
+  public address, any path       503 with Retry-After: 120, /healthz included
+  probe address, GET /healthz    200 ok, for the kubelet's readiness and liveness probes
+
+The Service lists the public port only. The probe listener answers nothing a
+visitor can reach, which is what keeps /healthz from reporting an outage as healthy.
 
 Exit codes:
   0  stopped cleanly after SIGTERM or SIGINT
   1  could not listen, the server failed, or it did not stop in time
   2  bad usage
-`, errorPagesDefaultAddr)
+`, errorPagesDefaultAddr, errorPagesDefaultHealthAddr)
 }
 
 // error-pages serves the maintenance pages every front-door Ingress names as
@@ -66,6 +74,22 @@ Exit codes:
 // cannot depend on any of them. It is also why this does not go through the
 // server bootstrap, which would start the dependency chain it exists to
 // outlive.
+//
+// TWO LISTENERS, ONE SERVER. The public listener (MEMQL_ERROR_PAGES_ADDR) is
+// the one the Service lists, so the only one a request that came through an
+// ingress can reach, and it answers every path with the 503 page, /healthz
+// included. The probe listener (MEMQL_ERROR_PAGES_HEALTH_ADDR) is the one the
+// Service does not list, reached only by the kubelet at the pod's own address,
+// and it answers GET /healthz with 200 ok. That split is the point. This server
+// is the default backend of every front door, so a request for
+// `https://api.<domain>/healthz` that finds the real node down lands here, and
+// if /healthz were answered 200 on the same port, the status-code loop in
+// docs/public/operate/instance-scale-and-upgrade.md, the post-roll /healthz gate
+// and any uptime monitor would all read the middle of an outage as healthy. It
+// is one http.Server serving both listeners, with the branch on the port a
+// connection arrived on (http.LocalAddrContextKey), so the probe is answered by
+// the same server, handler and accept machinery that answers the pages and still
+// proves this process is alive; a second server would prove only itself.
 //
 // EXIT CODES ARE THE CONTRACT, because a Deployment restarts on them:
 //
@@ -108,23 +132,29 @@ func runErrorPagesSubcommand(args []string) int {
 		fmt.Fprintf(os.Stderr, "error-pages: MEMQL_DOMAIN %q is not a domain the cluster derives its hosts from; the platform's own hosts may get the neutral page\n", domain)
 	}
 
-	// Built before the listener opens: a page that cannot render fails the
+	// Built before the listeners open: a page that cannot render fails the
 	// start, not the first visitor.
 	handler := errorpages.Handler(domain)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	ln, err := net.Listen("tcp", errorPagesAddr())
+	public, err := net.Listen("tcp", errorPagesAddr())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error-pages: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "error-pages: serving on %s\n", ln.Addr())
+	probe, err := net.Listen("tcp", errorPagesHealthAddr())
+	if err != nil {
+		public.Close()
+		fmt.Fprintf(os.Stderr, "error-pages: probe listener: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "error-pages: serving on %s, probe on %s\n", public.Addr(), probe.Addr())
 
 	done := make(chan int, 1)
 	go func() {
-		done <- serveErrorPages(ctx, ln, handler, app.DefaultShutdownDrainDelay, errorPagesShutdownTimeout)
+		done <- serveErrorPages(ctx, public, probe, handler, app.DefaultShutdownDrainDelay, errorPagesShutdownTimeout)
 	}()
 	select {
 	case code := <-done:
@@ -138,7 +168,8 @@ func runErrorPagesSubcommand(args []string) int {
 	}
 }
 
-// errorPagesAddr is where to listen: MEMQL_ERROR_PAGES_ADDR, else :8080.
+// errorPagesAddr is where the public listener binds: MEMQL_ERROR_PAGES_ADDR,
+// else :8080.
 func errorPagesAddr() string {
 	if addr := strings.TrimSpace(os.Getenv("MEMQL_ERROR_PAGES_ADDR")); addr != "" {
 		return addr
@@ -146,22 +177,87 @@ func errorPagesAddr() string {
 	return errorPagesDefaultAddr
 }
 
-// serveErrorPages serves handler on ln until ctx is done, then stops. It
-// returns the exit code.
+// errorPagesHealthAddr is where the probe listener binds:
+// MEMQL_ERROR_PAGES_HEALTH_ADDR, else :8081.
+func errorPagesHealthAddr() string {
+	if addr := strings.TrimSpace(os.Getenv("MEMQL_ERROR_PAGES_HEALTH_ADDR")); addr != "" {
+		return addr
+	}
+	return errorPagesDefaultHealthAddr
+}
+
+// withProbeListener answers GET and HEAD /healthz with 200 "ok" when the
+// connection arrived on the probe listener, and gives every other request, the
+// same path on the public listener included, to pages.
 //
-// A stop is a drain, then a shutdown. The drain keeps serving for the same
-// endpoint-removal window the engine's nodes keep
+// The branch is on the local PORT of the connection (http.LocalAddrContextKey),
+// not its address: a listener bound to every address sees each connection's
+// local address as whichever one the client dialled, and only the port is the
+// listener's. It fails closed: a request with no local address, which net/http
+// never produces and only a test can, is never the probe.
+func withProbeListener(pages http.Handler, probe net.Addr) http.Handler {
+	probePort := portOf(probe)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" && (r.Method == http.MethodGet || r.Method == http.MethodHead) && arrivedOnPort(r, probePort) {
+			hdr := w.Header()
+			hdr.Set("Content-Type", "text/plain; charset=utf-8")
+			hdr.Set("Content-Length", "2")
+			hdr.Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusOK)
+			if r.Method != http.MethodHead {
+				_, _ = w.Write([]byte("ok"))
+			}
+			return
+		}
+		pages.ServeHTTP(w, r)
+	})
+}
+
+// portOf is the port of a listener or connection address, empty when it has none.
+func portOf(addr net.Addr) string {
+	_, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return ""
+	}
+	return port
+}
+
+func arrivedOnPort(r *http.Request, port string) bool {
+	if port == "" {
+		return false
+	}
+	local, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	return ok && portOf(local) == port
+}
+
+// serveErrorPages serves pages on public, and answers the probe on probe, until
+// ctx is done, then stops. It returns the exit code. It owns both listeners.
+//
+// A stop is a drain, then a shutdown. The drain keeps serving, on both
+// listeners, for the same endpoint-removal window the engine's nodes keep
 // (app.DefaultShutdownDrainDelay): a pod that is being deleted leaves the
 // Service's endpoints, and ingress-nginx learns that a moment later, so a
 // listener closed at the signal would refuse the requests still being sent to
-// it. Those would get ingress-nginx's own 502, on the one page that exists to
-// be better than that.
+// it. Those would get ingress-nginx's own 502, on the one page that exists to be
+// better than that. The probe keeps answering through it: a pod that is leaving
+// is alive until it has left.
+//
+// The two listeners must be on different ports, because the branch between
+// them is by port. Two on one would make /healthz a 200 on the public side,
+// which is the answer this arrangement exists to prevent, so it is refused.
 //
 // Logging is startup and shutdown only. A line per request is exactly the
 // volume this release is removing.
-func serveErrorPages(ctx context.Context, ln net.Listener, handler http.Handler, drain, shutdownTimeout time.Duration) int {
+func serveErrorPages(ctx context.Context, public, probe net.Listener, pages http.Handler, drain, shutdownTimeout time.Duration) int {
+	if portOf(public.Addr()) == portOf(probe.Addr()) {
+		fmt.Fprintf(os.Stderr, "error-pages: the public and probe listeners must be on different ports (both are on %q)\n", portOf(public.Addr()))
+		public.Close()
+		probe.Close()
+		return 1
+	}
+
 	srv := &http.Server{
-		Handler: handler,
+		Handler: withProbeListener(pages, probe.Addr()),
 		// The response is a few kilobytes, so the read and write limits are far
 		// from a constraint on an honest client; they exist so a stalled one
 		// cannot hold a connection. The header size is left at the default on
@@ -176,12 +272,14 @@ func serveErrorPages(ctx context.Context, ln net.Listener, handler http.Handler,
 		IdleTimeout: 2 * time.Minute,
 	}
 
-	failed := make(chan error, 1)
-	go func() { failed <- srv.Serve(ln) }()
+	failed := make(chan error, 2)
+	go func() { failed <- srv.Serve(public) }()
+	go func() { failed <- srv.Serve(probe) }()
 
 	select {
 	case err := <-failed:
 		// Serve returns only on failure here: Shutdown has not been called.
+		_ = srv.Close()
 		fmt.Fprintf(os.Stderr, "error-pages: server stopped: %v\n", err)
 		return 1
 	case <-ctx.Done():
@@ -191,6 +289,7 @@ func serveErrorPages(ctx context.Context, ln net.Listener, handler http.Handler,
 	select {
 	case <-time.After(drain):
 	case err := <-failed:
+		_ = srv.Close()
 		fmt.Fprintf(os.Stderr, "error-pages: server stopped while draining: %v\n", err)
 		return 1
 	}

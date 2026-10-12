@@ -17,40 +17,49 @@
 //
 // The decision is made on the request's Host and nothing else.
 //
-//   - The platform's own hosts (the apex, and api, identity, mcp, os and vscode
-//     under it) get the MemQL page: the mark, the name, and a plain statement
-//     that the platform is being updated.
-//   - Every other host gets a neutral page with no MemQL mark, name, link or
-//     colour. A customer's visitor has never heard of the platform underneath
-//     their shopfront, and "MemQL is being updated" on someone else's site
-//     would put our name on their outage. The hosts a client's reserved
-//     account name serves (app, api and id under memql.<their domain>) are
-//     sites in this sense too: they appear under the client's brand and are
-//     read by people who have never heard of ours.
+//   - The platform's own hosts (api, identity, mcp, os and vscode under the
+//     domain) get the MemQL page: the mark, the name set in the brand's
+//     wordmark face, and a plain statement that the platform is being updated.
+//   - Every other host gets a neutral page with no MemQL mark, name, link,
+//     colour or face. A customer's visitor has never heard of the platform
+//     underneath their shopfront, and "MemQL is being updated" on someone
+//     else's site would put our name on their outage. The hosts a client's
+//     reserved account name serves (app, api and id under memql.<their
+//     domain>) are sites in this sense too: they appear under the client's
+//     brand and are read by people who have never heard of ours.
+//
+// THE BARE DOMAIN IS A SITE. It is not one of the platform's hosts: the front
+// door treats the apex as the cluster owner's main website, a site row like any
+// other (docs/public/operate/front-door.md, component/frontdoor's Apex), and
+// the owner wants a deployable to show nothing of the platform underneath it.
+// So `memql.example` itself gets the neutral page while `os.memql.example` gets
+// the MemQL one.
 //
 // The platform's host set is not listed here. It is component/frontdoor's,
-// the one place those hosts are composed, so a platform site added there is
-// branded here without anybody remembering a second list. An unset or
+// the one place those hosts are composed: its Roles and its PlatformSites, the
+// same two sets the rest of the engine reserves labels from. Not its Hosts,
+// which also lists the apex and the wildcard rule. A platform site added there
+// is branded here without anybody remembering a second list. An unset or
 // malformed domain makes every host a site: the unconfigured case fails toward
 // not branding somebody's page, and the subcommand says so on stderr at start.
 //
 // An API client gets JSON, not a page it cannot parse: when Accept names
 // application/json, and always on the api host.
 //
-// # /healthz answers the kubelet and nobody else
+// # /healthz is a path like any other here
 //
-// The Deployment probes this server's readiness and liveness on /healthz, so
-// it answers 200 "ok". But this server is also the default backend of every
-// front door, so `https://api.<domain>/healthz` reaches it whenever the real
-// node cannot answer, and a 200 there would turn the operator's own checks
-// into false greens: the status-code loop in
+// This handler answers /healthz with the same 503 as every other path. This
+// server is the default backend of every front door, so
+// `https://api.<domain>/healthz` reaches it whenever the real node cannot
+// answer, and a 200 there would turn the operator's own checks into false
+// greens: the status-code loop in
 // docs/public/operate/instance-scale-and-upgrade.md, which files any non-200
 // during a roll as a defect, the post-roll /healthz gate on identity, api and
 // os, and any uptime monitor would all read the middle of an outage as
-// healthy. A request that came through ingress-nginx carries the headers it
-// adds to everything it forwards (X-Forwarded-For, X-Real-IP and X-Request-ID
-// among them); a kubelet probe is sent straight to the pod and carries none of
-// them. So a forwarded /healthz is treated like any other path: a 503.
+// healthy. The kubelet's probe is answered somewhere no forwarded request can
+// reach: `memql error-pages` serves it on a second listener the Service does
+// not list (MEMQL_ERROR_PAGES_HEALTH_ADDR), and that wiring is not this
+// package's.
 //
 // # What it deliberately does not do
 //
@@ -59,11 +68,13 @@
 // exactly the process that would add one per visitor.
 //
 // It is self-contained. Each page is one inline stylesheet, the mark in the
-// markup, no font file, no script, no image, and the response's
-// Content-Security-Policy allows that one stylesheet by hash and nothing
-// else. Nothing the page needs is anywhere but in the response. Measured with
-// the mark inline, the MemQL page is 4,214 bytes and the neutral one 1,782,
-// against the 20 KB the tests allow.
+// markup, no script and no image, and the response's Content-Security-Policy
+// allows that one stylesheet by hash and nothing else. The MemQL page also
+// carries one font, the brand's wordmark face, inline as a data: URI, which
+// its policy admits with `font-src data:` and nothing wider; the neutral page
+// carries no font at all. Nothing a page needs is anywhere but in the response.
+// Measured, the MemQL page is 11,895 bytes with the mark and the face
+// inline and the neutral one 1,782, against the 20 KB the tests allow.
 package errorpages
 
 import (
@@ -84,55 +95,79 @@ import (
 	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
-// assets holds the two pages and the brand mark. //go:embed cannot reach
-// ../../brand, so mark.svg is a byte copy of brand/mark.svg and
-// TestMarkMatchesBrand fails the build when the copy drifts, as the identity
-// favicon copy does (brand_shared_source_test.go).
+// assets holds the two pages, the brand mark and the brand wordmark face.
+// //go:embed cannot reach ../../brand, so mark.svg and the woff2 are byte
+// copies of brand/mark.svg and brand/fonts/squada-one-latin-400-normal.woff2,
+// and TestMarkMatchesBrand and TestWordmarkFaceMatchesBrand fail the build when
+// a copy drifts, as the identity favicon copy does
+// (brand_shared_source_test.go).
 //
-//go:embed mark.svg maintenance.html.tmpl unavailable.html.tmpl
+//go:embed mark.svg squada-one-latin-400-normal.woff2 maintenance.html.tmpl unavailable.html.tmpl
 var assets embed.FS
 
 // Kind says whose page a host gets.
 type Kind int
 
 const (
+	// KindSite is any host that is not one of the platform's own: a customer's
+	// site, a custom domain, the bare domain, an address, a request with no host
+	// at all. It gets the neutral page. It is the zero value, so a Kind nobody
+	// set never brands anything.
+	KindSite Kind = iota
 	// KindPlatform is one of the platform's own hosts: it gets the MemQL page.
-	KindPlatform Kind = iota
-	// KindSite is any other host: a customer's site, a custom domain, an
-	// address, a request with no host at all. It gets the neutral page.
-	KindSite
+	KindPlatform
 )
 
 func (k Kind) String() string {
 	switch k {
-	case KindPlatform:
-		return "platform"
 	case KindSite:
 		return "site"
+	case KindPlatform:
+		return "platform"
 	}
 	return "Kind(" + strconv.Itoa(int(k)) + ")"
 }
 
-// ClassifyHost answers KindPlatform for domain itself and for every host the
-// front door serves under it (api, identity, mcp, os, vscode), and KindSite for
-// everything else: other subdomains, any other domain, a host nested one label
-// deeper, an address, and every host at all when domain is empty.
+// ClassifyHost answers KindPlatform for the hosts the front door serves the
+// platform itself at under domain (api, identity, mcp, os, vscode), and KindSite
+// for everything else: the bare domain, other subdomains, any other domain, a
+// host nested one label deeper, an address, and every host at all when domain is
+// empty.
 //
 // Case, a port and a trailing dot are not part of the name. ingress-nginx
 // forwards the client's Host header as it was sent, so `OS.Memql.Example:443`
 // is a real value here and must be the platform's own host.
+//
+// The handler does not call this per request: it builds the set once and
+// classifies against it. This is the same decision, for a caller with a host and
+// a domain and nothing else.
 func ClassifyHost(host, domain string) Kind {
-	domain = normalizeHost(domain)
+	return classify(host, platformHosts(normalizeHost(domain)))
+}
+
+// platformHosts is the set of hosts that are the platform's under domain, which
+// must already be normalized: component/frontdoor's Roles and PlatformSites,
+// the two sets the rest of the engine derives its reserved labels from, and
+// nothing else. Not Hosts(), which also lists the sites wildcard (an Ingress
+// rule, not a host a request carries) and the apex (the cluster owner's main
+// website, a site like any other).
+func platformHosts(domain string) map[string]struct{} {
+	hosts := map[string]struct{}{}
 	if domain == "" {
-		return KindSite
+		return hosts
 	}
-	host = normalizeHost(host)
-	for _, h := range frontdoor.Hosts(domain) {
-		// The wildcard is the Ingress rule that reaches every site, not a host
-		// a request carries.
-		if !h.Wildcard && h.Name == host {
-			return KindPlatform
-		}
+	for _, role := range frontdoor.Roles() {
+		hosts[frontdoor.RoleHost(role, domain)] = struct{}{}
+	}
+	for _, site := range frontdoor.PlatformSites() {
+		hosts[frontdoor.PlatformSiteHost(site, domain)] = struct{}{}
+	}
+	return hosts
+}
+
+func classify(host string, platform map[string]struct{}) Kind {
+	if _, ok := platform[normalizeHost(host)]; ok {
+		return KindPlatform
 	}
 	return KindSite
 }
@@ -182,11 +217,13 @@ var (
 	}
 )
 
-// pageData is what the templates read: the words, and the mark. The neutral
-// page is given no mark, and its template has nowhere to put one.
+// pageData is what the templates read: the words, the mark, and the wordmark
+// face as base64. The neutral page is given neither the mark nor the face, and
+// its template has nowhere to put them.
 type pageData struct {
 	copyText
-	Mark template.HTML
+	Mark     template.HTML
+	Wordmark string
 }
 
 // errorBody is the JSON an API client gets.
@@ -228,16 +265,29 @@ func loadMark() (template.HTML, error) {
 	return template.HTML(svg), nil
 }
 
-func render(name string, c copyText, mark template.HTML) (rendered, error) {
+// loadWordmark is the brand's display face, base64 for a data: URI. It is the
+// face the identity pages set their wordmark in.
+func loadWordmark() (string, error) {
+	raw, err := assets.ReadFile(wordmarkFace)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(raw), nil
+}
+
+// wordmarkFace is the embedded copy of the brand's latin Squada One.
+const wordmarkFace = "squada-one-latin-400-normal.woff2"
+
+func render(name string, c copyText, mark template.HTML, wordmark string) (rendered, error) {
 	tmpl, err := template.ParseFS(assets, name)
 	if err != nil {
 		return rendered{}, fmt.Errorf("parse %s: %w", name, err)
 	}
 	var page bytes.Buffer
-	if err := tmpl.Execute(&page, pageData{copyText: c, Mark: mark}); err != nil {
+	if err := tmpl.Execute(&page, pageData{copyText: c, Mark: mark, Wordmark: wordmark}); err != nil {
 		return rendered{}, fmt.Errorf("execute %s: %w", name, err)
 	}
-	csp, err := contentSecurityPolicy(page.Bytes())
+	csp, err := contentSecurityPolicy(page.Bytes(), wordmark != "")
 	if err != nil {
 		return rendered{}, fmt.Errorf("%s: %w", name, err)
 	}
@@ -253,9 +303,13 @@ func render(name string, c copyText, mark template.HTML) (rendered, error) {
 // visit, not only a property the tests checked once: a page that grew a script
 // or a remote font would be blocked instead of quietly working.
 //
+// A page that carries its face inline (withFace) also gets `font-src data:`,
+// which admits that one data: URI and no host; the page without a face gets no
+// font directive, so default-src 'none' refuses a font from anywhere.
+//
 // The hash is taken from the rendered bytes, so editing the stylesheet cannot
 // leave the policy describing the old one.
-func contentSecurityPolicy(page []byte) (string, error) {
+func contentSecurityPolicy(page []byte, withFace bool) (string, error) {
 	const open, shut = "<style>", "</style>"
 	start := bytes.Index(page, []byte(open))
 	end := bytes.Index(page, []byte(shut))
@@ -263,15 +317,20 @@ func contentSecurityPolicy(page []byte) (string, error) {
 		return "", fmt.Errorf("no <style> element to pin")
 	}
 	sum := sha256.Sum256(page[start+len(open) : end])
-	return "default-src 'none'; style-src 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) +
-		"'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", nil
+	policy := "default-src 'none'; style-src 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	if withFace {
+		policy += "; font-src data:"
+	}
+	return policy + "; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", nil
 }
 
 // Handler serves every path, for every method, with status 503 and
-// Retry-After: 120. The platform's hosts (see ClassifyHost) get the MemQL page,
-// every other host the neutral one, and JSON in place of either for an API
-// client. GET /healthz answers 200 "ok" to a probe that did not come through
-// the ingress.
+// Retry-After: 120, /healthz included. The platform's hosts (see ClassifyHost)
+// get the MemQL page, every other host, the bare domain among them, the neutral
+// one, and JSON in place of either for an API client.
+//
+// It builds what it needs once: the pages, and the set of the platform's hosts
+// under domain. A request costs a lookup and a write.
 //
 // It panics if its own embedded pages cannot be rendered. That is a defect in
 // this package and not a condition of the world: the same bytes fail on every
@@ -282,39 +341,40 @@ func Handler(domain string) http.Handler {
 	if err != nil {
 		panic("errorpages: " + err.Error())
 	}
-	platform, err := render("maintenance.html.tmpl", platformCopy, mark)
+	wordmark, err := loadWordmark()
 	if err != nil {
 		panic("errorpages: " + err.Error())
 	}
-	site, err := render("unavailable.html.tmpl", siteCopy, "")
+	platform, err := render("maintenance.html.tmpl", platformCopy, mark, wordmark)
 	if err != nil {
 		panic("errorpages: " + err.Error())
 	}
-	return &handler{
-		domain: normalizeHost(domain),
-		pages:  map[Kind]rendered{KindPlatform: platform, KindSite: site},
+	site, err := render("unavailable.html.tmpl", siteCopy, "", "")
+	if err != nil {
+		panic("errorpages: " + err.Error())
 	}
+	domain = normalizeHost(domain)
+	h := &handler{
+		platformHosts: platformHosts(domain),
+		pages:         map[Kind]rendered{KindPlatform: platform, KindSite: site},
+	}
+	if domain != "" {
+		h.apiHost = frontdoor.RoleHost(frontdoor.RoleAPI, domain)
+	}
+	return h
 }
 
 type handler struct {
-	domain string
-	pages  map[Kind]rendered
+	// platformHosts is the set of hosts that get the MemQL page.
+	platformHosts map[string]struct{}
+	// apiHost is api.<domain>, where every caller is a program; empty with no
+	// domain, so nothing is taken for it.
+	apiHost string
+	pages   map[Kind]rendered
 }
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if isProbe(r) {
-		hdr := w.Header()
-		hdr.Set("Content-Type", "text/plain; charset=utf-8")
-		hdr.Set("Content-Length", "2")
-		hdr.Set("Cache-Control", "no-store")
-		w.WriteHeader(http.StatusOK)
-		if r.Method != http.MethodHead {
-			_, _ = w.Write([]byte("ok"))
-		}
-		return
-	}
-
-	p := h.pages[ClassifyHost(r.Host, h.domain)]
+	p := h.pages[classify(r.Host, h.platformHosts)]
 	hdr := w.Header()
 	body := p.html
 	if h.wantsJSON(r) {
@@ -341,7 +401,7 @@ func (h *handler) wantsJSON(r *http.Request) bool {
 	if acceptsJSON(strings.Join(r.Header.Values("Accept"), ",")) {
 		return true
 	}
-	return h.domain != "" && normalizeHost(r.Host) == frontdoor.RoleHost(frontdoor.RoleAPI, h.domain)
+	return h.apiHost != "" && normalizeHost(r.Host) == h.apiHost
 }
 
 // acceptsJSON reports whether an Accept header lists application/json with a
@@ -361,21 +421,4 @@ func acceptsJSON(accept string) bool {
 		return true
 	}
 	return false
-}
-
-// proxyHeaders are what ingress-nginx adds to every request it forwards. A
-// kubelet probe is sent straight to the pod and carries none of them.
-var proxyHeaders = []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP", "X-Request-ID", "Forwarded"}
-
-// isProbe is a GET or HEAD for exactly /healthz that no proxy forwarded.
-func isProbe(r *http.Request) bool {
-	if r.URL.Path != "/healthz" || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
-		return false
-	}
-	for _, name := range proxyHeaders {
-		if len(r.Header.Values(name)) > 0 {
-			return false
-		}
-	}
-	return true
 }
