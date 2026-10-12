@@ -863,15 +863,16 @@ func lineCount(s string) int {
 }
 
 // inlineMarks counts the inline marks of a text block's Markdown, which make
-// the runs it is read into: each run of "*", of "_" and of backticks, and each
-// "[". A mark written with a backslash escape is text and not counted.
+// the runs it is read into and the parentheses it pairs: each run of "*", of
+// "_" and of backticks, each "[" and each "(". A mark written with a
+// backslash escape is text and not counted.
 func inlineMarks(s string) int {
 	n := 0
 	for i := 0; i < len(s); i++ {
 		switch c := s[i]; {
 		case c == '\\' && i+1 < len(s) && escapable(s[i+1]):
 			i++
-		case c == '[':
+		case c == '[' || c == '(':
 			n++
 		case c == '*' || c == '_' || c == '`':
 			n++

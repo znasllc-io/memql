@@ -565,8 +565,8 @@ func textBlocks(texts ...string) string {
 func TestParseBoundsFormattedTextPerEmail(t *testing.T) {
 	// Reading Markdown costs memory in proportion to its lines and its
 	// inline marks, so an email may have at most 5,000 lines of text blocks
-	// and 10,000 inline marks (runs of "*", "_" or backticks, and "["), all
-	// its text blocks together, wherever they sit.
+	// and 10,000 inline marks (runs of "*", "_" or backticks, each "[" and
+	// each "("), all its text blocks together, wherever they sit.
 	items := func(n int) string { return strings.Repeat("- a\n", n) }
 	runs := func(n int) string { return strings.Repeat("*a* ", n) } // two marks each
 	inSection := func(text string) string {
@@ -591,7 +591,12 @@ func TestParseBoundsFormattedTextPerEmail(t *testing.T) {
 		{"long runs count once", textBlocks(strings.Repeat("***a*** ", 5000)), true},
 		{"runs of every kind", textBlocks(strings.Repeat("_a_ ", 1000) + strings.Repeat("``a`` ", 1000) + strings.Repeat("[a] ", 1000) + strings.Repeat("**a** ", 2500)), true},
 		{"runs of every kind and one more", textBlocks(strings.Repeat("_a_ ", 1000) + strings.Repeat("``a`` ", 1000) + strings.Repeat("[a] ", 1000) + strings.Repeat("**a** ", 2500) + "_"), false},
-		{"escaped marks are text", textBlocks(strings.Repeat(`\*a\* \[`, 5000) + runs(5000)), true},
+		{"escaped marks are text", textBlocks(strings.Repeat(`\*a\* \[ \(`, 5000) + runs(5000)), true},
+		// An open parenthesis is a mark: the reader pairs each one it meets.
+		{"10,000 open parentheses", textBlocks(strings.Repeat("(", 10_000)), true},
+		{"10,001 open parentheses", textBlocks("](" + strings.Repeat("(", 10_000)), false},
+		{"10,001 marks with an open parenthesis", textBlocks(runs(5000) + "("), false},
+		{"closing parentheses are not marks", textBlocks(strings.Repeat("(", 5000) + strings.Repeat(")", 50_000) + runs(2500)), true},
 		// Other blocks' words are not Markdown.
 		{"headings are not counted", layoutJSON(`{"id":"h","type":"heading","text":` + jsonString(runs(6000)+items(6000)) + `}`), true},
 	} {

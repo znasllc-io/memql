@@ -1450,22 +1450,14 @@ func TestRenderStopsAtItsCeiling(t *testing.T) {
 	}
 	// Highlight lines grow the same way.
 	lines := strings.Repeat("a\n", 450_000)
-	for _, c := range []struct {
-		name  string
-		block Block
-		read  func()
-	}{
-		{"highlight lines", Block{ID: "l", Type: "highlight", Text: lines}, func() { _ = strings.Split(oneNewline(lines), "\n") }},
-	} {
-		d, err := Parse([]byte(layoutJSON(`{"id":"l","type":"highlight","text":` + jsonString(lines) + `}`)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		reading := allocatedBy(c.read)
-		rendering := allocatedBy(func() { _, renderErr = Render(ctx, d, nil, RenderOptions{}) })
-		if !errors.Is(renderErr, ErrTooLarge) || rendering > reading+8*MaxRenderBytes {
-			t.Fatalf("%s: want ErrTooLarge within the ceiling, got %v after %d bytes (%d of them reading)", c.name, renderErr, rendering, reading)
-		}
+	highlight, err := Parse([]byte(layoutJSON(`{"id":"l","type":"highlight","text":` + jsonString(lines) + `}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reading := allocatedBy(func() { _ = strings.Split(oneNewline(lines), "\n") })
+	rendering := allocatedBy(func() { _, renderErr = Render(ctx, highlight, nil, RenderOptions{}) })
+	if !errors.Is(renderErr, ErrTooLarge) || rendering > reading+8*MaxRenderBytes {
+		t.Fatalf("highlight lines: want ErrTooLarge within the ceiling, got %v after %d bytes (%d of them reading)", renderErr, rendering, reading)
 	}
 	// It stops as soon as it is past the ceiling: the blocks after are never
 	// written, and their pictures never read. (Only a Document built without
@@ -2512,9 +2504,11 @@ func TestLinkTagsAroundOtherSpacesAreNotLinks(t *testing.T) {
 
 // formattedTextCost is the most Parse and Render together may allocate for
 // one of the worst documents Parse accepts under its budget for formatted
-// text (see TestFormattedTextCostIsBounded). Measured at 116 MiB, the worst
-// of them (a paragraph of 2 MiB of "&", which escapes to five times its
-// size), and about 2x that: 2026-10-11, go1.27.2, darwin/arm64.
+// text (see TestFormattedTextCostIsBounded). The worst of them measured 161
+// MiB: a paragraph of 2 MiB of "&&)" after "](", whose parentheses the reader
+// pairs and whose HTML comes just under the ceiling, so all of it is written
+// (2026-10-11, go1.27.2, darwin/arm64; a search over 1,360 documents of
+// repeated units found none dearer). The bound leaves about 1.5x that.
 const formattedTextCost = 240 << 20
 
 func TestFormattedTextCostIsBounded(t *testing.T) {
@@ -2538,15 +2532,17 @@ func TestFormattedTextCostIsBounded(t *testing.T) {
 		return []byte(layoutJSON(strings.Join(append(blocks, footer), ",")))
 	}
 	quoted := func(texts ...string) []string {
-		for n := range texts {
-			texts[n] = jsonString(texts[n])
+		out := make([]string, len(texts))
+		for n, text := range texts {
+			out[n] = jsonString(text)
 		}
-		return texts
+		return out
 	}
-	// A paragraph as long as a document can hold.
-	whole := func(size, letter string) []byte {
-		room := MaxBytes - len(document(size, raw("")))
-		return document(size, raw(strings.Repeat(letter, room)))
+	// A paragraph as long as a document can hold: prefix, then unit as many
+	// times as fit.
+	whole := func(size, prefix, unit string) []byte {
+		room := MaxBytes - len(document(size, raw(prefix)))
+		return document(size, raw(prefix+strings.Repeat(unit, room/len(unit))))
 	}
 	worst := 0
 	for _, size := range []string{"", `,"size":18`} {
@@ -2558,8 +2554,12 @@ func TestFormattedTextCostIsBounded(t *testing.T) {
 			{"5,000 list items", document(size, quoted(items(2000, "a"), items(2000, "a"), items(1000, "a"))...)},
 			{"5,000 list items and 10,000 marks", document(size, quoted(items(2000, "*a*"), items(2000, "*a*"), items(1000, "*a*"))...)},
 			{"50 blocks of 100 emphasis runs on one line", document(size, quoted(fifty...)...)},
-			{"a plain paragraph of 2 MiB", whole(size, "a")},
-			{"a paragraph of 2 MiB that escapes to five times its size", whole(size, "&")},
+			{"a plain paragraph of 2 MiB", whole(size, "", "a")},
+			{"a paragraph of 2 MiB that escapes to five times its size", whole(size, "", "&")},
+			// "](" makes the reader pair every parenthesis of the text; with
+			// "&&)" the HTML comes just under the ceiling, so all of it is
+			// written, and the text part too.
+			{"a paragraph of 2 MiB of paired parentheses near the ceiling", whole(size, "](", "&&)")},
 		} {
 			var parseErr, renderErr error
 			allocated := allocatedBy(func() {
@@ -2579,4 +2579,11 @@ func TestFormattedTextCostIsBounded(t *testing.T) {
 		}
 	}
 	t.Logf("worst: %d MiB", worst>>20)
+	// Each open parenthesis is a mark: 2 MiB of them after "](" (which cost
+	// 409 MiB to read and write when they were not) is refused at once.
+	var err error
+	doc := whole("", "](", "(")
+	if allocated := allocatedBy(func() { _, err = Parse(doc) }); err == nil || err.Error() != "This email has too much formatted text. Shorten it or split it into more emails." || allocated > 64<<20 {
+		t.Fatalf("2 MiB of open parentheses: want the budget's refusal, cheaply, got %v after %d bytes", err, allocated)
+	}
 }
