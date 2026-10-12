@@ -35,7 +35,22 @@ import (
 // So a gate takes its connection from a pool of its own. The holder keeps using the
 // request pool for its work; the gate pool carries nothing else, so a holder never
 // waits for a connection to do its work, and the number of gates open at once is
-// the size of this pool (DefaultGatePoolSize per process) and nothing else.
+// the size of this pool (DefaultGatePoolSize per process, four) and nothing else.
+//
+// # Its size, and what it costs
+//
+// Four per process (memql#6022, fix round 4): enough for the phases that hold
+// gates, each bounded (a signup's thirty seconds, a welcome's send) and each one
+// acquisition however many locks it names. A fifth caller waits up to the gate's
+// six seconds for a connection and then answers busy, which every caller treats as
+// "nothing attempted, try later". Each connection counts against max_connections
+// like the request pool's: a process opens at most main + direct + migration +
+// gate (4 + 4 + 1 + 4 with the shipped values), which is what lets six Deployments
+// of two replicas fit the smallest preset's 190 usable connections
+// (docs/public/operate/db-connection-budget.md; scripts/deploy/conn-headroom-check.sh
+// counts all four). An idle process holds none: a connection given back is kept
+// warm only while fewer than gatePoolMaxIdle are idle (any more close at once),
+// and a warm one closes after gatePoolMaxIdleTime unused.
 //
 // # Its sessions
 //
@@ -57,14 +72,20 @@ const (
 	envDBGatePoolSize          = "MEMQL_DB_GATE_POOL_SIZE"
 	envDBGateIdleInTxTimeoutMs = "MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS"
 
-	defaultGatePoolSize          = 8
+	defaultGatePoolSize          = 4
 	defaultGateIdleInTxTimeoutMs = 300000
 
-	// gatePoolMaxIdle: connections the pool keeps warm. A gate is taken and given
-	// back within seconds, and a cold connect costs a TCP+TLS round trip a signup
-	// would pay for.
+	// gatePoolMaxIdle: connections the pool keeps warm between gates. A gate is
+	// taken and given back within seconds, and a cold connect costs a TCP+TLS
+	// round trip a signup would pay for.
 	gatePoolMaxIdle = 2
 )
+
+// gatePoolMaxIdleTime is how long a warm gate connection may go unused before
+// the pool closes it, so a process that takes no gates holds no gate connection.
+// The request pool's idle time, set here rather than left to the opener. A
+// variable only so a test can shorten it.
+var gatePoolMaxIdleTime = 2 * time.Minute
 
 // The numbers other packages build on, read from here rather than copied: the
 // gate wait must stay under the driver's read deadline, a gated phase under the
@@ -130,6 +151,7 @@ func openGatePool(opener SQLOpener, driverName, dsn string, size int) (*sql.DB, 
 	}
 	db.SetMaxOpenConns(size)
 	db.SetMaxIdleConns(min(gatePoolMaxIdle, size))
+	db.SetConnMaxIdleTime(gatePoolMaxIdleTime)
 	return db, nil
 }
 

@@ -392,9 +392,13 @@ func TestGatesTakeNoConnectionFromTheRequestPool(t *testing.T) {
 
 // TestThreeCallersEachHoldingOneGateAndAskingForASecondComplete: a caller that
 // holds a gate and asks for another needs a second connection of the gate pool.
-// With the pool the size it is deployed at, three callers doing it at once are
-// six connections and all complete. (On a pool of three they deadlock: each holds
-// the connection the others wait for. See the mutation check in the round report.)
+// With the pool the size it is deployed at (four), three callers doing it at once
+// hold three and share the fourth: each second gate is short, and the caller that
+// finishes gives its connections back to the next. (On a pool of three they
+// deadlock: each holds the connection the others wait for. See the mutation check
+// in the round report.) Flows that need several locks name them in one
+// acquisition instead; this is the nesting that remains -- the transport's own
+// lock inside a send's, a goal's budget inside an approval's.
 func TestThreeCallersEachHoldingOneGateAndAskingForASecondComplete(t *testing.T) {
 	pool := deployedGatePool(t, database.DefaultGatePoolSize)
 

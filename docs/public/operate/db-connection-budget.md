@@ -26,13 +26,13 @@ the instance's ceiling — across steady state **and** deploys — to prevent
 > managed control-plane `deployer` pool.
 >
 > **Count every pool and rollout overlap.** The main pool's configured limit
-> does not bound the process's separate direct and startup migration pools.
-> Their combined peak must fit under `max_connections - reserved`, because every
-> Postgres backend is a process with its own memory and raising the ceiling
+> does not bound the process's separate direct, startup migration and write-gate
+> pools. Their combined peak must fit under `max_connections - reserved`, because
+> every Postgres backend is a process with its own memory and raising the ceiling
 > trades RAM for headroom.
 > `scripts/deploy/conn-headroom-check.sh` was **kept** and rewritten for the
 > same reason — it is the one thing standing between a replica-count bump and
-> the storm that caused memql#1817.
+> the storm that caused memql#1817 — and it counts all four pools of a process.
 >
 > Platform: [database-platform.md](database-platform.md).
 
@@ -67,21 +67,39 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   again as a separate Job; count actual independent Jobs separately.
 - With the shipped main pool limit of four, a configured direct pool adds up to
   four, a startup migration adds one, and the write-gate pool (below) adds up to
-  eight: budget up to seventeen per process. If no direct DSN is configured,
-  direct calls share the main pool. Any additional independent database pool
-  must be counted too.
-- **The write-gate pool** (`MEMQL_DB_GATE_POOL_SIZE`, default eight) holds the
+  four: budget up to thirteen per process. If no direct DSN is configured,
+  direct calls share the main pool and the direct term is zero (every shipped
+  install configures one: the local secrets seed copies the main DSN when no
+  direct one is given). Any additional independent database pool must be counted
+  too.
+- **The shipped base fits the smallest preset.** Six DB-connecting Deployments
+  of two replicas, at thirteen per process, are 6 × 2 × 13 = 156 connections
+  against the local/entry preset's `max_connections` of 200 less ten reserved,
+  190 usable: 34 to spare, above the gate's 80% soft line (152), so it warns and
+  passes. `scripts/deploy/conn-headroom-check.sh` prints that arithmetic per
+  Deployment (`main + direct + migration + gate`), reads the main pool from the
+  `memql-db-pool` ConfigMap and the gate pool from `MEMQL_DB_GATE_POOL_SIZE`, and
+  takes `--direct-pool=0` for an install with no direct DSN. The local overlay
+  raises the main pool to eight (seventeen per process): its seven Deployments
+  at one replica each fit (119 steady, 153 at a bff roll), and at two replicas
+  each they do not (238) -- lower the main pool or raise `max_connections`
+  before scaling a local cluster to two.
+- **The write-gate pool** (`MEMQL_DB_GATE_POOL_SIZE`, default four) holds the
   transactions of write gates -- the advisory locks that serialise a signup, a
-  library file version, an approval decision -- and nothing else. A gate is taken
-  on these connections, never on the main pool, so the work its holder does keeps
-  all of the main pool's connections, and the sessions may sit idle in a
-  transaction for minutes (`MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS`, five) where the
-  main pool's end an idle transaction after sixty seconds and take the lock with
-  it. The pool opens a connection only while that many gates are held at once,
-  keeps two warm and closes the rest after two idle minutes, so steady state is
-  about two per process and the eight is the burst. A caller that finds all of
-  them held waits up to six seconds and then answers that coordination is busy;
-  raise the size only if the budget above has the room.
+  welcome, a library file version, an approval decision -- and nothing else. A
+  gate is taken on these connections, never on the main pool, so the work its
+  holder does keeps all of the main pool's connections, and the sessions may sit
+  idle in a transaction for minutes (`MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS`, five)
+  where the main pool's end an idle transaction after sixty seconds and take the
+  lock with it. A connection is opened when a gate is taken and none is free; a
+  connection given back is kept warm only while fewer than two are idle (any
+  more close at once), and a warm one closes after two minutes unused. So an
+  idle process holds **no** gate connection, a busy one up to two between its
+  gates, and four is the burst. Four is enough for the bounded phases that hold
+  gates (a signup's thirty seconds, a welcome's send); a fifth caller waits up to
+  six seconds for a connection and then answers that coordination is busy,
+  which every caller treats as "nothing attempted, try later". Raise the size
+  only if the budget above has the room.
 
 ## The knobs (per-pod pool — `component/database/database.go`)
 
@@ -93,7 +111,7 @@ Source of truth is the code; defaults are conservative and overridable per env:
 | `MAX_IDLE_CONNS` | 1 | warm idle connections kept per pod |
 | `CONN_MAX_LIFETIME_MS` | 3600000 (1h) | rotate connections hourly (bounds long-lived leaks) |
 | `CONN_MAX_IDLE_TIME_MS` | 120000 (2m) | close idle connections after 2 min (reclaims slack) |
-| `MEMQL_DB_GATE_POOL_SIZE` | 8 | hard cap on the write-gate pool (see the budget above); not under the `MEMORY_NODES_DATABASE_` prefix |
+| `MEMQL_DB_GATE_POOL_SIZE` | 4 | hard cap on the write-gate pool (see the budget above); not under the `MEMORY_NODES_DATABASE_` prefix |
 | `MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS` | 300000 (5m) | how long a write-gate session may sit idle in its transaction; a gate refuses a pool below two minutes |
 
 `MAX_OPEN_CONNS` is a **hard cap on that pool**, not on the whole pod. The
@@ -101,7 +119,9 @@ memory-nodes instance reads the `MEMORY_NODES_DATABASE_` prefix; the shared
 `memql-db-pool` ConfigMap sets its main open/idle limits to four/two. The direct
 pool has a separate fixed limit of four and ignores these knobs; startup SQL
 migrations can use one dedicated connection. Check
-`component/database/database.go` when those implementation bounds change.
+`component/database/database.go` when those implementation bounds change: the
+headroom gate's defaults are held to them by
+`scripts/deploy/conn_headroom_test.go`.
 Right-size the combined budget against the actual instance ceiling before
 changing replicas or adding a pooler.
 

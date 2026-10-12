@@ -337,7 +337,7 @@ anything; a pass over recipients that all carry a digest writes nothing.
 **What a signup holds.** A signup serialises its writes with two advisory locks,
 the storefront's and then the audience's, taken together in one transaction on
 one connection of the pod's write-gate pool: connections used for nothing else
-(`MEMQL_DB_GATE_POOL_SIZE`, eight by default), so the work under the locks keeps
+(`MEMQL_DB_GATE_POOL_SIZE`, four by default), so the work under the locks keeps
 all of the request pool, and the locks are not subject to the request pool's
 60-second limit on a session idle in a transaction. A gate session may sit idle
 for five minutes (`MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS`), and a signup stays far
@@ -365,8 +365,9 @@ same moment. A signup that gets its locks but is under them for more than thirty
 seconds is stopped before it writes and gives the same answer; consent is written
 first and keyed by the signup, so asking again is safe at every step. If
 PostgreSQL ends the gate's session (an administrator, a failover) the signup finds
-out before it writes and writes nothing. A pod that holds all of its gates at once
-answers busy to the next signup rather than waiting for a connection.
+out before it writes and writes nothing. A pod whose gate connections are all
+held (four signups, welcomes or other gates at the same moment) makes the next
+signup wait for one, up to the same six seconds, and then give the same answer.
 
 Consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and

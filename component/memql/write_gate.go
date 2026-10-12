@@ -24,7 +24,7 @@ import (
 // # Where the connection comes from
 //
 // A gate is taken on a pool of its own (component/database, gate_pool.go;
-// MEMQL_DB_GATE_POOL_SIZE connections, 8 by default), never on the request pool
+// MEMQL_DB_GATE_POOL_SIZE connections, 4 by default), never on the request pool
 // its holder does its work on. Gates on the request pool took the connections the
 // work under them needed, and the request pool ends a session idle in a transaction
 // after 60 s -- ending the advisory lock with it, silently, while the holder went

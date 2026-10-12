@@ -2,7 +2,10 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -74,10 +77,14 @@ func TestGateConnParamsOverride(t *testing.T) {
 	}
 }
 
+// TestGatePoolSizeFromEnv: four gates per process by default (memql#6022, fix
+// round 4) -- enough for the bounded phases that hold them, and what lets six
+// Deployments of two replicas fit the smallest preset with every pool counted
+// (docs/public/operate/db-connection-budget.md).
 func TestGatePoolSizeFromEnv(t *testing.T) {
 	t.Setenv(envDBGatePoolSize, "")
-	if got := gatePoolSize(); got != 8 || DefaultGatePoolSize != 8 {
-		t.Errorf("default gate pool size = %d (exported %d), want 8", got, DefaultGatePoolSize)
+	if got := gatePoolSize(); got != 4 || DefaultGatePoolSize != 4 {
+		t.Errorf("default gate pool size = %d (exported %d), want 4", got, DefaultGatePoolSize)
 	}
 	t.Setenv(envDBGatePoolSize, "3")
 	if got := gatePoolSize(); got != 3 {
@@ -201,5 +208,60 @@ func TestClosePoolClosesTheGatePool(t *testing.T) {
 	}
 	if err := gate.PingContext(context.Background()); err == nil || !strings.Contains(err.Error(), "closed") {
 		t.Errorf("ClosePool left the gate pool open (ping: %v)", err)
+	}
+}
+
+// idleConn is a connection a pool can hand out and take back; closes counts the
+// ones the pool closed.
+type idleConn struct{ closes *atomic.Int32 }
+
+func (c idleConn) Prepare(string) (driver.Stmt, error) { return nil, driver.ErrSkip }
+func (c idleConn) Close() error                        { c.closes.Add(1); return nil }
+func (c idleConn) Begin() (driver.Tx, error)           { return nil, driver.ErrSkip }
+
+type idleConnector struct{ closes atomic.Int32 }
+
+func (c *idleConnector) Connect(context.Context) (driver.Conn, error) {
+	return idleConn{closes: &c.closes}, nil
+}
+func (c *idleConnector) Driver() driver.Driver { return nil }
+
+// TestAnIdleProcessHoldsNoGateConnection: a gate pool keeps at most two
+// connections warm between gates -- a third given back is closed at once -- and
+// closes the warm ones once they have gone unused for the pool's idle time, so a
+// process that takes no gates holds none. Set by the gate pool itself, not left to
+// whichever opener built it.
+func TestAnIdleProcessHoldsNoGateConnection(t *testing.T) {
+	idle := gatePoolMaxIdleTime
+	gatePoolMaxIdleTime = 100 * time.Millisecond
+	defer func() { gatePoolMaxIdleTime = idle }()
+	connector := &idleConnector{}
+	pool, err := openGatePool(func(string, string) (*sql.DB, error) { return sql.OpenDB(connector), nil }, "stub", "stub-dsn", DefaultGatePoolSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	ctx := context.Background()
+	var held []*sql.Conn
+	for range 3 {
+		conn, err := pool.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, conn)
+	}
+	for _, conn := range held {
+		_ = conn.Close()
+	}
+	if st := pool.Stats(); st.OpenConnections != 2 || st.Idle != 2 || connector.closes.Load() != 1 {
+		t.Errorf("after three gates: %d open, %d idle, %d closed; want two warm and the third closed at once", st.OpenConnections, st.Idle, connector.closes.Load())
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for pool.Stats().OpenConnections > 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if st := pool.Stats(); st.OpenConnections != 0 {
+		t.Errorf("an idle process still holds %d gate connections %s after its last gate (idle time %s)", st.OpenConnections, 5*time.Second, gatePoolMaxIdleTime)
 	}
 }

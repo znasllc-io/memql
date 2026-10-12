@@ -1254,6 +1254,29 @@ const (
 	directMaxIdleConns = 1
 )
 
+// The connections a process can open against max_connections, pool by pool, as
+// the deploy gate and the budget documentation count them
+// (scripts/deploy/conn-headroom-check.sh, which conn_headroom_test.go holds to
+// these; docs/public/operate/db-connection-budget.md). With the gate pool
+// (DefaultGatePoolSize, gate_pool.go) they are a process's four pools.
+const (
+	// DefaultRequestPoolSize is the main (request) pool's limit when nothing
+	// configures one (MAX_OPEN_CONNS under the database's env prefix).
+	DefaultRequestPoolSize = defaultRequestMaxOpenConns
+	// DirectPoolSize is the direct pool's fixed limit, opened only when a
+	// direct DSN is configured.
+	DirectPoolSize = directMaxOpenConns
+	// MigrationPoolSize is the connection a startup migration opens.
+	MigrationPoolSize = migrationMaxOpenConns
+)
+
+// defaultRequestMaxOpenConns and migrationMaxOpenConns are the request pool's
+// default limit and the startup migration pool's.
+const (
+	defaultRequestMaxOpenConns = 10
+	migrationMaxOpenConns      = 1
+)
+
 // openDirectSQL opens the direct (non-pooled) *sql.DB from DIRECT_DSN using the
 // same configured opener as the main pool (so a test-injected opener applies
 // to both), then clamps it to a small fixed pool. Caller guarantees
@@ -1335,8 +1358,8 @@ func (d *Database) migrationBunDB(fallback *bun.DB) (*bun.DB, func()) {
 		d.Logger.Warn("migration pool unavailable; migrating over the request pool under its statement timeout", "error", err)
 		return fallback, noop
 	}
-	sqlDB.SetMaxOpenConns(1)
-	sqlDB.SetMaxIdleConns(1)
+	sqlDB.SetMaxOpenConns(migrationMaxOpenConns)
+	sqlDB.SetMaxIdleConns(migrationMaxOpenConns)
 	migrationDB, err := d.config.bunFactory(sqlDB)
 	if err != nil {
 		_ = sqlDB.Close()
@@ -1743,10 +1766,10 @@ func pgSQLOpener(params func() map[string]any) SQLOpener {
 		// 25/node x ~20 pods at surge blew past the Tiger Cloud ceiling ->
 		// 53300 storms). Override per env via MAX_OPEN_CONNS / MAX_IDLE_CONNS;
 		// budget = (max_connections - reserved) / max_pods(steady+surge).
-		db.SetMaxOpenConns(10)                 // Max concurrent connections per node
-		db.SetMaxIdleConns(1)                  // Keep ONE idle connection warm (memql#1817)
-		db.SetConnMaxLifetime(1 * time.Hour)   // Rotate connections hourly
-		db.SetConnMaxIdleTime(2 * time.Minute) // Close idle connections after 2min (memql#1817)
+		db.SetMaxOpenConns(defaultRequestMaxOpenConns) // Max concurrent connections per node
+		db.SetMaxIdleConns(1)                          // Keep ONE idle connection warm (memql#1817)
+		db.SetConnMaxLifetime(1 * time.Hour)           // Rotate connections hourly
+		db.SetConnMaxIdleTime(2 * time.Minute)         // Close idle connections after 2min (memql#1817)
 
 		return db, nil
 	}
