@@ -4,8 +4,10 @@
 - **Status:** design for sub-projects 4 (memql#6034) and 5 (memql#6035); not built yet
 - **Branch:** `epic/materializer-app`, cut from `origin/main` at `386e5af39`, which contains sub-project 1 (memql#6051)
 - **Program:** sub-projects 4 and 5 of 5 in epic memql#6022
-- **Builds on:** `2026-10-11-materializer-front-door-design.md` (sub-project 1). Its section 4 (the starting setup), amendments 5 to 11 and its guard test "one creation path" are binding here.
+- **Builds on:** `2026-10-11-materializer-front-door-design.md` (sub-project 1). Its section 4 (the starting setup), amendments 5 to 11 and its guard test "one creation path" are binding here, with one change: which Markdown requests are described (its amendment 5) follows D31 below, in the server and the SDK alike.
+- **Supersedes:** for the Materializer, section 6 of the email program spec (`2026-10-11-email-layouts-automations-design.md`, on `epic/email-rework`); see "Relation to the email program spec".
 - **Plan:** `docs/superpowers/plans/2026-10-12-materializer-app.md`
+- **Rulings:** the controller ruled on this record's owner questions on 2026-10-12 (see the last section); the owner can reverse any of them.
 
 ## In plain terms
 
@@ -17,13 +19,17 @@
 - **From is where you mix.** Your Library files and your records sit in one tray
   with a search; what you pick stands above the tray as cards. **Describe** is one
   text box. Both are optional.
+- **What you mix is used.** A Markdown file you describe, with nothing picked or only
+  Markdown files and pictures, is written by the editor's revision workflow, which
+  reads those. Pick anything else (a CSV, a JSON file, a web page, records) and a
+  model writes the file, reading what you picked.
 - **The folder is visible and yours to change.** A file made from Files starts in the
   folder you were looking at; the Folder step shows it and lets you choose another.
 - **After Make the file, the same wizard shows the cluster at work**, with Stop and
   Leave. When the file exists it has a page of its own: what it was made from, what
   you asked for, which model wrote it, and **Open in editor**. A file the cluster
-  files blank (a blank file, or a Markdown file you described) opens in the browser
-  editor by itself.
+  files blank (a blank file, or a Markdown file you described with nothing picked but
+  Markdown files and pictures) opens in the browser editor by itself.
 - **The app's tabs become its nouns:** Materialized (what was made), Templates and
   Recipes. Make a file is reached from the plus on Materialized, from Start over, and
   from other apps.
@@ -90,6 +96,31 @@ Read on `origin/main` at `386e5af39`, after sub-project 1.
   `ChoiceStack`, `RecordRow` (`selected` for a choice), `EmptyState`, `Switch`,
   `RecordListSkeleton`. `TextArea` is promoted to the kit by the email work (email/os
   commit `e78b0ac8c`) and is not on main yet.
+- **The described rule on the server.** A Markdown request with a statement is filed
+  blank when its sources are Library files of any type, or none (`describedMarkdown()`,
+  `integrations/compose/materialize.go:88`; the SDK's `isDescribedMarkdown` mirrors
+  it from the request alone). A CSV picked with a description is therefore handed to
+  the revision workflow, which cannot attach it, and is reported as not attached. The
+  server also reads every opted-in reference's content before it decides
+  (`captureSourceContents` at `:400`, the decision at `:412`), so a described request
+  downloads, and can be refused over, files nothing uses.
+
+### Relation to the email program spec
+
+This record supersedes section 6 of `2026-10-11-email-layouts-automations-design.md`
+(on `epic/email-rework`) for the Materializer app, in two places:
+
+- **No layout cards in Make a file.** An email is written in VS Code's New email page,
+  with its layouts and a live preview, and the email work's "Create new template" opens
+  that page directly (email/os Ruling 9). A second email front door here would offer
+  the same choice without the preview (D8).
+- **No per-ingredient "read as content" or "use as reference" mark.** How a picked file
+  is used follows from the request: the composer reads every file it is given, and the
+  revision workflow attaches what the Library takes (D13, D31). A mark a person sets
+  would change nothing they could see.
+
+Its Files bullet (New Markdown file with format, folder and the way back) and its audit
+fixes are carried out here as written.
 
 ## Design
 
@@ -159,7 +190,7 @@ The bar on the window's bottom edge says what the file needs, first match wins:
 | something to make it from, for a kind that cannot start blank, or with a template chosen | Describe it or pick what to make it from | "A blank file can be Markdown, text, HTML, CSV or JSON." or, with a template, "A template needs something to fill it." |
 | an organization, for an email template | Choose an organization | |
 | Inference, for a file a model writes or a description, when readiness reports it not set up (not yet known, or set up on some nodes, does not block) | Making this needs Inference | "An owner or developer can set it up." when this person cannot reach Settings > Vendors |
-| nothing | Ready to make <filed name> | "It starts blank." / "You review its draft in the editor." / "Only Markdown files and pictures go with a description." / "A model writes it." (section 2.10) |
+| nothing | Ready to make <filed name> | "It starts blank." / "You review its draft in the editor." / "A model writes it." (section 2.10) |
 
 Acts, at most three, primary last, one button (rule 12, "One wizard for adding"):
 
@@ -219,10 +250,14 @@ combinations that meant nothing. A package sends `format: "html"` and its
   `.markdown`, `.txt`, `.html`, `.htm`, `.css`, `.json`, `.csv`, `.svg`, `.png`,
   `.jpg`, `.jpeg`, `.gif` and `.zip` (the composer's own list in
   `integrations/compose/source_content.go`, which refuses the whole request for
-  anything else). A record type with no list query is not offered (it was drawn
-  disabled; a choice that cannot work is absent). Single rows (`concept_row`) are
-  never picked here; they arrive only with a sender's setup, stand as cards like the
-  rest, and can be removed.
+  anything else). Every offered file is used whichever way the file is written: a
+  described Markdown file stays on the revision workflow only while what is picked is
+  Markdown files and pictures the Library can attach, and anything else sends it to
+  the composer, which reads it (D31). The tray is read from the person's Library file
+  rows (`libraryFilesForOwner`), which carry the name and size that rule reads (D32).
+  A record type with no list query is not offered (it was drawn disabled; a choice
+  that cannot work is absent). Single rows (`concept_row`) are never picked here; they
+  arrive only with a sender's setup, stand as cards like the rest, and can be removed.
 - **States.** Each group shows `RecordListSkeleton` while it loads and a notice with
   the cluster's sentence when its read fails. A node that cannot read the record
   registry says "This node cannot read the record types, so none are offered."
@@ -284,26 +319,36 @@ unanswered optional left out (sub-project 1's rule):
 | `folderId` | the folder, unless it is the top level |
 | `accountIds` | `[organization]`, when one is set |
 | `statement` | the description, when there is one |
-| `sources` | the picked things as `{kind, ref, label}`; a Library file also carries `content: true` exactly when the path is *composed* |
+| `sources` | the picked things as `{kind, ref, label}`; a Library file (its file row's own id, as given) also carries `content: true` |
 | `requestId` | `useMaterialize`'s id for this ask (unchanged) |
 
-The path decides what the floor says and what happens after the file exists:
+The path decides what the floor says and what happens after the file exists. The server
+decides it, and the person's client decides it the same way from the same facts (D31):
 
 - **blank**: no description, nothing picked, no template, a document kind. The server
   files an empty file with no model call. Detail "It starts blank."
-- **described**: `isDescribedMarkdown(request)` (Markdown, a description, only Library
-  files or nothing). The server files the empty page and this window hands the
-  description to the Library's revision workflow (sub-project 1). Detail "You review its
-  draft in the editor.", or, when a picked file is neither Markdown nor a picture,
-  "Only Markdown files and pictures go with a description." (the hand-off leaves the
-  others off and names them afterwards, amendment 7).
-- **composed**: everything else. The composer writes it, reading the picked things.
+- **described**: Markdown, a description, nothing of the file's own to compose from (no
+  template, recipe, special output or package), and every picked thing a Library file
+  the Library can attach to a review comment: a `.md` file up to 32 KiB, or a picture
+  (PNG, JPEG, GIF, WebP) up to 8 MiB, judged by the name and size on its file row (a
+  row that says no size is judged by its name, as the hand-off does), a file that is
+  archived or whose row cannot be read counting as not attachable; or nothing picked.
+  The server files the empty page and this window hands the description and those
+  files to the Library's revision workflow (sub-project 1). Detail "You review its
+  draft in the editor."
+- **composed**: everything else, including a described Markdown file with a CSV, JSON,
+  text, HTML or ZIP file, an oversized or archived Markdown file or a record type
+  picked. The composer writes it, reading every picked thing. A picked file the person
+  cannot read refuses the start on this path, as an unreadable reference always has.
   Detail "A model writes it."
 
-`content: true` only on the composed path, because the server reads a `content`
-reference before it decides the path (`captureSourceContents` runs before
-`describedMarkdown()` in `integrations/compose/materialize.go`): a flag on a described
-request would read, and could refuse, files nothing uses.
+**Contents are read only for a file the composer writes.** The server decides the path
+from the request and the picked files' rows first, and reads `content` references only
+when the composer will write the file; a described request reads no content at all
+(this closes the sub-project 1 gap where `captureSourceContents` ran before the
+decision). Every picked Library file is therefore sent with `content: true`: it costs
+nothing on the described path and is what lets the composer read it on the composed
+one (D13).
 
 #### 2.11 Making: progress, Stop and Leave
 
@@ -413,8 +458,16 @@ editor, never in the OS, and by itself wherever the browser allows it.
 
 Unchanged from sub-project 1 (amendments 5 to 7 and 11): this window hands a described
 file's description to the Library once the composition is ready and its Files entry
-exists, once per composition, under the request id the file was started with. One
-addition: a file stopped after it was made is not handed on (section 2.11).
+exists, once per composition, under the request id the file was started with. Two
+additions: a file stopped after it was made is not handed on (section 2.11), and
+whether a file is described is decided at the press with the SDK's
+`readDescribedMarkdown`, which applies the server's rule to the picked files' rows
+(D31), so this window hands on exactly the files the server filed blank. (The two read
+the same rows a moment apart; only a file replaced in that moment could be judged
+differently, which costs at most an unneeded draft to review or one Describe document
+press.) A picture or
+Markdown file past the Library's totals for one comment (eight attachments, 16 MiB,
+64 KiB of Markdown) can still be left off and named, as amendment 7 says.
 
 ### 4. Materialized
 
@@ -441,8 +494,9 @@ addition: a file stopped after it was made is not handed on (section 2.11).
   `RecordListSkeleton` while loading; `EmptyState` "No templates yet" / "A template is a
   Library file whose look a new file can take."
 - **Add a template** (`Wizard`; its orb wears a template glyph): **File** ("The Library
-  file it is drawn from."; the From tray's file group, one choice, any Library file but
-  a ZIP; with none: "Upload the file in Files first."), **Kind of file** ("What it makes."; pre-selected
+  file it is drawn from."; the Library file rows the From tray reads, one choice, any
+  file but a ZIP, a Word document included; with none: "Upload the file in Files
+  first."), **Kind of file** ("What it makes."; pre-selected
   from the file's extension), **Name** ("What to call it."; starts as the file's name
   without its extension), **Description** ("What it is for."; optional, an `Input`),
   **Organization** ("Who it is for."; optional, only when the person has one). The
@@ -495,10 +549,11 @@ names, because a composition's page lives there.
 ### 9. Data
 
 - **One feed per concept at the app root.** Compositions, templates and recipes walk
-  every page of their reads (fixing the stop at 50). Library files
-  (`libraryArtifactsByKind({kind: "file"})`) and folders (`libraryFolders`) are retained
-  at the root too, but only while a wizard or a page needs them, so opening the list
-  alone does not seed the person's whole Library.
+  every page of their reads (fixing the stop at 50). Library files (the person's file
+  rows, `libraryFilesForOwner`, which carry the name and size the routing reads and the
+  file's own id) and folders (`libraryFolders`) are retained at the root too, but only
+  while a wizard or a page needs them, so opening the list alone does not seed the
+  person's whole Library.
 - **Runs of unfinished compositions** stay joined as now (`runState.ts`); the making
   stage also reads the run's `startedAt` for its measure.
 - **The hand-off's wait for a Files entry** stays the narrow, per-file live read
@@ -558,7 +613,7 @@ Every sentence is the contract; tests assert these strings.
 | Kind of file | Markdown, Web page, Plain text, Spreadsheet (CSV), Data (JSON), Word document, PDF, Single-page app package, Static site package, Shopify storefront package ("A package for Deployables"), Email template ("Opens in the email editor") |
 | From | "Search your files and records", "Search", "Files", "Records", "Unmarked", "Remove <name>", "Search to find older files.", "Nothing to pick yet. Files you upload in Files appear here.", "This node cannot read the record types, so none are offered." |
 | Describe, Name, Folder | "Describe what you want", "A one-page summary of the Q3 results for the board", "Name", "Q3 summary", "Folder", "Library (top level)" |
-| Floor | "Name the file"; "Describe it or pick what to make it from" + "A blank file can be Markdown, text, HTML, CSV or JSON." or "A template needs something to fill it."; "Choose an organization"; "Making this needs Inference" + "An owner or developer can set it up."; "Ready to make <name>" + "It starts blank." / "You review its draft in the editor." / "Only Markdown files and pictures go with a description." / "A model writes it."; "Making the file" + "Starting" / "Composing" / "Writing the file" |
+| Floor | "Name the file"; "Describe it or pick what to make it from" + "A blank file can be Markdown, text, HTML, CSV or JSON." or "A template needs something to fill it."; "Choose an organization"; "Making this needs Inference" + "An owner or developer can set it up."; "Ready to make <name>" + "It starts blank." / "You review its draft in the editor." / "A model writes it."; "Making the file" + "Starting" / "Composing" / "Writing the file" |
 | Acts | Cancel, Next, Make the file, Set up Inference, Stop, Leave; Open in editor, Back to <app>, Archive, Restore, Save as recipe, Download, Deploy it, Start over, Run it again, Add template |
 | Refusals | "The file was not made.", "The template was not added.", each with the cluster's sentence |
 | Page | facts in 3.1; "Nothing", "None", "Open the run"; "The file is still in Files."; "Saved as a recipe. It is in Recipes."; "Stopped before the description was sent." |
@@ -588,14 +643,39 @@ Every sentence is the contract; tests assert these strings.
 
 ## Testing
 
-All client tests run in `clients/os` with vitest; this design changes no Go and no DSL.
-Generated files change: `component/memql/os_navigation.json` and
+This design changes Go (`integrations/compose`: the described rule and the order of the
+decision and the content read), the SDK (`sdk/ts`, hand-written: `isDescribedMarkdown`
+and `readDescribedMarkdown`) and the OS client. It changes no wire shape:
+`composeMaterialize` takes and returns what it did. The one DSL edit is the description
+of its `statement` argument, which states the rule and is copied into the typed SDKs
+(`make sdk-gen`). Generated files change: those two SDK files,
+`component/memql/os_navigation.json` and
 `component/architecture/embedded/platform.graph.json`.
 
+- **The routing, in Go** (`integrations/compose`, unit tests over the suite's fake
+  engine and DB-gated cases over the CI Postgres image, accepting on one engine and
+  executing on another as the suite already does): a described Markdown request with a
+  `.md` file or a picture is filed blank; with a CSV, JSON, text, HTML or ZIP file, or
+  a Markdown file over 32 KiB or archived, the composer writes it and reads that file;
+  a picked file whose row cannot be read refuses the start; a described request reads
+  no content even when its sources say `content: true`, on a node that has no
+  reference reader at all; a request from a work run still composes.
+- **The copies stay the Library's** (`integrations/library`'s drift guard): compose's
+  copy of the per-file attachment rule (sizes and picture formats) and the SDK's are held
+  to the Library's own constants, and the SDK's `isDescribedMarkdown` must decide
+  through `attachmentKind`, the function those constants feed.
+- **The routing, in the SDK** (`sdk/ts/test/materialize.test.ts`): `isDescribedMarkdown`
+  over file facts, case for case with the Go tests; `readDescribedMarkdown` reads a
+  picked file's row once, and nothing for a request that cannot be described;
+  `materialize` hands on only a described request and reads its files before it
+  starts.
+- **VS Code** (`editors/productivity`): New Markdown and Create Email from Examples
+  behave as before (their suites pass unchanged).
 - **The model** (`test/materializer/make.test.ts`, no DOM): steps per draft; the
   opening step for a plus, a setup and Start over; every floor row in 2.3 in order; the
-  request for each path, including `content` only on the composed path and nothing sent
-  for an unanswered optional; answers on the rail; filed names; readable references.
+  path for each mix of picked files, with the SDK's predicate; the request for each
+  path, `content: true` on every Library file and nothing sent for an unanswered
+  optional; answers on the rail; filed names; readable references.
 - **The wizard** (`wizard.test.tsx`, `making.test.tsx`): a setup opens on Name with
   Markdown and its folder answered; the plus opens on From; a choice moves on; Next and
   Enter; Make the file absent until legal and never disabled; a double press starts one
@@ -634,9 +714,6 @@ Generated files change: `component/memql/os_navigation.json` and
 
 - Email layouts in the Materializer: an email is written in VS Code's New email page
   (sub-projects 2 and 3). The `outputKind` key keeps working for a sender.
-- Routing a described Markdown request with Library files the revision workflow cannot
-  read to the composer instead (a server change in `describedMarkdown()` and the SDK's
-  `isDescribedMarkdown`); see D31 and the owner list.
 - A per-row record picker, uploading from the computer inside the wizard (uploads stay
   in Files, sub-project 1), page help content (the help modal still says documentation
   is coming), Ask record destinations for compositions, editing a template or recipe
@@ -658,7 +735,7 @@ Generated files change: `component/memql/os_navigation.json` and
 | D10 | Template appears only when a live template makes the kind | A question whose only answer is "No template" is furniture |
 | D11 | From is one searchable tray of Library files and record types; picked things stand as cards | "Mix artifacts" as the owner put it; Library files were reachable only through a setup; cards make the mix tangible |
 | D12 | Only files the composer can read are offered; record types with no list query are absent | A step knows before it offers; the composer refuses the whole request otherwise |
-| D13 | `content: true` only on the composed path | The server reads a content reference before deciding the path, so a flag on a described request reads, and may refuse, files nothing uses |
+| D13 | Every picked Library file is sent with `content: true`, and the server decides the path before reading contents, reading them only on the composed path | The composer needs the flag to read a file; the revision path needs no contents, and reading them first (as sub-project 1 did) downloaded, and could refuse, files nothing used; a client that does not predict the path for the flag cannot get it wrong |
 | D14 | The Folder step shows the folder and lets the person change it; a claimed folder is sent as claimed and shown as "Unavailable folder" when unseen | The owner asked for the folder control; amendment 8 binds |
 | D15 | `FolderSelect` is promoted to `items/` and used by Files' Move to folder too | Second use of the same control (DESIGN.md "Applying them") |
 | D16 | After the press the same wizard shows the making stage, with Stop (text) and Leave (button) | "A wait is visible" and "a wizard can be come back to"; closes the double-press gap |
@@ -676,20 +753,27 @@ Generated files change: `component/memql/os_navigation.json` and
 | D28 | `idTail` is deleted; ids are compared with `sameEntityId` | The bare-id contract |
 | D29 | Files' Add menu: Upload files, New Markdown file, New folder; the button is "Add to this folder" | The owner's wording; files together, the folder last; the name says what every item does |
 | D30 | New Markdown file is absent when the Materializer cannot be opened | An act that cannot work is absent, never disabled |
-| D31 | A described Markdown file keeps sub-project 1's rule: only Markdown files and pictures go with the description, and the floor says so before the press | The revision workflow reads Markdown and images only (amendment 5); changing which path a request takes is a server change outside this OS-only design |
+| D31 | A described Markdown request takes the Library revision path only when every picked Library file is one the Library can attach (a `.md` file up to 32 KiB or a PNG, JPEG, GIF or WebP picture up to 8 MiB, judged on its file row's name and size; an archived or unreadable file is not one) or nothing is picked; any other picked file sends it to the composer, which reads it. The server (`describedMarkdown` in `integrations/compose`) and the SDK (`isDescribedMarkdown`, through the hand-off's own `attachmentKind`) apply the same rule to the same rows, and a drift guard holds both copies to the Library's constants | "Mix artifacts, describe it, get the file" is the owner's core ask, so a picked file is used, never dropped; the revision workflow can read only what the Library attaches, and the composer reads the rest; one rule on both sides means the person's client hands on exactly the files the server filed blank |
+| D32 | The From tray reads the person's Library file rows (`libraryFilesForOwner`), not the artifact index | The routing reads a file's name and size, which the file row carries and the index does not; a file row's own id is the bare id a `library_file` source names |
 
 ## Decisions for the owner to confirm
 
+The controller ruled on all five on 2026-10-12. They stay listed so the owner sees them.
+
 1. **Ordinary files no longer carry an organization** (D9). Only an email template
-   asks for one; older records keep theirs.
+   asks for one; older records keep theirs. *Ruled by the controller on 2026-10-12; the
+   owner can reverse it.*
 2. **The file opens by itself only in the browser editor and only when it is filed
    blank** (D18). People who use VS Code or Cursor, and files a model writes, press Open
-   in editor once.
+   in editor once. *Ruled by the controller on 2026-10-12; the owner can reverse it.*
 3. **No email option in Make a file** (D8). This departs from the email program spec's
    section 6 ("Email shows the layout cards"): the email work routes Create new template
    to VS Code's New email page, so a second email front door here would duplicate it.
-4. **The Materializer opens on Materialized**, not on Make a file (D3).
-5. **A file other than Markdown or a picture (a CSV, say) mixed into a described
-   Markdown file is left off the description** (D31). The floor says so; the
-   alternative is a server change that sends such a request to the composer, which
-   reads them.
+   *Ruled by the controller on 2026-10-12; the owner can reverse it.*
+4. **The Materializer opens on Materialized**, not on Make a file (D3). *Ruled by the
+   controller on 2026-10-12; the owner can reverse it.*
+5. **A file mixed into a described Markdown file is used, not dropped** (D31). This
+   record first proposed leaving a CSV off the description, as sub-project 1 does; the
+   controller overrode that: a picked file the Library cannot attach sends the request
+   to the composer, which reads it, and the server decides the path before it reads any
+   content. *Ruled by the controller on 2026-10-12; the owner can reverse it.*
