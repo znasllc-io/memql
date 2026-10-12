@@ -21,6 +21,17 @@ import (
 // origin; a missing or unusable one is refused ahead of a send by
 // Config.RequireUnsubscribe, as it is for the unsubscribe link.
 //
+// # What a link gives away
+//
+// The confirm, preferences and view tokens are sealed (link_token.go): what they
+// carry -- who the message is for, the organization, a digest of the address,
+// the names it showed -- cannot be read from the link, and these are the links
+// that get forwarded and posted. The unsubscribe token is not: it is the older
+// signed-and-readable u3 format, and it has to stay that way, because a link
+// already sitting in a mailbox must keep working for years and its format
+// cannot change under it. A later change to it needs a version that both
+// formats are read through until the old links are gone.
+//
 // # From builders to a message
 //
 // The builders above take a payload. A message needs all of its links at once,
@@ -81,7 +92,7 @@ func pageURL(cfg Config, kind LinkKind, path string, p LinkPayload) (string, err
 
 // requireLinkOrigin refuses a blank origin. Without one a link would be a bare
 // path (/email/confirm?token=...) that no mail client can open, and nothing
-// would say so: the token would sign and the URL would build. An origin of only
+// would say so: the token would seal and the URL would build. An origin of only
 // slashes is blank for the same reason.
 func requireLinkOrigin(cfg Config) error {
 	if strings.TrimRight(strings.TrimSpace(cfg.UnsubscribeBaseURL), "/") == "" {
@@ -132,7 +143,7 @@ func (l MessageLinks) exempt() map[string]bool {
 // linkRequest is what Worker.messageLinks needs to build one message's links:
 // who the message is for, what it is, and what it showed.
 //
-// The ids may be in either form; messageLinks signs them bare. The campaign is
+// The ids may be in either form; messageLinks carries them bare. The campaign is
 // empty for a message that belongs to no campaign (a single send made by a
 // rule, which is not a persisted campaign and must not be named as one).
 type linkRequest struct {
@@ -169,8 +180,8 @@ type linkRequest struct {
 // is missing, or names longer than the caps allow into a token), so the failure
 // is logged at error level, loudly enough to be fixed, and the link is left out.
 //
-// Recipient, campaign and template ids are signed bare, as the unsubscribe token
-// has always signed them; the owner is signed as given.
+// Recipient, campaign and template ids are carried bare, as the unsubscribe token
+// has always carried them; the owner is carried as given.
 func (w *Worker) messageLinks(req linkRequest) (MessageLinks, error) {
 	recipientID, campaignID, templateID := bare(req.RecipientID), bare(req.CampaignID), bare(req.TemplateID)
 
