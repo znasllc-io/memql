@@ -399,28 +399,73 @@ QueryClient.prototype.campaignRetryNewsletterWelcome = function (this: QueryClie
   return this.executeNamed("campaignRetryNewsletterWelcome", buildCampaignRetryNewsletterWelcome(args), opts);
 };
 
-/** Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail. */
+/** Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision. */
+export interface CampaignSaveLayoutArgs {
+  /** Stable caller-generated layout id; reuse it on an uncertain creation response. */
+  layoutId: string;
+  /** Owning organization; immutable after creation. */
+  accountId: string;
+  /** Required when saving. */
+  name?: string;
+  description?: string;
+  /** The layout-mode email document. Required when saving. */
+  document?: Record<string, unknown>;
+  /** The Library file the layout comes from. */
+  sourceArtifactId?: string;
+  /** Exact createdAt from emailLayoutById; empty only when creating. */
+  expectedRevision: string;
+  /** save (default), archive or restore. */
+  action?: string;
+}
+
+export function buildCampaignSaveLayout(args: CampaignSaveLayoutArgs): string {
+  const parts: string[] = [];
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.name !== undefined) parts.push("name: " + renderMemQLValue(args.name));
+  if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
+  if (args.document !== undefined) parts.push("document: " + renderMemQLValue(args.document));
+  if (args.sourceArtifactId !== undefined) parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
+  parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
+  if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
+  return "builtin campaignSaveLayout(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignSaveLayout(args: CampaignSaveLayoutArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignSaveLayout = function (this: QueryClient, args: CampaignSaveLayoutArgs = {} as CampaignSaveLayoutArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignSaveLayout", buildCampaignSaveLayout(args), opts);
+};
+
+/** Save an organization email template with an exact revision precondition. content is the email document (a *.email.json file): a layout document made of blocks, or custom HTML with its plain-text body. The server renders it and stores the subject, the text and HTML parts and the document, and answers {templateId, revision, status, saved, issues}. issues are what keeps the email from being sent as it is: a missing picture or link, a picture the caller cannot read, a missing unsubscribe link, an email that is too large. Saving works with issues and returns the template to draft. Publishing requires the exact saved revision and the exact saved content, and is refused while any issue remains. Archive and restore require only the exact revision; the content in the call is ignored, and restore returns a template to draft. Empty expectedRevision creates a draft. With sourceArtifactId (the Library file the email is written in) there is one template per organization and file: the template already published from that file is updated whatever templateId says, and the first save creates it, so templateId may be left empty. This never sends mail. */
 export interface CampaignSaveTemplateArgs {
-  /** Stable caller-generated template ID; reuse on an uncertain creation response. */
-  templateId: string;
+  /** Stable caller-generated template ID; reuse on an uncertain creation response. May be empty only when sourceArtifactId is given. */
+  templateId?: string;
   /** Owning organization; immutable after creation. */
   accountId: string;
   /** Template name. */
   name: string;
-  /** The reviewed email file: subject, textBody, htmlBody. */
+  /** The email document: a layout document {subject, preheader, layout, theme, blocks} or custom HTML {subject, preheader, textBody, htmlBody}. Ignored when archiving or restoring. */
   content: Record<string, unknown>;
-  /** Exact createdAt from templateById; empty only when creating. */
+  /** The Library file the email is written in. Keeps one template per organization and file; see above. */
+  sourceArtifactId?: string;
+  /** Exact createdAt from templateById or templateForSource; empty only when creating. */
   expectedRevision: string;
-  /** save (default), publish, or archive. Publishing is an explicit human action. */
+  /** save (default), publish, archive or restore. Publishing is an explicit human action. */
   action?: string;
 }
 
 export function buildCampaignSaveTemplate(args: CampaignSaveTemplateArgs): string {
   const parts: string[] = [];
-  parts.push("templateId: " + renderMemQLValue(args.templateId));
+  if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   parts.push("accountId: " + renderMemQLValue(args.accountId));
   parts.push("name: " + renderMemQLValue(args.name));
   parts.push("content: " + renderMemQLValue(args.content));
+  if (args.sourceArtifactId !== undefined) parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
   parts.push("expectedRevision: " + renderMemQLValue(args.expectedRevision));
   if (args.action !== undefined) parts.push("action: " + renderMemQLValue(args.action));
   return "builtin campaignSaveTemplate(" + parts.join(", ") + ")";
@@ -760,9 +805,9 @@ QueryClient.prototype.composeCancel = function (this: QueryClient, args: Compose
 
 /** Start a Materializer work run using the known materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row. */
 export interface ComposeMaterializeArgs {
-  /** What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is. */
+  /** What to call it, and the filename stem of the output. A name with a slash is refused (folderId chooses where it is filed), and one trailing extension that already names the format is dropped, because the extension is added when the file is filed: Plan.md is filed as Plan.md, never Plan.md.md. */
   name: string;
-  /** What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind, and no source that is not a Library file) is created EMPTY when a person's own client asks, and the statement stays on its composition: the client hands it to the Library's revision workflow, which writes the document. That workflow reads Markdown and images and cannot read the graph, so a concept_row or query source keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement. */
+  /** What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind, and no source that is not a Library file) is created EMPTY outside a work run, and the statement stays on its composition: the caller hands it to the Library's revision workflow, as the person (the SDK's handOffDescription), which writes the document. That workflow reads Markdown and images and cannot read the graph, so a concept_row or query source keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement. */
   statement?: string;
   /** markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of. */
   format: string;
@@ -1214,6 +1259,57 @@ declare module "./query.js" {
 
 QueryClient.prototype.emailInbox = function (this: QueryClient, args: EmailInboxArgs = {} as EmailInboxArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("emailInbox", buildEmailInbox(args), opts);
+};
+
+/** The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. The id is opaque: pass it to composeMaterialize as layoutId. */
+export interface EmailLayoutsArgs {
+  accountId: string;
+  includeArchived?: boolean;
+}
+
+export function buildEmailLayouts(args: EmailLayoutsArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.includeArchived !== undefined) parts.push("includeArchived: " + renderMemQLValue(args.includeArchived));
+  return "builtin emailLayouts(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailLayouts(args: EmailLayoutsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailLayouts = function (this: QueryClient, args: EmailLayoutsArgs = {} as EmailLayoutsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailLayouts", buildEmailLayouts(args), opts);
+};
+
+/** Render an email document for preview: pictures you can read are embedded, sample merge values are applied, and {subject, html, text, issues} comes back. Never saves or sends anything. */
+export interface EmailRenderArgs {
+  /** The *.email.json document, in layout or custom mode. */
+  document: Record<string, unknown>;
+  /** The organization the email is for. You need read access to its data. */
+  accountId: string;
+  /** Sample values: displayName, email, accountName, campaignName, and fields (an object of column values). */
+  sample?: Record<string, unknown>;
+}
+
+export function buildEmailRender(args: EmailRenderArgs): string {
+  const parts: string[] = [];
+  parts.push("document: " + renderMemQLValue(args.document));
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.sample !== undefined) parts.push("sample: " + renderMemQLValue(args.sample));
+  return "builtin emailRender(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailRender(args: EmailRenderArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailRender = function (this: QueryClient, args: EmailRenderArgs = {} as EmailRenderArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailRender", buildEmailRender(args), opts);
 };
 
 /** Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions. */
@@ -2409,7 +2505,7 @@ QueryClient.prototype.logsStatus = function (this: QueryClient, args: LogsStatus
   return this.executeNamed("logsStatus", buildLogsStatus(args), opts);
 };
 
-/** Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then delete that day; at most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, skipped, refused }. */
+/** Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then, once every node type of the day is uploaded, drop the day's chunk whole; only rows no chunk wholly inside the day holds (a plain table, or a chunk that straddles midnight) go by a batched DELETE instead. At most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, chunksDropped, skipped, refused }; a dropped day's rows count in rowsDeleted at what the day archived. */
 export interface LogsSweepArgs {
 }
 

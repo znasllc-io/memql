@@ -36,9 +36,28 @@ export function userMessage(error: unknown, operation: string): string {
   return `Couldn’t ${operation}. Try again. If this continues, choose Show details.`;
 }
 
+// The error with what caused it. The SDK hands a person a refusal as one sentence
+// and keeps the refusal as it arrived -- the call's name, the engine's frame -- as
+// the error's cause, and a diagnostic is where those belong. The causes go straight
+// after the first line, ahead of the stack frames, so the length cap below cannot
+// cut them off.
+function withCauses(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const stack = error.stack || error.message;
+  const causes: string[] = [];
+  let cause: unknown = error.cause;
+  for (let depth = 0; cause !== undefined && cause !== null && depth < 4; depth++) {
+    causes.push(`Caused by: ${cause instanceof Error ? cause.message : String(cause)}`);
+    cause = cause instanceof Error ? cause.cause : undefined;
+  }
+  if (causes.length === 0) return stack;
+  const lineEnd = stack.indexOf("\n");
+  return lineEnd < 0 ? [stack, ...causes].join("\n") : [stack.slice(0, lineEnd), ...causes, stack.slice(lineEnd + 1)].join("\n");
+}
+
 /** Credential material must not reach either the cluster log or local output. */
 export function diagnosticText(error: unknown): string {
-  const raw = error instanceof Error ? error.stack || error.message : String(error);
+  const raw = withCauses(error);
   const redacted = raw.replace(/\bBearer\s+[^\s"']+/gi, "Bearer [redacted]")
     .replace(/\bmql_[a-z]{3}_[A-Za-z0-9_-]+/g, "[redacted]")
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted]")

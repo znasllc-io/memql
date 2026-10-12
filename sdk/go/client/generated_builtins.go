@@ -497,19 +497,100 @@ func CampaignRetryNewsletterWelcomeBuild(args CampaignRetryNewsletterWelcomeArgs
 	return b.String()
 }
 
-// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.
+// CampaignSaveLayout -- Save an organization email layout with an exact revision precondition, or archive or restore it. Saving validates a layout-mode email document; custom HTML cannot be a layout. Empty expectedRevision creates the layout under the caller-generated layoutId. Archive and restore need only the exact revision.
+type CampaignSaveLayoutArgs struct {
+	// Stable caller-generated layout id; reuse it on an uncertain creation response.
+	LayoutId string
+	// Owning organization; immutable after creation.
+	AccountId string
+	// Required when saving.
+	Name        string
+	Description string
+	// The layout-mode email document. Required when saving.
+	Document map[string]any
+	// The Library file the layout comes from.
+	SourceArtifactId string
+	// Exact createdAt from emailLayoutById; empty only when creating.
+	ExpectedRevision string
+	// save (default), archive or restore.
+	Action string
+}
+
+// CampaignSaveLayout calls the engine builtin campaignSaveLayout.
+func (qc *QueryClient) CampaignSaveLayout(ctx context.Context, args CampaignSaveLayoutArgs) (*Result, error) {
+	call := CampaignSaveLayoutBuild(args)
+	return qc.executeNamed(ctx, "campaignSaveLayout", call)
+}
+
+func CampaignSaveLayoutBuild(args CampaignSaveLayoutArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin campaignSaveLayout(")
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Name != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("name: ")
+		b.WriteString(quoteMemQL(args.Name))
+	}
+	if args.Description != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("description: ")
+		b.WriteString(quoteMemQL(args.Description))
+	}
+	if args.Document != nil {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("document: ")
+		b.WriteString(renderMemQLValue(args.Document))
+	}
+	if args.SourceArtifactId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceArtifactId: ")
+		b.WriteString(quoteMemQL(args.SourceArtifactId))
+	}
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expectedRevision: ")
+	b.WriteString(quoteMemQL(args.ExpectedRevision))
+	if args.Action != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("action: ")
+		b.WriteString(quoteMemQL(args.Action))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. content is the email document (a *.email.json file): a layout document made of blocks, or custom HTML with its plain-text body. The server renders it and stores the subject, the text and HTML parts and the document, and answers {templateId, revision, status, saved, issues}. issues are what keeps the email from being sent as it is: a missing picture or link, a picture the caller cannot read, a missing unsubscribe link, an email that is too large. Saving works with issues and returns the template to draft. Publishing requires the exact saved revision and the exact saved content, and is refused while any issue remains. Archive and restore require only the exact revision; the content in the call is ignored, and restore returns a template to draft. Empty expectedRevision creates a draft. With sourceArtifactId (the Library file the email is written in) there is one template per organization and file: the template already published from that file is updated whatever templateId says, and the first save creates it, so templateId may be left empty. This never sends mail.
 type CampaignSaveTemplateArgs struct {
-	// Stable caller-generated template ID; reuse on an uncertain creation response.
+	// Stable caller-generated template ID; reuse on an uncertain creation response. May be empty only when sourceArtifactId is given.
 	TemplateId string
 	// Owning organization; immutable after creation.
 	AccountId string
 	// Template name.
 	Name string
-	// The reviewed email file: subject, textBody, htmlBody.
+	// The email document: a layout document {subject, preheader, layout, theme, blocks} or custom HTML {subject, preheader, textBody, htmlBody}. Ignored when archiving or restoring.
 	Content map[string]any
-	// Exact createdAt from templateById; empty only when creating.
+	// The Library file the email is written in. Keeps one template per organization and file; see above.
+	SourceArtifactId string
+	// Exact createdAt from templateById or templateForSource; empty only when creating.
 	ExpectedRevision string
-	// save (default), publish, or archive. Publishing is an explicit human action.
+	// save (default), publish, archive or restore. Publishing is an explicit human action.
 	Action string
 }
 
@@ -522,8 +603,10 @@ func (qc *QueryClient) CampaignSaveTemplate(ctx context.Context, args CampaignSa
 func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin campaignSaveTemplate(")
-	b.WriteString("templateId: ")
-	b.WriteString(quoteMemQL(args.TemplateId))
+	if args.TemplateId != "" {
+		b.WriteString("templateId: ")
+		b.WriteString(quoteMemQL(args.TemplateId))
+	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -539,6 +622,13 @@ func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
 	}
 	b.WriteString("content: ")
 	b.WriteString(renderMemQLValue(args.Content))
+	if args.SourceArtifactId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceArtifactId: ")
+		b.WriteString(quoteMemQL(args.SourceArtifactId))
+	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -979,9 +1069,9 @@ func ComposeCancelBuild(args ComposeCancelArgs) string {
 
 // ComposeMaterialize -- Start a Materializer work run using the known materializeFile template. The composition and immutable source snapshot are saved before dispatch. Returns {compositionId, goalId, runId}; progress and the eventual outputFileId arrive on the composition row.
 type ComposeMaterializeArgs struct {
-	// What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is.
+	// What to call it, and the filename stem of the output. A name with a slash is refused (folderId chooses where it is filed), and one trailing extension that already names the format is dropped, because the extension is added when the file is filed: Plan.md is filed as Plan.md, never Plan.md.md.
 	Name string
-	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind, and no source that is not a Library file) is created EMPTY when a person's own client asks, and the statement stays on its composition: the client hands it to the Library's revision workflow, which writes the document. That workflow reads Markdown and images and cannot read the graph, so a concept_row or query source keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement.
+	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind, and no source that is not a Library file) is created EMPTY outside a work run, and the statement stays on its composition: the caller hands it to the Library's revision workflow, as the person (the SDK's handOffDescription), which writes the document. That workflow reads Markdown and images and cannot read the graph, so a concept_row or query source keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement.
 	Statement string
 	// markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.
 	Format string
@@ -1621,6 +1711,72 @@ func (qc *QueryClient) EmailInbox(ctx context.Context, args EmailInboxArgs) (*Re
 func EmailInboxBuild(args EmailInboxArgs) string {
 	_ = args
 	return "builtin emailInbox()"
+}
+
+// EmailLayouts -- The email layouts an organization can start from: the four built-in layouts, then its own active layouts (all of them with includeArchived). Rows are {id, kind, name, description, document, status} plus layoutId, revision and sourceArtifactId for organization layouts. The id is opaque: pass it to composeMaterialize as layoutId.
+type EmailLayoutsArgs struct {
+	AccountId          string
+	IncludeArchived    bool
+	IncludeArchivedSet bool // set true to send includeArchived; required because zero-value bool is ambiguous
+}
+
+// EmailLayouts calls the engine builtin emailLayouts.
+func (qc *QueryClient) EmailLayouts(ctx context.Context, args EmailLayoutsArgs) (*Result, error) {
+	call := EmailLayoutsBuild(args)
+	return qc.executeNamed(ctx, "emailLayouts", call)
+}
+
+func EmailLayoutsBuild(args EmailLayoutsArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailLayouts(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.IncludeArchivedSet {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("includeArchived: ")
+		b.WriteString(fmt.Sprintf("%v", args.IncludeArchived))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailRender -- Render an email document for preview: pictures you can read are embedded, sample merge values are applied, and {subject, html, text, issues} comes back. Never saves or sends anything.
+type EmailRenderArgs struct {
+	// The *.email.json document, in layout or custom mode.
+	Document map[string]any
+	// The organization the email is for. You need read access to its data.
+	AccountId string
+	// Sample values: displayName, email, accountName, campaignName, and fields (an object of column values).
+	Sample map[string]any
+}
+
+// EmailRender calls the engine builtin emailRender.
+func (qc *QueryClient) EmailRender(ctx context.Context, args EmailRenderArgs) (*Result, error) {
+	call := EmailRenderBuild(args)
+	return qc.executeNamed(ctx, "emailRender", call)
+}
+
+func EmailRenderBuild(args EmailRenderArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin emailRender(")
+	b.WriteString("document: ")
+	b.WriteString(renderMemQLValue(args.Document))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Sample != nil {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sample: ")
+		b.WriteString(renderMemQLValue(args.Sample))
+	}
+	b.WriteString(")")
+	return b.String()
 }
 
 // FleetModelProbe -- Ask one of YOUR OWN fleet machines to measure a model it already has, and return at once with the id of the record to watch. The suite is pinned by this engine and echoed back by the machine, so figures can never be filed under a suite that was not run. Owner-only, and the machine must be yours, unrevoked and connected right now -- the same refusals a pull makes, reused deliberately, because offline is offline whichever act is asking. Progress lands per case on the v1:worker:modelProbe row this returns the id of; the figures land on a v1:platform:modelMeasurement row keyed by machine, model and suite version. Every figure is a measured statistic OR a named reason there is none: a machine nobody has probed and a model that failed every case are different answers, and a page that renders both as zero would lead to opposite actions.
@@ -3108,7 +3264,7 @@ func LogsStatusBuild(args LogsStatusArgs) string {
 	return "builtin logsStatus()"
 }
 
-// LogsSweep -- Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then delete that day; at most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, skipped, refused }.
+// LogsSweep -- Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then, once every node type of the day is uploaded, drop the day's chunk whole; only rows no chunk wholly inside the day holds (a plain table, or a chunk that straddles midnight) go by a batched DELETE instead. At most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, chunksDropped, skipped, refused }; a dropped day's rows count in rowsDeleted at what the day archived.
 type LogsSweepArgs struct {
 }
 

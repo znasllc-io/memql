@@ -11,11 +11,18 @@ package deploy
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/deploycontrol"
+	"github.com/znasllc-io/memql/integrations/customdomain"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -238,5 +245,141 @@ func TestBindDryRunRendersValidObjects(t *testing.T) {
 	}
 	if result["certificateReady"] != false {
 		t.Errorf("certificateReady = %v on a dry run; nothing was requested, so it cannot be ready", result["certificateReady"])
+	}
+}
+
+// ===========================================================================
+// The error pages (after the 2026-10-11 outage)
+// ===========================================================================
+//
+// The engine's own substrate writes these objects through
+// integrations/customdomain, and this script is the operator's path to the SAME
+// objects (provision.go: "both write the same two objects ... so a domain
+// bound by one and re-reconciled by the other converges rather than fighting").
+// So the annotation that sends an Ingress to `memql error-pages` when its
+// Service has no ready endpoints has to be here too, under the same rule: only
+// an Ingress whose proxy speaks plain HTTP carries it.
+//
+// The key and the Service name are literals below, ingress-nginx's contract and
+// the base manifest's name, and not read from the code under test; the equality
+// with the engine's constants is TestBothBindScriptsUseTheEnginesErrorPages.
+
+const (
+	scriptDefaultBackendKey  = "nginx.ingress.kubernetes.io/default-backend"
+	scriptBackendProtocolKey = "nginx.ingress.kubernetes.io/backend-protocol"
+	scriptCustomErrorsKey    = "nginx.ingress.kubernetes.io/custom-http-errors"
+	scriptErrorPagesService  = "error-pages"
+)
+
+// scriptIngress is the slice of a rendered Ingress these tests read.
+type scriptIngress struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
+		Name        string            `yaml:"name"`
+		Annotations map[string]string `yaml:"annotations"`
+	} `yaml:"metadata"`
+}
+
+// ingressesOfManifest decodes every Ingress of a multi-document manifest. A
+// decode error is fatal: a truncated prefix would leave every assertion passing
+// over a fraction of the objects.
+func ingressesOfManifest(t *testing.T, manifest string) []scriptIngress {
+	t.Helper()
+	var out []scriptIngress
+	dec := yaml.NewDecoder(strings.NewReader(manifest))
+	for i := 1; ; i++ {
+		var d scriptIngress
+		err := dec.Decode(&d)
+		if errors.Is(err, io.EOF) {
+			return out
+		}
+		if err != nil {
+			t.Fatalf("decoding document %d of the rendered manifest: %v", i, err)
+		}
+		if d.Kind == "Ingress" {
+			out = append(out, d)
+		}
+	}
+}
+
+// appliedByTheBindScript runs the REAL bind script with a stub kubectl that
+// records what is piped to `apply`, so the test reads the objects the script
+// would have applied without reaching a cluster (the stub certificate_owner_test
+// uses, for the same reason: bind-custom-domain.sh has no --renderTo).
+func appliedByTheBindScript(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	captured := filepath.Join(dir, "applied.yaml")
+	stub := "#!/bin/bash\nfunction main() {\n  if [[ \"$1\" == apply ]]; then cat > \"$ERROR_PAGES_TEST_CAPTURE\"; echo configured; fi\n}\nmain \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "kubectl"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("ERROR_PAGES_TEST_CAPTURE", captured)
+
+	env, code := envelopeFrom(t, bindScript,
+		"--hostname=www.acme.com", "--domainId=d1", "--siteId=site1", "--issuer=letsencrypt-prod")
+	if code != 0 || !env.OK {
+		t.Fatalf("bind failed: exit %d, error %+v", code, env.Error)
+	}
+	raw, err := os.ReadFile(captured)
+	if err != nil {
+		t.Fatalf("the script applied nothing: %v", err)
+	}
+	return string(raw)
+}
+
+// A client's own domain reaches the edge over plain HTTP, so its Ingress falls
+// back to the error pages -- and it is the SAME annotation set the engine's
+// IngressObject writes, so a domain bound from a shell and one bound by the
+// reconciler are one object.
+func TestBindFallsBackToTheErrorPages(t *testing.T) {
+	ingresses := ingressesOfManifest(t, appliedByTheBindScript(t))
+	if len(ingresses) != 1 {
+		t.Fatalf("the script applied %d Ingress(es), want exactly 1", len(ingresses))
+	}
+	annotations := ingresses[0].Metadata.Annotations
+
+	if got := annotations[scriptDefaultBackendKey]; got != scriptErrorPagesService {
+		t.Errorf("the Ingress carries %s=%q, want %q: with no ready edge pod its visitors would get "+
+			"ingress-nginx's bare 503", scriptDefaultBackendKey, got, scriptErrorPagesService)
+	}
+	if _, ok := annotations[scriptCustomErrorsKey]; ok {
+		t.Errorf("the Ingress sets %s, which would replace the application's own error responses with the maintenance page", scriptCustomErrorsKey)
+	}
+	if v, ok := annotations[scriptBackendProtocolKey]; ok {
+		t.Errorf("the Ingress sets %s=%q; the edge is plain HTTP, and the error pages only stand behind plain HTTP", scriptBackendProtocolKey, v)
+	}
+
+	// The engine's builder, same inputs (the script's defaults are the engine's).
+	goIngress := customdomain.IngressObject(customdomain.BindRequest{
+		Hostname: "www.acme.com", DomainID: "d1", SiteID: "site1", Namespace: "memql",
+		Issuer: "letsencrypt-prod", IngressClass: "nginx", Service: "edge", Port: 8085,
+	})
+	asStrings := map[string]string{}
+	for k, v := range goIngress["metadata"].(map[string]any)["annotations"].(map[string]any) {
+		asStrings[k], _ = v.(string)
+	}
+	if !reflect.DeepEqual(asStrings, annotations) {
+		t.Errorf("the script's Ingress annotations %v differ from integrations/customdomain.IngressObject's %v: "+
+			"the two substrates must write the same object", annotations, asStrings)
+	}
+}
+
+// The script's literal is a second spelling of the engine's two constants, held
+// to them here the way the three host labels and the worker-stream prefix are
+// held to component/frontdoor: read out of the shell source, not restated.
+func TestBothBindScriptsUseTheEnginesErrorPages(t *testing.T) {
+	want := "readonly ERROR_PAGES_BACKEND='" + customdomain.ErrorPagesBackendAnnotation + ": " + customdomain.ErrorPagesServiceName + "'"
+	for _, script := range []string{bindScript, bindDoorScript} {
+		raw, err := os.ReadFile(aksScript(t, script))
+		if err != nil {
+			t.Fatalf("reading %s: %v", script, err)
+		}
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("%s does not declare %q; integrations/customdomain.ErrorPagesBackendAnnotation and "+
+				"ErrorPagesServiceName are the one spelling the engine writes, and a domain bound from a "+
+				"shell must fall back to the same Service", script, want)
+		}
 	}
 }

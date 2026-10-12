@@ -11,6 +11,7 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // formatDuration returns a human-readable duration string in milliseconds.
@@ -88,8 +89,13 @@ func RecordStepExecution(ctx context.Context, engine *memql.MemQLEngine, data St
 	insertQuery := fmt.Sprintf(`insert("%s", { payload: { %s } })`,
 		memoryNodes.ConceptMemQLAutomationStep, strings.Join(payloadParts, ", "))
 
-	// Execute the insert
-	_, err := engine.Execute(ctx, insertQuery)
+	// Execute the insert, masked from the run's write observer. The record is
+	// the executor's own bookkeeping, not a write the run made, for the reason
+	// the work journal's writes are masked (automations' journalContext): a
+	// scheduled firing's journal is held until the run's first graph write, and
+	// heard there, this record would open the run of every tick at its first
+	// step.
+	_, err := engine.Execute(common.ContextWithoutWriteObserver(ctx), insertQuery)
 	if err != nil {
 		// Log error but don't fail the step
 		return ""

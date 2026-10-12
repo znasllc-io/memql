@@ -355,3 +355,62 @@ func TestBindDoorRefusesAMalformedWorkerPrefix(t *testing.T) {
 		})
 	}
 }
+
+// An account's front door is four Ingresses and only two of them can fall back
+// to the error pages, under the same rule integrations/customdomain applies
+// (doorIngressObjects): the app. Ingress (the edge) and the api. HTTP Ingress
+// (bff-http) speak plain HTTP and carry the annotation; the api. gRPC Ingress
+// (backend-protocol GRPC) and the id. Ingress (backend-protocol HTTPS) do not.
+// ingress-nginx keeps an Ingress's backend protocol when it swaps in the
+// default backend, and the error pages are a plain HTTP/1.1 server: behind
+// grpc_pass they would be sent h2c and behind HTTPS a TLS handshake, and either
+// way the proxy answers 502, which is worse than the bare 503 it replaces.
+//
+// Parsed from --renderTo, because the envelope re-checks the input and the
+// objects are what a cluster applies.
+func TestBindDoorFallsBackToTheErrorPagesOnItsPlainHTTPIngresses(t *testing.T) {
+	rendered := filepath.Join(t.TempDir(), "door.yaml")
+	env, code := envelopeFrom(t, bindDoorScript,
+		"--accountId="+testAccountID, "--reservedName="+testReservedName,
+		"--issuer=letsencrypt-prod", "--apiPaths=/healthz,/memql/ws", "--dryRun=true",
+		"--renderTo="+rendered)
+	if code != 0 || !env.OK {
+		t.Fatalf("dry run: exit %d ok=%v", code, env.OK)
+	}
+	raw, err := os.ReadFile(rendered)
+	if err != nil {
+		t.Fatalf("reading the rendered manifest: %v", err)
+	}
+
+	want := map[string]struct {
+		fits bool
+		why  string
+	}{
+		"-app":      {true, "the edge, plain HTTP"},
+		"-api":      {true, "bff-http, plain HTTP"},
+		"-api-grpc": {false, "backend-protocol GRPC: the proxy would speak h2c to a server that speaks HTTP/1.1"},
+		"-id":       {false, "backend-protocol HTTPS: the proxy would start a TLS handshake with a server that speaks none"},
+	}
+	ingresses := ingressesOfManifest(t, string(raw))
+	if len(ingresses) != len(want) {
+		t.Fatalf("the script rendered %d Ingresses, want %d", len(ingresses), len(want))
+	}
+	for _, ing := range ingresses {
+		suffix := strings.TrimPrefix(ing.Metadata.Name, testObjectName)
+		w, known := want[suffix]
+		if !known {
+			t.Errorf("an Ingress named %q has no expectation here; decide whether the error pages can stand behind it", ing.Metadata.Name)
+			continue
+		}
+		got, has := ing.Metadata.Annotations[scriptDefaultBackendKey]
+		switch {
+		case w.fits && got != scriptErrorPagesService:
+			t.Errorf("%s carries %s=%q, want %q (%s)", ing.Metadata.Name, scriptDefaultBackendKey, got, scriptErrorPagesService, w.why)
+		case !w.fits && has:
+			t.Errorf("%s carries %s=%q, but it must not (%s); the proxy would answer 502", ing.Metadata.Name, scriptDefaultBackendKey, got, w.why)
+		}
+		if _, ok := ing.Metadata.Annotations[scriptCustomErrorsKey]; ok {
+			t.Errorf("%s sets %s, which would replace the application's own error responses", ing.Metadata.Name, scriptCustomErrorsKey)
+		}
+	}
+}

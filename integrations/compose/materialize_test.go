@@ -34,6 +34,13 @@ type materializeEngine struct {
 	failFileReady  bool
 	fileReadyError string
 	afterFile      func()
+
+	// cachedCompositions is what THIS node's result cache still holds for a
+	// composition another replica has changed since: a compositionById read that
+	// is not fresh is answered from here when it names one. compositionReads
+	// records, for each compositionById, whether it asked for a fresh read.
+	cachedCompositions map[string]map[string]any
+	compositionReads   []bool
 }
 
 func newMaterializeEngine(t *testing.T) *materializeEngine {
@@ -85,8 +92,21 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 		maps.Copy(row, args)
 	case "compositionById", "compositionExecutionById":
 		row = e.compositions[stringOf(args["compositionId"])]
+		if name == "compositionById" {
+			fresh := memql.FreshReadFromContext(ctx)
+			e.compositionReads = append(e.compositionReads, fresh)
+			if cached, ok := e.cachedCompositions[stringOf(args["compositionId"])]; ok && !fresh {
+				row = cached
+			}
+		}
 	case "createLibraryFile":
+		// @serverOnly, as the engine holds it: blobUrl is a storage path the
+		// node's credential reads back, so an unstamped write is refused.
+		if auth.OriginFromContext(ctx) != auth.OriginInternal {
+			return nil, fmt.Errorf("missing internal origin")
+		}
 		row = maps.Clone(args)
+		row["ownerUserId"] = ac.UserId
 		e.files[stringOf(args["fileId"])] = row
 		if e.afterFile != nil {
 			e.afterFile()
@@ -181,10 +201,12 @@ type materializeUploader struct {
 	bytes []byte
 }
 
-func (u *materializeUploader) Upload(_ context.Context, _, name string, data []byte, _ string) (string, error) {
+func (u *materializeUploader) Upload(_ context.Context, container, name string, data []byte, _ string) (string, error) {
 	u.calls++
 	u.bytes = append([]byte(nil), data...)
-	return "https://storage.test/" + name, nil
+	// The shape the Azure client returns: account host, then container, then
+	// the object -- which is what the Library's key check reads.
+	return "https://storage.test/" + container + "/" + name, nil
 }
 func materializeContext() context.Context {
 	return auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u-alice", Role: auth.RoleWriter})
@@ -504,6 +526,41 @@ func TestMaterializeCancelRequestsItsWorkGoalToStop(t *testing.T) {
 		}
 	}
 	t.Fatal("composition cancellation never requested cancellation of its executing work run")
+}
+
+// A STOP IS DECIDED ON A FRESH READ. With two replicas the run that makes a file
+// usually finishes on the other one, and this node's cached copy of the
+// composition can still say `composing` after it is ready. Deciding on that copy
+// would mark a ready composition cancelled -- erasing that it made a file that is
+// still there -- and the person's client would report a stop for a file that
+// exists.
+func TestCancelDecidesOnAFreshReadOfTheComposition(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	e.compositions["c1"] = map[string]any{"compositionId": "c1", "status": "ready", "outputFileId": "f1", "goalId": "g1", "ownerUserId": "u-alice"}
+	e.cachedCompositions = map[string]map[string]any{"c1": {"compositionId": "c1", "status": "composing", "goalId": "g1", "ownerUserId": "u-alice"}}
+
+	nodes, err := i.handleCancel(materializeContext(), map[string]any{"compositionId": "c1", "reason": "Stopped by the person"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.compositionReads) != 1 || !e.compositionReads[0] {
+		t.Fatalf("the composition must be read once, fresh, before deciding the stop: %v", e.compositionReads)
+	}
+	var reply map[string]any
+	if len(nodes) != 1 || json.Unmarshal(nodes[0].Payload, &reply) != nil {
+		t.Fatalf("cancel answered %v", nodes)
+	}
+	if reply["cancelled"] != false || reply["status"] != "ready" {
+		t.Fatalf("a composition that had finished was reported as stopped: %v", reply)
+	}
+	if e.compositions["c1"]["status"] != "ready" {
+		t.Fatalf("a ready composition was marked %v", e.compositions["c1"]["status"])
+	}
+	for _, call := range e.calls {
+		if call == "updateCompositionState" || call == "cancelGoal" {
+			t.Fatalf("a finished composition was still stopped (%s): %v", call, e.calls)
+		}
+	}
 }
 
 func TestMaterializeReplayServesItsCompletedSourceRunFile(t *testing.T) {
@@ -864,17 +921,24 @@ func TestParseMaterializeArgsStripsAMatchingExtensionAndRefusesPaths(t *testing.
 		}
 	}
 
-	for _, name := range []string{"a\\b", "/etc/passwd", "folder/Plan.md"} {
-		if _, err := parseMaterializeArgs(map[string]any{"name": name, "format": "markdown"}); err == nil {
-			t.Fatalf("name %q carries a folder path and must be refused", name)
+	// A person reads these refusals where they typed the name (the OS shows the
+	// cluster's sentence beside the control), so each is exactly one sentence that
+	// says what to do, with no package name in front of it.
+	for _, name := range []string{"a\\b", "/etc/passwd", "folder/Plan.md", "Notes 10/11"} {
+		_, err := parseMaterializeArgs(map[string]any{"name": name, "format": "markdown"})
+		if err == nil || err.Error() != "Enter a name without slashes." {
+			t.Fatalf("name %q carries a slash: refusal = %v, want %q", name, err, "Enter a name without slashes.")
 		}
 	}
-	if _, err := parseMaterializeArgs(map[string]any{"name": "a/b", "format": "markdown"}); err == nil || !strings.Contains(err.Error(), "enter a file name without a folder path") {
-		t.Fatalf("the path refusal must say what to do: %v", err)
-	}
-	// Stripping must not turn a name into nothing.
-	if _, err := parseMaterializeArgs(map[string]any{"name": ".md", "format": "markdown"}); err == nil {
-		t.Fatal("a name that is only the extension has no stem and must be refused")
+	// Stripping must not turn a name into nothing, and a name that was nothing to
+	// begin with is the same refusal.
+	for _, tc := range []struct{ name, format string }{
+		{".md", "markdown"}, {".MARKDOWN", "markdown"}, {" .md ", "markdown"}, {".csv", "csv"}, {"", "markdown"}, {"   ", "txt"},
+	} {
+		_, err := parseMaterializeArgs(map[string]any{"name": tc.name, "format": tc.format})
+		if err == nil || err.Error() != "Enter a name for the file." {
+			t.Fatalf("name %q as %s has no stem: refusal = %v, want %q", tc.name, tc.format, err, "Enter a name for the file.")
+		}
 	}
 }
 
@@ -893,7 +957,9 @@ func TestParseMaterializeArgsReadsTheRequestId(t *testing.T) {
 // leave the identity of an in-run materialization exactly as it was: the
 // composition id of a step is derived from its arguments, so a field that
 // serialised as an empty string would give every step already in flight a new
-// id and file its output twice on the next replay.
+// id and file its output twice on the next replay. (A name that DOES end in its
+// format's extension is keyed by its cleaned stem, which re-keys such a step
+// once; parseMaterializeArgs says why that is accepted.)
 func TestMaterializeArgsWithoutARequestIdSerialiseAsBefore(t *testing.T) {
 	raw, err := json.Marshal(materializeDraft())
 	if err != nil {
@@ -1106,8 +1172,11 @@ func TestMaterializeCapabilityCleansTheNameBeforeFiling(t *testing.T) {
 	}
 
 	refused, refusedEngine, _ := materializeFixture(t)
-	if _, err := refused.handleMaterialize(nestedMaterializeContext(), map[string]any{"name": "notes/Plan", "format": "markdown"}, 0); err == nil {
-		t.Fatal("a name with a folder path was accepted")
+	if _, err := refused.handleMaterialize(nestedMaterializeContext(), map[string]any{"name": "notes/Plan", "format": "markdown"}, 0); err == nil || err.Error() != "Enter a name without slashes." {
+		t.Fatalf("a name with a slash: refusal = %v, want %q", err, "Enter a name without slashes.")
+	}
+	if _, err := refused.handleMaterialize(nestedMaterializeContext(), map[string]any{"name": ".md", "format": "markdown"}, 0); err == nil || err.Error() != "Enter a name for the file." {
+		t.Fatalf("a name that is only the extension: refusal = %v, want %q", err, "Enter a name for the file.")
 	}
 	if len(refusedEngine.calls) != 0 {
 		t.Fatalf("the refused name still reached the engine: %v", refusedEngine.calls)
@@ -1333,7 +1402,7 @@ func TestDescribedMarkdownKeepsCapturingOptedInReferences(t *testing.T) {
 	data := []byte("Launch notes: ship on the first Tuesday")
 	reader := &referenceReader{data: data}
 	i.SetSourceDownloader(reader)
-	e.files["reference-file"] = map[string]any{"name": "launch-notes.md", "blobUrl": "stored-object", "sha256": (pure.Result{Bytes: data}).SHA256()}
+	e.files["reference-file"] = map[string]any{"name": "launch-notes.md", "blobUrl": "library/u-alice/reference-file/launch-notes.md", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256()}
 	a := describedArgs()
 	a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference-file", Label: "Launch notes", Content: true}}
 	compositionId, input := acceptAsAPerson(t, i, a)
@@ -1490,9 +1559,11 @@ func TestDescribedMarkdownInsideARunStillUsesTheComposer(t *testing.T) {
 	}
 }
 
-// fromARun is the Library's own test for "a person is not making this call":
-// handleRequestDocumentRevision refuses when a run id is on the context.
-func TestFromARunIsTheConditionTheLibraryRefusesARevisionRequestFor(t *testing.T) {
+// fromARun is true for a context that names a run and for nothing else. That it
+// is the Library's own test for "a person is not making this call" is true by
+// construction (both read common.RunFromContext) and cannot be seen from here:
+// this package never calls the Library.
+func TestFromARunIsTrueOnlyForAContextThatNamesARun(t *testing.T) {
 	if fromARun(materializeContext()) {
 		t.Fatal("a call with no run on its context is a person's")
 	}
@@ -1501,7 +1572,76 @@ func TestFromARunIsTheConditionTheLibraryRefusesARevisionRequestFor(t *testing.T
 	}
 	noRunId := common.ContextWithRun(materializeContext(), common.RunContext{GoalId: "v1:work:goal:nexus", StepKey: "file", OwnerUserId: "u-alice"})
 	if fromARun(noRunId) {
-		t.Fatal("a run context with no run id is what the Library lets through, so it is a person's")
+		t.Fatal("a run context with no run id is a person's: the Library lets it through")
+	}
+	// A run with no goal is still a run: it is not nested (its composition has no
+	// goal to attach to) but the Library still refuses it, so there is still no
+	// client to hand a description on.
+	noGoal := common.ContextWithRun(materializeContext(), common.RunContext{RunId: "v1:work:run:orphan", StepKey: "file", OwnerUserId: "u-alice"})
+	if !fromARun(noGoal) {
+		t.Fatal("a run that names no goal is still a run, and not a person's")
+	}
+}
+
+// filedSize reads the size of a filed file's row, strictly: a row with no size,
+// or one that is not a whole number of bytes, is an error and not zero.
+// runCountOf answers 0 for all of those, which is right for a counter that starts
+// at nothing and wrong for a check that a file was sized at nothing.
+func filedSize(file map[string]any) (int, error) {
+	raw, ok := file["size"]
+	if !ok {
+		return 0, errors.New("the file row carries no size")
+	}
+	switch n := raw.(type) {
+	case int:
+		if n >= 0 {
+			return n, nil
+		}
+	case int64:
+		if n >= 0 {
+			return int(n), nil
+		}
+	case float64:
+		if n >= 0 && n == float64(int(n)) {
+			return int(n), nil
+		}
+	case json.Number:
+		if v, err := n.Int64(); err == nil && v >= 0 {
+			return int(v), nil
+		}
+	}
+	return 0, fmt.Errorf("the file row's size %v (%T) is not a whole number of bytes", raw, raw)
+}
+
+func TestFiledSizeIsReadStrictly(t *testing.T) {
+	for name, tc := range map[string]struct {
+		row  map[string]any
+		want int
+	}{
+		"zero as a decoded number": {map[string]any{"size": float64(0)}, 0},
+		"one as a decoded number":  {map[string]any{"size": float64(1)}, 1},
+		"an int":                   {map[string]any{"size": 7}, 7},
+		"an int64":                 {map[string]any{"size": int64(9)}, 9},
+		"a json number":            {map[string]any{"size": json.Number("12")}, 12},
+	} {
+		if got, err := filedSize(tc.row); err != nil || got != tc.want {
+			t.Errorf("%s: filedSize = %d, %v; want %d", name, got, err, tc.want)
+		}
+	}
+	for name, row := range map[string]map[string]any{
+		"no row at all":         nil,
+		"no size":               {"name": "Blank.txt"},
+		"a null size":           {"size": nil},
+		"a string":              {"size": "0"},
+		"a fraction":            {"size": 1.5},
+		"a negative number":     {"size": float64(-1)},
+		"a negative int":        {"size": -3},
+		"a bad json number":     {"size": json.Number("x")},
+		"a type it cannot read": {"size": []int{0}},
+	} {
+		if got, err := filedSize(row); err == nil {
+			t.Errorf("%s was read as %d; a size that is not there or not a number must be an error", name, got)
+		}
 	}
 }
 
@@ -1561,9 +1701,14 @@ func TestDescribedMarkdownMeansAStatementAndNothingToComposeFrom(t *testing.T) {
 // The Library lists a file by its summary, and "Materialized from no sources"
 // reads as a fault on a file that was never going to have any.
 func TestBlankAndDescribedFilesAreSummarisedAsCreatedBlank(t *testing.T) {
+	// Each request files exactly one file: a summary read off a file that was never
+	// filed, or off a second file that is not the one asked for, proves nothing.
 	i, e, _ := materializeFixture(t)
 	if _, err := i.materialize(nestedMaterializeContext(), "u-alice", "", blankArgs(pure.FormatMarkdown)); err != nil {
 		t.Fatal(err)
+	}
+	if len(e.files) != 1 {
+		t.Fatalf("a blank request filed %d files, want exactly one", len(e.files))
 	}
 	for _, f := range e.files {
 		if f["summary"] != "Created blank." {
@@ -1576,6 +1721,9 @@ func TestBlankAndDescribedFilesAreSummarisedAsCreatedBlank(t *testing.T) {
 	if err := adoptTheRun(anotherReplica(de, du, nil), input); err != nil {
 		t.Fatal(err)
 	}
+	if len(de.files) != 1 {
+		t.Fatalf("a described request filed %d files, want exactly one", len(de.files))
+	}
 	if f := de.files[stringOf(de.compositions[compositionId]["outputFileId"])]; f["summary"] != "Created blank." {
 		t.Fatalf("a described file's summary = %q, want Created blank.", f["summary"])
 	}
@@ -1584,6 +1732,9 @@ func TestBlankAndDescribedFilesAreSummarisedAsCreatedBlank(t *testing.T) {
 	ordinary, oe, _ := materializeFixture(t)
 	if _, err := ordinary.materialize(nestedMaterializeContext(), "u-alice", "", materializeDraft()); err != nil {
 		t.Fatal(err)
+	}
+	if len(oe.files) != 1 {
+		t.Fatalf("an ordinary request filed %d files, want exactly one", len(oe.files))
 	}
 	for _, f := range oe.files {
 		if f["summary"] != "Materialized from no sources." {

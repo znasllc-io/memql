@@ -129,7 +129,7 @@ func testHistoryBranchesAcrossReplicas(t *testing.T, f *revisionDB) {
 
 func testHistoryForkReadsOwnedFileBytes(t *testing.T, f *revisionDB) {
 	fileID := f.owner + "-imported"
-	f.query(f.engine, f.ctx, "mutation", "createLibraryFile", map[string]any{"fileId": fileID, "name": "Imported.md", "mimeType": "text/markdown", "size": 19, "blobUrl": "https://store.example/imported.md", "source": "uploaded", "format": "markdown"})
+	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "createLibraryFile", map[string]any{"fileId": fileID, "name": "Imported.md", "mimeType": "text/markdown", "size": 19, "blobUrl": "https://store.example/memql-library/library/" + f.owner + "/" + fileID + "/Imported.md", "source": "uploaded", "format": "markdown"})
 	artifact := f.query(f.engine, f.ctx, "mutation", "createArtifact", map[string]any{"sourceConceptRef": fileID, "ownerUserId": f.owner, "lens": "artifact", "kind": "file", "source": "uploaded", "title": "Imported.md", "format": "markdown"})[0]
 	fetcher := &fakeBlobStreamer{data: []byte("# Imported\n\nKeep me.\n")}
 	f.second.SetBlobFetcher(fetcher)

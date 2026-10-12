@@ -209,3 +209,63 @@ func TestFederationExchangeSeriesExistFromBoot(t *testing.T) {
 		}
 	}
 }
+
+// TestStatusHistoryVersionsPurgedCountsPerConcept pins what the purge's counter
+// promises an operator: each concept is counted on its own, and a batch that
+// removed nothing is not a sample.
+func TestStatusHistoryVersionsPurgedCountsPerConcept(t *testing.T) {
+	registration, clusterNode := "v1:worker:registration", "v1:cluster:node"
+	beforeRegistration := StatusHistoryVersionsPurgedValue(registration)
+	beforeNode := StatusHistoryVersionsPurgedValue(clusterNode)
+
+	StatusHistoryVersionsPurged(registration, 500)
+	StatusHistoryVersionsPurged(registration, 12)
+	StatusHistoryVersionsPurged(clusterNode, 3)
+	// Nothing removed is not a sample, and a counter can never go down: Add
+	// panics on a negative, so the recorder must never pass one through.
+	StatusHistoryVersionsPurged(clusterNode, 0)
+	StatusHistoryVersionsPurged(clusterNode, -4)
+
+	if got := StatusHistoryVersionsPurgedValue(registration) - beforeRegistration; got != 512 {
+		t.Fatalf("registration counted %v versions, want 512", got)
+	}
+	if got := StatusHistoryVersionsPurgedValue(clusterNode) - beforeNode; got != 3 {
+		t.Fatalf("cluster node counted %v versions, want 3 (zero and negative are not samples)", got)
+	}
+}
+
+// TestStatusHistorySeriesExistFromBoot: the Help string tells an operator to
+// alert on this counter going quiet, and a rule over a series that does not
+// exist yet evaluates to no data rather than to zero -- the state of a purge
+// that has never run. So every concept is exported at 0 before it is first used.
+func TestStatusHistorySeriesExistFromBoot(t *testing.T) {
+	mfs, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	var seen []string
+	for _, mf := range mfs {
+		if mf.GetName() != "memql_status_history_versions_purged_total" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "concept" {
+					seen = append(seen, l.GetValue())
+				}
+			}
+		}
+	}
+	for _, want := range StatusHistoryConcepts() {
+		found := false
+		for _, got := range seen {
+			found = found || got == want
+		}
+		if !found {
+			t.Errorf("no series for concept %q at boot; exported %v", want, seen)
+		}
+	}
+	if len(seen) != len(StatusHistoryConcepts()) {
+		t.Errorf("exported concepts %v, want exactly %v", seen, StatusHistoryConcepts())
+	}
+}

@@ -513,10 +513,10 @@ func TestComputedLengthsAreRounded(t *testing.T) {
 		{"heading line height from 28", Block{Type: "heading", Text: "x"}, []string{"line-height:30.8px;mso-line-height-alt:30.8px"}},
 		{"heading line height from 26.7", Block{Type: "heading", Text: "x", Size: 26.7}, []string{"line-height:29.37px;mso-line-height-alt:29.37px"}},
 		{"heading line height from 37.3", Block{Type: "heading", Text: "x", Size: 37.3}, []string{"line-height:41.03px;"}},
-		{"highlight line height from 18", Block{Type: "highlight", Text: "x"}, []string{"line-height:9px;mso-line-height-alt:9px"}},
+		{"highlight line height from 18", Block{Type: "highlight", Text: "x"}, []string{"line-height:25.2px;mso-line-height-alt:25.2px"}},
 		{"a list's line height is the text's", Block{Type: "text", Text: "- x", LineHeight: 30}, []string{"line-height:30px;mso-line-height-alt:30px;font-size:0"}},
 		{"a list's own line height", Block{Type: "text", Text: "x\n\n- y", LineHeight: 30, ListLineHeight: 17.64}, []string{"line-height:30px;mso-line-height-alt:30px\">x<", "line-height:17.64px;mso-line-height-alt:17.64px;font-size:0"}},
-		{"highlight line height from 17.35", Block{Type: "highlight", Text: "x", Size: 17.35}, []string{"line-height:8.68px;"}},
+		{"highlight line height from 17.35", Block{Type: "highlight", Text: "x", Size: 17.35}, []string{"line-height:24.29px;"}},
 		{"button 20", Block{Type: "button", Label: "x", Href: "https://example.com"}, []string{"height:50px;width:300px;", "border-radius:25px;", "line-height:28px;"}},
 		{"button 20.2", Block{Type: "button", Label: "x", Href: "https://example.com", Size: 20.2}, []string{"height:51px;width:300px;", "border-radius:25px;", "line-height:28.3px;"}},
 		{"button 21.1 with 12 above and below", Block{Type: "button", Label: "x", Href: "https://example.com", Size: 21.1, PaddingY: 12, Width: 316}, []string{"height:54px;width:316px;", "border-radius:26px;", "line-height:29.5px;", "padding-top:12px;padding-bottom:12px;"}},
@@ -535,6 +535,39 @@ func TestComputedLengthsAreRounded(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A highlight that names no line height has to be legible when it wraps. Its
+// text is a span on the highlight colour, and a span's background fills the
+// font's whole content area, about 1.15 times its size in common fonts and up
+// to 1.2 in others. A line height under that draws a wrapped statement over
+// itself: the default was half the size, and a statement of two lines on a
+// phone was one line written across the other. The built-in layouts name their
+// own line heights (TestBuiltinHighlightsLeaveRoomForTheirLines); this is the
+// floor for every highlight that does not.
+func TestHighlightDefaultLineHeightLeavesRoomForItsLines(t *testing.T) {
+	for _, size := range []float64{0, 10, 12, 14.5, 17.35, 18, 24, 40, 64} {
+		b := Block{ID: "h", Type: "highlight", Text: "x", Size: size}
+		r, err := Render(context.Background(), oneBlock(b), nil, RenderOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := regexp.MustCompile(`line-height:([0-9.]+)px;mso-line-height-alt:([0-9.]+)px`).FindStringSubmatch(r.HTML)
+		if m == nil {
+			t.Fatalf("size %g: no line height in the highlight:\n%s", size, r.HTML)
+		}
+		got, err := strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shown := highlightSize(b)
+		if got < 1.2*shown {
+			t.Errorf("size %g: a default line height of %gpx is under 1.2 times the text (%.2fpx), so wrapped lines draw over each other", size, got, 1.2*shown)
+		}
+		if m[1] != m[2] {
+			t.Errorf("size %g: Outlook's line height %spx differs from %spx", size, m[2], m[1])
+		}
 	}
 }
 
@@ -945,6 +978,83 @@ func TestRenderReturnsAnErrorOnlyForACancelledContext(t *testing.T) {
 	}), RenderOptions{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("custom, cancelled during a read: %v", err)
 	}
+}
+
+// A reader that will read no more pictures says so with ErrTooManyPictures, and
+// the email is told it has too many pictures (once), not that a picture could
+// not be read: the picture is fine, and the way on is to use fewer.
+func TestRenderReportsPicturesAReaderWillNotReadAsTooMany(t *testing.T) {
+	reads := map[string]int{}
+	reader := resolverFunc(func(_ context.Context, id string) (Image, error) {
+		reads[id]++
+		if id == "a1" {
+			return pngImage(t, 2, 2), nil
+		}
+		// Wrapped, as a reader that says more than the bare sentence would.
+		return Image{}, fmt.Errorf("a preview reads nine pictures: %w", ErrTooManyPictures)
+	})
+	t.Run("a layout", func(t *testing.T) {
+		clear(reads)
+		d := oneBlock(Block{ID: "p1", Type: "image", Src: "artifact:a1", Width: 10})
+		d.Blocks = append([]Block{
+			{ID: "p2", Type: "image", Src: "artifact:b2", Width: 10, Alt: "Two"},
+			{ID: "p3", Type: "image", Src: "artifact:b3", Width: 10},
+			{ID: "p4", Type: "image", Src: "artifact:b2", Width: 10},
+		}, d.Blocks...)
+		r := mustRender(t, d, reader, RenderOptions{})
+		if n := countIssues(r.Issues, IssueImagesLimit); n != 1 {
+			t.Errorf("images_limit said %d times, want once: %+v", n, r.Issues)
+		}
+		if hasIssue(r.Issues, IssueImageUnavailable) {
+			t.Errorf("a picture that was not read is reported as one that could not be: %+v", r.Issues)
+		}
+		for _, issue := range r.Issues {
+			if issue.Code == IssueImagesLimit && issue.Message != picturesOverBudget {
+				t.Errorf("message = %q, want %q", issue.Message, picturesOverBudget)
+			}
+		}
+		if n := strings.Count(r.HTML, "data:image/png"); n != 1 {
+			t.Errorf("%d pictures embedded, want only the one that was read", n)
+		}
+		// Each is asked for once, however often it is used.
+		if reads["a1"] != 1 || reads["b2"] != 1 || reads["b3"] != 1 {
+			t.Errorf("reads: %v", reads)
+		}
+	})
+	t.Run("custom HTML", func(t *testing.T) {
+		clear(reads)
+		d := Document{Subject: "x", TextBody: "x", HTMLBody: `<img src="artifact:b2" alt="Two"><img src="artifact:a1"><img src="artifact:b3"><img src="artifact:b2">`}
+		r := mustRender(t, d, reader, RenderOptions{})
+		if n := countIssues(r.Issues, IssueImagesLimit); n != 1 || hasIssue(r.Issues, IssueImageUnavailable) {
+			t.Errorf("issues: %+v", r.Issues)
+		}
+		// The ones not read stay as they were written, and the one read is embedded.
+		if n := strings.Count(r.HTML, "data:image/png"); n != 1 || strings.Count(r.HTML, "artifact:b2") != 2 {
+			t.Errorf("HTML: %s", r.HTML)
+		}
+		if reads["b2"] != 1 {
+			t.Errorf("reads: %v", reads)
+		}
+	})
+	t.Run("a render that is cancelled is cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		cancelling := resolverFunc(func(context.Context, string) (Image, error) {
+			cancel()
+			return Image{}, ErrTooManyPictures
+		})
+		if _, err := Render(ctx, oneBlock(Block{ID: "p", Type: "image", Src: "artifact:z", Width: 10}), cancelling, RenderOptions{}); !errors.Is(err, context.Canceled) {
+			t.Errorf("got %v", err)
+		}
+	})
+	t.Run("only the sentence of this error", func(t *testing.T) {
+		// Any other error is a picture that could not be read.
+		other := resolverFunc(func(context.Context, string) (Image, error) { return Image{}, errors.New("too many requests") })
+		r := mustRender(t, oneBlock(Block{ID: "p", Type: "image", Src: "artifact:z", Width: 10}), other, RenderOptions{})
+		if !hasIssue(r.Issues, IssueImageUnavailable) || hasIssue(r.Issues, IssueImagesLimit) {
+			t.Errorf("issues: %+v", r.Issues)
+		}
+	})
 }
 
 func TestEachPictureIsReadOnce(t *testing.T) {

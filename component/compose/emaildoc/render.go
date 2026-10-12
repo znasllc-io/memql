@@ -66,7 +66,11 @@ var ErrTooLarge = errors.New("this email is larger than 8 MiB once it is written
 // refuses more, and compose.ExtractEmailImages applies it to every email.
 const sendLimit = 2 << 20
 
-const tooLargeMessage = "This email is larger than 2 MiB once its pictures are embedded. Use fewer or smaller pictures."
+// TooLargeMessage is the sentence for an email that is more than sending takes
+// (IssueEmailTooLarge). It is exported because the same words are owed wherever
+// such an email is turned away: a template that stores no HTML for it, and a
+// test send that has none to send, say it as the editor did.
+const TooLargeMessage = "This email is larger than 2 MiB once its pictures are embedded. Use fewer or smaller pictures."
 
 // Render writes a document as an email: its HTML part, its plain-text part,
 // its subject with sample values in it, and the issues that keep it from being
@@ -198,7 +202,7 @@ func (r *renderer) issue(code, block, message string) {
 func (r *renderer) tooLargeToSend() {
 	if !r.tooBig {
 		r.tooBig = true
-		r.issue(IssueEmailTooLarge, "", tooLargeMessage)
+		r.issue(IssueEmailTooLarge, "", TooLargeMessage)
 	}
 }
 

@@ -3388,6 +3388,58 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	return b.String()
 }
 
+// EmailLayoutById -- One email layout by id, for the organization's members. Backs the revision check campaignSaveLayout makes and the editors that open a saved layout. The id is not a capability: the concept's account tier answers a layout outside the caller's organizations as not found.
+//
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutById"] in generated_concepts.go).
+type EmailLayoutByIdArgs struct {
+	LayoutId string
+}
+
+// EmailLayoutById calls the engine query emailLayoutById.
+func (qc *QueryClient) EmailLayoutById(ctx context.Context, args EmailLayoutByIdArgs) (*Result, error) {
+	call := EmailLayoutByIdBuild(args)
+	return qc.executeNamed(ctx, "emailLayoutById", call)
+}
+
+func EmailLayoutByIdBuild(args EmailLayoutByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailLayoutById(")
+	b.WriteString("layoutId: ")
+	b.WriteString(quoteMemQL(args.LayoutId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// EmailLayoutsForAccount -- An organization's email layouts, newest first. Backs the layout picker (through the emailLayouts builtin) and the Email app's Templates section. status narrows to active or archived layouts; omit it to see both.
+//
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutsForAccount"] in generated_concepts.go).
+type EmailLayoutsForAccountArgs struct {
+	AccountId string
+	Status    string
+}
+
+// EmailLayoutsForAccount calls the engine query emailLayoutsForAccount.
+func (qc *QueryClient) EmailLayoutsForAccount(ctx context.Context, args EmailLayoutsForAccountArgs) (*Result, error) {
+	call := EmailLayoutsForAccountBuild(args)
+	return qc.executeNamed(ctx, "emailLayoutsForAccount", call)
+}
+
+func EmailLayoutsForAccountBuild(args EmailLayoutsForAccountArgs) string {
+	var b strings.Builder
+	b.WriteString("query emailLayoutsForAccount(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if args.Status != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // EmailRuleById -- One event-email rule by id.
 //
 // Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRuleById"] in generated_concepts.go).
@@ -12381,7 +12433,35 @@ func TemplateByIdBuild(args TemplateByIdArgs) string {
 	return b.String()
 }
 
-// Templates -- The caller's templates, newest first. Backs the template list and the campaign editor's template picker. Owned.
+// TemplateForSource -- The template an organization published from one Library file, for campaignSaveTemplate and the editors that open a file: publishing a file again updates this template, so there is one per organization and file. It answers the template's id and its revision (createdAt) and nothing of its content, which templateById reads. Newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers a template outside the caller's organizations as not found, so the file id is not a way into somebody else's templates. Owned.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateForSource"] in generated_concepts.go).
+type TemplateForSourceArgs struct {
+	AccountId        string
+	SourceArtifactId string
+}
+
+// TemplateForSource calls the engine query templateForSource.
+func (qc *QueryClient) TemplateForSource(ctx context.Context, args TemplateForSourceArgs) (*Result, error) {
+	call := TemplateForSourceBuild(args)
+	return qc.executeNamed(ctx, "templateForSource", call)
+}
+
+func TemplateForSourceBuild(args TemplateForSourceArgs) string {
+	var b strings.Builder
+	b.WriteString("query templateForSource(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sourceArtifactId: ")
+	b.WriteString(quoteMemQL(args.SourceArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// Templates -- The caller's templates, newest first, as summaries: no body and no document. Backs the template list and the campaign editor's template picker; a template's content is read with templateById. Owned.
 //
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templates"] in generated_concepts.go).
 type TemplatesArgs struct {
@@ -13260,6 +13340,45 @@ func (qc *QueryClient) WorkRunForOwner(ctx context.Context, args WorkRunForOwner
 func WorkRunForOwnerBuild(args WorkRunForOwnerArgs) string {
 	var b strings.Builder
 	b.WriteString("query workRunForOwner(")
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// WorkRunSummariesForOwner -- The caller's run navigation, in small pages. No execution payloads: long document work otherwise makes a single list response exceed the transport ceiling. This is a projection of the same owner-scoped history, not a template-specific subset. Clients follow its cursor to keep older runs.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummariesForOwner"] in generated_concepts.go).
+type WorkRunSummariesForOwnerArgs struct {
+}
+
+// WorkRunSummariesForOwner calls the engine query workRunSummariesForOwner.
+func (qc *QueryClient) WorkRunSummariesForOwner(ctx context.Context, args WorkRunSummariesForOwnerArgs) (*Result, error) {
+	call := WorkRunSummariesForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workRunSummariesForOwner", call)
+}
+
+func WorkRunSummariesForOwnerBuild(args WorkRunSummariesForOwnerArgs) string {
+	_ = args
+	return "query workRunSummariesForOwner()"
+}
+
+// WorkRunSummaryForOwner -- The same projection for live updates. Never fold a full CDC payload into a summary feed: that would gradually restore the retained execution data.
+//
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummaryForOwner"] in generated_concepts.go).
+type WorkRunSummaryForOwnerArgs struct {
+	RunId string
+}
+
+// WorkRunSummaryForOwner calls the engine query workRunSummaryForOwner.
+func (qc *QueryClient) WorkRunSummaryForOwner(ctx context.Context, args WorkRunSummaryForOwnerArgs) (*Result, error) {
+	call := WorkRunSummaryForOwnerBuild(args)
+	return qc.executeNamed(ctx, "workRunSummaryForOwner", call)
+}
+
+func WorkRunSummaryForOwnerBuild(args WorkRunSummaryForOwnerArgs) string {
+	var b strings.Builder
+	b.WriteString("query workRunSummaryForOwner(")
 	b.WriteString("runId: ")
 	b.WriteString(quoteMemQL(args.RunId))
 	b.WriteString(")")

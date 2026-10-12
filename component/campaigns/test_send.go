@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -72,6 +73,10 @@ const testSendSubjectPrefix = "[Test] "
 // is what tells an operator the greeting is personalized at all.
 const testSendDisplayName = "Test Recipient"
 
+// errDraftTooLargeToSend is the sentence the editor showed for the email when it
+// was saved (emaildoc.IssueEmailTooLarge).
+var errDraftTooLargeToSend = errors.New(emaildoc.TooLargeMessage)
+
 func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	campaignID := memql.BareShortId(strings.TrimSpace(argString(args, "campaignId")))
 	if campaignID == "" {
@@ -120,6 +125,14 @@ func (w *Worker) handleTestSend(ctx context.Context, args map[string]any, _ int)
 	// is what stops half-written copy reaching an audience; a test send to
 	// one address is how the copy gets finished, so requiring `ready` here
 	// would forbid the one use the feature exists for.
+	//
+	// A draft too large to send is the one draft refused, and for what it
+	// lacks: it keeps its document and no HTML, and renderMessage writes an
+	// HTML part only when there is HTML, so the message would go out as plain
+	// text and look like a test of the email.
+	if tmpl.lacksItsHTML() {
+		return nil, errDraftTooLargeToSend
+	}
 
 	identity, refusal := w.resolveSendIdentity(ctx, campaign)
 	if refusal.refused() {

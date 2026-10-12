@@ -616,6 +616,11 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 		case isHumanWait(err):
 			// The feedback capability parked the shared run before returning.
 			// Do not overwrite it: another replica may already have its answer.
+			// A held run (a scheduled firing whose question reached the observer
+			// as no write) opens here, so the run, its steps and the waiting
+			// receipt the answer resumes from are on file; nothing closes it. A
+			// no-op on a journal that is not held, as in closeRun.
+			journal.release()
 			exec.Status, exec.ErrorValue = "waiting", err
 			exec.Duration = time.Since(exec.StartedAt)
 			return exec, err

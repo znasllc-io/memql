@@ -1,6 +1,6 @@
 import { useAccountOptions } from "../accounts/tie";
 import { recipeFacts } from "./actions";
-import { rowNumber, rowString, sameEntityId } from "@znasllc-io/memql-sdk-core/client";
+import { refusalSentence, rowNumber, rowString, sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 import { useAuthSource } from "../../auth/context";
 import { useOsConnection } from "../../live/connection";
 import { MATERIALIZER_COMPOSE_SECTION, readComposeIntent, type ComposeSetup } from "../../items/materialize";
@@ -132,7 +132,8 @@ export function MaterializerApp({
       download: file => downloadArtifact({ artifactId: file.artifactId!, name: file.name, fileId,
         readFile: async () => file, bearer: () => authSource.bearer() }),
     }).then(cancel => { cancelHandoff.current = cancel; })
-      .catch((error: unknown) => setOpenError(error instanceof Error ? error.message : "The file could not be opened."));
+      // A refusal of one of the reads is shown as the cluster's sentence alone.
+      .catch((error: unknown) => setOpenError(error instanceof Error ? refusalSentence(error) : "The file could not be opened."));
   };
 
   const [openCompositionId, setOpenCompositionId] = useState("");
@@ -182,6 +183,9 @@ export function MaterializerApp({
       ? appById(os.registry, returnFor.appId)?.name
       : undefined;
   const description = open !== null ? descriptions.find((outcome) => sameEntityId(outcome.compositionId, open.id)) : undefined;
+  // Whether this window asked for the open file by describing it: it then knows
+  // more than the row does about what the file is (see madeCaption).
+  const describedHere = open !== null && materialize.described.some((file) => sameEntityId(file.compositionId, open.id));
 
   function openComposition(id: string) {
     if (id.trim() === "") return;
@@ -198,11 +202,10 @@ export function MaterializerApp({
   const handled = useRef("");
   useEffect(() => {
     if (intent === undefined || intent.id === handled.current) return;
-    const raw = intent.payload["compositionId"];
-    const compositionId = typeof raw === "string" ? raw : "";
-    if (compositionId === "") {
-      const start = readComposeIntent(intent.payload);
-      if (start === null) return;
+    const asked = instructionFor(intent.payload);
+    if (asked === null) return;
+    if ("setup" in asked) {
+      const start = asked.setup;
       handled.current = intent.id;
       // A new file, from a form with nothing open on it -- and not the trip
       // that began with an earlier one.
@@ -214,7 +217,7 @@ export function MaterializerApp({
       return;
     }
     handled.current = intent.id;
-    setOpenCompositionId(compositionId);
+    setOpenCompositionId(asked.compositionId);
     // The section the opener asked for is respected: a Files row's "open
     // in Materializer" wants the composer, and a link into the list wants
     // the list. Defaulting to one would move somebody who said where they
@@ -242,10 +245,12 @@ export function MaterializerApp({
     // A WINDOW OPENED FOR AN INSTRUCTION WAS OPENED WHERE ITS SENDER ASKED. The
     // preference is for a window nobody asked anything of, and by section alone
     // the two cannot be told apart: Compose is both the shell's default and the
-    // one a sender names. So a pending intent is the sender speaking, and it wins
-    // -- otherwise this runs after the intent's own navigation and moves the
-    // window off the section it was sent to.
-    if (intent !== undefined) return;
+    // one a sender names. So a pending instruction THIS APP ACTS ON is the sender
+    // speaking, and it wins -- otherwise this runs after the instruction's own
+    // navigation and moves the window off the section it was sent to. One it
+    // leaves standing (addressed to something else) moved nothing, and the
+    // window opens where the person prefers.
+    if (intent !== undefined && instructionFor(intent.payload) !== null) return;
     const shellDefault = MATERIALIZER_SECTIONS[0]?.id ?? "";
     if (sectionId !== shellDefault) return;
     if (settings.defaultSection && settings.defaultSection !== sectionId) {
@@ -321,6 +326,7 @@ export function MaterializerApp({
       onApplied={(applied) => setSetup((now) => (now === applied ? null : now))}
       backTo={backTo}
       description={description}
+      describedHere={describedHere}
       onNewComposition={() => {
         setOpenCompositionId("");
         setReturnFor(null);
@@ -379,6 +385,20 @@ export function MaterializerApp({
       }}
     />
   );
+}
+
+/**
+ * What a standing instruction asks of this app: a composition to open, a setup
+ * to compose from, or null for anything else -- which is left standing for
+ * whatever it was meant for, and moves nobody's window. The intent effect and
+ * the default-section preference ask the same question here.
+ */
+function instructionFor(payload: Record<string, unknown>): { compositionId: string } | { setup: ComposeSetup } | null {
+  const raw = payload["compositionId"];
+  const compositionId = typeof raw === "string" ? raw : "";
+  if (compositionId !== "") return { compositionId };
+  const setup = readComposeIntent(payload);
+  return setup === null ? null : { setup };
 }
 
 /** The tail of a canonical id, for comparing a bare id against a stored one. */

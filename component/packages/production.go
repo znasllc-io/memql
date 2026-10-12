@@ -16,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/edge"
 	"github.com/znasllc-io/memql/component/identity/githubapp"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/librarykey"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
@@ -159,6 +160,20 @@ func (s *store) artifactBytes(ctx context.Context, artifactId string, read blobR
 	key := storageKey(rowString(file, "blobUrl"))
 	if key == "" {
 		return nil, "", refuse(CodeSourceUnreadable, "file %q records no storage location", fileId)
+	}
+	// The row is the caller's; the KEY must be its owner's too. The read uses
+	// the node's storage credential, so a row naming somebody else's object
+	// (one a client wrote before createLibraryFile was @serverOnly) would deploy
+	// their source as the caller's. Judged the way blobReader.read opens it: a
+	// URL as the storage client parses one, anything else as the exact key.
+	var keyErr error
+	if owner := rowString(file, "ownerUserId"); strings.HasPrefix(key, "http://") || strings.HasPrefix(key, "https://") {
+		keyErr = librarykey.Check(key, owner, "")
+	} else {
+		keyErr = librarykey.CheckKey(key, owner)
+	}
+	if keyErr != nil {
+		return nil, "", refuse(CodeSourceUnreadable, "file %q is not stored in its owner's Library", fileId)
 	}
 	if read == nil {
 		return nil, "", refuse(CodeSourceUnreadable, "this node cannot read object storage, so a Library zip cannot be deployed from here")

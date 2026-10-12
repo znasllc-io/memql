@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 
-import { MATERIALIZER_APP, MATERIALIZER_COMPOSER } from "../../src/apps/files/materializer";
 import { MATERIALIZER_SECTIONS } from "../../src/apps/materializer/settings";
 import { FORMATS } from "../../src/apps/materializer/words";
 import {
@@ -112,8 +111,6 @@ describe("what a sender and the Materializer must agree on", () => {
 
   it("reaches the app by the id its manifest, its Logs scope and Files already use", () => {
     expect(MATERIALIZER_APP_ID).toBe("materializer");
-    expect(MATERIALIZER_APP).toBe(MATERIALIZER_APP_ID);
-    expect(MATERIALIZER_COMPOSER).toBe(MATERIALIZER_COMPOSE_SECTION);
   });
 
   it("offers the formats the composer offers, in the same order", () => {

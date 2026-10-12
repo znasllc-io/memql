@@ -262,8 +262,10 @@ automation reviseLibraryDocument {
  })
  // Research and image acquisition are independent: factual corrections can
  // also request new portraits. Neither decision may suppress the other.
+ // Acquisition intent needs human direction, not the old document or lengthy
+ // reference drafts. Supplied images may satisfy only part of a mixed request.
  imageIntent := builtin ai(templateId: "libraryRevisionImageIntent", data: {
-  passages: captured.passagesJSON, references: references.references,
+  passages: captured.passages.select(p => {comments: p.comments}),
   instruction: captured.amendment.instruction ?? captured.instruction
  })
  // Keep the app receipt at evidence.app/report so retries across replicas
@@ -362,9 +364,30 @@ automation reviseLibraryDocument {
     passages: captured.passagesJSON, instruction: captured.amendment.instruction ?? captured.instruction,
     references: references.references, evidence: combinedEvidence, previous: imagePlan.reply
    })
-   imageSpecs := builtin libraryRevisionImagePlan(response: repairedImagePlan.reply)
+   initialImageSpecs := builtin libraryRevisionImagePlan(response: repairedImagePlan.reply)
+   initialImagePlan := repairedImagePlan.reply
   } else {
-   imageSpecs := validatedImageSpecs
+   initialImageSpecs := validatedImageSpecs
+   initialImagePlan := imagePlan.reply
+  }
+  if trim(initialImageSpecs.limitations) != "" {
+   // A valid plan may still omit requested assets. Recover the missing source
+   // evidence once, before acquiring a partial batch or asking a prose model
+   // to repair an omission it cannot resolve without image tools.
+   missingImageEvidence := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
+    imageSourceOnly: true, document: "", passages: "[]", priorEvidence: [combinedEvidence],
+    gaps: "Research ONLY these missing image requirements: " + initialImageSpecs.limitations + ". Retrieve the exact direct raster URL, its associated source record, subject, attribution and reuse terms. Follow actual links; do not guess paths or bypass access restrictions. Preserve completed research and sources for other images. Return the missing source evidence, not a document draft."
+   })
+   completedImagePlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: imageSchema, data: {
+    passages: captured.passagesJSON, references: references.references, instruction: captured.amendment.instruction ?? captured.instruction,
+    evidence: combinedEvidence + "\nMissing image source research:\n" + missingImageEvidence.reply, previous: initialImagePlan, gaps: initialImageSpecs.limitations
+   })
+   imageSpecs := builtin libraryRevisionImagePlan(response: completedImagePlan.reply)
+   if trim(imageSpecs.limitations) != "" {
+    return error("image evidence incomplete: " + imageSpecs.limitations)
+   }
+  } else {
+   imageSpecs := initialImageSpecs
   }
   for imageSpec in imageSpecs.images {
    acquired := builtin libraryPrepareRevisionImage(requestId: args.requestId, specification: imageSpec, level: "fast", width: 512, height: 512, reportSourceFailure: true)
@@ -372,9 +395,8 @@ automation reviseLibraryDocument {
     // A remote 403, catalog page or unusable raster is not a MemQL permission
     // failure. Research one replacement; never repeat a known-bad URL blindly.
     replacementEvidence := builtin runAgentTurn(templateId: "libraryRevisionResearch", data: {
-     document: "", passages: "[]", references: references.references, priorEvidence: [combinedEvidence],
-     instruction: "Find a usable openly licensed or public-domain raster source for ONLY this requested image: " + (imageSpec.alt + "; filename: " + imageSpec.name + "; failed URL: " + imageSpec.url + "; previous source page: " + imageSpec.sourceURL),
-     gaps: "The attempted acquisition failed: " + acquired.problem + ". Retrieve an accessible source page and its exact direct raster URL, attribution and reuse terms. A catalog page is not an image URL. Follow actual links; do not guess paths. Do not generate an illustration or repeat the failed URL. Return only the source evidence for this one image."
+     imageSourceOnly: true, document: "", passages: "[]", priorEvidence: [combinedEvidence],
+     gaps: "Find a usable openly licensed or public-domain raster source for ONLY this requested image: " + (imageSpec.alt + "; filename: " + imageSpec.name + "; failed URL: " + imageSpec.url + "; previous source page: " + imageSpec.sourceURL) + ". The attempted acquisition failed: " + acquired.problem + ". Retrieve an accessible source page and its exact direct raster URL, attribution and reuse terms. A catalog page is not an image URL. Follow actual links; do not guess paths. Do not generate an illustration or repeat the failed URL. Return only the source evidence for this one image."
     })
     replacementPlan := builtin ai(templateId: "libraryRevisionImagePlan", responseSchema: imageSchema, data: {
      passages: "[]", references: references.references, instruction: "Return exactly one import replacing this failed source for the same subject, using only the newly retrieved evidence: " + (imageSpec.alt + "; filename: " + imageSpec.name + "; failed URL: " + imageSpec.url + "; previous source page: " + imageSpec.sourceURL), evidence: replacementEvidence.reply

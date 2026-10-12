@@ -37,6 +37,8 @@ package emaildoc
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"strconv"
 )
 
 // Limits of a document.
@@ -51,6 +53,11 @@ const (
 	// inside a section or a column.
 	MaxBlocks = 300
 )
+
+// ErrFileTooLarge is what Parse returns for a file of more than MaxBytes. It is
+// a value so that a caller who measures a document before it hands it to Parse,
+// to spend nothing on one that is too large, says the same sentence.
+var ErrFileTooLarge = errors.New("This email file is larger than " + strconv.Itoa(MaxBytes>>20) + " MiB. Use fewer or smaller pictures.")
 
 // The link merge tags. A link may be exactly one of these (they are replaced
 // with a per-recipient address when the email is sent) and no other merge tag

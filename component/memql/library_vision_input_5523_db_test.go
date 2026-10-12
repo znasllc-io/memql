@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // library_vision_input_5523_db_test.go -- the LIFECYCLE of a staged vision
@@ -71,7 +73,7 @@ func TestAStagedVisionInputIsWritablePromotableAndArchivable(t *testing.T) {
 	// (1) THE FILE. createLibraryFile's own `source` arg has to accept the
 	// value -- the arg enum and the concept enum are two declarations, and
 	// only one of them is what a write is validated against.
-	runMutation(t, ctx, eng, "createLibraryFile", visionInputFileArgs(fileId, owner))
+	runMutation(t, auth.ContextWithInternalOrigin(ctx), eng, "createLibraryFile", visionInputFileArgs(fileId, owner))
 
 	res, err := eng.Execute(ctx, fmt.Sprintf(`libraryFileById(fileId: "%s")`, fileId))
 	if err != nil {
@@ -198,7 +200,7 @@ func TestAnOrdinaryLibraryFileStaysVisible(t *testing.T) {
 
 	args := visionInputFileArgs(fileId, owner)
 	args["source"] = "uploaded"
-	runMutation(t, ctx, eng, "createLibraryFile", args)
+	runMutation(t, auth.ContextWithInternalOrigin(ctx), eng, "createLibraryFile", args)
 	artifactId := runMutation(t, ctx, eng, "createArtifact", map[string]any{
 		"sourceConceptRef": "v1:library:file:" + fileId,
 		"ownerUserId":      owner,

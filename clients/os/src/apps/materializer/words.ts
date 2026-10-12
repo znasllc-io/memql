@@ -186,8 +186,12 @@ export function modelsPhrase(models: ModelRow[]): string {
 }
 
 /**
- * The provenance claim, as the one sentence the Composer and the record
- * panel both render.
+ * The provenance claim the format alone can make, for a record that carries no
+ * sentence of its own: the chain renders the record's `provenanceNote` when it
+ * has one, because only the stamp step knows which branch it took. A blank file
+ * carries no front matter because it was filed blank, not because Markdown has
+ * nowhere to put it, and a claim worked out from the format would say the
+ * opposite.
  *
  * THREE ANSWERS, NEVER TWO. `null` is "nothing has decided yet" -- a
  * composition that has not reached the stamp step -- and saying "the
@@ -218,6 +222,56 @@ export function failureSentence(c: CompositionRow): string {
 }
 
 // ---------------------------------------------------------------------------
+// What a finished file is
+// ---------------------------------------------------------------------------
+//
+// THE CLUSTER FILES TWO KINDS OF FILE EMPTY, and "the composed text is in the
+// file" is false of both: a blank one (nothing was composed) and a Markdown file
+// asked for by describing it (empty until the person approves the Library's
+// draft). So the caption under what was asked for says what is known.
+//
+// The row tells them apart: a blank file has no statement, no sources and no
+// model call; a described one has a statement, no model call, only Library files
+// for sources, and does not carry its provenance (it was filed blank, so it has
+// no front matter -- the same fact as its "Created blank." note). A Markdown
+// file a model wrote carries its provenance and records the model. This window
+// knows more about a file it asked for by describing it: whether it has sent the
+// description, and whether that worked.
+
+export const CREATED_BLANK = "This file was created blank.";
+export const DESCRIPTION_SENT = "Your description was sent to be written. Open the file to review and approve the draft.";
+export const CREATED_FROM_DESCRIPTION = "This file was created from a description. Open it to continue.";
+export const COMPOSED_IN_FILE = "The composed text is in the file. Open it to read what was made.";
+
+/**
+ * The caption under "What was asked for" on a finished file, or "" for none:
+ * nothing is said of a file that does not exist yet or failed to (the state
+ * line and the failure say that), nor of a described file whose description
+ * this window could not send (the notice that says so is the whole of it).
+ *
+ * `describedHere` is whether this window asked for the file by describing it;
+ * `outcome` is what became of its hand-off, absent while this window does not
+ * know (it has not heard back, or the file was opened later from the list).
+ */
+export function madeCaption(
+  c: CompositionRow,
+  sources: SourceRow[],
+  models: ModelRow[],
+  describedHere: boolean,
+  outcome?: { failure: string },
+): string {
+  if (c.status !== "ready") return "";
+  const statement = c.statement.trim() !== "";
+  if (!statement && sources.length === 0 && models.length === 0) return CREATED_BLANK;
+  const described =
+    describedHere ||
+    (statement && c.format === "markdown" && models.length === 0 && c.provenanceEmbedded === false && sources.every((source) => source.kind === "library_file"));
+  if (!described) return COMPOSED_IN_FILE;
+  if (outcome === undefined) return CREATED_FROM_DESCRIPTION;
+  return outcome.failure === "" ? DESCRIPTION_SENT : "";
+}
+
+// ---------------------------------------------------------------------------
 // A Markdown file asked for by describing it
 // ---------------------------------------------------------------------------
 //
@@ -232,11 +286,23 @@ export const DESCRIPTION_NOT_SENT = "The file was created, but the description w
 /** What to do about it: the editor's empty page is where a description is sent from. */
 export const DESCRIPTION_NOT_SENT_NEXT = "Open the file and choose Describe document to send it again.";
 
-/**
- * The references that went without being attached, by the names the person
- * gave them. The Library takes Markdown and images as attachments and nothing
- * else, and saying which kinds is what lets the person decide what to do.
- */
-export function notAttachedSentence(labels: string[]): string {
-  return `Not attached: ${labels.join(", ")}. Only Markdown and images can be attached.`;
+// The SDK opens a hand-off's failure with this (handOffDescription's
+// revisionFailure). The notice's own sentence already says it, first.
+const NOT_SENT_LEAD = "The description could not be sent for writing: ";
+
+/** A hand-off's failure as the notice's detail: the cluster's reason, without the SDK's lead-in saying again what the notice says. */
+export function notSentDetail(failure: string): string {
+  return failure.startsWith(NOT_SENT_LEAD) ? failure.slice(NOT_SENT_LEAD.length) : failure;
 }
+
+/**
+ * What is said of a reference that went without being attached, named beside it
+ * by the label the person gave it.
+ *
+ * IT CLAIMS ONLY WHAT IS KNOWN. A reference is left off for its kind, for its
+ * size, for the Library's limits on a comment, for not being found or being in
+ * the Bin, or because the Library refused the attachments as a set -- and the
+ * SDK's `unattached` entry is the label alone, carrying no reason to show. So
+ * the sentence says that it was not attached, and not why.
+ */
+export const NOT_ATTACHED = "This reference wasn't attached.";

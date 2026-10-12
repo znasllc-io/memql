@@ -133,7 +133,9 @@ func recordSession(t *testing.T, e *memql.MemQLEngine, w *workspine.SessionWrite
 	// The report the session wrote, filed content-addressed the way the
 	// recorder files it.
 	fileId := id.NewShortId()
-	templateMutation(t, e, ownerCtx, "createLibraryFile", map[string]any{
+	// createLibraryFile is @serverOnly: seeded with internal origin, as
+	// component/server/libraryfile writes it for the recorder.
+	templateMutation(t, e, auth.ContextWithInternalOrigin(ownerCtx), "createLibraryFile", map[string]any{
 		"fileId": fileId, "name": "report.txt." + session[len(session)-8:] + ".toolu_write", "mimeType": "text/plain",
 		"size": 6, "sha256": procDBHelloDigest, "blobUrl": "memory://report", "source": "app_session",
 	})

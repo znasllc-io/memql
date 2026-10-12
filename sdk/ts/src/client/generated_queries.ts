@@ -3370,6 +3370,52 @@ QueryClient.prototype.dueResponsibilities = function (this: QueryClient, args: D
   return this.executeNamed("dueResponsibilities", buildDueResponsibilities(args), opts);
 };
 
+/** One email layout by id, for the organization's members. Backs the revision check campaignSaveLayout makes and the editors that open a saved layout. The id is not a capability: the concept's account tier answers a layout outside the caller's organizations as not found. */
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutById"] in generated_concepts.ts).
+export interface EmailLayoutByIdArgs {
+  layoutId: string;
+}
+
+export function buildEmailLayoutById(args: EmailLayoutByIdArgs): string {
+  const parts: string[] = [];
+  parts.push("layoutId: " + renderMemQLValue(args.layoutId));
+  return "query emailLayoutById(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailLayoutById(args: EmailLayoutByIdArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailLayoutById = function (this: QueryClient, args: EmailLayoutByIdArgs = {} as EmailLayoutByIdArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailLayoutById", buildEmailLayoutById(args), opts);
+};
+
+/** An organization's email layouts, newest first. Backs the layout picker (through the emailLayouts builtin) and the Email app's Templates section. status narrows to active or archived layouts; omit it to see both. */
+// Bound concept: v1:campaigns:emailLayout (machine-readable: BoundConcepts["emailLayoutsForAccount"] in generated_concepts.ts).
+export interface EmailLayoutsForAccountArgs {
+  accountId: string;
+  status?: string;
+}
+
+export function buildEmailLayoutsForAccount(args: EmailLayoutsForAccountArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  if (args.status !== undefined) parts.push("status: " + renderMemQLValue(args.status));
+  return "query emailLayoutsForAccount(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailLayoutsForAccount(args: EmailLayoutsForAccountArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailLayoutsForAccount = function (this: QueryClient, args: EmailLayoutsForAccountArgs = {} as EmailLayoutsForAccountArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailLayoutsForAccount", buildEmailLayoutsForAccount(args), opts);
+};
+
 /** One event-email rule by id. */
 // Bound concept: v1:campaigns:emailRule (machine-readable: BoundConcepts["emailRuleById"] in generated_concepts.ts).
 export interface EmailRuleByIdArgs {
@@ -11734,7 +11780,31 @@ QueryClient.prototype.templateById = function (this: QueryClient, args: Template
   return this.executeNamed("templateById", buildTemplateById(args), opts);
 };
 
-/** The caller's templates, newest first. Backs the template list and the campaign editor's template picker. Owned. */
+/** The template an organization published from one Library file, for campaignSaveTemplate and the editors that open a file: publishing a file again updates this template, so there is one per organization and file. It answers the template's id and its revision (createdAt) and nothing of its content, which templateById reads. Newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers a template outside the caller's organizations as not found, so the file id is not a way into somebody else's templates. Owned. */
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateForSource"] in generated_concepts.ts).
+export interface TemplateForSourceArgs {
+  accountId: string;
+  sourceArtifactId: string;
+}
+
+export function buildTemplateForSource(args: TemplateForSourceArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("sourceArtifactId: " + renderMemQLValue(args.sourceArtifactId));
+  return "query templateForSource(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    templateForSource(args: TemplateForSourceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.templateForSource = function (this: QueryClient, args: TemplateForSourceArgs = {} as TemplateForSourceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("templateForSource", buildTemplateForSource(args), opts);
+};
+
+/** The caller's templates, newest first, as summaries: no body and no document. Backs the template list and the campaign editor's template picker; a template's content is read with templateById. Owned. */
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templates"] in generated_concepts.ts).
 export interface TemplatesArgs {
   status?: string;
@@ -12609,6 +12679,48 @@ declare module "./query.js" {
 
 QueryClient.prototype.workRunForOwner = function (this: QueryClient, args: WorkRunForOwnerArgs = {} as WorkRunForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("workRunForOwner", buildWorkRunForOwner(args), opts);
+};
+
+/** The caller's run navigation, in small pages. No execution payloads: long document work otherwise makes a single list response exceed the transport ceiling. This is a projection of the same owner-scoped history, not a template-specific subset. Clients follow its cursor to keep older runs. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummariesForOwner"] in generated_concepts.ts).
+export interface WorkRunSummariesForOwnerArgs {
+}
+
+export function buildWorkRunSummariesForOwner(args: WorkRunSummariesForOwnerArgs): string {
+  void args;
+  return "query workRunSummariesForOwner()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunSummariesForOwner(args?: WorkRunSummariesForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunSummariesForOwner = function (this: QueryClient, args: WorkRunSummariesForOwnerArgs = {} as WorkRunSummariesForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunSummariesForOwner", buildWorkRunSummariesForOwner(args), opts);
+};
+
+/** The same projection for live updates. Never fold a full CDC payload into a summary feed: that would gradually restore the retained execution data. */
+// Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunSummaryForOwner"] in generated_concepts.ts).
+export interface WorkRunSummaryForOwnerArgs {
+  runId: string;
+}
+
+export function buildWorkRunSummaryForOwner(args: WorkRunSummaryForOwnerArgs): string {
+  const parts: string[] = [];
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  return "query workRunSummaryForOwner(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRunSummaryForOwner(args: WorkRunSummaryForOwnerArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRunSummaryForOwner = function (this: QueryClient, args: WorkRunSummaryForOwnerArgs = {} as WorkRunSummaryForOwnerArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRunSummaryForOwner", buildWorkRunSummaryForOwner(args), opts);
 };
 
 /** The caller's runs that are executing right now. Owned: `row.ownerUserId == actor.userId` binds server-side, so this answers for whoever the actor is and nobody else.

@@ -22,7 +22,7 @@ vi.mock("../../src/chrome/state", async (importOriginal) => ({
 const { MaterializerApp } = await import("../../src/apps/materializer/MaterializerApp");
 const { useMaterialize } = await import("../../src/apps/materializer/actions");
 const { composeIntent } = await import("../../src/items/materialize");
-const { compositionRow, fakeConnection, memoryStore, rowsResult, templateRow, withSession } = await import("./harness");
+const { compositionRow, fakeConnection, memoryStore, refused, rowsResult, templateRow, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -94,6 +94,9 @@ async function materializeNotes(over: { name?: string; statement?: string } = {}
 }
 
 const sent = (conn: Conn, index = 0): Record<string, unknown> => conn.query.composeMaterialize.mock.calls[index]?.[0] ?? {};
+// A notice's sentence as it is SHOWN. The live region repeats the words for assistive technology, so a plain
+// text search finds the announcement too; this finds only the sentence line of the visible notice.
+const shown = (text: string) => screen.findByText(text, { selector: ".os-notice-line" });
 const kindOfFile = () => screen.getByLabelText("Kind of file").textContent ?? "";
 
 // ---------------------------------------------------------------------------
@@ -237,6 +240,15 @@ describe("the section a window opens on", () => {
     const { navigate } = mount(fakeConnection(), { settings: { defaultSection: "materialized" } });
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("materialized"));
   });
+
+  // Only an instruction the Materializer acts on is a sender saying where the window
+  // goes. One addressed to something else is left standing, and the window opens
+  // where the person prefers, as one nobody asked anything of does.
+  it("is the person's default section when the instruction pending is not one the Materializer acts on", async () => {
+    const { navigate, consumeIntent } = mount(fakeConnection(), { settings: { defaultSection: "materialized" }, intent: { id: "i3", payload: { somethingElse: "x" } } });
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("materialized"));
+    expect(consumeIntent).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -277,7 +289,7 @@ describe("the folder a setup names", () => {
 
   it("shows the cluster's refusal beside the control, verbatim, and keeps the act", async () => {
     const conn = fakeConnection({ materializeReply: reply });
-    conn.query.composeMaterialize.mockRejectedValueOnce(new Error(REFUSAL));
+    conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", REFUSAL));
     await start(conn, "folder-gone");
     await materializeNotes();
     expect(await screen.findByText(REFUSAL)).toBeTruthy();
@@ -288,7 +300,7 @@ describe("the folder a setup names", () => {
 
   it("asks again with the folder it was refused for and the same request id, because that is the same ask", async () => {
     const conn = fakeConnection({ materializeReply: reply });
-    conn.query.composeMaterialize.mockRejectedValueOnce(new Error(REFUSAL));
+    conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", REFUSAL));
     await start(conn, "folder-gone");
     await materializeNotes();
     await screen.findByText(REFUSAL);
@@ -420,7 +432,7 @@ describe("creating a file", () => {
 
   it("asks with a new request id once the facts have changed: that is a different ask", async () => {
     const conn = fakeConnection({ materializeReply: reply });
-    conn.query.composeMaterialize.mockRejectedValueOnce(new Error("refused"));
+    conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", "refused"));
     mount(conn);
     await materializeNotes();
     expect(await screen.findByText(/refused/)).toBeTruthy();
@@ -468,7 +480,7 @@ describe("creating a file", () => {
 
   it("asks with a new request id after the form is reset, because a reset abandons the ask", async () => {
     const conn = fakeConnection({ materializeReply: reply });
-    conn.query.composeMaterialize.mockRejectedValueOnce(new Error("refused"));
+    conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", "refused"));
     h.connection = conn;
     const { result } = renderHook(() => useMaterialize());
     const facts = {
@@ -491,13 +503,87 @@ describe("creating a file", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The name, checked as it is typed, and a refusal, as a person reads it
+// ---------------------------------------------------------------------------
+//
+// The composer checks a name with the SDK's fileNameProblem: the rule and the
+// words VS Code's New Markdown uses, so the two clients say the same thing about
+// the same name. And whatever the cluster refuses arrives framed (the call's
+// name, the engine's frame); the person reads the sentence alone.
+
+describe("a name and a refusal, as a person reads them", () => {
+  const reply = { compositionId: "c1" } as unknown as Row;
+  const problem = () => document.querySelector(".os-mz-name-problem")?.textContent ?? "";
+  const typeName = (value: string) => fireEvent.change(screen.getByLabelText("Name"), { target: { value } });
+
+  it("checks a name as it is typed, in the editor's words, and sends nothing until it can be used", async () => {
+    const conn = fakeConnection({ materializeReply: reply });
+    mount(conn);
+    await materializeNotes({ name: "Notes 10/11" });
+    expect(problem()).toBe("Enter a file name, without a folder path.");
+    expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
+    typeName("Notes");
+    expect(problem()).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Materialize" }));
+    await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+    expect(sent(conn)["name"]).toBe("Notes");
+  });
+
+  it("says nothing about a name before one is typed, and asks for one when Materialize is pressed without it", async () => {
+    const conn = fakeConnection({ materializeReply: reply });
+    mount(conn);
+    fireEvent.change(screen.getByLabelText("What do you want made?"), { target: { value: "A one page brief" } });
+    await chooseOrganization();
+    expect(problem()).toBe("");
+    fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
+    expect(problem()).toBe("Enter a file name.");
+    expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
+  });
+
+  it("refuses an extension of the chosen kind of file with nothing before it, and only that kind's", async () => {
+    const conn = fakeConnection({ materializeReply: reply });
+    mount(conn, { intent: setupIntent("i1", { format: "csv" }) });
+    await waitFor(() => expect(kindOfFile()).toContain("Spreadsheet (CSV)"));
+    typeName(".CSV");
+    expect(problem()).toBe("Enter a name before the extension.");
+    // ".md" is not a spreadsheet's extension: it is the name.
+    typeName(".md");
+    expect(problem()).toBe("");
+    typeName("x".repeat(151));
+    expect(problem()).toBe("Use a name up to 150 characters.");
+  });
+
+  it("shows the cluster's refusal of a file as its sentence alone, not the frames it arrived in", async () => {
+    const conn = fakeConnection({ materializeReply: reply });
+    conn.query.composeMaterialize.mockRejectedValueOnce(refused("composeMaterialize", "Enter a name without slashes."));
+    mount(conn);
+    await materializeNotes();
+    expect(await shown("Enter a name without slashes.")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/composeMaterialize|MemQL engine|Details:/);
+  });
+
+  it("shows the cluster's refusal of a stop the same way, a Go package name taken off as well", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: `${COMPOSITION}:c9`, status: "composing", outputFileId: "" })] });
+    conn.query.composeCancel.mockRejectedValueOnce(refused("composeCancel", "compose: no composition with that id is readable by you"));
+    mount(conn, { intent: { id: "open", payload: { compositionId: `${COMPOSITION}:c9` } } });
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(await shown("no composition with that id is readable by you")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(/composeCancel|MemQL engine|Details:|compose:/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // A described Markdown file: the OS hands the description on once the file is ready
 // ---------------------------------------------------------------------------
 
 describe("a Markdown file asked for by describing it", () => {
   const ARTIFACT = { id: "artifact-1", sourceConceptRef: "v1:library:file:f-new", title: "Notes.md" } as unknown as Row;
+  // As the cluster writes a described file: filed blank, so no model was called and nothing is embedded.
   const ready = (over: Record<string, unknown> = {}) =>
-    compositionRow({ id: "c-new", name: "Notes", status: "ready", format: "markdown", outputFileId: "f-new", sources: [], statement: "A one page brief", ...over });
+    compositionRow({
+      id: "c-new", name: "Notes", status: "ready", format: "markdown", outputFileId: "f-new", sources: [], statement: "A one page brief",
+      modelsUsed: [], provenanceEmbedded: false, provenanceNote: "Created blank. Its history is kept on its composition, not in the file.", ...over,
+    });
   const seed = (over: Record<string, unknown> = {}) => ({
     materializeReply: { compositionId: "c-new" } as unknown as Row,
     compositions: [] as Row[],
@@ -531,7 +617,7 @@ describe("a Markdown file asked for by describing it", () => {
     });
     // Nothing to say: it went through.
     expect(screen.queryByText(/description was not sent/)).toBeNull();
-    expect(screen.queryByText(/Not attached/)).toBeNull();
+    expect(screen.queryByText(/wasn't attached/)).toBeNull();
   });
 
   it("waits for the composition to be ready, not merely to name a file", async () => {
@@ -596,36 +682,214 @@ describe("a Markdown file asked for by describing it", () => {
 
   it("says so, beside the file, when the description could not be sent", async () => {
     const conn = fakeConnection(seed());
-    conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(new Error("revision budget exhausted"));
+    conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
     mount(conn);
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
 
-    expect(await screen.findByText("The file was created, but the description was not sent for writing.")).toBeTruthy();
-    // The reason is the cluster's own words, in the data voice.
-    expect(screen.getByText(/revision budget exhausted/)).toBeTruthy();
+    expect(await shown("The file was created, but the description was not sent for writing.")).toBeTruthy();
+    // The reason is the cluster's own words, in the data voice, and only those: the notice's own
+    // sentence already says the description was not sent, so the SDK's lead-in saying so again is gone.
+    expect(document.querySelector(".os-notice-detail")?.textContent).toBe("revision budget exhausted");
     // And the file is still there to open.
     expect(screen.getByRole("button", { name: "Open Notes" })).toBeTruthy();
   });
 
-  // What arrives a moment after "Ready" is not something the person did, so it
-  // is announced; and a live region that appears together with its text is not
-  // reliably announced, so the region is there first (the Dock's roaming notice
-  // is mounted the same way).
-  it("announces what arrives after Ready in a status region that was already there", async () => {
-    const conn = fakeConnection(seed());
-    conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(new Error("revision budget exhausted"));
-    mount(conn);
+  // WHAT THE FILE IS, under what was asked for. A described file is empty until the
+  // person approves the Library's draft, so "the composed text is in the file" would
+  // be false; the caption follows what this window knows of the hand-off.
+  describe("the caption says what the file is", () => {
+    const caption = () => document.querySelector(".os-mz-col-brief .os-caption")?.textContent ?? "";
+    const NOT_COMPOSED = /composed text/;
+
+    it("says the description was sent, once this window has sent it", async () => {
+      const conn = fakeConnection(seed());
+      mount(conn);
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      await waitFor(() => expect(caption()).toBe("Your description was sent to be written. Open the file to review and approve the draft."));
+      expect(document.body.textContent).not.toMatch(NOT_COMPOSED);
+    });
+
+    it("leaves it to the failure notice when this window could not send it", async () => {
+      const conn = fakeConnection(seed());
+      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
+      mount(conn);
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      await shown("The file was created, but the description was not sent for writing.");
+      expect(caption()).toBe("");
+      expect(document.body.textContent).not.toMatch(NOT_COMPOSED);
+    });
+
+    it("says only that it was created from a description when it is opened later, from the list", async () => {
+      const conn = fakeConnection(seed({ compositions: [ready({ id: "c-elsewhere" })] }));
+      mount(conn, { intent: { id: "open", payload: { compositionId: "c-elsewhere" } } });
+      await screen.findByRole("button", { name: "Open Notes" });
+      expect(caption()).toBe("This file was created from a description. Open it to continue.");
+      expect(document.body.textContent).not.toMatch(NOT_COMPOSED);
+    });
+
+    it("says the same while this window has not heard back from the Library", async () => {
+      const conn = fakeConnection(seed({ outputArtifact: undefined }));
+      mount(conn);
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      // Ready, but its Files entry has not been written, so nothing has been sent yet.
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      await screen.findByRole("button", { name: "Open Notes" });
+      expect(caption()).toBe("This file was created from a description. Open it to continue.");
+      expect(conn.query.libraryAddDocumentComment).not.toHaveBeenCalled();
+    });
+  });
+
+  it("names each reference that went without being attached, on its own", async () => {
+    const conn = fakeConnection(
+      seed({
+        artifactsByFile: { "f-spec": { id: "a-spec" } as unknown as Row, "f-sheet": { id: "a-sheet" } as unknown as Row },
+        filesById: {
+          "f-spec": { id: "f-spec", name: "spec.pdf", size: 900, versionNumber: 1 } as unknown as Row,
+          "f-sheet": { id: "f-sheet", name: "numbers.csv", size: 300, versionNumber: 1 } as unknown as Row,
+        },
+      }),
+    );
+    mount(conn, {
+      intent: setupIntent("i1", {
+        format: "markdown",
+        sources: [
+          { kind: "library_file", ref: "f-spec", label: "spec.pdf" },
+          { kind: "library_file", ref: "f-sheet", label: "numbers.csv" },
+        ],
+      }),
+    });
+    await screen.findByRole("list", { name: "Picked sources" });
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
-    const region = document.querySelector(".os-mz-status");
-    expect(region?.getAttribute("role")).toBe("status");
-    expect(region?.textContent).toBe("");
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
-    const notice = await screen.findByText("The file was created, but the description was not sent for writing.");
-    expect(document.querySelector(".os-mz-status")).toBe(region);
-    expect(region?.contains(notice)).toBe(true);
+    await waitFor(() => expect(document.querySelectorAll(".os-notice-line")).toHaveLength(2));
+    const notices = [...document.querySelectorAll(".os-notice")].map((notice) => [
+      notice.querySelector(".os-notice-line")?.textContent,
+      notice.querySelector(".os-notice-detail")?.textContent,
+    ]);
+    expect(notices).toEqual([
+      ["This reference wasn't attached.", "spec.pdf"],
+      ["This reference wasn't attached.", "numbers.csv"],
+    ]);
+  });
+
+  // What arrives a moment after "Ready" is not something the person did, so it
+  // is announced. The announcement is its own element -- visually hidden, polite,
+  // and mounted before there is anything to say, because a live region that
+  // appears together with its text is not reliably announced -- and NOT a wrapper
+  // around the visible notices: Safari and VoiceOver drop the semantics of an
+  // element laid out with `display: contents`, which is how this region used to
+  // be hidden from the grid.
+  describe("what arrives after Ready is announced", () => {
+    const announcer = () => document.querySelector(".os-mz-announce");
+
+    it("in a visually hidden live region of its own, mounted before there is anything to say", async () => {
+      const conn = fakeConnection(seed());
+      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
+      mount(conn);
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      const region = announcer();
+      expect(region, "the live region is mounted before any notice").not.toBeNull();
+      expect(region?.getAttribute("role")).toBe("status");
+      expect(region?.getAttribute("aria-live")).toBe("polite");
+      expect(region?.classList.contains("os-sr-only"), "it is visually hidden, not display: none").toBe(true);
+      expect(region?.textContent).toBe("");
+
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      const notice = await shown("The file was created, but the description was not sent for writing.");
+      // The same element took the words: a new one appearing with its text would not be announced.
+      expect(announcer()).toBe(region);
+      expect(region?.textContent).toContain("The file was created, but the description was not sent for writing.");
+      expect(region?.textContent).toContain("Open the file and choose Describe document to send it again.");
+      expect(region?.textContent).toContain("revision budget exhausted");
+      // Each part is spoken as a sentence. The cluster's reason has no full stop of its own, and
+      // without one a screen reader runs it into whatever comes next.
+      expect(region?.textContent).toMatch(/send it again\. revision budget exhausted\.$/);
+      expect(region?.textContent).not.toMatch(/could not be sent for writing/);
+      // The visible notice is a notice, not a live region and not inside one.
+      expect(region?.contains(notice)).toBe(false);
+      expect(notice.closest("[role=status]")).toBeNull();
+    });
+
+    it("without wrapping the visible notices in a status region", async () => {
+      const conn = fakeConnection(seed());
+      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
+      mount(conn);
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      const line = await shown("The file was created, but the description was not sent for writing.");
+      // The old region was a `display: contents` wrapper with role="status"; neither it nor
+      // anything like it holds the notices now: they are rows of the composer's own grid.
+      expect(document.querySelector(".os-mz-status")).toBeNull();
+      const notice = line.closest(".os-notice");
+      expect(notice?.closest("[role=status]")).toBeNull();
+      expect(notice?.parentElement?.classList.contains("os-mz")).toBe(true);
+    });
+
+    it("including the references that could not be attached, which arrive instead of a failure", async () => {
+      const conn = fakeConnection(
+        seed({
+          artifactsByFile: { "f-notes": { id: "a-notes" } as unknown as Row, "f-spec": { id: "a-spec" } as unknown as Row },
+          filesById: {
+            "f-notes": { id: "f-notes", name: "notes.md", size: 120, versionNumber: 2 } as unknown as Row,
+            "f-spec": { id: "f-spec", name: "spec.pdf", size: 900, versionNumber: 1 } as unknown as Row,
+          },
+        }),
+      );
+      mount(conn, {
+        intent: setupIntent("i1", {
+          format: "markdown",
+          sources: [
+            { kind: "library_file", ref: "f-notes", label: "notes.md" },
+            { kind: "library_file", ref: "f-spec", label: "spec.pdf" },
+          ],
+        }),
+      });
+      await screen.findByRole("list", { name: "Picked sources" });
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      const region = announcer();
+      expect(region?.textContent).toBe("");
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      await shown("This reference wasn't attached.");
+      expect(announcer()).toBe(region);
+      expect(region?.textContent).toBe("This reference wasn't attached. spec.pdf.");
+    });
+
+    it("and goes quiet again when the file is left", async () => {
+      const conn = fakeConnection(seed());
+      conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
+      mount(conn);
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      const region = announcer();
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      await shown("The file was created, but the description was not sent for writing.");
+      fireEvent.click(screen.getByRole("button", { name: "Compose another" }));
+      await waitFor(() => expect(screen.queryByText(/not sent for writing/)).toBeNull());
+      expect(announcer()).toBe(region);
+      expect(region?.textContent).toBe("");
+    });
+
+    it("saying nothing when there is nothing to say", async () => {
+      const conn = fakeConnection(seed());
+      mount(conn);
+      await materializeNotes();
+      await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+      conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
+      await waitFor(() => expect(conn.query.libraryRequestDocumentRevision).toHaveBeenCalledOnce());
+      await act(async () => {});
+      expect(announcer()?.textContent).toBe("");
+    });
   });
 
   it("names the references that could not be attached, after opening the revision with the ones that could", async () => {
@@ -653,7 +917,12 @@ describe("a Markdown file asked for by describing it", () => {
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
 
-    expect(await screen.findByText("Not attached: spec.pdf. Only Markdown and images can be attached.")).toBeTruthy();
+    // Each reference left off is named on its own, by the label the person gave it. The SDK does not say
+    // why one was left off (its kind, its size, the Library's limits, not being found), so nor does this.
+    const notice = (await shown("This reference wasn't attached.")).closest(".os-notice");
+    expect(notice?.querySelector(".os-notice-detail")?.textContent).toBe("spec.pdf");
+    expect(document.querySelectorAll(".os-notice-line")).toHaveLength(1);
+    expect(document.body.textContent).not.toMatch(/Only Markdown and images/);
     expect(conn.query.libraryAddDocumentComment.mock.calls[0]?.[0]).toMatchObject({
       attachments: [{ artifactId: "a-notes", version: 2, revision: "file:2" }],
     });
@@ -663,12 +932,12 @@ describe("a Markdown file asked for by describing it", () => {
 
   it("shows what happened to this file's description only on this file", async () => {
     const conn = fakeConnection(seed({ compositions: [ready({ id: "c-other", name: "Another file", outputFileId: "f-other" })] }));
-    conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(new Error("revision budget exhausted"));
+    conn.query.libraryRequestDocumentRevision.mockRejectedValueOnce(refused("libraryRequestDocumentRevision", "revision budget exhausted"));
     const { deliver } = mount(conn);
     await materializeNotes();
     await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
     conn.subscriptions.emit(COMPOSITION, ready(), "NODE_UPDATED");
-    await screen.findByText("The file was created, but the description was not sent for writing.");
+    await shown("The file was created, but the description was not sent for writing.");
     deliver({ id: "open-other", payload: { compositionId: "c-other" } });
     expect(await screen.findByRole("button", { name: "Open Another file" })).toBeTruthy();
     expect(screen.queryByText(/description was not sent/)).toBeNull();

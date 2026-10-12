@@ -62,6 +62,14 @@ const requestIdIn = (call: string) => /requestId:\s*"([^"]*)"/.exec(call)?.[1] ?
 // What the Library accepts as a request id (integrations/library/review.go).
 const LIBRARY_REQUEST_ID = /^[a-zA-Z0-9_-]{8,120}$/;
 
+// A refusal AS IT REALLY ARRIVES. The server wraps an internal engine error in
+// "MemQL engine failed to execute query. Details: " (buildEngineErrorMessage,
+// component/grpc/server.go), and executeNamed puts the call's name in front
+// (query.ts). A fake that threw the bare reason would pass code that shows a
+// person both prefixes.
+const ENGINE = "MemQL engine failed to execute query. Details: ";
+const refusal = (construct: string, reason: string): Error => new Error(`${construct}: ${ENGINE}${reason}`);
+
 // ---------------------------------------------------------------------------
 // Starting and following a composition
 // ---------------------------------------------------------------------------
@@ -121,12 +129,109 @@ test("followComposition resolves a ready composition and never hands anything of
 });
 
 // ---------------------------------------------------------------------------
+// When it looks
+// ---------------------------------------------------------------------------
+//
+// A blank file can be ready, with its Files entry, well inside two seconds, and
+// the upload it replaces was instant. So the first look comes 300 ms after the
+// start; the rest keep the whole interval, so a slow composition is not read
+// more often than before.
+
+const FIRST_LOOK_MS = 300;
+
+// Lets every promise that is ready settle, past the follow's chain of awaits.
+const settle = async () => { for (let n = 0; n < 5; n++) await new Promise<void>(resolve => setImmediate(resolve)); };
+
+// A clock the test moves by hand. It stands in for the global setTimeout and
+// clearTimeout (which the follow's waits use) while a test runs, so the schedule
+// is seen exactly and without waiting it out. `now` is the time the clock reads.
+function handClock() {
+  const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+  const timers = new Map<number, { at: number; fire: () => void }>();
+  let now = 0;
+  let nextId = 1;
+  globalThis.setTimeout = ((fire: () => void, ms = 0) => {
+    const id = nextId++;
+    timers.set(id, { at: now + ms, fire });
+    return id;
+  }) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = ((id: number) => { timers.delete(id); }) as unknown as typeof clearTimeout;
+  return {
+    get now() { return now; },
+    // Moves the clock on by `ms`, firing every timer that comes due on the way, in order.
+    async advance(ms: number) {
+      const until = now + ms;
+      for (;;) {
+        const due = [...timers.entries()].filter(([, timer]) => timer.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        timers.delete(due[0]);
+        now = due[1].at;
+        due[1].fire();
+        await settle();
+      }
+      now = until;
+      await settle();
+    },
+    restore() { Object.assign(globalThis, real); },
+  };
+}
+
+// The times, on the hand clock, at which the composition is read.
+function looksAt(clock: ReturnType<typeof handClock>, f: ReturnType<typeof fake>): { looks: number[]; execute: MaterializeExecute } {
+  const looks: number[] = [];
+  return { looks, execute: (name, call) => { if (name === "compositionById") looks.push(clock.now); return f.execute(name, call); } };
+}
+
+test("the first look comes 300 ms after the start, and each one after it a whole interval later", async () => {
+  const clock = handClock();
+  try {
+    const f = fake({
+      compositionById: [[{ status: "composing" }], [{ status: "composing" }], [{ status: "ready", outputFileId: "f1" }]],
+      libraryArtifactForFile: [[{ id: "a1", title: "Notes.md" }]],
+    });
+    const { looks, execute } = looksAt(clock, f);
+    const run = followComposition({ execute }, "c1");
+    await settle();
+    assert.deepEqual(looks, [], "the composition was read before the first wait");
+    await clock.advance(FIRST_LOOK_MS - 1);
+    assert.deepEqual(looks, []);
+    await clock.advance(1);
+    assert.deepEqual(looks, [FIRST_LOOK_MS], "the first look did not come at 300 ms");
+    await clock.advance(1999);
+    assert.deepEqual(looks, [FIRST_LOOK_MS], "a later look came before the whole interval");
+    await clock.advance(1);
+    assert.deepEqual(looks, [FIRST_LOOK_MS, FIRST_LOOK_MS + 2000]);
+    await clock.advance(2000);
+    assert.deepEqual(looks, [FIRST_LOOK_MS, FIRST_LOOK_MS + 2000, FIRST_LOOK_MS + 4000]);
+    assert.equal((await run).artifactId, "a1");
+  } finally {
+    clock.restore();
+  }
+});
+
+test("a caller's own interval keeps its length, and a shorter one is never stretched to 300 ms", async () => {
+  for (const [interval, first, second] of [[5000, FIRST_LOOK_MS, FIRST_LOOK_MS + 5000], [100, 100, 200]] as const) {
+    const clock = handClock();
+    try {
+      const f = fake({ compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1" }]], libraryArtifactForFile: [[{ id: "a1" }]] });
+      const { looks, execute } = looksAt(clock, f);
+      const run = followComposition({ execute, intervalMs: interval }, "c1");
+      await clock.advance(second);
+      assert.deepEqual(looks, [first, second], `interval ${interval}`);
+      assert.equal((await run).artifactId, "a1");
+    } finally {
+      clock.restore();
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Stopping
 // ---------------------------------------------------------------------------
 
 test("aborting cancels the composition once and stops polling", async () => {
   const controller = new AbortController();
-  const f = fake({ compositionById: [[{ status: "ready", outputFileId: "f1" }]], libraryArtifactForFile: [[]] });
+  const f = fake({ compositionById: [[{ status: "composing" }]] });
   const run = followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5 }, "c1");
   setTimeout(() => controller.abort(), 12);
   await assert.rejects(run, (e: Error) => e instanceof MaterializeCancelled);
@@ -134,6 +239,141 @@ test("aborting cancels the composition once and stops polling", async () => {
   await new Promise(r => setTimeout(r, 20));
   assert.equal(f.calls.filter(c => c.name === "composeCancel").length, 1);
   assert.equal(f.calls.length, before, "polling continued after abort");
+});
+
+test("a stop that lands while the composition is being read ends the wait at once, with one cancel", { timeout: 5000 }, async () => {
+  // The signal is already aborted by the time the wait for the next look begins,
+  // so no abort event is left to arrive. Without a check of the signal itself the
+  // wait would run its whole interval (a minute here) and cancel only after it.
+  const controller = new AbortController();
+  const f = fake({ compositionById: () => { controller.abort(); return [{ status: "composing" }]; } });
+  const started = Date.now();
+  await assert.rejects(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 60_000 }, "c1"), MaterializeCancelled);
+  assert.ok(Date.now() - started < 1000, "the stop waited out the poll interval");
+  assert.equal(f.named("composeCancel").length, 1);
+  assert.equal(f.named("compositionById").length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// A stop once the file exists does not take the file away
+// ---------------------------------------------------------------------------
+
+test("a stop while a ready composition waits for its Files entry takes one last look and keeps the file", async () => {
+  // The file exists, so there is nothing left to cancel. The entry may well have
+  // appeared while the wait ran, and then the person gets what was made.
+  const controller = new AbortController();
+  const f = fake({ compositionById: [[{ status: "ready", outputFileId: "f1", name: "Brief" }]], libraryArtifactForFile: [[], [{ id: "a1", title: "Brief.md" }]] });
+  const run = followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1");
+  setTimeout(() => controller.abort(), FIRST_LOOK_MS + 12);
+  assert.deepEqual(await run, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md" });
+  assert.equal(f.named("composeCancel").length, 0, "a ready composition is not cancelled");
+  assert.equal(f.named("libraryArtifactForFile").length, 2);
+});
+
+test("a stop while a ready composition's Files entry is still missing ends the follow without cancelling it", async () => {
+  // Nothing can be handed back without the entry (the artifact is how the file is
+  // opened), so this one is the only stop after the file exists that throws. The
+  // composition stays ready and its file is kept.
+  const controller = new AbortController();
+  const f = fake({ compositionById: [[{ status: "ready", outputFileId: "f1" }]], libraryArtifactForFile: [[]] });
+  const run = followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1");
+  setTimeout(() => controller.abort(), FIRST_LOOK_MS + 12);
+  await assert.rejects(run, MaterializeCancelled);
+  assert.equal(f.named("composeCancel").length, 0, "a ready composition is not cancelled");
+  assert.equal(f.named("libraryArtifactForFile").length, 2, "one look when it was found ready, one last look at the stop");
+});
+
+test("a stop already in effect when the Files entry was looked for does not look again", async () => {
+  const controller = new AbortController();
+  const f = fake({ compositionById: () => { controller.abort(); return [{ status: "ready", outputFileId: "f1" }]; }, libraryArtifactForFile: [[]] });
+  await assert.rejects(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 60_000 }, "c1"), MaterializeCancelled);
+  assert.equal(f.named("libraryArtifactForFile").length, 1);
+  assert.equal(f.named("composeCancel").length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// A stop that races the composition finishing
+// ---------------------------------------------------------------------------
+//
+// The look that saw "composing" can be up to a whole interval old when the stop arrives. If the
+// composition finished in that time the file exists, and composeCancel, which cancels nothing that
+// has finished, says so: integrations/compose/handlers.go answers `cancelled: false` with the
+// composition's own status. The stop must not throw the file away on the strength of a look that
+// is out of date.
+const alreadyFinished = (status: string): Rows => [{ compositionId: "c1", status, cancelled: false, note: "that composition had already finished, so nothing was stopped" }];
+// The stop lands in the wait after the first look, which comes FIRST_LOOK_MS after the start.
+const stoppedAfter = (run: Promise<unknown>, controller: AbortController) => { setTimeout(() => controller.abort(), FIRST_LOOK_MS + 12); return run; };
+
+test("a composition that finishes while the stop is on its way keeps its file", async () => {
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1", name: "Brief" }]],
+    composeCancel: [alreadyFinished("ready")],
+    libraryArtifactForFile: [[{ id: "a1", title: "Brief.md" }]],
+  });
+  const result = await stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller);
+  assert.deepEqual(result, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md" });
+  assert.deepEqual(f.calls.map(c => c.name), ["compositionById", "composeCancel", "compositionById", "libraryArtifactForFile"]);
+});
+
+test("a stop that raced a finished composition, whose Files entry is not there yet, ends without a second cancel", async () => {
+  // The same rule as a stop after the file exists: with no entry there is no artifact to hand back,
+  // so this one throws, and the composition stays ready with its file.
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1", name: "Brief" }]],
+    composeCancel: [alreadyFinished("ready")],
+    libraryArtifactForFile: [[]],
+  });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller), MaterializeCancelled);
+  assert.deepEqual(f.calls.map(c => c.name), ["compositionById", "composeCancel", "compositionById", "libraryArtifactForFile"]);
+});
+
+test("a composition that failed while the stop was on its way reports why, as a poll would have", async () => {
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }], [{ status: "failed", failureReason: "No access to notes.md" }]],
+    composeCancel: [alreadyFinished("failed")],
+  });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller),
+    (e: Error) => e instanceof MaterializeFailed && e.message === "No access to notes.md");
+});
+
+test("a composition stopped from elsewhere while the stop was on its way is a stop", async () => {
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }], [{ status: "cancelled" }]],
+    composeCancel: [alreadyFinished("cancelled")],
+  });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller), MaterializeCancelled);
+});
+
+test("a cancel that took effect is not followed by another look at the composition", async () => {
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }]],
+    composeCancel: [[{ compositionId: "c1", status: "cancelled", cancelled: true }]],
+  });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller), MaterializeCancelled);
+  assert.deepEqual(f.calls.map(c => c.name), ["compositionById", "composeCancel"]);
+});
+
+test("a cancel the cluster answers with nothing is a stop, and is not followed by another look", async () => {
+  const controller = new AbortController();
+  const f = fake({ compositionById: [[{ status: "composing" }]], composeCancel: [[]] });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller), MaterializeCancelled);
+  assert.deepEqual(f.calls.map(c => c.name), ["compositionById", "composeCancel"]);
+});
+
+test("a cancel that says it finished a composition that still reads as unfinished is a stop, and does not loop", async () => {
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }]],
+    composeCancel: [alreadyFinished("ready")],
+  });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller), MaterializeCancelled);
+  assert.equal(f.named("composeCancel").length, 1);
+  assert.equal(f.named("compositionById").length, 2);
 });
 
 test("an already stopped signal cancels the composition without reading it", async () => {
@@ -278,11 +518,79 @@ test("startMaterialize never forwards a field the request type does not declare"
   assert.equal(f.calls[0]?.call, buildComposeMaterialize({ name: "x", format: "markdown", requestId: "req-0003" }));
 });
 
+test("a refusal to start reaches the caller as the cluster's sentence alone", async () => {
+  // As it really arrives: the call's name, the engine's frame, then the sentence the
+  // Materializer wrote for a person. What a person is shown is the last part only.
+  const cases: [string, string][] = [
+    ["Enter a name without slashes.", "Enter a name without slashes."],
+    ["That folder isn't available. Choose another folder.", "That folder isn't available. Choose another folder."],
+    ["compose: the sources could not be read: no such query", "the sources could not be read: no such query"],
+  ];
+  for (const [reason, shown] of cases) {
+    const f = fake({ composeMaterialize: refusedAs("composeMaterialize", reason) });
+    await assert.rejects(startMaterialize(f.execute, { name: "Notes 10/11", format: "markdown", requestId: "req-0008" }), (e: Error) => e.message === shown && !(e instanceof MaterializeFailed), reason);
+    await assert.rejects(materialize({ execute: f.execute, intervalMs: 1 }, { name: "Notes 10/11", format: "markdown", requestId: "req-0008" }), (e: Error) => e.message === shown, reason);
+  }
+});
+
 test("a request with no request id is refused before anything is sent", async () => {
   // Without an id a double click makes two files; that is what the id is for.
   const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
   await assert.rejects(startMaterialize(f.execute, { name: "x", format: "txt", requestId: "  " }), /request id/);
   assert.deepEqual(f.calls, []);
+});
+
+// ---------------------------------------------------------------------------
+// The hand-off's request ids, checked before a file is made
+// ---------------------------------------------------------------------------
+
+const DESCRIBED_ASK = { name: "Brief", format: "markdown", statement: "A one page brief for the launch" } as const;
+
+test("a described request whose id the hand-off would refuse is refused before the file is made", async () => {
+  // The hand-off sends the description under <id>-comment and <id>-revision, and
+  // the Library takes only letters, digits, - and _ in them. An id outside that
+  // would still make the FILE, and then fail to send what the file was asked for.
+  for (const requestId of ["campaign:42", "has space", "with/slash", "über-id", "a".repeat(112)]) {
+    const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
+    await assert.rejects(startMaterialize(f.execute, { ...DESCRIBED_ASK, requestId }), /request id .*letters, digits/, `"${requestId}" was accepted`);
+    assert.deepEqual(f.calls, [], `"${requestId}" was sent`);
+    await assert.rejects(materialize({ execute: f.execute, intervalMs: 1 }, { ...DESCRIBED_ASK, requestId }), /request id .*letters, digits/);
+    assert.deepEqual(f.calls, [], `"${requestId}" was sent by materialize`);
+  }
+});
+
+test("a described request may use the longest id the hand-off can carry", async () => {
+  const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
+  const requestId = "a".repeat(111);
+  assert.equal(await startMaterialize(f.execute, { ...DESCRIBED_ASK, requestId }), "c1");
+  assert.match(f.calls[0]?.call ?? "", new RegExp(`requestId:\\s*"${requestId}"`));
+});
+
+test("an id the hand-off never uses is not held to its pattern", async () => {
+  // A blank file, a template, a spreadsheet: nothing is sent under the id but the
+  // request itself, and the server asks only that it is not blank.
+  const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
+  for (const request of [
+    { name: "x", format: "markdown" as const, requestId: "campaign:42" },
+    { name: "x", format: "markdown" as const, statement: "Brief", templateId: "t1", requestId: "campaign:42" },
+    { name: "x", format: "csv" as const, statement: "Brief", requestId: "a".repeat(200) },
+  ]) {
+    assert.equal(await startMaterialize(f.execute, request), "c1");
+  }
+  assert.equal(f.calls.length, 3);
+});
+
+test("the id is trimmed once, and the file and its description are asked for under the same one", async () => {
+  // The server trims it. If the hand-off kept the spaces it would be refused
+  // under a pattern the trimmed id passes.
+  const f = fake(describedScript());
+  const out = await materialize({ execute: f.execute, intervalMs: 1 }, { ...described, requestId: "  req-0004  " });
+  assert.equal(out.revisionId, "req-0004-revision");
+  assert.equal(requestIdIn(f.calls[0]?.call ?? ""), "req-0004");
+  assert.deepEqual(f.calls.filter(c => /^library(Add|Request)/.test(c.name)).map(c => requestIdIn(c.call)), ["req-0004-comment", "req-0004-revision"]);
+  const direct = fake(handOffScript());
+  await handOffDescription(direct.execute, { artifactId: "a1", statement: "A one page brief", requestId: " req-0007 " });
+  assert.deepEqual(direct.calls.map(c => requestIdIn(c.call)), ["req-0007-comment", "req-0007-revision"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -343,7 +651,7 @@ const FAILURE_PREFIX = "The description could not be sent for writing: ";
 const failures: { label: string; script: Record<string, Answer>; request?: Partial<Parameters<typeof handOffDescription>[1]>; message: RegExp; calls: string[] }[] = [
   {
     label: "the Library refuses the comment",
-    script: handOffScript({ libraryAddDocumentComment: () => { throw new Error("the document changed; reopen its current revision before adding feedback"); } }),
+    script: handOffScript({ libraryAddDocumentComment: () => { throw refusal("libraryAddDocumentComment", "the document changed; reopen its current revision before adding feedback"); } }),
     message: /^the document changed; reopen its current revision/,
     calls: ["libraryAddDocumentComment"],
   },
@@ -355,7 +663,7 @@ const failures: { label: string; script: Record<string, Answer>; request?: Parti
   },
   {
     label: "the Library cannot start the revision",
-    script: handOffScript({ libraryRequestDocumentRevision: () => { throw new Error("document review jobs are unavailable on this node"); } }),
+    script: handOffScript({ libraryRequestDocumentRevision: () => { throw refusal("libraryRequestDocumentRevision", "document review jobs are unavailable on this node"); } }),
     message: /^document review jobs are unavailable/,
     calls: ["libraryAddDocumentComment", "libraryRequestDocumentRevision"],
   },
@@ -393,6 +701,57 @@ for (const { label, script, request, message, calls } of failures) {
     assert.deepEqual(f.calls.map(c => c.name), calls);
   });
 }
+
+// A refusal arrives as "<construct name>: MemQL engine failed to execute query.
+// Details: <reason>" (see `refusal`). Neither the name nor the engine's frame is
+// something a person can act on, and revisionFailure is shown to people.
+const refusedAs = (name: string, reason: string) => () => { throw refusal(name, reason); };
+
+test("a refusal that arrives with the construct's name and the engine's frame in front is shown without either", async () => {
+  for (const [construct, calls] of [
+    ["libraryAddDocumentComment", ["libraryAddDocumentComment"]],
+    ["libraryRequestDocumentRevision", ["libraryAddDocumentComment", "libraryRequestDocumentRevision"]],
+  ] as const) {
+    const reason = "document review jobs are unavailable on this node";
+    const f = fake(handOffScript({ [construct]: refusedAs(construct, reason) }));
+    const out = await handOffDescription(f.execute, { artifactId: "a1", statement: "A one page brief", requestId: "req-0003" });
+    assert.deepEqual(out, { revisionFailure: FAILURE_PREFIX + reason });
+    assert.deepEqual(f.calls.map(c => c.name), calls);
+  }
+});
+
+test("the lookups it makes are worded the same way", async () => {
+  for (const construct of ["libraryArtifactForFile", "libraryFileById"]) {
+    const f = fake(handOffScript({ ...library({}), [construct]: refusedAs(construct, "you cannot read that file") }));
+    const out = await handOffDescription(f.execute, { artifactId: "a1", statement: "Summarise this", requestId: "req-0003", sources: [reference("f1", "Notes")] });
+    assert.deepEqual(out, { revisionFailure: FAILURE_PREFIX + "you cannot read that file" }, construct);
+  }
+});
+
+test("the retry without attachments words its own refusal the same way", async () => {
+  let attempts = 0;
+  const f = fake(handOffScript({
+    ...library({ "f-notes": stored("att-notes", "notes.md", KiB) }),
+    libraryAddDocumentComment: () => { throw refusal("libraryAddDocumentComment", ++attempts === 1 ? "attach a nonempty UTF-8 Markdown file up to 32 KiB" : "the document changed; reopen its current revision before adding feedback"); },
+  }));
+  const out = await handOffDescription(f.execute, { artifactId: "a1", statement: "Summarise these", requestId: "req-0010", sources: [reference("f-notes", "Notes")] });
+  assert.deepEqual(out, { revisionFailure: FAILURE_PREFIX + "the document changed; reopen its current revision before adding feedback" });
+  assert.equal(attempts, 2, "an attachment refusal that arrives prefixed is still retried without them");
+});
+
+test("only the construct's own name is taken off, and only from the front", async () => {
+  const cases: [string, string][] = [
+    ["Note: the document changed", "Note: the document changed"],                                       // some other word and a colon
+    ["the libraryAddDocumentComment: call failed", "the libraryAddDocumentComment: call failed"],       // not at the front
+    ["libraryAddDocumentComment:no space", "libraryAddDocumentComment:no space"],                       // not how executeNamed words it
+    ["libraryAddDocumentComment: libraryAddDocumentComment: twice", "libraryAddDocumentComment: twice"], // the one prefix, once
+  ];
+  for (const [message, shown] of cases) {
+    const f = fake(handOffScript({ libraryAddDocumentComment: () => { throw new Error(message); } }));
+    const out = await handOffDescription(f.execute, { artifactId: "a1", statement: "A one page brief", requestId: "req-0003" });
+    assert.equal(out.revisionFailure, FAILURE_PREFIX + shown, message);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // References: attach what the Library accepts, report the rest
@@ -599,7 +958,7 @@ test("when the Library refuses an attachment the comment is sent once more witho
     { "f-notes": stored("att-notes", "notes.md", 2 * KiB), "f-spec": stored("att-spec", "spec.pdf", KiB), "f-shot": stored("att-shot", "shot.png", 40 * KiB) },
     [reference("f-notes", "Notes"), reference("f-spec", "Spec"), reference("f-shot", "Screenshot")],
     { libraryAddDocumentComment: call => {
-      if (/attachments: \[\{/.test(call)) throw new Error(ATTACHMENT_REFUSAL);
+      if (/attachments: \[\{/.test(call)) throw refusal("libraryAddDocumentComment", ATTACHMENT_REFUSAL);
       return [{ saved: true, commentId: "cm1" }];
     } });
   assert.deepEqual(out, { revisionId: "req-0010-revision", unattached: ["Notes", "Spec", "Screenshot"] });
@@ -611,7 +970,7 @@ test("when the Library refuses an attachment the comment is sent once more witho
 
 test("a refusal that is not about an attachment is not retried without them", async () => {
   const { f, out } = await handOffWith({ "f-notes": stored("att-notes", "notes.md", KiB) }, [reference("f-notes", "Notes")],
-    { libraryAddDocumentComment: () => { throw new Error(DOCUMENT_REFUSAL); } });
+    { libraryAddDocumentComment: () => { throw refusal("libraryAddDocumentComment", DOCUMENT_REFUSAL); } });
   assert.deepEqual(out, { revisionFailure: FAILURE_PREFIX + DOCUMENT_REFUSAL });
   assert.equal(f.named("libraryAddDocumentComment").length, 1);
   assert.equal(f.named("libraryRequestDocumentRevision").length, 0);
@@ -619,7 +978,7 @@ test("a refusal that is not about an attachment is not retried without them", as
 
 test("with no attachment to take off there is nothing to retry", async () => {
   const { f, out } = await handOffWith({ "f-spec": stored("att-spec", "spec.pdf", KiB) }, [reference("f-spec", "Spec")],
-    { libraryAddDocumentComment: () => { throw new Error(ATTACHMENT_REFUSAL); } });
+    { libraryAddDocumentComment: () => { throw refusal("libraryAddDocumentComment", ATTACHMENT_REFUSAL); } });
   assert.equal(out.revisionFailure, FAILURE_PREFIX + ATTACHMENT_REFUSAL);
   assert.equal(f.named("libraryAddDocumentComment").length, 1);
 });
@@ -627,7 +986,7 @@ test("with no attachment to take off there is nothing to retry", async () => {
 test("if the comment fails again without its attachments, that failure is the one reported", async () => {
   let attempts = 0;
   const { f, out } = await handOffWith({ "f-notes": stored("att-notes", "notes.md", KiB) }, [reference("f-notes", "Notes")],
-    { libraryAddDocumentComment: () => { throw new Error(++attempts === 1 ? ATTACHMENT_REFUSAL : DOCUMENT_REFUSAL); } });
+    { libraryAddDocumentComment: () => { throw refusal("libraryAddDocumentComment", ++attempts === 1 ? ATTACHMENT_REFUSAL : DOCUMENT_REFUSAL); } });
   assert.deepEqual(out, { revisionFailure: FAILURE_PREFIX + DOCUMENT_REFUSAL });
   assert.equal(f.named("libraryAddDocumentComment").length, 2);
   assert.equal(f.named("libraryRequestDocumentRevision").length, 0);
@@ -690,7 +1049,7 @@ test("materialize waits for the Files entry before it hands the description over
 });
 
 test("a failed hand-off leaves the file and says why, and materialize still resolves", async () => {
-  const f = fake(describedScript({ libraryRequestDocumentRevision: () => { throw new Error("document review jobs are unavailable on this node"); } }));
+  const f = fake(describedScript({ libraryRequestDocumentRevision: () => { throw refusal("libraryRequestDocumentRevision", "document review jobs are unavailable on this node"); } }));
   const out = await materialize({ execute: f.execute, intervalMs: 1 }, described);
   assert.equal(out.artifactId, "a1");
   assert.equal(out.fileId, "f1");
@@ -698,14 +1057,71 @@ test("a failed hand-off leaves the file and says why, and materialize still reso
   assert.equal(out.revisionFailure, FAILURE_PREFIX + "document review jobs are unavailable on this node");
 });
 
-test("stopping after the file exists but before the description is sent sends nothing", async () => {
+const STOPPED_BEFORE_SENT = "Stopped before the description was sent.";
+
+test("stopping after the file exists keeps the file, sends nothing, and says the description was not sent", async () => {
   const controller = new AbortController();
   const f = fake(describedScript({
     libraryArtifactForFile: call => { controller.abort(); return fileIdIn(call) === "f1" ? [{ id: "a1", title: "Brief.md" }] : []; },
   }));
-  await assert.rejects(materialize({ execute: f.execute, signal: controller.signal, intervalMs: 1 }, described), MaterializeCancelled);
+  const out = await materialize({ execute: f.execute, signal: controller.signal, intervalMs: 1 }, described);
+  assert.deepEqual(out, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md", revisionFailure: STOPPED_BEFORE_SENT });
   assert.equal(f.named("libraryAddDocumentComment").length, 0);
+  assert.equal(f.named("libraryRequestDocumentRevision").length, 0);
+  assert.equal(f.named("libraryFileById").length, 0, "the references were not even looked up");
   assert.equal(f.named("composeCancel").length, 0, "a ready composition is not cancelled");
+});
+
+test("stopping after a blank file exists returns the file as it is: there was no description to send", async () => {
+  const controller = new AbortController();
+  const f = fake(describedScript({
+    libraryArtifactForFile: call => { controller.abort(); return fileIdIn(call) === "f1" ? [{ id: "a1", title: "Brief.md" }] : []; },
+  }));
+  const out = await materialize({ execute: f.execute, signal: controller.signal, intervalMs: 1 }, { name: "Brief", format: "markdown", requestId: "req-0006" });
+  assert.deepEqual(out, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md" });
+  assert.equal(f.named("composeCancel").length, 0);
+});
+
+test("a stop during the wait for a described file's Files entry still returns the file once the entry is there", async () => {
+  const controller = new AbortController();
+  let looks = 0;
+  const f = fake(describedScript({ libraryArtifactForFile: () => (++looks > 1 ? [{ id: "a1", title: "Brief.md" }] : []) }));
+  const run = materialize({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, described);
+  setTimeout(() => controller.abort(), FIRST_LOOK_MS + 12);
+  assert.deepEqual(await run, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md", revisionFailure: STOPPED_BEFORE_SENT });
+  assert.equal(f.named("libraryAddDocumentComment").length, 0);
+  assert.equal(f.named("composeCancel").length, 0);
+});
+
+test("a stop before the file exists still ends materialize with nothing returned", async () => {
+  const controller = new AbortController();
+  const f = fake(describedScript({ compositionById: () => { controller.abort(); return [{ status: "composing" }]; } }));
+  await assert.rejects(materialize({ execute: f.execute, signal: controller.signal, intervalMs: 60_000 }, described), MaterializeCancelled);
+  assert.equal(f.named("composeCancel").length, 1);
+  assert.equal(f.named("libraryAddDocumentComment").length, 0);
+});
+
+test("a described file that was finished while the stop was on its way is returned, and its description is not sent", async () => {
+  const controller = new AbortController();
+  const f = fake(describedScript({
+    compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1", name: "Brief" }]],
+    composeCancel: [alreadyFinished("ready")],
+  }));
+  const result = await stoppedAfter(materialize({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, described), controller);
+  assert.deepEqual(result, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md", revisionFailure: STOPPED_BEFORE_SENT });
+  assert.equal(f.named("libraryAddDocumentComment").length, 0);
+  assert.equal(f.named("libraryRequestDocumentRevision").length, 0);
+  assert.equal(f.named("composeCancel").length, 1);
+});
+
+test("a blank file that was finished while the stop was on its way is returned as it is", async () => {
+  const controller = new AbortController();
+  const f = fake(describedScript({
+    compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1", name: "Brief" }]],
+    composeCancel: [alreadyFinished("ready")],
+  }));
+  const result = await stoppedAfter(materialize({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, { name: "Brief", format: "markdown", requestId: "req-0006" }), controller);
+  assert.deepEqual(result, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md" });
 });
 
 const notDescribed: [string, MaterializeRequest][] = [
@@ -759,7 +1175,7 @@ test("isDescribedMarkdown holds for Library files and keeps the composer for any
 // ---------------------------------------------------------------------------
 
 test("the client barrel exports the materialize surface", () => {
-  for (const name of ["materialize", "startMaterialize", "followComposition", "handOffDescription", "isDescribedMarkdown"] as const) {
+  for (const name of ["materialize", "startMaterialize", "followComposition", "handOffDescription", "isDescribedMarkdown", "fileNameProblem", "fileNameStem", "refusalSentence"] as const) {
     assert.equal(typeof client[name], "function", `${name} is not exported from the client barrel`);
   }
   assert.equal(client.MaterializeCancelled, MaterializeCancelled);

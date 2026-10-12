@@ -49,6 +49,7 @@ const (
 var (
 	errTooMuchFormatting = errors.New("This email has too much formatted text. Shorten it or split it into more emails.")
 	errNotUTF8           = errors.New("This email file isn't valid UTF-8. Save it as UTF-8 and try again.")
+	errControlCharacter  = errors.New("This email contains a character that can't be saved. Remove it and try again.")
 )
 
 func wordSet(words string) map[string]bool {
@@ -400,7 +401,11 @@ func textOf(raw json.RawMessage) (string, error) {
 	return s, err
 }
 
-// Parse reads and validates an email document, which must be UTF-8.
+// Parse reads and validates an email document. The file is refused, before any
+// of it is read, when it is more than MaxBytes (ErrFileTooLarge), is not UTF-8,
+// or holds a control character that is not text: any C0 character but tab,
+// newline and carriage return, written as itself or as an escape, in any key
+// or value. Each of those is a sentence for the person whose file it is.
 //
 // The document is exactly one of two modes: a layout (blocks) or custom HTML
 // (textBody and htmlBody). Every key, value, link, picture and piece of markup
@@ -412,18 +417,97 @@ func textOf(raw json.RawMessage) (string, error) {
 // partly valid one.
 func Parse(data []byte) (Document, error) {
 	if len(data) > MaxBytes {
-		return Document{}, errors.New("email document exceeds 2 MiB")
+		return Document{}, ErrFileTooLarge
 	}
 	// Reading JSON turns each byte that is not UTF-8 into U+FFFD, three bytes,
 	// so a file of them would be three times its size once read.
 	if !utf8.Valid(data) {
 		return Document{}, errNotUTF8
 	}
+	if off, found := firstControlCharacter(data); found {
+		return Document{}, controlRefusal(data, off)
+	}
 	fields, err := readDocument(data)
 	if err != nil {
 		return Document{}, err
 	}
 	return parseDocument(fields)
+}
+
+// firstControlCharacter finds the first C0 control character (U+0000 to
+// U+001F) in the file other than tab, newline and carriage return, written as
+// itself or as an escape in a string: \u00XX, \b and \f. It returns the offset
+// where the character begins (for an escape, the backslash). It reads the bytes
+// of the file and nothing more, so a file of them is refused for the price of
+// looking at it; the escapes are read as JSON reads them, so a backslash that
+// is itself escaped does not begin one.
+//
+// JSON's own rules already keep a raw control character out of a string, but
+// an escape of one reads back as the character, and PostgreSQL's jsonb cannot
+// hold NUL at all: the engine would store the six characters of its escape
+// instead, so the email that is sent would differ from the one that was
+// saved, and a retry of the same save would no longer be recognised as one.
+func firstControlCharacter(data []byte) (int, bool) {
+	inString := false
+	for i := 0; i < len(data); i++ {
+		c := data[i]
+		if !inString {
+			if c == '"' {
+				inString = true
+			} else if refusedControl(c) {
+				return i, true
+			}
+			continue
+		}
+		switch {
+		case c == '"':
+			inString = false
+		case c == '\\':
+			at := i
+			i++
+			if i >= len(data) {
+				return 0, false
+			}
+			switch data[i] {
+			case 'b', 'f':
+				return at, true
+			case 'u':
+				if i+4 >= len(data) {
+					return 0, false
+				}
+				if r, ok := hexValue(data[i+1 : i+5]); ok && r < 0x20 && refusedControl(byte(r)) {
+					return at, true
+				}
+				i += 4
+			}
+		case refusedControl(c):
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// refusedControl reports whether c is a C0 control character that is not text.
+func refusedControl(c byte) bool {
+	return c < 0x20 && c != '\t' && c != '\n' && c != '\r'
+}
+
+// hexValue reads four hexadecimal digits, in either case.
+func hexValue(digits []byte) (rune, bool) {
+	var r rune
+	for _, d := range digits {
+		switch {
+		case d >= '0' && d <= '9':
+			r = r<<4 | rune(d-'0')
+		case d >= 'a' && d <= 'f':
+			r = r<<4 | rune(d-'a'+10)
+		case d >= 'A' && d <= 'F':
+			r = r<<4 | rune(d-'A'+10)
+		default:
+			return 0, false
+		}
+	}
+	return r, true
 }
 
 // readDocument reads the one JSON object the file is, and nothing after it.

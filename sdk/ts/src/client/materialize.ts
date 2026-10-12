@@ -46,14 +46,44 @@
 // takes only Markdown (up to 32 KiB) and images as review attachments, and
 // refuses a comment that carries anything else. So the hand-off attaches the
 // library_file sources the Library accepts, opens the revision with them, and
-// returns every other reference (a PDF, a file it cannot find) by label in
-// `unattached` for the caller to show: "2 references were not attached: only
-// Markdown and images can be".
+// returns every other reference (a PDF, a file it cannot find, one past the
+// Library's limits) by label in `unattached`, for the caller to name. The label
+// is all an entry carries: it does not say why that reference was left off.
+//
+// ===========================================================================
+// A REFUSAL REACHES A PERSON AS ONE SENTENCE
+// ===========================================================================
+// Both texts this module hands a caller to show -- the refusal startMaterialize
+// throws, and a hand-off's revisionFailure -- are the cluster's sentence with
+// the call's name, the engine's frame and any Go package name taken off
+// (refusalSentence, beside executeNamed in query.ts). A person who typed a
+// slash reads "Enter a name without slashes.", not three layers of plumbing.
 //
 // handOffDescription derives its two Library request ids from the request id
 // (`<id>-comment`, `<id>-revision`), so a retry returns the first receipts. The
 // Library accepts only letters, digits, "-" and "_" (8 to 120 characters) as a
-// request id, so a request id used with a description is at most 111 of them.
+// request id, so a request id used with a description is at most 111 of them;
+// startMaterialize refuses a described request whose id is not, before the file
+// is made, because the file would exist and its description could not be sent.
+//
+// A RETRY OF THE HAND-OFF MUST SEND THE SAME INPUTS. The Library answers a repeat
+// of a request id with the first receipt only when the repeat says the same
+// thing; a changed description or reference list under an old id is refused
+// ("this feedback request was already used with different content"). Changed
+// inputs are a new ask and need a new request id.
+//
+// A STOP NEVER DELETES A FILE THAT WAS ALREADY MADE: it stays in Files. From the
+// moment the composition is ready the file exists, and a stop has nothing left to
+// cancel. So materialize returns the file when it is already in Files at the
+// moment of the stop: it skips the hand-off and, for a described request, says so
+// in `revisionFailure` ("Stopped before the description was sent."), so the
+// caller can open the empty file and offer the description again. That includes a
+// stop that raced the composition finishing: the cluster cancels nothing that has
+// finished and says so, and the composition is read again before the file is
+// given up. The one stop that still throws after the file exists is one that
+// lands while its Files entry is not there yet (see followComposition): without
+// the entry there is no artifact to hand back, and the file is in Files a moment
+// later.
 import {
   buildComposeCancel,
   buildComposeMaterialize,
@@ -68,6 +98,7 @@ import {
   buildWorkRunForOwner,
 } from "./generated_queries.js";
 import { sameEntityId } from "./id.js";
+import { refusalSentence } from "./query.js";
 import { rowNumber, rowString, type Row } from "./types.js";
 
 /** Runs one named construct as the signed-in person and returns its rows. `call` is the rendered call string. */
@@ -78,7 +109,8 @@ export interface MaterializeRequest { name: string; format: MaterializeFormat; r
 /**
  * What the helpers need from their caller. `signal` stops the follow and
  * cancels the composition; `onStatus` hears every poll's status; `intervalMs`
- * is the poll interval (default two seconds).
+ * is the poll interval (default two seconds). The first look comes sooner, 300
+ * ms after the start (or the interval, when that is shorter).
  */
 export interface MaterializePorts { execute: MaterializeExecute; signal?: AbortSignal; onStatus?: (status: string) => void; intervalMs?: number }
 /**
@@ -95,6 +127,11 @@ export class MaterializeCancelled extends Error {}
 export class MaterializeFailed extends Error {}
 
 const DEFAULT_INTERVAL_MS = 2000;
+// A blank file can be ready, with its Files entry, well before one interval has
+// passed, and the upload New Markdown used before was instant. So the first look
+// comes this long after the start; the rest keep the interval, so a composition
+// that takes a while is not read more often than before.
+const FIRST_LOOK_MS = 300;
 const STOPPED = "Stopped";
 const STOP_REASON = "Stopped by the person";
 const RUN_STOPPED = "The run stopped before the file was finished.";
@@ -110,6 +147,8 @@ const FIRST_REVISION = "file:1";
 const WHOLE_DOCUMENT = { kind: "document", quote: "Entire document" };
 const HAND_OFF_ID = /^[A-Za-z0-9_-]{1,111}$/;
 const HAND_OFF_FAILED = "The description could not be sent for writing: ";
+const STOPPED_BEFORE_HAND_OFF = "Stopped before the description was sent.";
+const HAND_OFF_ID_RULE = "A request id for a file that is asked for by describing it uses letters, digits, - and _ (at most 111 characters), because its description is sent under it.";
 
 // What the Library takes as a review attachment (integrations/library/
 // review_attachments.go). A comment carrying anything else is refused whole, so
@@ -152,11 +191,15 @@ export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" |
 /**
  * Opens the composition and returns its id. Sends only the fields
  * MaterializeRequest declares, and omits the ones left empty, so what the
- * server sees is what isDescribedMarkdown judged.
+ * server sees is what isDescribedMarkdown judged. A refusal is thrown as the
+ * cluster's own sentence and nothing else (see the header).
  */
 export async function startMaterialize(execute: MaterializeExecute, request: MaterializeRequest): Promise<string> {
   if (!has(request.requestId)) throw new Error("A request id is required, so that a repeated request makes one file.");
-  const args: ComposeMaterializeArgs = { name: request.name, format: request.format, requestId: request.requestId };
+  // The server trims it, and the hand-off must ask under the id the file was made under.
+  const requestId = request.requestId.trim();
+  if (isDescribedMarkdown(request) && !HAND_OFF_ID.test(requestId)) throw new Error(HAND_OFF_ID_RULE);
+  const args: ComposeMaterializeArgs = { name: request.name, format: request.format, requestId };
   if (has(request.statement)) args.statement = request.statement;
   if (request.sources?.length) args.sources = request.sources.map(source => ({ ...source }));
   if (has(request.templateId)) args.templateId = request.templateId;
@@ -165,7 +208,7 @@ export async function startMaterialize(execute: MaterializeExecute, request: Mat
   if (request.accountIds?.length) args.accountIds = [...request.accountIds];
   if (has(request.recipeId)) args.recipeId = request.recipeId;
   if (has(request.deployableKind)) args.deployableKind = request.deployableKind;
-  const reply = first(await execute("composeMaterialize", buildComposeMaterialize(args)));
+  const reply = first(await inPlainWords(execute)("composeMaterialize", buildComposeMaterialize(args)));
   const compositionId = rowString(reply, "compositionId");
   if (!compositionId) throw new Error("Materializer did not confirm a composition. Check its history before retrying.");
   return compositionId;
@@ -212,47 +255,94 @@ async function deadRunMessage(execute: MaterializeExecute, runId: string): Promi
 
 /**
  * Polls the composition until it is ready and has its Files entry, reporting
- * each status through `onStatus`. Throws MaterializeFailed with the
+ * each status through `onStatus`: the first look 300 ms after the start, the
+ * rest one interval apart. Throws MaterializeFailed with the
  * composition's reason (or its run's, when the run stopped first) and
- * MaterializeCancelled when it was stopped. An aborted `signal` cancels the
- * composition once and stops polling; if that cancel request itself fails, its
- * error is thrown instead, because the composition may still finish.
+ * MaterializeCancelled when it was stopped.
+ *
+ * An aborted `signal` before the composition is ready cancels it once and stops
+ * polling; if that cancel request itself fails, its error is thrown instead,
+ * because the composition may still finish. Once it is ready its file exists and
+ * there is nothing to cancel, so a stop then only ends the wait for the Files
+ * entry: it takes one last look, returns the file when the entry is there, and
+ * throws MaterializeCancelled when it is not (there is no artifact yet to hand
+ * back; the composition stays ready and its file is kept).
+ *
+ * The look that saw the composition unfinished can be a whole interval old when
+ * the stop arrives, so the composition may have finished in between. The cluster
+ * cancels nothing that has finished and says so (`cancelled: false`); the
+ * composition is then read again and a ready one is treated exactly like a stop
+ * after the file exists, and one that failed reports why.
  *
  * Never hands a description to the Library: see the header, and materialize.
  */
 export async function followComposition(ports: MaterializePorts, compositionId: string): Promise<MaterializeResult> {
   const { execute, signal } = ports;
   const interval = ports.intervalMs ?? DEFAULT_INTERVAL_MS;
-  const stop = async (): Promise<never> => {
-    await execute("composeCancel", buildComposeCancel({ compositionId, reason: STOP_REASON }));
-    throw new MaterializeCancelled(STOPPED);
+  const read = async (): Promise<Row | null> => first(await execute("compositionById", buildCompositionById({ compositionId })));
+  // The file, once the composition is ready. A new file's Files entry is written
+  // after the file, by an automation, so it may not be there yet.
+  let made: { fileId: string; name: string } | null = null;
+  const filesEntry = async ({ fileId, name }: { fileId: string; name: string }): Promise<MaterializeResult | null> => {
+    const artifact = first(await execute("libraryArtifactForFile", buildLibraryArtifactForFile({ fileId })));
+    const artifactId = rowString(artifact, "id");
+    return artifactId ? { compositionId, fileId, artifactId, name: rowString(artifact, "title") || name } : null;
   };
-  for (;;) {
-    if (signal?.aborted) return stop();
-    const row = first(await execute("compositionById", buildCompositionById({ compositionId })));
+  // What the composition's row settles: its file once it is ready, nothing while
+  // it is still being made, and an error when it failed, was stopped or cannot be read.
+  const settled = (row: Row | null): { fileId: string; name: string } | null => {
     if (!row) throw new MaterializeFailed("This composition is no longer readable. Its history remains in Materializer.");
     const status = rowString(row, "status");
     if (status === "failed") throw new MaterializeFailed(rowString(row, "failureReason") || "Materializer could not finish this file.");
     if (status === "cancelled") throw new MaterializeCancelled(STOPPED);
-    if (status === "ready") {
-      // A new file's Files entry is written after the file, by an automation, so
-      // it may not be there yet. A ready composition keeps its file whatever its
-      // run says, which is why the run is not read here.
-      const fileId = rowString(row, "outputFileId");
-      const artifact = first(await execute("libraryArtifactForFile", buildLibraryArtifactForFile({ fileId })));
-      const artifactId = rowString(artifact, "id");
-      if (artifactId) return { compositionId, fileId, artifactId, name: rowString(artifact, "title") || rowString(row, "name") };
+    return status === "ready" ? { fileId: rowString(row, "outputFileId"), name: rowString(row, "name") } : null;
+  };
+  const stop = async (): Promise<MaterializeResult> => {
+    if (made) {
+      // Nothing to cancel, and the stop may have cut a wait short: look once more.
+      const kept = await filesEntry(made);
+      if (kept) return kept;
+      throw new MaterializeCancelled(STOPPED);
+    }
+    const reply = first(await execute("composeCancel", buildComposeCancel({ compositionId, reason: STOP_REASON })));
+    // A composition that had already finished is not cancelled, and the cluster says so. Its file may
+    // have been made after the look that sent this stop, so read it again before giving it up.
+    if (reply?.["cancelled"] === false) {
+      const finished = settled(await read());
+      if (finished) {
+        made = finished;
+        const kept = await filesEntry(made);
+        if (kept) return kept;
+      }
+    }
+    throw new MaterializeCancelled(STOPPED);
+  };
+  // Every look is made after a wait: the first a short one, the rest the
+  // interval. A stop during any wait (or already in effect) ends it at once.
+  let wait = Math.min(FIRST_LOOK_MS, interval);
+  for (;;) {
+    try {
+      await pause(wait, signal);
+    } catch {
+      return stop();
+    }
+    wait = interval;
+    const row = await read();
+    const file = settled(row);
+    if (file) {
+      // A ready composition keeps its file whatever its run says, which is why
+      // the run is not read here.
+      made = file;
+      const entry = await filesEntry(made);
+      if (entry) return entry;
+      // A stop already in effect saw the look just made: that was the last one.
+      if (signal?.aborted) throw new MaterializeCancelled(STOPPED);
       ports.onStatus?.("Saved; waiting for its Files entry");
     } else {
       const runId = rowString(row, "runId");
       const dead = runId ? await deadRunMessage(execute, runId) : "";
       if (dead) throw new MaterializeFailed(dead);
-      ports.onStatus?.(status);
-    }
-    try {
-      await pause(interval, signal);
-    } catch {
-      return stop();
+      ports.onStatus?.(rowString(row, "status"));
     }
   }
 }
@@ -361,6 +451,20 @@ const attachmentsOf = (references: Reference[]): ReviewAttachment[] =>
   references.flatMap(reference => (reference.attachment ? [reference.attachment] : []));
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+// The calls whose refusals this module hands a caller to show go through here:
+// a refusal comes back as the cluster's sentence alone, the name of the call
+// that was made, the engine's frame and any Go package name taken off
+// (refusalSentence). The original error is kept as the cause.
+function inPlainWords(execute: MaterializeExecute): MaterializeExecute {
+  return async (name, call) => {
+    try {
+      return await execute(name, call);
+    } catch (error) {
+      throw new Error(refusalSentence(error, name), { cause: error });
+    }
+  };
+}
+
 /**
  * Gives a described file's description to the Library's revision workflow, as
  * the person: a document-level comment carrying the statement (the library_file
@@ -386,11 +490,13 @@ const errorText = (error: unknown): string => (error instanceof Error ? error.me
  */
 export async function handOffDescription(execute: MaterializeExecute, request: HandOffRequest): Promise<HandOffResult> {
   try {
-    const { artifactId, requestId } = request;
+    const run = inPlainWords(execute);
+    const { artifactId } = request;
+    const requestId = (request.requestId ?? "").trim();
     if (!has(request.statement)) throw new Error("there is no description to send.");
     if (!HAND_OFF_ID.test(requestId)) throw new Error("request ids for a description use letters, digits, - and _ (at most 111 characters).");
-    let references = await chooseReferences(execute, request.sources ?? []);
-    const postComment = async (): Promise<Row | null> => first(await execute("libraryAddDocumentComment", buildLibraryAddDocumentComment({
+    let references = await chooseReferences(run, request.sources ?? []);
+    const postComment = async (): Promise<Row | null> => first(await run("libraryAddDocumentComment", buildLibraryAddDocumentComment({
       artifactId, expectedVersion: FIRST_VERSION, expectedRevision: FIRST_REVISION,
       anchor: WHOLE_DOCUMENT, body: request.statement, requestId: `${requestId}-comment`, attachments: attachmentsOf(references),
     })));
@@ -405,7 +511,7 @@ export async function handOffDescription(execute: MaterializeExecute, request: H
     const commentId = rowString(comment, "commentId");
     if (!comment?.["saved"] || !commentId) throw new Error("the cluster did not confirm the description. Retry to recover it.");
     const revisionId = `${requestId}-revision`;
-    const revision = first(await execute("libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision({
+    const revision = first(await run("libraryRequestDocumentRevision", buildLibraryRequestDocumentRevision({
       artifactId, expectedVersion: FIRST_VERSION, expectedRevision: FIRST_REVISION,
       commentIds: [commentId], instruction: "", requestId: revisionId,
     })));
@@ -422,16 +528,22 @@ export async function handOffDescription(execute: MaterializeExecute, request: H
  * for a described Markdown request, hands the description to the Library's
  * revision workflow, returning its `revisionId` or `revisionFailure` on the
  * result, with the references it could not attach in `unattached`. Resolves once
- * the FILE exists even when the hand-off failed. See the header for the request
- * id rules.
+ * the FILE exists even when the hand-off failed, or was stopped. A stop never
+ * deletes a file that was already made: when the file is already in Files at the
+ * moment of the stop, it is returned, with the hand-off skipped and (for a
+ * described request) `revisionFailure` "Stopped before the description was sent."
+ * A stop before the file exists, or before its Files entry does, throws
+ * MaterializeCancelled. See the header for the request id rules.
+ *
+ * The hand-off itself is not interruptible: once it has begun it finishes.
  */
 export async function materialize(ports: MaterializePorts, request: MaterializeRequest): Promise<MaterializeResult> {
   if (ports.signal?.aborted) throw new MaterializeCancelled(STOPPED);
   const result = await followComposition(ports, await startMaterialize(ports.execute, request));
   if (!isDescribedMarkdown(request)) return result;
   // The description is the one step here that spends model calls. A stop that
-  // arrived while the file was being found ends it, as a stop anywhere else does.
-  if (ports.signal?.aborted) throw new MaterializeCancelled(STOPPED);
+  // arrived while the file was being found ends it, but not the file.
+  if (ports.signal?.aborted) return { ...result, revisionFailure: STOPPED_BEFORE_HAND_OFF };
   const handOff = await handOffDescription(ports.execute, {
     artifactId: result.artifactId, statement: request.statement ?? "", sources: request.sources, requestId: request.requestId,
   });

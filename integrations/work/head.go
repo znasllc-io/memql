@@ -53,12 +53,11 @@ func (i *Integration) handleMoveRunHead(ctx context.Context, args map[string]any
 	if err := run.requireExecutable(); err != nil {
 		return nil, err
 	}
-	if err := run.requireTopLevel(stepKey); err != nil {
+	versions, err := i.readActVersions(ctx, &run)
+	if err != nil {
 		return nil, err
 	}
-
-	versions, err := i.readVersions(ctx, run.id, run.order)
-	if err != nil {
+	if err := run.requireTopLevel(stepKey); err != nil {
 		return nil, err
 	}
 	old := headOf(run, versions)
@@ -110,6 +109,7 @@ func (i *Integration) handleMoveRunHead(ctx context.Context, args map[string]any
 	fields := map[string]any{
 		"head":       next.Object(),
 		"staleSteps": staleList(stale),
+		"stepOrder":  run.checkpointOrder(),
 	}
 	if len(stale) > 0 {
 		// Only the steps with no version computed from the new upstream run

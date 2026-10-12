@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as vscode from "vscode";
-import { configureProblems, ProblemReporter, ReportedError, UserInputError, userMessage } from "../src/problems.js";
+import { startMaterialize } from "@znasllc-io/memql-sdk-core/client";
+import { configureProblems, diagnosticText, ProblemReporter, ReportedError, UserInputError, userMessage } from "../src/problems.js";
 import { setProblemOutput, showProblem } from "../src/problemUI.js";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
@@ -132,4 +133,32 @@ test("a notification VS Code draws itself carries the reference, since it has no
   assert.equal(new ReportedError({ message: "Select a passage first." }).message, "Select a passage first.");
   // The problem itself keeps the whole message: the toast and the panels show it with their own control.
   assert.equal(new ReportedError({ message: generic, reference: "tools-3" }).problem.message, generic);
+});
+
+// The SDK hands a person a refusal as one sentence and keeps the refusal as it arrived -- the
+// call's name and the engine's frame -- as the error's cause. The diagnostic is where those
+// frames belong, so it carries the cause, straight after the first line where the length cap
+// cannot cut it off, and redacted like the rest.
+const AS_IT_ARRIVED = "composeMaterialize: MemQL engine failed to execute query. Details: Enter a name without slashes.";
+
+test("a start refusal keeps the call's name and the engine's frame in its diagnostic, through its cause", async () => {
+  const refused = await startMaterialize(async () => { throw new Error(AS_IT_ARRIVED); }, { name: "Notes 10/11", format: "markdown", requestId: "req-1" })
+    .then(() => null, (error: unknown) => error);
+  assert.ok(refused instanceof Error);
+  assert.equal(refused.message, "Enter a name without slashes.");
+  assert.ok(diagnosticText(refused).startsWith(`Error: Enter a name without slashes.\nCaused by: ${AS_IT_ARRIVED}\n`));
+  const output: string[] = [];
+  const reporter = new ProblemReporter({ current: () => undefined } as unknown as EditorConnectionAPI, line => output.push(line));
+  reporter.report(refused, "create the Markdown document");
+  assert.ok(output[0]?.includes(AS_IT_ARRIVED), output[0]);
+});
+
+test("every cause is kept, ahead of a long stack, and redacted like the rest", () => {
+  const error = new Error("outer", { cause: new Error("middle", { cause: "innermost Bearer private-token" }) });
+  error.stack = `Error: outer\n${"    at frame (file.js:1:1)\n".repeat(200)}`;
+  const text = diagnosticText(error);
+  assert.ok(text.startsWith("Error: outer\nCaused by: middle\nCaused by: innermost Bearer [redacted]\n"), text.slice(0, 120));
+  assert.doesNotMatch(text, /private-token/);
+  assert.equal(diagnosticText(new Error("alone")).split("\n")[0], "Error: alone");
+  assert.doesNotMatch(diagnosticText(new Error("alone")), /Caused by/);
 });

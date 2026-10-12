@@ -15,6 +15,7 @@ import (
 	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/librarykey"
 	"github.com/znasllc-io/memql/core/num"
 	work "github.com/znasllc-io/memql/integrations/work"
 )
@@ -108,6 +109,17 @@ func onlyLibraryFiles(sources []SourceRef) bool {
 //nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
 var errFolderUnavailable = errors.New("That folder isn't available. Choose another folder.")
 
+// The two refusals of a name, sentences a person reads where they typed it, like
+// errFolderUnavailable. A name is refused with a slash in it (folderId says where
+// a file goes, a name never does) and when nothing is left of it once one
+// trailing extension that names the format is dropped.
+//
+//nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
+var (
+	errNameHasSlash = errors.New("Enter a name without slashes.")
+	errNameMissing  = errors.New("Enter a name for the file.")
+)
+
 // requireUsableFolder refuses a folder the caller cannot file a new file into:
 // one they cannot read (somebody else's, deleted, or no such id) or one that has
 // been archived.
@@ -132,12 +144,22 @@ func (i *Integration) requireUsableFolder(ctx context.Context, folderId string) 
 
 // fromARun says a work run is making this call, and not a person's own client.
 // It is the condition under which the Library refuses a revision request ("a
-// person must prepare the document revision request",
-// integrations/library/revision.go), so it is also the condition under which
-// there is no client to hand a description on.
+// person must prepare the document revision request", handleRequestDocumentRevision
+// and the revision-item changes in integrations/library), so it is also the
+// condition under which there is no client to hand a description on.
+//
+// RunFromContext answers true only for a context that names a run
+// (RunContext.IsRun), which is the Library's own test; nothing is added to it
+// here, so the two cannot disagree about what a run is.
+//
+// It is not `nested`, which materialize works out for a different question: a
+// nested call is one whose composition BELONGS to the run, so it also needs the
+// run's goal to attach to. A run that names no goal is still a run -- the
+// Library still refuses it, and there is still no client -- while its
+// composition opens a goal of its own like a person's.
 func fromARun(ctx context.Context) bool {
-	rc, ok := common.RunFromContext(ctx)
-	return ok && rc.RunId != ""
+	_, ok := common.RunFromContext(ctx)
+	return ok
 }
 
 func (i *Integration) handleMaterialize(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -179,13 +201,22 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 		}
 	}
 	if out.Name == "" {
-		return out, fmt.Errorf("compose: a materialization needs a name")
+		return out, errNameMissing
 	}
 	format, err := pure.ParseFormat(stringOf(args["format"]))
 	if err != nil {
 		return out, err
 	}
 	out.Format = format
+	// THE CLEANED NAME IS WHAT AN IN-RUN COMPOSITION IS KEYED BY. A nested
+	// composition's id hashes these arguments (see materialize), and before name
+	// cleaning a name reached that hash as it was given. So for a step that was in
+	// flight when the cleaning shipped, a name ending in its format's extension
+	// now hashes to a new id: its retry misses the composition it wrote and files
+	// once more. (A name with a slash, flattened at filing before, is now refused,
+	// so such a step fails its retry.) Both are transient -- only steps in flight
+	// across the upgrade -- and accepted pre-release. A name with no extension to
+	// drop and no slash keys exactly as before.
 	if out.Name, err = cleanFileName(out.Name, format); err != nil {
 		return out, err
 	}
@@ -220,7 +251,7 @@ func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {
 // "Plan.md" stays Plan.md and is never Plan.md.md.
 func cleanFileName(name string, format pure.Format) (string, error) {
 	if strings.ContainsAny(name, "/\\") {
-		return "", errors.New("compose: enter a file name without a folder path")
+		return "", errNameHasSlash
 	}
 	for _, ext := range formatNameExtensions(format) {
 		suffix := "." + ext
@@ -230,7 +261,7 @@ func cleanFileName(name string, format pure.Format) (string, error) {
 		}
 	}
 	if name == "" {
-		return "", errors.New("compose: a materialization needs a name")
+		return "", errNameMissing
 	}
 	return name, nil
 }
@@ -303,6 +334,9 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	if nested {
 		// The step owns a single materialization for this exact request. Including
 		// args also distinguishes multiple file calls within the same agent step.
+		// They are the arguments as parsed, name cleaning included, so a change to
+		// the cleaning re-keys a step whose name it changes (parseMaterializeArgs
+		// says which, and why that is accepted).
 		raw, err := json.Marshal(a)
 		if err != nil {
 			return nil, err
@@ -1041,6 +1075,9 @@ func (i *Integration) templateBody(ctx context.Context, fileId string) (string, 
 	reader := i.sourceDownloader()
 	if reader == nil || stringOf(row["blobUrl"]) == "" {
 		return "", errors.New("template storage is unavailable")
+	}
+	if err := librarykey.Check(stringOf(row["blobUrl"]), stringOf(row["ownerUserId"]), ""); err != nil {
+		return "", errors.New("template file is not stored in its owner's Library")
 	}
 	data, err := reader.DownloadURLWithLimit(ctx, stringOf(row["blobUrl"]), maxReferenceText)
 	if err != nil {

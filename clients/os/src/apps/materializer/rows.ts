@@ -232,6 +232,16 @@ export function optionalBool(row: Row, key: string): boolean | null {
   return null;
 }
 
+/**
+ * Whether a recipe keeps this source: a query or a Library file, which a
+ * recipe selects again on every run. A row picked by hand is the row it was,
+ * and a recipe does not keep it (composeRunRecipe takes query and library_file
+ * selectors only).
+ */
+export function recipeKeeps(source: SourceRow): boolean {
+  return source.kind === "query" || source.kind === "library_file";
+}
+
 export function sourcesOf(row: Row): SourceRow[] {
   return objectArray(row, "sources").map((s) => ({
     kind: str(s["kind"]),

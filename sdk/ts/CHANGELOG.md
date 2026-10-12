@@ -6,6 +6,38 @@ Notable changes to the client-agnostic runtime core. Entries are newest first.
 
 ### Added
 
+**`materialize` and its parts -- the one way a client creates a file**
+(`@znasllc-io/memql-sdk-core/client`, memql#6023). `materialize(ports, request)`
+starts a composition, follows it until the file has its Files entry (the first
+look 300 ms after the start, the rest one `intervalMs` apart, two seconds by
+default), and returns `{ compositionId, fileId, artifactId, name }`. `startMaterialize` and
+`followComposition` are its two halves, for a client that follows its own live
+feed or polls; `isDescribedMarkdown` says which requests the cluster files empty;
+`handOffDescription` gives such a file's description to the Library's revision
+workflow as the person (a document-level comment with the `library_file` sources
+the Library accepts attached, then a revision request) and returns `revisionId` or
+`revisionFailure` without throwing, with the references it could not attach in
+`unattached`. `composeMaterialize` gains `requestId`: repeating it returns the
+same composition, so mint a new one for every person action. An aborted signal
+cancels a composition that is still being made. Stopping never deletes a file
+that was already made: it stays in Files, and `materialize` returns it when it is
+already in Files at the moment of the stop (a described request then carries
+`revisionFailure` "Stopped before the description was sent."), and throws
+`MaterializeCancelled` when it is not yet. A described request's id may use
+letters, digits, `-` and `_`, at most 111 characters. `fileNameProblem(name,
+format)` is the name rule a client checks as a name is typed (no slash, no
+control character, not empty, at most 150 characters, something before the
+extension) in the words a person reads, and `fileNameStem(name, format)` the
+name the cluster files it under (one trailing extension of the format dropped).
+
+**`refusalSentence(error, construct?)`** (`@znasllc-io/memql-sdk-core/client`,
+beside `QueryClient`) -- the sentence a person reads out of a refused call. A
+refusal arrives as `<construct>: MemQL engine failed to execute query. Details:
+compose: ...`; this takes off the call's name `executeNamed` puts in front, the
+server's frame and a leading Go package name, once each, and leaves the rest as
+the cluster wrote it. `startMaterialize` throws, and `handOffDescription`
+reports, refusals in these words.
+
 **`AiChatOptions.level`** -- how much intelligence a chat call needs: `""`
 (Auto: the cluster's rules decide), `"fast"`, `"strong"` or `"reasoning"`. It
 rides `AiChatMsg.level` beside `provider` on both `aiChat` and `aiChatStream`,

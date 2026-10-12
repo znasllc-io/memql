@@ -630,13 +630,13 @@ site, still carries runtime settings and still records traffic. Full context:
 
 All in `component/server/memqlws/env.go`:
 
-| Variable                              | Default            |
-|---------------------------------------|--------------------|
-| `MEMQL_WS_DIAL_TIMEOUT_MS`            | `5000`             |
-| `MEMQL_WS_WRITE_TIMEOUT_MS`           | `10000`            |
-| `MEMQL_WS_MAX_CONCURRENT_REQUESTS`    | `4`                |
-| `MEMQL_WS_MAX_MESSAGE_BYTES`          | `5242880` (5 MB)   |
-| `MEMQL_WS_PING_INTERVAL_MS`           | `30000`            |
+| Variable                              | Default             |
+|---------------------------------------|---------------------|
+| `MEMQL_WS_DIAL_TIMEOUT_MS`            | `5000`              |
+| `MEMQL_WS_WRITE_TIMEOUT_MS`           | `10000`             |
+| `MEMQL_WS_MAX_CONCURRENT_REQUESTS`    | `4`                 |
+| `MEMQL_WS_MAX_MESSAGE_BYTES`          | `33554432` (32 MiB); a session that has not signed in is held to 5 MiB at most |
+| `MEMQL_WS_PING_INTERVAL_MS`           | `15000`             |
 
 ---
 
@@ -1074,6 +1074,11 @@ overrides a stored global variable; every window above except the two
 journal-detail windows honors an existing global setting, including the legacy
 `WORKER_INVOCATION_RETENTION_DAYS` global variable. Invalid/nonpositive values
 use the documented defaults.
+
+The sweep reads each window's records one UTC day at a time, oldest first, and
+spends at most four minutes, shared among the policies; a backlog older than
+that is retired over several nights, and the sweep's result marks the policies
+that ran out of their share with `budgetExhausted`.
 
 `MEMQL_WORK_ARCHIVE_CONTAINER` defaults to `MEMQL_AZURE_BLOB_CONTAINER`.
 Archives use `retention/<UTC-day>/<sha256>.ndjson.gz`, with the original node

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"image"
 	_ "image/gif" // the formats an email picture may be
 	_ "image/jpeg"
@@ -24,9 +25,18 @@ type Image struct {
 // artifact:<id>. Render asks for each picture once, with the id after the
 // colon, as whoever the resolver reads for. An error means that reader cannot
 // have the picture; it becomes an image_unavailable issue, not a failed render.
+// The one error that is not that is ErrTooManyPictures.
 type ImageResolver interface {
 	ResolveImage(ctx context.Context, artifactID string) (Image, error)
 }
+
+// ErrTooManyPictures is what an ImageResolver answers (itself or wrapped) for a
+// picture it will not read because it has read as many as it is willing to. The
+// picture is not at fault, so the render does not say it could not be read: the
+// email has more pictures than the reader shows, which is images_limit, said
+// once for the email whatever the number of pictures past the limit. The
+// picture is not embedded.
+var ErrTooManyPictures = errors.New("this reader reads no more pictures")
 
 // picture is what the renderer knows about one image source: the data URI it
 // is embedded as and its natural size, or why it cannot be embedded.
@@ -96,6 +106,9 @@ func (p *pictures) read(ctx context.Context, src string) (picture, error) {
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return picture{}, ctxErr
+			}
+			if errors.Is(err, ErrTooManyPictures) {
+				return picture{problem: IssueImagesLimit}, nil
 			}
 			return unavailable, nil
 		}
