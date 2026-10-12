@@ -1394,32 +1394,165 @@ func TestDescribedMarkdownWithLibrarySourcesStillFilesBlank(t *testing.T) {
 	}
 }
 
-// Source capture is the composition's provenance, so a reference the person
-// opted in is captured at accept time exactly as before; the empty file just
-// does not need it, so the replica that executes the run reads nothing.
-func TestDescribedMarkdownKeepsCapturingOptedInReferences(t *testing.T) {
+// THE PATH IS DECIDED BEFORE ANY CONTENT IS READ. A described file is filed empty, so
+// nothing it names is read: not when the request is accepted (it used to be, for a
+// provenance the empty file never used, and a reference nobody could read refused a
+// request that needed none of them) and not on the replica that executes the run.
+func TestDescribedMarkdownReadsNoReferenceContent(t *testing.T) {
+	data := []byte("Launch notes: ship on the first Tuesday")
+	notes := func() map[string]any {
+		return map[string]any{"name": "launch-notes.md", "blobUrl": "library/u-alice/reference-file/launch-notes.md", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256(), "size": len(data)}
+	}
+	described := func() materializeArgs {
+		a := describedArgs()
+		a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference-file", Label: "Launch notes", Content: true}}
+		return a
+	}
+
+	t.Run("a node with no way to read references accepts it", func(t *testing.T) {
+		i, e, u := materializeFixture(t)
+		e.files["reference-file"] = notes()
+		compositionId, input := acceptAsAPerson(t, i, described())
+		if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+			t.Fatal(err)
+		}
+		if row := e.compositions[compositionId]; row["status"] != "ready" || string(u.bytes) != "\n" {
+			t.Fatalf("the described request did not file blank: row=%v bytes=%q", row, u.bytes)
+		}
+	})
+
+	t.Run("a node that can read them reads nothing, at accept or on the replica that executes it", func(t *testing.T) {
+		i, e, u := materializeFixture(t)
+		reader := &referenceReader{data: data}
+		i.SetSourceDownloader(reader)
+		e.files["reference-file"] = notes()
+		compositionId, input := acceptAsAPerson(t, i, described())
+		if reader.calls != 0 {
+			t.Fatalf("a described request reads no reference, but the accepting node read one %d time(s)", reader.calls)
+		}
+		saved, _ := json.Marshal(e.inputs[compositionId]["request"])
+		if strings.Contains(string(saved), "ship on the first Tuesday") {
+			t.Fatalf("the saved input holds the text of a file nothing read: %s", saved)
+		}
+		var snapshot executionRequest
+		if err := json.Unmarshal(saved, &snapshot); err != nil || !snapshot.Described || len(snapshot.Resolved) != 1 || len(snapshot.Resolved[0].Files) != 0 {
+			t.Fatalf("the saved input is not a described request that read nothing: described=%v resolved=%+v (%v)", snapshot.Described, snapshot.Resolved, err)
+		}
+
+		if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+			t.Fatal(err)
+		}
+		if reader.calls != 0 || string(u.bytes) != "\n" || e.compositions[compositionId]["status"] != "ready" {
+			t.Fatalf("the empty file should need no reference read: reads=%d bytes=%q row=%v", reader.calls, u.bytes, e.compositions[compositionId])
+		}
+		// The file is still the composition's provenance: it is named in its sources.
+		recorded, _ := json.Marshal(e.compositions[compositionId]["sources"])
+		if !strings.Contains(string(recorded), `"ref":"reference-file"`) {
+			t.Fatalf("the picked file is not among the composition's sources: %s", recorded)
+		}
+	})
+}
+
+// A file the Library cannot attach to a review comment cannot go to the revision workflow,
+// so the request goes to the composer, which reads it -- every picked file is used, and
+// none is dropped. Only now is a reference's content read: once, when the request is
+// accepted, and the replica that executes the run composes from that snapshot.
+func TestDescribedMarkdownWithAFileTheLibraryCannotAttachIsWrittenByTheComposer(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		text     string
+		size     int // what the file's row says; 0 says what the bytes are
+		archived bool
+	}{
+		{name: "numbers.csv", text: "region,total\nnorth,40\nsouth,60\n"},
+		{name: "data.json", text: `{"region": "north", "total": 40}`},
+		{name: "notes.txt", text: "Plain notes on the autumn launch"},
+		{name: "page.html", text: "<h1>Autumn launch</h1>"},
+		{name: "long-notes.md", text: "# Notes that are too long for a comment", size: 40960},
+		{name: "old-notes.md", text: "# Notes from the Bin", archived: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			i, e, u := materializeFixture(t)
+			data := []byte(tc.text)
+			reader := &referenceReader{data: data}
+			i.SetSourceDownloader(reader)
+			size := tc.size
+			if size == 0 {
+				size = len(data)
+			}
+			e.files["reference-file"] = map[string]any{"name": tc.name, "blobUrl": "library/u-alice/reference-file/" + tc.name, "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256(), "size": size, "archived": tc.archived}
+			a := describedArgs()
+			a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference-file", Label: tc.name, Content: true}}
+			compositionId, input := acceptAsAPerson(t, i, a)
+			if reader.calls != 1 {
+				t.Fatalf("the composer reads the file, once, when the request is accepted; it was read %d times", reader.calls)
+			}
+
+			var asked []ComposeRequest
+			worker := anotherReplica(e, u, materializeComposerFunc(func(_ context.Context, r ComposeRequest) (ComposeReply, error) {
+				asked = append(asked, r)
+				return ComposeReply{Draft: pure.Draft{Body: "Written from the file"}}, nil
+			}))
+			if err := adoptTheRun(worker, input); err != nil {
+				t.Fatal(err)
+			}
+			if len(asked) != 1 || asked[0].Statement != describedStatement || len(asked[0].Sources) != 1 || len(asked[0].Sources[0].Files) != 1 || asked[0].Sources[0].Files[0].Text != tc.text {
+				t.Fatalf("the composer was not asked to write from the statement and the file's text: %+v", asked)
+			}
+			if !strings.Contains(string(u.bytes), "Written from the file") || string(u.bytes) == "\n" {
+				t.Fatalf("a request with a file the Library cannot attach must carry the composed document, got %q", u.bytes)
+			}
+			if row := e.compositions[compositionId]; row["status"] != "ready" || row["statement"] != describedStatement {
+				t.Fatalf("the request did not complete with its statement: %v", row)
+			}
+			if reader.calls != 1 {
+				t.Fatalf("the replica that executed the run read the file again (%d reads in all)", reader.calls)
+			}
+		})
+	}
+}
+
+// A picked file that nobody can read refuses the start on the composed path, as an
+// unreadable reference always has -- and the refusal comes before anything is written.
+func TestAPickedFileNobodyCanReadRefusesTheStart(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	reader := &referenceReader{data: []byte("never read")}
+	i.SetSourceDownloader(reader)
+	i.SetGoalOpener(&directMaterializeGoal{})
+	a := describedArgs()
+	a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "nobody-readable", Label: "Meeting notes", Content: true}}
+	_, err := i.materialize(materializeContext(), "u-alice", "", a)
+	if err == nil || !strings.Contains(err.Error(), `reference "Meeting notes" is not readable by you`) {
+		t.Fatalf("a file no row answers for must refuse the start, got %v", err)
+	}
+	if len(e.compositions) != 0 || len(e.inputs) != 0 || len(e.files) != 0 || reader.calls != 0 {
+		t.Fatalf("the refused start wrote something or read something: compositions=%d inputs=%d files=%d reads=%d", len(e.compositions), len(e.inputs), len(e.files), reader.calls)
+	}
+}
+
+// A work run keeps the composer for a described request, so the composer reads what the run
+// picked: the path is the composed one, and the composed path reads its contents.
+func TestDescribedMarkdownInsideARunReadsItsReferences(t *testing.T) {
 	i, e, u := materializeFixture(t)
 	data := []byte("Launch notes: ship on the first Tuesday")
 	reader := &referenceReader{data: data}
 	i.SetSourceDownloader(reader)
-	e.files["reference-file"] = map[string]any{"name": "launch-notes.md", "blobUrl": "library/u-alice/reference-file/launch-notes.md", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256()}
+	e.files["reference-file"] = map[string]any{"name": "launch-notes.md", "blobUrl": "library/u-alice/reference-file/launch-notes.md", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256(), "size": len(data)}
+	var asked []ComposeRequest
+	i.SetComposer(materializeComposerFunc(func(_ context.Context, r ComposeRequest) (ComposeReply, error) {
+		asked = append(asked, r)
+		return ComposeReply{Draft: pure.Draft{Body: "Written from the notes"}}, nil
+	}))
 	a := describedArgs()
 	a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference-file", Label: "Launch notes", Content: true}}
-	compositionId, input := acceptAsAPerson(t, i, a)
-	if reader.calls != 1 {
-		t.Fatalf("an opted-in reference must still be read once at accept time, was read %d times", reader.calls)
-	}
-	captured, _ := json.Marshal(e.inputs[compositionId]["request"])
-	if !strings.Contains(string(captured), "ship on the first Tuesday") {
-		t.Fatalf("the reference was not captured in the owner-only input: %s", captured)
-	}
-
-	// The executing replica has no downloader and must not need one.
-	if err := adoptTheRun(anotherReplica(e, u, forbidComposer(t)), input); err != nil {
+	if _, err := i.materialize(nestedMaterializeContext(), "u-alice", "", a); err != nil {
 		t.Fatal(err)
 	}
-	if reader.calls != 1 || string(u.bytes) != "\n" || e.compositions[compositionId]["status"] != "ready" {
-		t.Fatalf("the empty file should need no reference read: reads=%d bytes=%q row=%v", reader.calls, u.bytes, e.compositions[compositionId])
+	if reader.calls != 1 || len(asked) != 1 || len(asked[0].Sources) != 1 || len(asked[0].Sources[0].Files) != 1 || asked[0].Sources[0].Files[0].Text != string(data) {
+		t.Fatalf("an in-run request is written by the composer from the file it read: reads=%d asked=%+v", reader.calls, asked)
+	}
+	if !strings.Contains(string(u.bytes), "Written from the notes") || string(u.bytes) == "\n" {
+		t.Fatalf("an in-run described request was filed blank: %q", u.bytes)
 	}
 }
 
@@ -1646,18 +1779,21 @@ func TestFiledSizeIsReadStrictly(t *testing.T) {
 }
 
 func TestDescribedMarkdownMeansAStatementAndNothingToComposeFrom(t *testing.T) {
-	if !describedArgs().describedMarkdown() {
+	notes, spec := pickedFile("meeting-notes.md", 2048), pickedFile("spec.md", 4096)
+	if !describedArgs().describedMarkdown(nil) {
 		t.Fatal("a Markdown name and statement alone are a described request")
 	}
 	// Where the document goes and the limits its run keeps are not what makes it a
-	// description. Nor are the files it is about: Library files are references the
-	// revision workflow can read, and they are passed on with the description. A
-	// whitespace-only draft is no draft.
+	// description. Nor are the files it is about: Markdown files and pictures the Library
+	// can attach are references the revision workflow can read, and they are passed on with
+	// the description. A whitespace-only draft is no draft.
 	around := describedArgs()
-	around.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes-file", Label: "Notes"}, {Kind: KindLibraryFile, Ref: "spec-file", Label: "Spec", Content: true}}
+	specRef := spec.Ref
+	specRef.Content = true
+	around.Sources = []SourceRef{notes.Ref, specRef}
 	around.FolderId, around.AccountIds, around.Ceilings, around.Draft, around.RequestId = "folder-1", []string{"account-1"}, map[string]any{"maxRetries": 1}, " \n ", "req-1"
-	if !around.describedMarkdown() {
-		t.Fatal("library files, a folder, account tags, ceilings, a request id and a whitespace-only draft do not stop a request being described")
+	if !around.describedMarkdown([]Resolved{notes, spec}) {
+		t.Fatal("Markdown files, a folder, account tags, ceilings, a request id and a whitespace-only draft do not stop a request being described")
 	}
 	for name, with := range map[string]func(*materializeArgs){
 		"no statement":   func(a *materializeArgs) { a.Statement = "" },
@@ -1673,27 +1809,36 @@ func TestDescribedMarkdownMeansAStatementAndNothingToComposeFrom(t *testing.T) {
 		"a recipe":       func(a *materializeArgs) { a.RecipeId = "recipe-1" },
 		"an output kind": func(a *materializeArgs) { a.OutputKind = "email_template" },
 		"a deployable":   func(a *materializeArgs) { a.DeployableKind = "spa" },
-		// The revision workflow reads Markdown and images. It cannot read the graph,
-		// so a request with records to write from has something of its own to
-		// compose from, and only the composer can read it.
-		"a query":       func(a *materializeArgs) { a.Sources = []SourceRef{{Kind: KindQuery, Ref: "sourceRows()"}} },
-		"a concept row": func(a *materializeArgs) { a.Sources = []SourceRef{{Kind: KindConceptRow, Ref: "invoice-1"}} },
 	} {
 		a := describedArgs()
 		with(&a)
-		if a.describedMarkdown() {
+		if a.describedMarkdown(nil) || a.describedMarkdown([]Resolved{notes}) {
 			t.Fatalf("a request with %s is not a described Markdown request", name)
 		}
 	}
-	// One data source among the files is enough to keep the composer: the files
-	// would go to the revision workflow and the records could not.
-	mixed := describedArgs()
-	mixed.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes-file"}, {Kind: KindQuery, Ref: "sourceRows()"}}
-	if mixed.describedMarkdown() {
-		t.Fatal("a request with a query among its files is not a described Markdown request")
+	// The revision workflow reads Markdown and images. It cannot read the graph, so a
+	// request with records to write from has something of its own to compose from, and
+	// only the composer can read it. One data source among the files is enough to keep the
+	// composer: the files would go to the revision workflow and the records could not.
+	query := Resolved{Ref: SourceRef{Kind: KindQuery, Ref: "sourceRows()"}, Rows: []map[string]any{{"id": "invoice-1"}}, Count: 1}
+	conceptRow := Resolved{Ref: SourceRef{Kind: KindConceptRow, Ref: "invoice-1"}, Rows: []map[string]any{{"id": "invoice-1"}}, Count: 1}
+	for name, resolved := range map[string][]Resolved{
+		"a query":                     {query},
+		"a concept row":               {conceptRow},
+		"a Markdown file and a query": {notes, query},
+		"a query and a Markdown file": {query, notes},
+	} {
+		a := describedArgs()
+		a.Sources = make([]SourceRef, 0, len(resolved))
+		for _, r := range resolved {
+			a.Sources = append(a.Sources, r.Ref)
+		}
+		if a.describedMarkdown(resolved) {
+			t.Fatalf("a request with %s is not a described Markdown request", name)
+		}
 	}
 	// A request is blank or described, never both: blank has no words at all.
-	if describedArgs().blank() || blankArgs(pure.FormatMarkdown).describedMarkdown() {
+	if describedArgs().blank() || blankArgs(pure.FormatMarkdown).describedMarkdown(nil) {
 		t.Fatal("blank and described requests overlap")
 	}
 }

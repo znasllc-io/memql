@@ -69,33 +69,36 @@ func (a materializeArgs) blank() bool {
 		len(a.Sources) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == ""
 }
 
-// describedMarkdown is a Markdown file asked for by DESCRIBING it: a statement,
-// and nothing of the document's own to compose from -- no draft, sections,
-// template, recipe or special output. Library files may come with it; they are
-// references the revision workflow can read, and they are passed on with the
-// description.
+// describedMarkdown is a Markdown file asked for by DESCRIBING it: a statement, and
+// nothing of the document's own to compose from -- no draft, sections, template, recipe or
+// special output -- and every picked thing a Library file the Library can attach to a review
+// comment (attachableSource, described.go: a ".md" file up to 32 KiB, or a PNG, JPEG, GIF or
+// WebP picture up to 8 MiB, judged on its file row's name and size). Nothing picked
+// qualifies too. `resolved` is what the request's sources resolved to.
 //
-// Such a request is filed as the empty page with its statement kept on the
-// composition. Writing the document is the Library's revision workflow, and the
-// person's own client hands the description to it: a work run may not (see
-// fromARun).
+// Such a request is filed as the empty page with its statement kept on the composition.
+// Writing the document is the Library's revision workflow, and the person's own client
+// hands it the description together with the files: a work run may not (see fromARun).
 //
-// A DATA SOURCE KEEPS THE COMPOSER. The revision workflow reads Markdown and
-// images and cannot read the graph, so a request to write a document from
-// records (a query, a concept row) has something of its own to compose from and
-// only the composer can read it. Filing that request blank would throw the
-// records away. The SDK's isDescribedMarkdown says the same thing; the two move
-// together.
-func (a materializeArgs) describedMarkdown() bool {
-	return a.Format == pure.FormatMarkdown && a.Statement != "" && strings.TrimSpace(a.Draft) == "" &&
-		len(a.SectionKeys) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == "" &&
-		onlyLibraryFiles(a.Sources)
-}
-
-// onlyLibraryFiles says every source is a Library file, or there are none.
-func onlyLibraryFiles(sources []SourceRef) bool {
-	for _, source := range sources {
-		if source.Kind != KindLibraryFile {
+// ANY OTHER SOURCE KEEPS THE COMPOSER. The revision workflow reads Markdown and pictures
+// within the Library's limits, and nothing else: not the graph, and not a spreadsheet, a
+// JSON, text or web page file, an archive, a PDF, a Markdown file past 32 KiB, a file in the
+// Bin or one nobody can read. A request to write a document from any of those has something
+// of its own to compose from and only the composer can read it; filing it blank would drop
+// what the person picked. So a record, a query, or a Library file the Library cannot attach
+// sends the whole request to the composer, which reads every picked thing. The SDK's
+// isDescribedMarkdown says the same thing from the same rows, so the person's client hands
+// on exactly the files this server filed blank; the two move together, and the Library's
+// drift guard holds both copies to its constants.
+//
+// IT IS A DECISION ON THE ROWS, MADE BEFORE ANY CONTENT IS READ (see materialize).
+func (a materializeArgs) describedMarkdown(resolved []Resolved) bool {
+	if !(a.Format == pure.FormatMarkdown && a.Statement != "" && strings.TrimSpace(a.Draft) == "" &&
+		len(a.SectionKeys) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == "") {
+		return false
+	}
+	for _, source := range resolved {
+		if !attachableSource(source) {
 			return false
 		}
 	}
@@ -288,8 +291,9 @@ type executionRequest struct {
 	// as the empty page (see describedMarkdown). It is decided ONCE, when the
 	// request is accepted, and saved with the request: the replica that executes
 	// the run is usually not the one that accepted it, and only the accepting call
-	// knows whether a person or a run made it. omitempty keeps every other saved
-	// request exactly as it was.
+	// knows whether a person or a run made it. It also says no reference was read:
+	// the path is decided before any content is, so a described request's sources
+	// carry no Files. omitempty keeps every other saved request exactly as it was.
 	Described bool `json:"described,omitempty"`
 }
 
@@ -398,10 +402,14 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	if err != nil {
 		return nil, fmt.Errorf("compose: the sources could not be read: %w", err)
 	}
-	if err := i.captureSourceContents(ctx, resolved); err != nil {
-		return nil, err
-	}
-	request := executionRequest{Args: a, Resolved: resolved, Started: i.clock().UTC()}
+	// THE PATH IS DECIDED HERE, ON THE ROWS THE SOURCES RESOLVED TO, BEFORE ANY CONTENT IS
+	// READ, and the contents are read only for a file the composer will write. A described
+	// file is filed empty, so nothing it names is read: not now, and not on the replica that
+	// executes the run. Reading first (as this once did) downloaded files nothing used, and
+	// could refuse a whole request over a reference nobody would have looked at. Every
+	// picked Library file may therefore say `content: true`: it costs nothing on the
+	// described path and is what lets the composer read it on the other.
+	//
 	// FILED BLANK ONLY WHEN A PERSON ASKED. The empty page is the first half of a
 	// hand-off: the person's client reads the description off the composition and
 	// gives it to the Library's revision workflow. The second half cannot be done
@@ -409,8 +417,15 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	// a call made BY a run (the planner's file delivery, an agent's composeFile:
 	// both say "write this" in a statement) has no client to finish it, and filing
 	// it blank would end the run with an empty document and nobody to write it.
-	// Those keep the composer.
-	request.Described = a.describedMarkdown() && !fromARun(ctx)
+	// Those keep the composer, and so read their references.
+	described := !fromARun(ctx) && a.describedMarkdown(resolved)
+	if !described {
+		if err := i.captureSourceContents(ctx, resolved); err != nil {
+			return nil, err
+		}
+	}
+	request := executionRequest{Args: a, Resolved: resolved, Started: i.clock().UTC()}
+	request.Described = described
 	if len(a.SectionKeys) > 0 {
 		request.Sections, err = i.captureSections(ctx, rc, a.SectionKeys)
 		if err != nil {
