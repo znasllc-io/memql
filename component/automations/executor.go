@@ -688,7 +688,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 
 	// Debug, not Info: a scheduled firing that writes nothing now leaves no run
 	// row (journal.go), so this line promised an execution record that may never
-	// exist, and on an idle instance it was one line per tick per replica.
+	// exist, and on an idle instance it was one line per tick on the cron leader.
 	if e.logger != nil {
 		e.logger.Debug("starting automation execution",
 			"component", ComponentName,
@@ -746,10 +746,13 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		}
 	}
 
-	// Open the run row before the first step, so every later write has a
-	// home. An automation whose trigger names a v1:work:* concept is NOT
-	// journaled: its own step rows would re-fire it, and a feedback loop
-	// through the graph is the failure an event-sourced substrate makes easy.
+	// Give the run its row before anything is written against it: at open, ahead
+	// of the first step, unless it is a held cron tick (holdsScheduledJournal,
+	// below), whose row waits for the tick's first graph write, its failure or
+	// its park on a human wait. An adopted run's row exists already. An
+	// automation whose trigger names a v1:work:* concept is NOT journaled: its
+	// own step rows would re-fire it, and a feedback loop through the graph is
+	// the failure an event-sourced substrate makes easy.
 	journal := e.journal
 	if journalSkipsAutomation(automation) {
 		journal = nil

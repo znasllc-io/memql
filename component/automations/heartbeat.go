@@ -37,9 +37,10 @@ func (j *workJournal) duringStep(ctx context.Context, runId string) func() {
 	return func() { cancel(); <-done }
 }
 
-// pulse renews a run's heartbeat while one of its steps runs. A late run
-// (heldUntilWrite) that is still held has no row to renew, so its pulses are
-// dropped rather than kept to be replayed once it opens (heldWrites.dropsPulses).
+// pulse renews a run's heartbeat while one of its steps runs. A late run (a
+// scheduled firing's, heldUntilWrite, or a directly called logic's) that is
+// still held has no row to renew, so its pulses are dropped rather than kept to
+// be replayed once it opens (heldWrites.dropsPulses).
 func (j *workJournal) pulse(ctx context.Context, runId string) {
 	if j.hold.dropsPulses() {
 		return

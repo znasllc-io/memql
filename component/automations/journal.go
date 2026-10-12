@@ -42,12 +42,13 @@ package automations
 // tick therefore holds its journal the way a directly called logic does
 // (heldWrites, logic_statements.go): the run row and every step row wait until
 // the engine reports the run's first graph write (common.NotifyWrite), or until
-// the run fails, and are then written in the order they were made. A tick that
-// completes without a write writes nothing at all. holdsScheduledJournal is the
-// rule: a cron tick that is neither adopted (its row exists already and the
-// adoption advances it) nor @journalRequired (it promises confirmed boundaries,
-// and a boundary that waits for a write is not one). Every other trigger is
-// journaled at open, as it always was.
+// the run fails or parks on a human wait (runStatementAutomation), and are then
+// written in the order they were made. A tick that completes without a write
+// writes nothing at all. holdsScheduledJournal is the rule: a cron tick that is
+// neither adopted (its row exists already and the adoption advances it) nor
+// @journalRequired (it promises confirmed boundaries, and a boundary that waits
+// for a write is not one). Every other trigger is journaled at open, as it
+// always was.
 //
 // A LATE RUN OPENS LIVE. The work sweep judges a running run by its newest
 // heartbeat, heartbeatAt else startedAt, and hands one that has been silent for
@@ -61,12 +62,14 @@ package automations
 // receipt is stamped when it is replayed (heldUntilWrite).
 //
 // THE TRADE-OFF, ACCEPTED: only a write through the engine's mutation path
-// reaches the observer. A builtin that writes through raw SQL -- the retention
-// sweeps and purges, workJournalRetentionSweep and logsRetentionSweep among
-// them -- reports nothing, so a scheduled automation whose only effect is raw
-// SQL leaves no journal unless it fails. Its failure is journaled in full
-// (closeRun opens the run before it classifies or closes it); its success is the
-// one thing it no longer records.
+// reaches the observer. A builtin that writes through raw SQL alone -- a raw-SQL
+// archive and delete, such as the logs sweep (logsRetentionSweep) -- reports
+// nothing, so a scheduled automation whose only effect is raw SQL leaves no
+// journal unless it fails. Its failure is journaled in full (closeRun opens the
+// run before it classifies or closes it); its success is the one thing it no
+// longer records. workJournalRetentionSweep is not one: when it has detail to
+// retire, its builtin first folds each run's summary through updateWorkRun, an
+// engine write, and that opens its run.
 //
 // AN AUTOMATION THAT REACTS TO WORK ROWS IS NOT JOURNALED. Its own step
 // rows would re-fire its trigger, and a feedback loop through the graph
@@ -424,11 +427,11 @@ type heldWrites struct {
 	released bool
 	// open writes the run row when the run opens, ahead of every held write.
 	open func()
-	// opensLive marks the hold of a run that opens LATE, after its firing began
-	// (heldUntilWrite). Its run is judged by its heartbeat the moment it exists,
-	// so none of the beats held for it may be replayed as they were made: see
-	// dropsPulses and beating. A directly called logic's hold leaves it false
-	// and replays what it held, as it always has.
+	// opensLive marks the hold of a run that opens LATE, after its firing or
+	// call began: a scheduled firing's (heldUntilWrite) and a directly called
+	// logic's (logic_statements.go), so every hold today. Its run is judged by
+	// its heartbeat the moment it exists, so none of the beats held for it may
+	// be replayed as they were made: see dropsPulses and beating.
 	opensLive bool
 	writes    []heldWrite
 }
@@ -819,7 +822,7 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 	// template and a journal because somebody closed a laptop.
 	if status == "failed" {
 		// A HELD RUN OPENS HERE. A scheduled firing that failed without ever
-		// writing (a retention sweep whose raw-SQL builtin timed out) is held, and
+		// writing (the logs sweep, whose raw-SQL DELETE timed out) is held, and
 		// its failure is the one record it can leave. Everything below reads or
 		// updates the run's row, so the row has to exist first: release writes it,
 		// then the steps held behind it, in order. It is a no-op on a journal that

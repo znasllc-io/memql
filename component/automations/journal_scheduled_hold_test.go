@@ -24,6 +24,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -196,9 +197,10 @@ func TestScheduledRunKeepsTheStepsBeforeItsFirstWrite(t *testing.T) {
 
 // A failed firing is journaled whether or not it wrote. This is the case a
 // hold that forgot to open on failure would lose, and the one the incident
-// record needs: a retention sweep fails every night on a statement timeout, and
-// its builtin writes through raw SQL, which reports nothing to the observer --
-// so the failure is the only thing such a run can leave.
+// record needs: the logs sweep failed on a statement timeout on 2026-10-10 and
+// again on 2026-10-11, and its builtin archives and deletes through raw SQL,
+// which reports nothing to the observer -- so the failure is the only thing
+// such a run can leave.
 func TestScheduledRunFailureIsJournaled(t *testing.T) {
 	rec := &recordingJournalExecutor{}
 	probe := &scheduledProbe{rec: rec, failAt: "a"}
@@ -229,6 +231,59 @@ func TestScheduledRunFailureIsJournaled(t *testing.T) {
 	last := args[len(args)-1]
 	if last["status"] != "failed" || last["errorMessage"] != "boom" || last["runId"] != exec.ID || last["finishedAt"] == nil {
 		t.Errorf("close: %v, want the run closed failed with its error", last)
+	}
+}
+
+// waitingProbe parks the run on a human wait at waitAt, and reports no write to
+// the observer: the question was persisted where the hold does not hear it (on
+// another node, or through a write masked the way the journal's own are).
+type waitingProbe struct{ waitAt string }
+
+func (p *waitingProbe) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+	now := time.Now()
+	if step.ID == p.waitAt {
+		return &StepResult{StepId: step.ID, StartedAt: now}, &work.HumanWait{ApprovalID: "approval-1"}
+	}
+	return &StepResult{StepId: step.ID, Status: "completed", Result: map[string]any{"ok": true}, StartedAt: now, CompletedAt: now}, nil
+}
+
+// A run parked on a human wait is not finished, and only the answer carries it
+// on: resume reads its run row and its waiting step back. A tick whose question
+// reached the observer as no write is still held when it parks, so parking must
+// open it -- the run row, the steps held behind it, the waiting receipt -- and
+// leave it open: no close, for the reason closeRun writes none on a human wait
+// (the answer may already have landed on another replica). Held and returned
+// as it was, the run would be waiting on an approval with no run on file.
+func TestScheduledRunParkedOnAHumanWaitLeavesAnOpenRun(t *testing.T) {
+	rec := &recordingJournalExecutor{}
+	e := NewExecutor(ExecutorOptions{StepRegistry: &waitingProbe{waitAt: "b"}})
+	e.journal = newWorkJournal(rec, nil)
+	auto := &Automation{Name: "askingTick", Schedule: "0 */10 * * * *", Steps: scheduledSteps("a", "b")}
+
+	exec, err := e.Execute(context.Background(), auto, "schedule")
+	if !isHumanWait(err) || exec.Status != "waiting" {
+		t.Fatalf("status %q, err %v; want the run parked on its human wait", exec.Status, err)
+	}
+
+	names, args := journalWrites(t, rec)
+	want := []string{
+		"createWorkRun",
+		"createWorkStep", "updateWorkStep", "updateWorkRun", // a, held then flushed
+		"createWorkStep", "updateWorkStep", // b: the intent and the waiting receipt
+	}
+	if !slices.Equal(names, want) {
+		t.Fatalf("journal writes = %v, want %v: a held run that parks must open, and stay open", names, want)
+	}
+	if args[0]["runId"] != exec.ID || args[0]["status"] != "running" || args[0]["triggeredBy"] != "schedule" {
+		t.Errorf("run row: %v, want this run opened running by schedule", args[0])
+	}
+	if receipt := args[len(args)-1]; receipt["status"] != "waiting" {
+		t.Errorf("the parked step's receipt: %v, want status waiting", receipt)
+	}
+	for i, name := range names {
+		if name == "updateWorkRun" && args[i]["status"] != nil {
+			t.Errorf("the parked run was closed %v: nothing closes a waiting run but its answer", args[i]["status"])
+		}
 	}
 }
 
