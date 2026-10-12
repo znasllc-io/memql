@@ -35,6 +35,24 @@
 # is an HTTP/1.1 request handed to an h2c backend, which fails without
 # mentioning the path, the host or the generator.
 #
+# THE ERROR PAGES, ON TWO OF THE FOUR. On 2026-10-11 the whole mesh was down and
+# every host answered ingress-nginx's bare 503. An Ingress carrying
+# `nginx.ingress.kubernetes.io/default-backend: error-pages` sends a request to
+# `memql error-pages` instead when its Service has no ready endpoints, and this
+# script applies it under the rule integrations/customdomain's doorIngressObjects
+# applies: only an Ingress whose proxy speaks plain HTTP carries it. That is
+# app. (the edge) and api.'s HTTP paths (bff-http). It is NOT on api.'s gRPC
+# Ingress (backend-protocol GRPC) or on id. (backend-protocol HTTPS):
+# ingress-nginx keeps an Ingress's backend protocol when it swaps in the
+# default backend, and the error pages are a plain HTTP/1.1 server, so behind
+# grpc_pass they would be sent h2c and behind HTTPS a TLS handshake -- and
+# either way the proxy answers 502, which is worse than the bare 503 it
+# replaces. The Service is looked up in --namespace; a namespace other than the
+# engine's needs an `error-pages` Deployment AND Service of its own (a Service
+# alone selects no pods there), and until it has both ingress-nginx skips the
+# fallback and the Ingress behaves as it did before.
+# account_front_door_test.go holds all four.
+#
 # ONE CERTIFICATE WITH THREE SANs, AND THAT IS THE ACTIVATION RULE (design D8).
 # An HTTP-01 order cannot go Ready unless every dnsName in it solves, so the
 # certificate IS the all-or-nothing check rather than a rule the reconciler
@@ -133,6 +151,14 @@ readonly FIELD_MANAGER="memql-account-front-door"
 # differs from the cluster's own api host is a client discovering that the same
 # call works at one address and 413s at another.
 readonly PROXY_BODY_SIZE="48m"
+
+# The annotation line that sends an Ingress to the error pages when its Service
+# has no ready endpoints: a second spelling of integrations/customdomain's
+# ErrorPagesBackendAnnotation + ": " + ErrorPagesServiceName, which
+# custom_domain_test.go reads out of this file and holds equal. Passed to the
+# plain-HTTP Ingresses only -- see the header for why id. and the gRPC one do
+# not carry it.
+readonly ERROR_PAGES_BACKEND='nginx.ingress.kubernetes.io/default-backend: error-pages'
 
 OBJECT_NAME=""
 APPLIED=false
@@ -299,7 +325,8 @@ YAML
 # serves TLS in-cluster, so `id.` without backend-protocol: HTTPS answers 502
 # on every request while the row says live; and ingress-nginx defaults
 # proxy-body-size to 1m, so `api.` without it 413s every upload past a
-# megabyte with a message naming no knob.
+# megabyte with a message naming no knob. app. passes ERROR_PAGES_BACKEND here;
+# id. does not, because its HTTPS backend protocol rules the error pages out.
 function render_simple_ingress() {
     local name="$1" host="$2" service="$3" port="$4"
     shift 4
@@ -361,6 +388,7 @@ YAML
     cat <<YAML
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "${PROXY_BODY_SIZE}"
+    ${ERROR_PAGES_BACKEND}
 spec:
   ingressClassName: ${INGRESS_CLASS}
   tls:
@@ -481,7 +509,8 @@ YAML
 # The first version of this script emitted the Certificate first while the Go
 # path emitted it last, so one substrate documented why the other was wrong.
 function render_objects() {
-    render_simple_ingress "${OBJECT_NAME}-app" "$APP_HOST" "$EDGE_SERVICE" "$EDGE_PORT"
+    render_simple_ingress "${OBJECT_NAME}-app" "$APP_HOST" "$EDGE_SERVICE" "$EDGE_PORT" \
+        "$ERROR_PAGES_BACKEND"
     printf -- '---\n'
     render_api_grpc_ingress
     printf -- '---\n'

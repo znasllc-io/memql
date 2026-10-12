@@ -2409,7 +2409,7 @@ QueryClient.prototype.logsStatus = function (this: QueryClient, args: LogsStatus
   return this.executeNamed("logsStatus", buildLogsStatus(args), opts);
 };
 
-/** Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then delete that day; at most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, skipped, refused }. */
+/** Run the retention sweep now: archive every expired UTC day per node type as logs/<day>/<nodeType>.ndjson.gz in MEMQL_LOGS_ARCHIVE_CONTAINER, then, once every node type of the day is uploaded, drop the day's chunk whole; only rows no chunk wholly inside the day holds (a plain table, or a chunk that straddles midnight) go by a batched DELETE instead. At most sixty days per run. NO ARCHIVE, NO DELETE: with no container configured the sweep keeps every line and says so in its own log line. A second sweep while one runs answers skipped. The nightly logsRetentionSweep automation calls this on the cron leader; an owner may call it by hand. Answers { daysArchived, rowsArchived, rowsDeleted, chunksDropped, skipped, refused }; a dropped day's rows count in rowsDeleted at what the day archived. */
 export interface LogsSweepArgs {
 }
 

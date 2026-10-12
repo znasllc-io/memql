@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -567,17 +568,33 @@ func (i *Integration) RetentionSweep(ctx context.Context, dryRun bool) (Retentio
 	if err := requireClusterOwner(ctx); err != nil {
 		return RetentionResult{}, err
 	}
-	result, err := i.journalRetentionSweep(ctx, dryRun)
-	if err != nil {
-		return result, err
+	// THE TWO HALVES DO NOT DEPEND ON EACH OTHER, so one failing does not skip the
+	// other. The journal half's expired-rows read takes the latest version of every
+	// id of one concept and is not windowed (0.41 s per 400,000 model-call
+	// versions, and growing with them): a timeout there used to return before the
+	// operational half ran, and zero the whole night for every policy in it.
+	// Windowing that read is deferred to release 2.
+	//
+	// Running the operational half after a journal failure is safe. A run whose
+	// model calls or observations are still stored is kept by the operational
+	// half's own read (retentionCandidateRead's child test, and retireVerified's
+	// guard), whatever became of the journal half that would have retired them.
+	result, journalErr := i.journalRetentionSweep(ctx, dryRun)
+	if journalErr != nil {
+		i.log().Warn("work: the journal retention sweep failed; the operational retention pass runs regardless",
+			"component", "work.retention", "dryRun", dryRun, "error", journalErr)
 	}
-	result.Operational, err = i.operationalRetention(ctx, dryRun)
+	var operationalErr error
+	result.Operational, operationalErr = i.operationalRetention(ctx, dryRun)
 	for _, p := range result.Operational {
 		result.RowsArchived += p.ArchivedVersions
 		result.RowsDeleted += p.DeletedVersions
 		result.Objects = append(result.Objects, p.Objects...)
 		result.Oversized = append(result.Oversized, p.Oversized...)
 	}
+	// Both failures come back, in one error: a night's operator needs to see that
+	// the journal half failed even when the operational half went through.
+	err := errors.Join(journalErr, operationalErr)
 	i.log().Info("work: operational retention pass complete", "component", "work.retention", "dryRun", dryRun, "policies", result.Operational, "error", err)
 	return result, err
 }
@@ -769,6 +786,13 @@ ORDER BY n."createdAt", n.id
 // expiredJournalRowsSQL is the retention read. The boundary is applied to the
 // LATEST version's createdAt, so a row rewritten inside the window is kept.
 //
+// NOT WINDOWED, AND KNOWN TO BE. It takes the latest version of every id of the
+// concept (DISTINCT ON over all its versions), so it costs the concept's history
+// and not a day's: 0.41 s for 400,000 model-call versions, and linear in them. It
+// is not what stopped retention on 2026-10-10 and -11, which was the operational
+// half; and RetentionSweep no longer lets this half's failure stop that one.
+// Windowing it, as the operational policies are, is deferred to release 2.
+//
 // staged-data: MUST-NOT-GATE -- a staged journal row SKIPPED HERE SURVIVES ITS
 // RETENTION WINDOW FOREVER, and unlike a skipped run there is nothing left to
 // find it: no later pass looks at a row this one did not return, so the table
@@ -810,31 +834,68 @@ func (i *Integration) expiredJournalRows(ctx context.Context, concept string, bo
 // refused at construction, and an undecidable tier is denied by the gate
 // itself.
 func (i *Integration) selectAdmitted(ctx context.Context, concept, query string, params ...any) ([]map[string]any, error) {
-	// The admission gate is checked FIRST, and the order is the fail-closed
-	// direction: "there is no database" is a configuration answer, while "we
-	// cannot tell who may see this row" is the one that must never be
-	// resolved by proceeding.
+	rows, _, err := i.selectAdmittedPage(ctx, concept, query, params...)
+	return rows, err
+}
+
+// pageEnd says how far a read got, which the admitted rows alone cannot: scanned
+// is how many rows the database returned, admitted or not, and at and id are the
+// key of the last of them. A caller that reads in pages needs both. A page is
+// full when the database filled it, and the next page starts after the last row
+// the read went through -- a row the gate refused included, or the rows behind a
+// refused run of them would never be read.
+type pageEnd struct {
+	scanned int
+	at      time.Time
+	id      string
+}
+
+// selectAdmittedPage is selectAdmitted that also reports where the read ended.
+func (i *Integration) selectAdmittedPage(ctx context.Context, concept, query string, params ...any) ([]map[string]any, pageEnd, error) {
+	db, err := i.gatedDB()
+	if err != nil {
+		return nil, pageEnd{}, err
+	}
+	return i.scanAdmitted(ctx, db, concept, query, params...)
+}
+
+// gatedDB is the database handle a hand-rolled sweep read may use, or the
+// reason it may not.
+//
+// The admission gate is checked FIRST, and the order is the fail-closed
+// direction: "there is no database" is a configuration answer, while "we
+// cannot tell who may see this row" is the one that must never be
+// resolved by proceeding.
+func (i *Integration) gatedDB() (*bun.DB, error) {
 	if i.admitRow == nil {
 		return nil, fmt.Errorf("work: no row-admission gate is wired; refusing a hand-rolled read rather than admitting every row")
 	}
 	if i.bunDB == nil || i.bunDB() == nil {
 		return nil, fmt.Errorf("work: the sweeps need a database handle")
 	}
-	return i.selectAdmittedFrom(ctx, i.bunDB(), concept, query, params...)
+	return i.bunDB(), nil
 }
 
 // selectAdmittedFrom also supports the recovery snapshot transaction.
 func (i *Integration) selectAdmittedFrom(ctx context.Context, db bun.IDB, concept, query string, params ...any) ([]map[string]any, error) {
+	rows, _, err := i.scanAdmitted(ctx, db, concept, query, params...)
+	return rows, err
+}
+
+func (i *Integration) scanAdmitted(ctx context.Context, db bun.IDB, concept, query string, params ...any) ([]map[string]any, pageEnd, error) {
 	if i.admitRow == nil {
-		return nil, fmt.Errorf("work: no row-admission gate is wired")
+		return nil, pageEnd{}, fmt.Errorf("work: no row-admission gate is wired")
 	}
 	rows, err := db.QueryContext(ctx, query, params...)
 	if err != nil {
-		return nil, fmt.Errorf("work: read %s: %w", concept, err)
+		return nil, pageEnd{}, fmt.Errorf("work: read %s: %w", concept, err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out []map[string]any
+	var (
+		out  []map[string]any
+		page pageEnd
+	)
 	for rows.Next() {
 		var (
 			idv       string
@@ -842,8 +903,10 @@ func (i *Integration) selectAdmittedFrom(ctx context.Context, db bun.IDB, concep
 			payload   []byte
 		)
 		if err := rows.Scan(&idv, &createdAt, &payload); err != nil {
-			return nil, fmt.Errorf("work: scan %s: %w", concept, err)
+			return nil, pageEnd{}, fmt.Errorf("work: scan %s: %w", concept, err)
 		}
+		page.scanned++
+		page.at, page.id = createdAt, idv
 		node := memorynodes.MemoryNode{
 			ID:        idv,
 			Concept:   concept,
@@ -869,9 +932,9 @@ func (i *Integration) selectAdmittedFrom(ctx context.Context, db bun.IDB, concep
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("work: read %s: %w", concept, err)
+		return nil, pageEnd{}, fmt.Errorf("work: read %s: %w", concept, err)
 	}
-	return out, nil
+	return out, page, nil
 }
 
 // ---------------------------------------------------------------------------

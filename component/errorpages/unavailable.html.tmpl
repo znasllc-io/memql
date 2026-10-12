@@ -1,0 +1,97 @@
+{{- /*
+  The page every other host gets: a customer's site, a custom domain, anything
+  the platform hosts for somebody else, and the bare domain itself, which is
+  the cluster owner's own main website. It says whose it is by saying nothing:
+  no mark, no name, no link, no brand colour. Its visitor has never heard of
+  the platform underneath, and a notice about the platform on their shopfront
+  would put someone else's name on their outage. errorpages.go says why.
+
+  Self-contained for the same reason the branded page is: one inline
+  stylesheet, no font file, no script, no image.
+*/ -}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f7f7f5">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#07090a">
+<title>{{.Title}}</title>
+<meta name="description" content="{{.Message}}">
+<style>
+/*
+  The neutrals of the platform palette and none of its accent. They are
+  copied rather than imported because a page that may fetch nothing cannot
+  import anything, and errorpages_test.go fails the build when they drift from
+  the brand tokens. A plain light set plus a dark override, not light-dark(),
+  so that an older browser still gets its colours.
+*/
+:root {
+  --bg: #f7f7f5;
+  --surface: #ffffff;
+  --fg: #191d1a;
+  --muted: #5b615c;
+  --line: #e5e6e2;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #07090a;
+    --surface: #0b1110;
+    --fg: #e8e6dd;
+    --muted: #9ca395;
+    --line: #18231e;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  padding: 1.5rem;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "InterVariable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  width: 100%;
+  max-width: 26rem;
+  padding: 2.5rem 2rem;
+  text-align: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.625rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+p {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+  text-wrap: pretty;
+}
+</style>
+</head>
+<body>
+<main>
+<h1>{{.Heading}}</h1>
+<p>{{.Detail}}</p>
+</main>
+</body>
+</html>

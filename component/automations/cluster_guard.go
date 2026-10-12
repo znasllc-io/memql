@@ -231,7 +231,8 @@ func (g *ClusterExecutionGuard) claimWithTTL(ctx context.Context, automationName
 	if n == 0 {
 		// Another replica already owns this (automation, event) -> duplicate.
 		g.prevented.Add(1)
-		g.warn("duplicate automation execution prevented by cluster guard",
+		// 2026-10-11 idle-instance log volume: 71,105 of these warnings in six hours, about a million log lines a day in total; Debug, the prevented counter keeps the count.
+		g.debug("duplicate automation execution prevented by cluster guard",
 			"automation", automationName, "dedupKey", dedupKey, "node", g.nodeId)
 		return false
 	}
