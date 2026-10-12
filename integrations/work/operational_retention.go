@@ -306,6 +306,13 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 		return nil, err
 	}
 	started := i.clock()
+	// ONE POLICY'S ERROR IS THAT POLICY'S. It is recorded, and the policies after
+	// it still run: the two run policies that filled production's disk come fifth
+	// and sixth of eight, so returning at an earlier policy's transient error cost
+	// exactly their rows the whole night. Every policy's row comes back, and the
+	// errors come back joined, each naming its policy (RetentionSweep does the
+	// same for the two halves).
+	var policyErrs []error
 	for k, p := range operationalPolicies {
 		days := windows[p.env]
 		cutoff := i.clock().UTC().AddDate(0, 0, -days)
@@ -321,7 +328,8 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 		result.BudgetExhausted = spent
 		results = append(results, result)
 		if policyErr != nil {
-			return results, policyErr
+			policyErrs = append(policyErrs, fmt.Errorf("retention policy %s on %s: %w", p.concept, p.env, policyErr))
+			continue
 		}
 		if spent {
 			i.log().Info("work: a retention policy spent its share of the pass's time budget with day windows unread; the next pass starts again at the oldest version stored",
@@ -329,7 +337,7 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 				"candidates", result.Candidates, "deleted", result.DeletedVersions)
 		}
 	}
-	return results, nil
+	return results, errors.Join(policyErrs...)
 }
 
 // retirePolicy walks one policy's candidates a day window at a time, oldest

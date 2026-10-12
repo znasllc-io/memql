@@ -847,10 +847,23 @@ FROM generate_series(1, 10000) r CROSS JOIN generate_series(1, 4) v`, now.AddDat
 	// Four times what the batch's own rows come to is room for every probe's
 	// misses; the walk of the table is over seventy thousand.
 	bound := float64(4 * 100 * versionsPerScheduledRun)
+	// And the batch's own rows are the floor. Each statement goes to every one of
+	// them, so a count below it means the plan's scans were not counted at all --
+	// rowsExamined counts scans of "MemoryNodes", and on a hypertable they are
+	// scans of its chunks -- and the bound above would pass on nothing. The
+	// parents' load returns the hundred runs' two versions each, the children's
+	// load their steps' two each, and the delete takes all of them.
+	floors := []float64{100 * 2, 100 * 2}
 	loads := retirementLoads(runConcept, ids, true)
+	if len(loads) != len(floors) {
+		t.Fatalf("%d loads, want the parents' and the children's (%d)", len(loads), len(floors))
+	}
 	for n, load := range loads {
 		examined := explainRowsExamined(t, db, load)
-		t.Logf("load %d examined %.0f MemoryNodes rows (bound %.0f)", n+1, examined, bound)
+		t.Logf("load %d examined %.0f MemoryNodes rows (floor %.0f, bound %.0f)", n+1, examined, floors[n], bound)
+		if examined < floors[n] {
+			t.Errorf("load %d examined %.0f MemoryNodes rows, fewer than the %.0f of the batch's own it returns: the plan's scans were not counted, so the bound proves nothing", n+1, examined, floors[n])
+		}
 		if examined > bound {
 			t.Errorf("a load of the batch's versions examined %.0f rows, more than %.0f: it walked the table\n%.300s", examined, bound, load.query)
 		}
@@ -873,7 +886,11 @@ FROM generate_series(1, 10000) r CROSS JOIN generate_series(1, 4) v`, now.AddDat
 	}
 	del := retirementDelete(runConcept, true, ids, string(rawKeys))
 	examined := explainRowsExamined(t, db, del)
-	t.Logf("the guarded delete examined %.0f MemoryNodes rows (bound %.0f)", examined, bound*3)
+	deleteFloor := float64(len(nodes))
+	t.Logf("the guarded delete examined %.0f MemoryNodes rows (floor %.0f, bound %.0f)", examined, deleteFloor, bound*3)
+	if examined < deleteFloor {
+		t.Errorf("the guarded delete examined %.0f MemoryNodes rows, fewer than the %.0f versions it deletes: the plan's scans were not counted, so the bound proves nothing", examined, deleteFloor)
+	}
 	if examined > bound*3 {
 		t.Errorf("the guarded delete examined %.0f rows, more than %.0f: a guard walked the table\n%.300s", examined, bound*3, del.query)
 	}
@@ -1058,4 +1075,72 @@ func TestRetentionSweepRunsTheOperationalHalfWhenTheJournalHalfFails(t *testing.
 			t.Fatalf("%d versions remain, want all %d: no archive, no delete", n, 3*versionsPerScheduledRun+1)
 		}
 	})
+}
+
+// firstUploadRefused is an archive that refuses its first upload and keeps
+// every later one: the first policy of a pass with candidates fails, and the
+// policies after it find the archive working.
+type firstUploadRefused struct {
+	verifyingArchive
+	refused bool
+}
+
+var errFirstUploadRefused = errors.New("test archive refused the first upload")
+
+func (a *firstUploadRefused) Upload(ctx context.Context, c, o string, b []byte, kind string) (string, error) {
+	if !a.refused {
+		a.refused = true
+		return "", errFirstUploadRefused
+	}
+	return a.verifyingArchive.Upload(ctx, c, o, b, kind)
+}
+
+// TestOperationalRetentionAPolicysErrorDoesNotEndThePass: one policy's error is
+// that policy's, not the night's. The two run policies that filled production's
+// disk come fifth and sixth of eight, so a transient failure in a policy before
+// them used to cost exactly their rows the whole night. Here the system-run
+// policy (fifth) fails on its archive; the pipelines run policy (seventh) still
+// runs and retires its rows, every policy reports its row, and the error names
+// the policy that failed.
+func TestOperationalRetentionAPolicysErrorDoesNotEndThePass(t *testing.T) {
+	db, i := sweepDB(t)
+	ctx := retentionOwner()
+	now := time.Now().UTC().Truncate(time.Second)
+	i.SetNow(func() time.Time { return now })
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	t.Setenv(EnvSystemRunRetentionDays, "")
+	t.Setenv(EnvPipelinesRunRetentionDays, "")
+	i.SetArchiver(&firstUploadRefused{})
+
+	seedScheduledRuns(t, db, "refused", now, 20, 40)
+	at := now.AddDate(0, 0, -40).Truncate(24 * time.Hour).Add(12 * time.Hour)
+	for n := 1; n <= 5; n++ {
+		seedPipelinesRun(t, db, fmt.Sprintf("after-%02d", n), pipelineOwner, "completed", at)
+	}
+	if failing, later := policyIndex(runConcept, EnvSystemRunRetentionDays), policyIndex(pipelinesRunConcept, EnvPipelinesRunRetentionDays); failing < 0 || later <= failing {
+		t.Fatalf("the system-run policy (%d) must come before the pipelines run policy (%d) for this test to say anything", failing, later)
+	}
+
+	results, err := i.operationalRetention(ctx, false)
+	if !errors.Is(err, errFirstUploadRefused) {
+		t.Fatalf("the pass returned %v, want the system-run policy's archive failure", err)
+	}
+	if !strings.Contains(err.Error(), runConcept) || !strings.Contains(err.Error(), EnvSystemRunRetentionDays) {
+		t.Errorf("the error %q does not name the policy that failed (%s on %s)", err, runConcept, EnvSystemRunRetentionDays)
+	}
+	if len(results) != len(operationalPolicies) {
+		t.Fatalf("%d result rows, want one for each of the %d policies: a policy after the failure did not run", len(results), len(operationalPolicies))
+	}
+	if r := resultFor(t, results, runConcept, EnvSystemRunRetentionDays); r.DeletedVersions != 0 {
+		t.Errorf("the failed policy deleted %d versions without an archive: %+v", r.DeletedVersions, r)
+	}
+	if r := resultFor(t, results, pipelinesRunConcept, EnvPipelinesRunRetentionDays); r.Candidates != 5 || r.DeletedVersions != 5*3 {
+		t.Errorf("the pipelines run policy after the failure reported %+v, want its 5 runs retired (15 versions)", r)
+	}
+	if n := storedVersionsLike(t, db, "v1:work:%:refused-%"); n != 20*versionsPerScheduledRun {
+		t.Errorf("%d versions of the failed policy's runs remain, want all %d: no archive, no delete", n, 20*versionsPerScheduledRun)
+	}
+	if n := storedVersionsLike(t, db, pipelinesRunConcept+":after-%"); n != 0 {
+		t.Errorf("%d versions of the later policy's runs remain, want none", n)
+	}
 }
