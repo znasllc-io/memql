@@ -30,6 +30,7 @@ export class NewEmail implements vscode.CustomReadonlyEditorProvider<vscode.Cust
   private readonly shown = new Map<string, string>();
   // Duplicate tabs for one link share one owner; no simultaneous resends of a request.
   private readonly panels = new Map<string, vscode.WebviewPanel>();
+  private readonly starts = new Map<string, Promise<string>>();
   constructor(private readonly context: vscode.ExtensionContext, private readonly api: EditorConnectionAPI, private readonly dictation: DocumentDictation) {}
   openCustomDocument(uri: vscode.Uri): vscode.CustomDocument {
     if (resourceFrom(uri.toString()).kind !== "new-email") throw new UserInputError(H.openEmail);
@@ -127,7 +128,17 @@ export class NewEmail implements vscode.CustomReadonlyEditorProvider<vscode.Cust
         await keep();
         await this.context.workspaceState.update(PENDING + link, pending);
         if (!pending.compositionId) {
-          pending.compositionId = await startMaterialize(execute(connection), pending.request);
+          if (disposed) throw new PageClosed();
+          const startKey = link + ":" + pending.request.requestId;
+          let starting = this.starts.get(startKey);
+          if (!starting) {
+            // Panel replacement must not submit the same request concurrently:
+            // engine idempotency is a lookup, not a lock on the request id.
+            starting = startMaterialize((name, call) => this.api.execute(connection, name, call), pending.request);
+            this.starts.set(startKey, starting);
+            void starting.finally(() => { if (this.starts.get(startKey) === starting) this.starts.delete(startKey); }).catch(() => undefined);
+          }
+          pending.compositionId = await starting;
           await this.context.workspaceState.update(PENDING + link, pending);
         }
         const result = await followComposition({ execute: execute(connection), signal: abort.signal }, pending.compositionId);

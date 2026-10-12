@@ -11,7 +11,7 @@ const draftKey = "memql.newEmail.draft:" + link, pendingKey = "memql.newEmail.pe
 const article = { id: "builtin:article", name: "Article", kind: "builtin", document: { subject: "Hello", blocks: [] } };
 const write = { type: "write", layoutId: article.id, name: "Autumn welcome.email.json", description: "A short welcome." };
 type Answer = (call: string) => Promise<Record<string, unknown>[]> | Record<string, unknown>[];
-async function fixture(options: { state?: Map<string, any>; connected?: boolean; answers?: Record<string, Answer> } = {}) {
+async function fixture(options: { state?: Map<string, any>; connected?: boolean; page?: NewEmail; answers?: Record<string, Answer> } = {}) {
   const state = options.state ?? new Map<string, any>();
   const messages: any[] = [], calls: { name: string; call: string }[] = [], opened: any[][] = [], uploads: any[][] = [];
   let current = options.connected === false ? undefined : lease, disposed = false, connects = 0;
@@ -30,7 +30,7 @@ async function fixture(options: { state?: Map<string, any>; connected?: boolean;
     execute: async (_lease: ConnectionLease, name: string, call: string) => { calls.push({ name, call }); assert.equal(_lease, lease); return (answers[name] ?? (() => []))(call); },
     uploadFile: async (...args: any[]) => { uploads.push(args); return { fileId: `upload-${uploads.length}` }; },
   } as unknown as EditorConnectionAPI;
-  const page = new NewEmail({ extensionUri: vscode.Uri.file("/extension"), workspaceState: memento, globalState: memento, subscriptions: [] } as unknown as vscode.ExtensionContext, api, { available: async () => false, cancel() {} } as unknown as DocumentDictation);
+  const page = options.page ?? new NewEmail({ extensionUri: vscode.Uri.file("/extension"), workspaceState: memento, globalState: memento, subscriptions: [] } as unknown as vscode.ExtensionContext, api, { available: async () => false, cancel() {} } as unknown as DocumentDictation);
   await page.resolveCustomEditor(page.openCustomDocument(vscode.Uri.parse(link)), panel);
   await receive({ type: "ready" });
   return { receive, messages, calls, state, opened, uploads, page, dispose: () => panel.dispose(), answers, get disposed() { return disposed; }, get connects() { return connects; } };
@@ -95,4 +95,20 @@ test("reference uploads validate the entire selection before uploading anything"
   names = ["good.md", "bad.exe"]; await f.receive({ type: "attach" }); assert.equal(f.uploads.length, 0); assert.equal(f.messages.at(-1).problem.message, EMAIL_COPY.host.unsupported);
   names = ["brief.md"]; size = 17 * 1024 * 1024; await f.receive({ type: "attach" }); assert.equal(f.uploads.length, 0); assert.equal(f.messages.at(-1).problem.message, EMAIL_COPY.host.tooLarge);
   size = 1; await f.receive({ type: "attach" }); assert.equal(f.uploads.length, 1); assert.equal(f.state.get(draftKey).references[0].fileId, "upload-1"); f.dispose();
+});
+
+
+test("replacing a page during creation shares its in-flight start", async () => {
+  let resolve!: (rows: Record<string, unknown>[]) => void;
+  const start = new Promise<Record<string, unknown>[]>(done => { resolve = done; });
+  const f = await fixture({ answers: { composeMaterialize: () => start } });
+  const run = f.receive(write);
+  while (!f.calls.some(call => call.name === "composeMaterialize")) await new Promise(done => setTimeout(done, 1));
+  const replacing = fixture({ state: f.state, page: f.page });
+  await new Promise(done => setTimeout(done, 5));
+  assert.equal(f.calls.filter(call => call.name === "composeMaterialize").length, 1);
+  resolve([{ compositionId: "c1" }]); await run;
+  const replacement = await replacing;
+  assert.equal(replacement.opened.length, 1); assert.equal(replacement.disposed, true);
+  assert.equal(f.calls.filter(call => call.name === "composeMaterialize").length, 1);
 });
