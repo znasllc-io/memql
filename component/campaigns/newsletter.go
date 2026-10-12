@@ -399,7 +399,7 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	locked, endPhase := context.WithTimeout(ctx, signupLockedPhase)
 	defer endPhase()
 	fail := func(err error) ([]memorynodes.MemoryNode, error) {
-		if ctx.Err() == nil && locked.Err() != nil {
+		if !signupContextEnded(ctx) && signupContextEnded(locked) {
 			w.logger.Warn("campaigns: a signup ran past its time under the storefront's locks, so it was not taken",
 				"site", siteID, "audience", audienceID, "limit", signupLockedPhase.String())
 			return nil, signupsBusy
@@ -528,6 +528,17 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		return nil, err
 	}
 	return accepted()
+}
+
+// signupContextEnded checks the deadline itself as well as cancellation. A socket
+// read can reach the context's deadline before the context timer gets CPU time
+// to publish Err(); that is still the end of the signup's locked phase.
+func signupContextEnded(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	deadline, ok := ctx.Deadline()
+	return ok && !time.Now().Before(deadline)
 }
 
 func (w *Worker) drainNewsletterWelcomes(ctx, systemCtx context.Context) {

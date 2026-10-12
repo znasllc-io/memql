@@ -13,6 +13,15 @@ import (
 	"github.com/znasllc-io/memql/component/database"
 )
 
+// These cases share a booted engine; each subtest owns and cleans its rows.
+func TestSignupPhaseDB(t *testing.T) {
+	f := newDigestFixture(t)
+	f.run(t, "ASignupWhoseLocksWereEndedWritesNothing", f.TestASignupWhoseLocksWereEndedWritesNothing)
+	f.run(t, "ASignupThatRunsPastItsTimeUnderTheLocksWritesNothing", f.TestASignupThatRunsPastItsTimeUnderTheLocksWritesNothing)
+	f.run(t, "ABurstOfSignupsLosesNoLockAndWritesNothingPastItsTime", f.TestABurstOfSignupsLosesNoLockAndWritesNothingPastItsTime)
+	f.run(t, "ASignupCountsTheAudienceOncePerDecision", f.TestASignupCountsTheAudienceOncePerDecision)
+}
+
 // signup_phase_db_test.go -- what a signup does under its locks, and what it does
 // when the locks are gone or its time under them is up (memql#6022, F9 fix round 3).
 //
@@ -86,8 +95,8 @@ func heldGate(n *digestNewsletter, held *atomic.Bool) (restore func()) {
 // between the signup's reads and its writes. The advisory lock goes with it, and
 // the signup, which was not told, asks before it writes -- and writes nothing: no
 // consent, no member, no signup. The person is told to try again.
-func TestASignupWhoseLocksWereEndedWritesNothing(t *testing.T) {
-	n := newEmptyNewsletter(t, "phase-lost")
+func (f *digestFixture) TestASignupWhoseLocksWereEndedWritesNothing(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "phase-lost")
 	actual := n.worker.store.engine
 	ender := &sessionEnder{Engine: actual, admin: n.db.DB, key: "campaign-newsletter:audience:" + n.audience, t: t}
 	n.worker.store.engine = ender
@@ -109,8 +118,8 @@ func TestASignupWhoseLocksWereEndedWritesNothing(t *testing.T) {
 // TestASignupThatRunsPastItsTimeUnderTheLocksWritesNothing: the phase under the
 // locks has a deadline, far inside the gate session's idle limit. A signup whose
 // reads under them take longer than it is cut off before it writes anything.
-func TestASignupThatRunsPastItsTimeUnderTheLocksWritesNothing(t *testing.T) {
-	n := newEmptyNewsletter(t, "phase-late")
+func (f *digestFixture) TestASignupThatRunsPastItsTimeUnderTheLocksWritesNothing(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "phase-late")
 	actual := n.worker.store.engine
 	var held atomic.Bool
 	n.worker.store.engine = slowUnderLocks{Engine: actual, held: &held, delay: always(400 * time.Millisecond)}
@@ -197,10 +206,10 @@ func (e *writeLog) Execute(ctx context.Context, q string) (any, error) {
 // audience never holds more than its ceiling, the signups that ran out of time wrote
 // nothing, and no two signups' writes interleave -- which a lock lost under a holder
 // that went on writing would be.
-func TestABurstOfSignupsLosesNoLockAndWritesNothingPastItsTime(t *testing.T) {
+func (f *digestFixture) TestABurstOfSignupsLosesNoLockAndWritesNothingPastItsTime(t *testing.T) {
 	const signups, ceiling = 16, 5
 	const sentence = "Too many signups at once. Try again in a moment."
-	n := newEmptyNewsletter(t, "phase-burst")
+	n := f.newEmptyNewsletter(t, "phase-burst")
 	n.db.DB.SetMaxOpenConns(4) // the request pool, as deployed
 	n.worker.cfg.MaxAudience = ceiling
 
@@ -332,8 +341,8 @@ func (e *sizeCounter) Execute(ctx context.Context, q string) (any, error) {
 // audience's lock, where it is exact -- and the second count before the locks that the
 // send preflight used to make for itself is the same number as the first. Each is a
 // read of every recipient in the cluster.
-func TestASignupCountsTheAudienceOncePerDecision(t *testing.T) {
-	n := newEmptyNewsletter(t, "count-once")
+func (f *digestFixture) TestASignupCountsTheAudienceOncePerDecision(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "count-once")
 	actual := n.worker.store.engine
 	var held atomic.Bool
 	counter := &sizeCounter{Engine: actual, held: &held}

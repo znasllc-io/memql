@@ -14,6 +14,34 @@ import (
 
 var attemptsArg = regexp.MustCompile(`attempts:\s*(\d+)`)
 
+// deadlineBeforeTimer models a socket deadline firing before context's timer
+// publishes cancellation. Err is still nil even though the deadline is past.
+type deadlineBeforeTimer struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c deadlineBeforeTimer) Deadline() (time.Time, bool) { return c.deadline, true }
+
+func TestSignupRecognizesADeadlineBeforeItsContextTimerRuns(t *testing.T) {
+	phase := deadlineBeforeTimer{Context: context.Background(), deadline: time.Now().Add(-time.Second)}
+	if phase.Err() != nil {
+		t.Fatal("the regression needs a context whose timer has not run")
+	}
+	if !signupContextEnded(phase) {
+		t.Fatal("a socket timeout at the phase deadline would leak instead of returning the signup retry message")
+	}
+	phase.deadline = time.Now().Add(time.Minute)
+	if signupContextEnded(phase) || signupContextEnded(context.Background()) {
+		t.Fatal("an unrelated transport error must not be treated as an expired signup phase")
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if !signupContextEnded(canceled) {
+		t.Fatal("a canceled caller must keep its own error instead of the signup retry message")
+	}
+}
+
 // TestABusyLockIsNeitherAnAttemptNorAFailureForTheBulkDrain: a send that finds the
 // pod's lock busy was never judged on its merits. It costs the recipient no attempt
 // (three attempts end a delivery as failed, so a busy pod would fail mail that was
