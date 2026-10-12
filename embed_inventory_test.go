@@ -85,6 +85,7 @@ import (
 // each should be an explicit edit here rather than a silent drift.
 var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/component/compose":               11, // Actual renderer sources + pinned module files + license for reproducible source ZIPs.
+	"github.com/znasllc-io/memql/component/compose/emaildoc":      4,  // the four built-in email layouts (#6032)
 	"github.com/znasllc-io/memql/core/num":                        1,  // Actual numeric conversion source used by the packaged renderer.
 	"github.com/znasllc-io/memql/component/memql":                 1,  // os_navigation.json: generated OS navigation contract
 	"github.com/znasllc-io/memql/component/edge":                  1,  // site_refresh.js, shared browser deployment monitor

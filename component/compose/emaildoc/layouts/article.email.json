@@ -1,0 +1,217 @@
+{
+  "subject": "Three small changes for calmer mornings",
+  "preheader": "Pick one and try it tomorrow.",
+  "layout": "builtin:article",
+  "theme": {
+    "page": "#eef0f3",
+    "canvas": "#ffffff",
+    "primary": "#1f5f8b",
+    "secondary": "#5b8fb9",
+    "accent": "#d9534f",
+    "tint": "#f6f4ef",
+    "text": "#2b2b2b",
+    "muted": "#8a8f98",
+    "headingFont": "Georgia",
+    "bodyFont": "Arial"
+  },
+  "blocks": [
+    {
+      "id": "logo",
+      "type": "image",
+      "role": "brand",
+      "padding": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "alt": "Your logo",
+      "width": 600,
+      "height": 155,
+      "bleed": true
+    },
+    {
+      "id": "banner",
+      "type": "image",
+      "role": "content",
+      "padding": [
+        24,
+        24,
+        16,
+        24
+      ],
+      "alt": "Article banner",
+      "width": 552,
+      "height": 191
+    },
+    {
+      "id": "body",
+      "type": "section",
+      "role": "content",
+      "background": "tint",
+      "maxWidth": 502,
+      "blocks": [
+        {
+          "id": "intro",
+          "type": "text",
+          "role": "content",
+          "text": "*Most busy mornings go wrong in the same few places.*\n\n- The evening ran late.\n- Something went missing.\n- There were too many decisions before breakfast.",
+          "size": 14.7,
+          "lineHeight": 19.2,
+          "listLineHeight": 17.64,
+          "align": "left"
+        },
+        {
+          "id": "highlight",
+          "type": "highlight",
+          "role": "content",
+          "text": "The fix that works most often:\nmake one decision the night before.",
+          "size": 17.3,
+          "lineHeight": 8.65
+        },
+        {
+          "id": "article",
+          "type": "text",
+          "role": "content",
+          "text": "***Three things to try tonight.***\n\n1. **Set out tomorrow's clothes.** Two minutes now saves ten later.\n2. **Put the bag by the door.** Nothing to hunt for on the way out.\n3. **Decide on breakfast.** One question fewer when everyone is hungry.\n\nYou don't need a new routine. One early decision is usually enough.",
+          "size": 14.7,
+          "lineHeight": 19.2,
+          "listLineHeight": 17.64,
+          "align": "left"
+        }
+      ]
+    },
+    {
+      "id": "question",
+      "type": "heading",
+      "role": "brand",
+      "text": "Got a question about this?",
+      "size": 21.3,
+      "lineHeight": 10.65,
+      "color": "primary",
+      "italic": true,
+      "weight": 700
+    },
+    {
+      "id": "question-more",
+      "type": "heading",
+      "role": "brand",
+      "text": "Write to us.",
+      "size": 21.3,
+      "lineHeight": 10.65,
+      "color": "secondary",
+      "italic": true,
+      "weight": 700
+    },
+    {
+      "id": "ask",
+      "type": "button",
+      "role": "brand",
+      "size": 20.3,
+      "color": "primary",
+      "width": 305,
+      "label": "Ask our team",
+      "paddingY": 11
+    },
+    {
+      "id": "signature",
+      "type": "columns",
+      "role": "brand",
+      "inset": [
+        0,
+        39.81606744178767,
+        0,
+        39.81606744178767
+      ],
+      "maxWidth": 473,
+      "columns": [
+        {
+          "width": 48.31,
+          "blocks": [
+            {
+              "id": "signature-photo",
+              "type": "image",
+              "alt": "Founder photo",
+              "width": 183,
+              "height": 191
+            }
+          ]
+        },
+        {
+          "width": 48.31,
+          "blocks": [
+            {
+              "id": "signature-space",
+              "type": "spacer",
+              "height": 70.4
+            },
+            {
+              "id": "signature-name",
+              "type": "image",
+              "alt": "Founder signature",
+              "width": 184,
+              "height": 32
+            },
+            {
+              "id": "signature-title",
+              "type": "text",
+              "text": "Founder of Acme",
+              "size": 14,
+              "lineHeight": 16,
+              "align": "center"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rule",
+      "type": "divider",
+      "role": "brand"
+    },
+    {
+      "id": "footer",
+      "type": "footer",
+      "role": "brand",
+      "size": 14.7,
+      "lineHeight": 22.4,
+      "color": "muted",
+      "linkColor": "secondary",
+      "background": "white",
+      "font": "base",
+      "letterSpacing": "-0.025em",
+      "inset": [
+        20.47555319531862,
+        24,
+        20.47555319531862,
+        24
+      ],
+      "maxWidth": 552,
+      "cellPadding": 13,
+      "links": [
+        {
+          "label": "Contact us",
+          "href": ""
+        },
+        {
+          "label": "Manage preferences",
+          "href": "{{preferencesUrl}}"
+        },
+        {
+          "label": "Unsubscribe",
+          "href": "{{unsubscribeUrl}}"
+        },
+        {
+          "label": "View in browser",
+          "href": "{{viewUrl}}"
+        }
+      ],
+      "lines": [
+        "ACME",
+        "123 Example Street, Springfield",
+        "You're receiving this email because you signed up for updates from Acme.",
+        "© 2026 Acme"
+      ]
+    }
+  ]
+}
