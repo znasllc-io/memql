@@ -144,55 +144,86 @@ const FIRST_LOOK_MS = 300;
 // Lets every promise that is ready settle, past the follow's chain of awaits.
 const settle = async () => { for (let n = 0; n < 5; n++) await new Promise<void>(resolve => setImmediate(resolve)); };
 
-test("the first look comes 300 ms after the start, and each one after it a whole interval later", async t => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const f = fake({
-    compositionById: [[{ status: "composing" }], [{ status: "composing" }], [{ status: "ready", outputFileId: "f1" }]],
-    libraryArtifactForFile: [[{ id: "a1", title: "Notes.md" }]],
-  });
+// A clock the test moves by hand. It stands in for the global setTimeout and
+// clearTimeout (which the follow's waits use) while a test runs, so the schedule
+// is seen exactly and without waiting it out. `now` is the time the clock reads.
+function handClock() {
+  const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout };
+  const timers = new Map<number, { at: number; fire: () => void }>();
   let now = 0;
-  const looks: number[] = [];
-  const execute: MaterializeExecute = (name, call) => {
-    if (name === "compositionById") looks.push(now);
-    return f.execute(name, call);
+  let nextId = 1;
+  globalThis.setTimeout = ((fire: () => void, ms = 0) => {
+    const id = nextId++;
+    timers.set(id, { at: now + ms, fire });
+    return id;
+  }) as unknown as typeof setTimeout;
+  globalThis.clearTimeout = ((id: number) => { timers.delete(id); }) as unknown as typeof clearTimeout;
+  return {
+    get now() { return now; },
+    // Moves the clock on by `ms`, firing every timer that comes due on the way, in order.
+    async advance(ms: number) {
+      const until = now + ms;
+      for (;;) {
+        const due = [...timers.entries()].filter(([, timer]) => timer.at <= until).sort((a, b) => a[1].at - b[1].at)[0];
+        if (!due) break;
+        timers.delete(due[0]);
+        now = due[1].at;
+        due[1].fire();
+        await settle();
+      }
+      now = until;
+      await settle();
+    },
+    restore() { Object.assign(globalThis, real); },
   };
-  const run = followComposition({ execute }, "c1");
-  const advance = async (ms: number) => { now += ms; t.mock.timers.tick(ms); await settle(); };
-  await settle();
-  assert.deepEqual(looks, [], "the composition was read before the first wait");
-  await advance(FIRST_LOOK_MS - 1);
-  assert.deepEqual(looks, []);
-  await advance(1);
-  assert.deepEqual(looks, [FIRST_LOOK_MS], "the first look did not come at 300 ms");
-  await advance(1999);
-  assert.deepEqual(looks, [FIRST_LOOK_MS], "a later look came before the whole interval");
-  await advance(1);
-  assert.deepEqual(looks, [FIRST_LOOK_MS, FIRST_LOOK_MS + 2000]);
-  await advance(2000);
-  assert.deepEqual(looks, [FIRST_LOOK_MS, FIRST_LOOK_MS + 2000, FIRST_LOOK_MS + 4000]);
-  assert.equal((await run).artifactId, "a1");
+}
+
+// The times, on the hand clock, at which the composition is read.
+function looksAt(clock: ReturnType<typeof handClock>, f: ReturnType<typeof fake>): { looks: number[]; execute: MaterializeExecute } {
+  const looks: number[] = [];
+  return { looks, execute: (name, call) => { if (name === "compositionById") looks.push(clock.now); return f.execute(name, call); } };
+}
+
+test("the first look comes 300 ms after the start, and each one after it a whole interval later", async () => {
+  const clock = handClock();
+  try {
+    const f = fake({
+      compositionById: [[{ status: "composing" }], [{ status: "composing" }], [{ status: "ready", outputFileId: "f1" }]],
+      libraryArtifactForFile: [[{ id: "a1", title: "Notes.md" }]],
+    });
+    const { looks, execute } = looksAt(clock, f);
+    const run = followComposition({ execute }, "c1");
+    await settle();
+    assert.deepEqual(looks, [], "the composition was read before the first wait");
+    await clock.advance(FIRST_LOOK_MS - 1);
+    assert.deepEqual(looks, []);
+    await clock.advance(1);
+    assert.deepEqual(looks, [FIRST_LOOK_MS], "the first look did not come at 300 ms");
+    await clock.advance(1999);
+    assert.deepEqual(looks, [FIRST_LOOK_MS], "a later look came before the whole interval");
+    await clock.advance(1);
+    assert.deepEqual(looks, [FIRST_LOOK_MS, FIRST_LOOK_MS + 2000]);
+    await clock.advance(2000);
+    assert.deepEqual(looks, [FIRST_LOOK_MS, FIRST_LOOK_MS + 2000, FIRST_LOOK_MS + 4000]);
+    assert.equal((await run).artifactId, "a1");
+  } finally {
+    clock.restore();
+  }
 });
 
-test("a caller's own interval keeps its length, and a shorter one is never stretched to 300 ms", async t => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+test("a caller's own interval keeps its length, and a shorter one is never stretched to 300 ms", async () => {
   for (const [interval, first, second] of [[5000, FIRST_LOOK_MS, FIRST_LOOK_MS + 5000], [100, 100, 200]] as const) {
-    const f = fake({ compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1" }]], libraryArtifactForFile: [[{ id: "a1" }]] });
-    let now = 0;
-    const looks: number[] = [];
-    const execute: MaterializeExecute = (name, call) => {
-      if (name === "compositionById") looks.push(now);
-      return f.execute(name, call);
-    };
-    const run = followComposition({ execute, intervalMs: interval }, "c1");
-    await settle();
-    now += first;
-    t.mock.timers.tick(first);
-    await settle();
-    now += second - first;
-    t.mock.timers.tick(second - first);
-    await settle();
-    assert.deepEqual(looks, [first, second], `interval ${interval}`);
-    assert.equal((await run).artifactId, "a1");
+    const clock = handClock();
+    try {
+      const f = fake({ compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1" }]], libraryArtifactForFile: [[{ id: "a1" }]] });
+      const { looks, execute } = looksAt(clock, f);
+      const run = followComposition({ execute, intervalMs: interval }, "c1");
+      await clock.advance(second);
+      assert.deepEqual(looks, [first, second], `interval ${interval}`);
+      assert.equal((await run).artifactId, "a1");
+    } finally {
+      clock.restore();
+    }
   }
 });
 
