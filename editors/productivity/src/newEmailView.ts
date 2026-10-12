@@ -190,7 +190,7 @@ function drawBar(now: View): void {
     // Loading has no words on the screen: its shape says it. A screen reader still hears them.
     if (now.quiet) barState.replaceChildren(textElement("span", now.state, "sr-only"));
     else barState.textContent = now.state;
-    post({ type: "shown", state: now.state });
+    post({ type: "shown", state: now.state, loading: now.kind === "loading" });
   }
   barState.classList.toggle("busy", now.busy === true);
   const shown = Array.from(barActs.querySelectorAll<HTMLElement>("button"));

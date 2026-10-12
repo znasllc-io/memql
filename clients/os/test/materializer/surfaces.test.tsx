@@ -342,7 +342,7 @@ describe("made file pages", () => {
         },
       ],
     });
-    expect(screen.queryByRole("button", { name: "Save as recipe" })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Save as recipe" })).toBeNull());
   });
   it.each(["failed", "cancelled", "abandoned"])(
     "follows a %s run from another replica",

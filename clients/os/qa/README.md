@@ -303,3 +303,26 @@ domain row (or Add sending domain on the empty view). Inspect both modes and
 domain binding; the footer stays reachable and prior steps reopen. Provisioning
 shows an elapsed wait and continues automatically using the fixture connection.
 These views never contact Azure or change DNS.
+
+
+## Materializer
+
+The `materializer-*` scenes mount the real wizard, pages and lists. Capture at
+1400×900 and 520×900 in light and dark. The 25 scenes cover populated, empty
+and archived-only lists; the plus and Files entry points; mixed ingredients;
+blank PDF and inference refusals; a retained folder refusal; making progress;
+ready, archived, failed, described and deployable file pages; templates and
+recipes, including their add/detail pages; and Settings. The `files-add-menu`
+scene covers the Files entry point.
+
+The October 12 review inspected all 100 Materializer captures, with an
+independent dark-mode review. It removed the old composer styles, corrected
+search input sizing, separated and labelled preferences, corrected back
+labels, and made the current File step visible while making on narrow screens.
+The integrated browser pass rechecked Settings, progress and description
+refusal states after those corrections. There was no remaining accessory to
+remove without losing navigation, filtering, status or an action. Captures
+and the per-scene critique index stay outside this public repository.
+
+These fixture scenes verify layout and content. They do not claim that an
+Azure sender was provisioned or that a live model generated a document.

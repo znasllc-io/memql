@@ -27,7 +27,7 @@ interface Pending { request: MaterializeRequest; compositionId?: string }
 class PageClosed extends Error {}
 
 export class NewEmail implements vscode.CustomReadonlyEditorProvider<vscode.CustomDocument> {
-  private readonly shown = new Map<string, string>();
+  private readonly shown = new Map<string, { state: string; loading: boolean }>();
   // Duplicate tabs for one link share one owner; no simultaneous resends of a request.
   private readonly panels = new Map<string, vscode.WebviewPanel>();
   private readonly starts = new Map<string, Promise<string>>();
@@ -48,8 +48,8 @@ export class NewEmail implements vscode.CustomReadonlyEditorProvider<vscode.Cust
   async whenShown(uri: vscode.Uri): Promise<{ state: string }> {
     const deadline = Date.now() + 15000;
     while (Date.now() < deadline) {
-      const state = this.shown.get(uri.toString());
-      if (state) return { state };
+      const shown = this.shown.get(uri.toString());
+      if (shown && !shown.loading) return { state: shown.state };
       await new Promise(resolve => setTimeout(resolve, 40));
     }
     throw new Error("The New email page did not report its state.");
@@ -201,7 +201,9 @@ export class NewEmail implements vscode.CustomReadonlyEditorProvider<vscode.Cust
       if (disposed || !message || typeof message !== "object") return;
       try {
         switch (message.type) {
-          case "shown": if (typeof message.state === "string") this.shown.set(link, message.state); break;
+          case "shown":
+            if (typeof message.state === "string" && typeof message.loading === "boolean") this.shown.set(link, { state: message.state, loading: message.loading });
+            break;
           case "ready":
             await post({ type: "restore", draft }); await references();
             await setup();

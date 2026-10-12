@@ -112,3 +112,17 @@ test("replacing a page during creation shares its in-flight start", async () => 
   assert.equal(replacement.opened.length, 1); assert.equal(replacement.disposed, true);
   assert.equal(f.calls.filter(call => call.name === "composeMaterialize").length, 1);
 });
+
+
+test("host readiness waits past the initial loading render", async () => {
+  const f = await fixture({ connected: false });
+  await f.receive({ type: "shown", state: EMAIL_COPY.newEmail.loading, loading: true });
+  let completed = false;
+  const ready = f.page.whenShown(vscode.Uri.parse(link)).then(value => { completed = true; return value; });
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(completed, false, "the loading render is not the host's settled state");
+  await f.receive({ type: "shown", state: "Not connected to client.example", loading: false });
+  assert.deepEqual(await ready, { state: "Not connected to client.example" });
+  f.dispose();
+});

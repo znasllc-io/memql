@@ -464,3 +464,34 @@ action releaseEngine {
   }
   capability script(script: "release.engine", version: args.version, repo: args.repo, notes: args.notes, targetSha: args.targetSha, pollSeconds: args.pollSeconds, dryRun: args.dryRun)
 }
+
+// Operator authority creates a dedicated workload identity; the cluster keeps
+// public identifiers only and prepares its own sender through the Email flow.
+action configureAzureEmail {
+  args {
+    subscriptionId string!
+    resourceGroup string!
+    clusterName string!
+    emailResourceGroup string!
+    emailIdentityName string!
+    emailService string!
+    communicationService string!
+    emailLocation string!
+    emailDataLocation string!
+    namespace string
+    replyTo string
+    dryRun boolean
+  }
+  capability script(script: "deploy.configureAzureEmail", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, clusterName: args.clusterName, emailResourceGroup: args.emailResourceGroup, emailIdentityName: args.emailIdentityName, emailService: args.emailService, communicationService: args.communicationService, emailLocation: args.emailLocation, emailDataLocation: args.emailDataLocation, namespace: args.namespace, replyTo: args.replyTo, dryRun: args.dryRun)
+}
+
+// Read-only facts for the install recipe; public identifiers only.
+action inspectAzureEmail {
+  args {
+    subscriptionId string!
+    resourceGroup string!
+    clusterName string!
+    namespace string
+  }
+  capability script(script: "deploy.inspectAzureEmail", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, clusterName: args.clusterName, namespace: args.namespace)
+}

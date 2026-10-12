@@ -187,3 +187,30 @@ logic renderDiffVerdict {
   verdict := gateRequired == true ? (clear == true ? "clear" : "blocked") : "clear"
   return verdict
 }
+
+/// Choose installation email resources from the physical cluster's public facts.
+/// Preserve installed choices on repeat runs. The full issuer fingerprint fences
+/// resource-group authority across simultaneous or recreated installations.
+logic emailInstallationChoices {
+  args {
+    facts object!
+    emailResourceGroup string
+    emailIdentityName string
+    emailService string
+    communicationService string
+    emailLocation string
+    emailDataLocation string
+    emailReplyTo string
+  }
+  saved := args.facts.installed
+  prefix := trim(args.emailResourceGroup)
+  group := prefix != "" ? prefix + "-" + args.facts.issuerHash : saved.resourceGroup ?? ("memql-email-" + args.facts.issuerHash)
+  identity := trim(args.emailIdentityName) != "" ? args.emailIdentityName : saved.identityName ?? "memql-email"
+  email := trim(args.emailService) != "" ? args.emailService : saved.emailService ?? ("email-" + args.facts.serviceSuffix)
+  communication := trim(args.communicationService) != "" ? args.communicationService : saved.communicationService ?? ("send-" + args.facts.serviceSuffix)
+  location := trim(args.emailLocation) != "" ? args.emailLocation : saved.location ?? args.facts.location
+  geography := args.facts.geography == "US" ? "United States" : args.facts.geography
+  dataLocation := trim(args.emailDataLocation) != "" ? args.emailDataLocation : saved.dataLocation ?? geography
+  replyTo := trim(args.emailReplyTo) != "" ? args.emailReplyTo : saved.replyTo ?? ""
+  return {resourceGroup: group, identityName: identity, emailService: email, communicationService: communication, location: location, dataLocation: dataLocation, replyTo: replyTo}
+}
