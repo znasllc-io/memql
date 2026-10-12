@@ -9170,6 +9170,12 @@ a.os-button {
   cursor: default;
   opacity: 0.6;
 }
+/* A TEXT ACT THAT CANNOT BE UNDONE ("Cancel campaign") keeps the danger colour
+   at rest, pointed at and focused alike: muted, it would read as the way out,
+   which is the opposite of what it does. */
+.os-actbar-text[data-tone="danger"] {
+  color: var(--os-error);
+}
 /* A MEASURE, NOT MORE OF THE SENTENCE. Set off by a hairline so "checked 40s
    ago" is read as a figure beside the state rather than as its last clause. */
 .os-actbar-meta {

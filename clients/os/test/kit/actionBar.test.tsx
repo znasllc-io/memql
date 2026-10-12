@@ -1,4 +1,6 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -283,5 +285,16 @@ describe("what the guard leaves alone", () => {
     render(<ActionBar state="Ready to send" acts={[{ label: "Send now", tone: "primary", onAct: send }]} />);
     press("Send now");
     expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a text act that cannot be undone", () => {
+  it("reads as one, not as the muted way out", () => {
+    // "Cancel campaign" on an Edit page is a label beside the button, and a
+    // muted label reads as the way out -- this one is the opposite of that.
+    render(<ActionBar state="Editing" acts={[{ label: "Cancel campaign", text: true, tone: "danger", onAct: () => {} }]} />);
+    expect(within(bar()).getByRole("button", { name: "Cancel campaign" }).getAttribute("data-tone")).toBe("danger");
+    const css = readFileSync(join(__dirname, "..", "..", "src", "styles", "index.css"), "utf8");
+    expect(css).toContain('.os-actbar-text[data-tone="danger"] {\n  color: var(--os-error);');
   });
 });
