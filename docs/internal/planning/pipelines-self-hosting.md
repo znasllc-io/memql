@@ -561,8 +561,9 @@ ingress-masking failure in #5810; cloud and multi-node rollout remain unverified
 The runner accepts an operator-selected `MEMQL_PIPELINES_NODE_POOL`, with an
 exact label and `NoSchedule` toleration shared by step Jobs and isolation
 probes. Repository configuration cannot add tolerations or choose arbitrary
-node selectors. The local overlay permits one Job across all Workbench replicas.
-Invalid placement refuses before creating external resources.
+node selectors. The local overlay then permitted one Job across all Workbench
+replicas; it permits six since #6013. Invalid placement refuses before creating
+external resources.
 
 A live test on local ARM64 K3s v1.32.13 checked out exact main commit
 `e65551c7d763afff66c77eb2f45c766b7fe43beb`, ran `SELECT 1` against the repository's
