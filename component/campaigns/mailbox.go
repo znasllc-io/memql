@@ -1,6 +1,10 @@
 package campaigns
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+)
 
 // mailbox.go -- which rows of an audience hold one mailbox, and what a public
 // form does about them (memql#6022, F9).
@@ -27,6 +31,27 @@ const (
 	digestLessWindow = 50
 )
 
+// mailboxRosterScanPages is the most pages of the roster (500 rows each) that
+// MailboxMembers reads, when a full page of digest-less rows sends it there, before
+// it gives up trying to prove a mailbox absent. The walk is the cost the digest
+// removed, and it is paid on every signup while the rows have no digest: measured at
+// about two seconds a page with 140,000 to 240,000 recipients in the cluster (41
+// pages in 86 s, 201 pages in 8 min 25 s), because the engine collapses every
+// current recipient version in the cluster to answer any recipient query. A walk of
+// a large audience takes minutes and a visitor's request does not wait for that.
+// Ten pages are 5,000 recipients, which covers the audiences the signup was built
+// for. A variable only so a test can lower it.
+//
+// An audience can be larger -- the ceiling is 250,000 -- and past the limit the
+// answer is "cannot tell", not "not there".
+var mailboxRosterScanPages = 10
+
+// ErrMailboxUndecidable is what MailboxMembers returns when it cannot rule out
+// that a mailbox opted out: the audience holds a page of rows without a digest and
+// more pages of roster than the scan will read. The caller must not read it as "no
+// such mailbox" -- a public form says it cannot take the subscription for now.
+var ErrMailboxUndecidable = errors.New("campaigns: cannot rule out an earlier opt-out for this address")
+
 // MailboxMembers returns every row of the audience that holds this mailbox,
 // found by the digest of the address and, for the rows that carry none, by
 // comparing addresses. Oldest first within each source.
@@ -41,9 +66,12 @@ const (
 //     mailbox, and the opt-out wins.
 //  3. When that page is FULL, nothing is known about the rows beyond it -- an
 //     audience nobody has stamped yet holds thousands of them -- so the roster is
-//     read, as the signup always did, and the answer comes from the whole audience.
-//     This is the cost of the transition and it ends when the sweep has been
-//     through: afterwards the page is nearly empty.
+//     read, as the signup always did, and the answer comes from the audience. This
+//     is the cost of the transition and it ends when the sweep has been through:
+//     afterwards the page is nearly empty. The walk stops as soon as it meets a row
+//     that opted out (nothing further can change the answer) and gives up with
+//     ErrMailboxUndecidable after mailboxRosterScanPages pages without having seen
+//     the end of the audience.
 //
 // Every read here decides a write, so the caller's ctx must be a fresh read.
 func (s *Store) MailboxMembers(ctx context.Context, audienceID, address string) ([]Recipient, error) {
@@ -65,13 +93,38 @@ func (s *Store) MailboxMembers(ctx context.Context, audienceID, address string) 
 	members = append(members, holdingMailbox(unstamped, want)...)
 
 	if len(unstamped) >= digestLessWindow {
-		roster, err := s.Roster(ctx, audienceID)
+		return s.mailboxFromRoster(ctx, audienceID, want)
+	}
+	return members, nil
+}
+
+// mailboxFromRoster answers from the audience, a page at a time, keeping only the
+// rows that hold the mailbox. It returns as soon as one of them has opted out, and
+// ErrMailboxUndecidable if it has read mailboxRosterScanPages pages and the audience
+// goes on: Store.Roster would return what it had read and call it the audience,
+// which is how an opt-out beyond its cap is missed.
+func (s *Store) mailboxFromRoster(ctx context.Context, audienceID, want string) ([]Recipient, error) {
+	var held []Recipient
+	cursor := ""
+	for pages := 1; ; pages++ {
+		page, next, err := s.RosterPage(ctx, audienceID, cursor)
 		if err != nil {
 			return nil, err
 		}
-		return holdingMailbox(roster, want), nil
+		held = append(held, holdingMailbox(page, want)...)
+		for _, r := range held {
+			if r.optedOut() {
+				return held, nil
+			}
+		}
+		if next == "" {
+			return held, nil
+		}
+		if pages >= mailboxRosterScanPages {
+			return nil, fmt.Errorf("%w: read %d pages of the audience and it holds more, some of its rows without a digest yet", ErrMailboxUndecidable, pages)
+		}
+		cursor = next
 	}
-	return members, nil
 }
 
 // holdingMailbox keeps the rows whose own address normalizes to want.

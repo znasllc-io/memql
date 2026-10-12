@@ -1,7 +1,9 @@
 package campaigns
 
 import (
+	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -238,4 +240,59 @@ func TestADigestLessOptOutBeyondTheFirstPageStillRefuses(t *testing.T) {
 
 	n.signup(t)
 	n.assertTheFormDidNothing(t, before)
+}
+
+// endlessAudience answers the reads a signup makes about a mailbox as an audience
+// too large to search to the end would: a full page of rows with no digest, none of
+// them the mailbox, and then a roster that never runs out.
+type endlessAudience struct {
+	Engine
+	pages *int
+}
+
+func (e endlessAudience) Execute(ctx context.Context, q string) (any, error) {
+	switch {
+	case strings.HasPrefix(q, "query recipientsWithoutDigestInAudience"):
+		rows := make([]any, 0, digestLessWindow)
+		for i := 0; i < digestLessWindow; i++ {
+			rows = append(rows, map[string]any{"id": fmt.Sprintf("v1:campaigns:recipient:stranger-%02d", i), "email": fmt.Sprintf("stranger%02d@example.test", i), "subscriptionStatus": "subscribed"})
+		}
+		return map[string]any{"output": rows}, nil
+	case strings.HasPrefix(q, "query audienceRosterForSend"):
+		// A walk that does not stop at its limit would never end; fail it here
+		// instead, so the test says so rather than hanging.
+		if *e.pages++; *e.pages > 50 {
+			return nil, fmt.Errorf("the roster walk read %d pages of an audience that never ends and did not stop", *e.pages)
+		}
+		return map[string]any{
+			"output": []any{map[string]any{"id": "v1:campaigns:recipient:someone", "email": "someone@example.test", "subscriptionStatus": "subscribed"}},
+			"cursor": "more",
+		}, nil
+	}
+	return e.Engine.Execute(ctx, q)
+}
+
+// TestASignupIsNotTakenWhenTheAudienceCannotBeSearchedToTheEnd: past the scan limit
+// "I did not find an opt-out" proves nothing, and a public form that guessed would
+// welcome a mailbox that may have opted out. It says it cannot take the
+// subscription for now, and writes nothing: no signup, no consent, no row.
+func TestASignupIsNotTakenWhenTheAudienceCannotBeSearchedToTheEnd(t *testing.T) {
+	n := newEmptyNewsletter(t, "consent-undecidable")
+	limit := mailboxRosterScanPages
+	mailboxRosterScanPages = 3
+	actual := n.worker.store.engine
+	pages := 0
+	n.worker.store.engine = endlessAudience{Engine: actual, pages: &pages}
+	n.args["email"] = consentMailbox
+	_, err := n.worker.handleSubscribe(n.owner, n.args, 0)
+	n.worker.store.engine = actual
+	mailboxRosterScanPages = limit
+
+	if err == nil || !strings.Contains(err.Error(), "try again later") {
+		t.Fatalf("the form answered %v after %d roster pages; want it to say it cannot take the subscription for now", err, pages)
+	}
+	if pages != 3 {
+		t.Errorf("the roster was read in %d pages, want it to stop at the limit of 3", pages)
+	}
+	n.assertTheFormDidNothing(t, 0)
 }

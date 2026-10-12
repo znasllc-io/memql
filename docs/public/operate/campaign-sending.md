@@ -316,12 +316,17 @@ replica until it is gone. New recipients carry the digest from the first request
 of the new release, and rolling back to a release before the digest leaves them
 in the same state, so roll forward instead. A signup always reads one page of the
 audience's recipients that have no digest as well; once the sweep has been through
-that page is empty. While an audience holds a full page of them the signup reads
-the whole audience, and an email rule that sends to an address on a row declines
-to fire, saying so in its refusals, because it cannot tell whether the address is
-already a member. The sweep logs "put the address digest on recipients written
-without one" with a count when it stamps anything; a pass over recipients that
-all carry a digest writes nothing.
+that page is empty. While an audience holds a full page of them, which is every
+populated audience between a rollout and the first sweep, the signup reads the
+audience page by page (500 recipients a page, about two seconds a page with
+200,000 recipients in the cluster) and stops at the first row for the address
+that opted out. That is the cost the digest removed, so it stops after ten pages:
+in an audience of more than 5,000 recipients it cannot rule an opt-out out, and
+the form asks the visitor to try again later. An email rule that sends to an
+address on a row has no such read, and declines to fire and says so in its
+refusals. The sweep logs "put the address digest on recipients written without
+one" with a count when it stamps anything; a pass over recipients that all carry
+a digest writes nothing.
 
 Consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and

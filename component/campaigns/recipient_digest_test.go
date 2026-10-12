@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -111,9 +112,33 @@ type mailboxEngine struct {
 	byDigest      []map[string]any
 	withoutDigest []map[string]any
 	roster        []map[string]any
+	// rosterPageSize pages the roster, as the engine does; zero answers it in one page.
+	rosterPageSize int
 }
 
-func (e *mailboxEngine) Execute(_ context.Context, q string) (any, error) {
+// rosterEnvelope answers one page of the roster for the cursor it arrived with.
+func (e *mailboxEngine) rosterEnvelope(cursor string) map[string]any {
+	size := e.rosterPageSize
+	if size <= 0 {
+		size = len(e.roster) + 1
+	}
+	from := 0
+	if cursor != "" {
+		_, _ = fmt.Sscanf(cursor, "%d", &from)
+	}
+	to := min(from+size, len(e.roster))
+	out := make([]any, 0, to-from)
+	for _, r := range e.roster[from:to] {
+		out = append(out, r)
+	}
+	envelope := map[string]any{"output": out}
+	if to < len(e.roster) {
+		envelope["cursor"] = fmt.Sprintf("%d", to)
+	}
+	return envelope
+}
+
+func (e *mailboxEngine) Execute(ctx context.Context, q string) (any, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.calls = append(e.calls, q)
@@ -124,7 +149,7 @@ func (e *mailboxEngine) Execute(_ context.Context, q string) (any, error) {
 	case strings.HasPrefix(q, "query recipientsWithoutDigestInAudience"):
 		rows = e.withoutDigest
 	case strings.HasPrefix(q, "query audienceRosterForSend"):
-		rows = e.roster
+		return e.rosterEnvelope(memql.CursorFromContext(ctx)), nil
 	}
 	out := make([]any, 0, len(rows))
 	for _, r := range rows {
@@ -241,6 +266,109 @@ func TestMailboxMembersReadsTheRosterWhenThePageOfRowsWithoutADigestIsFull(t *te
 	}
 	if engine.called("query audienceRosterForSend") != 1 {
 		t.Errorf("the roster was read %d times, want once", engine.called("query audienceRosterForSend"))
+	}
+}
+
+// fullPageOfStrangers is what makes MailboxMembers read the roster: a full page of
+// rows without a digest, none of them the mailbox asked about.
+func fullPageOfStrangers() []map[string]any {
+	var page []map[string]any
+	for i := 0; i < digestLessWindow; i++ {
+		page = append(page, mailboxRow(fmt.Sprintf("stranger-%02d", i), fmt.Sprintf("stranger%02d@example.test", i), "subscribed"))
+	}
+	return page
+}
+
+// rosterOf builds a roster of n other people with the given rows put in at the
+// given positions.
+func rosterOf(n int, at map[int]map[string]any) []map[string]any {
+	var roster []map[string]any
+	for i := 0; i < n; i++ {
+		if row, ok := at[i]; ok {
+			roster = append(roster, row)
+			continue
+		}
+		roster = append(roster, mailboxRow(fmt.Sprintf("other-%02d", i), fmt.Sprintf("other%02d@example.test", i), "subscribed"))
+	}
+	return roster
+}
+
+// TestMailboxMembersWalksTheRosterAPageAtATimeAndStopsAtAnOptOut: the fallback
+// reads the audience as the send does, page by page and holding only the rows that
+// are the mailbox, and stops the moment one of them has opted out -- nothing after
+// it can change the answer.
+func TestMailboxMembersWalksTheRosterAPageAtATimeAndStopsAtAnOptOut(t *testing.T) {
+	const mailbox = "member@example.test"
+	for _, tc := range []struct {
+		name      string
+		at        map[int]map[string]any
+		wantIDs   []string
+		wantPages int
+	}{
+		{"an opt-out on the last page is found", map[int]map[string]any{8: mailboxRow("late", "Member@Example.test", "unsubscribed")}, []string{"late"}, 3},
+		{"an opt-out on the first page ends the walk there", map[int]map[string]any{1: mailboxRow("early", "member@example.test", "bounced")}, []string{"early"}, 1},
+		{"a subscribed member on the second page needs the whole audience", map[int]map[string]any{4: mailboxRow("here", "member@example.test", "subscribed")}, []string{"here"}, 3},
+		{"nobody is found only after the last page", nil, nil, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &mailboxEngine{withoutDigest: fullPageOfStrangers(), roster: rosterOf(9, tc.at), rosterPageSize: 3}
+			got, err := NewStore(engine).MailboxMembers(context.Background(), "aud-1", mailbox)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(ids(got), tc.wantIDs) {
+				t.Errorf("members %v, want %v", ids(got), tc.wantIDs)
+			}
+			if pages := engine.called("query audienceRosterForSend"); pages != tc.wantPages {
+				t.Errorf("the roster was read in %d pages, want %d", pages, tc.wantPages)
+			}
+		})
+	}
+}
+
+// TestMailboxMembersWontGuessPastTheRosterScanLimit: an audience bigger than the
+// scan will read, while some of its rows still have no digest, cannot be proved
+// free of an opt-out. The answer is "cannot tell" -- never "not there", which would
+// welcome a mailbox that opted out -- unless an opt-out was already found. The
+// limit is two pages here, of two rows.
+func TestMailboxMembersWontGuessPastTheRosterScanLimit(t *testing.T) {
+	limit := mailboxRosterScanPages
+	mailboxRosterScanPages = 2
+	defer func() { mailboxRosterScanPages = limit }()
+
+	const mailbox = "member@example.test"
+	for _, tc := range []struct {
+		name        string
+		rows        int
+		at          map[int]map[string]any
+		undecidable bool
+		wantIDs     []string
+	}{
+		{"nobody within the limit", 10, nil, true, nil},
+		{"a subscribed member within the limit does not rule out an opt-out beyond it", 10, map[int]map[string]any{1: mailboxRow("here", mailbox, "subscribed")}, true, nil},
+		{"an opt-out within the limit is decisive", 10, map[int]map[string]any{3: mailboxRow("out", mailbox, "unsubscribed")}, false, []string{"out"}},
+		{"an audience the limit covers is answered", 4, nil, false, nil},
+		{"an opt-out beyond the limit is exactly why it must not guess", 10, map[int]map[string]any{9: mailboxRow("far", mailbox, "unsubscribed")}, true, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &mailboxEngine{withoutDigest: fullPageOfStrangers(), roster: rosterOf(tc.rows, tc.at), rosterPageSize: 2}
+			got, err := NewStore(engine).MailboxMembers(context.Background(), "aud-1", mailbox)
+			if tc.undecidable {
+				if !errors.Is(err, ErrMailboxUndecidable) {
+					t.Fatalf("members %v, error %v; want ErrMailboxUndecidable", ids(got), err)
+				}
+				if pages := engine.called("query audienceRosterForSend"); pages != 2 {
+					t.Errorf("the roster was read in %d pages, want it to stop at the limit after 2", pages)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(ids(got), tc.wantIDs) {
+				t.Errorf("members %v, want %v", ids(got), tc.wantIDs)
+			}
+		})
 	}
 }
 
