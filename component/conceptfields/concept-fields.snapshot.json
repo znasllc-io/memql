@@ -1230,9 +1230,13 @@
       "file": "campaigns/concepts.memql",
       "fields": [
         "accountId",
+        "document",
         "htmlBody",
+        "layoutId",
         "name",
         "ownerUserId",
+        "preheader",
+        "sourceArtifactId",
         "status",
         "subject",
         "textBody"

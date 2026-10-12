@@ -352,6 +352,7 @@ var tierDecidesTheRead = map[string]string{
 	"senderIdentityById":            "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"siteByHostname":                "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"templateById":                  "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
+	"templateForSource":             "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 	"templates":                     "memql#5598: the mandatory organization and app boundary decides this read; creator-only filtering would exclude authorized organization peers.",
 
 	// The four store reads (Connect Shopify, decision D3, design record

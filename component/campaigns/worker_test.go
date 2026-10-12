@@ -101,6 +101,13 @@ type fakeEngine struct {
 	// outside the organization.
 	emailLayouts map[string]map[string]any
 
+	// templateBySource backs templateForSource, the template published from one
+	// Library file, keyed "accountId|sourceArtifactId" with both as the query
+	// is called (bare). Absent means "no template for that file in that
+	// organization", which is also what the real query says of a template the
+	// caller cannot see.
+	templateBySource map[string]map[string]any
+
 	// libraryArtifacts / libraryFiles back the CSV import's two owner-gated
 	// reads (memql#4822), keyed by bare id. Absent means "not visible to
 	// this caller", which is the same answer the real queries give and is
@@ -135,6 +142,11 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 		return rowsEnvelope([]map[string]any{e.campaign}), nil
 	case strings.HasPrefix(q, "query templateById"):
 		return rowsEnvelope([]map[string]any{e.template}), nil
+	case strings.HasPrefix(q, "query templateForSource"):
+		if row, ok := e.templateBySource[argOf(q, "accountId")+"|"+argOf(q, "sourceArtifactId")]; ok {
+			return rowsEnvelope([]map[string]any{row}), nil
+		}
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query audienceRosterForSend"):
 		// PAGED, because the send walks it (memql#3460). A fake that
 		// returned the whole roster at once would make every paging test

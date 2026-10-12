@@ -12433,6 +12433,34 @@ func TemplateByIdBuild(args TemplateByIdArgs) string {
 	return b.String()
 }
 
+// TemplateForSource -- The template an organization published from one Library file, for campaignSaveTemplate and the editors that open a file: publishing a file again updates this template, so there is one per organization and file. Newest first and one row, so a stray duplicate can never make a save ambiguous. The concept's account tier answers a template outside the caller's organizations as not found, so the file id is not a way into somebody else's templates. Owned.
+//
+// Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templateForSource"] in generated_concepts.go).
+type TemplateForSourceArgs struct {
+	AccountId        string
+	SourceArtifactId string
+}
+
+// TemplateForSource calls the engine query templateForSource.
+func (qc *QueryClient) TemplateForSource(ctx context.Context, args TemplateForSourceArgs) (*Result, error) {
+	call := TemplateForSourceBuild(args)
+	return qc.executeNamed(ctx, "templateForSource", call)
+}
+
+func TemplateForSourceBuild(args TemplateForSourceArgs) string {
+	var b strings.Builder
+	b.WriteString("query templateForSource(")
+	b.WriteString("accountId: ")
+	b.WriteString(quoteMemQL(args.AccountId))
+	if b.Len() > 24 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sourceArtifactId: ")
+	b.WriteString(quoteMemQL(args.SourceArtifactId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // Templates -- The caller's templates, newest first. Backs the template list and the campaign editor's template picker. Owned.
 //
 // Bound concept: v1:campaigns:template (machine-readable: BoundConcepts["templates"] in generated_concepts.go).

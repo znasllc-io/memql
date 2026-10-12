@@ -576,19 +576,21 @@ func CampaignSaveLayoutBuild(args CampaignSaveLayoutArgs) string {
 	return b.String()
 }
 
-// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. Empty expectedRevision creates a draft under a new caller-generated ID; editing always returns it to draft. Publishing or archiving requires the saved content and revision to match exactly. This never sends mail.
+// CampaignSaveTemplate -- Save an organization email template with an exact revision precondition. content is the email document (a *.email.json file): a layout document made of blocks, or custom HTML with its plain-text body. The server renders it and stores the subject, the text and HTML parts and the document, and answers {templateId, revision, status, saved, issues}. issues are what keeps the email from being sent as it is: a missing picture or link, a picture the caller cannot read, a missing unsubscribe link, an email that is too large. Saving works with issues and returns the template to draft. Publishing requires the exact saved revision and the exact saved content, and is refused while any issue remains. Archive and restore require only the exact revision; the content in the call is ignored, and restore returns a template to draft. Empty expectedRevision creates a draft. With sourceArtifactId (the Library file the email is written in) there is one template per organization and file: the template already published from that file is updated whatever templateId says, and the first save creates it, so templateId may be left empty. This never sends mail.
 type CampaignSaveTemplateArgs struct {
-	// Stable caller-generated template ID; reuse on an uncertain creation response.
+	// Stable caller-generated template ID; reuse on an uncertain creation response. May be empty only when sourceArtifactId is given.
 	TemplateId string
 	// Owning organization; immutable after creation.
 	AccountId string
 	// Template name.
 	Name string
-	// The reviewed email file: subject, textBody, htmlBody.
+	// The email document: a layout document {subject, preheader, layout, theme, blocks} or custom HTML {subject, preheader, textBody, htmlBody}. Ignored when archiving or restoring.
 	Content map[string]any
-	// Exact createdAt from templateById; empty only when creating.
+	// The Library file the email is written in. Keeps one template per organization and file; see above.
+	SourceArtifactId string
+	// Exact createdAt from templateById or templateForSource; empty only when creating.
 	ExpectedRevision string
-	// save (default), publish, or archive. Publishing is an explicit human action.
+	// save (default), publish, archive or restore. Publishing is an explicit human action.
 	Action string
 }
 
@@ -601,8 +603,10 @@ func (qc *QueryClient) CampaignSaveTemplate(ctx context.Context, args CampaignSa
 func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
 	var b strings.Builder
 	b.WriteString("builtin campaignSaveTemplate(")
-	b.WriteString("templateId: ")
-	b.WriteString(quoteMemQL(args.TemplateId))
+	if args.TemplateId != "" {
+		b.WriteString("templateId: ")
+		b.WriteString(quoteMemQL(args.TemplateId))
+	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}
@@ -618,6 +622,13 @@ func CampaignSaveTemplateBuild(args CampaignSaveTemplateArgs) string {
 	}
 	b.WriteString("content: ")
 	b.WriteString(renderMemQLValue(args.Content))
+	if args.SourceArtifactId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceArtifactId: ")
+		b.WriteString(quoteMemQL(args.SourceArtifactId))
+	}
 	if b.Len() > 29 {
 		b.WriteString(", ")
 	}

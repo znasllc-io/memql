@@ -30,6 +30,7 @@ import (
 // layoutWorld is two replicas of the engine over one database, an owner who can
 // create organizations, and the identity that seeds scaffolding.
 type layoutWorld struct {
+	db      *bun.DB
 	engines [2]*memql.MemQLEngine
 	workers [2]*Worker
 	suffix  string
@@ -54,7 +55,7 @@ func newLayoutWorld(t *testing.T) *layoutWorld {
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatal(err)
 	}
-	w := &layoutWorld{suffix: fmt.Sprintf("layout-%d", time.Now().UnixNano())}
+	w := &layoutWorld{db: db, suffix: fmt.Sprintf("layout-%d", time.Now().UnixNano())}
 	// Registered after the connection's own cleanup, so it runs while the
 	// connection is still open.
 	t.Cleanup(func() { removeLayoutRows(t, db, w.suffix) })

@@ -53,6 +53,10 @@ shape template templateFull {
   htmlBody
   status
   accountId
+  document
+  layoutId
+  preheader
+  sourceArtifactId
   row.createdAt
 }
 

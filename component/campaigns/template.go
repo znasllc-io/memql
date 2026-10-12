@@ -2,65 +2,216 @@ package campaigns
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
-	pure "github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/component/compose/emaildoc"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
+// template.go -- saving, publishing, archiving and restoring an organization's
+// email templates (the campaignSaveTemplate builtin).
+//
+// # The email is a document
+//
+// What a client sends as content is the email document: a layout-mode document
+// (blocks and a theme) or a custom-mode one (HTML and its plain-text body). The
+// server parses it with emaildoc.Parse and renders it as it will be sent, with
+// emaildoc.Render in send mode, and stores what the render made (the subject,
+// the plain-text part and the HTML part, which is what a send uses) next to what
+// it was made from (the document, the layout it names, the preheader). A custom
+// template that is saved as {subject, textBody, htmlBody}, as every template was
+// before documents, is a custom document, and its HTML is stored as written.
+//
+// # Issues
+//
+// A render finds what keeps an email from being sent as it is: a picture to
+// choose, a picture that cannot be read, a link without an address, no
+// unsubscribe link, an email too large to send. Saving never refuses for them:
+// a draft is a draft, and the answer lists them (issues) so an editor can show
+// where. Publishing refuses while any remains, with their sentences, so a
+// template that is ready is one that can go out. Their number is bounded the way
+// a preview's is (previewIssues), since a document can make a hundred thousand.
+// Only an email too large to be written out at all (past emaildoc.MaxRenderBytes)
+// is refused when it is saved, with a sentence of its own.
+//
+// # Whose pictures
+//
+// A document names a picture as artifact:<id>, a Library file. The render reads
+// it as the CALLER does, through artifactImages, and reads no more of them than
+// a preview does (pictureReads): the artifact and its file are looked up under
+// the caller's own actor, so a picture that belongs to somebody else, even a
+// colleague in the same organization, is an image_unavailable issue and storage
+// is not asked for it. The template keeps the document as it was written, with
+// artifact: pictures, and its HTML with the pictures embedded; whoever publishes
+// it embeds their own readable pictures, not another person's.
+//
+// # One template per organization and file
+//
+// With sourceArtifactId (the Library file the email is written in) the template
+// already published from that file is the one saved, whatever templateId says,
+// and the first save creates it under an id made from the organization and the
+// file (sourceTemplateID), so two editors who both create it from the same file
+// meet in the same row. The write gate is the file's. The template's own gate is
+// taken as well once it is known, so that a save from the file and a save from
+// the Campaigns app, which names only the template, cannot both pass the same
+// revision.
+//
+// # Revisions
+//
+// As for every shared write here: one cross-replica lock, the stored row read
+// FRESH, the caller held to the exact revision they read (the row's createdAt),
+// and a write stamped newer than it through a @serverOnly mutation, which the
+// concept refuses every other writer for (executor_mutation.go).
+//
+// Archive and restore take the revision and nothing else: putting a template
+// away is not an edit, and a client that holds only the card has no document to
+// send. The content in the call is not even read, and the stored content is
+// written back as it is. Publishing takes the revision AND the exact content the
+// person reviewed, so the bytes that go live are the bytes they saw.
+
 var templateIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,160}$`)
 
-// Templates are files in the editor and reusable records in Campaigns. One
-// shared lock protects both changes of copy and the explicit review decision.
-// Publishing is always on the exact saved bytes the person just reviewed.
+const (
+	maxTemplateNameChars = 200
+
+	// maxRefusalIssues is how many problems the refusal to publish spells out.
+	// The answer to a save lists every issue (bounded as a preview's is); a
+	// sentence is for a person to read, and fifty pictures that cannot be read
+	// are one problem said fifty times.
+	maxRefusalIssues = 10
+)
+
+var (
+	errChooseTemplate     = errors.New("choose an organization and a template name (up to 200 characters)")
+	errUnknownAction      = errors.New("unknown template action")
+	errNotALibraryFile    = errors.New("The source file isn't a Library file. Choose a file from the Library, or leave the source empty.")
+	errTemplateSaveBusy   = errors.New("Saving is busy right now. Try again in a moment.")
+	errTemplateNotFound   = errors.New("template not found; create and save it before publishing")
+	errTemplateChanged    = errors.New("this template changed; compare the latest revision before saving or publishing")
+	errUnsavedTemplate    = errors.New("save and review this revision before publishing")
+	errTemplateOrgMoved   = errors.New("a template cannot move between organizations; create a copy instead")
+	errTemplateNoRevision = errors.New("template has no readable revision")
+)
+
+// templateStatus is the status each action leaves a template in: editing always
+// returns it to draft, and so does restoring it.
+var templateStatus = map[string]string{"save": "draft", "publish": "ready", "archive": "archived", "restore": "draft"}
+
+// templateRequest is a call to campaignSaveTemplate once its arguments have been
+// read: the ids are bare and the action is one of the four.
+type templateRequest struct {
+	templateID string // the target; empty until a file has said which template it is
+	accountID  string
+	sourceID   string // the Library file, or empty
+	name       string
+	expected   string // the revision the caller read, or empty when creating
+	action     string
+	document   emaildoc.Document // the parsed content; read only for save and publish
+}
+
+// templateContent is what a template holds and a write replaces: the rendering
+// a send uses and the document it was made from.
+type templateContent struct {
+	name, subject, textBody, htmlBody, preheader, layoutID, sourceArtifactID string
+	// document is the email document as a JSON object, or nil for a template
+	// saved before documents existed, which is written back without one.
+	document map[string]any
+}
+
+// handleSaveTemplate implements integration.campaigns.saveTemplate.
 func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
-	templateID, accountID := bare(argString(args, "templateId")), bare(argString(args, "accountId"))
-	name, expected, action := strings.TrimSpace(argString(args, "name")), argString(args, "expectedRevision"), argString(args, "action")
-	if action == "" {
-		action = "save"
+	req := templateRequest{
+		templateID: bare(argString(args, "templateId")),
+		accountID:  bare(argString(args, "accountId")),
+		sourceID:   bare(argString(args, "sourceArtifactId")),
+		name:       strings.TrimSpace(argString(args, "name")),
+		expected:   argString(args, "expectedRevision"),
+		action:     argString(args, "action"),
 	}
-	if !templateIDPattern.MatchString(templateID) || accountID == "" || name == "" || len(name) > 200 || strings.IndexFunc(name, unicode.IsControl) >= 0 || callerUserID(ctx) == "" {
-		return nil, fmt.Errorf("choose an organization and a template name (up to 200 characters)")
+	if req.action == "" {
+		req.action = "save"
 	}
-	if action != "save" && action != "publish" && action != "archive" {
-		return nil, fmt.Errorf("unknown template action")
+	// Only a save or a publish brings content. Archive and restore ignore
+	// whatever else the call carries.
+	writing := req.action == "save" || req.action == "publish"
+	badName := req.name == "" || utf8.RuneCountInString(req.name) > maxTemplateNameChars || strings.IndexFunc(req.name, unicode.IsControl) >= 0
+	switch {
+	case req.templateID == "" && req.sourceID == "",
+		req.templateID != "" && !templateIDPattern.MatchString(req.templateID),
+		req.accountID == "", callerUserID(ctx) == "", writing && badName:
+		return nil, errChooseTemplate
 	}
-	encoded, err := json.Marshal(args["content"])
-	if err != nil {
-		return nil, err
+	if req.sourceID != "" && !templateIDPattern.MatchString(req.sourceID) {
+		return nil, errNotALibraryFile
 	}
-	content, err := pure.ParseEmailTemplate(string(encoded))
-	if err != nil {
-		return nil, fmt.Errorf("template: %w", err)
+	if _, known := templateStatus[req.action]; !known {
+		return nil, errUnknownAction
 	}
-	if _, _, err := pure.ExtractEmailImages(content.HTMLBody); err != nil {
-		return nil, err
+	if writing {
+		// Measured as the file it is, as a preview measures it: an email that is
+		// previewed is not refused here as larger than a file may be.
+		encoded, err := encodeDocument(args["content"])
+		if err != nil {
+			return nil, fmt.Errorf("template: %w", err)
+		}
+		if req.document, err = emaildoc.Parse(encoded); err != nil {
+			return nil, fmt.Errorf("template: %w", err)
+		}
 	}
 
 	if w.templateGate == nil {
-		return nil, fmt.Errorf("template write coordination is unavailable")
+		return nil, errors.New("template write coordination is unavailable")
 	}
-	release, err := w.templateGate(ctx, templateID)
+	gateKey := req.templateID
+	if req.sourceID != "" {
+		gateKey = "source:" + req.accountID + ":" + req.sourceID
+	}
+	release, err := w.templateGate(ctx, gateKey)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
-	accounts, err := w.store.rows(ctx, call("query", "clientAccountById", arg{"accountId", accountID}))
+	accounts, err := w.store.rows(ctx, call("query", "clientAccountById", arg{"accountId", req.accountID}))
 	if err != nil {
 		return nil, err
 	}
 	if len(accounts) != 1 || str(accounts[0], "status") != "active" {
-		return nil, fmt.Errorf("organization is not active or accessible")
+		return nil, errors.New("organization is not active or accessible")
 	}
-	rows, err := w.store.rows(ctx, call("query", "templateById", arg{"templateId", templateID}))
+
+	if req.sourceID != "" {
+		// The file says which template this is. Without one the template is the
+		// one the file would get, unless the caller named an id for it.
+		found, ok, err := w.store.TemplateForSource(ctx, req.accountID, req.sourceID)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case ok:
+			req.templateID = bare(str(found, "id"))
+		case req.templateID == "":
+			req.templateID = sourceTemplateID(req.accountID, req.sourceID)
+		}
+		releaseTemplate, err := w.templateGate(ctx, req.templateID)
+		if err != nil {
+			return nil, err
+		}
+		defer releaseTemplate()
+	}
+
+	rows, err := w.store.rows(ctx, call("query", "templateById", arg{"templateId", req.templateID}))
 	if err != nil {
 		return nil, err
 	}
@@ -68,53 +219,253 @@ func (w *Worker) handleSaveTemplate(ctx context.Context, args map[string]any, _ 
 	if len(rows) > 0 {
 		verb = auth.VerbUpdate
 	}
-	if !w.store.engine.OrganizationCapable(ctx, accountID, verb, auth.ResourceData) {
-		return nil, fmt.Errorf("template write permission is required in this organization")
+	if !w.store.engine.OrganizationCapable(ctx, req.accountID, verb, auth.ResourceData) {
+		return nil, errors.New("template write permission is required in this organization")
 	}
-	var prior time.Time
-	status, mutation := "draft", "createTemplate"
-	if len(rows) > 0 {
-		row := rows[0]
-		if !sameOrganization(accountID, str(row, "accountId")) {
-			return nil, fmt.Errorf("a template cannot move between organizations; create a copy instead")
-		}
-		prior = templateTime(row["createdAt"])
-		if prior.IsZero() {
-			return nil, fmt.Errorf("template has no readable revision")
-		}
-		same := name == str(row, "name") && content.Subject == str(row, "subject") && content.TextBody == str(row, "textBody") && content.HTMLBody == str(row, "htmlBody")
-		// An uncertain response can be retried without writing another version.
-		// This also makes file autosave of unchanged bytes inert.
-		target := map[string]string{"save": "draft", "publish": "ready", "archive": "archived"}[action]
-		if same && str(row, "status") == target {
-			return templateReceipt(templateID, prior, target)
-		}
-		wanted, parseErr := time.Parse(time.RFC3339Nano, expected)
-		if parseErr != nil || !prior.Equal(wanted) {
-			return nil, fmt.Errorf("this template changed; compare the latest revision before saving or publishing")
-		}
-		if action != "save" && !same {
-			return nil, fmt.Errorf("save and review this revision before publishing or archiving")
-		}
-		status, mutation = target, "updateTemplate"
-	} else if expected != "" || action != "save" {
-		return nil, fmt.Errorf("template not found; create and save it before publishing")
+	if len(rows) == 0 {
+		return w.createTemplate(ctx, req)
 	}
+	return w.changeTemplate(ctx, req, rows[0])
+}
+
+// createTemplate saves a template nobody has saved yet, as a draft.
+func (w *Worker) createTemplate(ctx context.Context, req templateRequest) ([]memorynodes.MemoryNode, error) {
+	if req.expected != "" || req.action != "save" {
+		return nil, errTemplateNotFound
+	}
+	content, issues, err := w.renderTemplate(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	revision := w.templateRevision(time.Time{})
+	values := content.values(req.templateID, revision)
+	values["accountId"] = req.accountID
+	if err := w.writeTemplate(ctx, "createTemplate", values); err != nil {
+		return nil, err
+	}
+	return templateReceipt(req.templateID, revision, "draft", issues)
+}
+
+// changeTemplate saves, publishes, archives or restores a template that is
+// stored. row is the stored version, read fresh under the template's gate.
+func (w *Worker) changeTemplate(ctx context.Context, req templateRequest, row map[string]any) ([]memorynodes.MemoryNode, error) {
+	if !sameOrganization(req.accountID, str(row, "accountId")) {
+		return nil, errTemplateOrgMoved
+	}
+	prior := templateTime(row["createdAt"])
+	if prior.IsZero() {
+		return nil, errTemplateNoRevision
+	}
+	current, target := str(row, "status"), templateStatus[req.action]
+
+	var (
+		content templateContent
+		issues  = []emaildoc.Issue{}
+		same    bool
+	)
+	switch req.action {
+	case "archive", "restore":
+		// An uncertain response can be retried without writing another version:
+		// what was asked is already so, whatever revision the retry carries. A
+		// template that is not archived is as restored as it can be.
+		if req.action == "archive" && current == "archived" || req.action == "restore" && current != "archived" {
+			return templateReceipt(req.templateID, prior, current, issues)
+		}
+		content = storedTemplate(row)
+	default:
+		var err error
+		if content, issues, err = w.renderTemplate(ctx, req); err != nil {
+			return nil, err
+		}
+		if req.action == "publish" && len(issues) > 0 {
+			return nil, publishRefusal(issues)
+		}
+		// A call that names no file keeps the one the template has.
+		if content.sourceArtifactID == "" {
+			content.sourceArtifactID = bare(str(row, "sourceArtifactId"))
+		}
+		same = sameTemplate(row, content)
+		// The same content already saved, or published, answers with the receipt
+		// it already has. This also makes an autosave of unchanged bytes inert.
+		if same && current == target {
+			return templateReceipt(req.templateID, prior, target, issues)
+		}
+	}
+
+	wanted, parseErr := time.Parse(time.RFC3339Nano, req.expected)
+	if parseErr != nil || !prior.Equal(wanted) {
+		return nil, errTemplateChanged
+	}
+	if req.action == "publish" && !same {
+		return nil, errUnsavedTemplate
+	}
+	revision := w.templateRevision(prior)
+	values := content.values(req.templateID, revision)
+	values["status"] = target
+	if err := w.writeTemplate(ctx, "updateTemplate", values); err != nil {
+		return nil, err
+	}
+	return templateReceipt(req.templateID, revision, target, issues)
+}
+
+// renderTemplate renders the document as it will be sent and says what a
+// template made from it holds. issues is never nil.
+func (w *Worker) renderTemplate(ctx context.Context, req templateRequest) (templateContent, []emaildoc.Issue, error) {
+	// A render can cost a node hundreds of MiB (see email_render.go), so saving
+	// takes one of the same slots a preview does, here, after the organization
+	// has been looked at and the document is known to be admissible.
+	releaseSlot, err := acquireRenderSlot(ctx)
+	if err != nil {
+		if errors.Is(err, errPreviewBusy) {
+			err = errTemplateSaveBusy
+		}
+		return templateContent{}, nil, err
+	}
+	defer releaseSlot()
+	result, err := emaildoc.Render(ctx, req.document, &pictureReads{inner: artifactImages{w}, left: maxPictureReads}, emaildoc.RenderOptions{})
+	if err != nil {
+		if errors.Is(err, emaildoc.ErrTooLarge) {
+			return templateContent{}, nil, errPreviewTooLarge
+		}
+		return templateContent{}, nil, err
+	}
+	document, err := documentObject(req.document)
+	if err != nil {
+		return templateContent{}, nil, err
+	}
+	return templateContent{
+		name: req.name, subject: req.document.Subject, textBody: result.Text, htmlBody: result.HTML,
+		preheader: req.document.Preheader, layoutID: req.document.Layout, sourceArtifactID: req.sourceID,
+		document: document,
+	}, previewIssues(result.Issues), nil
+}
+
+// storedTemplate is the content of a stored version, to write back as it is. Its
+// source file is the one it has: an archive does not change where it came from.
+func storedTemplate(row map[string]any) templateContent {
+	content := templateContent{
+		name: str(row, "name"), subject: str(row, "subject"), textBody: str(row, "textBody"), htmlBody: str(row, "htmlBody"),
+		preheader: str(row, "preheader"), layoutID: str(row, "layoutId"), sourceArtifactID: bare(str(row, "sourceArtifactId")),
+	}
+	if document, ok := row["document"].(map[string]any); ok && len(document) > 0 {
+		content.document = document
+	}
+	return content
+}
+
+// values is the arguments of the mutation that writes the content. All of them
+// are always named, so a save that leaves out the layout or the preheader clears
+// it instead of keeping the stale one. A template saved before documents
+// existed has no document to write back.
+func (c templateContent) values(templateID string, revision time.Time) map[string]any {
+	values := map[string]any{
+		"templateId": templateID, "name": c.name, "subject": c.subject, "textBody": c.textBody, "htmlBody": c.htmlBody,
+		"preheader": c.preheader, "layoutId": c.layoutID, "sourceArtifactId": c.sourceArtifactID,
+		"versionTime": revision.Format(time.RFC3339Nano),
+	}
+	if c.document != nil {
+		values["document"] = c.document
+	}
+	return values
+}
+
+// sameTemplate reports whether saving the content would write what is already
+// stored: the name, the three parts, the preheader, the layout, the file and the
+// document. The documents are compared as the JSON they are, which sorts object
+// keys and reads numbers the same whichever way they came (from a client, or
+// back out of the database). The file counts, so that saving a template from
+// another file moves it there instead of answering that nothing changed.
+//
+// A template saved before documents existed has no document. It is a custom
+// template by construction, so its document is the one its own parts make:
+// publishing it unchanged is the same content, as it was before documents, and
+// the document is stored with the publication.
+func sameTemplate(row map[string]any, c templateContent) bool {
+	if c.name != str(row, "name") || c.subject != str(row, "subject") || c.textBody != str(row, "textBody") ||
+		c.htmlBody != str(row, "htmlBody") || c.preheader != str(row, "preheader") || c.layoutID != str(row, "layoutId") {
+		return false
+	}
+	if c.sourceArtifactID != bare(str(row, "sourceArtifactId")) {
+		return false
+	}
+	stored := storedTemplate(row).document
+	if stored == nil {
+		var err error
+		stored, err = documentObject(emaildoc.Document{
+			Subject: str(row, "subject"), Preheader: str(row, "preheader"), TextBody: str(row, "textBody"), HTMLBody: str(row, "htmlBody"),
+		})
+		if err != nil {
+			return false
+		}
+	}
+	incoming, err := plainJSON(c.document)
+	if err != nil {
+		return false
+	}
+	have, err := plainJSON(stored)
+	return err == nil && string(incoming) == string(have)
+}
+
+// writeTemplate runs one of the two @serverOnly mutations. The call is rendered
+// with the parser's own renderer because the document is an object, which the
+// package's call helper does not carry. The mutation name is a variable on
+// purpose: Store.execServerOnly is what stamps the internal origin both need.
+func (w *Worker) writeTemplate(ctx context.Context, mutation string, values map[string]any) error {
+	rendered, err := langparser.RenderCall(mutation, values)
+	if err != nil {
+		return fmt.Errorf("template: %w", err)
+	}
+	return w.store.execServerOnly(ctx, "mutation "+rendered)
+}
+
+// templateRevision is the revision a write is stamped with: newer than the one
+// it read, even if this replica's clock lags.
+func (w *Worker) templateRevision(prior time.Time) time.Time {
 	now := time.Now()
 	if w.now != nil {
 		now = w.now()
 	}
-	revision := memql.VersionTimeAfter(prior, now)
-	values := []arg{{"templateId", templateID}, {"name", name}, {"subject", content.Subject}, {"textBody", content.TextBody}, {"htmlBody", content.HTMLBody}, {"versionTime", revision.Format(time.RFC3339Nano)}}
-	if mutation == "createTemplate" {
-		values = append(values, arg{"accountId", accountID})
-	} else {
-		values = append(values, arg{"status", status})
+	return memql.VersionTimeAfter(prior, now)
+}
+
+// publishRefusal is the refusal to publish a template that has issues: their
+// sentences, so a person sees what to fix. It names the first few; the answer to
+// the save they just made lists them all.
+func publishRefusal(issues []emaildoc.Issue) error {
+	shown := issues
+	if len(shown) > maxRefusalIssues {
+		shown = shown[:maxRefusalIssues]
 	}
-	if err := w.store.execServerOnly(ctx, call("mutation", mutation, values...)); err != nil {
-		return nil, err
+	messages := make([]string, 0, len(shown))
+	for _, issue := range shown {
+		messages = append(messages, issue.Message)
 	}
-	return templateReceipt(templateID, revision, status)
+	text := "fix these before publishing: " + strings.Join(messages, " ")
+	if more := len(issues) - len(shown); more > 0 {
+		text += fmt.Sprintf(" And %d more.", more)
+	}
+	return errors.New(text)
+}
+
+// sourceTemplateID is the id of the template a Library file gets in an
+// organization when nobody named one: the same for every caller and replica, so
+// that two first saves of one file are one template.
+func sourceTemplateID(accountID, sourceArtifactID string) string {
+	sum := sha256.Sum256([]byte("memql/campaigns/template-source\x00" + accountID + "\x00" + sourceArtifactID))
+	return hex.EncodeToString(sum[:])[:32]
+}
+
+// TemplateForSource reads the template an organization published from a Library
+// file, or reports false when there is none the caller can see. The concept's
+// account tier answers a template outside the caller's organizations exactly as
+// it answers one that does not exist, so the file id is not a way into other
+// organizations' templates. The row's createdAt is its revision.
+func (s *Store) TemplateForSource(ctx context.Context, accountID, sourceArtifactID string) (map[string]any, bool, error) {
+	rows, err := s.rows(ctx, call("query", "templateForSource", arg{"accountId", accountID}, arg{"sourceArtifactId", sourceArtifactID}))
+	if err != nil || len(rows) == 0 {
+		return nil, false, err
+	}
+	return rows[0], true, nil
 }
 
 func templateTime(value any) time.Time {
@@ -125,6 +476,14 @@ func templateTime(value any) time.Time {
 	return instant
 }
 
-func templateReceipt(templateID string, revision time.Time, status string) ([]memorynodes.MemoryNode, error) {
-	return resultNode("campaignTemplateSaved", map[string]any{"templateId": templateID, "revision": revision.UTC().Format(time.RFC3339Nano), "status": status, "saved": true})
+// templateReceipt is the answer to a save: the template, its revision and
+// status, and the issues of the email (an empty list when there are none, never
+// null, since a client reads issues.length).
+func templateReceipt(templateID string, revision time.Time, status string, issues []emaildoc.Issue) ([]memorynodes.MemoryNode, error) {
+	if issues == nil {
+		issues = []emaildoc.Issue{}
+	}
+	return resultNode("campaignTemplateSaved", map[string]any{
+		"templateId": templateID, "revision": revision.UTC().Format(time.RFC3339Nano), "status": status, "saved": true, "issues": issues,
+	})
 }

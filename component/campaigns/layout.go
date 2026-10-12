@@ -80,7 +80,7 @@ func (w *Worker) handleSaveLayout(ctx context.Context, args map[string]any, _ in
 		return nil, errors.New("a layout description is one line of up to 500 characters")
 	}
 	if saving && sourceArtifactID != "" && !layoutIDPattern.MatchString(sourceArtifactID) {
-		return nil, errors.New("The source file isn't a Library file. Choose a file from the Library, or leave the source empty.")
+		return nil, errNotALibraryFile
 	}
 	if action != "save" && action != "archive" && action != "restore" {
 		return nil, errors.New("unknown layout action")
@@ -275,11 +275,11 @@ func (w *Worker) handleEmailLayouts(ctx context.Context, args map[string]any, _ 
 func documentObject(doc emaildoc.Document) (map[string]any, error) {
 	raw, err := doc.JSON()
 	if err != nil {
-		return nil, fmt.Errorf("layout: %w", err)
+		return nil, fmt.Errorf("email document: %w", err)
 	}
 	var out map[string]any
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, fmt.Errorf("layout: %w", err)
+		return nil, fmt.Errorf("email document: %w", err)
 	}
 	return out, nil
 }

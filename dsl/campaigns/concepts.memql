@@ -135,6 +135,10 @@ concept template {
   htmlBody     string   @description("Optional HTML alternative. When present the message goes out as multipart/alternative with text first.")
   status       enum("draft", "ready", "archived")  @description("Authoring lifecycle. 'draft' is being written; 'ready' means an operator has decided it may be attached to a campaign; 'archived' keeps it readable for the campaigns that referenced it without offering it in the picker.")
   accountId    string   @description("The owning v1:accounts:account organization. New work requires an authorized organization selected explicitly or resolved from the caller. Legacy untied rows retain their existing attribution until an operator assigns one.")
+  document          object  @description("The email document (emaildoc, a *.email.json file) this template was rendered from, in layout or custom mode, exactly as campaignSaveTemplate validated it. The subject and the two bodies above are its rendering and are what a send uses. Absent on templates saved before documents existed: their subject and bodies are the whole template.")
+  layoutId          string  @description("The layout the document was made from: 'builtin:<name>' or 'org:<layoutId>'. Provenance only; an opaque id the server issues. Empty for custom HTML.")
+  preheader         string  @description("The hidden line an inbox shows after the subject, from the document. It is already written into htmlBody; kept here so an editor can show it.")
+  sourceArtifactId  string  @description("The Library file the template was published from. There is one template per organization and file: publishing the same file again updates this template (templateForSource). Empty for templates not made from a file.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")

@@ -124,9 +124,129 @@ still rechecks the caller's authority and the source template's readability.
 Jobs queued before this change have no captured copy and retain their previous
 behavior; pause and recreate those jobs before editing their shared template.
 
-The client write surface is `campaignSaveTemplate`, with `templateId`,
-`accountId`, `name`, `content`, `expectedRevision`, and `action` (`save`,
-`publish`, or `archive`). Its receipt includes the saved revision and status.
+### The email document
+
+A template is an email document, the `*.email.json` file the editor opens. It
+has one of two modes, and exactly one:
+
+- **Layout mode** is `{subject, preheader, layout, theme, blocks}`. The email is
+  a column of blocks (pictures, headings, Markdown text, buttons, dividers,
+  sections, columns, social links, a footer, and an HTML block for the rare case
+  nothing else covers), drawn in the colours and fonts of a theme. MemQL writes
+  the HTML and the plain-text part from the blocks, in the table layout that
+  holds up in mail clients and on phones, with the rules of a 600 pixel email.
+  `layout` records which layout the email started from and changes nothing.
+- **Custom mode** is `{subject, preheader, textBody, htmlBody}`: HTML you pasted
+  or wrote, with its plain-text alternative. Its HTML is kept as written. MemQL
+  only embeds the Library pictures it names and puts the preheader after the
+  body tag.
+
+Templates saved before documents existed are custom templates. They keep
+working as they are, and a saved draft of one can be published without saving
+it again.
+
+Colours in a block are the theme's own (`page`, `canvas`, `primary`,
+`secondary`, `accent`, `tint`, `text`, `muted` and `white`), never a value of
+their own. A link is empty, a web, email or phone address, or exactly one of
+the four link tags `{{unsubscribeUrl}}`, `{{preferencesUrl}}`, `{{viewUrl}}`
+and `{{confirmUrl}}`, which sending replaces for each recipient. No other merge
+tag can stand in for an address, so a recipient's own value can never become a
+link. A picture is `artifact:<id>`, a PNG, JPEG or GIF in the Library, or a
+`data:` image. An email carries at most eight pictures and 1 MiB of picture
+data in all, and a file is at most 2 MiB.
+
+Pictures are read as the person who previews or saves. A picture they cannot
+read, such as another member's private file, is not embedded and is reported as
+unreadable; having its artifact id is not a way to read it. The saved document
+keeps the `artifact:` reference, and the saved HTML has the picture embedded
+(sent as an inline attachment, as before).
+
+### Layouts and previews
+
+Four built-in layouts start an email: **Confirmation**, **Letter**, **Article**
+and **Spotlight**. They come with MemQL, in a neutral example brand, with
+pictures and links left to choose. An organization can also keep a finished
+email as a layout of its own, which keeps its logo, footer and signature for
+the next email in the series.
+
+- `emailLayouts({accountId, includeArchived?})` lists what the organization can
+  start from: the four built-in layouts, then its own. Each row is
+  `{id, kind, name, description, document, status}`, and an organization's own
+  also carry `layoutId`, `revision` and `sourceArtifactId`. The `id`
+  (`builtin:<name>` or `org:<layoutId>`) is opaque: a client passes it on and
+  never builds or splits one.
+- `campaignSaveLayout({layoutId, accountId, name, description, document,
+  sourceArtifactId, expectedRevision, action})` saves an organization's layout
+  with the same exact-revision rule as a template. It takes a layout-mode
+  document only. Archiving and restoring need only the revision, and an
+  archived layout is restored before it is edited. `layoutId` is the bare id of
+  the row, not the opaque id of a picker row.
+- `emailRender({document, accountId, sample?})` previews a document: it answers
+  `{subject, html, text, issues}` with the pictures the caller can read
+  embedded, `sample` values (`displayName`, `email`, `accountName`,
+  `campaignName` and `fields`) filled in, the four link tags left as written,
+  and each block marked so an editor can select it. `{{accountName}}` is the
+  organization's name unless the sample says another. It saves and sends
+  nothing, needs read access to the organization's data, and a node renders only
+  a few previews at once; one asked for while it is busy is told to try again.
+
+### Saving, issues and publishing
+
+Saving renders the document the way it will be sent and stores the subject, the
+plain-text part and the HTML part (what a send uses) together with the document
+itself, its layout and its preheader. The render finds what keeps the email from
+being sent as it is, and the receipt lists it as `issues`, each
+`{code, block?, message}` with a sentence that says what to do:
+
+| Code | The email has |
+|------|---------------|
+| `image_missing` | a picture block with no picture chosen |
+| `image_unavailable` | a picture that cannot be read: not found, not readable by the person saving, not a PNG, JPEG or GIF, or over 1 MiB |
+| `images_limit` | more than eight pictures, or more than 1 MiB of picture data |
+| `link_missing` | a button, social link or footer link with no address |
+| `unsubscribe_missing` | a layout email with no `{{unsubscribeUrl}}` link (every built-in layout has one) |
+| `email_too_large` | more than 2 MiB of HTML once its pictures are embedded |
+
+**Saving works with issues**, and returns the template to draft: a draft is a
+draft. **Publishing is refused while any issue remains**, with their sentences
+(`fix these before publishing: Choose a picture for "Hero picture".`), so a
+template that is ready is one that can go out. A document the format refuses, or
+an email too large to write out at all (more than 8 MiB of HTML), cannot be
+saved, and the answer says why.
+
+### One template per organization and file
+
+An editor opens a Library file, so the file says which template it is. Give
+`sourceArtifactId` (the file's artifact id) and the template already published
+from that file in the organization is the one saved, whatever `templateId` says;
+the first save creates it, so `templateId` may then be left empty. The template
+of a file is read with `templateForSource({accountId, sourceArtifactId})`, which
+gives its id and revision (`createdAt`) before a save. The same file in another
+organization is another template, and a person outside the organization does not
+find the template by the file.
+
+### The write surface
+
+The client write surface is `campaignSaveTemplate`, with `templateId` (optional
+when `sourceArtifactId` is given), `accountId`, `name`, `content` (the email
+document, in either mode), `sourceArtifactId`, `expectedRevision`, and `action`
+(`save`, `publish`, `archive` or `restore`). Its receipt is
+`{templateId, revision, status, saved, issues}`: the id of the template written,
+which for a file is the template the file already had, the revision to name in
+the next call, the status (`draft`, `ready` or `archived`), and the issues of the
+email, an empty list when there are none.
+
+- `save` renders the document and writes it as a draft. An unchanged email
+  answers with the receipt it already has instead of writing another version, so
+  a retry after a lost response, and an autosave of unchanged bytes, are safe.
+- `publish` needs the exact saved revision **and** the exact saved content, and
+  is refused while the email has issues.
+- `archive` and `restore` need only the exact revision. The content in the call
+  is ignored (a client that holds only the template's card may send an empty
+  object), the stored content is written back as it is, and one that is already
+  done answers with its receipt. `restore` returns an archived template to
+  draft; it publishes nothing.
+
 Raw template writes and the underlying create/update mutations are internal.
 
 ## Configure Azure once for the cluster

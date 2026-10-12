@@ -252,6 +252,10 @@ func TestEveryRenderedCallParses(t *testing.T) {
 		{"emailLayoutById", func() error { _, _, err := store.EmailLayoutByID(ctx, awkward); return err }},
 		{"emailLayoutsForAccount (active)", func() error { _, err := store.EmailLayoutsForAccount(ctx, awkward, false); return err }},
 		{"emailLayoutsForAccount (archived too)", func() error { _, err := store.EmailLayoutsForAccount(ctx, awkward, true); return err }},
+
+		// the template an organization published from one Library file; both
+		// ids are the caller's, so both are awkward.
+		{"templateForSource", func() error { _, _, err := store.TemplateForSource(ctx, awkward, awkward); return err }},
 	}
 
 	before := 0

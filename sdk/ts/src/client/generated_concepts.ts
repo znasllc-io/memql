@@ -1014,6 +1014,7 @@ export const BoundConcepts = {
   systemActiveAuthoringBundles: "v1:authoring:bundle",
   takeBooking: "v1:calendar:booking",
   templateById: "v1:campaigns:template",
+  templateForSource: "v1:campaigns:template",
   templates: "v1:campaigns:template",
   territoriesForStore: "v1:commerce:territory",
   todoById: "v1:todos:todo",
