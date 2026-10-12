@@ -230,6 +230,13 @@ gives its id and revision (`createdAt`) before a save. The same file in another
 organization is another template, and a person outside the organization does not
 find the template by the file.
 
+The id a file gets is worked out from the organization and the file, and a
+template id is a name its caller chooses, so a person in another organization
+can save a template under that id first. The file's owner cannot see it, and
+their first save of the file is refused with a sentence that says what happened:
+"This file is already linked to a template you can't open. Save it with a
+different template." Any other refusal of a first save keeps its own words.
+
 ### The write surface
 
 The client write surface is `campaignSaveTemplate`, with `templateId` (optional

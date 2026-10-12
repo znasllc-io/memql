@@ -67,6 +67,15 @@ import (
 // the Campaigns app, which names only the template, cannot both pass the same
 // revision.
 //
+// That id can be worked out by anybody who knows the organization and the file,
+// and a template id is a name its caller chooses, so a person in another
+// organization can save a template under it first. That template cannot be seen
+// from here (a template outside the caller's organizations answers as one that
+// does not exist), so the file's first save looks like a create, and the write
+// guard refuses it because the row is somebody else's. That refusal is turned
+// into a sentence (errTemplateIDTaken) for this one case: a create under the id
+// the file would have been given.
+//
 // # An email too large to send keeps no HTML
 //
 // An email past the 2 MiB a send takes can never be sent, and its HTML can be as
@@ -119,6 +128,7 @@ var (
 	errUnknownAction      = errors.New("unknown template action")
 	errNotALibraryFile    = errors.New("The source file isn't a Library file. Choose a file from the Library, or leave the source empty.")
 	errTemplateSaveBusy   = errors.New("Saving is busy right now. Try again in a moment.")
+	errTemplateIDTaken    = errors.New("This file is already linked to a template you can't open. Save it with a different template.")
 	errTemplateLocked     = errors.New("Someone else is saving this template. Try again in a moment.")
 	errTemplateNeedsWrite = errors.New("template write permission is required in this organization")
 	errOrganizationClosed = errors.New("organization is not active or accessible")
@@ -321,9 +331,22 @@ func (w *Worker) createTemplate(ctx context.Context, req templateRequest, render
 	values := rendered.content.values(req.templateID, revision)
 	values["accountId"] = req.accountID
 	if err := w.writeTemplate(ctx, "createTemplate", values); err != nil {
+		if req.sourceID != "" && req.templateID == sourceTemplateID(req.accountID, req.sourceID) && refusedAsAnotherOrganizations(err) {
+			return nil, errTemplateIDTaken
+		}
 		return nil, err
 	}
 	return templateReceipt(req.templateID, revision, "draft", rendered.issues)
+}
+
+// refusedAsAnotherOrganizations says whether err is the write guard's refusal of
+// a write to a row that exists in an organization the caller may not change
+// (validateOrganizationTransfer in component/memql). It is matched by the words
+// the guard writes, which are a code and a sentence of its own; the database
+// test of this case runs the real guard, so a change to them is a failing test
+// and not a raw refusal on somebody's screen.
+func refusedAsAnotherOrganizations(err error) bool {
+	return strings.Contains(err.Error(), "organization_forbidden: you cannot change data in the existing organization")
 }
 
 // changeTemplate saves, publishes, archives or restores a template that is

@@ -774,3 +774,70 @@ func TestTemplateListsAreLight(t *testing.T) {
 		t.Errorf("the template weighs %d bytes: the fixture is not heavy enough to show the difference", n)
 	}
 }
+
+// A template id somebody else already holds is a sentence for the person
+// whose save it stops, not the write guard's words.
+//
+// The id a Library file gets in an organization is made from the organization
+// and the file (sourceTemplateID), so anybody who knows the two can work it out,
+// and a template id is a name the caller may choose. So a person in ANOTHER
+// organization can save a template under exactly that id before the file's
+// owner ever saves it. The owner cannot see that row (the concept's account tier
+// answers a template outside their organizations as it answers one that does not
+// exist), so their first save looks like a create, and the write guard refuses it
+// because the id is taken. That refusal says what the guard says; it has to say,
+// to a person, what happened and what to do.
+func TestAPreTakenDerivedTemplateIDIsASentence(t *testing.T) {
+	w := newLayoutWorld(t)
+	previousGrants, previousMembers := auth.InstalledGrantSource(), auth.InstalledMembershipSource()
+	w.engines[0].InstallGrantResolution()
+	t.Cleanup(func() { auth.SetGrantSource(previousGrants); auth.SetMembershipSource(previousMembers) })
+
+	account, elsewhere := w.suffix+"-org", w.suffix+"-other-org"
+	source := "art-" + w.suffix
+	w.createOrganization(t, account, "Template client")
+	w.createOrganization(t, elsewhere, "Another client")
+	member, squatter := w.suffix+"-member", w.suffix+"-squatter"
+	w.seedUser(t, member, "writer")
+	w.seedUser(t, squatter, "writer")
+	w.seedMember(t, member, account)
+	w.seedMember(t, squatter, elsewhere)
+	memberCtx, squatterCtx := layoutActor(member, auth.RoleWriter), layoutActor(squatter, auth.RoleWriter)
+
+	document := readyConfirmation(t)
+	derived := sourceTemplateID(account, source)
+
+	// Somebody in another organization takes the id the file would get.
+	nodes, err := w.workers[0].handleSaveTemplate(squatterCtx, map[string]any{
+		"templateId": derived, "accountId": elsewhere, "name": "Taken", "content": document, "expectedRevision": "", "action": "save",
+	}, 0)
+	if err != nil {
+		t.Fatalf("the other organization's save under the derived id: %v", err)
+	}
+	taken := decodeSaved(t, nodes)
+
+	// The file's owner saves it for the first time. The id is taken, and they
+	// are told so in words they can act on.
+	_, err = w.workers[1].handleSaveTemplate(memberCtx, map[string]any{
+		"accountId": account, "name": "Welcome email", "content": document, "sourceArtifactId": source, "expectedRevision": "", "action": "save",
+	}, 0)
+	if err == nil {
+		t.Fatal("a save over an id another organization holds succeeded")
+	}
+	t.Logf("the refusal: %v", err)
+	const want = "This file is already linked to a template you can't open. Save it with a different template."
+	if err.Error() != want {
+		t.Errorf("the refusal reads %q, want %q", err.Error(), want)
+	}
+
+	// And nothing of theirs was written, nothing of the other organization's
+	// was touched.
+	var rows int
+	if err := w.db.QueryRowContext(context.Background(),
+		`SELECT count(*) FROM "MemoryNodes" WHERE concept = 'v1:campaigns:template' AND id = ?`, "v1:campaigns:template:"+derived).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Errorf("the id has %d versions, want the other organization's one (%s)", rows, taken.Revision)
+	}
+}

@@ -84,6 +84,8 @@ type templateEngine struct {
 	// stateful keeps what createTemplate and updateTemplate write as the stored
 	// template (and as the template of its file), as the engine would.
 	stateful bool
+	// refuseCreate, when set, is what a createTemplate is refused with.
+	refuseCreate error
 }
 
 func (e *templateEngine) Execute(ctx context.Context, q string) (any, error) {
@@ -105,6 +107,9 @@ func (e *templateEngine) Execute(ctx context.Context, q string) (any, error) {
 			}
 		}
 	case strings.HasPrefix(q, "mutation createTemplate("), strings.HasPrefix(q, "mutation updateTemplate("):
+		if e.refuseCreate != nil && strings.HasPrefix(q, "mutation createTemplate(") {
+			return nil, e.refuseCreate
+		}
 		if e.stateful {
 			e.keep(q)
 		}
@@ -1348,6 +1353,51 @@ func TestAGateThatCannotBeTakenIsASentence(t *testing.T) {
 			t.Fatalf("error = %v, want %q", err, sentence)
 		}
 	})
+}
+
+// The write guard refuses a create over a row that is another organization's
+// with words about organizations. A person whose first save of a file it stops
+// is told what happened and what to do, but only when the id is the one the file
+// would have been given: for any other create, or any other refusal, the words
+// are not a claim about a file, and they pass through as they were.
+func TestOnlyACreateUnderTheFilesOwnIDIsReportedAsTaken(t *testing.T) {
+	const sentence = "This file is already linked to a template you can't open. Save it with a different template."
+	guard := errors.New("mutation createTemplate: organization_forbidden: you cannot change data in the existing organization")
+
+	fromTheFile := func(a map[string]any) { delete(a, "templateId"); a["sourceArtifactId"] = templateSource }
+	for _, c := range []struct {
+		name   string
+		refuse error
+		mutate func(map[string]any)
+		want   string // "" for the refusal as it was
+	}{
+		{"the id the file would get", guard, fromTheFile, sentence},
+		{"the same id, named by the caller", guard, func(a map[string]any) {
+			a["templateId"] = sourceTemplateID(templateOrg, templateSource)
+			a["sourceArtifactId"] = templateSource
+		}, sentence},
+		{"an id the caller chose, with a file", guard, func(a map[string]any) { a["sourceArtifactId"] = templateSource }, ""},
+		{"an id the caller chose, with no file", guard, func(map[string]any) {}, ""},
+		{"the id the file would get, refused for another reason", errors.New("mutation createTemplate: database unavailable"), fromTheFile, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tw := newTemplateWorld(t)
+			tw.engine.refuseCreate = c.refuse
+			_, err := tw.save(saveTemplateArgs(readyConfirmation(t), c.mutate))
+			if err == nil {
+				t.Fatal("a refused create succeeded")
+			}
+			if c.want != "" {
+				if err.Error() != c.want {
+					t.Fatalf("error = %q, want %q", err, c.want)
+				}
+				return
+			}
+			if !errors.Is(err, c.refuse) || err.Error() == sentence {
+				t.Fatalf("error = %q, want the refusal as it was (%q)", err, c.refuse)
+			}
+		})
+	}
 }
 
 // A person who may not save here costs no render and takes no lock: the
