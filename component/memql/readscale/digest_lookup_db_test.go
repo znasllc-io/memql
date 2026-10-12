@@ -99,7 +99,12 @@ func TestDigestLookupReadsOnlyTheMatchingRows(t *testing.T) {
 	_, err := admin.ExecContext(ctx, `CREATE SCHEMA `+schema)
 	require.NoError(t, err)
 	t.Cleanup(func() { _, _ = admin.ExecContext(ctx, `DROP SCHEMA `+schema+` CASCADE`) })
-	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()), pgdriver.WithConnParams(map[string]any{"search_path": schema}))), pgdialect.New())
+	// pgdriver cuts every read off at 10 s by default, and the seed below runs
+	// past that on a CI runner (measured: the INSERT alone takes ~6 s locally,
+	// and CI ran out of time inside it). The bound is for seeding, not for the
+	// reads under test, which the buffer bound measures.
+	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()),
+		pgdriver.WithConnParams(map[string]any{"search_path": schema}), pgdriver.WithReadTimeout(5*time.Minute))), pgdialect.New())
 	t.Cleanup(func() { _ = db.Close() })
 	started := time.Now()
 	for _, stmt := range []string{
