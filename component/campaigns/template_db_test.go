@@ -551,7 +551,7 @@ func (w *layoutWorld) uploadPicture(t *testing.T, uploader context.Context, uplo
 	for _, worker := range w.workers {
 		worker.newBlobReader = func(context.Context) (blobReader, string, error) { return blobs, "memql", nil }
 	}
-	w.run(t, uploader, call("mutation", "createLibraryFile", arg{"fileId", file}, arg{"name", "hero.png"}, arg{"mimeType", "image/png"},
+	w.run(t, auth.ContextWithInternalOrigin(uploader), call("mutation", "createLibraryFile", arg{"fileId", file}, arg{"name", "hero.png"}, arg{"mimeType", "image/png"},
 		arg{"size", len(data)}, arg{"blobUrl", blobURL}, arg{"source", "uploaded"}, arg{"format", "image"}))
 	created, ok := w.run(t, uploader, call("mutation", "createArtifact", arg{"sourceConceptRef", "v1:library:file:" + file}, arg{"ownerUserId", uploaderID},
 		arg{"lens", "artifact"}, arg{"kind", "file"}, arg{"source", "uploaded"}, arg{"title", "hero.png"}, arg{"format", "image"}, arg{"mimeType", "image/png"})).(*memql.ExecuteResult)
@@ -659,9 +659,8 @@ func TestASlowRenderCannotLoseASaveThatLandsMeanwhile(t *testing.T) {
 	}
 }
 
-// A template gate that cannot be taken within the statement limit is a sentence for
-// a person: the pool's own words (canceling statement due to statement timeout)
-// are not.
+// A template gate that cannot be taken within the caller's deadline is a
+// sentence for a person, even when another replica holds the gate.
 func TestAGateThatTimesOutIsASentenceForAPerson(t *testing.T) {
 	w := newLayoutWorldWith(t, productionLikeSession)
 	account := w.suffix + "-org"
@@ -669,21 +668,23 @@ func TestAGateThatTimesOutIsASentenceForAPerson(t *testing.T) {
 	template := w.suffix + "-template"
 
 	// Somebody else is saving this template: its gate is held.
-	holder, err := memql.AcquireWriteGate(context.Background(), w.db.DB, "campaign-template:"+template)
+	holder, err := memql.AcquireWriteGate(context.Background(), gatePoolFor(t)(), "campaign-template:"+template)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer holder()
 
+	ctx, cancel := context.WithTimeout(w.owner, 2*time.Second)
+	defer cancel()
 	started := time.Now()
-	_, err = w.workers[1].handleSaveTemplate(w.owner, map[string]any{
+	_, err = w.workers[1].handleSaveTemplate(ctx, map[string]any{
 		"templateId": template, "accountId": account, "name": "Busy email", "content": readyConfirmation(t), "expectedRevision": "", "action": "save",
 	}, 0)
 	if err == nil || err.Error() != "Someone else is saving this template. Try again in a moment." {
 		t.Fatalf("error = %v", err)
 	}
 	if waited := time.Since(started); waited < time.Second || waited > 10*time.Second {
-		t.Errorf("waited %v: the pool should cancel the wait at its statement limit (1.5 s here)", waited)
+		t.Errorf("waited %v: the gate should cancel its lock wait within the caller deadline (2 s here)", waited)
 	}
 }
 

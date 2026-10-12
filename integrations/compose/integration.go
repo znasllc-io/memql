@@ -76,10 +76,12 @@ type GoalOpener interface {
 // and the only one.
 //
 // NIL IS AN ANSWER HERE TOO, and a useful one: with no composer wired, a
-// materialization whose caller supplied a draft still works end to end,
+// ordinary materialization whose caller supplied a draft still works end to end,
 // which is what lets the whole render/stamp/file tail be exercised on a
 // node with no provider configured. A materialization with NEITHER a
-// composer nor a draft is refused, naming which.
+// composer nor a draft is refused, naming which. Email templates instead keep
+// their chosen layout: blank emails need no composer, while described emails
+// require one and never accept a caller-supplied document as the generated draft.
 type Composer interface {
 	Compose(ctx context.Context, req ComposeRequest) (ComposeReply, error)
 }

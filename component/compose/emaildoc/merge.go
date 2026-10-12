@@ -259,54 +259,24 @@ func linkTagOf(href string) string {
 // it with a sentence that says why.
 func droppedLinkTag(b *Block, text string) string {
 	switch b.Type {
-	case typeHeading, typeHighlight, typeText:
-	default:
-		return ""
-	}
-	for _, tag := range linkTags {
-		if strings.Count(text, tag) < strings.Count(b.Text, tag) {
-			return tag
+	case typeHeading, typeHighlight:
+		for _, tag := range linkTags {
+			if strings.Count(text, tag) < strings.Count(b.Text, tag) {
+				return tag
+			}
 		}
-	}
-	if b.Type != typeText {
-		return ""
-	}
-	before := linkTagLinks(b.Text)
-	if len(before) == 0 {
-		return ""
-	}
-	after := linkTagLinks(text)
-	if after == nil {
-		return ""
-	}
-	for _, tag := range linkTags {
-		if after[tag] < before[tag] {
-			return tag
+	case typeText:
+		before, beforeLinks, beforeProblem := markdownLinkFacts(b.Text)
+		after, afterLinks, afterProblem := markdownLinkFacts(text)
+		// Parse supplies the specific refusal for malformed or unsafe text.
+		if beforeProblem != "" || afterProblem != "" {
+			return ""
 		}
-	}
-	return ""
-}
-
-// linkTagLinks counts the links of a text block's Markdown whose address is a
-// link tag, by tag.
-func linkTagLinks(text string) map[string]int {
-	elements, err := parseMarkdown(text)
-	if err != nil {
-		return nil
-	}
-	counts := map[string]int{}
-	count := func(inline []mdInline) {
-		for _, node := range inline {
-			if node.Kind == mdLink && linkTagOf(node.URL) != "" {
-				counts[node.URL]++
+		for _, tag := range linkTags {
+			if after[tag] < before[tag] || afterLinks[tag] < beforeLinks[tag] {
+				return tag
 			}
 		}
 	}
-	for _, element := range elements {
-		count(element.Inline)
-		for _, item := range element.Items {
-			count(item.Inline)
-		}
-	}
-	return counts
+	return ""
 }

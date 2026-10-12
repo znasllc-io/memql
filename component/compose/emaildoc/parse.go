@@ -843,6 +843,13 @@ func fourLengths(raw json.RawMessage, name string) (*[4]float64, error) {
 // absent value, except where noted. Links, columns and nested blocks are read
 // by the caller.
 func blockProblem(b *Block) string {
+	if b.Type != typeText {
+		for _, text := range append([]string{b.Text, b.Label, b.Alt, b.Title}, b.Lines...) {
+			if problem := LinkTextProblem(text); problem != "" {
+				return problem
+			}
+		}
+	}
 	switch b.Role {
 	case "", "brand", "content":
 	default:
@@ -990,31 +997,8 @@ func inlineMarks(s string) int {
 // markdownProblem reads the Markdown of a text block and applies the link rule
 // to every link in it. A link in Markdown always has an address.
 func markdownProblem(text string) string {
-	elements, err := parseMarkdown(text)
-	if err != nil {
-		return err.Error()
-	}
-	linkProblem := func(inline []mdInline) string {
-		for _, node := range inline {
-			if node.Kind == mdLink {
-				if problem := hrefProblem(node.URL, false); problem != "" {
-					return problem
-				}
-			}
-		}
-		return ""
-	}
-	for _, element := range elements {
-		if problem := linkProblem(element.Inline); problem != "" {
-			return problem
-		}
-		for _, item := range element.Items {
-			if problem := linkProblem(item.Inline); problem != "" {
-				return problem
-			}
-		}
-	}
-	return ""
+	_, _, problem := markdownLinkFacts(text)
+	return problem
 }
 
 // columns reads the columns of a columns block: one to four, each a width in

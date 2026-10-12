@@ -53,7 +53,7 @@ func TestEmailRenderBuiltinReadsPicturesAsTheCallerThroughTheEngine(t *testing.T
 	for _, worker := range w.workers {
 		worker.newBlobReader = func(context.Context) (blobReader, string, error) { return blobs, "memql", nil }
 	}
-	w.run(t, uploader, call("mutation", "createLibraryFile", arg{"fileId", file}, arg{"name", "logo.png"}, arg{"mimeType", "image/png"},
+	w.run(t, auth.ContextWithInternalOrigin(uploader), call("mutation", "createLibraryFile", arg{"fileId", file}, arg{"name", "logo.png"}, arg{"mimeType", "image/png"},
 		arg{"size", len(data)}, arg{"blobUrl", blobURL}, arg{"source", "uploaded"}, arg{"format", "image"}))
 	created, ok := w.run(t, uploader, call("mutation", "createArtifact", arg{"sourceConceptRef", "v1:library:file:" + file}, arg{"ownerUserId", uploaderID},
 		arg{"lens", "artifact"}, arg{"kind", "file"}, arg{"source", "uploaded"}, arg{"title", "logo.png"}, arg{"format", "image"}, arg{"mimeType", "image/png"})).(*memql.ExecuteResult)
