@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -66,6 +67,16 @@ type memSource struct {
 	mu      sync.Mutex
 	rows    []Row
 	journal *[]string
+
+	// chunkSpan is how much of a day dropDay can take whole, counted from the
+	// day's start: 24h models a day that has a chunk of its own (production:
+	// one-day chunks), 12h a chunk that covers only its first half, and zero a
+	// table with no chunk lying wholly inside the day (a plain table, or a
+	// chunk that straddles midnight). dropDay never touches a row outside the
+	// span, which is the guarantee drop_chunks gives the real sweep.
+	chunkSpan time.Duration
+	// dropErr is what dropDay answers instead of dropping anything.
+	dropErr error
 }
 
 func (m *memSource) sorted() []Row {
@@ -146,6 +157,44 @@ func (m *memSource) deleteDay(_ context.Context, day time.Time, limit int) (int6
 	m.rows = kept
 	*m.journal = append(*m.journal, fmt.Sprintf("delete:%s:%d", day.Format("2006-01-02"), n))
 	return n, nil
+}
+
+func (m *memSource) dropDay(_ context.Context, day time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.dropErr != nil {
+		*m.journal = append(*m.journal, "drop:"+day.Format("2006-01-02")+":error")
+		return 0, m.dropErr
+	}
+	end := day.Add(m.chunkSpan)
+	var kept []Row
+	var gone int
+	for _, r := range m.rows {
+		if m.chunkSpan > 0 && !r.OccurredAt.Before(day) && r.OccurredAt.Before(end) {
+			gone++
+			continue
+		}
+		kept = append(kept, r)
+	}
+	m.rows = kept
+	var chunks int64
+	if gone > 0 {
+		chunks = 1
+	}
+	*m.journal = append(*m.journal, fmt.Sprintf("drop:%s:%d", day.Format("2006-01-02"), chunks))
+	return chunks, nil
+}
+
+func (m *memSource) dayHasRows(_ context.Context, day time.Time) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	end := day.AddDate(0, 0, 1)
+	for _, r := range m.rows {
+		if !r.OccurredAt.Before(day) && r.OccurredAt.Before(end) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m *memSource) insertIgnore(_ context.Context, rows []Row) (int64, error) {
@@ -336,6 +385,234 @@ func TestSweepIsBoundedPerRun(t *testing.T) {
 	}
 	if rep.DaysArchived != 2 || !rep.Truncated || len(src.rows) != 1 || src.rows[0].ID != "c" {
 		t.Errorf("bounded run: %+v rows=%v", rep, src.rows)
+	}
+}
+
+// journalIndex is the position of the first journal entry that starts with
+// prefix, or -1. Callers assert on presence before they compare positions,
+// because -1 sorts before everything and would pass an ordering check by
+// accident.
+func journalIndex(journal []string, prefix string) int {
+	for i, e := range journal {
+		if strings.HasPrefix(e, prefix) {
+			return i
+		}
+	}
+	return -1
+}
+
+// uploadFailsArchiver refuses one object and archives the rest.
+type uploadFailsArchiver struct {
+	*memArchiver
+	failObject string
+}
+
+func (a uploadFailsArchiver) Upload(ctx context.Context, container, object string, data []byte, contentType string) (string, error) {
+	if object == a.failObject {
+		return "", errors.New("blob store unreachable")
+	}
+	return a.memArchiver.Upload(ctx, container, object, data, contentType)
+}
+
+// 2026-10-10 and 2026-10-11: the sweep archived 2026-09-09's 18,010 rows and
+// its DELETE then hit the 8 s statement timeout (over a chunk the compression
+// policy had long since compressed). The sweep now drops the archived day's
+// chunk, and deletes nothing when the chunk was the whole day.
+func TestSweepDropsArchivedDayChunk(t *testing.T) {
+	var journal []string
+	now := time.Date(2026, 9, 3, 3, 20, 0, 0, time.UTC)
+	d1 := now.AddDate(0, 0, -40)
+	d2 := now.AddDate(0, 0, -35)
+	src := &memSource{journal: &journal, chunkSpan: 24 * time.Hour, rows: []Row{
+		seedRow(d1.Add(1*time.Hour), "bff", "d1-bff-a"),
+		seedRow(d1.Add(2*time.Hour), "bff", "d1-bff-b"),
+		seedRow(d1.Add(3*time.Hour), "agent", "d1-agent-a"),
+		seedRow(d2.Add(1*time.Hour), "bff", "d2-bff-a"),
+		seedRow(now.AddDate(0, 0, -3), "bff", "recent-a"),
+	}}
+	rep, err := newSweeper(src, newMemArchiver(&journal), "c", now).Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// RowsDeleted is the archived count: the rows left with their chunks, and
+	// drop_chunks reports chunks, not rows.
+	if rep.DaysArchived != 2 || rep.RowsArchived != 4 || rep.RowsDeleted != 4 || rep.ChunksDropped != 2 {
+		t.Fatalf("report: %+v", rep)
+	}
+	for _, e := range journal {
+		if strings.HasPrefix(e, "delete:") {
+			t.Errorf("a day that left with its chunk must not be deleted row by row: %v", journal)
+		}
+	}
+	if len(src.rows) != 1 || src.rows[0].ID != "recent-a" {
+		t.Errorf("rows after sweep: %+v", src.rows)
+	}
+
+	// ORDER: every upload of a day precedes that day's drop, and the days go
+	// oldest first.
+	day1, day2 := utcDay(d1).Format("2006-01-02"), utcDay(d2).Format("2006-01-02")
+	for _, prefix := range []string{
+		"upload:logs/" + day1 + "/agent", "upload:logs/" + day1 + "/bff", "drop:" + day1 + ":1",
+		"upload:logs/" + day2 + "/bff", "drop:" + day2 + ":1",
+	} {
+		if journalIndex(journal, prefix) < 0 {
+			t.Fatalf("journal lacks %q: %v", prefix, journal)
+		}
+	}
+	idx := func(prefix string) int { return journalIndex(journal, prefix) }
+	if idx("upload:logs/"+day1+"/agent") > idx("drop:"+day1) || idx("upload:logs/"+day1+"/bff") > idx("drop:"+day1) {
+		t.Errorf("a chunk was dropped before every node type of its day was uploaded: %v", journal)
+	}
+	if idx("drop:"+day1) > idx("upload:logs/"+day2+"/bff") {
+		t.Errorf("days must be processed oldest first: %v", journal)
+	}
+	if idx("upload:logs/"+day2+"/bff") > idx("drop:"+day2) {
+		t.Errorf("day 2 dropped before its upload: %v", journal)
+	}
+
+	// The reply a caller reads carries the count as chunks_dropped.
+	body, err := json.Marshal(rep)
+	if err != nil {
+		t.Fatalf("marshal report: %v", err)
+	}
+	var reply map[string]any
+	if err := json.Unmarshal(body, &reply); err != nil {
+		t.Fatalf("unmarshal report: %v", err)
+	}
+	if reply["chunks_dropped"] != float64(2) {
+		t.Errorf("report JSON lacks chunks_dropped=2: %s", body)
+	}
+}
+
+// A day whose chunk does not lie wholly inside it (a plain table, or a chunk
+// that straddles midnight) is not dropped. The rows still go, in batches, until
+// the day is empty.
+func TestSweepFallsBackToDeleteWhenNoWholeChunk(t *testing.T) {
+	var journal []string
+	now := time.Date(2026, 9, 3, 3, 20, 0, 0, time.UTC)
+	start := utcDay(now.AddDate(0, 0, -40))
+	day := start.Format("2006-01-02")
+	// One row more than a DELETE batch, so "until empty" takes two statements.
+	n := SweepDeleteBatch + 1
+	rows := make([]Row, 0, n+1)
+	for i := 0; i < n; i++ {
+		rows = append(rows, seedRow(start.Add(time.Duration(i)*time.Second), "bff", fmt.Sprintf("d-%05d", i)))
+	}
+	rows = append(rows, seedRow(now.AddDate(0, 0, -3), "bff", "recent-a"))
+	src := &memSource{journal: &journal, rows: rows} // chunkSpan zero: no whole chunk
+
+	rep, err := newSweeper(src, newMemArchiver(&journal), "c", now).Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rep.DaysArchived != 1 || rep.RowsArchived != int64(n) || rep.RowsDeleted != int64(n) || rep.ChunksDropped != 0 {
+		t.Fatalf("report: %+v", rep)
+	}
+	want := []string{"drop:" + day + ":0", fmt.Sprintf("delete:%s:%d", day, SweepDeleteBatch), "delete:" + day + ":1"}
+	if len(journal) < len(want) || strings.Join(journal[len(journal)-len(want):], ",") != strings.Join(want, ",") {
+		t.Errorf("after the uploads the journal must be the drop that found no chunk, then the DELETE batches until the day is empty: %v", journal)
+	}
+	if len(src.rows) != 1 || src.rows[0].ID != "recent-a" {
+		t.Errorf("rows after sweep: %d, first %+v", len(src.rows), src.rows)
+	}
+}
+
+// A chunk that covers only part of the day goes whole and the rest of the day
+// goes by DELETE. Either way the day ends empty and is counted as the rows it
+// archived.
+func TestSweepEmptiesTheRestOfADayAfterAPartialDrop(t *testing.T) {
+	var journal []string
+	now := time.Date(2026, 9, 3, 3, 20, 0, 0, time.UTC)
+	start := utcDay(now.AddDate(0, 0, -40))
+	day := start.Format("2006-01-02")
+	src := &memSource{journal: &journal, chunkSpan: 12 * time.Hour, rows: []Row{
+		seedRow(start.Add(1*time.Hour), "bff", "early-a"),
+		seedRow(start.Add(2*time.Hour), "bff", "early-b"),
+		seedRow(start.Add(3*time.Hour), "bff", "early-c"),
+		seedRow(start.Add(13*time.Hour), "bff", "late-a"),
+		seedRow(start.Add(14*time.Hour), "bff", "late-b"),
+		seedRow(now.AddDate(0, 0, -3), "bff", "recent-a"),
+	}}
+	rep, err := newSweeper(src, newMemArchiver(&journal), "c", now).Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if rep.DaysArchived != 1 || rep.RowsArchived != 5 || rep.RowsDeleted != 5 || rep.ChunksDropped != 1 {
+		t.Fatalf("report: %+v", rep)
+	}
+	want := []string{"drop:" + day + ":1", "delete:" + day + ":2"}
+	if len(journal) < len(want) || strings.Join(journal[len(journal)-len(want):], ",") != strings.Join(want, ",") {
+		t.Errorf("the chunk goes first, then only the rows outside it: %v", journal)
+	}
+	if len(src.rows) != 1 || src.rows[0].ID != "recent-a" {
+		t.Errorf("rows after sweep: %+v", src.rows)
+	}
+}
+
+// NO ARCHIVE, NO DELETE holds for the chunk drop: an archive that fails for
+// any node type of the day leaves the day, and its chunk, exactly as it was.
+func TestSweepDoesNotDropBeforeArchive(t *testing.T) {
+	var journal []string
+	now := time.Date(2026, 9, 3, 3, 20, 0, 0, time.UTC)
+	d1 := now.AddDate(0, 0, -40)
+	d2 := now.AddDate(0, 0, -35)
+	day1 := utcDay(d1).Format("2006-01-02")
+	rows := []Row{
+		seedRow(d1.Add(1*time.Hour), "bff", "d1-bff-a"),
+		seedRow(d1.Add(2*time.Hour), "agent", "d1-agent-a"),
+		seedRow(d2.Add(1*time.Hour), "bff", "d2-bff-a"),
+	}
+	src := &memSource{journal: &journal, chunkSpan: 24 * time.Hour, rows: append([]Row(nil), rows...)}
+	// agent uploads first (node types go in order), bff then fails: the day is
+	// half archived, which is not archived.
+	arch := uploadFailsArchiver{memArchiver: newMemArchiver(&journal), failObject: "logs/" + day1 + "/bff.ndjson.gz"}
+
+	rep, err := newSweeper(src, arch, "c", now).Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "blob store unreachable") {
+		t.Fatalf("an archive failure must end the run with its error: %v", err)
+	}
+	for _, e := range journal {
+		if strings.HasPrefix(e, "drop:") || strings.HasPrefix(e, "delete:") {
+			t.Errorf("the day left the store before it was archived: %v", journal)
+		}
+	}
+	if len(src.rows) != len(rows) {
+		t.Errorf("rows after a failed archive: %d, want all %d", len(src.rows), len(rows))
+	}
+	if rep.ChunksDropped != 0 || rep.RowsDeleted != 0 {
+		t.Errorf("report: %+v", rep)
+	}
+}
+
+// A drop that fails is the run's error, like a DELETE that fails: the day was
+// archived, nothing is removed row by row behind the failure, and the next run
+// archives the day again (same object names) and retries.
+func TestSweepStopsWhenTheChunkDropFails(t *testing.T) {
+	var journal []string
+	now := time.Date(2026, 9, 3, 3, 20, 0, 0, time.UTC)
+	d1 := now.AddDate(0, 0, -40)
+	d2 := now.AddDate(0, 0, -35)
+	src := &memSource{journal: &journal, chunkSpan: 24 * time.Hour,
+		dropErr: errors.New("canceling statement due to statement timeout"),
+		rows: []Row{
+			seedRow(d1.Add(1*time.Hour), "bff", "d1-bff-a"),
+			seedRow(d1.Add(2*time.Hour), "bff", "d1-bff-b"),
+			seedRow(d2.Add(1*time.Hour), "bff", "d2-bff-a"),
+		}}
+	rep, err := newSweeper(src, newMemArchiver(&journal), "c", now).Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "statement timeout") {
+		t.Fatalf("a failed drop must end the run with its error: %v", err)
+	}
+	if rep.DaysArchived != 1 || rep.RowsArchived != 2 || rep.RowsDeleted != 0 || rep.ChunksDropped != 0 {
+		t.Errorf("report: %+v", rep)
+	}
+	for _, e := range journal {
+		if strings.HasPrefix(e, "delete:") {
+			t.Errorf("a failed drop must not be followed by a row DELETE: %v", journal)
+		}
+	}
+	if len(src.rows) != 3 {
+		t.Errorf("rows after a failed drop: %d, want all 3", len(src.rows))
 	}
 }
 
