@@ -11,10 +11,10 @@ import (
 // THE ADDRESS-DIGEST LOOKUP INDEXES. Campaigns finds a subscriber by the
 // digest of their normalized mailbox -- an audience's recipient row at signup,
 // and the consent events that answer "status, date, source" -- and a digest
-// never changes once written, so every version carrying one is a version of a
-// row that still carries it. Without an index each of those reads enumerated
-// every id of its concept (measured at 200,000 recipients: about a second per
-// lookup, and a signup re-checks under its lock).
+// names one mailbox, so its range in the index holds one subscriber's
+// versions. Without an index each of those reads enumerates every id of its
+// concept (measured at 200,000 recipients: about a second per lookup, and a
+// signup re-checks under its lock).
 //
 // One index PER CONCEPT rather than one over both: ensureNamedWorkIndex refuses
 // an index whose definition differs from the one it builds, so a combined
