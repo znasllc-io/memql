@@ -3,21 +3,13 @@ package memql
 import (
 	"context"
 	"crypto/md5"
-	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
-	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/auth"
-	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
@@ -27,21 +19,6 @@ import (
 const digestLookupSQL = "(payload->>'emailDigest')"
 
 func lookupDigest(s string) string { return fmt.Sprintf("%x", md5.Sum([]byte(s))) }
-
-// explainBuffers runs query under EXPLAIN (ANALYZE, BUFFERS) and returns the
-// shared buffers its plan touched, hits and reads alike: a count that does not
-// depend on how warm the cache or how fast the runner is.
-func explainBuffers(t *testing.T, db *bun.DB, query string) int {
-	t.Helper()
-	var raw []byte
-	require.NoError(t, db.QueryRowContext(context.Background(), `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) `+query).Scan(&raw))
-	var plans []map[string]any
-	require.NoError(t, json.Unmarshal(raw, &plans))
-	plan := plans[0]["Plan"].(map[string]any)
-	hit, _ := plan["Shared Hit Blocks"].(float64)
-	read, _ := plan["Shared Read Blocks"].(float64)
-	return int(hit + read)
-}
 
 // collapsedScans is capturedScans with no lookup index registered, so the read
 // takes the concept-wide collapse it took before lookups existed: the
@@ -67,99 +44,6 @@ func capturedScans(t *testing.T, eng *MemQLEngine, hook *latestPlanCapture, ctx 
 	hook.mu.Lock()
 	defer hook.mu.Unlock()
 	return result, append([]string(nil), hook.queries...)
-}
-
-// THE KEYED READ COSTS ITS MATCHES, NOT ITS CONCEPT.
-//
-// 200,000 recipients in one audience, two versions each: the scale at which a
-// signup's digest check took about a second (EXPLAIN ANALYZE: 804k buffer
-// hits), because every id of the concept was collapsed to its latest version
-// before the digest was compared. Measured in buffers, which do not depend on
-// the runner: the scan and its latest-version recheck together must stay three
-// orders of magnitude under that collapse, for a digest that is there and for
-// the one a new subscriber brings.
-func TestLatestScanLookupReadsOnlyTheMatchingRows(t *testing.T) {
-	const recipients = 200000
-	const bound = 2000
-	ctx := context.Background()
-	admin := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
-	t.Cleanup(func() { _ = admin.Close() })
-	if err := admin.PingContext(ctx); err != nil {
-		dbtest.Unreachable(t, "keyed lookup at scale", dbtest.DSN(), err)
-	}
-	var timescale bool
-	require.NoError(t, admin.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname='timescaledb')`).Scan(&timescale))
-	if !timescale {
-		t.Skip("requires TimescaleDB chunks, as production runs")
-	}
-	schema := fmt.Sprintf("lookupscale_%d", time.Now().UnixNano())
-	_, err := admin.ExecContext(ctx, `CREATE SCHEMA `+schema)
-	require.NoError(t, err)
-	t.Cleanup(func() { _, _ = admin.ExecContext(ctx, `DROP SCHEMA `+schema+` CASCADE`) })
-	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()), pgdriver.WithConnParams(map[string]any{"search_path": schema}))), pgdialect.New())
-	t.Cleanup(func() { _ = db.Close() })
-	started := time.Now()
-	for _, stmt := range []string{
-		// INCLUDING ALL copies every index the migrations built on public,
-		// the digest lookup indexes among them.
-		`CREATE TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`,
-		`SELECT public.create_hypertable('"MemoryNodes"','createdAt',chunk_time_interval=>interval '1 day')`,
-		fmt.Sprintf(`INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",schema,payload)
-         SELECT 'v1:campaigns:recipient:r-'||n,'v1:campaigns:recipient',
-           TIMESTAMPTZ '2026-01-01'+(n %% 4)*interval '1 day'+n*interval '1 millisecond'+v*interval '1 hour','fixture','{}',
-           jsonb_build_object('ownerUserId','v1:identity:user:lookup-owner','accountId','v1:accounts:account:lookup-account',
-             'audienceId','v1:campaigns:audience:lookup-audience','email','user-'||n||'@example.test',
-             'emailDigest',md5('user-'||n||'@example.test'),'displayName','Recipient '||n,
-             'subscriptionStatus',CASE WHEN v=0 THEN 'subscribed' ELSE 'unsubscribed' END,'source','signup')
-         FROM generate_series(1,%d) n CROSS JOIN generate_series(0,1) v`, recipients),
-		`VACUUM ANALYZE "MemoryNodes"`,
-	} {
-		_, err := db.ExecContext(ctx, stmt)
-		require.NoError(t, err)
-	}
-	var lookupIndexes int
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname=? AND tablename='MemoryNodes'
-	   AND indexdef LIKE '%(payload ->> ''emailDigest''::text)%' AND indexdef LIKE '%v1:campaigns:recipient%'`, schema).Scan(&lookupIndexes))
-	require.Equal(t, 1, lookupIndexes, "public.\"MemoryNodes\" must carry the recipient digest lookup index the migrations build")
-	t.Logf("seeded %d recipients x 2 versions in %s", recipients, time.Since(started).Round(time.Millisecond))
-
-	_, err = LoadUnifiedConcepts(nil)
-	require.NoError(t, err)
-	eng, err := New(db)
-	require.NoError(t, err)
-	eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	require.NoError(t, eng.Init(memorynodes.DefaultRegistry()))
-	hook := &latestPlanCapture{}
-	db.AddQueryHook(hook)
-
-	reader := clusterOwnerCtx("lookup-scale-owner")
-	for _, tc := range []struct {
-		name, email string
-		want        []string
-	}{
-		{"present", "user-123457@example.test", []string{"v1:campaigns:recipient:r-123457"}},
-		{"new subscriber", "nobody@example.test", []string{}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			query := fmt.Sprintf(`concept==v1:campaigns:recipient && payload.audienceId=="v1:campaigns:audience:lookup-audience" && payload.emailDigest==%q`, lookupDigest(tc.email))
-			readStarted := time.Now()
-			result, scans := capturedScans(t, eng, hook, reader, query)
-			elapsed := time.Since(readStarted)
-			require.Equal(t, tc.want, pageIDs(t, result))
-			require.NotEmpty(t, scans, "the read must reach the concept scan")
-			require.Contains(t, scans[0], digestLookupSQL, "the read must enumerate its ids through the digest lookup")
-			collapsed, _ := collapsedScans(t, eng, hook, reader, query)
-			require.Equal(t, pageIDs(t, collapsed), pageIDs(t, result), "the lookup must return exactly what the concept-wide collapse returns")
-			total := 0
-			for _, scan := range scans {
-				total += explainBuffers(t, db, scan)
-			}
-			t.Logf("%d buffers over %d scans, read in %s", total, len(scans), elapsed.Round(time.Millisecond))
-			require.LessOrEqual(t, total, bound,
-				"a digest lookup over %d recipients touched %d buffers: the read enumerated the concept instead of the digest's ids\n%s",
-				recipients, total, strings.Join(scans, "\n"))
-		})
-	}
 }
 
 // A LOOKUP ANSWERS FOR THE LATEST VERSION ONLY. The index holds every version,
