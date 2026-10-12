@@ -72,7 +72,8 @@ type Options struct {
 	PingInterval time.Duration
 	// PingTimeout is how long a ping waits for its pong (default 10 s). No ping is
 	// sent while a message is being written, nor while one is arriving and bytes
-	// of it are still coming.
+	// of it are still coming (the sender's own: what is written to it does not
+	// count).
 	PingTimeout time.Duration
 	// OriginPatterns is the allow-list of Origin header values that may
 	// upgrade to a WebSocket. Patterns are passed verbatim to
@@ -338,6 +339,10 @@ type session struct {
 
 	trafficMu   sync.Mutex
 	lastTraffic time.Time
+	// lastRead is the last time bytes of a message arrived from the peer. Unlike
+	// lastTraffic, nothing the bridge writes moves it: it is the peer's progress,
+	// which is what says whether a message that is arriving has stalled.
+	lastRead time.Time
 
 	// reading and writing count the messages being read from the peer and written
 	// to it right now. See messageMoving.
@@ -590,15 +595,19 @@ func writeDeadline(base time.Duration, size int) time.Duration {
 // sending. A message being written ends in its own deadline or error. One that is
 // arriving counts while bytes of it have come within the last two ping intervals
 // (the window a missed ping is forgiven in), so a sender that has started a message
-// and stopped is not one the keepalive stops watching.
+// and stopped is not one the keepalive stops watching. Only the sender's own bytes
+// count: what the bridge writes to a peer that has stopped sending (live-feed
+// events, answers) is not the peer's progress, and counting it would let a peer
+// that died mid-message on a socket still receiving them go unpinged until TCP
+// gave up.
 func (s *session) messageMoving() bool {
 	if s.writing.Load() > 0 {
 		return true
 	}
-	return s.reading.Load() > 0 && s.recentTraffic(2*s.pingInterval)
+	return s.reading.Load() > 0 && s.recentRead(2*s.pingInterval)
 }
 
-// progressReader notes traffic as the bytes of a message arrive.
+// progressReader notes the peer's progress as the bytes of a message arrive.
 type progressReader struct {
 	r       io.Reader
 	session *session
@@ -607,7 +616,7 @@ type progressReader struct {
 func (p *progressReader) Read(b []byte) (int, error) {
 	n, err := p.r.Read(b)
 	if n > 0 {
-		p.session.noteTraffic()
+		p.session.noteRead()
 	}
 	return n, err
 }
@@ -617,6 +626,29 @@ func (s *session) pingTimeoutOrDefault() time.Duration {
 		return s.pingTimeout
 	}
 	return defaultPingTimeout
+}
+
+// noteRead records bytes of a message arriving from the peer: traffic, and the
+// peer's own progress (see messageMoving).
+func (s *session) noteRead() {
+	if s == nil {
+		return
+	}
+	now := time.Now()
+	s.trafficMu.Lock()
+	s.lastTraffic = now
+	s.lastRead = now
+	s.trafficMu.Unlock()
+}
+
+func (s *session) recentRead(within time.Duration) bool {
+	if s == nil || within <= 0 {
+		return false
+	}
+	s.trafficMu.Lock()
+	last := s.lastRead
+	s.trafficMu.Unlock()
+	return !last.IsZero() && time.Since(last) <= within
 }
 
 func (s *session) noteTraffic() {

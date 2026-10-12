@@ -454,7 +454,7 @@ func TestNoPingIsSentWhileAMessageIsMoving(t *testing.T) {
 		s, ended := pinger(t, func(s *session) { s.reading.Add(1) })
 		// Bytes arrive every 20 ms for 600 ms, as a slow upload's do.
 		for end := time.Now().Add(600 * time.Millisecond); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
-			s.noteTraffic()
+			s.noteRead()
 			select {
 			case err := <-ended:
 				t.Fatalf("the keepalive ended the session during an upload that was still moving: %v", err)
@@ -467,8 +467,30 @@ func TestNoPingIsSentWhileAMessageIsMoving(t *testing.T) {
 
 	t.Run("a message that started to arrive and stalled does not keep the session alive", func(t *testing.T) {
 		s, ended := pinger(t, func(s *session) { s.reading.Add(1) })
-		s.noteTraffic() // the first bytes, and then nothing
+		s.noteRead() // the first bytes, and then nothing
 		requireEndsWithPingFailure(t, ended, "a sender that stopped mid-message held the session open")
+	})
+
+	// What keeps a message alive is the SENDER's bytes. The bridge's own writes to a
+	// peer that has stopped sending (live-feed events, answers) are not the peer's
+	// progress, and a peer that died mid-message on a socket still receiving them
+	// would otherwise never be pinged and linger until TCP gave up.
+	t.Run("the bridge's own writes do not keep a stalled message alive", func(t *testing.T) {
+		s, ended := pinger(t, func(s *session) {
+			s.reading.Add(1)
+			s.writeLimit = 5 * time.Second
+		})
+		s.noteRead() // the first bytes, and then nothing from the peer
+		go func() {
+			// Live-feed events written to the peer every 20 ms, inside the window.
+			for ticker := time.NewTicker(20 * time.Millisecond); ; <-ticker.C {
+				if ctx.Err() != nil || s.ctx.Err() != nil {
+					return
+				}
+				_ = s.writeMessage([]byte("{}"))
+			}
+		}()
+		requireEndsWithPingFailure(t, ended, "a sender that stopped mid-message was kept alive by what the bridge wrote to it")
 	})
 }
 
