@@ -2,11 +2,11 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { describe, expect, it, vi } from "vitest";
 import { chooseOption, openSelect } from "../selectControl";
 import { audienceRow, fakeConnection, senderRow, templateRow, withSession } from "./harness";
-import { audienceProjection, senderProjection, templateProjection } from "../../src/apps/email/CampaignsSection";
+import { audienceProjection, senderProjection, templateProjection } from "../../src/apps/email/rows";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
-import { CampaignForm } from "../../src/apps/email/CampaignsSection";
+import { CampaignForm } from "../../src/apps/email/campaigns/CampaignPage";
 import { useCampaignWrites } from "../../src/apps/email/actions";
 
 const audiences = audienceProjection([audienceRow({ id: "a-acme", accountId: "acme", name: "Acme audience" }), audienceRow({ id: "a-other", accountId: "other", name: "Other audience" })]);

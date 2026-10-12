@@ -62,8 +62,9 @@ export interface EmailSettings {
   defaultSection: string;
   /**
    * Whether archived things are listed: archived audiences and templates,
-   * archived senders and, for now, finished campaigns and paused rules. OFF by
-   * default.
+   * archived senders and, for now, paused rules. OFF by default. Finished
+   * campaigns are always listed; which of them a list shows is a question asked
+   * through its Refine (Ruling 5).
    *
    * ONE TOGGLE FOR EVERY LIST, deliberately. The standing question all of them
    * answer is what you are working with now, and somebody who wants to see an

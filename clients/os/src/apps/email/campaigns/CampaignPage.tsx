@@ -1,63 +1,56 @@
-import { ContentSkeleton, InlineSkeleton } from "../../kit/ContentSkeleton";
-import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
-import { RecordList, listCount } from "../../kit/RecordRow";
-import { useSession } from "../../chrome/access";
-import { editorTemplateURL } from "../../items/editorPreference";
-import { openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
-import type { UploadProvider } from "../../items/upload";
-import { CampaignJourney } from "./CampaignJourney";
-import { AddButton } from "../../kit/AddButton";
 import { useEffect, useMemo, useState } from "react";
-import type { Row } from "@znasllc-io/memql-sdk-core/client";
-import { Send } from "lucide-react";
+import { newShortId } from "@znasllc-io/memql-sdk-core/client";
 
-import { AccountChip, AccountPicker } from "../accounts/AccountPicker";
-import { useAccountOptions } from "../accounts/tie";
-import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
-import { accountNameFrom } from "../accounts/rows";
+import { useSession } from "../../../chrome/access";
+import { editorTemplateURL } from "../../../items/editorPreference";
+import { openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../../items/vscode";
 import {
   AutoRefresh,
   Button,
-  EmptyState,
   Caption,
   Check,
-  Chip,
   Fact,
   Facts,
   Field,
   Head,
   Input,
-  LiveList,
   Notice,
   Panel,
   RecordRow,
   Select,
   Subhead,
   formatMoment,
-} from "../../kit";
-import { useLiveView } from "../../live/liveView";
-import { TestSendPanel } from "./TestAudiencePanel";
-import type { CampaignWrites } from "./actions";
-import { SendBar } from "./SendBar";
-import { RecurrencePanel } from "./RecurrencePanel";
-import { recordNamed, useOpenRequest, type OpenRequest } from "./openRequest";
+} from "../../../kit";
+import { ContentSkeleton, InlineSkeleton } from "../../../kit/ContentSkeleton";
+import { RecordListSkeleton } from "../../../kit/RecordListSkeleton";
+import { RecordList } from "../../../kit/RecordRow";
+import { AccountChip, AccountPicker } from "../../accounts/AccountPicker";
+import { organizationChosen, useDefaultOrganization } from "../../accounts/organization";
+import { accountNameFrom } from "../../accounts/rows";
+import { useAccountOptions } from "../../accounts/tie";
+import type { CampaignWrites } from "../actions";
+import { RecurrencePanel } from "../RecurrencePanel";
 import {
-  audienceFromRow,
-  campaignFingerprint,
-  campaignFromRow,
+  audienceProjection,
   campaignIsFinished,
   campaignIsRunning,
   campaignName,
   deliveryFromRow,
   formatFigure,
-  senderIdentityFromRow,
+  labelOfSender,
+  nameOfAudience,
+  nameOfTemplate,
+  senderProjection,
   skipReasonSentence,
-  templateFromRow,
+  templateProjection,
+  useProjected,
   type AudienceRow,
   type CampaignRow,
   type SenderIdentityRow,
   type TemplateRow,
-} from "./rows";
+} from "../rows";
+import { SendBar } from "../SendBar";
+import { TestSendPanel } from "../TestAudiencePanel";
 import {
   EMAIL_REFRESH_MS,
   useCampaignDeliveries,
@@ -66,249 +59,51 @@ import {
   type EmailFeeds,
   type EmailRecordFeeds,
   type SendingReadiness,
-} from "./useEmail";
+} from "../useEmail";
 
-// The campaigns list and one campaign in full.
+// ONE CAMPAIGN'S PAGE, which replaces the list it was opened from (DESIGN.md
+// rule 11): its results, its tests, its sending controls and, while it is a
+// draft, its details.
 //
-// The list is LIVE (`v1:campaigns:campaign` broadcasts both verbs). The
-// detail keeps delivery records and server-computed statistics fresh with an
-// `AutoRefresh` beside each reading, without broadcasting recipient-volume
-// events, and reads the series and testing settings the app root retains.
+// MOVED HERE UNCHANGED from the old campaigns section (memql#6033, Task 8) so
+// the list and Add a campaign could be rebuilt around it; the next task
+// rewrites it around one action bar. Delivery records and server-computed
+// statistics stay fresh through an `AutoRefresh` beside each reading, without
+// broadcasting recipient-volume events, and the series and testing settings are
+// the ones the app root retains.
 
-export function CampaignsSection({
-  feeds,
-  recordFeeds,
-  writes,
-  includeArchived,
-  trackByDefault,
-  uploads,
-  openRequest,
-}: {
-  uploads: UploadProvider;
+/** A campaign's page: its name over everything about it, and the way back to the list. */
+export function CampaignPage({ campaign, feeds, recordFeeds, writes, onBack }: {
+  campaign: CampaignRow;
   feeds: EmailFeeds;
   recordFeeds: EmailRecordFeeds;
   writes: CampaignWrites;
-  includeArchived: boolean;
-  trackByDefault: boolean;
-  /** A campaign to open, or the Add flow to start, from search, Ask or another page. */
-  openRequest?: OpenRequest;
+  onBack: () => void;
 }) {
-  const [openId, setOpenId] = useState("");
-  const [adding, setAdding] = useState(false);
-  useOpenRequest(openRequest, (target) => {
-    if ("add" in target) {
-      setOpenId("");
-      setAdding(true);
-    } else {
-      setAdding(false);
-      setOpenId(target.id);
-    }
-  });
-
-  // PROJECT, then narrow, in one pass -- the collection holds RAW wire rows
-  // (the fold upserts an event payload with no projection hook), so every
-  // predicate below runs on a campaignFromRow result.
-  const source = useLiveView<Row, CampaignRow>(
-    feeds.campaigns.source,
-    `archived:${includeArchived}`,
-    (rows) => {
-      const campaigns = rows.map(campaignFromRow).filter((c) => c.id !== "");
-      return includeArchived ? campaigns : campaigns.filter((c) => !campaignIsFinished(c));
-    },
-  );
-
   const audiences = useProjected(feeds.audiences.snapshot.rows, audienceProjection);
   const templates = useProjected(feeds.templates.snapshot.rows, templateProjection);
   const senders = useProjected(feeds.senders.snapshot.rows, senderProjection);
-
-  // A PAGE OPENS WHICHEVER CAMPAIGN ITS ID NAMES, however the list is filtered
-  // (`recordNamed`): a finished campaign is hidden from the list by default and
-  // search and Ask still reach it. One that has not arrived yet leaves the list
-  // on screen, and the page opens when it does.
-  const open = useMemo(
-    () => recordNamed(feeds.campaigns.snapshot.rows, campaignFromRow, openId),
-    [feeds.campaigns.snapshot.rows, openId],
-  );
-
-  if (adding)
-    return (
-      <CampaignJourney
-        feeds={feeds}
-        writes={writes}
-        uploads={uploads}
-        trackByDefault={trackByDefault}
-        onDone={(id) => {
-          setAdding(false);
-          if (id) {
-            setOpenId(id);
-            feeds.campaigns.reseed();
-          }
-        }}
-      />
-    );
-  if (open)
-    return (
-      <div
-        className="os-app-stack"
-        data-os-page-context={JSON.stringify({
-          page: "Campaign",
-          name: campaignName(open),
-          id: open.id,
-        })}
-      >
-        <Head
-          title={campaignName(open)}
-          back={{ label: "Campaigns", onSelect: () => setOpenId("") }}
-        />
-        <CampaignDetail
-          key={open.id}
-          campaign={open}
-          audiences={audiences}
-          templates={templates}
-          templateFeed={feeds.templates}
-          recordFeeds={recordFeeds}
-          senders={senders}
-          writes={writes}
-        />
-      </div>
-    );
-
   return (
-    <div className="os-app-stack">
-      <Head title="Campaigns" meta={listCount(source?.snapshot)}>
-        <AddButton onClick={() => setAdding((v) => !v)} label="New campaign" />
-      </Head>
-
-      {feeds.campaigns.snapshot.error ? (
-        <Notice
-          tone="error"
-          sentence="This cluster did not return your campaigns."
-          next="Nothing below is current."
-        >
-          <Button onClick={feeds.campaigns.reseed}>Try again</Button>
-        </Notice>
-      ) : null}
-
-      {/* Keyed on the filter so flipping it RE-BASELINES the arrival cues.
-          Revealing rows the browser already had is not the cluster sending
-          them. */}
-      <LiveList<CampaignRow>
-        key={`campaigns:${includeArchived}`}
-        source={source}
-        rowId={(c) => c.id}
-        // THE COUNTERS ARE NOT NAMED HERE. See campaignFingerprint: the drain
-        // worker moves sentCount / failedCount / skippedCount on every batch,
-        // so ringing on one would strobe this whole list for the duration of
-        // every send in the cluster. The bar below still fills live.
-        fingerprint={campaignFingerprint}
-        label="Your campaigns"
-        emptyText={
-          includeArchived
-            ? "No campaigns yet. Write one above -- you will need an audience and a template first."
-            : "Nothing in flight. Start a campaign above -- or turn on finished campaigns in this app's settings to see what has already gone out."
-        }
-        emptyContent={
-          <EmptyState icon={Send} title="No campaigns yet">
-            Start a campaign to prepare your sender, audience and content. Finished campaigns are
-            available through Settings.
-          </EmptyState>
-        }
-        renderRow={(campaign, tick) => (
-          <CampaignLine
-            campaign={campaign}
-            audiences={audiences}
-            tick={tick}
-            open={openId === campaign.id}
-            onToggle={() => setOpenId((held) => (held === campaign.id ? "" : campaign.id))}
-          />
-        )}
+    <div
+      className="os-app-stack"
+      data-os-page-context={JSON.stringify({
+        page: "Campaign",
+        name: campaignName(campaign),
+        id: campaign.id,
+      })}
+    >
+      <Head title={campaignName(campaign)} back={{ label: "Campaigns", onSelect: onBack }} />
+      <CampaignDetail
+        key={campaign.id}
+        campaign={campaign}
+        audiences={audiences}
+        templates={templates}
+        templateFeed={feeds.templates}
+        recordFeeds={recordFeeds}
+        senders={senders}
+        writes={writes}
       />
     </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Projections shared with the other sections' pickers
-// ---------------------------------------------------------------------------
-
-export const campaignProjection = (rows: readonly Row[]): CampaignRow[] =>
-  rows.map((r) => campaignFromRow(r)).filter((c) => c.id !== "");
-export const audienceProjection = (rows: readonly Row[]): AudienceRow[] =>
-  rows.map((r) => audienceFromRow(r)).filter((a) => a.id !== "");
-export const templateProjection = (rows: readonly Row[]): TemplateRow[] =>
-  rows.map((r) => templateFromRow(r)).filter((t) => t.id !== "");
-export const senderProjection = (rows: readonly Row[]): SenderIdentityRow[] =>
-  rows.map((r) => senderIdentityFromRow(r)).filter((s) => s.id !== "");
-
-/** Memoise a projection on the SNAPSHOT ARRAY's identity, which the collection
- *  already holds stable until something actually changes. */
-export function useProjected<T>(rows: readonly Row[], project: (rows: readonly Row[]) => T[]): T[] {
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => project(rows), [rows]);
-}
-
-export function nameOfAudience(audiences: AudienceRow[], id: string): string {
-  return audiences.find((a) => a.id === id)?.name ?? "";
-}
-export function nameOfTemplate(templates: TemplateRow[], id: string): string {
-  return templates.find((t) => t.id === id)?.name ?? "";
-}
-export function labelOfSender(senders: SenderIdentityRow[], id: string): string {
-  return senders.find((s) => s.id === id)?.address ?? "";
-}
-
-// ---------------------------------------------------------------------------
-// The list line
-// ---------------------------------------------------------------------------
-
-/** The tone a status reads in. Only two states are worth colouring: one that
- *  is happening and one that went wrong. Everything else is a plain chip --
- *  seven coloured statuses is a list with no emphasis at all. */
-
-
-function CampaignLine({
-  campaign,
-  audiences,
-  tick,
-  open,
-  onToggle,
-}: {
-  campaign: CampaignRow;
-  audiences: AudienceRow[];
-  tick: "added" | "updated" | null;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  const audience = nameOfAudience(audiences, campaign.audienceId);
-  return (
-    <RecordRow
-      icon={<Send size={16} aria-hidden />}
-      name={campaignName(campaign)}
-      // `current` is the row's own liveness, and for a campaign that is
-      // whether it is still work: a finished send keeps its facts and loses
-      // its ink.
-      current={!campaignIsFinished(campaign)}
-      dim={campaignIsFinished(campaign)}
-      open={open}
-      onOpen={onToggle}
-      secondary={audience}
-      state={campaign.status || "unknown"}
-      tone={campaign.status === "sending" ? "accent" : campaign.lastError ? "warn" : "muted"}
-      stateExtra={tick === "added" ? <span className="os-livelist-tick">new</span> : null}
-    >
-      {campaign.scheduledAt === "" || campaign.status !== "scheduled" ? null : (
-        <span className="os-caption">{formatMoment(campaign.scheduledAt)}</span>
-      )}
-      {/* THE COUNTERS RENDER, and they move live. What they do not do is ring
-          -- the fingerprint above is what separates re-rendering from
-          announcing. */}
-      {campaign.recipientCount === 0 ? null : (
-        <span className="os-caption os-mono">
-          {campaign.sentCount}/{campaign.recipientCount}
-        </span>
-      )}
-      {campaign.lastError === "" ? null : <Chip tone="neutral">problem</Chip>}
-    </RecordRow>
   );
 }
 
@@ -817,6 +612,9 @@ export function CampaignForm({
 }) {
   const accounts = useAccountOptions();
   const defaultAccountId = useDefaultOrganization(accounts);
+  // The id a new campaign is created under, held for as long as the form is
+  // open: a create tried again after a refusal is the same campaign.
+  const [createId] = useState(newShortId);
   const editing = campaign !== undefined;
   const write = editing ? writes.updateCampaign : writes.createCampaign;
   const [draft, setDraft] = useState(() => ({
@@ -853,8 +651,7 @@ export function CampaignForm({
       if (ok) onDone(campaign.id);
       return;
     }
-    const id = await writes.createCampaign.create({ ...draft, accountId });
-    if (id !== "") onDone(id);
+    if (await writes.createCampaign.create({ ...draft, accountId }, createId)) onDone(createId);
   }
 
   // Only the audiences and templates somebody could sensibly send: archived

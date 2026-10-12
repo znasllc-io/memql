@@ -46,6 +46,8 @@ export interface EmailNavigation {
   openRecord: (section: OpenSection, target: OpenTarget) => void;
   /** Opens Settings scoped to one organization. */
   openSettings: (accountId: string) => void;
+  /** Opens the capture inbox, where a test cluster keeps the mail it did not deliver. */
+  openInbox: () => void;
 }
 
 export const EmailNavigationContext = createContext<EmailNavigation | null>(null);
@@ -76,7 +78,10 @@ export function useEmailRequests(navigate: OsAppProps["navigate"]): { requests: 
     goto.current("settings", { fromContent: true });
   }, []);
 
-  const navigation = useMemo(() => ({ openRecord, openSettings }), [openRecord, openSettings]);
+  // The inbox shows what it holds; there is no record in it to ask for.
+  const openInbox = useCallback(() => goto.current("inbox", { fromContent: true }), []);
+
+  const navigation = useMemo(() => ({ openRecord, openSettings, openInbox }), [openRecord, openSettings, openInbox]);
   return { requests, navigation };
 }
 
@@ -94,6 +99,11 @@ export function useOpenRecord(): EmailNavigation["openRecord"] {
 /** Open Settings on one organization. */
 export function useOpenSettings(): EmailNavigation["openSettings"] {
   return useNavigation("useOpenSettings").openSettings;
+}
+
+/** Open the capture inbox. A page offers it only to somebody who can open that tab. */
+export function useOpenInbox(): EmailNavigation["openInbox"] {
+  return useNavigation("useOpenInbox").openInbox;
 }
 
 /**

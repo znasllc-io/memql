@@ -13,7 +13,7 @@ import { accessAdmits, type OsAppProps } from "../../system/registry";
 import { AccountOptionsProvider } from "../accounts/tie";
 import { AudiencesSection } from "./AudiencesSection";
 import { CampaignsOverview } from "./CampaignsOverview";
-import { CampaignsSection } from "./CampaignsSection";
+import { CampaignsSection } from "./campaigns/CampaignsSection";
 import { RulesSection } from "./RulesSection";
 import { TemplatesSection } from "./TemplatesSection";
 import { useCampaignWrites } from "./actions";
@@ -260,9 +260,7 @@ function EmailSections({
             feeds={feeds}
             recordFeeds={recordFeeds}
             writes={writes}
-            includeArchived={settings.includeArchived}
             trackByDefault={settings.trackByDefault}
-            uploads={uploadProvider}
             openRequest={requests.campaigns}
           />
         );

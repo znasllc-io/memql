@@ -176,6 +176,15 @@ describe("the other four cues", () => {
     const before = audienceFingerprint(audienceFromRow(base));
     expect(audienceFingerprint(audienceFromRow({ ...base, name: "Other" }))).not.toBe(before);
     expect(audienceFingerprint(audienceFromRow({ ...base, status: "archived" }))).not.toBe(before);
+    // Asking people to confirm is a change a person made.
+    expect(audienceFingerprint(audienceFromRow({ ...base, confirmation: "required" }))).not.toBe(before);
+  });
+
+  it("reads whether an audience asks people to confirm, and absent is no", () => {
+    expect(audienceFromRow(audienceRow({ id: "a1" })).confirmation).toBe("none");
+    expect(audienceFromRow(audienceRow({ id: "a1", confirmation: "required" })).confirmation).toBe("required");
+    expect(audienceFromRow(audienceRow({ id: "a1", confirmation: "none" })).confirmation).toBe("none");
+    expect(audienceFromRow(audienceRow({ id: "a1", confirmation: "sometimes" })).confirmation).toBe("none");
   });
 
   it("rings on a template COPY EDIT -- somebody fixing a typo is the news", () => {

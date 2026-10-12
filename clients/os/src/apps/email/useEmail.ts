@@ -800,6 +800,12 @@ const NO_COUNTS: ReadonlyMap<string, Figure> = new Map();
  * Subscribers join and leave through imports and signups that are routing
  * exclusions, so there is no event to follow: the surface that shows the
  * numbers mounts an `AutoRefresh` on `reload`.
+ *
+ * A FEW AT A TIME, and WHAT IS KNOWN STAYS KNOWN. The audiences are counted six
+ * at once (`readEach`), so an organization with forty is not forty requests on
+ * every refresh. And when the set changes -- an audience somebody just added in
+ * another tab arrives -- the counts already read stay on screen while the new
+ * read runs, rather than every one going back to "not read yet" for it.
  */
 export function useSubscriberCounts(audienceIds: readonly string[]): { counts: ReadonlyMap<string, Figure>; reload: () => Promise<void> } {
   const connection = useOsConnection();
@@ -810,7 +816,7 @@ export function useSubscriberCounts(audienceIds: readonly string[]): { counts: R
   const read = useMemo(() => {
     if (query === null || wanted.length === 0) return null;
     return async (signal: AbortSignal): Promise<ReadonlyMap<string, Figure>> => {
-      const answers = await Promise.all(wanted.map(async (audienceId): Promise<[string, Figure]> => {
+      const answers = await readEach(wanted, async (audienceId): Promise<[string, Figure]> => {
         try {
           const result = await query.audienceSubscriberCount({ audienceId }, { signal });
           return [audienceId, figureFrom(result.rows()[0] ?? null, "count")];
@@ -819,14 +825,19 @@ export function useSubscriberCounts(audienceIds: readonly string[]): { counts: R
           if (signal.aborted) throw err;
           return [audienceId, absent("failed", describe(err))];
         }
-      }));
+      }, signal);
       return new Map(answers);
     };
   }, [query, wanted]);
   const reading = useReading<ReadonlyMap<string, Figure>>(NO_COUNTS, read, [query, signature]);
+  // The last answer that landed, whatever set it was read over: a reading that
+  // starts over for a new set hands back nothing until it lands.
+  const known = useRef<ReadonlyMap<string, Figure>>(NO_COUNTS);
+  if (reading.value !== NO_COUNTS) known.current = reading.value;
+  const held = known.current;
   const counts = useMemo(
-    () => new Map(wanted.map((id): [string, Figure] => [id, reading.value.get(id) ?? absent("unread")])),
-    [wanted, reading.value],
+    () => new Map(wanted.map((id): [string, Figure] => [id, reading.value.get(id) ?? held.get(id) ?? absent("unread")])),
+    [wanted, reading.value, held],
   );
   return { counts, reload: reading.reload };
 }

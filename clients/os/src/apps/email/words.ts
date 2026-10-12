@@ -21,4 +21,28 @@ export const WORDS = {
    * statement of what is wrong and for whom.
    */
   sendingNotSetUp: (organization: string): string => `Sending isn't set up for ${organization}.`,
+
+  /** A campaign's state, by the engine's status. A status this build does not know has no word. */
+  campaign: {
+    draft: "Draft",
+    scheduled: "Scheduled",
+    sending: "Sending",
+    paused: "Paused",
+    sent: "Sent",
+    cancelled: "Cancelled",
+    failed: "Failed",
+  } as Readonly<Record<string, string>>,
+
+  /** A draft that a repeating series sends from reads as the series does, by its status. */
+  repeating: {
+    active: "Repeating",
+    paused: "Repeating paused",
+    blocked: "Repeating stopped",
+  } as Readonly<Record<string, string>>,
+
+  /** A template that is not published yet. */
+  templateDraft: "Draft",
+
+  /** The cluster's own sender, which only the operator organization may send as. */
+  clusterSender: "This cluster's sender",
 } as const;

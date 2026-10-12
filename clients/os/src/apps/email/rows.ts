@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { boolOr, flatten, stringsOf } from "../../kit/rows";
@@ -419,6 +420,12 @@ export interface AudienceRow {
   /** active | archived. */
   status: string;
   accountId: string;
+  /**
+   * Whether somebody who joins waits, pending, until they confirm their address
+   * (double opt-in). The engine adds the field with the automations work, so a
+   * row that does not carry it is one that does not ask: absent reads as none.
+   */
+  confirmation: "none" | "required";
   createdAt: string;
 }
 
@@ -431,6 +438,7 @@ export function audienceFromRow(row: Row): AudienceRow {
     description: rowString(flat, "description"),
     status: rowString(flat, "status"),
     accountId: rowString(flat, "accountId"),
+    confirmation: rowString(flat, "confirmation") === "required" ? "required" : "none",
     createdAt: rowString(flat, "createdAt"),
   };
 }
@@ -446,7 +454,7 @@ export function audienceName(audience: AudienceRow): string {
 /** Every field a person edits. `v1:campaigns:audience` carries nothing the
  *  engine churns, so there is nothing here to leave out. */
 export function audienceFingerprint(audience: AudienceRow): string {
-  return [audience.name, audience.description, audience.status, audience.accountId].join("|");
+  return [audience.name, audience.description, audience.status, audience.accountId, audience.confirmation].join("|");
 }
 
 // ---------------------------------------------------------------------------
@@ -1159,4 +1167,40 @@ export type PauseReading = "operator" | "after_failure";
 
 export function pauseReading(rule: EmailRuleRow): PauseReading {
   return rule.lastError.trim() === "" ? "operator" : "after_failure";
+}
+
+// ---------------------------------------------------------------------------
+// The projections every page that picks or names a record reads
+// ---------------------------------------------------------------------------
+//
+// A feed holds RAW wire rows (its fold upserts an event's payload as it came),
+// so a page that offers an audience, a template or a sender projects the rows
+// it was handed. These live here, beside the projections they apply, because
+// the campaigns list, the campaign page, Add a campaign and the rules builder
+// all read them -- a projection that lived in one section was a section the
+// others had to import. `useProjected` is the one hook in this file: a memo
+// around a pure projection, which is still checked without React.
+
+export const audienceProjection = (rows: readonly Row[]): AudienceRow[] =>
+  rows.map((r) => audienceFromRow(r)).filter((a) => a.id !== "");
+export const templateProjection = (rows: readonly Row[]): TemplateRow[] =>
+  rows.map((r) => templateFromRow(r)).filter((t) => t.id !== "");
+export const senderProjection = (rows: readonly Row[]): SenderIdentityRow[] =>
+  rows.map((r) => senderIdentityFromRow(r)).filter((s) => s.id !== "");
+
+/** Memoise a projection on the SNAPSHOT ARRAY's identity, which the collection
+ *  already holds stable until something actually changes. */
+export function useProjected<T>(rows: readonly Row[], project: (rows: readonly Row[]) => T[]): T[] {
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  return useMemo(() => project(rows), [rows]);
+}
+
+export function nameOfAudience(audiences: AudienceRow[], id: string): string {
+  return audiences.find((a) => a.id === id)?.name ?? "";
+}
+export function nameOfTemplate(templates: TemplateRow[], id: string): string {
+  return templates.find((t) => t.id === id)?.name ?? "";
+}
+export function labelOfSender(senders: SenderIdentityRow[], id: string): string {
+  return senders.find((s) => s.id === id)?.address ?? "";
 }

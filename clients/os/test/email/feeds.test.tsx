@@ -612,4 +612,42 @@ describe("subscriber counts", () => {
     const { result } = renderHook(() => useSubscriberCounts(["a1"]));
     await waitFor(() => expect(result.current.counts.get("a1")).toEqual(absent("unmeasured")));
   });
+
+  // The Add a campaign wizard shows a count beside every audience it offers,
+  // and an audience added in another tab arrives while it is open: the counts it
+  // already has must not go back to skeletons while the new one is read.
+  it("keeps the counts it has while an audience that arrived is counted", async () => {
+    const conn = fakeConnection({ subscriberCounts: { a1: 7, a2: 3 } });
+    h.connection = conn;
+    const { result, rerender } = renderHook(({ ids }) => useSubscriberCounts(ids), { initialProps: { ids: ["a1"] } });
+    await waitFor(() => expect(result.current.counts.get("a1")).toEqual(figureOf(7)));
+
+    const release = deferred(conn);
+    rerender({ ids: ["a1", "a2"] });
+    expect(result.current.counts.get("a1")).toEqual(figureOf(7));
+    expect(result.current.counts.get("a2")).toEqual(absent("unread"));
+
+    await act(async () => { release(); });
+    await waitFor(() => expect(result.current.counts.get("a2")).toEqual(figureOf(3)));
+    expect(result.current.counts.get("a1")).toEqual(figureOf(7));
+  });
+
+  it("counts a few audiences at a time, however many there are", async () => {
+    const conn = fakeConnection();
+    let inFlight = 0;
+    let most = 0;
+    conn.query.audienceSubscriberCount.mockImplementation(async () => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((settle) => setTimeout(settle, 1));
+      inFlight -= 1;
+      return rowsResult([{ count: 1 }]);
+    });
+    h.connection = conn;
+    const ids = Array.from({ length: 20 }, (_, n) => `a${n}`);
+    const { result } = renderHook(() => useSubscriberCounts(ids));
+    await waitFor(() => expect(ids.every((id) => result.current.counts.get(id)?.kind === "measured")).toBe(true));
+    expect(conn.query.audienceSubscriberCount).toHaveBeenCalledTimes(20);
+    expect(most).toBeLessThanOrEqual(6);
+  });
 });

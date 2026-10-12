@@ -127,12 +127,17 @@ export interface CampaignFacts {
 }
 
 export interface CreateCampaignState extends WriteState {
-  create: (facts: CampaignFacts) => Promise<string>;
+  /**
+   * `campaignId` is the CALLER'S, held for the life of the flow that adds the
+   * campaign: an add whose answer was lost, or whose refusal the person fixed,
+   * is tried again as the same campaign -- never a second draft somebody then
+   * has to find and cancel. True when the cluster took it.
+   */
+  create: (facts: CampaignFacts, campaignId: string) => Promise<boolean>;
 }
 
 export function useCreateCampaign(): CreateCampaignState {
-  const { busy, error, reset, call } = useWrite(async (query, facts: CampaignFacts) => {
-    const campaignId = newShortId();
+  const { busy, error, reset, call } = useWrite(async (query, facts: CampaignFacts, campaignId: string) => {
     await query.createCampaign({
       campaignId,
       name: facts.name.trim(),
@@ -149,8 +154,8 @@ export function useCreateCampaign(): CreateCampaignState {
     // NOTHING IS INSERTED LOCALLY. `v1:campaigns:campaign` broadcasts both
     // verbs, so the row arrives on the feed the list already draws -- with the
     // arrival cue, exactly like a campaign somebody else created.
-    return campaignId;
-  }, "");
+    return true;
+  }, false);
   return { busy, error, reset, create: call };
 }
 
@@ -248,7 +253,16 @@ export function useSendControls(): SendControlState {
 
 export interface TestSendState extends WriteState {
   runId: string;
+  /** The merge tags the last test to an address could not resolve, as the engine wrote them. */
+  unresolved: string[];
+  /** A test run to the organization's testing audience. */
   send: (campaignId: string, audienceId: string) => Promise<boolean>;
+  /**
+   * One test copy to one address -- the person's own, when the organization has
+   * no testing audience. It reads a draft template too, and reports the merge
+   * tags it could not fill.
+   */
+  sendToMe: (campaignId: string, to: string) => Promise<boolean>;
 }
 
 /** Retain the request id after an uncertain response. Retrying must recover
@@ -258,14 +272,17 @@ export function useTestSend(): TestSendState {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [runId, setRunId] = useState("");
+  const [unresolved, setUnresolved] = useState<string[]>([]);
   const request = useRef<{ scope: string; id: string } | null>(null);
+  // ONE TEST AT A TIME, whichever way it goes: a second press while the first is
+  // on its way is the same press.
   const pending = useRef(false);
   const send = useCallback(async (campaignId: string, audienceId: string) => {
     if (pending.current) return false;
     if (!connection || !audienceId) { setError("Choose a testing audience in Settings."); return false; }
     const scope = `${campaignId}:${audienceId}`;
     if (request.current?.scope !== scope) request.current = { scope, id: crypto.randomUUID() };
-    pending.current = true; setBusy(true); setError("");
+    pending.current = true; setBusy(true); setError(""); setUnresolved([]);
     try {
       const result = await connection.query.campaignTestAudienceSend({ campaignId, audienceId, requestId: request.current.id });
       const row = flatten(result.rows()[0] ?? {});
@@ -275,7 +292,26 @@ export function useTestSend(): TestSendState {
     } catch (err) { setError(describe(err)); return false; }
     finally { pending.current = false; setBusy(false); }
   }, [connection]);
-  return { busy, error, runId, send, reset: () => { setError(""); setRunId(""); request.current = null; } };
+  const sendToMe = useCallback(async (campaignId: string, to: string) => {
+    if (pending.current) return false;
+    if (!connection) { setError("Not connected to the cluster, so nothing was sent."); return false; }
+    pending.current = true; setBusy(true); setError(""); setRunId(""); setUnresolved([]);
+    try {
+      const result = await connection.query.campaignTestSend({ campaignId, to });
+      setUnresolved(unresolvedTagsFrom(result.rows()[0] ?? null));
+      return true;
+    } catch (err) { setError(describe(err)); return false; }
+    finally { pending.current = false; setBusy(false); }
+  }, [connection]);
+  return {
+    busy,
+    error,
+    runId,
+    unresolved,
+    send,
+    sendToMe,
+    reset: () => { setError(""); setRunId(""); setUnresolved([]); request.current = null; },
+  };
 }
 
 /**

@@ -33,8 +33,6 @@ const {
 
 type Conn = ReturnType<typeof fakeConnection>;
 
-const CAMPAIGN_CONCEPT = "v1:campaigns:campaign";
-
 function memoryStore(over: Record<string, unknown> = {}) {
   const bag = new Map<string, string>();
   const store = new LocalEmailSettingsStore({
@@ -82,121 +80,6 @@ function mount(
   );
   return { view, navigate, uploads };
 }
-
-// ---------------------------------------------------------------------------
-// The list
-// ---------------------------------------------------------------------------
-
-describe("the campaigns list", () => {
-  it("renders the campaigns the cluster returned", async () => {
-    const conn = fakeConnection({
-      campaigns: [
-        campaignRow({ id: "v1:campaigns:campaign:c1", name: "August update" }),
-        campaignRow({ id: "v1:campaigns:campaign:c2", name: "September update" }),
-      ],
-    });
-    mount(conn);
-    expect(await screen.findByText("August update")).toBeTruthy();
-    expect(screen.getByText("September update")).toBeTruthy();
-  });
-
-  it("SEEDS UNFILTERED and folds the finished filter client-side", async () => {
-    // Seeding filtered would make the toggle re-run the read and re-baseline
-    // every arrival cue, so revealing rows the browser already had would
-    // announce them as new.
-    const conn = fakeConnection({
-      campaigns: [campaignRow({ id: "v1:campaigns:campaign:c1", name: "August update" })],
-    });
-    mount(conn);
-    await screen.findByText("August update");
-    expect(conn.query.campaigns).toHaveBeenCalledWith({}, expect.anything());
-  });
-
-  it("hides finished campaigns by default and shows them under the settings preference", async () => {
-    // The in-surface checkbox is gone (DESIGN.md rules 4/10): visibility of
-    // filed rows is the app-settings preference, exactly like Fleet's
-    // revoked machines and Users' deactivated people.
-    const seed = {
-      campaigns: [
-        campaignRow({ id: "v1:campaigns:campaign:c1", name: "In flight", status: "sending" }),
-        campaignRow({ id: "v1:campaigns:campaign:c2", name: "All done", status: "sent" }),
-      ],
-    };
-    const first = mount(fakeConnection(seed));
-    await screen.findByText("In flight");
-    expect(screen.queryByText("All done")).toBeNull();
-    first.view.unmount();
-
-    mount(fakeConnection(seed), "campaigns", fakeUploads(), { includeArchived: true });
-    expect(await screen.findByText("All done")).toBeTruthy();
-  });
-});
-
-// ===========================================================================
-// THE ARRIVAL CUE, THROUGH THE REAL LIVELIST, IN BOTH DIRECTIONS
-// ===========================================================================
-// rows.test.ts pins the fingerprint as a function. This pins that the wiring
-// carries it: the drain worker's counter ticks must NOT ring, and a rename
-// must. A test of only one half would pass against a cue that fires on
-// everything or on nothing.
-describe("the arrival cue on a live send", () => {
-  const CAMPAIGN = campaignRow({
-    id: "v1:campaigns:campaign:c1",
-    name: "August update",
-    status: "sending",
-    recipientCount: 100,
-    sentCount: 10,
-  });
-
-  it("stays SILENT while the send counters tick, and RINGS on a rename", async () => {
-    const conn = fakeConnection({ campaigns: [CAMPAIGN] });
-    mount(conn);
-    await screen.findByText("August update");
-
-    const rowOf = (name: string) =>
-      (screen.getByText(name).closest(".os-livelist-row") as HTMLElement) ?? null;
-
-    // A drain tick: only the counters move. This happens several times a
-    // second for the whole duration of every send in the cluster.
-    await act(async () => {
-      conn.subscriptions.emit(
-        CAMPAIGN_CONCEPT,
-        { ...CAMPAIGN, sentCount: 40, skippedCount: 3, failedCount: 1 },
-      );
-    });
-    expect(rowOf("August update").getAttribute("data-arrival")).toBeNull();
-    // ...and the counters DID re-render. Not ringing is not the same as not
-    // updating, and this is the half a fingerprint test cannot see.
-    expect(screen.getByText("40/100")).toBeTruthy();
-
-    // A rename: news.
-    await act(async () => {
-      conn.subscriptions.emit(
-        CAMPAIGN_CONCEPT,
-        { ...CAMPAIGN, name: "September update", sentCount: 41 },
-      );
-    });
-    expect(rowOf("September update").getAttribute("data-arrival")).toBe("updated");
-  });
-
-  it("announces a campaign created while somebody is watching", async () => {
-    const conn = fakeConnection({ campaigns: [CAMPAIGN] });
-    mount(conn);
-    await screen.findByText("August update");
-
-    await act(async () => {
-      conn.subscriptions.emit(
-        CAMPAIGN_CONCEPT,
-        campaignRow({ id: "v1:campaigns:campaign:new", name: "Brand new" }),
-        "NODE_CREATED",
-      );
-    });
-
-    const row = (await screen.findByText("Brand new")).closest(".os-livelist-row") as HTMLElement;
-    expect(row.getAttribute("data-arrival")).toBe("added");
-    expect(within(row).getByText("new")).toBeTruthy();
-  });
-});
 
 // ---------------------------------------------------------------------------
 // The send bar and the breakdown
@@ -688,6 +571,15 @@ describe("audiences", () => {
     expect(screen.getByText("not-an-address")).toBeTruthy();
     expect(screen.getByText("Done with this")).toBeTruthy();
   });
+
+  it("replaces resource lists with their detail and restores the list with one back control", async () => {
+    mount(fakeConnection({ audiences: [audienceRow({ id: "a1" })] }), "audiences");
+    fireEvent.click(await screen.findByText("Newsletter"));
+    expect(screen.queryByRole("list", { name: "Your audiences" })).toBeNull();
+    expect(screen.getAllByRole("navigation", { name: "Breadcrumbs" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Back to Audiences" }));
+    expect(await screen.findByText("Newsletter")).toBeTruthy();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1163,60 +1055,6 @@ describe("a rule that stopped itself", () => {
   });
 });
 
-describe("guided campaign preparation", () => {
-  it("keeps review fields and template selection across steps, and only saves a draft", async () => {
-    const conn = fakeConnection({
-      audiences: [audienceRow({ id: "a1" })],
-      templates: [templateRow({ id: "t1" })],
-      recipientsForAudience: [recipientRow({ id: "r1" })],
-    });
-    mount(conn);
-    fireEvent.click(screen.getByRole("button", { name: "New campaign" }));
-    await screen.findByText("Sending settings are configured.");
-    expect(screen.queryByRole("dialog")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    chooseOption(screen.getByLabelText("Campaign audience"), "Newsletter");
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    chooseOption(screen.getByLabelText("Campaign content"), "August copy (ready)");
-    expect(screen.queryByLabelText("Message")).toBeNull();
-    expect(screen.getByRole("button", {name: "Open template in editor"})).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    fireEvent.change(screen.getByLabelText("Campaign name"), { target: { value: "September newsletter" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Count who opens it" }));
-    fireEvent.click(screen.getByRole("button", { name: /Content/ }));
-    expect(screen.getByRole("button", {name: "Open template in editor"})).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    expect((screen.getByLabelText("Campaign name") as HTMLInputElement).value).toBe("September newsletter");
-    expect((screen.getByRole("checkbox", { name: "Count who opens it" }) as HTMLInputElement).checked).toBe(false);
-    expect(conn.query.createCampaign).not.toHaveBeenCalled();
-    await waitFor(() => expect((screen.getByRole("button", { name: "Create campaign" }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole("button", { name: "Create campaign" }));
-    await waitFor(() => expect(conn.query.createCampaign).toHaveBeenCalledWith(expect.objectContaining({ name: "September newsletter", audienceId: "a1", templateId: "t1", trackOpens: false })));
-    expect(conn.query.campaignStartSend).not.toHaveBeenCalled();
-    expect(conn.query.campaignScheduleSend).not.toHaveBeenCalled();
-    expect(conn.query.campaignTestSend).not.toHaveBeenCalled();
-    expect(conn.query.campaignSaveTemplate).not.toHaveBeenCalled();
-  });
-
-  it("does not confirm setup when the email status read fails", async () => {
-    mount(fakeConnection({ sendingReadiness: new Error("Email report unavailable") }));
-    fireEvent.click(screen.getByRole("button", { name: "New campaign" }));
-    await screen.findByText("Email report unavailable");
-    expect(screen.queryByText("Sending settings are configured.")).toBeNull();
-    expect(screen.getByRole("button", { name: "Continue with draft" })).toBeTruthy();
-  });
-
-  it("replaces resource lists with their detail and restores the list with one back control", async () => {
-    mount(fakeConnection({ audiences: [audienceRow({ id: "a1" })] }), "audiences");
-    fireEvent.click(await screen.findByText("Newsletter"));
-    expect(screen.queryByRole("list", { name: "Your audiences" })).toBeNull();
-    expect(screen.getAllByRole("navigation", { name: "Breadcrumbs" })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Back to Audiences" }));
-    expect(await screen.findByText("Newsletter")).toBeTruthy();
-  });
-});
-
 it("keeps test, send and scheduling unavailable until organization setup is confirmed", async () => {
   const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1" })], sendingReadiness: [{ ready: false, reason: "Connect this organization’s domain." }] });
   h.connection = conn;
@@ -1233,7 +1071,6 @@ it("keeps test, send and scheduling unavailable until organization setup is conf
 
 describe("record list counts", () => {
   const lists = [
-    { name: "campaigns", section: "campaigns", query: "campaigns", row: campaignRow({ id: "count-c", name: "Counted campaign" }) },
     { name: "audiences", section: "audiences", query: "audiences", row: audienceRow({ id: "count-a", name: "Counted audience" }) },
     { name: "templates", section: "templates", query: "templates", row: templateRow({ id: "count-t", name: "Counted template" }) },
     { name: "automations", section: "automations", query: "emailRules", row: ruleRow({ id: "count-r", name: "Counted rule" }) },
@@ -1253,12 +1090,5 @@ describe("record list counts", () => {
     const { view } = mount(conn, section);
     await screen.findByText(/permission denied/);
     expect(view.container.querySelector(".os-head-meta")).toBeNull();
-  });
-
-  it("counts the finished filter and an honestly empty answer", async () => {
-    const conn = fakeConnection({ campaigns: [campaignRow({ id: "done", name: "Finished", status: "sent" })] });
-    const { view } = mount(conn);
-    await waitFor(() => expect(view.container.querySelector(".os-head-meta")?.textContent).toBe("0"));
-    expect(view.container.querySelectorAll(".os-record-row")).toHaveLength(0);
   });
 });

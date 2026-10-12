@@ -6605,11 +6605,6 @@ a.os-button {
  * somebody assemble the meaning themselves every time.
  */
 
-.os-campaign-journey > .os-deploy-scroll > * {
-  /* Keep the step trail readable when the setup instructions need to scroll. */
-  flex-shrink: 0;
-}
-
 /* Email keeps every section it has opened mounted, so a wizard's answers and an
  * edit's unsaved changes survive a tab switch. The wrapper takes no box of its
  * own -- a page lays out as it did when it was the window's only child -- and
@@ -15611,24 +15606,6 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-map-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .os-map-heading h4 { margin: 0; font-size: var(--os-text-base); font-weight: 600; }
 .os-map-heading .os-info-detail { position: static; }
-
-/* Shared wizard trail: content determines step count; narrow windows scroll. */
-.os-journey-trail { list-style: none; padding: 0; margin: 24px 0 28px; display: flex; overflow-x: auto; gap: 12px; }
-.os-journey-trail li { min-width: 0; flex: 1 0 auto; }
-.os-journey-trail button, .os-journey-trail .os-step-pending { display: flex; gap: 9px; align-items: center; text-align: left; border: 0; background: transparent; color: var(--os-muted); padding: 8px 0; font: inherit; }
-.os-journey-trail button { cursor: pointer; color: var(--os-ink); }
-.os-step-number { width: 26px; height: 26px; border: 1px solid var(--os-line); border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: var(--os-text-sm); }
-.os-journey-trail [aria-current="step"] .os-step-number { color: var(--os-accent-fg); background: var(--os-accent); border-color: var(--os-accent); }
-.os-journey-trail button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
-
-
-@container (max-width: 600px) {
-  .os-journey-trail { gap: 12px; padding-bottom: 6px; margin-block: 16px; }
-  .os-journey-trail li { flex: 0 0 auto; }
-  .os-journey-trail button, .os-journey-trail .os-step-pending { white-space: nowrap; font-size: var(--os-text-sm); }
-  .os-step-number { width: 22px; height: 22px; }
-}
-@media (pointer: coarse) { .os-journey-trail button { min-height: 44px; } }
 
 .deployable-mode-fieldset { border: 0; padding: 0; margin: 0; }
 .os-window-nav-item { position: relative; }

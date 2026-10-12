@@ -30,15 +30,13 @@ import { useLiveView } from "../../live/liveView";
 import type { CampaignWrites, RuleFacts } from "./actions";
 import { recordNamed, useOpenRequest, type OpenRequest } from "./openRequest";
 import {
+  RECIPIENT_MODES,
   audienceProjection,
   nameOfAudience,
   nameOfTemplate,
   senderProjection,
   templateProjection,
   useProjected,
-} from "./CampaignsSection";
-import {
-  RECIPIENT_MODES,
   conceptEntity,
   conditionRowIs,
   emailRuleFromRow,

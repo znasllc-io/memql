@@ -4,7 +4,7 @@ import { fakeConnection as filesConnection, artifactRow as filesArtifact, folder
 import { EmailApp } from "../src/apps/email/EmailApp";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
 import { LocalEmailSettingsStore } from "../src/apps/email/settings";
-import { audienceRow as campaignAudience, fakeConnection as campaignConnection, rowsResult, senderRow as campaignSender, withSession as campaignSession } from "../test/email/harness";
+import { audienceRow as campaignAudience, campaignRow as emailCampaign, fakeConnection as campaignConnection, rowsResult, senderRow as campaignSender, templateRow as emailTemplate, withSession as campaignSession } from "../test/email/harness";
 import { NewsletterPanel } from "../src/apps/email/NewsletterPanel";
 import { useEmailFeeds, useSeriesFeed, useSignupFormFeed } from "../src/apps/email/useEmail";
 import { RecurrencePanel } from "../src/apps/email/RecurrencePanel";
@@ -718,6 +718,10 @@ const VIEWS: Record<
   "azure-email-empty": azureEmailView("unconfigured"),
   "campaigns-settings": campaignSettingsView(false),
   "campaigns-settings-connected": campaignSettingsView(true),
+  // Email -> Campaigns (memql#6033): the list, and Add a campaign reached the
+  // way a person reaches it, `&click=Add a campaign|Newsletter|...`.
+  "email-campaigns": emailCampaignsView(true),
+  "email-campaigns-empty": emailCampaignsView(false),
   "campaign-newsletter-empty": { connect: () => newsletterQaConnection(false), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
   "campaign-newsletter-active": { connect: () => newsletterQaConnection(true), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
   "campaign-repeat-empty": {
@@ -1232,6 +1236,48 @@ function CampaignSettingsPane() {
   return <WindowBody fallback="Email"><EmailApp sectionId="settings" navigate={() => {}} askContext={() => {}} store={store}/></WindowBody>;
 }
 
+// The campaigns a list is judged with: one in every state, a draft a series
+// repeats from, and the audiences, templates and sender Add a campaign offers.
+// Generic names and addresses only (acme.com, client.example).
+function emailCampaignsView(populated: boolean) {
+  const audiences = [
+    campaignAudience({ id: "qa-newsletter", name: "Newsletter" }),
+    campaignAudience({ id: "qa-signups", name: "Signups" }),
+    campaignAudience({ id: "qa-reviewers", name: "Reviewers" }),
+  ];
+  const templates = [
+    emailTemplate({ id: "qa-august", name: "August update" }),
+    emailTemplate({ id: "qa-welcome", name: "Welcome 2" }),
+    emailTemplate({ id: "qa-autumn", name: "Autumn sale", status: "draft" }),
+  ];
+  const campaigns = populated ? [
+    emailCampaign({ id: "qa-c-sending", name: "August update", audienceId: "qa-newsletter", templateId: "qa-august", status: "sending", recipientCount: 1250, sentCount: 1204, startedAt: "2026-10-11T15:00:00Z" }),
+    emailCampaign({ id: "qa-c-scheduled", name: "Launch day", audienceId: "qa-newsletter", templateId: "qa-welcome", status: "scheduled", scheduledAt: "2031-10-14T16:00:00Z" }),
+    emailCampaign({ id: "qa-c-repeat", name: "Weekly digest", audienceId: "qa-signups", templateId: "qa-welcome" }),
+    emailCampaign({ id: "qa-c-draft", name: "Autumn sale", audienceId: "qa-newsletter", templateId: "qa-autumn" }),
+    emailCampaign({ id: "qa-c-sent", name: "July update", audienceId: "qa-newsletter", templateId: "qa-august", status: "sent", recipientCount: 1180, sentCount: 1180, completedAt: "2026-10-03T18:00:00Z" }),
+    emailCampaign({ id: "qa-c-failed", name: "Spring promo", audienceId: "qa-signups", templateId: "qa-welcome", status: "failed", lastError: "The sending service refused the sender address." }),
+    emailCampaign({ id: "qa-c-cancelled", name: "Holiday preview", audienceId: "qa-newsletter", templateId: "qa-august", status: "cancelled" }),
+  ] : [];
+  return {
+    connect: () => campaignConnection({
+      campaigns,
+      campaignSeries: populated ? [{ id: "qa-series", sourceCampaignId: "qa-c-repeat", status: "active", intervalWeeks: 1, timeZone: "America/Phoenix", anchorAt: "2031-10-14T16:00:00Z", nextAt: "2031-10-21T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" }] : [],
+      audiences,
+      templates,
+      senderIdentities: [campaignSender({ id: "qa-news", address: "news@acme.com", fromName: "Acme News" })],
+      subscriberCounts: { "qa-newsletter": 1204, "qa-signups": 86, "qa-reviewers": 3 },
+    }),
+    wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
+    render: () => <EmailCampaignsPane />,
+  };
+}
+
+function EmailCampaignsPane() {
+  const [store] = useState(() => new LocalEmailSettingsStore({ getItem: () => null, setItem: () => {} }));
+  return <WindowBody fallback="Email"><EmailApp sectionId="campaigns" navigate={() => {}} askContext={() => {}} store={store}/></WindowBody>;
+}
+
 function AccountsPane() {
   const [store] = useState(() => new LocalAccountsSettingsStore({ getItem: () => null, setItem: () => {} }));
   return <WindowBody fallback="Accounts"><AccountsApp sectionId="accounts" navigate={() => {}} askContext={() => {}} store={store} /></WindowBody>;
@@ -1692,8 +1738,9 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
 const clicks = (new URLSearchParams(window.location.search).get("click") ?? "").split("|").filter((c) => c !== "");
 clicks.forEach((label, i) => {
   window.setTimeout(() => {
+    // A choice card answers to its name: its note ("1,204 subscribers") is not part of what is pressed.
     const target = Array.from(document.querySelectorAll<HTMLElement>("button, [role=tab], [role=radio], a")).find(
-      (el) => (el.textContent ?? "").trim() === label || el.getAttribute("aria-label") === label,
+      (el) => (el.textContent ?? "").trim() === label || el.getAttribute("aria-label") === label || el.querySelector(".os-choice-card-name")?.textContent?.trim() === label,
     );
     target?.click();
   }, 2500 + i * 1200);

@@ -16,10 +16,10 @@ vi.mock("../../src/auth/context", () => ({
 
 const { OS_REGISTRY } = await import("../../src/apps/registry");
 const { EmailApp, useOpenRecord, useOpenSettings } = await import("../../src/apps/email/EmailApp");
-const { EmailNavigationContext, recordNamed, useEmailRequests } = await import("../../src/apps/email/openRequest");
+const { EmailNavigationContext, recordNamed, useEmailRequests, useOpenInbox } = await import("../../src/apps/email/openRequest");
 const { LocalEmailSettingsStore } = await import("../../src/apps/email/settings");
 const { AudiencesSection } = await import("../../src/apps/email/AudiencesSection");
-const { CampaignsSection } = await import("../../src/apps/email/CampaignsSection");
+const { CampaignsSection } = await import("../../src/apps/email/campaigns/CampaignsSection");
 const { RulesSection } = await import("../../src/apps/email/RulesSection");
 const { TemplatesSection } = await import("../../src/apps/email/TemplatesSection");
 const { useCampaignWrites } = await import("../../src/apps/email/actions");
@@ -345,6 +345,17 @@ describe("opening a record from inside the app", () => {
     expect(navigate).toHaveBeenCalledTimes(4);
   });
 
+  it("asks for the capture inbox, as a link from a page", () => {
+    const navigate = vi.fn();
+    const { result } = renderHook(() => useEmailRequests(navigate));
+
+    act(() => result.current.navigation.openInbox());
+
+    expect(navigate).toHaveBeenCalledWith("inbox", { fromContent: true });
+    // There is no record in it to ask for.
+    expect(result.current.requests).toEqual({});
+  });
+
   it("asks for Settings scoped to an organization", () => {
     const navigate = vi.fn();
     const { result } = renderHook(() => useEmailRequests(navigate));
@@ -371,20 +382,23 @@ describe("opening a record from inside the app", () => {
   });
 
   it("gives a section the openers, and says so when there is no Email app to open anything in", () => {
-    const openers = { openRecord: vi.fn(), openSettings: vi.fn() };
+    const openers = { openRecord: vi.fn(), openSettings: vi.fn(), openInbox: vi.fn() };
     const wrapper = ({ children }: { children: ReactNode }) => (
       <EmailNavigationContext.Provider value={openers}>{children}</EmailNavigationContext.Provider>
     );
-    const { result } = renderHook(() => ({ record: useOpenRecord(), settings: useOpenSettings() }), { wrapper });
+    const { result } = renderHook(() => ({ record: useOpenRecord(), settings: useOpenSettings(), inbox: useOpenInbox() }), { wrapper });
     result.current.record("templates", { add: true });
     result.current.settings("acme");
+    result.current.inbox();
     expect(openers.openRecord).toHaveBeenCalledWith("templates", { add: true });
     expect(openers.openSettings).toHaveBeenCalledWith("acme");
+    expect(openers.openInbox).toHaveBeenCalledOnce();
 
     const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       expect(() => renderHook(() => useOpenRecord())).toThrow(/outside the Email app/);
       expect(() => renderHook(() => useOpenSettings())).toThrow(/outside the Email app/);
+      expect(() => renderHook(() => useOpenInbox())).toThrow(/outside the Email app/);
     } finally {
       quiet.mockRestore();
     }
@@ -396,15 +410,25 @@ describe("opening a record from inside the app", () => {
 // ---------------------------------------------------------------------------
 
 describe("a section given an open request", () => {
-  /** A section on its own, over the feeds the app root would retain for it. */
+  /** A section on its own, over the feeds the app root would retain for it, with
+   *  the openers a page in it reaches for. */
   function Section({ name, request }: { name: OpenSection; request?: OpenRequest }) {
+    const { navigation } = useEmailRequests(() => {});
+    return (
+      <EmailNavigationContext.Provider value={navigation}>
+        <SectionBody name={name} request={request} />
+      </EmailNavigationContext.Provider>
+    );
+  }
+
+  function SectionBody({ name, request }: { name: OpenSection; request?: OpenRequest }) {
     const feeds = useEmailFeeds();
     const recordFeeds = useEmailRecordFeeds(feeds);
     const writes = useCampaignWrites();
     const [uploads] = useState(fakeUploads);
     switch (name) {
       case "campaigns":
-        return <CampaignsSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} includeArchived={false} trackByDefault uploads={uploads} openRequest={request} />;
+        return <CampaignsSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} trackByDefault openRequest={request} />;
       case "audiences":
         return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} includeArchived={false} uploads={uploads} openRequest={request} />;
       case "templates":
@@ -421,7 +445,7 @@ describe("a section given an open request", () => {
   }
 
   it.each([
-    ["campaigns", "New campaign", "Campaigns"],
+    ["campaigns", "Add a campaign", "Campaigns"],
     ["audiences", "New audience", "Audiences"],
     ["templates", "New template", "Templates"],
     ["automations", "New rule", "Automations"],
