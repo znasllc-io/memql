@@ -7157,7 +7157,7 @@ func RecipientByIdBuild(args RecipientByIdArgs) string {
 	return b.String()
 }
 
-// RecipientInAudienceByDigest -- The membership for one mailbox in one audience, by address digest. Organization-authorized. The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a signup or a row-address rule finds an existing member in one keyed read instead of walking the roster. Any subscription state is returned: whether a send or a signup does anything about an unsubscribed or bounced address is the caller's decision. Oldest first and a window of five -- an import does not deduplicate, so a mailbox can hold more than one row, and the caller takes the first.
+// RecipientInAudienceByDigest -- The memberships for one mailbox in one audience, by address digest. Organization-authorized. The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a signup or a row-address rule finds the rows a mailbox holds without walking the roster. EVERY match comes back, in any subscription state, oldest first: the same mailbox can hold more than one row (a manual add beside an earlier row, a race), one of them can have opted out by hand while another has not, and the caller must see all of them to refuse for the one that did. The window is far wider than any mailbox's duplicates. A row carries a digest only if it was written by addRecipient or filled in by the digest sweep, so a mailbox can also hold rows this does not return: recipientsWithoutDigestInAudience is the other half. The caller checks each row's own address before it believes the key; a raw write can set a digest that is not its address's.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientInAudienceByDigest"] in generated_concepts.go).
 type RecipientInAudienceByDigestArgs struct {
@@ -7201,6 +7201,28 @@ func (qc *QueryClient) RecipientsForAudience(ctx context.Context, args Recipient
 func RecipientsForAudienceBuild(args RecipientsForAudienceArgs) string {
 	var b strings.Builder
 	b.WriteString("query recipientsForAudience(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecipientsWithoutDigestInAudience -- One page of the rows of an audience that carry no address digest, oldest first. Organization-authorized. Those are the rows written before the digest existed, by a replica still running the previous release, or by a raw write, until the digest sweep fills them in. A lookup by digest cannot see them, so a signup or a row-address rule reads this page too and compares each row's address; a FULL page proves nothing about the rows beyond it and the caller must not read it as "no such row".
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsWithoutDigestInAudience"] in generated_concepts.go).
+type RecipientsWithoutDigestInAudienceArgs struct {
+	AudienceId string
+}
+
+// RecipientsWithoutDigestInAudience calls the engine query recipientsWithoutDigestInAudience.
+func (qc *QueryClient) RecipientsWithoutDigestInAudience(ctx context.Context, args RecipientsWithoutDigestInAudienceArgs) (*Result, error) {
+	call := RecipientsWithoutDigestInAudienceBuild(args)
+	return qc.executeNamed(ctx, "recipientsWithoutDigestInAudience", call)
+}
+
+func RecipientsWithoutDigestInAudienceBuild(args RecipientsWithoutDigestInAudienceArgs) string {
+	var b strings.Builder
+	b.WriteString("query recipientsWithoutDigestInAudience(")
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
 	b.WriteString(")")

@@ -38,6 +38,29 @@ func TestAddressDigestMatchesCampaigns(t *testing.T) {
 	}
 }
 
+// TestNormalizeAddressMatchesCampaigns: the normalized address the firing compares
+// the rows it finds against is campaigns.NormalizeEmail, for every address either
+// can use and for the ones neither can.
+func TestNormalizeAddressMatchesCampaigns(t *testing.T) {
+	usable := 0
+	for _, addr := range []string{
+		" Foo@Example.COM ", "ÄBC@x.test", "no-at-sign", "a b@c.test",
+		"", "   ", "@leading", "trailing@", "line\nbreak@example.test", "tab\tin@example.test",
+		"Person+News@Example.Test", `"a@b"@example.test`, "\u00a0nbsp@example.test\u00a0", "in\u00a0side@example.test",
+	} {
+		got, want := normalizeAddress(addr), campaigns.NormalizeEmail(addr)
+		if got != want {
+			t.Errorf("normalizeAddress(%q) = %q, campaigns.NormalizeEmail = %q", addr, got, want)
+		}
+		if want != "" {
+			usable++
+		}
+	}
+	if usable < 5 {
+		t.Fatalf("only %d of the addresses normalize to something; the comparison above proves nothing", usable)
+	}
+}
+
 // TestAddressDigestIsTheMailboxNotItsSpelling: case and surrounding whitespace
 // are folded and nothing else is -- a sub-addressed or dotted mailbox is another
 // person's mailbox as far as this key is concerned.

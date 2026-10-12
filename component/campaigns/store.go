@@ -1217,35 +1217,63 @@ func (s *Store) RecipientByID(ctx context.Context, recipientID string) (Recipien
 	return recipientFromRow(rows[0]), true, nil
 }
 
-// RecipientInAudienceByDigest finds the membership for one mailbox in one
-// audience by the digest of its address (EmailDigest, which every recipient row
-// carries as emailDigest). OWNED tier: organization-authorized, like every read
-// of a recipient.
+// RecipientsInAudienceByDigest returns the memberships of one audience that
+// carry the digest of one address (EmailDigest, which addRecipient stamps on
+// every recipient it writes as emailDigest), oldest first and in ANY
+// subscription state. OWNED tier: organization-authorized, like every read of a
+// recipient.
 //
-// It is ONE keyed read however large the audience is. Finding a member by
-// address used to be a walk of the whole roster -- every signup into an audience
-// of a hundred thousand read a hundred thousand rows to learn whether one
-// address was among them (memql#6022, F9).
+// EVERY match comes back, not the first. A mailbox can hold more than one row (a
+// manual add beside an earlier row, a race), one of them can have opted out by
+// hand while another has not, and a caller that looked at one row would act for
+// the mailbox on the strength of the wrong one. A form refuses when ANY of them
+// is not subscribed (memql#6022).
 //
-// The member comes back in ANY subscription state; whether a signup or a send
-// does anything about an unsubscribed, bounced or complained address is the
-// caller's decision. The OLDEST match wins -- the engine answers oldest first
-// and this takes the first, which is the member the roster walk met first. An
-// import does not deduplicate, so a mailbox can hold more than one row; the
-// others are not looked at.
+// The digest is a KEY, not proof: a raw write can set a digest that is not the
+// digest of the row's own address, so a caller compares each row's address
+// before it believes the match. MailboxMembers does.
+//
+// This does not see rows that carry no digest (RecipientsWithoutDigestInAudience
+// is the other half) and is not a keyed lookup in the database's sense: the
+// engine filters the audience's recipient versions on the digest, so the cost
+// grows with the cluster's recipients until an index serves it.
 //
 // A digest of "" matches NOTHING and is not sent: EmailDigest answers "" for an
 // address that cannot be a mailbox, and as a filter value "" would select every
 // row that has no digest at all.
-func (s *Store) RecipientInAudienceByDigest(ctx context.Context, audienceID, digest string) (Recipient, bool, error) {
+func (s *Store) RecipientsInAudienceByDigest(ctx context.Context, audienceID, digest string) ([]Recipient, error) {
 	if digest == "" {
-		return Recipient{}, false, nil
+		return nil, nil
 	}
 	rows, err := s.rows(ctx, call("query", "recipientInAudienceByDigest", arg{"audienceId", audienceID}, arg{"emailDigest", digest}))
-	if err != nil || len(rows) == 0 {
-		return Recipient{}, false, err
+	if err != nil {
+		return nil, err
 	}
-	return recipientFromRow(rows[0]), true, nil
+	return recipientsFromRows(rows), nil
+}
+
+// RecipientsWithoutDigestInAudience returns ONE PAGE (digestLessWindow rows,
+// oldest first) of the audience's recipients that carry no digest, in any
+// subscription state. OWNED tier.
+//
+// Those are the rows written before the digest existed, by a replica still on
+// the previous release, or by a raw write, until the digest sweep fills them in.
+// A lookup by digest cannot see them. A page that is FULL proves nothing about
+// the rows beyond it; MailboxMembers does not read it as "no such row".
+func (s *Store) RecipientsWithoutDigestInAudience(ctx context.Context, audienceID string) ([]Recipient, error) {
+	rows, err := s.rows(ctx, call("query", "recipientsWithoutDigestInAudience", arg{"audienceId", audienceID}))
+	if err != nil {
+		return nil, err
+	}
+	return recipientsFromRows(rows), nil
+}
+
+func recipientsFromRows(rows []map[string]any) []Recipient {
+	out := make([]Recipient, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, recipientFromRow(r))
+	}
+	return out
 }
 
 // --- plumbing -----------------------------------------------------------

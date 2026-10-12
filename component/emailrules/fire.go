@@ -335,12 +335,15 @@ func (f *Firer) fireAudience(ctx context.Context, rule Rule, nodeID string, even
 // one thing this engine will not send. The enrolment names the rule's
 // organization, because the send refuses a recipient outside the campaign's.
 //
-// Whether the address is a member already is ONE keyed read by its digest
-// (memql#6022, F9), not a listing of the audience. The member is found in any
-// state, so an address that unsubscribed is not enrolled again as subscribed --
-// the send path decides what a send to them is -- and the read is a fresh one,
-// because it decides whether to write: a cached "nobody" from before another
-// replica's enrolment would enrol the mailbox a second time.
+// Whether the address is a member already is found by its digest and, for the
+// rows that carry none, by comparing addresses (Store.MailboxMembers), not by
+// listing the audience (memql#6022, F9). The rows are found in any state, and ANY
+// row that is not subscribed keeps the mailbox from being enrolled again or
+// mailed through a subscribed sibling: the send goes to the row that opted out,
+// where the send path refuses it and writes the ledger row the operator is owed.
+// The reads are fresh ones, because they decide whether to write: a cached
+// "nobody" from before another replica's enrolment would enrol the mailbox a
+// second time.
 func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, event map[string]any, out *FireOutcome) error {
 	address := strings.TrimSpace(payloadField(event, rule.RecipientField))
 	if address == "" {
@@ -349,17 +352,22 @@ func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, ev
 	}
 	// An address with no digest cannot be looked up, deduplicated or suppressed,
 	// and the send would refuse it anyway: say so before anything is written.
-	digest := addressDigest(address)
-	if digest == "" {
+	if addressDigest(address) == "" {
 		out.Refusals = append(out.Refusals, fmt.Sprintf("%q is not an address", rule.RecipientField))
 		return nil
 	}
 
-	member, found, err := f.store.RecipientInAudienceByDigest(memql.ContextWithFreshRead(ctx), rule.AudienceID, digest)
+	members, complete, err := f.store.MailboxMembers(memql.ContextWithFreshRead(ctx), rule.AudienceID, address)
 	if err != nil {
 		return err
 	}
-	target := str(member, "id")
+	if !complete {
+		out.Refusals = append(out.Refusals, fmt.Sprintf(
+			"could not tell whether %q is already in the audience: older recipients are still being indexed. Nothing was sent; make the change again in a few minutes",
+			rule.RecipientField))
+		return nil
+	}
+	target, found := mailboxTarget(members)
 	if !found {
 		// Not in the audience yet. Enrol, then send -- and note that the
 		// enrolment is what an unsubscribe later acts on, so a second firing
@@ -372,6 +380,22 @@ func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, ev
 	out.Recipients++
 	f.sendMarketing(ctx, rule, nodeID, target, event, out)
 	return nil
+}
+
+// mailboxTarget picks the row a send is addressed to: the first one that is not
+// subscribed, so a mailbox that opted out is never mailed through a sibling that
+// has not heard of it, and otherwise the first (oldest) row. found is false when
+// the mailbox holds none.
+func mailboxTarget(members []map[string]any) (id string, found bool) {
+	for _, r := range members {
+		if status := str(r, "subscriptionStatus"); status != "" && status != "subscribed" {
+			return str(r, "id"), true
+		}
+	}
+	if len(members) > 0 {
+		return str(members[0], "id"), true
+	}
+	return "", false
 }
 
 // Stable across replicas and checkpoint replay. A created rule names one row's

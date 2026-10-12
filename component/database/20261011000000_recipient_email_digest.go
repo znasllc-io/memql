@@ -24,10 +24,9 @@ import (
 // ===========================================================================
 // Every recipient now carries emailDigest, the SHA-256 of its address, stamped
 // by addRecipient. A newsletter signup and an email rule's row-address send use
-// it to find an existing membership in ONE keyed read
-// (recipientInAudienceByDigest), where they used to walk the audience's whole
-// roster. That only works for rows that HAVE a digest, so this stamps the ones
-// that predate it.
+// it to find the rows a mailbox holds (recipientInAudienceByDigest), where they
+// used to walk the audience's whole roster. That only finds rows that HAVE a
+// digest, so this stamps the ones that predate it.
 //
 // ===========================================================================
 // THE NORMALIZATION: TRIM AND LOWER-CASE, NOTHING ELSE

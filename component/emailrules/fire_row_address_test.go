@@ -17,19 +17,24 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// rowAddressEngine is fireEngine plus the one answer a row-address firing asks
-// for that the operational lane never does: the receipt for the send. Without
-// it the send is refused for want of a readable receipt and the firing ends in
-// a refusal instead of a send.
+// rowAddressEngine is fireEngine plus the answers a row-address firing asks for
+// that the operational lane never does: what the rule's audience holds for the
+// mailbox, and the receipt for the send. Without the receipt the send is
+// refused for want of a readable receipt and the firing ends in a refusal
+// instead of a send.
 type rowAddressEngine struct {
 	fireEngine
 
-	// member, when set, is the audience's answer to the lookup of the address by
-	// digest: the membership that is already there. Unset, nobody has the digest.
-	member map[string]any
-	// lookupFresh records, for each lookup by digest, whether it was made under a
-	// fresh-read context -- the lookup decides whether to write, so it must be.
-	lookupFresh []bool
+	// byDigest is the audience's answer to the lookup of the address by digest,
+	// oldest first: the memberships that carry it. Unset, nobody has the digest.
+	byDigest []map[string]any
+	// withoutDigest is its answer to the look at the rows that carry no digest
+	// at all -- one page of them, as the engine returns it.
+	withoutDigest []map[string]any
+	// lookupFresh and withoutDigestFresh record, for each read, whether it was
+	// made under a fresh-read context: both decide whether to write, so both must be.
+	lookupFresh        []bool
+	withoutDigestFresh []bool
 }
 
 func (e *rowAddressEngine) Execute(ctx context.Context, q string) (any, error) {
@@ -38,15 +43,24 @@ func (e *rowAddressEngine) Execute(ctx context.Context, q string) (any, error) {
 	case strings.HasPrefix(q, "query recipientInAudienceByDigest"):
 		e.mu.Lock()
 		e.lookupFresh = append(e.lookupFresh, memql.FreshReadFromContext(ctx))
-		member := e.member
+		rows := e.byDigest
 		e.mu.Unlock()
-		if member != nil {
-			return rowsEnvelope([]map[string]any{member}), nil
-		}
+		return rowsEnvelope(rows), nil
+	case strings.HasPrefix(q, "query recipientsWithoutDigestInAudience"):
+		e.mu.Lock()
+		e.withoutDigestFresh = append(e.withoutDigestFresh, memql.FreshReadFromContext(ctx))
+		rows := e.withoutDigest
+		e.mu.Unlock()
+		return rowsEnvelope(rows), nil
 	case strings.HasPrefix(q, "builtin campaignSendToRecipient"):
 		return rowsEnvelope([]map[string]any{{"sent": true}}), nil
 	}
 	return out, err
+}
+
+// memberRow is one recipient row as the reads return it.
+func memberRow(short, email, status string) map[string]any {
+	return map[string]any{"id": "v1:campaigns:recipient:" + short, "email": email, "subscriptionStatus": status}
 }
 
 // callIndex returns the position of the first recorded call that starts with
@@ -140,11 +154,16 @@ func TestRowAddressEnrollmentOmitsAnOrganizationTheRuleDoesNotName(t *testing.T)
 	}
 }
 
+// audienceAnswers is what the rule's audience holds for the mailbox.
+type audienceAnswers struct {
+	byDigest, withoutDigest []map[string]any
+}
+
 // fireForContact fires rowAddressRule for an update whose contact address is
-// address, against an audience that answers the lookup by digest with member.
-func fireForContact(t *testing.T, address string, member map[string]any) (*rowAddressEngine, FireOutcome) {
+// address, against an audience that answers as given.
+func fireForContact(t *testing.T, address string, audience audienceAnswers) (*rowAddressEngine, FireOutcome) {
 	t.Helper()
-	e := &rowAddressEngine{fireEngine: fireEngine{rule: rowAddressRule()}, member: member}
+	e := &rowAddressEngine{fireEngine: fireEngine{rule: rowAddressRule()}, byDigest: audience.byDigest, withoutDigest: audience.withoutDigest}
 	event := map[string]any{
 		"timestamp": "2026-10-01T01:00:00.000001Z",
 		"payload":   map[string]any{"primaryContactEmail": address},
@@ -156,13 +175,23 @@ func fireForContact(t *testing.T, address string, member map[string]any) (*rowAd
 	return e, out
 }
 
+// sendsTo returns the recipient ids the firing sent to, bare.
+func (e *rowAddressEngine) sendsTo() []string {
+	var ids []string
+	for _, send := range e.callsWithPrefix("builtin campaignSendToRecipient(") {
+		start := strings.Index(send, `recipientId: "`) + len(`recipientId: "`)
+		ids = append(ids, send[start:start+strings.Index(send[start:], `"`)])
+	}
+	return ids
+}
+
 // TestRowAddressFindsTheRecipientByDigest: the address on the triggering row is
-// already a member of the rule's audience, so the firing finds it with ONE keyed
-// read by the digest of its normalized spelling -- no roster read, no second
-// enrolment -- and the send targets that member.
+// already a member of the rule's audience, so the firing finds it by the digest
+// of its normalized spelling -- no roster read, no second enrolment -- and the
+// send targets that member.
 func TestRowAddressFindsTheRecipientByDigest(t *testing.T) {
-	e, out := fireForContact(t, " New@Example.TEST ", map[string]any{
-		"id": "v1:campaigns:recipient:rcp-existing", "subscriptionStatus": "subscribed",
+	e, out := fireForContact(t, " New@Example.TEST ", audienceAnswers{
+		byDigest: []map[string]any{memberRow("rcp-existing", "NEW@example.test", "subscribed")},
 	})
 
 	if out.Sent != 1 || len(out.Refusals) != 0 {
@@ -178,26 +207,28 @@ func TestRowAddressFindsTheRecipientByDigest(t *testing.T) {
 	if lookups := e.callsWithPrefix("query recipientInAudienceByDigest("); len(lookups) != 1 || lookups[0] != want {
 		t.Errorf("the lookups were %q, want exactly %q", lookups, want)
 	}
-	sends := e.callsWithPrefix("builtin campaignSendToRecipient(")
-	if len(sends) != 1 || !strings.Contains(sends[0], `recipientId: "rcp-existing"`) {
-		t.Errorf("the send did not target the member the lookup found: %v", sends)
+	if ids := e.sendsTo(); len(ids) != 1 || ids[0] != "rcp-existing" {
+		t.Errorf("the send did not target the member the lookup found: %v", ids)
 	}
 	if len(e.lookupFresh) != 1 || !e.lookupFresh[0] {
 		t.Errorf("the lookup was not a fresh read (%v): a replica's cached miss would enrol a second membership for the same mailbox", e.lookupFresh)
+	}
+	if len(e.withoutDigestFresh) != 1 || !e.withoutDigestFresh[0] {
+		t.Errorf("the look at the rows with no digest was %v (true = a fresh read), want one fresh read", e.withoutDigestFresh)
 	}
 }
 
 // TestRowAddressLooksTheAddressUpBeforeEnrollingIt: nobody has the digest, so the
 // firing asks first and enrols second, and the enrolment is the only write.
 func TestRowAddressLooksTheAddressUpBeforeEnrollingIt(t *testing.T) {
-	e, out := fireForContact(t, "new@example.test", nil)
+	e, out := fireForContact(t, "new@example.test", audienceAnswers{})
 
 	if out.Sent != 1 || len(out.Refusals) != 0 {
 		t.Fatalf("the firing did not enrol and send: %+v", out)
 	}
-	lookup, enrol := e.callIndex("query recipientInAudienceByDigest("), e.callIndex("mutation addRecipient(")
-	if lookup < 0 || enrol < 0 || lookup > enrol {
-		t.Errorf("the lookup was call %d and the enrolment call %d: the address must be looked up before it is enrolled", lookup, enrol)
+	lookup, digestLess, enrol := e.callIndex("query recipientInAudienceByDigest("), e.callIndex("query recipientsWithoutDigestInAudience("), e.callIndex("mutation addRecipient(")
+	if lookup < 0 || digestLess < 0 || enrol < 0 || lookup > enrol || digestLess > enrol {
+		t.Errorf("the lookup was call %d, the look at rows with no digest call %d and the enrolment call %d: the address must be looked for before it is enrolled", lookup, digestLess, enrol)
 	}
 	if scans := e.callsWithPrefix("query sendableRecipientsForAudience"); len(scans) != 0 {
 		t.Errorf("the firing read the audience's roster: %v", scans)
@@ -210,16 +241,122 @@ func TestRowAddressLooksTheAddressUpBeforeEnrollingIt(t *testing.T) {
 // again as subscribed. Found, they are left as they are; the send path decides
 // what a send to them is.
 func TestRowAddressDoesNotEnrolAnUnsubscribedMemberAgain(t *testing.T) {
-	e, _ := fireForContact(t, "gone@example.test", map[string]any{
-		"id": "v1:campaigns:recipient:rcp-gone", "subscriptionStatus": "unsubscribed",
+	e, _ := fireForContact(t, "gone@example.test", audienceAnswers{
+		byDigest: []map[string]any{memberRow("rcp-gone", "gone@example.test", "unsubscribed")},
 	})
 
 	if enrolments := e.callsWithPrefix("mutation addRecipient("); len(enrolments) != 0 {
 		t.Errorf("a member who unsubscribed was enrolled again as subscribed: %v", enrolments)
 	}
-	sends := e.callsWithPrefix("builtin campaignSendToRecipient(")
-	if len(sends) != 1 || !strings.Contains(sends[0], `recipientId: "rcp-gone"`) {
-		t.Errorf("the send is the path that refuses an unsubscribed member, and it was not asked about them: %v", sends)
+	if ids := e.sendsTo(); len(ids) != 1 || ids[0] != "rcp-gone" {
+		t.Errorf("the send is the path that refuses an unsubscribed member, and it was not asked about them: %v", ids)
+	}
+}
+
+// TestRowAddressDoesNothingForAMailboxWithAnyRowThatOptedOut: a mailbox can hold
+// more than one row, and one of them can have opted out by hand without the
+// other hearing of it. A firing never enrols the mailbox again and never mails
+// the sibling that is still subscribed: the send goes to the row that is not,
+// where the send path refuses it and writes its ledger row.
+func TestRowAddressDoesNothingForAMailboxWithAnyRowThatOptedOut(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		audience audienceAnswers
+		want     string
+	}{
+		{"the opted-out row is listed second", audienceAnswers{byDigest: []map[string]any{
+			memberRow("sibling", "gone@example.test", "subscribed"), memberRow("gone", " Gone@Example.TEST", "unsubscribed")}}, "gone"},
+		{"the opted-out row is listed first", audienceAnswers{byDigest: []map[string]any{
+			memberRow("gone", "gone@example.test", "bounced"), memberRow("sibling", "gone@example.test", "subscribed")}}, "gone"},
+		{"the opted-out row has no digest", audienceAnswers{
+			byDigest:      []map[string]any{memberRow("sibling", "gone@example.test", "subscribed")},
+			withoutDigest: []map[string]any{memberRow("gone", "GONE@example.test", "complained")}}, "gone"},
+		{"the only row has no digest", audienceAnswers{
+			withoutDigest: []map[string]any{memberRow("other", "other@example.test", "subscribed"), memberRow("gone", "gone@example.test", "unsubscribed")}}, "gone"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, _ := fireForContact(t, "gone@example.test", tc.audience)
+
+			if enrolments := e.callsWithPrefix("mutation addRecipient("); len(enrolments) != 0 {
+				t.Errorf("a mailbox that opted out was enrolled again: %v", enrolments)
+			}
+			if ids := e.sendsTo(); len(ids) != 1 || ids[0] != tc.want {
+				t.Errorf("the send went to %v, want only the row that is not subscribed (%s): a subscribed sibling must not be mailed", ids, tc.want)
+			}
+		})
+	}
+}
+
+// TestRowAddressAdoptsAMemberThatHasNoDigest: a subscribed row with no digest --
+// written before the field existed, or by a replica on the previous release -- is
+// the member. A second subscribed row for the mailbox would put the person on
+// every campaign twice.
+func TestRowAddressAdoptsAMemberThatHasNoDigest(t *testing.T) {
+	e, out := fireForContact(t, "old@example.test", audienceAnswers{
+		withoutDigest: []map[string]any{memberRow("someone", "someone@example.test", "subscribed"), memberRow("old", " Old@Example.test ", "subscribed")},
+	})
+
+	if out.Sent != 1 {
+		t.Fatalf("the firing did not send to the member: %+v", out)
+	}
+	if enrolments := e.callsWithPrefix("mutation addRecipient("); len(enrolments) != 0 {
+		t.Errorf("a member with no digest was enrolled again: %v", enrolments)
+	}
+	if ids := e.sendsTo(); len(ids) != 1 || ids[0] != "old" {
+		t.Errorf("the send went to %v, want the member that was there", ids)
+	}
+}
+
+// TestRowAddressChecksTheAddressBeforeBelievingTheDigest: a row can carry a digest
+// that is not the digest of its own address. The firing checks the address, and a
+// row for someone else is a miss: it neither blocks the firing nor stands in for
+// the member.
+func TestRowAddressChecksTheAddressBeforeBelievingTheDigest(t *testing.T) {
+	for _, status := range []string{"unsubscribed", "subscribed"} {
+		e, out := fireForContact(t, "new@example.test", audienceAnswers{
+			byDigest: []map[string]any{memberRow("forged", "someone-else@example.test", status)},
+		})
+
+		if out.Sent != 1 || len(out.Refusals) != 0 {
+			t.Fatalf("%s: the firing did not enrol and send: %+v", status, out)
+		}
+		if enrolments := e.callsWithPrefix("mutation addRecipient("); len(enrolments) != 1 {
+			t.Errorf("%s: the address was not enrolled although the only row that carried its digest is another address's: %v", status, enrolments)
+		}
+		if ids := e.sendsTo(); len(ids) != 1 || ids[0] == "forged" {
+			t.Errorf("%s: the send went to %v, the row for another address", status, ids)
+		}
+	}
+}
+
+// TestRowAddressRefusesWhenTheRowsWithNoDigestCannotRuleTheMailboxOut: the look at
+// rows with no digest is one page. A full page that does not name the mailbox
+// proves nothing about the rows beyond it, and a rule that cannot tell whether the
+// mailbox opted out does not guess: nothing is enrolled or mailed, and the
+// refusal says why.
+func TestRowAddressRefusesWhenTheRowsWithNoDigestCannotRuleTheMailboxOut(t *testing.T) {
+	page := func(n int) []map[string]any {
+		var rows []map[string]any
+		for i := 0; i < n; i++ {
+			rows = append(rows, memberRow("filler"+string(rune('a'+i%26))+string(rune('a'+i/26)), "filler@example.test", "subscribed"))
+		}
+		return rows
+	}
+
+	e, out := fireForContact(t, "new@example.test", audienceAnswers{withoutDigest: page(digestLessWindow)})
+	if len(out.Refusals) != 1 || !strings.Contains(out.Refusals[0], "older recipients") || !strings.Contains(out.Refusals[0], "Nothing was sent") {
+		t.Errorf("refusals = %q, want one that says older recipients are still being indexed and that nothing was sent", out.Refusals)
+	}
+	for _, prefix := range []string{"mutation addRecipient(", "builtin campaignSendToRecipient("} {
+		if calls := e.callsWithPrefix(prefix); len(calls) != 0 {
+			t.Errorf("a page that could not rule the mailbox out still reached %s: %v", prefix, calls)
+		}
+	}
+
+	// One short of a page is the whole set: the mailbox is not in it.
+	e, out = fireForContact(t, "new@example.test", audienceAnswers{withoutDigest: page(digestLessWindow - 1)})
+	if out.Sent != 1 || len(out.Refusals) != 0 || len(e.callsWithPrefix("mutation addRecipient(")) != 1 {
+		t.Errorf("a page that was not full ruled the mailbox out, so the firing should have enrolled and sent: %+v", out)
 	}
 }
 
@@ -228,12 +365,12 @@ func TestRowAddressDoesNotEnrolAnUnsubscribedMemberAgain(t *testing.T) {
 // with the same sentence as one with no "@" -- before any read or write.
 func TestRowAddressRefusesAnAddressWithNoUsableDigest(t *testing.T) {
 	for _, address := range []string{"no-at-sign", "a b@c.test", "@leading", "trailing@"} {
-		e, out := fireForContact(t, address, nil)
+		e, out := fireForContact(t, address, audienceAnswers{})
 
 		if len(out.Refusals) != 1 || out.Refusals[0] != `"primaryContactEmail" is not an address` {
 			t.Errorf("%q: refusals = %q", address, out.Refusals)
 		}
-		for _, prefix := range []string{"query recipientInAudienceByDigest(", "mutation addRecipient(", "builtin campaignSendToRecipient("} {
+		for _, prefix := range []string{"query recipientInAudienceByDigest(", "query recipientsWithoutDigestInAudience(", "mutation addRecipient(", "builtin campaignSendToRecipient("} {
 			if calls := e.callsWithPrefix(prefix); len(calls) != 0 {
 				t.Errorf("%q: an unusable address still reached %s: %v", address, prefix, calls)
 			}

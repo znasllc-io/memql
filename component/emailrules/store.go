@@ -409,26 +409,48 @@ func (s *Store) RecipientsForAudience(ctx context.Context, audienceID string) ([
 		arg{"audienceId", memql.BareShortId(audienceID)}))
 }
 
-// RecipientInAudienceByDigest finds the membership for one mailbox in the rule's
-// audience by the digest of its address (addressDigest): ONE keyed read, in any
-// subscription state, oldest match first. A row-address firing uses it to learn
-// whether the address on the triggering row is a member already, where it used
-// to list the audience's subscribed members and compare addresses -- a read that
-// never saw anyone who had unsubscribed (so they were enrolled again as
-// subscribed) and stopped at the first hundred.
+// MailboxMembers returns every row of the rule's audience that holds the mailbox
+// on the triggering row, in any subscription state, oldest first within each
+// source -- and whether it can be sure that is all of them.
 //
-// A digest of "" matches nothing and is not sent: as a filter value it would
-// select every row that has no digest at all.
-func (s *Store) RecipientInAudienceByDigest(ctx context.Context, audienceID, digest string) (map[string]any, bool, error) {
-	if digest == "" {
-		return nil, false, nil
+// A row is found by the digest of the address (a read of the audience's rows that
+// carry it) or, for the rows that carry no digest at all, by comparing its
+// address (a page of them). Each row's OWN address is compared before the row is
+// believed: a digest is a key, and a raw write can set one that is not its row's.
+// This replaces a read that listed only the audience's subscribed members and
+// stopped at the first hundred: it never saw anyone who had unsubscribed (so they
+// were enrolled again as subscribed), and a mailbox beyond the hundred was enrolled
+// a second time.
+//
+// complete is false when the page of rows with no digest was FULL: it proves
+// nothing about the rows beyond it, an audience nobody has stamped yet holds more
+// of them than a page, and the caller must not read "not among them" as "not a
+// member". The campaigns package reads the whole roster in that case; a rule has
+// no roster read, so it refuses the firing and says why.
+//
+// Every read here decides a write, so the caller's ctx must be a fresh read.
+func (s *Store) MailboxMembers(ctx context.Context, audienceID, address string) (members []map[string]any, complete bool, err error) {
+	want, digest := normalizeAddress(address), addressDigest(address)
+	if want == "" || digest == "" {
+		return nil, true, nil
 	}
-	rows, err := s.rows(ctx, call("query", "recipientInAudienceByDigest",
-		arg{"audienceId", memql.BareShortId(audienceID)}, arg{"emailDigest", digest}))
-	if err != nil || len(rows) == 0 {
+	audience := memql.BareShortId(audienceID)
+	stamped, err := s.rows(ctx, call("query", "recipientInAudienceByDigest", arg{"audienceId", audience}, arg{"emailDigest", digest}))
+	if err != nil {
 		return nil, false, err
 	}
-	return rows[0], true, nil
+	unstamped, err := s.rows(ctx, call("query", "recipientsWithoutDigestInAudience", arg{"audienceId", audience}))
+	if err != nil {
+		return nil, false, err
+	}
+	for _, rows := range [][]map[string]any{stamped, unstamped} {
+		for _, r := range rows {
+			if normalizeAddress(str(r, "email")) == want {
+				members = append(members, r)
+			}
+		}
+	}
+	return members, len(unstamped) < digestLessWindow, nil
 }
 
 // TemplateByID reads the copy both lanes send.

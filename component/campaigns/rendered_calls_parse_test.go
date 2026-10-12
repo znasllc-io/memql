@@ -140,7 +140,11 @@ func TestEveryRenderedCallParses(t *testing.T) {
 		{"deliveryLedgerForCampaign", func() error { _, err := store.Ledger(ctx, awkward); return err }},
 		{"recipientById", func() error { _, _, err := store.RecipientByID(ctx, awkward); return err }},
 		{"recipientInAudienceByDigest", func() error {
-			_, _, err := store.RecipientInAudienceByDigest(ctx, awkward, strings.Repeat("a", 64))
+			_, err := store.RecipientsInAudienceByDigest(ctx, awkward, strings.Repeat("a", 64))
+			return err
+		}},
+		{"recipientsWithoutDigestInAudience", func() error {
+			_, err := store.RecipientsWithoutDigestInAudience(ctx, awkward)
 			return err
 		}},
 

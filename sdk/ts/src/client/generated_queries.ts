@@ -7098,7 +7098,7 @@ QueryClient.prototype.recipientById = function (this: QueryClient, args: Recipie
   return this.executeNamed("recipientById", buildRecipientById(args), opts);
 };
 
-/** The membership for one mailbox in one audience, by address digest. Organization-authorized. The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a signup or a row-address rule finds an existing member in one keyed read instead of walking the roster. Any subscription state is returned: whether a send or a signup does anything about an unsubscribed or bounced address is the caller's decision. Oldest first and a window of five -- an import does not deduplicate, so a mailbox can hold more than one row, and the caller takes the first. */
+/** The memberships for one mailbox in one audience, by address digest. Organization-authorized. The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a signup or a row-address rule finds the rows a mailbox holds without walking the roster. EVERY match comes back, in any subscription state, oldest first: the same mailbox can hold more than one row (a manual add beside an earlier row, a race), one of them can have opted out by hand while another has not, and the caller must see all of them to refuse for the one that did. The window is far wider than any mailbox's duplicates. A row carries a digest only if it was written by addRecipient or filled in by the digest sweep, so a mailbox can also hold rows this does not return: recipientsWithoutDigestInAudience is the other half. The caller checks each row's own address before it believes the key; a raw write can set a digest that is not its address's. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientInAudienceByDigest"] in generated_concepts.ts).
 export interface RecipientInAudienceByDigestArgs {
   audienceId: string;
@@ -7142,6 +7142,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.recipientsForAudience = function (this: QueryClient, args: RecipientsForAudienceArgs = {} as RecipientsForAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recipientsForAudience", buildRecipientsForAudience(args), opts);
+};
+
+/** One page of the rows of an audience that carry no address digest, oldest first. Organization-authorized. Those are the rows written before the digest existed, by a replica still running the previous release, or by a raw write, until the digest sweep fills them in. A lookup by digest cannot see them, so a signup or a row-address rule reads this page too and compares each row's address; a FULL page proves nothing about the rows beyond it and the caller must not read it as "no such row". */
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsWithoutDigestInAudience"] in generated_concepts.ts).
+export interface RecipientsWithoutDigestInAudienceArgs {
+  audienceId: string;
+}
+
+export function buildRecipientsWithoutDigestInAudience(args: RecipientsWithoutDigestInAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "query recipientsWithoutDigestInAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recipientsWithoutDigestInAudience(args: RecipientsWithoutDigestInAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recipientsWithoutDigestInAudience = function (this: QueryClient, args: RecipientsWithoutDigestInAudienceArgs = {} as RecipientsWithoutDigestInAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recipientsWithoutDigestInAudience", buildRecipientsWithoutDigestInAudience(args), opts);
 };
 
 /** Returns active data records. Optional filters: partitionId, recordType, validationState, importSource */

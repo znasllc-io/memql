@@ -228,15 +228,17 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	} else if suppressed {
 		return accepted()
 	}
-	// The member is found by the digest of the address: one keyed read, so a
-	// signup into an audience of any size costs the same (memql#6022, F9). It is
-	// found in any state, and a form never reopens an address that unsubscribed,
-	// bounced or complained.
-	member, found, err := w.store.RecipientInAudienceByDigest(ctx, audienceID, EmailDigest(address))
+	// The rows the mailbox holds are found by the digest of the address and, for
+	// the rows that carry none, by comparing addresses (mailbox.go). A form never
+	// reopens a mailbox that opted out: ANY row that unsubscribed, bounced or
+	// complained refuses it, whichever the lists happen to put first -- an opt-out
+	// made by hand sets only the row, and there is no suppression entry to find.
+	members, err := w.store.MailboxMembers(ctx, audienceID, address)
 	if err != nil {
 		return nil, err
 	}
-	if found && member.SubscriptionStatus != "" && member.SubscriptionStatus != "subscribed" {
+	member, found, optedOut := mailboxVerdict(members)
+	if optedOut {
 		return accepted()
 	}
 	if !found {

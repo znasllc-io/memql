@@ -218,12 +218,14 @@ func TestRecipientDigestBackfill(t *testing.T) {
 }
 
 // rosterReadCounter counts the roster walks a signup makes, and records each
-// lookup by digest with whether it was a fresh read.
+// read of the rows a mailbox holds -- by digest, and of the rows with no digest --
+// with whether it was a fresh read.
 type rosterReadCounter struct {
 	Engine
-	mu      sync.Mutex
-	reads   int
-	lookups []bool
+	mu         sync.Mutex
+	reads      int
+	lookups    []bool
+	digestLess []bool
 }
 
 func (e *rosterReadCounter) Execute(ctx context.Context, statement string) (any, error) {
@@ -233,6 +235,8 @@ func (e *rosterReadCounter) Execute(ctx context.Context, statement string) (any,
 		e.reads++
 	case strings.HasPrefix(statement, "query recipientInAudienceByDigest"):
 		e.lookups = append(e.lookups, memql.FreshReadFromContext(ctx))
+	case strings.HasPrefix(statement, "query recipientsWithoutDigestInAudience"):
+		e.digestLess = append(e.digestLess, memql.FreshReadFromContext(ctx))
 	}
 	e.mu.Unlock()
 	return e.Engine.Execute(ctx, statement)
@@ -251,22 +255,36 @@ func (e *rosterReadCounter) digestLookups() []bool {
 	return append([]bool(nil), e.lookups...)
 }
 
+// digestLessLookups returns, for each read of the audience's rows with no digest,
+// whether it was a fresh read.
+func (e *rosterReadCounter) digestLessLookups() []bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]bool(nil), e.digestLess...)
+}
+
 // digestNewsletter is one organization with a newsletter bound to one audience
-// that already holds one member, added by addRecipient under a spelling that is
-// not the one the signup form will send.
+// and a worker that takes its signups.
 type digestNewsletter struct {
 	*digestTenant
 	worker *Worker
+	sender *recordingSender
+	// member is the recipient newDigestNewsletter put in the audience, added by
+	// addRecipient under a spelling that is not the one the signup form will
+	// send. Empty for a newsletter whose audience starts empty.
 	member string
 	args   map[string]any
 }
 
-func newDigestNewsletter(t *testing.T, name string) *digestNewsletter {
+// newEmptyNewsletter is a newsletter whose audience holds nobody: the form posts
+// subscriber@example.test, and a case plants whatever rows it needs.
+func newEmptyNewsletter(t *testing.T, name string) *digestNewsletter {
 	t.Helper()
 	d := newDigestTenant(t, name)
 	template, identity, site := d.suffix+"-tpl", d.suffix+"-sender", d.suffix+"-site"
 
-	worker := newTestWorker(t, deliveryDBEngine{d.engine}, &recordingSender{})
+	sender := &recordingSender{}
+	worker := newTestWorker(t, deliveryDBEngine{d.engine}, sender)
 	wired := NewWorker(deliveryDBEngine{d.engine}, nil, nil, quietLogger(), func() *sql.DB { return d.db.DB })
 	worker.newsletterGate, worker.templateGate, worker.singleSendGate = wired.newsletterGate, wired.templateGate, wired.singleSendGate
 
@@ -285,19 +303,21 @@ func newDigestNewsletter(t *testing.T, name string) *digestNewsletter {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	member := d.suffix + "-rec"
-	d.execute(t, d.owner, call("mutation", "addRecipient", arg{"recipientId", member}, arg{"audienceId", d.audience}, arg{"accountId", d.org}, arg{"email", " Subscriber@Example.TEST "}))
-
 	return &digestNewsletter{
-		digestTenant: d, worker: worker, member: member,
+		digestTenant: d, worker: worker, sender: sender,
 		args: map[string]any{"siteId": site, "storeId": "", "submissionId": "submission-" + d.suffix, "email": "subscriber@example.test", "displayName": "Subscriber", "consent": "yes", "consentRevision": decodeResult(t, nodes)["revision"]},
 	}
 }
 
-// roster reads the audience through the tenant's own store, not the worker's:
-// the cases below put a counting engine under the worker, and the test's own
-// look at the roster is not a read the signup made.
+// newDigestNewsletter is a newsletter whose audience already holds one member.
+func newDigestNewsletter(t *testing.T, name string) *digestNewsletter {
+	t.Helper()
+	n := newEmptyNewsletter(t, name)
+	n.member = n.suffix + "-rec"
+	n.execute(t, n.owner, call("mutation", "addRecipient", arg{"recipientId", n.member}, arg{"audienceId", n.audience}, arg{"accountId", n.org}, arg{"email", " Subscriber@Example.TEST "}))
+	return n
+}
+
 // replica boots another node of the mesh on the same database: its own engine,
 // with its own node-local result cache, and its own worker.
 func (n *digestNewsletter) replica(t *testing.T) *Worker {
@@ -309,6 +329,9 @@ func (n *digestNewsletter) replica(t *testing.T) *Worker {
 	return worker
 }
 
+// roster reads the audience through the tenant's own store, not the worker's:
+// the cases below put a counting engine under the worker, and the test's own
+// look at the roster is not a read the signup made.
 func (n *digestNewsletter) roster(t *testing.T) []Recipient {
 	t.Helper()
 	roster, err := n.store.Roster(memql.ContextWithFreshRead(n.owner), n.audience)
@@ -334,10 +357,13 @@ func TestSignupFindsTheExistingMembershipByDigest(t *testing.T) {
 	}
 
 	if reads := counting.rosterReads(); reads != 0 {
-		t.Errorf("the signup read the roster %d times; a membership is one keyed read by digest", reads)
+		t.Errorf("the signup read the roster %d times; a membership is found by digest, and the rows with no digest are one bounded page", reads)
 	}
 	if lookups := counting.digestLookups(); len(lookups) != 1 || !lookups[0] {
 		t.Errorf("the signup looked the address up %v (true = a fresh read); want exactly one, fresh: it decides whether to write, and a cached answer from before another replica's enrolment would add a second membership", lookups)
+	}
+	if lookups := counting.digestLessLookups(); len(lookups) != 1 || !lookups[0] {
+		t.Errorf("the signup looked at the rows with no digest %v (true = a fresh read); want exactly one, fresh: an opt-out on one of them is what the form must not miss, and a cached page from before it would", lookups)
 	}
 	if roster := n.roster(t); len(roster) != 1 || roster[0].ID != n.member {
 		t.Errorf("the roster after the signup is %+v, want the one member that was there (%s)", roster, n.member)
@@ -420,8 +446,8 @@ func TestASignupOnAnotherReplicaSeesAMemberWhoUnsubscribedAfterItLastLooked(t *t
 	other := n.replica(t)
 	digest := EmailDigest("subscriber@example.test")
 
-	if member, found, err := other.store.RecipientInAudienceByDigest(n.owner, n.audience, digest); err != nil || !found || member.SubscriptionStatus != "subscribed" {
-		t.Fatalf("before the unsubscribe: %+v found=%v err=%v", member, found, err)
+	if members, err := other.store.RecipientsInAudienceByDigest(n.owner, n.audience, digest); err != nil || len(members) != 1 || members[0].SubscriptionStatus != "subscribed" {
+		t.Fatalf("before the unsubscribe: %+v err=%v", members, err)
 	}
 
 	// Replica A records the unsubscribe -- an operator honouring it by hand.
