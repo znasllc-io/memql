@@ -25,6 +25,7 @@ type materializeEngine struct {
 	files          map[string]map[string]any
 	folders        map[string]map[string]any // the Library folders the caller can READ, by id; any other id answers no row
 	folderReads    []bool                    // for each libraryFolderById, whether it asked for a fresh read
+	templateReads  []bool                    // for each composeTemplateById, whether it asked for a fresh read
 	calls          []string
 	source         map[string]any
 	account        map[string]any
@@ -135,6 +136,7 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 	case "composeRecipeById":
 		row = e.recipe
 	case "composeTemplateById":
+		e.templateReads = append(e.templateReads, memql.FreshReadFromContext(ctx))
 		row = e.template
 	case "cancelGoal":
 		return memql.NewResultWithOutput(map[string]any{"runsAsked": 1}), nil
@@ -892,6 +894,175 @@ func TestMaterializeRepeatedRequestDoesNotAskAboutTheFolderAgain(t *testing.T) {
 	}
 	if again["compositionId"] != first["compositionId"] || len(e.compositions) != 1 || len(e.folderReads) != 1 {
 		t.Fatalf("the repeat did not return the first composition without a second folder read: first=%v again=%v rows=%d reads=%v", first, again, len(e.compositions), e.folderReads)
+	}
+}
+
+// A TEMPLATE THE CALLER HOLDS IS NOT NECESSARILY ONE THAT CAN MAKE THE FILE.
+//
+// composeTemplateById answers any template its owner holds, and the render step used to apply
+// whatever it was given: an archived one (a binding somebody retired) and one that makes another
+// kind of file than the request asked for (a PDF template under a Markdown file) were applied
+// without a word. So the request is refused, before anything is written, when its template is
+// archived or makes another format. A template that names no format fits any, as it always did.
+
+const templateArchived = "That template is archived. Restore it or choose another."
+
+func templateArgs(format pure.Format) materializeArgs {
+	a := materializeDraft()
+	a.Format = format
+	a.TemplateId = "template-1"
+	return a
+}
+
+func TestMaterializeRefusesAnArchivedTemplateBeforeWritingAnything(t *testing.T) {
+	for where, ctx := range map[string]context.Context{"in a run": nestedMaterializeContext(), "standalone": materializeContext()} {
+		i, e, u := materializeFixture(t)
+		e.template = map[string]any{"id": "template-1", "name": "House style", "format": "markdown", "archived": true}
+		_, err := i.materialize(ctx, "u-alice", "", templateArgs(pure.FormatMarkdown))
+		// The sentence is the person's: the OS shows it as it is.
+		if err == nil || err.Error() != templateArchived {
+			t.Fatalf("%s: want the archived-template refusal verbatim, got %v", where, err)
+		}
+		if len(e.compositions) != 0 || len(e.inputs) != 0 || len(e.files) != 0 || u.calls != 0 {
+			t.Fatalf("%s: refusal wrote rows: %v %v %v uploads=%d", where, e.compositions, e.inputs, e.files, u.calls)
+		}
+		// Reads only: a step looks for the composition it may already have made, and the template is read.
+		for _, made := range e.calls {
+			if made != "composeTemplateById" && made != "compositionExecutionById" {
+				t.Fatalf("%s: the refusal went on to %s: %v", where, made, e.calls)
+			}
+		}
+	}
+}
+
+func TestMaterializeRefusesATemplateThatMakesAnotherKindOfFile(t *testing.T) {
+	for name, tc := range map[string]struct {
+		template   string
+		request    pure.Format
+		deployable string
+		email      bool
+		want       string
+	}{
+		"a PDF template under a Markdown file":      {template: "pdf", request: pure.FormatMarkdown, want: "That template makes PDF files. Choose a template for Markdown."},
+		"a web page template under a PDF":           {template: "html", request: pure.FormatPDF, want: "That template makes Web page files. Choose a template for PDF."},
+		"a Word template under a spreadsheet":       {template: "docx", request: pure.FormatCSV, want: "That template makes Word document files. Choose a template for Spreadsheet (CSV)."},
+		"a text template under data":                {template: "txt", request: pure.FormatJSON, want: "That template makes Plain text files. Choose a template for Data (JSON)."},
+		"a Markdown template under a package":       {template: "markdown", request: pure.FormatHTML, deployable: "static", want: "That template makes Markdown files. Choose a template for Web page."},
+		"a Markdown template under an email":        {template: "markdown", request: pure.FormatJSON, email: true, want: "That template makes Markdown files. Choose a template for Data (JSON)."},
+		"a template of a format this app can't say": {template: "audio", request: pure.FormatMarkdown, want: "That template makes audio files. Choose a template for Markdown."},
+	} {
+		for where, ctx := range map[string]context.Context{"in a run": nestedMaterializeContext(), "standalone": materializeContext()} {
+			i, e, u := materializeFixture(t)
+			e.template = map[string]any{"id": "template-1", "name": "House style", "format": tc.template}
+			a := templateArgs(tc.request)
+			a.DeployableKind = tc.deployable
+			if tc.email {
+				e.account = map[string]any{"id": "client", "status": "active"}
+				a.OutputKind, a.AccountIds = "email_template", []string{"client"}
+			}
+			_, err := i.materialize(ctx, "u-alice", "", a)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("%s %s: want %q, got %v", name, where, tc.want, err)
+			}
+			if len(e.compositions) != 0 || len(e.inputs) != 0 || len(e.files) != 0 || u.calls != 0 {
+				t.Fatalf("%s %s: refusal wrote rows: %v %v %v uploads=%d", name, where, e.compositions, e.inputs, e.files, u.calls)
+			}
+		}
+	}
+}
+
+func TestMaterializeAcceptsATemplateThatCanMakeTheFile(t *testing.T) {
+	for name, tc := range map[string]struct {
+		row        map[string]any
+		request    pure.Format
+		deployable string
+	}{
+		"a template of the same format":                   {row: map[string]any{"format": "markdown"}, request: pure.FormatMarkdown},
+		"a template that has no format at all":            {row: map[string]any{}, request: pure.FormatPDF},
+		"a template whose format is empty":                {row: map[string]any{"format": ""}, request: pure.FormatCSV},
+		"a template that is not archived":                 {row: map[string]any{"format": "markdown", "archived": false}, request: pure.FormatMarkdown},
+		"a web page template, for a package's HTML pages": {row: map[string]any{"format": "html"}, request: pure.FormatHTML, deployable: "static"},
+	} {
+		// Standalone with a goal opener: the request is accepted and nothing runs, which is where the template is checked.
+		i, e, _ := materializeFixture(t)
+		i.SetGoalOpener(&directMaterializeGoal{})
+		e.template = map[string]any{"id": "template-1", "name": "House style"}
+		for key, value := range tc.row {
+			e.template[key] = value
+		}
+		a := templateArgs(tc.request)
+		a.DeployableKind = tc.deployable
+		out, err := i.materialize(materializeContext(), "u-alice", "", a)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if row := e.compositions[stringOf(out["compositionId"])]; row == nil || row["templateId"] != "template-1" {
+			t.Fatalf("%s: the composition does not name the template: %v", name, row)
+		}
+	}
+}
+
+// The template is read when one is named and not otherwise, as the caller (the fixture refuses a read under
+// any other actor), and FRESH: a template archived a moment ago on another replica must not be applied
+// because this node's cache has not heard.
+func TestMaterializeReadsTheTemplateFreshAndOnlyWhenOneIsNamed(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	i.SetGoalOpener(&directMaterializeGoal{})
+	e.template = map[string]any{"id": "template-1", "name": "House style"}
+	if _, err := i.materialize(materializeContext(), "u-alice", "", templateArgs(pure.FormatMarkdown)); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.templateReads) != 1 || !e.templateReads[0] {
+		t.Fatalf("the template must be read once, fresh: %v", e.templateReads)
+	}
+
+	none, ne, _ := materializeFixture(t)
+	none.SetGoalOpener(&directMaterializeGoal{})
+	if _, err := none.materialize(materializeContext(), "u-alice", "", materializeDraft()); err != nil {
+		t.Fatal(err)
+	}
+	if len(ne.templateReads) != 0 {
+		t.Fatalf("a request that names no template read one: %v", ne.templateReads)
+	}
+}
+
+// A repeat finds the composition its first call made. If the template has been archived since, that repeat
+// must still answer with the composition: the first call was accepted and a refusal now would only hide it.
+func TestMaterializeRepeatedRequestDoesNotAskAboutTheTemplateAgain(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	i.SetGoalOpener(&directMaterializeGoal{})
+	e.template = map[string]any{"id": "template-1", "name": "House style", "format": "markdown"}
+	a := templateArgs(pure.FormatMarkdown)
+	a.RequestId = "req-1"
+	first, err := i.materialize(materializeContext(), "u-alice", "", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.template["archived"] = true
+	again, err := i.materialize(materializeContext(), "u-alice", "", a)
+	if err != nil {
+		t.Fatalf("a repeat of an accepted request was refused: %v", err)
+	}
+	if again["compositionId"] != first["compositionId"] || len(e.compositions) != 1 || len(e.templateReads) != 1 {
+		t.Fatalf("the repeat did not return the first composition without a second template read: first=%v again=%v rows=%d reads=%v", first, again, len(e.compositions), e.templateReads)
+	}
+}
+
+// A template the caller cannot read is not this check's to refuse: the render step has always said so
+// ("that template is not readable by you"), and the composition it fails is the record of it.
+func TestMaterializeLeavesAnUnreadableTemplateToTheRenderStep(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	_, err := i.materialize(nestedMaterializeContext(), "u-alice", "", templateArgs(pure.FormatMarkdown))
+	if err == nil || !strings.Contains(err.Error(), "that template is not readable by you") {
+		t.Fatalf("an unreadable template: want the render step's refusal, got %v", err)
+	}
+	for _, row := range e.compositions {
+		if row["status"] != "failed" {
+			t.Fatalf("the composition was not failed by the render step: %v", row)
+		}
+	}
+	if len(e.compositions) != 1 {
+		t.Fatalf("want the failed composition as the record, got %d rows", len(e.compositions))
 	}
 }
 

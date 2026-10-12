@@ -993,7 +993,7 @@ type ComposeMaterializeArgs struct {
 	Draft string
 	// Ordered completed text step keys in the CURRENT work run. Renders their saved replies verbatim, separated by blank lines, without another model call. Exclude research-only notes; include every final chapter in delivery order. Preserves recorded model/source provenance. Requires a prose format and no draft, outputKind or deployableKind. Missing, unfinished, duplicate or non-text sections are refused.
 	SectionKeys []string
-	// v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through.
+	// v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through. An archived template, or one that makes another format than the request's (a template that names no format fits any), is refused before anything is written.
 	TemplateId string
 	// v1:library:folder to file the output into. Empty means the Library root. A folder you cannot read, or one in the Bin, is refused before anything is written.
 	FolderId string

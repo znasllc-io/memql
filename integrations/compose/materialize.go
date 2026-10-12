@@ -145,6 +145,67 @@ func (i *Integration) requireUsableFolder(ctx context.Context, folderId string) 
 	return nil
 }
 
+// errTemplateArchived is the refusal for a template that has been archived, and it is a sentence a
+// person reads (the Materializer returns it as written), which is why it is capitalised and
+// punctuated like one.
+//
+//nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
+var errTemplateArchived = errors.New("That template is archived. Restore it or choose another.")
+
+// formatWords names a format as the Materializer names it to a person ("Web page", not "html"), in the
+// words of formatWord in clients/os/src/apps/materializer/words.ts, so a refusal speaks as the screen
+// does. A format that is none of the seven is named as it is written.
+func formatWords(f pure.Format) string {
+	switch f {
+	case pure.FormatMarkdown:
+		return "Markdown"
+	case pure.FormatHTML:
+		return "Web page"
+	case pure.FormatText:
+		return "Plain text"
+	case pure.FormatCSV:
+		return "Spreadsheet (CSV)"
+	case pure.FormatJSON:
+		return "Data (JSON)"
+	case pure.FormatDOCX:
+		return "Word document"
+	case pure.FormatPDF:
+		return "PDF"
+	}
+	return string(f)
+}
+
+// requireUsableTemplate refuses a template that cannot make this request's file: one that has been
+// archived, and one that makes another format than the request asked for. A template that names no
+// format fits any.
+//
+// IT IS A READ, NOT A TRUST. composeTemplateById answers any template its owner holds, and the render
+// step applies whatever it is given: an archived binding, or a PDF template under a Markdown file, was
+// applied without a word. The request is refused here instead, before anything is written. The read runs
+// as the caller and fresh (materialize asks for fresh reads), so a template archived a moment ago on
+// another replica is not applied on this node's cache.
+//
+// A template the caller cannot read is not refused here. The render step has always said so ("that
+// template is not readable by you"), and the failed composition is the record of it; this check adds to
+// what is refused, and changes nothing that was.
+func (i *Integration) requireUsableTemplate(ctx context.Context, templateId string, format pure.Format) error {
+	template, err := i.store().templateById(ctx, templateId)
+	if err != nil {
+		return fmt.Errorf("compose: checking the template: %w", err)
+	}
+	if template == nil {
+		return nil
+	}
+	if boolOf(template["archived"]) {
+		return errTemplateArchived
+	}
+	if made := strings.TrimSpace(stringOf(template["format"])); made != "" && !strings.EqualFold(made, string(format)) {
+		//nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
+		return fmt.Errorf("That template makes %s files. Choose a template for %s.", formatWords(pure.Format(strings.ToLower(made))), formatWords(format))
+	}
+	return nil
+}
+
 // fromARun says a work run is making this call, and not a person's own client.
 // It is the condition under which the Library refuses a revision request ("a
 // person must prepare the document revision request", handleRequestDocumentRevision
@@ -395,6 +456,13 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	// read or written for a new one.
 	if a.FolderId != "" {
 		if err := i.requireUsableFolder(ctx, a.FolderId); err != nil {
+			return nil, err
+		}
+	}
+	// THE TEMPLATE IS CHECKED NEXT, for the same reasons and at the same point: a repeat of an accepted
+	// request finds its composition first, and a refusal comes before anything is read or written.
+	if a.TemplateId != "" {
+		if err := i.requireUsableTemplate(ctx, a.TemplateId, a.Format); err != nil {
 			return nil, err
 		}
 	}
