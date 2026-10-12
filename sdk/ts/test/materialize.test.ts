@@ -18,6 +18,8 @@ import { randomUUID } from "node:crypto";
 import { getEventListeners } from "node:events";
 
 import {
+  fileNameProblem,
+  fileNameStem,
   followComposition,
   handOffDescription,
   isDescribedMarkdown,
@@ -61,6 +63,14 @@ const requestIdIn = (call: string) => /requestId:\s*"([^"]*)"/.exec(call)?.[1] ?
 
 // What the Library accepts as a request id (integrations/library/review.go).
 const LIBRARY_REQUEST_ID = /^[a-zA-Z0-9_-]{8,120}$/;
+
+// A refusal AS IT REALLY ARRIVES. The server wraps an internal engine error in
+// "MemQL engine failed to execute query. Details: " (buildEngineErrorMessage,
+// component/grpc/server.go), and executeNamed puts the call's name in front
+// (query.ts). A fake that threw the bare reason would pass code that shows a
+// person both prefixes.
+const ENGINE = "MemQL engine failed to execute query. Details: ";
+const refusal = (construct: string, reason: string): Error => new Error(`${construct}: ${ENGINE}${reason}`);
 
 // ---------------------------------------------------------------------------
 // Starting and following a composition
@@ -412,11 +422,69 @@ test("startMaterialize never forwards a field the request type does not declare"
   assert.equal(f.calls[0]?.call, buildComposeMaterialize({ name: "x", format: "markdown", requestId: "req-0003" }));
 });
 
+test("a refusal to start reaches the caller as the cluster's sentence alone", async () => {
+  // As it really arrives: the call's name, the engine's frame, then the sentence the
+  // Materializer wrote for a person. What a person is shown is the last part only.
+  const cases: [string, string][] = [
+    ["Enter a name without slashes.", "Enter a name without slashes."],
+    ["That folder isn't available. Choose another folder.", "That folder isn't available. Choose another folder."],
+    ["compose: the sources could not be read: no such query", "the sources could not be read: no such query"],
+  ];
+  for (const [reason, shown] of cases) {
+    const f = fake({ composeMaterialize: refusedAs("composeMaterialize", reason) });
+    await assert.rejects(startMaterialize(f.execute, { name: "Notes 10/11", format: "markdown", requestId: "req-0008" }), (e: Error) => e.message === shown && !(e instanceof MaterializeFailed), reason);
+    await assert.rejects(materialize({ execute: f.execute, intervalMs: 1 }, { name: "Notes 10/11", format: "markdown", requestId: "req-0008" }), (e: Error) => e.message === shown, reason);
+  }
+});
+
 test("a request with no request id is refused before anything is sent", async () => {
   // Without an id a double click makes two files; that is what the id is for.
   const f = fake({ composeMaterialize: [[{ compositionId: "c1" }]] });
   await assert.rejects(startMaterialize(f.execute, { name: "x", format: "txt", requestId: "  " }), /request id/);
   assert.deepEqual(f.calls, []);
+});
+
+// ---------------------------------------------------------------------------
+// The name a person types, checked as it is typed
+// ---------------------------------------------------------------------------
+//
+// VS Code's New Markdown and the MemQL OS composer both check a name with
+// fileNameProblem, so the two say the same thing about the same name. The words
+// are VS Code's, from before the rule moved here.
+
+const NOT_A_FILE_NAME = "Enter a file name, without a folder path.";
+const NO_NAME_BEFORE_EXTENSION = "Enter a name before the extension.";
+
+test("fileNameProblem accepts a file name, with or without its extension", () => {
+  for (const [name, format] of [
+    ["Untitled.md", "markdown"], ["Plan", "markdown"], ["Q3.report.md", "markdown"], ["notes.markdown", "markdown"], ["a", "markdown"],
+    ["Plan .md", "markdown"], ["  Plan  ", "markdown"], ["data.csv", "csv"], ["page", "html"], ["Plan.md", "txt"], [".md", "txt"],
+    ["x".repeat(150), "markdown"],
+  ] as const) {
+    assert.equal(fileNameProblem(name, format), undefined, `"${name}" as ${format} should be accepted`);
+  }
+});
+
+test("fileNameProblem refuses a place, an empty name and an over-long one", () => {
+  for (const name of ["", "   ", "a/b.md", "a\\b.md", "Notes 10/11", "tab\there.md", "x".repeat(151)]) {
+    assert.equal(fileNameProblem(name, "markdown"), NOT_A_FILE_NAME, `"${name}" should be refused as a path or an empty name`);
+  }
+});
+
+test("fileNameProblem refuses an extension of the file's own format with nothing before it", () => {
+  for (const [name, format] of [[".md", "markdown"], [".markdown", "markdown"], [" .MD ", "markdown"], [".Markdown", "markdown"], [".csv", "csv"], [".HTML", "html"], [".json", "json"]] as const) {
+    assert.equal(fileNameProblem(name, format), NO_NAME_BEFORE_EXTENSION, `"${name}" as ${format} should be refused`);
+  }
+});
+
+test("fileNameStem drops one extension of the file's own format, as the cluster does", () => {
+  for (const [name, format, stem] of [
+    ["Plan.md", "markdown", "Plan"], ["Plan.MD", "markdown", "Plan"], ["Plan.markdown", "markdown", "Plan"], ["  Plan.md  ", "markdown", "Plan"],
+    ["Plan .md", "markdown", "Plan"], ["Plan.md.md", "markdown", "Plan.md"], ["Plan.txt", "markdown", "Plan.txt"], ["notes.txt", "txt", "notes"],
+    ["data.CSV", "csv", "data"], ["v1.2 notes", "markdown", "v1.2 notes"], [".md", "markdown", ""],
+  ] as const) {
+    assert.equal(fileNameStem(name, format), stem, `"${name}" as ${format}`);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -530,7 +598,7 @@ const FAILURE_PREFIX = "The description could not be sent for writing: ";
 const failures: { label: string; script: Record<string, Answer>; request?: Partial<Parameters<typeof handOffDescription>[1]>; message: RegExp; calls: string[] }[] = [
   {
     label: "the Library refuses the comment",
-    script: handOffScript({ libraryAddDocumentComment: () => { throw new Error("the document changed; reopen its current revision before adding feedback"); } }),
+    script: handOffScript({ libraryAddDocumentComment: () => { throw refusal("libraryAddDocumentComment", "the document changed; reopen its current revision before adding feedback"); } }),
     message: /^the document changed; reopen its current revision/,
     calls: ["libraryAddDocumentComment"],
   },
@@ -542,7 +610,7 @@ const failures: { label: string; script: Record<string, Answer>; request?: Parti
   },
   {
     label: "the Library cannot start the revision",
-    script: handOffScript({ libraryRequestDocumentRevision: () => { throw new Error("document review jobs are unavailable on this node"); } }),
+    script: handOffScript({ libraryRequestDocumentRevision: () => { throw refusal("libraryRequestDocumentRevision", "document review jobs are unavailable on this node"); } }),
     message: /^document review jobs are unavailable/,
     calls: ["libraryAddDocumentComment", "libraryRequestDocumentRevision"],
   },
@@ -581,12 +649,12 @@ for (const { label, script, request, message, calls } of failures) {
   });
 }
 
-// executeNamed words every refusal as "<construct name>: <reason>"
-// (sdk/ts/src/client/query.ts). The name is the cluster's word for the call, not
+// A refusal arrives as "<construct name>: MemQL engine failed to execute query.
+// Details: <reason>" (see `refusal`). Neither the name nor the engine's frame is
 // something a person can act on, and revisionFailure is shown to people.
-const refusedAs = (name: string, reason: string) => () => { throw new Error(`${name}: ${reason}`); };
+const refusedAs = (name: string, reason: string) => () => { throw refusal(name, reason); };
 
-test("a refusal that arrives with the construct's name in front is shown without it", async () => {
+test("a refusal that arrives with the construct's name and the engine's frame in front is shown without either", async () => {
   for (const [construct, calls] of [
     ["libraryAddDocumentComment", ["libraryAddDocumentComment"]],
     ["libraryRequestDocumentRevision", ["libraryAddDocumentComment", "libraryRequestDocumentRevision"]],
@@ -611,7 +679,7 @@ test("the retry without attachments words its own refusal the same way", async (
   let attempts = 0;
   const f = fake(handOffScript({
     ...library({ "f-notes": stored("att-notes", "notes.md", KiB) }),
-    libraryAddDocumentComment: () => { throw new Error(`libraryAddDocumentComment: ${++attempts === 1 ? "attach a nonempty UTF-8 Markdown file up to 32 KiB" : "the document changed; reopen its current revision before adding feedback"}`); },
+    libraryAddDocumentComment: () => { throw refusal("libraryAddDocumentComment", ++attempts === 1 ? "attach a nonempty UTF-8 Markdown file up to 32 KiB" : "the document changed; reopen its current revision before adding feedback"); },
   }));
   const out = await handOffDescription(f.execute, { artifactId: "a1", statement: "Summarise these", requestId: "req-0010", sources: [reference("f-notes", "Notes")] });
   assert.deepEqual(out, { revisionFailure: FAILURE_PREFIX + "the document changed; reopen its current revision before adding feedback" });
@@ -837,7 +905,7 @@ test("when the Library refuses an attachment the comment is sent once more witho
     { "f-notes": stored("att-notes", "notes.md", 2 * KiB), "f-spec": stored("att-spec", "spec.pdf", KiB), "f-shot": stored("att-shot", "shot.png", 40 * KiB) },
     [reference("f-notes", "Notes"), reference("f-spec", "Spec"), reference("f-shot", "Screenshot")],
     { libraryAddDocumentComment: call => {
-      if (/attachments: \[\{/.test(call)) throw new Error(ATTACHMENT_REFUSAL);
+      if (/attachments: \[\{/.test(call)) throw refusal("libraryAddDocumentComment", ATTACHMENT_REFUSAL);
       return [{ saved: true, commentId: "cm1" }];
     } });
   assert.deepEqual(out, { revisionId: "req-0010-revision", unattached: ["Notes", "Spec", "Screenshot"] });
@@ -849,7 +917,7 @@ test("when the Library refuses an attachment the comment is sent once more witho
 
 test("a refusal that is not about an attachment is not retried without them", async () => {
   const { f, out } = await handOffWith({ "f-notes": stored("att-notes", "notes.md", KiB) }, [reference("f-notes", "Notes")],
-    { libraryAddDocumentComment: () => { throw new Error(DOCUMENT_REFUSAL); } });
+    { libraryAddDocumentComment: () => { throw refusal("libraryAddDocumentComment", DOCUMENT_REFUSAL); } });
   assert.deepEqual(out, { revisionFailure: FAILURE_PREFIX + DOCUMENT_REFUSAL });
   assert.equal(f.named("libraryAddDocumentComment").length, 1);
   assert.equal(f.named("libraryRequestDocumentRevision").length, 0);
@@ -857,7 +925,7 @@ test("a refusal that is not about an attachment is not retried without them", as
 
 test("with no attachment to take off there is nothing to retry", async () => {
   const { f, out } = await handOffWith({ "f-spec": stored("att-spec", "spec.pdf", KiB) }, [reference("f-spec", "Spec")],
-    { libraryAddDocumentComment: () => { throw new Error(ATTACHMENT_REFUSAL); } });
+    { libraryAddDocumentComment: () => { throw refusal("libraryAddDocumentComment", ATTACHMENT_REFUSAL); } });
   assert.equal(out.revisionFailure, FAILURE_PREFIX + ATTACHMENT_REFUSAL);
   assert.equal(f.named("libraryAddDocumentComment").length, 1);
 });
@@ -865,7 +933,7 @@ test("with no attachment to take off there is nothing to retry", async () => {
 test("if the comment fails again without its attachments, that failure is the one reported", async () => {
   let attempts = 0;
   const { f, out } = await handOffWith({ "f-notes": stored("att-notes", "notes.md", KiB) }, [reference("f-notes", "Notes")],
-    { libraryAddDocumentComment: () => { throw new Error(++attempts === 1 ? ATTACHMENT_REFUSAL : DOCUMENT_REFUSAL); } });
+    { libraryAddDocumentComment: () => { throw refusal("libraryAddDocumentComment", ++attempts === 1 ? ATTACHMENT_REFUSAL : DOCUMENT_REFUSAL); } });
   assert.deepEqual(out, { revisionFailure: FAILURE_PREFIX + DOCUMENT_REFUSAL });
   assert.equal(f.named("libraryAddDocumentComment").length, 2);
   assert.equal(f.named("libraryRequestDocumentRevision").length, 0);
@@ -928,7 +996,7 @@ test("materialize waits for the Files entry before it hands the description over
 });
 
 test("a failed hand-off leaves the file and says why, and materialize still resolves", async () => {
-  const f = fake(describedScript({ libraryRequestDocumentRevision: () => { throw new Error("document review jobs are unavailable on this node"); } }));
+  const f = fake(describedScript({ libraryRequestDocumentRevision: () => { throw refusal("libraryRequestDocumentRevision", "document review jobs are unavailable on this node"); } }));
   const out = await materialize({ execute: f.execute, intervalMs: 1 }, described);
   assert.equal(out.artifactId, "a1");
   assert.equal(out.fileId, "f1");
@@ -1054,7 +1122,7 @@ test("isDescribedMarkdown holds for Library files and keeps the composer for any
 // ---------------------------------------------------------------------------
 
 test("the client barrel exports the materialize surface", () => {
-  for (const name of ["materialize", "startMaterialize", "followComposition", "handOffDescription", "isDescribedMarkdown"] as const) {
+  for (const name of ["materialize", "startMaterialize", "followComposition", "handOffDescription", "isDescribedMarkdown", "fileNameProblem", "fileNameStem", "refusalSentence"] as const) {
     assert.equal(typeof client[name], "function", `${name} is not exported from the client barrel`);
   }
   assert.equal(client.MaterializeCancelled, MaterializeCancelled);

@@ -23,7 +23,19 @@ that was already made: it stays in Files, and `materialize` returns it when it i
 already in Files at the moment of the stop (a described request then carries
 `revisionFailure` "Stopped before the description was sent."), and throws
 `MaterializeCancelled` when it is not yet. A described request's id may use
-letters, digits, `-` and `_`, at most 111 characters.
+letters, digits, `-` and `_`, at most 111 characters. `fileNameProblem(name,
+format)` is the name rule a client checks as a name is typed (no slash, no
+control character, not empty, at most 150 characters, something before the
+extension) in the words a person reads, and `fileNameStem(name, format)` the
+name the cluster files it under (one trailing extension of the format dropped).
+
+**`refusalSentence(error, construct?)`** (`@znasllc-io/memql-sdk-core/client`,
+beside `QueryClient`) -- the sentence a person reads out of a refused call. A
+refusal arrives as `<construct>: MemQL engine failed to execute query. Details:
+compose: ...`; this takes off the call's name `executeNamed` puts in front, the
+server's frame and a leading Go package name, once each, and leaves the rest as
+the cluster wrote it. `startMaterialize` throws, and `handOffDescription`
+reports, refusals in these words.
 
 **`AiChatOptions.level`** -- how much intelligence a chat call needs: `""`
 (Auto: the cluster's rules decide), `"fast"`, `"strong"` or `"reasoning"`. It

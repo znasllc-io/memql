@@ -46,9 +46,18 @@
 // takes only Markdown (up to 32 KiB) and images as review attachments, and
 // refuses a comment that carries anything else. So the hand-off attaches the
 // library_file sources the Library accepts, opens the revision with them, and
-// returns every other reference (a PDF, a file it cannot find) by label in
-// `unattached` for the caller to show: "2 references were not attached: only
-// Markdown and images can be".
+// returns every other reference (a PDF, a file it cannot find, one past the
+// Library's limits) by label in `unattached`, for the caller to name. The label
+// is all an entry carries: it does not say why that reference was left off.
+//
+// ===========================================================================
+// A REFUSAL REACHES A PERSON AS ONE SENTENCE
+// ===========================================================================
+// Both texts this module hands a caller to show -- the refusal startMaterialize
+// throws, and a hand-off's revisionFailure -- are the cluster's sentence with
+// the call's name, the engine's frame and any Go package name taken off
+// (refusalSentence, beside executeNamed in query.ts). A person who typed a
+// slash reads "Enter a name without slashes.", not three layers of plumbing.
 //
 // handOffDescription derives its two Library request ids from the request id
 // (`<id>-comment`, `<id>-revision`), so a retry returns the first receipts. The
@@ -89,6 +98,7 @@ import {
   buildWorkRunForOwner,
 } from "./generated_queries.js";
 import { sameEntityId } from "./id.js";
+import { refusalSentence } from "./query.js";
 import { rowNumber, rowString, type Row } from "./types.js";
 
 /** Runs one named construct as the signed-in person and returns its rows. `call` is the rendered call string. */
@@ -172,10 +182,52 @@ export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" |
     (request.sources ?? []).every(source => source.kind === "library_file");
 }
 
+// What a person may call a new file, in the words they read where they type it.
+// VS Code's New Markdown and the MemQL OS composer check a name with
+// fileNameProblem as it is typed, so the two say the same thing about the same
+// name. The cluster refuses the names it cannot file in its own words, for a
+// client that sends one anyway.
+const NOT_A_FILE_NAME = "Enter a file name, without a folder path.";
+const NO_NAME_BEFORE_EXTENSION = "Enter a name before the extension.";
+const MAX_NAME_LENGTH = 150;
+// The suffixes that already name a format: its file extension and, for Markdown,
+// its own name too (formatNameExtensions in integrations/compose/materialize.go).
+const formatExtensions = (format: MaterializeFormat): string[] => (format === "markdown" ? ["md", "markdown"] : [format]);
+
+/**
+ * The name a file of this format is filed under: the name without ONE trailing
+ * extension that already names the format, because the cluster adds the
+ * extension once when it files the file ("Plan.md" is filed as Plan.md, never
+ * Plan.md.md). An extension of another format is part of the name. Mirrors
+ * cleanFileName in integrations/compose/materialize.go.
+ */
+export function fileNameStem(name: string, format: MaterializeFormat): string {
+  const trimmed = name.trim();
+  for (const extension of formatExtensions(format)) {
+    const suffix = `.${extension}`;
+    if (trimmed.length >= suffix.length && trimmed.slice(-suffix.length).toLowerCase() === suffix) return trimmed.slice(0, -suffix.length).trim();
+  }
+  return trimmed;
+}
+
+/**
+ * What is wrong with a name typed for a new file of this format, or undefined
+ * when it can be used. A name is a file name and not a place (folderId says
+ * where a file goes), so a slash or a control character is refused, as is an
+ * empty name or one over 150 characters; and there must be something before the
+ * extension, because ".md" on its own would file a document with no name.
+ */
+export function fileNameProblem(name: string, format: MaterializeFormat): string | undefined {
+  if (!name.trim() || /[\\/\u0000-\u001f]/.test(name) || name.length > MAX_NAME_LENGTH) return NOT_A_FILE_NAME;
+  if (!fileNameStem(name, format)) return NO_NAME_BEFORE_EXTENSION;
+  return undefined;
+}
+
 /**
  * Opens the composition and returns its id. Sends only the fields
  * MaterializeRequest declares, and omits the ones left empty, so what the
- * server sees is what isDescribedMarkdown judged.
+ * server sees is what isDescribedMarkdown judged. A refusal is thrown as the
+ * cluster's own sentence and nothing else (see the header).
  */
 export async function startMaterialize(execute: MaterializeExecute, request: MaterializeRequest): Promise<string> {
   if (!has(request.requestId)) throw new Error("A request id is required, so that a repeated request makes one file.");
@@ -191,7 +243,7 @@ export async function startMaterialize(execute: MaterializeExecute, request: Mat
   if (request.accountIds?.length) args.accountIds = [...request.accountIds];
   if (has(request.recipeId)) args.recipeId = request.recipeId;
   if (has(request.deployableKind)) args.deployableKind = request.deployableKind;
-  const reply = first(await execute("composeMaterialize", buildComposeMaterialize(args)));
+  const reply = first(await inPlainWords(execute)("composeMaterialize", buildComposeMaterialize(args)));
   const compositionId = rowString(reply, "compositionId");
   if (!compositionId) throw new Error("Materializer did not confirm a composition. Check its history before retrying.");
   return compositionId;
@@ -430,18 +482,16 @@ const attachmentsOf = (references: Reference[]): ReviewAttachment[] =>
   references.flatMap(reference => (reference.attachment ? [reference.attachment] : []));
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-// executeNamed words every refusal as "<construct name>: <reason>"
-// (query.ts). The name is the cluster's word for the call, not something a person
-// can act on, and the hand-off's failure is shown to people: so the calls it makes
-// go through here, which takes off the name of the call that was made.
-function withoutConstructName(execute: MaterializeExecute): MaterializeExecute {
+// The calls whose refusals this module hands a caller to show go through here:
+// a refusal comes back as the cluster's sentence alone, the name of the call
+// that was made, the engine's frame and any Go package name taken off
+// (refusalSentence). The original error is kept as the cause.
+function inPlainWords(execute: MaterializeExecute): MaterializeExecute {
   return async (name, call) => {
     try {
       return await execute(name, call);
     } catch (error) {
-      const prefix = `${name}: `;
-      if (error instanceof Error && error.message.startsWith(prefix)) throw new Error(error.message.slice(prefix.length), { cause: error });
-      throw error;
+      throw new Error(refusalSentence(error, name), { cause: error });
     }
   };
 }
@@ -471,7 +521,7 @@ function withoutConstructName(execute: MaterializeExecute): MaterializeExecute {
  */
 export async function handOffDescription(execute: MaterializeExecute, request: HandOffRequest): Promise<HandOffResult> {
   try {
-    const run = withoutConstructName(execute);
+    const run = inPlainWords(execute);
     const { artifactId } = request;
     const requestId = (request.requestId ?? "").trim();
     if (!has(request.statement)) throw new Error("there is no description to send.");
