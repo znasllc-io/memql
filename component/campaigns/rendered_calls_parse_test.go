@@ -51,6 +51,9 @@ func (e *parsingEngine) Execute(_ context.Context, q string) (any, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.queries = append(e.queries, q)
+	if strings.Contains(q, "Count") || strings.Contains(q, "RosterSize") {
+		return rowsEnvelope([]map[string]any{{"count": 0}}), nil
+	}
 	return map[string]any{"output": []any{}}, nil
 }
 

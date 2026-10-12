@@ -405,3 +405,39 @@ builtin campaignJourneyAwaitConfirmation {  }
 /// One authorized automation enrollment operation, available only inside its native scope.
 @executor("integration.campaigns.campaignJourneySend")
 builtin campaignJourneySend {  }
+
+/// Scoped catalog operation; only the authorized proposal workflow supplies it.
+@executor("integration.campaigns.campaignJourneyCatalog")
+builtin campaignJourneyCatalog { }
+
+/// Scoped structured proposal operation; requires the catalog in this invocation.
+@executor("integration.campaigns.campaignGenerateJourneyProposal")
+@args(profile="object")
+builtin campaignGenerateJourneyProposal {
+ prompt string!
+ data object!
+}
+
+@sdk
+@description("Draft an email automation from one sentence using this organization's resources. Returns a proposal and what it needs, saves nothing. Save it with campaignSaveJourney.")
+@executor("integration.campaigns.describeJourney")
+builtin campaignDescribeJourney {
+ accountId string!
+ sentence string!
+}
+
+/// Scoped automation maintenance operation; only the active drain supplies its snapshot.
+@executor("integration.campaigns.campaignJourneysToRetire")
+builtin campaignJourneysToRetire {  }
+
+/// Scoped automation maintenance operation; only the active drain supplies its snapshot.
+@executor("integration.campaigns.campaignActiveJourneys")
+builtin campaignActiveJourneys {  }
+
+/// Scoped automation maintenance operation; only the active drain supplies its snapshot.
+@executor("integration.campaigns.campaignRetireJourney")
+builtin campaignRetireJourney { id string! }
+
+/// Scoped automation maintenance operation; only the active drain supplies its snapshot.
+@executor("integration.campaigns.campaignRunJourney")
+builtin campaignRunJourney { id string! }
