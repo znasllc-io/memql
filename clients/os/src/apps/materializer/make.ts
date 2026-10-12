@@ -464,16 +464,30 @@ export function answerOf(step: MakeStepId, draft: MakeDraft, names: AnswerNames)
 const MAX_STEM_BYTES = 120;
 
 /**
+ * The longest prefix of `bytes` that is at most `limit` bytes and ends between two characters
+ * (cutOnACharacter in integrations/compose/materialize.go). `bytes` is UTF-8: a byte of the
+ * form 10xxxxxx continues a character, so when the limit falls on one the cut moves back to
+ * where that character starts and leaves it out whole.
+ */
+function cutOnACharacter(bytes: Uint8Array, limit: number): Uint8Array {
+  if (bytes.length <= limit) return bytes;
+  let end = limit;
+  while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--;
+  return bytes.slice(0, end);
+}
+
+/**
  * The stem as the cluster files it, from the SDK's stem (the name without ONE trailing
  * extension of the kind). sanitiseFileStem, integrations/compose/materialize.go, also drops
- * a DEL character, trims dots from both ends, keeps at most 120 bytes and falls back to
- * "composition" for nothing. A slash, a backslash and a control character never get here:
- * fileNameProblem refuses them as the name is typed.
+ * a DEL character, trims dots from both ends, keeps at most 120 bytes, cut on a character (one
+ * that would cross the limit is left out whole, and a space the cut leaves at the end goes) and
+ * falls back to "composition" for nothing. A slash, a backslash and a control character never
+ * get here: fileNameProblem refuses them as the name is typed.
  */
 function filedStem(stem: string): string {
   const clean = stem.replace(/\u007f/g, "").trim().replace(/^\.+|\.+$/g, "");
   const bytes = new TextEncoder().encode(clean);
-  const kept = bytes.length > MAX_STEM_BYTES ? new TextDecoder().decode(bytes.slice(0, MAX_STEM_BYTES)).trim() : clean;
+  const kept = bytes.length > MAX_STEM_BYTES ? new TextDecoder().decode(cutOnACharacter(bytes, MAX_STEM_BYTES)).trim() : clean;
   return kept === "" ? "composition" : kept;
 }
 

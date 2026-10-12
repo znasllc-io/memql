@@ -8,6 +8,7 @@ import (
 	"maps"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	pure "github.com/znasllc-io/memql/component/compose"
@@ -935,6 +936,8 @@ func TestMaterializeRefusesAnArchivedTemplateBeforeWritingAnything(t *testing.T)
 	}
 }
 
+// The refusal names the KIND of file the person asked for (the words of the Materializer's kind choice), not
+// the format it is made in: a package is HTML pages and an email template is JSON, and neither is what they chose.
 func TestMaterializeRefusesATemplateThatMakesAnotherKindOfFile(t *testing.T) {
 	for name, tc := range map[string]struct {
 		template   string
@@ -947,8 +950,11 @@ func TestMaterializeRefusesATemplateThatMakesAnotherKindOfFile(t *testing.T) {
 		"a web page template under a PDF":           {template: "html", request: pure.FormatPDF, want: "That template makes Web page files. Choose a template for PDF."},
 		"a Word template under a spreadsheet":       {template: "docx", request: pure.FormatCSV, want: "That template makes Word document files. Choose a template for Spreadsheet (CSV)."},
 		"a text template under data":                {template: "txt", request: pure.FormatJSON, want: "That template makes Plain text files. Choose a template for Data (JSON)."},
-		"a Markdown template under a package":       {template: "markdown", request: pure.FormatHTML, deployable: "static", want: "That template makes Markdown files. Choose a template for Web page."},
-		"a Markdown template under an email":        {template: "markdown", request: pure.FormatJSON, email: true, want: "That template makes Markdown files. Choose a template for Data (JSON)."},
+		"a Markdown template under a static site":   {template: "markdown", request: pure.FormatHTML, deployable: "static", want: "That template makes Markdown files. Choose a template for Static site package."},
+		"a PDF template under a single-page app":    {template: "pdf", request: pure.FormatHTML, deployable: "spa", want: "That template makes PDF files. Choose a template for Single-page app package."},
+		"a text template under a storefront":        {template: "txt", request: pure.FormatHTML, deployable: "shopify_storefront", want: "That template makes Plain text files. Choose a template for Shopify storefront package."},
+		"a Markdown template under an email":        {template: "markdown", request: pure.FormatJSON, email: true, want: "That template makes Markdown files. Choose a template for Email template."},
+		"a web page template under an email":        {template: "html", request: pure.FormatJSON, email: true, want: "That template makes Web page files. Choose a template for Email template."},
 		"a template of a format this app can't say": {template: "audio", request: pure.FormatMarkdown, want: "That template makes audio files. Choose a template for Markdown."},
 	} {
 		for where, ctx := range map[string]context.Context{"in a run": nestedMaterializeContext(), "standalone": materializeContext()} {
@@ -1433,6 +1439,51 @@ func TestOutputFileNameAddsTheExtensionOnce(t *testing.T) {
 	} {
 		if got := outputFileName(tc.name, tc.format, ""); got != tc.want {
 			t.Fatalf("outputFileName(%q, %s) = %q, want %q", tc.name, tc.format, got, tc.want)
+		}
+	}
+}
+
+// A stem longer than 120 bytes is cut, and the cut is on a character. It used to be at byte 120 wherever
+// that fell, so a name whose 120th byte was in the middle of a character was filed with the start of that
+// character at its end: a file name that is not text, which a client shows with a replacement character.
+// The cut is now at the last character that ends at or below the limit.
+func TestSanitiseFileStemIsCutOnACharacterNotInsideOne(t *testing.T) {
+	const e, ri, face = "\u00e9", "\u65e5", "\U0001F600" // 2, 3 and 4 bytes
+	repeat := strings.Repeat
+	for name, tc := range map[string]struct{ typed, want string }{
+		"exactly the limit is kept whole":                {repeat("a", 120), repeat("a", 120)},
+		"one over the limit is cut":                      {repeat("a", 121), repeat("a", 120)},
+		"two-byte characters ending on the limit":        {repeat(e, 60), repeat(e, 60)},
+		"two-byte characters cut on the limit":           {repeat(e, 61), repeat(e, 60)},
+		"a two-byte character across the limit":          {"a" + repeat(e, 61), "a" + repeat(e, 59)},
+		"a three-byte character across the limit":        {"ab" + repeat(ri, 50), "ab" + repeat(ri, 39)},
+		"a three-byte character one byte earlier":        {"abcd" + repeat(ri, 50), "abcd" + repeat(ri, 38)},
+		"four-byte characters ending on the limit":       {repeat(face, 100), repeat(face, 30)},
+		"a four-byte character across the limit (1)":     {"a" + repeat(face, 40), "a" + repeat(face, 29)},
+		"a four-byte character across the limit (2)":     {"ab" + repeat(face, 40), "ab" + repeat(face, 29)},
+		"a four-byte character across the limit (3)":     {"abc" + repeat(face, 40), "abc" + repeat(face, 29)},
+		"the space the cut leaves at the end is trimmed": {repeat("a", 118) + " " + repeat(e, 5), repeat("a", 118)},
+		"bytes that are not text become U+FFFD whole":    {repeat("\xff", 100), repeat("\ufffd", 40)},
+	} {
+		got := sanitiseFileStem(tc.typed)
+		if got != tc.want {
+			t.Errorf("%s: sanitiseFileStem(%d bytes) = %q (%d bytes), want %q (%d bytes)", name, len(tc.typed), got, len(got), tc.want, len(tc.want))
+		}
+		if !utf8.ValidString(got) || len(got) > maxFileStemBytes {
+			t.Errorf("%s: the stem is %d bytes and valid = %v: it must be text of at most %d bytes", name, len(got), utf8.ValidString(got), maxFileStemBytes)
+		}
+	}
+
+	// Whatever character falls across the limit, and wherever in the last four bytes it starts, the stem
+	// is text, within the limit, and the longest such: it gives up only the bytes of the one character.
+	for _, character := range []string{e, ri, face} {
+		for lead := 0; lead < 8; lead++ {
+			typed := repeat("a", lead) + repeat(character, 80)
+			got := sanitiseFileStem(typed)
+			if !utf8.ValidString(got) || len(got) > maxFileStemBytes || len(got) <= maxFileStemBytes-len(character) {
+				t.Errorf("%d plain bytes then %q x 80: stem is %d bytes (valid = %v), want a whole number of characters within %d bytes and more than %d",
+					lead, character, len(got), utf8.ValidString(got), maxFileStemBytes, maxFileStemBytes-len(character))
+			}
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	pure "github.com/znasllc-io/memql/component/compose"
@@ -175,9 +176,33 @@ func formatWords(f pure.Format) string {
 	return string(f)
 }
 
+// kindWords names the KIND of file a request asks for as the Materializer's kind choice does ("Static
+// site package", "Email template", "Web page"), for a refusal to say to the person who chose it. A
+// package is made of HTML pages and an email template is JSON, so naming the format would name
+// something they did not ask for. The words are those of fileKindEntry in
+// clients/os/src/apps/materializer/make.ts (a package's, deployableWord in words.ts).
+func kindWords(format pure.Format, deployableKind, outputKind string) string {
+	switch {
+	case outputKind == "email_template":
+		return "Email template"
+	case deployableKind != "":
+		switch pure.DeployableKind(deployableKind) {
+		case pure.DeployableSPA:
+			return "Single-page app package"
+		case pure.DeployableStatic:
+			return "Static site package"
+		case pure.DeployableStorefront:
+			return "Shopify storefront package"
+		}
+		return deployableKind + " package"
+	}
+	return formatWords(format)
+}
+
 // requireUsableTemplate refuses a template that cannot make this request's file: one that has been
 // archived, and one that makes another format than the request asked for. A template that names no
-// format fits any.
+// format fits any. The refusal names the template's format and the KIND the request asked for
+// (kindWords), which for a package or an email template is not the format it is made in.
 //
 // IT IS A READ, NOT A TRUST. composeTemplateById answers any template its owner holds, and the render
 // step applies whatever it is given: an archived binding, or a PDF template under a Markdown file, was
@@ -188,8 +213,8 @@ func formatWords(f pure.Format) string {
 // A template the caller cannot read is not refused here. The render step has always said so ("that
 // template is not readable by you"), and the failed composition is the record of it; this check adds to
 // what is refused, and changes nothing that was.
-func (i *Integration) requireUsableTemplate(ctx context.Context, templateId string, format pure.Format) error {
-	template, err := i.store().templateById(ctx, templateId)
+func (i *Integration) requireUsableTemplate(ctx context.Context, a materializeArgs) error {
+	template, err := i.store().templateById(ctx, a.TemplateId)
 	if err != nil {
 		return fmt.Errorf("compose: checking the template: %w", err)
 	}
@@ -199,9 +224,9 @@ func (i *Integration) requireUsableTemplate(ctx context.Context, templateId stri
 	if boolOf(template["archived"]) {
 		return errTemplateArchived
 	}
-	if made := strings.TrimSpace(stringOf(template["format"])); made != "" && !strings.EqualFold(made, string(format)) {
+	if made := strings.TrimSpace(stringOf(template["format"])); made != "" && !strings.EqualFold(made, string(a.Format)) {
 		//nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
-		return fmt.Errorf("That template makes %s files. Choose a template for %s.", formatWords(pure.Format(strings.ToLower(made))), formatWords(format))
+		return fmt.Errorf("That template makes %s files. Choose a template for %s.", formatWords(pure.Format(strings.ToLower(made))), kindWords(a.Format, a.DeployableKind, a.OutputKind))
 	}
 	return nil
 }
@@ -462,7 +487,7 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 	// THE TEMPLATE IS CHECKED NEXT, for the same reasons and at the same point: a repeat of an accepted
 	// request finds its composition first, and a refusal comes before anything is read or written.
 	if a.TemplateId != "" {
-		if err := i.requireUsableTemplate(ctx, a.TemplateId, a.Format); err != nil {
+		if err := i.requireUsableTemplate(ctx, a); err != nil {
 			return nil, err
 		}
 	}
@@ -1264,6 +1289,15 @@ func filedFileName(name string, format pure.Format, deployableKind, outputKind s
 	return fileName
 }
 
+// maxFileStemBytes is the most a filed name's stem keeps, in bytes (the app tells a person the same
+// number: clients/os/src/apps/materializer/make.ts, MAX_STEM_BYTES).
+const maxFileStemBytes = 120
+
+// sanitiseFileStem is the stem of a filed name from what a person typed: path separators and NUL
+// become "-", control characters and DEL go, dots at either end go, and at most maxFileStemBytes are
+// kept. THE CUT IS ON A CHARACTER: when the limit falls in the middle of one, that whole character is
+// left out (cutOnACharacter), so the name stays text. (It was cut at the byte, which filed a name with
+// the start of a character at its end, and a client shows that as a replacement character.)
 func sanitiseFileStem(name string) string {
 	var b strings.Builder
 	for _, r := range strings.TrimSpace(name) {
@@ -1277,10 +1311,23 @@ func sanitiseFileStem(name string) string {
 		}
 	}
 	out := strings.Trim(strings.TrimSpace(b.String()), ".")
-	if len(out) > 120 {
-		out = strings.TrimSpace(out[:120])
+	if len(out) > maxFileStemBytes {
+		out = strings.TrimSpace(cutOnACharacter(out, maxFileStemBytes))
 	}
 	return out
+}
+
+// cutOnACharacter is the longest prefix of s that is at most limit bytes and ends between two
+// characters. s is text: sanitiseFileStem builds it from runes, so an invalid byte has already
+// become U+FFFD.
+func cutOnACharacter(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	for limit > 0 && !utf8.RuneStart(s[limit]) {
+		limit--
+	}
+	return s[:limit]
 }
 
 // libraryFormatFor maps onto v1:library:file.format, the Library's own

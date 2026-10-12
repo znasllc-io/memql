@@ -24,9 +24,10 @@ import (
 // the name it will be filed under. Each of those is a rule the engine holds, and the app holds a COPY
 // of it, because the person has to be told before the engine is asked.
 //
-// A copy that drifts says something false to a person. It did: the app said an email template is filed
-// as <stem>.json, and the engine files it as <stem>.email.json. These tests hold every copy the app
-// makes to the engine, in the way each can be held:
+// A copy that drifts says something false to a person. It did, in the app's first draft, which review
+// caught before it merged: the app said an email template is filed as <stem>.json, and the engine files
+// it as <stem>.email.json. These tests hold every copy the app makes to the engine, in the way each can
+// be held:
 //
 //   - a CONSTANT (a list of extensions, of formats, a sentence) is read off the app's source and
 //     compared with what the engine does with each value, in both directions: a value the app lists and
@@ -35,9 +36,11 @@ import (
 //     computed here through the engine's own parse and filing, and by the app's own tests through its
 //     own function (clients/os/test/materializer/make.test.ts reads the same file).
 //
-// They read the app's TypeScript, which Go's test cache does not notice changing: run them with
-// -count=1 after editing it. A declaration that is missing or reshaped fails with a sentence naming the
-// file, so that the guard is moved with the code it guards and never left quietly checking nothing.
+// They read the app's TypeScript and the table of names, files a test opens under the module root, which
+// Go's test cache keys on: an edit to either re-runs them. CI runs them with -count=1 regardless, and so
+// should anyone who wants to be sure a run read the files as they are now. A declaration that is missing
+// or reshaped fails with a sentence naming the file, so that the guard is moved with the code it guards
+// and never left quietly checking nothing.
 
 const (
 	osMakeSource    = "../../clients/os/src/apps/materializer/make.ts"
@@ -301,11 +304,12 @@ func TestTheEngineFilesTheNamesInTheTableAsTheTableSays(t *testing.T) {
 			continue
 		}
 		got := filedFileName(parsed.Name, parsed.Format, parsed.DeployableKind, parsed.OutputKind)
-		// A stem the engine cuts at 120 bytes can be cut inside a character, which leaves the bytes of
-		// its start. The table writes that as ONE replacement character, as the app shows it.
+		// A filed name is text: a stem longer than 120 bytes is cut on a character, never inside one.
 		if !utf8.ValidString(got) {
+			t.Errorf("%s %q: the engine files this as %q, which is not valid UTF-8: the stem was cut inside a character", kindOf(row), row.Name, got)
+		}
+		if limitFallsInsideACharacter(row.Name) {
 			cut++
-			got = strings.ToValidUTF8(got, "�")
 		}
 		if row.OutputKind == "email_template" {
 			email++
@@ -325,6 +329,15 @@ func TestTheEngineFilesTheNamesInTheTableAsTheTableSays(t *testing.T) {
 		}
 	}
 	if len(table.Rows) < 300 || refused < 20 || cut < 4 || email < 20 {
-		t.Errorf("%s holds %d rows, of which %d refused, %d cut inside a character and %d for an email template: it is meant to hold a few hundred, with each of those well represented", filedNamesTable, len(table.Rows), refused, cut, email)
+		t.Errorf("%s holds %d rows, of which %d refused, %d with a character across the 120-byte limit and %d for an email template: it is meant to hold a few hundred, with each of those well represented", filedNamesTable, len(table.Rows), refused, cut, email)
 	}
+}
+
+// limitFallsInsideACharacter says whether a name, as typed and trimmed, has a character across the 120th
+// byte: the case where the cut has to move back to where that character starts. It reads the name and not
+// the engine's cleaned stem, so it is exact only for names with no leading dot, control character or
+// extension to shift the bytes, which is what the rows that carry one are.
+func limitFallsInsideACharacter(name string) bool {
+	typed := []byte(strings.TrimSpace(name))
+	return len(typed) > maxFileStemBytes && !utf8.RuneStart(typed[maxFileStemBytes])
 }

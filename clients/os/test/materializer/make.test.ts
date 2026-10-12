@@ -846,6 +846,36 @@ describe("filedName", () => {
     expect(filed("a".repeat(130))).toBe(`${"a".repeat(120)}.md`);
     expect(filed("é".repeat(100))).toBe(`${"é".repeat(60)}.md`);
   });
+
+  // The cut is on a character, never inside one: a character that would cross the 120th byte is left
+  // out whole, so the name is text (the engine did the same once its cut was fixed; the table below
+  // holds the two to each other, and these say why in the app's words).
+  it("cuts a long name before the character that would cross the 120th byte, never through it", () => {
+    // 2, 3 and 4 bytes a character, each one byte short of fitting.
+    expect(filed("a" + "é".repeat(100))).toBe(`a${"é".repeat(59)}.md`);
+    expect(filed("ab" + "日".repeat(100))).toBe(`ab${"日".repeat(39)}.md`);
+    expect(filed("abcd" + "日".repeat(100))).toBe(`abcd${"日".repeat(38)}.md`);
+    expect(filed("a" + "😀".repeat(100))).toBe(`a${"😀".repeat(29)}.md`);
+    expect(filed("ab" + "😀".repeat(100))).toBe(`ab${"😀".repeat(29)}.md`);
+    expect(filed("abc" + "😀".repeat(100))).toBe(`abc${"😀".repeat(29)}.md`);
+    // Characters that end exactly on the limit are all kept.
+    expect(filed("😀".repeat(100))).toBe(`${"😀".repeat(30)}.md`);
+    // The space the cut leaves at the end goes, as the engine trims it.
+    expect(filed("a".repeat(118) + " " + "é".repeat(5))).toBe(`${"a".repeat(118)}.md`);
+  });
+
+  it("never files a name that is not text", () => {
+    for (const character of ["é", "日", "😀"]) {
+      for (let lead = 0; lead < 8; lead++) {
+        const name = filed("a".repeat(lead) + character.repeat(80));
+        expect(name).not.toContain("\ufffd");
+        const stem = name.slice(0, -".md".length);
+        const bytes = new TextEncoder().encode(stem).length;
+        expect(bytes).toBeLessThanOrEqual(120);
+        expect(bytes).toBeGreaterThan(120 - new TextEncoder().encode(character).length);
+      }
+    }
+  });
 });
 
 // THE ENGINE'S OWN TABLE of the names a file is filed under (integrations/compose/testdata/
@@ -880,14 +910,27 @@ describe("filedName, held to the engine's table", () => {
     expect(wrong).toEqual([]);
   });
 
+  // The name as typed and trimmed has a character across its 120th byte: the cut has to move back to
+  // where that character starts. Exact for the rows that carry one (no leading dot, control character or
+  // extension to shift the bytes), and the Go test counts them the same way.
+  const limitFallsInsideACharacter = (name: string) => {
+    const typed = new TextEncoder().encode(name.trim());
+    return typed.length > 120 && ((typed[120] ?? 0) & 0xc0) === 0x80;
+  };
+
   // A table that lost a kind, its refused names or its cuts would guard less than it says.
-  it("holds every kind of file, the names the engine refuses and the names it cuts inside a character", () => {
+  it("holds every kind of file, the names the engine refuses and the names it cuts short of the limit", () => {
     const kinds = new Set(rows.map((row) => fileKindEntry(kindOf(row)).value));
     expect([...kinds].sort()).toEqual(FILE_KINDS.map((entry) => entry.value).sort());
     expect(rows.length).toBeGreaterThanOrEqual(300);
     expect(rows.filter((row) => row.filed === "").length).toBeGreaterThanOrEqual(20);
-    expect(rows.filter((row) => row.filed.includes("\ufffd")).length).toBeGreaterThanOrEqual(4);
+    expect(rows.filter((row) => limitFallsInsideACharacter(row.name)).length).toBeGreaterThanOrEqual(4);
     expect(rows.filter((row) => row.outputKind === "email_template" && row.filed.endsWith(".email.json")).length).toBeGreaterThanOrEqual(20);
+  });
+
+  // A filed name is text: no row holds a replacement character, and the app files none.
+  it("holds no name that is not text", () => {
+    expect(rows.filter((row) => row.filed.includes("\ufffd")).map((row) => row.name)).toEqual([]);
   });
 });
 

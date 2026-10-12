@@ -1061,10 +1061,10 @@ jobs:
         # file is filed under) to the engine. `clients/**` is a `gates` entry, so a PR that
         # touches only the app reaches this step, and without the package here the guard
         # would run only on the next Go change: the app could drift from the engine and merge
-        # green, which is how the app came to say an email template is filed as .json when
-        # the engine files .email.json. The package is a db-gated tree (db-tests runs it
-        # whole); here its database cases skip, as they do for the complement, and its other
-        # tests run, in about a second.
+        # green. (It nearly did: the app's first draft said an email template is filed as
+        # .json where the engine files .email.json, and only a review caught it.) The package
+        # is a db-gated tree (db-tests runs it whole); here its database cases skip, as they
+        # do for the complement, and its other tests run, in about a second.
         run: go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./integrations/compose ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
