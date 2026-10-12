@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { useState } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { readTheQuestion } from "../../readTheQuestion";
 import { chooseOption } from "../../selectControl";
 import { installSeededAccess } from "../../seededAccess";
 
@@ -424,6 +425,12 @@ describe("Add a campaign, on Review", () => {
     expect(screen.queryByText("Send “August copy” to 1,204 subscribers now?")).toBeNull();
 
     press("Send now");
+    // A double-click asks and does not answer: its second click lands on the
+    // confirmation before anybody could have read the question.
+    press("Send now");
+    expect(conn.query.createCampaign).not.toHaveBeenCalled();
+    expect(barActs()).toEqual(["Not yet", "Send now"]);
+    await readTheQuestion();
     const confirm = within(bar()).getByRole("button", { name: "Send now" });
     // Two presses before the first one's busy state is drawn: one campaign, one send.
     act(() => {
@@ -459,6 +466,7 @@ describe("Add a campaign, on Review", () => {
     await walkToReview();
     await waitFor(() => expect(barActs()).toContain("Send now"));
     press("Send now");
+    await readTheQuestion();
     press("Send now");
 
     expect(await screen.findByText("The campaign was saved as a draft but not sent.")).toBeTruthy();
@@ -467,8 +475,11 @@ describe("Add a campaign, on Review", () => {
     expect(openStep()).toBe("Review");
     expect(barActs()).toEqual(["Cancel", "Send a test", "Send now"]);
 
-    // Trying again sends the same campaign; it is not written twice.
+    // Trying again sends the same campaign; it is not written twice. The ask
+    // took the refused confirmation's place under its label, so it is read first.
+    await readTheQuestion();
     press("Send now");
+    await readTheQuestion();
     press("Send now");
     await waitFor(() => expect(conn.query.campaignStartSend).toHaveBeenCalledTimes(2));
     expect(conn.query.createCampaign).toHaveBeenCalledTimes(1);
@@ -497,6 +508,7 @@ describe("Add a campaign, on Review", () => {
     await waitFor(() => expect(barWord()).toBe("Ready to schedule"));
     press("Schedule");
     expect(screen.getByText("Schedule “August copy” for Tue, Oct 14 at 9:00 (America/Phoenix), to 1,204 subscribers?")).toBeTruthy();
+    await readTheQuestion();
     press("Schedule");
 
     await waitFor(() => expect(conn.query.campaignScheduleSend).toHaveBeenCalledOnce());
@@ -522,6 +534,7 @@ describe("Add a campaign, on Review", () => {
     expect(barDetail()).toBe("A draft doesn't repeat until you start it.");
     press("Start repeating");
     expect(screen.getByText("Send “August copy” to Newsletter every 2 weeks from Tue, Oct 14 at 9:00?")).toBeTruthy();
+    await readTheQuestion();
     press("Start repeating");
 
     await waitFor(() => expect(conn.query.campaignConfigureSeries).toHaveBeenCalledOnce());
@@ -637,6 +650,7 @@ describe("Add a campaign, on Review", () => {
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Spring sale" } });
     press("Send now");
     expect(screen.getByText("Send “Spring sale” to 1,204 subscribers now?")).toBeTruthy();
+    await readTheQuestion();
     press("Send now");
     await waitFor(() => expect(conn.query.campaignStartSend).toHaveBeenCalledOnce());
     const created = createdCampaign(conn);

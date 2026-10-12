@@ -310,7 +310,9 @@ export function Wizard({
         </section>
       </div>
 
-      <ActionBar state={status.word} detail={status.detail} tone={status.tone} meta={status.meta} live acts={acts}>
+      {/* The open step is what the bar is about: a confirmation is held only
+          within one step, and the next step's forward act is a new question. */}
+      <ActionBar state={status.word} detail={status.detail} tone={status.tone} meta={status.meta} live acts={acts} scope={open}>
         {confirm}
       </ActionBar>
     </div>

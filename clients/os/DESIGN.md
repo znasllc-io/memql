@@ -133,6 +133,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     one surface, and the person had to know which was which.
     Account and organization details use this footer too: state on the left,
     Back/Disconnect on the right; Cancel/confirmation stay on that same edge.
+    An act that asks first is confirmed by the same act at the same place, and
+    the bar holds that confirmation for a moment after it appears
+    (`CONFIRM_SETTLE_MS`), so the second click of a double-click cannot answer
+    a question nobody read.
     Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them

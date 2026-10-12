@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 
 import { Button, type ButtonTone } from "./controls";
 
@@ -43,6 +43,32 @@ import { Button, type ButtonTone } from "./controls";
 // rather than to the window and travel with the wallpaper. The Logs app's jump
 // pill records the same trap. The bar is the second row of the pane's grid;
 // the content above it scrolls, and the bar does not.
+//
+// ===========================================================================
+// A CONFIRMATION IS NOT PRESSED BY THE CLICK THAT ASKED FOR IT
+// ===========================================================================
+// An act that asks first ("Send now", which names how many people it reaches)
+// is answered by an act with THE SAME LABEL AT THE SAME PLACE: the primary
+// stays on the right edge, so the confirmation stands exactly where the ask
+// stood. A double-click is then two presses -- the first asks, the second
+// lands on the confirmation and sends to everybody before the question was
+// on screen long enough to be read. So an act that took the place of the one
+// just pressed, under the same label, ignores presses for `CONFIRM_SETTLE_MS`
+// after it appears. One guard, here, for every ask in the shell; the bar
+// cannot tell an ask from any other act, and does not need to -- "the same
+// promise, where the last press landed, in a bar that just changed" is the
+// shape of every one of them. (It holds the way back too: a confirmation
+// refused at once puts its ask back in that place, and the rest of the
+// double-click does not open the question again.)
+//
+// What it leaves alone: an act whose bar did not change under it (a test sent
+// twice, a save tried again after a refusal), a confirmation that stands
+// somewhere else than its ask, which a double-click cannot reach, and a
+// wizard's next step -- its `scope` (the open step) moved, so the Next that
+// stands where the last Next stood is a new question.
+
+/** How long an act that replaced the one just pressed, under its label and at its place, ignores presses. */
+export const CONFIRM_SETTLE_MS = 400;
 
 /** One act the current state offers. */
 export interface Act {
@@ -100,13 +126,58 @@ export interface ActionBarProps {
   acts?: readonly Act[];
   /** Rendered in place of the acts -- the typed confirmation a delete takes. */
   children?: ReactNode;
+  /**
+   * WHAT THE BAR IS ABOUT, when it moves through several things: a wizard's
+   * open step. A confirmation is held only within one -- the next step's
+   * forward act standing where the last one stood is a new question, not the
+   * answer to the one just asked (`CONFIRM_SETTLE_MS`).
+   */
+  scope?: string;
 }
 
-export function ActionBar({ state, detail, tone = "none", meta, live = false, acts = [], children }: ActionBarProps) {
+/** The press the bar last acted on, and where it landed. */
+interface Pressed {
+  label: string;
+  /** Counted from the right edge, where the primary is. */
+  place: number;
+  /** What the bar offered when it was pressed. */
+  arrangement: string;
+  scope: string;
+}
+
+export function ActionBar({ state, detail, tone = "none", meta, live = false, acts = [], children, scope = "" }: ActionBarProps) {
+  // WHAT THE BAR OFFERS, and since when: the labels in order, and whether a
+  // question stands beside them. A press that changes it (an ask) starts the
+  // clock for whatever now stands where the press landed.
+  const asking = children !== undefined && children !== null && children !== false;
+  const arrangement = `${asking ? "?" : ""}${acts.map((act) => act.label).join("\u001f")}`;
+  const shown = useRef({ arrangement, since: 0 });
+  useLayoutEffect(() => {
+    if (shown.current.arrangement !== arrangement) shown.current = { arrangement, since: Date.now() };
+  }, [arrangement]);
+  const pressed = useRef<Pressed | null>(null);
+
   // NOTHING HAPPENS WHERE NOTHING IS OFFERED. With no state to name and no act
   // to offer, the bar is absent rather than an empty band of chrome -- the
   // same rule the shell states about right-click.
   if (state === "" && acts.length === 0 && !children) return null;
+
+  function press(act: Act, index: number) {
+    const place = acts.length - 1 - index;
+    const last = pressed.current;
+    const settling =
+      last !== null &&
+      last.label === act.label &&
+      last.place === place &&
+      last.scope === scope &&
+      last.arrangement !== shown.current.arrangement &&
+      Date.now() - shown.current.since < CONFIRM_SETTLE_MS;
+    // A press that lands too soon is the rest of the click that asked: it
+    // neither confirms nor counts as a press of its own.
+    if (settling) return;
+    pressed.current = { label: act.label, place, arrangement: shown.current.arrangement, scope };
+    act.onAct();
+  }
 
   return (
     <div className="os-actbar" data-tone={tone} role="group" aria-label="What you can do with this">
@@ -118,7 +189,7 @@ export function ActionBar({ state, detail, tone = "none", meta, live = false, ac
       </div>
       <div className="os-actbar-acts">
         {children}
-        {acts.map((act) =>
+        {acts.map((act, index) =>
           act.text ? (
             <button
               key={act.label}
@@ -128,7 +199,7 @@ export function ActionBar({ state, detail, tone = "none", meta, live = false, ac
               disabled={act.busy}
               aria-busy={act.busy || undefined}
               aria-label={act.ariaLabel}
-              onClick={act.onAct}
+              onClick={() => press(act, index)}
             >
               {act.icon}
               {act.label}
@@ -138,7 +209,7 @@ export function ActionBar({ state, detail, tone = "none", meta, live = false, ac
               key={act.label}
               tone={act.tone}
               busy={act.busy}
-              onClick={act.onAct}
+              onClick={() => press(act, index)}
               ariaLabel={act.ariaLabel}
             >
               {act.icon}

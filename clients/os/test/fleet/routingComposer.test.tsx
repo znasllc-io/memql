@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheQuestion } from "../readTheQuestion";
 
 // Fleet > Routing > Routes: the list, the route page (the composer) and the
 // New route wizard -- against the real Fleet reads and the routing builtins
@@ -314,6 +315,7 @@ describe("saving and restoring", () => {
     fireEvent.click(within(bar()).getByRole("button", { name: "Restore shipped" }));
     expect(within(bar()).getByText("Restore shipped sources?")).toBeTruthy();
     expect(calls.routingPolicyReset).not.toHaveBeenCalled();
+    await readTheQuestion();
     fireEvent.click(within(bar()).getByRole("button", { name: "Restore shipped" }));
     await settle();
     expect(calls.routingPolicyReset).toHaveBeenCalledWith({ name: "localFirst", expectedRevision: 7 });

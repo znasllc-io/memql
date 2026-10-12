@@ -1,11 +1,13 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readTheQuestion } from "../readTheQuestion";
 import { ReleaseBrowser } from "../../src/apps/cluster/releases/ReleasesSection";
 import { fileReleaseFixture, releaseFixture, releaseId, releaseResult, candidateRecord } from "./releaseFixtures";
 
 async function open() { fireEvent.click(await screen.findByRole("button", { name: "Review engine 0.25.0" })); await screen.findByText("Versions"); }
 async function destination() { fireEvent.click(await screen.findByRole("button", { name: "Review destination rehearsal" })); await screen.findByText("Artifact digest"); }
-async function twice(label: string) { fireEvent.click(await screen.findByRole("button", { name: label })); fireEvent.click(await screen.findByRole("button", { name: label })); }
+/** Asks, reads the question, and confirms: the confirmation stands where the ask did, under its label. */
+async function twice(label: string) { fireEvent.click(await screen.findByRole("button", { name: label })); await readTheQuestion(); fireEvent.click(await screen.findByRole("button", { name: label })); }
 
 describe("release review", () => {
   it("explains that a file upload remains in an existing draft release", async () => {
@@ -155,6 +157,7 @@ describe("draft release lifecycle", () => {
     await open(); await destination();
     fireEvent.click(await screen.findByRole("button", { name: "Create draft" }));
     expect(screen.getByText(/The tag may trigger repository automation/)).toBeTruthy();
+    await readTheQuestion();
     fireEvent.click(screen.getByRole("button", { name: "Create draft" }));
     await screen.findByText("Draft #81");
     expect(f.state.calls.filter((c) => ["publish", "promote"].includes(c.kind))).toHaveLength(0);
@@ -164,6 +167,7 @@ describe("draft release lifecycle", () => {
     fireEvent.click(screen.getByRole("button", { name: "Publish release" }));
     expect(screen.getByText(/and its uploaded files public/)).toBeTruthy();
     expect(screen.getByText(/Select as the latest release/)).toBeTruthy();
+    await readTheQuestion();
     fireEvent.click(screen.getByRole("button", { name: "Publish release" }));
     await screen.findByText("Release public and verified");
     expect(screen.getByText("Release #81")).toBeTruthy();

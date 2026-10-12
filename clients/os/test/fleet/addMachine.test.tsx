@@ -1,5 +1,6 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readTheQuestion } from "../readTheQuestion";
 
 import type { FleetSettings, FleetSettingsStore } from "../../src/apps/fleet/settings";
 
@@ -501,6 +502,7 @@ describe("cancel after a mint asks which of two things", () => {
     expect(screen.getByText(/won’t be shown again/)).toBeTruthy();
     // Nothing is revoked by leaving, so there is nothing to uninstall.
     expect(screen.queryByLabelText("the uninstall command")).toBeNull();
+    await readTheQuestion();
     await click(within(bar()).getByRole("button", { name: "Back to Machines" }));
     expect(h.revoke).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { name: "Machines" })).toBeTruthy();
