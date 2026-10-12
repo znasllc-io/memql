@@ -16,9 +16,20 @@ import (
 
 var singleSendRequestID = regexp.MustCompile(`^[A-Za-z0-9_-]{8,160}$`)
 
+// completeReceiptLimit bounds the write of the receipt that records an accepted
+// send. The message is out whatever becomes of it, so it is written on a context
+// the caller's end does not reach, for at most this long.
+const completeReceiptLimit = 5 * time.Second
+
 type singleSendReceipt struct {
 	id, fingerprint, accountID string
 	revision                   time.Time
+
+	// hold is the gate holding this receipt's lock (singleSendLock of id), set by
+	// whoever holds it before the send is made under the receipt. The receipt that
+	// says an attempt began is written only if the hold says its lock is still held
+	// (recordAttempt).
+	hold gateHold
 }
 
 // Event automations supply a stable requestId for one intended message. The
@@ -76,20 +87,28 @@ func (w *Worker) sendToRecipientOnce(ctx context.Context, args map[string]any, s
 	if w.singleSendGate == nil {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: send coordination is unavailable")
 	}
-	release, err := w.singleSendGate(ctx, receipt.id)
+	// The lock lives until Release, below, and nothing else: the caller's leaving
+	// mid-write must not end the transaction that holds it (database/sql rolls a
+	// transaction back when its context ends) while the receipt it protects is being
+	// written (as a signup's and a welcome's locks). A caller already gone takes none.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	hold, err := w.singleSendGate(context.WithoutCancel(ctx), receipt.id)
 	if err != nil {
 		// Nothing was attempted: no receipt exists. A busy lock is "try later" to
 		// every caller that sends mail, never a verdict on the message.
 		return nil, err
 	}
-	defer release()
+	defer hold.Release()
+	receipt.hold = hold
 	return w.sendToRecipientHeld(ctx, args, snapshot, expectedEmailDigest, receipt)
 }
 
 // sendToRecipientHeld is sendToRecipientOnce for a caller that already holds the
 // receipt's lock (singleSendLock of receipt.id), taken together with the others it
-// needed. It does not take it again: a second transaction asking for a lock the
-// first holds would wait for it.
+// needed, and has set receipt.hold to the gate that holds it. It does not take it
+// again: a second transaction asking for a lock the first holds would wait for it.
 func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, snapshot *Template, expectedEmailDigest string, receipt *singleSendReceipt) ([]memorynodes.MemoryNode, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
 	values := map[string]string{}
@@ -98,7 +117,8 @@ func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, s
 	}
 	rows, err := w.store.rows(auth.ContextWithInternalOrigin(ctx), call("query", "campaignSingleSendById", arg{"receiptId", receipt.id}))
 	if err != nil {
-		return nil, err
+		// The receipt could not be read: that decides nothing about the message.
+		return nil, undecided(err)
 	}
 	if len(rows) > 0 {
 		row := rows[0]
@@ -133,7 +153,7 @@ func (w *Worker) sendToRecipientHeld(ctx context.Context, args map[string]any, s
 		if err := json.Unmarshal(nodes[0].Payload, &result); err != nil {
 			return nil, err
 		}
-		persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		persist, cancel := context.WithTimeout(context.WithoutCancel(ctx), completeReceiptLimit)
 		defer cancel()
 		if err := w.saveSingleSendReceipt(persist, receipt, "complete", result); err != nil {
 			// The provider accepted the message. A persistence failure cannot

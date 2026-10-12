@@ -56,20 +56,31 @@ const signupsBusy = visitorMessage("Too many signups at once. Try again in a mom
 // can shorten it.
 var signupLockedPhase = 30 * time.Second
 
-// lockedWriteLimit bounds one write made under a gate's locks. Such a write runs on
-// a context its phase's deadline does not reach (detachedWrite), and this is what
-// keeps it from waiting for ever. It is above the request pool's statement timeout
-// (8 s, component/database): the server ends a slow write before this gives up on
-// it, so its answer is always read and the locks are given back only after it.
+// lockedWriteLimit is how long one write made under a gate's locks is waited for.
+// Such a write runs on a context its phase's deadline does not reach
+// (detachedWrite), and this keeps the wait from being for ever. It is above the
+// request pool's statement timeout (8 s, component/database), so a single slow
+// statement is ended by the server before the wait is, and its answer is read
+// while the locks are still held.
+//
+// IT IS A WAIT, NOT A CANCEL. A write still running when it ends is abandoned by
+// its client, which gives the locks back; the driver sends the server no
+// cancellation (pgdriver does not), so the server may go on and commit it
+// afterwards, after the locks were given back and beside whichever writer has taken
+// them since. That takes a write that outlasts the limit without the server ending
+// it: several statements, a stalled network, a database that has stopped
+// answering.
 var lockedWriteLimit = 10 * time.Second
 
 // detachedWrite makes one write the locks protect, on a context neither the phase's
 // deadline nor the caller's cancellation reaches, bounded by lockedWriteLimit. A
 // write cut mid-flight is not a write that did not happen: its client stops
 // waiting and the server goes on and commits it -- after the locks were given back,
-// beside a writer that has since taken them. Started, a write is waited for, and it
-// commits while the locks are held; the caller asks before starting it whether the
-// phase, and the locks, are still there.
+// beside a writer that has since taken them. Started, a write is waited for, and in
+// the ordinary case it commits while the locks are held; the caller asks before
+// starting it whether the phase, and the locks, are still there. The one case that
+// is not ordinary is a write still running at lockedWriteLimit (above): it is
+// reported as failed, and it may yet commit.
 func detachedWrite(phase context.Context, write func(context.Context) error) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(phase), lockedWriteLimit)
 	defer cancel()
@@ -605,16 +616,29 @@ const welcomePhaseCeiling = 2 * time.Minute
 // last, and nothing is waited for beyond it.
 //
 // ONLY A SEND THAT BEGAN CAN END A WELCOME. A busy lock anywhere, a phase that runs
-// out (or a pass that is stopped) before the send begins, a read that fails: each
-// is "nothing attempted, try later" -- no verdict is written, the welcome stays
-// pending, and the next pass takes it. A verdict is written for a send that began
-// (its receipt says an attempt was recorded), whatever the time, and for a
-// decision on the merits (the newsletter is off, the snapshot is unreadable, the
-// send was refused) made and written inside the phase. The verdict is written as
-// a signup's writes are: only if the gate says its locks are still held
-// (GateHold.Verify), and on detachedWrite -- its start is never cut by the phase,
-// so it commits while the locks are held (they are given back only after it) or
-// it does not start.
+// out (or a pass that is stopped) before the send begins, a read the welcome or its
+// send needs that fails, the record that an attempt began that cannot be written:
+// each is "nothing attempted, try later" -- no verdict is written, the welcome stays
+// pending, and the next pass takes it. (A send refused on its merits -- the template
+// is gone, the address changed, the sender is disabled -- is a verdict, and blocks.)
+// A verdict is written for a send that began (its receipt says an attempt was
+// recorded), whatever the time, and for a decision on the merits (the newsletter is
+// off, the snapshot is unreadable, the send was refused) made and written inside
+// the phase.
+//
+// THE WRITES UNDER THE LOCKS are made as a signup's are. The receipt that says an
+// attempt began (recordAttempt) and the verdict each ask the gate whether the locks
+// are still held (GateHold.Verify) and run on detachedWrite, which the phase's end
+// does not cut: begun, they are waited for and commit while the locks are held --
+// the locks are given back only after the write returns -- or they do not begin. The
+// exception is a write that outlasts lockedWriteLimit: it is reported as failed and
+// the locks are given back, and the server, which the driver cannot cancel, may
+// still commit it afterwards.
+//
+// HOW LONG THE LOCKS ARE HELD: the phase (the send's timeout plus
+// welcomePhaseMargin for the reads around it, never more than welcomePhaseCeiling),
+// and for a send that began, after it, up to completeReceiptLimit to save the
+// accepted message's receipt and up to lockedWriteLimit to write the verdict.
 func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned map[string]any) error {
 	scannedOwner := bare(str(scanned, "ownerUserId"))
 	requestID := "newsletter-" + bare(str(scanned, "id"))
@@ -669,6 +693,9 @@ func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned m
 			if receiptErr != nil || receipt.id != receiptID {
 				return fmt.Errorf("the welcome's send identity changed after it was scanned; it stays pending: %v", receiptErr)
 			}
+			// The receipt's lock is one of the three taken above; the receipt that says
+			// an attempt began is written only while the gate says it is still held.
+			receipt.hold = hold
 			nodes, sendErr := w.sendToRecipientHeld(owner, args, &snapshot, str(row, "emailDigest"), receipt)
 			// The send began when its attempt was recorded (saveSingleSendReceipt).
 			began = !receipt.revision.IsZero()
@@ -687,6 +714,13 @@ func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned m
 			// began: the error is the time's, not the welcome's.
 			if sendErr != nil && !began && phase.Err() != nil {
 				return fmt.Errorf("the welcome ran out of its time under its locks before its send began; it stays pending: %w", sendErr)
+			}
+			// Nor when a read the send needed failed, or the record that an attempt
+			// began could not be written (a statement timeout, a lost lock): the
+			// database's failure, not a verdict on the welcome, and a blocked welcome
+			// is never retried. Refusals on the merits are not marked, and block.
+			if sendErr != nil && !began && isUndecided(sendErr) {
+				return fmt.Errorf("the welcome's send could not be decided before it began; it stays pending: %w", sendErr)
 			}
 			if sendErr != nil {
 				reason = sendErr.Error()

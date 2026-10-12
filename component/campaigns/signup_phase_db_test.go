@@ -45,26 +45,37 @@ func (e *sessionEnder) triggers(q string) bool {
 }
 
 func (e *sessionEnder) Execute(ctx context.Context, q string) (any, error) {
-	if e.held.Load() && e.triggers(q) && !e.ended.Swap(true) {
-		var pid int
-		if err := e.admin.QueryRow(`SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted
-			AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid`, e.key).Scan(&pid); err != nil {
-			e.t.Errorf("no session holds %q: %v", e.key, err)
-		} else if _, err := e.admin.Exec("SELECT pg_terminate_backend($1)", pid); err != nil {
-			e.t.Errorf("could not end the session: %v", err)
-		}
-		deadline := time.Now().Add(3 * time.Second)
-		for {
-			var n int
-			_ = e.admin.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted
-				AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid`, e.key).Scan(&n)
-			if n == 0 || time.Now().After(deadline) {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
+	if e.held.Load() && e.triggers(q) {
+		e.endOnce()
 	}
 	return e.Engine.Execute(ctx, q)
+}
+
+// endOnce ends the session holding the key's lock, the first time it is asked, and
+// does not return until the lock is gone from the server. A test that wants the
+// session gone at a moment no query marks (a transport's reservation, say) calls
+// it from there.
+func (e *sessionEnder) endOnce() {
+	if e.ended.Swap(true) {
+		return
+	}
+	var pid int
+	if err := e.admin.QueryRow(`SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted
+		AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid`, e.key).Scan(&pid); err != nil {
+		e.t.Errorf("no session holds %q: %v", e.key, err)
+	} else if _, err := e.admin.Exec("SELECT pg_terminate_backend($1)", pid); err != nil {
+		e.t.Errorf("could not end the session: %v", err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var n int
+		_ = e.admin.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted
+			AND objsubid = 2 AND classid = 1296387409::oid AND objid = hashtext($1)::oid`, e.key).Scan(&n)
+		if n == 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // heldGate wraps the worker's newsletter gate so the engine under it can tell

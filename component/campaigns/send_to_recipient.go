@@ -53,6 +53,35 @@ import (
 
 var errCampaignRateLimited = errors.New("campaigns.sendToRecipient: the send-rate limit is exhausted; try again shortly")
 
+// undecidedSend is an error that says nothing about the message. Something the
+// send needed -- a read, the record that an attempt began -- failed, or was cut
+// short, before the attempt began: the database was slow, a statement timed out, a
+// lock was lost. Nothing was attempted, and the same send, made again, may well go
+// out.
+//
+// It exists for the callers that turn an error into a verdict. A welcome whose send
+// is refused on the merits (the template is gone, the address changed, the sender is
+// disabled) is blocked, and a blocked welcome is never retried; a welcome whose send
+// merely could not be decided is still owed its message and stays pending. The
+// text of the error is the wrapped error's, unchanged.
+type undecidedSend struct{ error }
+
+func (e undecidedSend) Unwrap() error { return e.error }
+
+// undecided marks err as a failure that decided nothing about the send.
+func undecided(err error) error {
+	if err == nil {
+		return nil
+	}
+	return undecidedSend{err}
+}
+
+// isUndecided reports whether err says nothing about the message (undecidedSend).
+func isUndecided(err error) bool {
+	var u undecidedSend
+	return errors.As(err, &u)
+}
+
 func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, receipt *singleSendReceipt, snapshot *Template, expectedEmailDigest string) ([]memorynodes.MemoryNode, error) {
 	templateID := memql.BareShortId(strings.TrimSpace(argString(args, "templateId")))
 	recipientID := memql.BareShortId(strings.TrimSpace(argString(args, "recipientId")))
@@ -77,7 +106,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	// can leave; visibility alone grants no sending authority.
 	tmpl, found, err := w.store.TemplateByID(ctx, templateID)
 	if err != nil {
-		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", err)
+		return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: %w", err))
 	}
 	if !found {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: template %q is not readable", templateID)
@@ -94,7 +123,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 
 	recipient, found, err := w.store.RecipientByID(ctx, recipientID)
 	if err != nil {
-		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", err)
+		return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: %w", err))
 	}
 	if !found {
 		// "No such row" and "not yours" are one answer here, deliberately.
@@ -117,7 +146,12 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	}
 	if emailRuleID != "" {
 		rows, err := w.store.rows(ctx, call("query", "emailRuleById", arg{"emailRuleId", emailRuleID}))
-		if err != nil || len(rows) != 1 || !sameOrganization(recipient.AccountID, str(rows[0], "accountId")) {
+		if err != nil {
+			// The rule could not be read: that is the database's failure, not an
+			// answer about the rule.
+			return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: email rule must be readable and belong to the recipient's organization: %w", err))
+		}
+		if len(rows) != 1 || !sameOrganization(recipient.AccountID, str(rows[0], "accountId")) {
 			return nil, errors.New("campaigns.sendToRecipient: email rule must be readable and belong to the recipient's organization")
 		}
 	}
@@ -150,7 +184,13 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 
 	identity, refusal := w.resolveSendIdentity(ctx, campaign)
 	if refusal.refused() {
-		return nil, fmt.Errorf("campaigns.sendToRecipient: %s", refusal.Reason)
+		err := fmt.Errorf("campaigns.sendToRecipient: %s", refusal.Reason)
+		if !refusal.Terminal {
+			// An identity that could not be READ ("the send will retry"), as opposed
+			// to one that is missing, retired or another organization's.
+			err = undecided(err)
+		}
+		return nil, err
 	}
 
 	// SUPPRESSION AT THE POINT OF SEND, before anything is rendered. The
@@ -164,9 +204,9 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	if sup, suppressed, err := w.store.SuppressionForSend(w.systemActorContext(ctx), campaign.AccountID, digest); err != nil {
 		// A failed lookup must NOT read as "not suppressed". Refusing is the
 		// only safe answer: a delayed message is recoverable, one sent to
-		// somebody who opted out is not.
-		return nil, fmt.Errorf("campaigns.sendToRecipient: the suppression list could not be consulted, "+
-			"so this send is refused rather than made: %w", err)
+		// somebody who opted out is not. Nor is it a verdict on the message.
+		return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: the suppression list could not be consulted, "+
+			"so this send is refused rather than made: %w", err))
 	} else if suppressed {
 		w.recordLoneDelivery(ctx, campaign, recipient, emailRuleID, Delivery{
 			Status: "skipped", SkipReason: sup.Reason,
@@ -221,12 +261,12 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		receipt.accountID = campaign.AccountID
 		reserved, giveBack, err := w.reserveDelivery(ctx, msg, identity.SendAs)
 		if err != nil {
-			return nil, fmt.Errorf("campaigns.sendToRecipient: %w", err)
+			return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: %w", err))
 		}
 		defer giveBack()
 		ctx = reserved
-		if err := w.saveSingleSendReceipt(ctx, receipt, "attempting", nil); err != nil {
-			return nil, err
+		if err := w.recordAttempt(ctx, receipt); err != nil {
+			return nil, undecided(err)
 		}
 	}
 	now := w.nowUTC()
@@ -250,6 +290,32 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		"sent": true, "skipped": false,
 		"recipientId": recipient.ID, "emailRuleId": emailRuleID,
 		"sentAs": identity.SendAs.Address,
+	})
+}
+
+// recordAttempt writes the receipt that says an attempt began. It is a write the
+// receipt's lock exists to protect -- a replica that took the lock after this one
+// gave it up, and read no receipt, would send the message again -- so it is made as
+// a signup's writes are, and as a welcome's verdict is: only if the gate says the lock
+// is still held (GateHold.Verify, on the caller's context, which answers its end), and
+// on detachedWrite, so it commits while the lock is held or does not start. On the
+// caller's context it would be cut where that context ends: the client stops waiting
+// and the server goes on and commits it after the lock was given back.
+//
+// An error means no attempt was recorded and the transport was not contacted. (The
+// write may still have reached the server; replay then finds a receipt that says an
+// attempt began and does not send, which is the safe side.)
+func (w *Worker) recordAttempt(ctx context.Context, receipt *singleSendReceipt) error {
+	if receipt.hold == nil {
+		// Whoever sends under a receipt holds its lock and says so; a send that does
+		// not is a wiring mistake, and the attempt is not recorded without the lock.
+		return errors.New("campaigns.sendToRecipient: the send does not hold its receipt's lock, so its attempt is not recorded")
+	}
+	if err := receipt.hold.Verify(ctx); err != nil {
+		return fmt.Errorf("campaigns.sendToRecipient: the send's lock is not held, so its attempt is not recorded: %w", err)
+	}
+	return detachedWrite(ctx, func(ctx context.Context) error {
+		return w.saveSingleSendReceipt(ctx, receipt, "attempting", nil)
 	})
 }
 

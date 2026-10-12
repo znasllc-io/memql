@@ -359,3 +359,95 @@ func TestAnOrdinaryCampaignDeliveryCarriesNoRuleId(t *testing.T) {
 		}
 	}
 }
+
+// failingRead makes the reads that start with prefix fail, the way the request
+// pool's statement timeout fails a read that took too long.
+type failingRead struct {
+	*fakeEngine
+	prefix string
+}
+
+func (e *failingRead) Execute(ctx context.Context, q string) (any, error) {
+	if strings.HasPrefix(q, e.prefix) {
+		return nil, errors.New("canceling statement due to statement timeout")
+	}
+	return e.fakeEngine.Execute(ctx, q)
+}
+
+// TestASendThatCouldNotReadIsUndecided: a read the send needs fails. That says
+// nothing about the message -- nothing was attempted and the same send, made again,
+// may go out -- and the error is marked so, for the callers that turn an error into
+// a verdict (a welcome that is blocked is never retried). Its text is unchanged.
+func TestASendThatCouldNotReadIsUndecided(t *testing.T) {
+	for _, read := range []string{
+		"query templateById",
+		"query recipientById",
+		"query emailRuleById",
+		"query senderIdentityById",
+		"query suppressionByDigest",
+	} {
+		t.Run(strings.TrimPrefix(read, "query "), func(t *testing.T) {
+			engine := recipientSendEngine()
+			engine.senderIdentities = map[string]map[string]any{
+				"si-acme": senderIdentityRow("si-acme", "news@acme.test", "Acme News", "active"),
+			}
+			sender := &recordingSender{}
+			w := newTestWorker(t, &failingRead{fakeEngine: engine, prefix: read}, sender)
+			args := sendToRecipientArgs()
+			args["senderIdentityId"] = "si-acme"
+
+			_, err := w.handleSendToRecipient(importCtx(), args, 0)
+
+			if err == nil {
+				t.Fatalf("a send whose %s failed went out", read)
+			}
+			if !isUndecided(err) {
+				t.Errorf("a send whose %s failed is a verdict on the message: %v", read, err)
+			}
+			if !strings.HasPrefix(err.Error(), "campaigns.sendToRecipient:") {
+				t.Errorf("marking the failure changed its text: %q", err)
+			}
+			if sender.count() != 0 {
+				t.Error("a message went out")
+			}
+		})
+	}
+}
+
+// TestASendRefusedOnItsMeritsIsNotUndecided: the other half. A send refused for a
+// reason of its own -- the template is not readable or not published, the recipient
+// is not readable, the sender is disabled -- is a verdict, and is never marked.
+func TestASendRefusedOnItsMeritsIsNotUndecided(t *testing.T) {
+	cases := map[string]func(*fakeEngine, map[string]any){
+		"the template is not readable":  func(e *fakeEngine, _ map[string]any) { e.template = nil },
+		"the template is not published": func(e *fakeEngine, _ map[string]any) { e.template["status"] = "draft" },
+		"the recipient is not readable": func(e *fakeEngine, _ map[string]any) { e.roster = nil },
+		"the sender is not readable":    func(_ *fakeEngine, args map[string]any) { args["senderIdentityId"] = "si-unknown" },
+		"the sender is disabled": func(e *fakeEngine, args map[string]any) {
+			e.senderIdentities = map[string]map[string]any{"si-retired": senderIdentityRow("si-retired", "old@acme.test", "Acme", "disabled")}
+			args["senderIdentityId"] = "si-retired"
+		},
+		"the email rule is not readable": func(e *fakeEngine, _ map[string]any) { e.emailRules = nil },
+	}
+	for name, arrange := range cases {
+		t.Run(name, func(t *testing.T) {
+			engine := recipientSendEngine()
+			args := sendToRecipientArgs()
+			arrange(engine, args)
+			sender := &recordingSender{}
+			w := newTestWorker(t, engine, sender)
+
+			_, err := w.handleSendToRecipient(importCtx(), args, 0)
+
+			if err == nil {
+				t.Fatal("a send that should be refused went out")
+			}
+			if isUndecided(err) {
+				t.Errorf("a send refused on its merits is marked undecided: %v", err)
+			}
+			if sender.count() != 0 {
+				t.Error("a message went out")
+			}
+		})
+	}
+}

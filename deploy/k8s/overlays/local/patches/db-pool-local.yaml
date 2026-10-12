@@ -1,14 +1,18 @@
-# Strategic merge patch: override Postgres connection pool bounds for local
-# in-cluster Postgres (not Tiger Cloud). Base sets very tight limits (4/2)
-# for Tiger Cloud's small max_connections ceiling; local Postgres allows more.
+# Strategic merge patch: override Postgres connection pool bounds for the local
+# in-cluster Postgres (the CloudNativePG Cluster this overlay patches). The base
+# sets the tight limits (4/2) the smallest cloud preset needs; the local Cluster
+# carries more connections (kustomization.yaml: max_connections 400).
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: memql-db-pool
   namespace: memql
 data:
-  # Local Postgres (in-cluster) has ample headroom. With replicas=1 per node
-  # type, 9 nodes x 8 open conns = 72 connections -- well within the default
-  # max_connections=100.
+  # A process opens up to 8 (this pool) + 4 (direct) + 1 (migration) + 4 (write
+  # gate) = 17 connections. The 7 nodes (identity, bff, agent, planner, workbench,
+  # mcp, edge) at 1 replica each hold 119, 153 while bff rolls; at 2 replicas each
+  # (`make scale N=2`) 238, 289 while bff rolls. All inside the 390 usable of
+  # max_connections 400 (10 reserved); the connection gate, run on this overlay
+  # rendered at two replicas, is render_connections_test.go.
   MEMORY_NODES_DATABASE_MAX_OPEN_CONNS: "8"
   MEMORY_NODES_DATABASE_MAX_IDLE_CONNS: "4"

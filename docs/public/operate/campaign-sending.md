@@ -371,8 +371,13 @@ same moment. A signup that gets its locks but is under them for more than thirty
 seconds starts no further write and gives the same answer; a write already under
 way when its time runs out, or when the visitor leaves, is waited for (up to ten
 seconds, past the database's own eight-second limit on a statement) and commits
-while the locks are still held, never after them. Consent is written first and
-keyed by the signup, so asking again is safe at every step. If PostgreSQL ends the
+while the locks are still held. Ten seconds is a wait, not a cancel: the database
+driver sends the server no cancellation, so a write still running when the wait
+ends (it takes more than one statement, or a stalled network, to outlast the
+database's own limit) is given up on, the locks are given back, and the server may
+still commit it afterwards, beside whichever signup has taken the locks since.
+Consent is written first and keyed by the signup, so asking again is safe at
+every step. If PostgreSQL ends the
 gate's session (an administrator, a failover) the signup finds out before its next
 write and makes none. A pod whose gate connections are all held (four signups,
 welcomes or other gates at the same moment) makes the next signup wait for one, up
@@ -386,16 +391,25 @@ redirecting it to an address that did not consent. Current authority, sender
 availability and suppression are checked again before sending.
 
 A welcome takes the storefront's lock, the audience's and its own send receipt's
-together, in that order, in one transaction on one connection, and spends at most
-the send's timeout plus thirty seconds under them. A lock that is busy at any point
+together, in that order, in one transaction on one connection. It holds them for
+at most the send's timeout plus thirty seconds for its reads (two minutes at most),
+and a send that began can hold them past that for its last two writes: up to five
+seconds to save the receipt of the accepted message and up to ten to write the
+welcome's outcome. The receipt that says an attempt began and the outcome are
+written only if the locks are still held, and a write begun is waited for rather
+than cut; the one exception is the ten-second wait described under signups, which a
+write can outlast without the server ending it. A lock that is busy at any point
 before the send begins, including the email provider's own (Azure's send receipt),
 is "nothing attempted, try later": the welcome stays pending, nothing is marked
 blocked, and the next worker pass sends it. So is a welcome whose time under its
-locks runs out, or whose worker stops, before its send begins, and one whose
-storefront could not be read: only a send that began ends a welcome, and its
-outcome is recorded even when the send outlasts the welcome's time. A welcome is
-marked blocked only for a reason of its own (the newsletter or its storefront was
-turned off, the reviewed template cannot be read, the send was refused).
+locks runs out, or whose worker stops, before its send begins, one whose storefront
+could not be read, and one whose send hit a database error before it began, reading
+the template, the recipient, the sender or the do-not-mail list, or recording that
+an attempt began: only a send that began ends a welcome, and its outcome is
+recorded even when the send outlasts the welcome's time. A welcome is marked
+blocked only for a reason of its own (the newsletter or its storefront was turned
+off, the saved copy of the reviewed template cannot be read, the send was refused,
+for instance because the recipient's address changed or the sender was retired).
 
 **Recent welcomes** shows the latest 50 outcomes, read when the audience opens
 or **Refresh** is selected. A rate limit or a busy lock leaves mail pending for a
@@ -485,7 +499,12 @@ Suppression and preflight refusals make no external send attempt and remain
 retryable, and so does a send whose coordination lock was busy: the attempt is
 recorded only after every lock the send needs has been taken, including the email
 provider's, so a busy lock leaves no record that an attempt began and the same
-request, made again, goes out. An email rule that finds the lock busy tries again
+request, made again, goes out. It is recorded only while the send still holds its
+own lock: if PostgreSQL ended the session that holds it, the send records nothing,
+contacts nothing and answers that its lock was lost, and the same request, made
+again, goes out. A database error while a send reads what it needs, or while it
+records the attempt, leaves it undecided in the same way: nothing was attempted, and
+a welcome stays pending instead of being marked blocked. An email rule that finds the lock busy tries again
 within its firing after one, two and four seconds. If it is still busy it reports a
 refusal ("nothing was sent to this recipient; the firing can be made again"),
 stops an audience rule at that recipient, and for a rule that fires when a row is

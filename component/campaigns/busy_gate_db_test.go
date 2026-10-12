@@ -228,3 +228,80 @@ func TestAnAttemptIsRecordedOnlyAfterTheTransportsLockIsReserved(t *testing.T) {
 		t.Errorf("%d reservations granted and %d given back, want 1 and 1", sender.reserved, sender.released)
 	}
 }
+
+// TestASingleSendWhoseCallerLeavesDuringItsAttemptKeepsItsLockUntilItCommits: the
+// caller's request ends while the receipt that says an attempt began is being
+// written. The write is waited for and commits while the send's lock is held: the
+// gate's transaction is not the caller's, and is not rolled back -- the lock with it
+// -- under the write by the caller's leaving.
+func TestASingleSendWhoseCallerLeavesDuringItsAttemptKeepsItsLockUntilItCommits(t *testing.T) {
+	n := newEmptyNewsletter(t, "single-caller-leaves")
+	recipient := n.suffix + "-rcp"
+	n.execute(t, n.owner, call("mutation", "addRecipient", arg{"recipientId", recipient}, arg{"audienceId", n.audience}, arg{"accountId", n.org}, arg{"email", "leaves@example.test"}))
+	args := map[string]any{"templateId": n.suffix + "-tpl", "recipientId": recipient, "senderIdentityId": n.suffix + "-sender", "requestId": "caller-leaves-once"}
+	receiptID := singleSendReceiptID(callerUserID(n.owner), "caller-leaves-once")
+	request, leave := context.WithCancel(n.owner)
+	defer leave()
+	actual := n.worker.store.engine
+	engine := &straddlingWrite{Engine: actual, prefix: "mutation recordCampaignSingleSend", contains: "attempting", delay: 400 * time.Millisecond, locked: n.lockHeld(t, singleSendLock(receiptID)), during: leave}
+	n.worker.store.engine = engine
+	defer func() { n.worker.store.engine = actual }()
+
+	_, _ = n.worker.handleSendToRecipient(request, args, 0)
+	engine.wg.Wait()
+
+	engine.mu.Lock()
+	held := append([]bool(nil), engine.held...)
+	engine.mu.Unlock()
+	if len(held) != 1 {
+		t.Fatalf("the attempt was recorded %d times; the test is not testing what it says", len(held))
+	}
+	if !held[0] {
+		t.Error("the caller's leaving ended the send's lock while its attempt was being recorded: the receipt committed without it")
+	}
+}
+
+// TestASingleSendRecordsNoAttemptAfterItsLockWasLost: PostgreSQL ends the gate
+// session that holds the send's receipt lock after the transport's lock was
+// reserved and before the attempt is recorded. The receipt that says an attempt
+// began is written only if the gate says its lock is still held: a replica that took
+// the lock since would read no receipt and send the message again. Here nothing is
+// recorded and nothing is sent, and the same request, made again, goes out once.
+func TestASingleSendRecordsNoAttemptAfterItsLockWasLost(t *testing.T) {
+	n := newEmptyNewsletter(t, "single-lost-first")
+	recipient := n.suffix + "-rcp"
+	n.execute(t, n.owner, call("mutation", "addRecipient", arg{"recipientId", recipient}, arg{"audienceId", n.audience}, arg{"accountId", n.org}, arg{"email", "lost@example.test"}))
+	args := map[string]any{"templateId": n.suffix + "-tpl", "recipientId": recipient, "senderIdentityId": n.suffix + "-sender", "requestId": "lost-before-attempt"}
+	receiptID := singleSendReceiptID(callerUserID(n.owner), "lost-before-attempt")
+	ender := &sessionEnder{admin: n.db.DB, key: singleSendLock(receiptID), t: t}
+	reserving := &reservingSender{recordingSender: n.sender}
+	reserving.probe = func(string) bool { ender.endOnce(); return false }
+	n.worker.resolve = func() email.Sender { return reserving }
+
+	_, err := n.worker.handleSendToRecipient(n.owner, args, 0)
+
+	if !ender.ended.Load() {
+		t.Fatal("the test never ended the gate's session; it is not testing what it says")
+	}
+	if !errors.Is(err, memql.ErrWriteGateLost) {
+		t.Errorf("a send whose lock was lost before its attempt answered %v, want ErrWriteGateLost", err)
+	}
+	if receipt := n.singleSendReceipt(t, receiptID); receipt != nil {
+		t.Errorf("an attempt was recorded without the lock that protects it: %v", receipt)
+	}
+	if n.sender.count() != 0 {
+		t.Errorf("%d messages were sent without a recorded attempt", n.sender.count())
+	}
+
+	n.worker.resolve = func() email.Sender { return n.sender }
+	nodes, err := n.worker.handleSendToRecipient(n.owner, args, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decodeResult(t, nodes)["sent"] != true {
+		t.Fatalf("the request made again did not send: %v", decodeResult(t, nodes))
+	}
+	if n.sender.count() != 1 {
+		t.Errorf("%d messages were sent, want 1", n.sender.count())
+	}
+}
