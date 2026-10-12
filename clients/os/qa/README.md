@@ -250,9 +250,12 @@ behind the shell's window surface; also inspect a narrow viewport. All themes
 share the approved Fold geometry (3.1% / 1.7% ground–ink mixes). There are no
 nodes, lines, canvas or animation. The palette and numeral remain the theme's.
 
-Recurring campaigns use `campaign-repeat-empty`, `campaign-repeat-active`, and
-`campaign-repeat-blocked`. Add `width=narrow` for the constrained panel. Open
-**Set up repeating sends** on the empty view to inspect the date/cadence form.
+A campaign's page opens from `email-campaigns` with `&click=<name>`: `October
+update` is ready to send, `Autumn sale` waits for its template to be published,
+`Launch day` is scheduled, `August update` is sending, `July update` has sent
+(with its tests; open one from its row), `Spring promo` failed, and `Weekly
+digest` repeats -- its bar pauses and resumes the series, and
+`&click=Weekly digest|Edit` shows how often and from when.
 
 Newsletter signup fixtures: `campaign-newsletter-empty` and `campaign-newsletter-active`. Open the plus control to review setup; use `width=narrow` for the compact layout.
 
