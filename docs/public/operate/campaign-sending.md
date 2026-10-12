@@ -387,8 +387,11 @@ other organizations and the cluster's Azure authorization.
 
 A successful ACS submission means **accepted by Azure**, not delivered to an
 inbox. Ambiguous submission responses are not automatically resubmitted.
-Delivery feedback still needs the pipeline described below; this setup does
-not install an Event Grid delivery-feedback route.
+Once the instance's public API is reachable, background maintenance installs
+an authenticated Event Grid subscription for each ready organization. Existing
+connections and imported packages are discovered automatically. **Check sends**
+reports feedback setup as pending or ready; pending setup leaves sending
+available and retries without creating another subscription.
 
 ### Registration and installation setup
 
@@ -1540,6 +1543,7 @@ The server returns these counts and preserves their completeness:
 | `skipped` | `suppressed`, `unsubscribed`, `other` |
 | `bounces` | `hard` |
 | feedback | `complaints`, `unsubscribed` |
+| `delivery` | `confirmed`, `failed`, `expanded`, `unconfirmed` |
 | `opens` / `clicks` | `total`, `unique` |
 
 They are computed server-side from the delivery ledger (status plus
@@ -1550,6 +1554,12 @@ If a count reaches the engine's source window, the response carries
 marker means the scan proved exhaustion. Small counts retain their exact path.
 Do not calculate an exact delivered figure or percentage from bounded inputs;
 `skipped.other` is omitted when subtracting bounded counts could invent a total.
+Delivery figures come from authenticated provider reports: `confirmed` means
+accepted by the recipient's mail server, `failed` means a reported delivery
+failure, and `expanded` means distribution-list expansion with no final delivery
+claim. `unconfirmed` is the accepted count minus these reported outcomes and is
+omitted when any operand is bounded. Each reported bucket can carry its own
+`atLeast` marker. A legacy send with no delivery reports remains unconfirmed.
 The send preflight walks the full roster when its capacity count is bounded,
 so the frozen `recipientCount` remains exact.
 
@@ -1987,21 +1997,53 @@ shared database coordination. A confirmed rate-limit refusal can retry after
 Azure's requested delay; an unknown outcome cannot.
 
 In the organization's email connection detail, **Check sends** shows the most
-recent 25 Azure processing receipts. **Processing completed** means ACS finished
-processing the request, not that the recipient received it. This setup does not
-yet provision an Event Grid or Azure Monitor delivery-feedback source; recipient
-bounces and delivery cannot be inferred from operation success. Existing campaign
-`sent` counts continue to mean transport acceptance. An acceptance that initially
-returned an unknown result can later be visible as accepted in the receipt even
-when the earlier campaign attempt was recorded as failed; it is never resent
-automatically.
+recent 25 Azure processing receipts and delivery-feedback readiness.
+**Processing completed** means ACS finished processing the request. Recipient
+outcomes are shown separately on each receipt and campaign delivery row.
 
-Polling stops after 24 hours if processing remains unconfirmed, retaining the
-receipt to prevent accidental resubmission. Reconnecting to a different Azure
-resource does not move old operations: they belong to the original resource.
-No message body, mailbox address, or access key appears in the receipt status
-response. Disconnecting email stops new sends and pauses reconciliation until
-the original resource is connected again.
+Each ready organization gets a resource-scoped Event Grid subscription after
+the public API becomes reachable. Maintenance also discovers older connections
+and imported packages, resumes pending provisioning, and repairs a deleted
+subscription. The receiver credential is encrypted before Azure validates the
+endpoint, so validation can reach any replica. An unfinished subscription stays
+pending and retries; one unavailable organization does not stop the others or
+prevent processing-receipt reconciliation.
+
+The approved HTTP exception is `POST /email/events/azure`. Azure sends a secret
+Authorization header. MemQL validates that credential, the saved subscription,
+the active organization connection, and the original ACS resource. A report must
+also match a persisted send receipt's message UUID and sender and recipient
+digests. Unmatched, forged, and cross-organization reports cannot change campaign
+state. The endpoint responds directly to Event Grid's validation challenge;
+it never follows the supplied validation URL. See Microsoft's
+[delivery-property authentication](https://learn.microsoft.com/en-us/azure/event-grid/delivery-properties)
+and [endpoint validation](https://learn.microsoft.com/en-us/azure/event-grid/end-point-validation-event-grid-events-schema).
+
+`Delivered` confirms handoff to the recipient's mail server, not inbox placement
+or a read. `Expanded` records expansion without asserting delivery. `Failed`,
+`Quarantined`, and `FilteredSpam` record a delivery failure without inventing a
+permanent invalid address. `Bounced` and `Suppressed` add a global hard-bounce
+suppression and one consent audit event attributed to the original campaign.
+Later delivery reports never lift that suppression. Duplicate reports are
+idempotent across replicas; the newest attempt wins within a verdict rank,
+while a permanent bounce remains dominant. These distinctions follow
+[ACS Email delivery events](https://learn.microsoft.com/en-us/azure/event-grid/communication-services-email-events).
+
+A valid delivery report also proves Azure accepted the original message. If its
+submission response was lost, MemQL repairs the existing receipt and delivery
+row without sending again. A durable marker requests an exact campaign and job
+counter reconciliation when the job reaches a terminal state. The repair walks
+the full ledger and clears the marker only after both counters are saved; a
+restart or partial failure resumes the repair. `sent` continues to mean
+transport acceptance, with provider delivery shown separately.
+
+Processing polling stops after 24 hours if it remains unconfirmed, retaining
+the receipt to prevent accidental resubmission. Authenticated delivery feedback
+can still resolve that receipt later. Reconnecting to a different Azure resource
+does not move old operations: they belong to the original resource. No message
+body, mailbox address, or access key appears in the receipt status response.
+Disconnecting email stops new sends and pauses reconciliation until the
+original resource is connected again.
 
 
 ## The Email app

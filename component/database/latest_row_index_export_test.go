@@ -23,4 +23,5 @@ const (
 var (
 	EnsureWorkJournalLookupIndex   = ensureWorkJournalLookupIndex
 	EnsureEmailDigestLookupIndexes = ensureEmailDigestLookupIndexes
+	EnsureEmailProviderLookupIndex = ensureEmailProviderLookupIndex
 )

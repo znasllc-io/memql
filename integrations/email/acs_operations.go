@@ -149,6 +149,7 @@ type OperationPoller struct {
 	cancel      context.CancelFunc
 	ready, done chan struct{}
 	running     atomic.Bool
+	interval    time.Duration
 }
 
 func NewOperationPoller(resolve func() *Integration, logger *slog.Logger) *OperationPoller {
@@ -168,7 +169,11 @@ func (p *OperationPoller) Start(_ context.Context) {
 		go func() {
 			defer close(p.done)
 			defer p.running.Store(false)
-			ticker := time.NewTicker(30 * time.Second)
+			interval := p.interval
+			if interval <= 0 {
+				interval = 30 * time.Second
+			}
+			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			for {
 				select {
@@ -176,23 +181,36 @@ func (p *OperationPoller) Start(_ context.Context) {
 					return
 				case <-ticker.C:
 					if i := p.resolve(); i != nil {
-						pass, cancel := context.WithTimeout(ctx, 25*time.Second)
-						feedbackErr := i.PollFeedbackConnections(pass)
-						if feedbackErr != nil {
-							p.logger.Warn("Azure email feedback setup delayed", "error", feedbackErr)
-						}
-						cancel()
-						pass, cancel = context.WithTimeout(ctx, 25*time.Second)
-						err := i.PollOperations(pass)
-						cancel()
-						if err != nil && ctx.Err() == nil {
-							p.logger.Warn("Azure email receipt reconciliation delayed", "error", err)
-						}
+						p.maintain(ctx, i)
 					}
 				}
 			}
 		}()
 	})
+}
+
+// Independent bounded phases prevent a pending installation or provider
+// subscription handshake from consuming receipt reconciliation's time budget.
+func (p *OperationPoller) maintain(ctx context.Context, i *Integration) {
+	phases := []struct {
+		name string
+		run  func(context.Context) error
+	}{
+		{"installation", i.azure.bootstrapInstallation},
+		{"feedback", i.PollFeedbackConnections},
+		{"receipts", i.PollOperations},
+	}
+	for _, phase := range phases {
+		if ctx.Err() != nil {
+			return
+		}
+		pass, cancel := context.WithTimeout(ctx, 25*time.Second)
+		err := phase.run(pass)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			p.logger.Warn("Azure email maintenance will retry", "phase", phase.name)
+		}
+	}
 }
 func (p *OperationPoller) Stop(_ context.Context) {
 	p.stop.Do(func() {

@@ -18,13 +18,22 @@ func (w *Worker) ApplyAzureDelivery(ctx context.Context, report email.AzureDeliv
 	if !auth.OriginFromContext(ctx).IsInternal() {
 		return fmt.Errorf("provider feedback requires internal origin")
 	}
+	if err := report.Verify(ctx); err != nil {
+		return err
+	}
 	digest := EmailDigest(report.Email)
 	if digest == "" || report.OperationID == "" || report.AccountID == "" {
 		return fmt.Errorf("provider feedback identity is missing")
 	}
+	var ledgerHold gateHold
 	write := func(effect func(context.Context) error) error {
 		if err := report.Verify(ctx); err != nil {
 			return err
+		}
+		if ledgerHold != nil {
+			if err := ledgerHold.Verify(ctx); err != nil {
+				return err
+			}
 		}
 		return detachedWrite(ctx, func(commit context.Context) error { return effect(w.systemActorContext(commit)) })
 	}
@@ -38,6 +47,23 @@ func (w *Worker) ApplyAzureDelivery(ctx context.Context, report email.AzureDeliv
 		}
 		if delivery == nil {
 			return fmt.Errorf("the original campaign delivery is not recorded yet")
+		}
+		if campaignID := bare(str(delivery, "campaignId")); campaignID != "" {
+			if w.newsletterGate == nil {
+				return fmt.Errorf("provider ledger coordination is unavailable")
+			}
+			ledgerHold, err = w.newsletterGate(context.WithoutCancel(ctx), "campaign-provider-ledger:"+campaignID)
+			if err != nil {
+				return err
+			}
+			defer ledgerHold.Release()
+			delivery, err = w.newsletterRow(system, "providerDeliveryById", "deliveryId", report.DeliveryID)
+			if err != nil {
+				return err
+			}
+			if delivery == nil || bare(str(delivery, "campaignId")) != campaignID {
+				return fmt.Errorf("original campaign delivery changed")
+			}
 		}
 		if !sameOrganization(str(delivery, "accountId"), report.AccountID) || EmailDigest(str(delivery, "email")) != digest {
 			return fmt.Errorf("the provider receipt does not match the campaign delivery")

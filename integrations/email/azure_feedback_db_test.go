@@ -22,6 +22,7 @@ import (
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 type azureFeedbackWorld struct {
@@ -213,17 +214,27 @@ func TestAzureFeedbackSubscriptionValidatesAfterCredentialIsDurable(t *testing.T
 		t.Error("validation sent a delivery report")
 		return nil
 	})
-	var puts atomic.Int32
+	var puts, gets atomic.Int32
 	var bearer string
 	protocol := w.instances[0].azure.protocol
 	protocol.client.Transport = acsRoundTrip(func(request *http.Request) (*http.Response, error) {
 		if request.Method == http.MethodGet {
-			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+			endpoint, _ := azureFeedbackURL()
+			state := "Succeeded"
+			if gets.Add(1) == 2 {
+				state = "Creating"
+			}
+			body := fmt.Sprintf(`{"properties":{"provisioningState":%q,"destination":{"endpointType":"WebHook","properties":{"endpointBaseUrl":%q}}}}`, state, endpoint)
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 		}
 		if request.Method != http.MethodPut || !strings.Contains(request.URL.Path, "/providers/Microsoft.EventGrid/eventSubscriptions/") {
 			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
 		}
 		puts.Add(1)
+		name := request.URL.Path[strings.LastIndex(request.URL.Path, "/")+1:]
+		if len(name) > 64 {
+			t.Fatalf("subscription name exceeds Azure's 64-character limit: %d", len(name))
+		}
 		var body map[string]any
 		if json.NewDecoder(request.Body).Decode(&body) != nil {
 			t.Fatal("bad ARM body")
@@ -246,17 +257,161 @@ func TestAzureFeedbackSubscriptionValidatesAfterCredentialIsDurable(t *testing.T
 		if response.Code != 200 || !strings.Contains(response.Body.String(), `"validationResponse":"challenge"`) {
 			t.Fatalf("validation %d %s", response.Code, response.Body.String())
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"properties":{"provisioningState":"Succeeded"}}`))}, nil
+		return &http.Response{StatusCode: 202, Body: io.NopCloser(strings.NewReader(""))}, nil
 	})
 	result, err := w.instances[0].azure.ensureDeliveryFeedback(context.Background(), w.account, azurePlanID(w.connection))
-	if err != nil || result["deliveryFeedback"] != "ready" {
-		t.Fatalf("setup=%v %v", result, err)
+	if err != nil || result["deliveryFeedback"] != "pending" {
+		t.Fatalf("empty asynchronous PUT became ready: setup=%v %v", result, err)
 	}
-	if _, err = w.instances[0].azure.ensureDeliveryFeedback(context.Background(), w.account, azurePlanID(w.connection)); err != nil || puts.Load() != 1 {
+	if result, err = w.instances[0].azure.ensureDeliveryFeedback(context.Background(), w.account, azurePlanID(w.connection)); err != nil || puts.Load() != 1 || result["deliveryFeedback"] != "pending" {
+		t.Fatalf("pending provisioning restarted: calls=%d result=%v error=%v", puts.Load(), result, err)
+	}
+	if result, err = w.instances[0].azure.ensureDeliveryFeedback(context.Background(), w.account, azurePlanID(w.connection)); err != nil || puts.Load() != 1 || result["deliveryFeedback"] != "ready" {
 		t.Fatalf("idempotency calls=%d %v", puts.Load(), err)
 	}
 	encoded, _ := json.Marshal(result)
 	if strings.Contains(string(encoded), bearer) || strings.Contains(string(encoded), w.configured.Secret) {
 		t.Fatal("public setup leaked credential")
 	}
+}
+
+func TestAzureFeedbackKeepsNewestAttemptWithinAProviderVerdict(t *testing.T) {
+	w := newAzureFeedbackWorld(t)
+	sender, op := w.send(t, "attempt-order")
+	var calls int
+	handler := NewAzureFeedbackHandler(func() *Integration { return w.instances[1] }, func(ctx context.Context, report AzureDeliveryReport) error { calls++; return report.Verify(ctx) })
+	first := w.now
+	post := func(status string, at time.Time) {
+		t.Helper()
+		body := strings.ReplaceAll(w.event(t, op, status), w.now.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano))
+		if response := w.request(handler, body, nil); response.Code != 204 {
+			t.Fatalf("%d %s", response.Code, response.Body.String())
+		}
+	}
+	post("Failed", first)
+	post("Quarantined", first.Add(-time.Minute))
+	post("Delivered", first.Add(time.Minute))
+	post("Delivered", first.Add(2*time.Minute))
+	post("Delivered", first.Add(time.Minute))
+	current, _, _, err := sender.operations.read(context.Background(), sender.operationKey("attempt-order"))
+	if err != nil || current.DeliveryStatus != "delivered" || !current.DeliveryAt.Equal(first.Add(2*time.Minute)) || calls != 3 {
+		t.Fatalf("outcome %+v calls%d error%v", current, calls, err)
+	}
+	post("Bounced", first.Add(-time.Minute))
+	post("Delivered", first.Add(3*time.Minute))
+	current, _, _, err = sender.operations.read(context.Background(), sender.operationKey("attempt-order"))
+	if err != nil || current.DeliveryStatus != "bounced" || calls != 4 {
+		t.Fatalf("late delivery erased permanent bounce: %+v calls%d %v", current, calls, err)
+	}
+}
+
+func TestAzureFeedbackDiscoversPreviouslySavedOrganization(t *testing.T) {
+	w := newAzureFeedbackWorld(t)
+	a := w.instances[0].azure
+	// Simulate a connection written before scheduling metadata existed. Its
+	// encrypted organization fields are the only discovery source.
+	data, _ := json.Marshal(w.connection)
+	sealed, _, err := secret.Encrypt(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = a.store.engine.Execute(emailStateContext(context.Background()), renderConfigCall("storeEmailConnectionState", map[string]string{"id": emailStateID("organization:" + w.account), "encryptedValue": sealed, "versionTime": w.now.Add(time.Second).Format(time.RFC3339Nano)}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	a.protocol.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		endpoint, _ := azureFeedbackURL()
+		body := fmt.Sprintf(`{"properties":{"provisioningState":"Succeeded","destination":{"endpointType":"WebHook","properties":{"endpointBaseUrl":%q}}}}`, endpoint)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	if err := w.instances[0].PollFeedbackConnections(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() == 0 {
+		t.Fatal("old ready organization was never discovered")
+	}
+	before := calls.Load()
+	if err := w.instances[0].PollFeedbackConnections(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != before {
+		t.Fatal("scheduled retry time was ignored")
+	}
+	// The scheduling write cannot resurrect a disconnected organization.
+	if err := a.store.change(context.Background(), "organization:"+w.account, &w.connection, func(bool) error { w.connection.Status = "disconnected"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.instances[0].PollFeedbackConnections(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != before {
+		t.Fatal("disconnected organization was provisioned")
+	}
+}
+
+func TestAzureMaintenanceKeepsReceiptsAndFeedbackMovingWhileInstallationIsPending(t *testing.T) {
+	w := newAzureFeedbackWorld(t)
+	sender, op := w.send(t, "pending-installation")
+	stored, prior, _, err := sender.operations.read(context.Background(), sender.operationKey("pending-installation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored.NextPollAt = w.now.Add(-time.Minute)
+	if _, err = sender.operations.write(context.Background(), sender.operationKey("pending-installation"), stored, prior); err != nil {
+		t.Fatal(err)
+	}
+	a := w.instances[1].azure
+	a.installation = installationFixture()
+	var installationCalls, feedbackCalls, receiptCalls atomic.Int32
+	a.store.engine = pendingInstallationTestStore{ConfigWriter: a.store.engine, calls: &installationCalls}
+	a.protocol.client.Transport = acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+		feedbackCalls.Add(1)
+		endpoint, _ := azureFeedbackURL()
+		body := fmt.Sprintf(`{"properties":{"provisioningState":"Succeeded","destination":{"endpointType":"WebHook","properties":{"endpointBaseUrl":%q}}}}`, endpoint)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	a.operationClient = &http.Client{Transport: acsRoundTrip(func(r *http.Request) (*http.Response, error) {
+		receiptCalls.Add(1)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"id":%q,"status":"Succeeded"}`, op.ID)))}, nil
+	})}
+	original := w.instances[1].sender
+	poller := NewOperationPoller(func() *Integration { return w.instances[1] }, nil)
+	poller.interval = 10 * time.Millisecond
+	poller.Start(context.Background())
+	t.Cleanup(func() { poller.Stop(context.Background()) })
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		current, _, _, err := sender.operations.read(context.Background(), sender.operationKey("pending-installation"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.Status == "succeeded" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("pending installation starved maintenance: feedback=%d receipts=%d status=%s", feedbackCalls.Load(), receiptCalls.Load(), current.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	poller.Stop(context.Background())
+	if installationCalls.Load() == 0 || feedbackCalls.Load() == 0 || receiptCalls.Load() == 0 || w.instances[1].sender != original {
+		t.Fatalf("maintenance skipped a phase or replaced the existing transport: feedback=%d receipts=%d", feedbackCalls.Load(), receiptCalls.Load())
+	}
+}
+
+// Refuse the first installed workflow effect while leaving transport maintenance
+// on the same engine available. This makes starvation observable in Start.
+type pendingInstallationTestStore struct {
+	ConfigWriter
+	calls *atomic.Int32
+}
+
+func (s pendingInstallationTestStore) Execute(ctx context.Context, query string) (any, error) {
+	if strings.Contains(query, "query clientAccountById(") {
+		s.calls.Add(1)
+		return nil, fmt.Errorf("installation account is temporarily unavailable")
+	}
+	return s.ConfigWriter.Execute(ctx, query)
 }

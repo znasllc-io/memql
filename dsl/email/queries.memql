@@ -82,7 +82,8 @@ query sendOperation emailSendOperationByProviderId {
 @serverOnly
 @cache(0)
 query connectionState emailUnindexedConnections {
- filter row => actor.isClusterOwner == true && (row.purpose == nil || row.purpose == "")
+ args { dueBefore datetime! }
+ filter row => actor.isClusterOwner == true && (row.purpose == nil || row.purpose == "" || (row.purpose == "unreadable" && row.nextAttemptAt <= args.dueBefore))
  sort "row.id", "asc"
  paginate 50
  shape emailConnectionIndex

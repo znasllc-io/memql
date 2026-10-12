@@ -4,13 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
-	"encoding/json"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/secret"
 	"github.com/znasllc-io/memql/core/env"
@@ -26,6 +26,7 @@ type azureFeedbackConnection struct {
 	Endpoint      string    `json:"endpoint"`
 	Secret        string    `json:"secret"`
 	Status        string    `json:"status"`
+	Applied       bool      `json:"applied"`
 	NextAttemptAt time.Time `json:"nextAttemptAt"`
 }
 
@@ -75,14 +76,11 @@ func (a *azureSetup) ensureDeliveryFeedback(ctx context.Context, account, planID
 		if _, err := rand.Read(secret); err != nil {
 			return err
 		}
-		configured = azureFeedbackConnection{AccountID: account, PlanID: actualPlan, Topic: connection.Plan.communicationPath(), Endpoint: endpoint, Subscription: "memqlemail" + strings.ReplaceAll(emailStateID(account), "-", ""), Secret: base64.RawURLEncoding.EncodeToString(secret), Status: "pending", NextAttemptAt: a.clock().Add(5 * time.Minute)}
+		configured = azureFeedbackConnection{AccountID: account, PlanID: actualPlan, Topic: connection.Plan.communicationPath(), Endpoint: endpoint, Subscription: "memqlemail" + emailStateID(account)[:48], Secret: base64.RawURLEncoding.EncodeToString(secret), Status: "pending", NextAttemptAt: a.clock().Add(5 * time.Minute)}
 		return nil
 	})
 	if err != nil {
 		return nil, err
-	}
-	if configured.Status == "ready" {
-		return map[string]any{"deliveryFeedback": "ready"}, nil
 	}
 	return a.withCluster(ctx, account, func(session azureSession) (map[string]any, error) {
 		if session.ClusterID != connection.Plan.ClusterID {
@@ -109,6 +107,32 @@ func (a *azureSetup) ensureDeliveryFeedback(ctx context.Context, account, planID
 		if err == nil && (existing.Properties.Destination.EndpointType != "WebHook" || existing.Properties.Destination.Properties.EndpointBaseURL != endpoint) {
 			return nil, fmt.Errorf("the Azure feedback subscription belongs to a different endpoint")
 		}
+		finish := func(ready bool) (map[string]any, error) {
+			state := "pending"
+			if ready {
+				state = "ready"
+			}
+			err := a.store.change(ctx, key, &configured, func(found bool) error {
+				if !found || configured.PlanID != actualPlan || configured.Endpoint != endpoint {
+					return fmt.Errorf("the feedback configuration changed")
+				}
+				configured.Status = state
+				configured.Applied = true
+				return nil
+			})
+			return map[string]any{"deliveryFeedback": state}, err
+		}
+		// A prior PUT may have finished after its response was lost. Observe
+		// completion without restarting provisioning. A newly minted credential
+		// must be installed at least once, even when a named resource exists.
+		if err == nil && (configured.Applied || configured.Status == "ready") {
+			switch existing.Properties.ProvisioningState {
+			case "Succeeded":
+				return finish(true)
+			case "Creating", "Updating", "AwaitingManualAction":
+				return finish(false)
+			}
+		}
 		body := map[string]any{"properties": map[string]any{
 			"destination": map[string]any{"endpointType": "WebHook", "properties": map[string]any{"endpointUrl": endpoint, "maxEventsPerBatch": 1, "preferredBatchSizeInKilobytes": 64, "deliveryAttributeMappings": []map[string]any{
 				{"name": "Authorization", "type": "Static", "properties": map[string]any{"value": "Bearer " + configured.Secret, "isSecret": true}},
@@ -118,20 +142,12 @@ func (a *azureSetup) ensureDeliveryFeedback(ctx context.Context, account, planID
 			"eventDeliverySchema": "EventGridSchema",
 			"retryPolicy":         map[string]any{"maxDeliveryAttempts": 30, "eventTimeToLiveInMinutes": 1440},
 		}}
+		// Do not let a successful GET survive an empty asynchronous PUT body.
+		existing.Properties.ProvisioningState = ""
 		if err = a.protocol.arm(ctx, http.MethodPut, path, session.AccessToken, body, &existing); err != nil {
 			return nil, err
 		}
-		if existing.Properties.ProvisioningState != "Succeeded" {
-			return map[string]any{"deliveryFeedback": "pending"}, nil
-		}
-		err = a.store.change(ctx, key, &configured, func(found bool) error {
-			if !found || configured.PlanID != actualPlan || configured.Endpoint != endpoint {
-				return fmt.Errorf("the feedback configuration changed")
-			}
-			configured.Status = "ready"
-			return nil
-		})
-		return map[string]any{"deliveryFeedback": "ready"}, err
+		return finish(existing.Properties.ProvisioningState == "Succeeded")
 	})
 }
 
@@ -156,13 +172,13 @@ func (i *Integration) PollFeedbackConnections(ctx context.Context) error {
 	}
 	a := i.azure
 	store := &storedACSOperations{connection: a.store}
-	old, err := store.rows(ctx, "emailUnindexedConnections", nil)
+	old, err := store.rows(ctx, "emailUnindexedConnections", map[string]any{"dueBefore": a.clock().Format(time.RFC3339Nano)})
 	if err != nil {
 		return err
 	}
 	for _, row := range old {
-		if err := a.indexFeedbackConnection(ctx, memql.BareShortId(fmt.Sprint(row["id"])), false); err != nil {
-			return err
+		if err := a.indexFeedbackConnection(ctx, memql.BareShortId(fmt.Sprint(row["id"])), false); err != nil && i.logger != nil {
+			i.logger.Warn("A sealed email connection could not be classified; it will retry")
 		}
 	}
 	rows, err := store.rows(ctx, "emailReadyFeedbackOrganizations", map[string]any{"dueBefore": a.clock().Format(time.RFC3339Nano)})
@@ -174,7 +190,10 @@ func (i *Integration) PollFeedbackConnections(ctx context.Context) error {
 			return ctx.Err()
 		}
 		if err := a.indexFeedbackConnection(ctx, memql.BareShortId(fmt.Sprint(row["id"])), true); err != nil {
-			return err
+			if i.logger != nil {
+				i.logger.Warn("A sealed email connection could not be scheduled; it will retry")
+			}
+			continue
 		}
 		account, _ := row["accountId"].(string)
 		if account == "" {
@@ -205,17 +224,17 @@ func (a *azureSetup) indexFeedbackConnection(ctx context.Context, rowID string, 
 		return err
 	}
 	row := rows[0]
-	plain, err := secret.Decrypt(fmt.Sprint(row["encryptedValue"]))
-	if err != nil {
-		return fmt.Errorf("could not read sealed email connection metadata")
-	}
+	plain, decryptErr := secret.Decrypt(fmt.Sprint(row["encryptedValue"]))
 	var connection azureConnection
-	if json.Unmarshal([]byte(plain), &connection) != nil {
-		return fmt.Errorf("invalid sealed email connection metadata")
+	if decryptErr == nil {
+		decryptErr = json.Unmarshal([]byte(plain), &connection)
 	}
 	purpose, account := "internal", ""
 	due := a.clock()
-	if connection.Plan.ClusterID != "" && connection.AccountID != "" {
+	if decryptErr != nil {
+		purpose = "unreadable"
+		due = due.Add(5 * time.Minute)
+	} else if connection.Plan.ClusterID != "" && connection.AccountID != "" {
 		purpose, account = "azure-organization-"+connection.Status, connection.AccountID
 		if attempt {
 			due = due.Add(5 * time.Minute)
@@ -232,5 +251,8 @@ func (a *azureSetup) indexFeedbackConnection(ctx context.Context, rowID string, 
 	write, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 	_, err = a.store.engine.Execute(emailStateContext(write), renderConfigCall("indexEmailConnectionState", values))
+	if err == nil && decryptErr != nil {
+		return fmt.Errorf("could not classify a sealed email connection")
+	}
 	return err
 }

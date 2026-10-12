@@ -359,12 +359,12 @@ or rollback must not resend an accepted queue through the other provider.
 
 ### Feedback and suppression
 
-ACS delivery reports are exposed through Event Grid. Implement an authenticated
-and validated ingestion path with replay deduplication, or an approved pull
-destination. The existing generic inbound HMAC contract is not automatically
-compatible with Event Grid validation/authentication. Never accept an
-unauthenticated payload's organization or recipient as authority.
-([ACS Email events](https://learn.microsoft.com/en-us/azure/event-grid/communication-services-email-events))
+The ACS bridge now provisions a resource-scoped Event Grid subscription and
+accepts authenticated, receipt-correlated reports at `/email/events/azure`.
+Shared gates deduplicate reports across replicas, permanent failures feed
+suppression and consent, and late acceptance triggers durable terminal counter
+repair. See the shipped [Azure send receipts contract](../../public/operate/campaign-sending.md#azure-send-receipts).
+The Postfix feedback work below remains a separate migration stage.
 
 For Postfix, collect queue/delivery events and structured DSNs into the same
 MemQL ledger. Correlate with a trusted attempt and signed/opaque bounce token;

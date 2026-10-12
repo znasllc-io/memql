@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,15 +57,43 @@ func TestEmailInstallationResumesOnIndependentReplica(t *testing.T) {
 	for _, a := range instances {
 		a.protocol = protocol
 	}
-	for attempt := 0; attempt < 4; attempt++ {
-		err := instances[attempt%2].bootstrapInstallation(ctx)
-		if attempt < 2 && (err == nil || !strings.Contains(err.Error(), "preparing")) {
-			t.Fatalf("create %d must remain pending: %v", attempt, err)
+	// Exercise the running maintenance path: no direct bootstrap call makes
+	// progress. A configured transport stays in service while Azure is pending.
+	var passes atomic.Int32
+	existing := NewLogSender(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	integrations := []*Integration{NewIntegration(existing, nil), NewIntegration(existing, nil)}
+	for index := range integrations {
+		integrations[index].azure = instances[index]
+	}
+	poller := NewOperationPoller(func() *Integration { return integrations[int(passes.Add(1)-1)%2] }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	poller.interval = 10 * time.Millisecond
+	poller.Start(ctx)
+	t.Cleanup(func() { poller.Stop(context.Background()) })
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		var saved azureConnection
+		found, _, err := instances[1].store.read(ctx, "organization:self", &saved)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if attempt >= 2 && err != nil {
-			t.Fatalf("resume %d: %v", attempt, err)
+		if found && saved.Status == "ready" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("maintenance did not resume installation after %d passes", passes.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	poller.Stop(context.Background())
+	if passes.Load() < 3 {
+		t.Fatal("fixture did not require asynchronous maintenance")
+	}
+	for _, integration := range integrations {
+		if integration.sender != existing {
+			t.Fatal("pending installation replaced existing transport")
 		}
 	}
+
 	var c azureConnection
 	if _, _, err := instances[1].store.read(ctx, "organization:self", &c); err != nil {
 		t.Fatal(err)

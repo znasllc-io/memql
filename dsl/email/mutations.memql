@@ -57,7 +57,7 @@ mutation connectionState indexEmailConnectionState {
  args {
  id string!
  purpose string!
- accountId string!
+ accountId string
  nextAttemptAt datetime!
  versionTime datetime!
  }
