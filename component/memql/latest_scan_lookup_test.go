@@ -24,12 +24,12 @@ func latestScanKeysSQL(t *testing.T, expr ExpressionNode, asOf *time.Time) strin
 	return keys.String()
 }
 
-// WHICH TERMS MAY NARROW THE ENUMERATION. Only an equality every returned row
-// must satisfy, on a payload field a lookup index serves for the concept, with
+// WHICH TERMS MAY NARROW THE ENUMERATION. Only a required equality or membership
+// on a payload field a lookup index serves for the concept, with
 // a value that is SET -- a lookup finds the versions carrying a value, and an
 // unset field is carried by every version written before it was set, so the
 // versions "lacking" a value are history, not matches.
-func TestLatestScanKeysLookUpOnlyMandatorySetEqualitiesOnALookupField(t *testing.T) {
+func TestLatestScanKeysLookUpOnlyMandatorySetTermsOnALookupField(t *testing.T) {
 	recipient := irConceptEq("v1:campaigns:recipient")
 	digest := irPayloadCmp("emailDigest", OpEq, "d1")
 	audience := irPayloadCmp("audienceId", OpEq, "v1:campaigns:audience:a")
@@ -49,7 +49,16 @@ func TestLatestScanKeysLookUpOnlyMandatorySetEqualitiesOnALookupField(t *testing
 		"an inequality":                   {and(recipient, irPayloadCmp("emailDigest", OpNe, "d1")), nil},
 		"the empty string is unset":       {and(recipient, irPayloadCmp("emailDigest", OpEq, "")), nil},
 		"nil is unset":                    {and(recipient, irPayloadCmp("emailDigest", OpEq, nil)), nil},
-		"a membership":                    {and(recipient, irPayloadCmp("emailDigest", OpIn, []any{"d1"})), nil},
+		"one member":                      {and(recipient, irPayloadCmp("emailDigest", OpIn, []any{"d1"})), []string{`((payload->>'emailDigest') = 'd1')`}},
+		"multiple members":                {and(recipient, irPayloadCmp("emailDigest", OpIn, []any{"d1", "d2"})), []string{`((payload->>'emailDigest') IN ('d1', 'd2'))`}},
+		"string slice members":            {and(recipient, irPayloadCmp("emailDigest", OpIn, []string{"d1", "d2"})), []string{`((payload->>'emailDigest') IN ('d1', 'd2'))`}},
+		"members under a disjunction":     {and(recipient, or(irPayloadCmp("emailDigest", OpIn, []any{"d1"}), audience)), nil},
+		"members under a negation":        {and(recipient, irNot(irPayloadCmp("emailDigest", OpIn, []any{"d1"}))), nil},
+		"excluded members":                {and(recipient, irPayloadCmp("emailDigest", OpOut, []any{"d1"})), nil},
+		"unset among members":             {and(recipient, irPayloadCmp("emailDigest", OpIn, []any{"d1", ""})), nil},
+		"nil among members":               {and(recipient, irPayloadCmp("emailDigest", OpIn, []any{"d1", nil})), nil},
+		"mixed member types":              {and(recipient, irPayloadCmp("emailDigest", OpIn, []any{"d1", 5})), nil},
+		"no members":                      {and(recipient, irPayloadCmp("emailDigest", OpIn, []any{})), nil},
 		"a number":                        {and(recipient, irPayloadCmp("emailDigest", OpEq, 5)), nil},
 		"a nested path":                   {and(recipient, irPayloadCmp("profile.emailDigest", OpEq, "d1")), nil},
 		"no lookup index for the field":   {and(recipient, audience), nil},
