@@ -148,7 +148,7 @@ describe("Open rate and Click rate", () => {
     expect(clicks.format?.(50 / 1000)).toBe("5.0%");
   });
 
-  it("is a rate of delivered, never of the audience", () => {
+  it("is a rate of accepted sends, never of the audience", () => {
     // 4,000 were meant to receive it; 1,000 were sent. The rate is over the 1,000.
     const sized = campaign({ id: "s", status: "sent", startedAt: daysAgo(1), recipientCount: 4000, sentCount: 1000 });
     const i = inputs({
@@ -157,6 +157,26 @@ describe("Open rate and Click rate", () => {
     });
     const opens = metric(i, "Open rate").figure;
     expect(opens.kind === "measured" && opens.value).toBeCloseTo(0.25, 10);
+  });
+
+  it("uses reconciled transport acceptance from the same stats response", () => {
+    const i = inputs({
+      campaigns: { rows: [A], settled: true, error: "" },
+      stats: new Map([["a", answered({ sent: 1200, opens: { unique: 300, total: 400 }, clicks: { unique: 60, total: 70 } })]]),
+    });
+    expect(metric(i, "Open rate").figure).toEqual(figureOf(0.25));
+    expect(metric(i, "Click rate").figure).toEqual(figureOf(0.05));
+  });
+
+  it("withholds rates with a bounded numerator or denominator or an absent denominator", () => {
+    for (const extra of [{ atLeast: { sent: true } }, { atLeast: { "opens.unique": true, "clicks.unique": true } }, { sent: undefined }]) {
+      const i = inputs({
+        campaigns: { rows: [A], settled: true, error: "" },
+        stats: new Map([["a", answered({ sent: 1000, opens: { unique: 300, total: 400 }, clicks: { unique: 50, total: 60 }, ...extra })]]),
+      });
+      expect(metric(i, "Open rate").figure.kind).toBe("absent");
+      expect(metric(i, "Click rate").figure.kind).toBe("absent");
+    }
   });
 
   it("an unmeasured unique figure makes the rate absent with its reason", () => {
