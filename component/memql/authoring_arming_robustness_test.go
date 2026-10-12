@@ -47,6 +47,7 @@ type faultyStore struct {
 	failStatus  map[string]error // SetConstructStatus(id, "active"), by construct id
 	readErr     map[string]error // LoadBundle, by bundle id
 	afterRetire func()           // runs once a retire has been written: the caller hangs up
+	afterActive func()           // runs once a bundle has been marked active: the caller hangs up
 }
 
 func newFaultyStore() *faultyStore {
@@ -83,7 +84,17 @@ func (s *faultyStore) SetBundleActive(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	return s.armTestStore.SetBundleActive(ctx, id)
+	if err := s.armTestStore.SetBundleActive(ctx, id); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	hangUp := s.afterActive
+	s.afterActive = nil
+	s.mu.Unlock()
+	if hangUp != nil {
+		hangUp()
+	}
+	return nil
 }
 
 func (s *faultyStore) SetBundleRetired(ctx context.Context, id string) error {
@@ -527,5 +538,73 @@ func TestASupersedeRetiresTheOldVersionWhenItsCallerHangsUp(t *testing.T) {
 	}
 	if st := store.bundleStatus(v1); st != BundleRetired {
 		t.Fatalf("version 1 reads %q, want retired", st)
+	}
+}
+
+// TestAnEditWhoseCallerHangsUpOnceItIsLiveStillRetiresTheOldVersion is the
+// reviewer's probe A: the client disconnects right after the new version is
+// marked active -- the activation's commit point. The activation has happened
+// and is reported as such, so everything after the commit point finishes: the
+// old version is retired and what only it defined comes out. Left half-done,
+// both versions read active, and nothing ever retires the old one.
+func TestAnEditWhoseCallerHangsUpOnceItIsLiveStillRetiresTheOldVersion(t *testing.T) {
+	store := newFaultyStore()
+	hooks := &armHooks{}
+	deps := hooks.deps(NewAuthoredRuntimeRegistry())
+	v1 := store.addBundle("v1:authoring:bundle:live-hang-v1", 1, "", BundleDryRunPassed,
+		[2]string{"automation", "autoHang"}, [2]string{"trait", "onlyInV1Hang"})
+	if _, err := ActivateApprovedBundleWithStore(context.Background(), store, armTestOwner, v1, deps); err != nil {
+		t.Fatalf("setup: activate version 1: %v", err)
+	}
+	v2 := store.addBundle("v1:authoring:bundle:live-hang-v2", 2, v1, BundleDryRunPassed, [2]string{"automation", "autoHang"})
+
+	ctx, hangUp := context.WithCancel(context.Background())
+	defer hangUp()
+	store.afterActive = hangUp
+	if _, err := ActivateApprovedBundleWithStore(ctx, store, armTestOwner, v2, deps); err != nil {
+		t.Fatalf("an edit whose caller hung up after it went live must be reported as live: %v", err)
+	}
+	if st := store.bundleStatus(v1); st != BundleRetired {
+		t.Fatalf("the caller hung up after version 2 went live and version 1 still reads %q: nothing ever retires it", st)
+	}
+	if held(t, deps, "trait", "onlyInV1Hang") != nil {
+		t.Fatal("what only version 1 defined stayed armed")
+	}
+	if c := held(t, deps, "automation", "autoHang"); c == nil || c.Version != 2 {
+		t.Fatalf("autoHang is %+v, want version 2", c)
+	}
+}
+
+// TestATurnedOffRuleStaysOffAfterAHungUpEdit is the reviewer's probe A2: after
+// an edit whose caller hung up once it was live, the person turns the rule off
+// (retires version 2). The next reconcile pass must arm nothing -- with version
+// 1 left active by the half-done edit, it armed the old definition again on
+// every replica.
+func TestATurnedOffRuleStaysOffAfterAHungUpEdit(t *testing.T) {
+	store := newFaultyStore()
+	hooks := &armHooks{}
+	deps := hooks.deps(NewAuthoredRuntimeRegistry())
+	v1 := store.addBundle("v1:authoring:bundle:off-hang-v1", 1, "", BundleDryRunPassed, [2]string{"automation", "autoOff"})
+	if _, err := ActivateApprovedBundleWithStore(context.Background(), store, armTestOwner, v1, deps); err != nil {
+		t.Fatalf("setup: activate version 1: %v", err)
+	}
+	v2 := store.addBundle("v1:authoring:bundle:off-hang-v2", 2, v1, BundleDryRunPassed, [2]string{"automation", "autoOff"})
+	ctx, hangUp := context.WithCancel(context.Background())
+	defer hangUp()
+	store.afterActive = hangUp
+	if _, err := ActivateApprovedBundleWithStore(ctx, store, armTestOwner, v2, deps); err != nil {
+		t.Fatalf("activate version 2: %v", err)
+	}
+
+	eng := &MemQLEngine{}
+	eng.SetAuthoredRuntimeDeps(func() AuthoredRuntimeDeps { return deps })
+	if err := eng.retireActiveBundleWithStore(context.Background(), store, armTestOwner, v2, deps); err != nil {
+		t.Fatalf("turn the rule off: %v", err)
+	}
+	if _, err := eng.reconcileAuthoredRuntime(context.Background(), store); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if c := held(t, deps, "automation", "autoOff"); c != nil {
+		t.Fatalf("the rule was turned off and the next reconcile armed bundle %s version %d again", c.BundleId, c.Version)
 	}
 }

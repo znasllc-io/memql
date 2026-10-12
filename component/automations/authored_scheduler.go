@@ -241,14 +241,15 @@ func (s *AuthoredScheduler) Activate(construct *memql.AuthoredConstruct) error {
 	}
 
 	entry := &authoredEntry{owner: construct.OwnerUserId, automation: automation}
+	run := armedRun{owner: construct.OwnerUserId, bundleId: construct.BundleId, version: construct.Version}
 
 	switch {
 	case automation.BeforeWrite != nil:
-		entry.unsub = s.subscribeBeforeWrite(construct.OwnerUserId, automation)
+		entry.unsub = s.subscribeBeforeWrite(run, automation)
 	case automation.IsEventTriggered():
-		entry.unsub = s.subscribeEvent(construct.OwnerUserId, automation)
+		entry.unsub = s.subscribeEvent(run, automation)
 	default: // scheduled: the switch above admitted nothing else
-		id, err := s.scheduleCron(construct.OwnerUserId, automation)
+		id, err := s.scheduleCron(run, automation)
 		if err != nil {
 			// Unreachable: the spec parsed above with the cron's own parser.
 			return fmt.Errorf("authored scheduler: schedule %s: %w", origin, err)
@@ -348,7 +349,8 @@ func (s *AuthoredScheduler) Stop() {
 // used to run every event matching the trigger pattern with the filter
 // unread, so an email rule's "only when" condition changed nothing: a rule
 // for the users at one domain mailed on every user change.
-func (s *AuthoredScheduler) subscribeEvent(owner string, automation *Automation) func() {
+func (s *AuthoredScheduler) subscribeEvent(run armedRun, automation *Automation) func() {
+	owner := run.owner
 	a := automation
 	pattern := automation.Trigger.Event
 	return s.eventBus.Subscribe(pattern, func(event events.Event) {
@@ -374,27 +376,41 @@ func (s *AuthoredScheduler) subscribeEvent(owner string, automation *Automation)
 				return
 			}
 		}
-		s.fireOnEvent(owner, a, &ev)
+		s.fireOnEvent(run, a, &ev)
 	}, events.WithSubscriberName("authored:"+owner+":"+a.Name))
 }
 
 // scheduleCron wires a scheduled authored automation.
-func (s *AuthoredScheduler) scheduleCron(owner string, automation *Automation) (cron.EntryID, error) {
+func (s *AuthoredScheduler) scheduleCron(run armedRun, automation *Automation) (cron.EntryID, error) {
 	a := automation
 	return s.cron.AddFunc(automation.Schedule, func() {
-		s.fireOnSchedule(owner, a)
+		s.fireOnSchedule(run, a)
 	})
+}
+
+// armedRun is what a firing knows of the construct it was armed from: the
+// owner it runs as, and the bundle and version, which a failure is recorded
+// against so a breaker trip names the version that failed (memql#6022).
+type armedRun struct {
+	owner    string
+	bundleId string
+	version  int
+}
+
+// subject is the breaker subject for a run of automation.
+func (r armedRun) subject(automation string) BreakerSubject {
+	return BreakerSubject{Owner: r.owner, Automation: automation, BundleId: r.bundleId, Version: r.version}
 }
 
 // fireOnEvent runs one event-triggered firing on THIS node, the node the event
 // happened on (subscribeEvent says why). The owner gate is not consulted:
 // nothing forwards the event to the owner's node, so a gate that said no here
 // would mean the firing never ran anywhere.
-func (s *AuthoredScheduler) fireOnEvent(owner string, automation *Automation, event *events.Event) {
-	if s.globallyHalted(owner, automation) {
+func (s *AuthoredScheduler) fireOnEvent(run armedRun, automation *Automation, event *events.Event) {
+	if s.globallyHalted(run.owner, automation) {
 		return
 	}
-	s.runUnderAuthor(owner, automation, event)
+	s.runUnderAuthor(run, automation, event)
 }
 
 // fireOnSchedule runs one cron firing on the node that owns the owner's
@@ -403,17 +419,17 @@ func (s *AuthoredScheduler) fireOnEvent(owner string, automation *Automation, ev
 // leader gate, #561, owner-scoped). Checked BEFORE the breaker so a non-owning
 // node neither runs nor records faults for an owner it does not own. nil gate
 // = ungated (single-node / dev).
-func (s *AuthoredScheduler) fireOnSchedule(owner string, automation *Automation) {
-	if s.globallyHalted(owner, automation) {
+func (s *AuthoredScheduler) fireOnSchedule(run armedRun, automation *Automation) {
+	if s.globallyHalted(run.owner, automation) {
 		return
 	}
 	s.mu.Lock()
 	ownerGate := s.ownerGate
 	s.mu.Unlock()
-	if ownerGate != nil && !ownerGate(owner) {
+	if ownerGate != nil && !ownerGate(run.owner) {
 		return
 	}
-	s.runUnderAuthor(owner, automation, nil)
+	s.runUnderAuthor(run, automation, nil)
 }
 
 // globallyHalted is the GLOBAL KILL SWITCH (#961): a cluster-wide hard stop.
@@ -443,7 +459,8 @@ func (s *AuthoredScheduler) globallyHalted(owner string, automation *Automation)
 // authored automation runs as its author, so the same per-row authz that gates
 // the author's interactive calls gates this run. It can never act as a cluster
 // owner or the system actor.
-func (s *AuthoredScheduler) runUnderAuthor(owner string, automation *Automation, event *events.Event) {
+func (s *AuthoredScheduler) runUnderAuthor(run armedRun, automation *Automation, event *events.Event) {
+	owner := run.owner
 	// Circuit breaker gate: a tripped automation is suppressed (belt-and-
 	// suspenders -- the trip already paused its subscription, but a late
 	// in-flight firing might still reach here).
@@ -471,7 +488,7 @@ func (s *AuthoredScheduler) runUnderAuthor(owner string, automation *Automation,
 	// tripping call the breaker's onTrip fires (the app pauses + surfaces it);
 	// other owners' automations and the same owner's other automations are
 	// untouched -- fault isolation, no cascade.
-	tripped := s.breaker.RecordFailure(owner, automation.Name, err.Error())
+	tripped := s.breaker.RecordFailure(run.subject(automation.Name), err.Error())
 	if s.logger != nil {
 		if tripped {
 			s.logger.Warn("authored automation breaker tripped -- auto-pausing",

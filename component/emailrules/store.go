@@ -132,14 +132,35 @@ func (s *Store) RuleStateByID(ctx context.Context, ruleID string) (RuleState, bo
 	if len(rows) == 0 {
 		return RuleState{}, false, nil
 	}
-	r := rows[0]
+	return ruleStateFromRow(rows[0]), true, nil
+}
+
+// RuleOfBundle names the rule a generated bundle was built for, read under
+// the caller's own actor. The bundle's dry-run report records the rule
+// (RecordDryRun), and the bundle id is derived from that rule and the bundle's
+// version (bundleIDFor) -- so the id is re-derived from what the row says, and
+// a bundle whose row names a rule that does not derive it names none.
+func (s *Store) RuleOfBundle(ctx context.Context, bundleID string) (string, bool, error) {
+	rows, err := s.rows(ctx, call("query", "authoringBundleById", arg{"bundleId", memql.BareShortId(bundleID)}))
+	if err != nil || len(rows) == 0 {
+		return "", false, err
+	}
+	report, _ := rows[0]["dryRunReport"].(map[string]any)
+	ruleID := strings.TrimSpace(str(report, "rule"))
+	if ruleID == "" || bundleIDFor(ruleID, integer(rows[0], "version")) != memql.BareShortId(bundleID) {
+		return "", false, nil
+	}
+	return ruleID, true, nil
+}
+
+func ruleStateFromRow(r map[string]any) RuleState {
 	return RuleState{
 		Status:        str(r, "status"),
 		BundleID:      str(r, "bundleId"),
 		ConstructName: str(r, "constructName"),
 		LastError:     str(r, "lastError"),
 		FiredCount:    integer(r, "firedCount"),
-	}, true, nil
+	}
 }
 
 // RuleState is the generated half of the row.

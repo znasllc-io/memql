@@ -111,6 +111,11 @@ const (
 type authoredArming struct {
 	deps     atomic.Pointer[func() AuthoredRuntimeDeps]
 	applying sync.Mutex
+
+	// The listeners told when this node records a breaker's pause
+	// (SetAuthoredPauseListener).
+	listenMu       sync.Mutex
+	pauseListeners map[string]AuthoredPauseListener
 }
 
 // SetAuthoredRuntimeDeps hands the engine this node's authored runtime -- the

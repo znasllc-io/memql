@@ -12,7 +12,8 @@ import (
 // authorization, so it must never acquire authority over another writer's row.
 // Every writing node installs this synchronous hook; leader gating is for bus
 // delivery and must not suppress the node actually persisting the row.
-func (s *AuthoredScheduler) subscribeBeforeWrite(owner string, a *Automation) func() {
+func (s *AuthoredScheduler) subscribeBeforeWrite(run armedRun, a *Automation) func() {
+	owner := run.owner
 	source := "authored:" + authoredEntryKey(owner, a.Name)
 	hooks := BuildBeforeWriteHooks(s.beforeWriteEngine, []*Automation{a}, s.beforeWriteRegistry, s.logger)
 	for concept, list := range hooks {
@@ -34,7 +35,7 @@ func (s *AuthoredScheduler) subscribeBeforeWrite(owner string, a *Automation) fu
 					if err == nil {
 						s.breaker.RecordSuccess(owner, a.Name)
 					} else {
-						s.breaker.RecordFailure(owner, a.Name, err.Error())
+						s.breaker.RecordFailure(run.subject(a.Name), err.Error())
 					}
 				}
 				return err

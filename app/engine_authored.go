@@ -224,7 +224,20 @@ func (a *App) pauseTrippedAuthoredAutomation(info automations.BreakerTripInfo) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := a.engine.PauseTrippedAutomation(ctx, a.AuthoredRuntimeDeps(), info.Owner, info.Automation, breakerPauseReason(info)); err != nil {
+	trip := memql.AuthoredTrip{
+		Owner:      info.Owner,
+		Automation: info.Automation,
+		// The version the failing runs were armed from: a fix armed before
+		// this pause takes the arming lock is not paused for them.
+		BundleId: info.BundleId,
+		Version:  info.Version,
+		Reason:   breakerPauseReason(info),
+		// Re-activation resets the breaker; a reset breaker's trip is moot.
+		StillTripped: func() bool {
+			return a.authoredBreaker != nil && a.authoredBreaker.IsOpen(info.Owner, info.Automation)
+		},
+	}
+	if err := a.engine.PauseTrippedAutomation(ctx, a.AuthoredRuntimeDeps(), trip); err != nil {
 		a.Logger.Warn("authored automation paused on this node only -- the pause could not be recorded, so other replicas may still run it",
 			"owner", info.Owner, "automation", info.Automation, "error", err)
 		return

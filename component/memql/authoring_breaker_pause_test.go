@@ -12,6 +12,7 @@ package memql
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -33,11 +34,15 @@ type pauseRecordingStore struct {
 	failPause error
 }
 
-func (s *pauseRecordingStore) PauseBundleForOwner(_ context.Context, owner, bundleId, reason string) error {
+func (s *pauseRecordingStore) PauseBundleForOwner(ctx context.Context, owner, bundleId, reason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.failPause != nil {
 		return s.failPause
+	}
+	// A database driver refuses a write on a cancelled context; so does this.
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	s.pauses = append(s.pauses, pauseWrite{owner: owner, bundleId: bundleId, reason: reason})
 	s.armTestStore.setBundleStatus(bundleId, BundlePaused)
@@ -51,6 +56,12 @@ func (s *pauseRecordingStore) recorded() []pauseWrite {
 }
 
 const tripReason = "Paused automatically after 5 failed runs in a row."
+
+// tripOf is the trip a breaker reports for the automation armed from bundleId
+// at version: the failing runs' own construct, captured when they failed.
+func tripOf(name, bundleId string, version int) AuthoredTrip {
+	return AuthoredTrip{Owner: armTestOwner, Automation: name, BundleId: bundleId, Version: version, Reason: tripReason}
+}
 
 // TestABreakerTripPausesTheAutomationOnEveryReplica: node A's breaker trips on
 // an automation both nodes hold. The trip records the pause on the bundle row,
@@ -88,7 +99,7 @@ func TestABreakerTripPausesTheAutomationOnEveryReplica(t *testing.T) {
 		t.Fatal("setup: node B should hold autoTrip")
 	}
 
-	if err := engA.pauseTrippedAutomationWithStore(ctx, store, depsA, armTestOwner, "autoTrip", tripReason); err != nil {
+	if err := engA.pauseTrippedAutomationWithStore(ctx, store, depsA, tripOf("autoTrip", bundleId, 1)); err != nil {
 		t.Fatalf("pause the tripped automation: %v", err)
 	}
 
@@ -149,7 +160,7 @@ func TestATripOnAnAutomationWhoseBundleIsNoLongerActiveRecordsNoPause(t *testing
 	var disarms atomic.Int64
 	bus.Subscribe("authoring.disarm.#", func(events.Event) { disarms.Add(1) })
 
-	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, armTestOwner, "autoTripGone", tripReason); err != nil {
+	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoTripGone", bundleId, 1)); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
 	if got := store.recorded(); len(got) != 0 {
@@ -182,7 +193,7 @@ func TestATripThatCannotRecordThePauseStillStopsThisNode(t *testing.T) {
 	var disarms atomic.Int64
 	bus.Subscribe("authoring.disarm.#", func(events.Event) { disarms.Add(1) })
 
-	err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, armTestOwner, "autoTripLocal", tripReason)
+	err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoTripLocal", bundleId, 1))
 	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
 		t.Fatalf("a pause that could not be recorded must say so, got %v", err)
 	}
@@ -199,5 +210,192 @@ func TestATripThatCannotRecordThePauseStillStopsThisNode(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if n := disarms.Load(); n != 0 {
 		t.Fatalf("a pause that was never recorded was broadcast (%d disarms); every peer reads the bundle as active and ignores it", n)
+	}
+}
+
+// TestATripFinishesWhenItsCallerHangsUp: the trip is the system's own
+// decision, so a caller that gives up -- the app bounds it with a minute --
+// does not leave it half-done. With the caller's context already cancelled,
+// the pause is still recorded, the listeners told, and the disarm broadcast.
+func TestATripFinishesWhenItsCallerHangsUp(t *testing.T) {
+	store := &pauseRecordingStore{armTestStore: newArmTestStore()}
+	bundleId := store.addBundle("v1:authoring:bundle:trip-hangup", 1, "", BundleActive, [2]string{"automation", "autoHangup"})
+	eng, bus, deps, _ := newArmNode(t, store)
+	if _, err := armBundleWithStore(context.Background(), store, armTestOwner, bundleId, deps); err != nil {
+		t.Fatalf("setup: arm: %v", err)
+	}
+	var told, disarms atomic.Int32
+	eng.SetAuthoredPauseListener("probe", func(ctx context.Context, _, _ string) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		told.Add(1)
+		return nil
+	})
+	bus.Subscribe("authoring.disarm.#", func(events.Event) { disarms.Add(1) })
+
+	ctx, hangUp := context.WithCancel(context.Background())
+	hangUp()
+	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoHangup", bundleId, 1)); err != nil {
+		t.Fatalf("a trip whose caller hung up: %v", err)
+	}
+	if st := store.bundleStatus(bundleId); st != BundlePaused || len(store.recorded()) != 1 {
+		t.Fatalf("a trip whose caller hung up left the bundle %q (pauses written %+v)", st, store.recorded())
+	}
+	if n := told.Load(); n != 1 {
+		t.Fatalf("a trip whose caller hung up told its listeners %d times, want once, on a live context", n)
+	}
+	if !eventually(2*time.Second, func() bool { return disarms.Load() == 1 }) {
+		t.Fatalf("a trip whose caller hung up broadcast %d disarms, want 1", disarms.Load())
+	}
+}
+
+// TestATripOfAnOlderVersionLeavesTheNewerOneArmed is the reviewer's probe B: a
+// fix was saved just after version 1's fifth failure and armed before the
+// trip's pause took the arming lock. The trip names version 1, which is no
+// longer what this node holds, so the newer version stays armed and nothing is
+// recorded against it.
+func TestATripOfAnOlderVersionLeavesTheNewerOneArmed(t *testing.T) {
+	ctx := context.Background()
+	store := &pauseRecordingStore{armTestStore: newArmTestStore()}
+	v1 := store.addBundle("v1:authoring:bundle:trip-old", 1, "", BundleActive, [2]string{"automation", "autoFixed"})
+	eng, _, deps, hooks := newArmNode(t, store)
+	if _, err := armBundleWithStore(ctx, store, armTestOwner, v1, deps); err != nil {
+		t.Fatal(err)
+	}
+	store.setBundleStatus(v1, BundleRetired)
+	v2 := store.addBundle("v1:authoring:bundle:trip-fix", 2, v1, BundleActive, [2]string{"automation", "autoFixed"})
+	if _, err := armBundleWithStore(ctx, store, armTestOwner, v2, deps); err != nil {
+		t.Fatal(err)
+	}
+	calls0, _ := hooks.snapshot()
+
+	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoFixed", v1, 1)); err != nil {
+		t.Fatalf("a trip of a version no longer held: %v", err)
+	}
+	if st := store.bundleStatus(v2); st != BundleActive || len(store.recorded()) != 0 {
+		t.Fatalf("a trip caused by version 1 paused version 2: it reads %q, pauses written %+v", st, store.recorded())
+	}
+	if c := held(t, deps, "automation", "autoFixed"); c == nil || c.BundleId != v2 || c.Status != AuthoredActive {
+		t.Fatalf("a trip caused by version 1 disturbed version 2: held %+v", c)
+	}
+	if got := callsSince(hooks, len(calls0)); len(got) != 0 {
+		t.Fatalf("a trip caused by version 1 touched the scheduler: %v", got)
+	}
+
+	// An entry is the bundle AND the version it was armed from: a trip naming
+	// this bundle id at another version -- an id written again at a later
+	// version -- is not this entry's either.
+	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoFixed", v2, 1)); err != nil {
+		t.Fatalf("a trip of another version of the held bundle: %v", err)
+	}
+	if st := store.bundleStatus(v2); st != BundleActive || len(store.recorded()) != 0 {
+		t.Fatalf("a trip of version 1 of bundle %s paused its version 2: it reads %q, pauses written %+v", v2, st, store.recorded())
+	}
+	if c := held(t, deps, "automation", "autoFixed"); c == nil || c.BundleId != v2 || c.Version != 2 || c.Status != AuthoredActive {
+		t.Fatalf("a trip of another version of the held bundle disturbed it: held %+v", c)
+	}
+}
+
+// TestATripWhoseBreakerWasResetPausesNothing: the trip still names the version
+// this node holds, but the breaker is no longer open -- the automation was
+// re-activated (Activate resets it) between the trip and its pause. A fresh
+// start is not paused for the failures that came before it.
+func TestATripWhoseBreakerWasResetPausesNothing(t *testing.T) {
+	ctx := context.Background()
+	store := &pauseRecordingStore{armTestStore: newArmTestStore()}
+	b := store.addBundle("v1:authoring:bundle:trip-reset", 1, "", BundleActive, [2]string{"automation", "autoReset"})
+	eng, _, deps, hooks := newArmNode(t, store)
+	if _, err := armBundleWithStore(ctx, store, armTestOwner, b, deps); err != nil {
+		t.Fatal(err)
+	}
+	calls0, _ := hooks.snapshot()
+	trip := tripOf("autoReset", b, 1)
+	trip.StillTripped = func() bool { return false }
+
+	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, trip); err != nil {
+		t.Fatalf("a trip whose breaker was reset: %v", err)
+	}
+	if st := store.bundleStatus(b); st != BundleActive || len(store.recorded()) != 0 {
+		t.Fatalf("a reset breaker's trip paused the bundle: it reads %q, pauses written %+v", st, store.recorded())
+	}
+	if c := held(t, deps, "automation", "autoReset"); c == nil || c.Status != AuthoredActive {
+		t.Fatalf("a reset breaker's trip stopped the automation: %+v", c)
+	}
+	if got := callsSince(hooks, len(calls0)); len(got) != 0 {
+		t.Fatalf("a reset breaker's trip touched the scheduler: %v", got)
+	}
+}
+
+// TestARecordedPauseIsReportedToTheListenersOnce: the node that writes the
+// pause tells the listeners registered on it -- once, after the bundle row
+// reads paused -- and no other node does: a peer that disarms by the broadcast
+// reports nothing, nor does a trip that wrote no pause.
+func TestARecordedPauseIsReportedToTheListenersOnce(t *testing.T) {
+	ctx := context.Background()
+	store := &pauseRecordingStore{armTestStore: newArmTestStore()}
+	bundleId := store.addBundle("v1:authoring:bundle:trip-heard", 1, "", BundleActive, [2]string{"automation", "autoHeard"})
+
+	type heard struct{ owner, bundleId string }
+	var mu sync.Mutex
+	var onA, onB []heard
+	listen := func(into *[]heard) AuthoredPauseListener {
+		return func(_ context.Context, owner, bundleId string) error {
+			mu.Lock()
+			defer mu.Unlock()
+			*into = append(*into, heard{owner, bundleId})
+			return nil
+		}
+	}
+	// reports copies what a node's listener heard; the lock is never held
+	// across a pause, which calls the listener.
+	reports := func(from *[]heard) []heard {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]heard(nil), (*from)...)
+	}
+	busA := events.NewBus()
+	t.Cleanup(busA.Close)
+	engA := &MemQLEngine{}
+	engA.SetEventBus(busA)
+	depsA := (&armHooks{}).deps(NewAuthoredRuntimeRegistry())
+	engA.SetAuthoredPauseListener("probe", listen(&onA))
+	engB, busB, depsB, _ := newArmNode(t, store)
+	engB.SetAuthoredPauseListener("probe", listen(&onB))
+	busA.Subscribe("authoring.disarm.#", func(ev events.Event) {
+		ev.OriginNodeId = "node-A"
+		busB.Publish(ev)
+	})
+	for _, deps := range []AuthoredRuntimeDeps{depsA, depsB} {
+		if _, err := armBundleWithStore(ctx, store, armTestOwner, bundleId, deps); err != nil {
+			t.Fatalf("setup: arm: %v", err)
+		}
+	}
+
+	if err := engA.pauseTrippedAutomationWithStore(ctx, store, depsA, tripOf("autoHeard", bundleId, 1)); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if !eventually(2*time.Second, func() bool { return held(t, depsB, "automation", "autoHeard") == nil }) {
+		t.Fatal("setup: node B never disarmed the paused bundle")
+	}
+	if got := reports(&onA); fmt.Sprint(got) != fmt.Sprint([]heard{{armTestOwner, bundleId}}) {
+		t.Fatalf("the node that recorded the pause told its listeners %v, want exactly one report of the bundle", got)
+	}
+	if got := reports(&onB); len(got) != 0 {
+		t.Fatalf("a peer that only disarmed reported the pause too (%v); the record is written once", got)
+	}
+
+	// A trip that writes no pause -- this node still held the bundle, which
+	// another node had already retired -- reports nothing.
+	store.setBundleStatus(bundleId, BundleRetired)
+	if err := registerBundleConstructs([]*AuthoredConstruct{{OwnerUserId: armTestOwner, Kind: "automation", Name: "autoHeard",
+		BundleId: bundleId, Version: 1, Source: "automation autoHeard { }"}}, depsA); err != nil {
+		t.Fatalf("setup: hold the retired bundle again: %v", err)
+	}
+	if err := engA.pauseTrippedAutomationWithStore(ctx, store, depsA, tripOf("autoHeard", bundleId, 1)); err != nil {
+		t.Fatalf("pause of a retired bundle: %v", err)
+	}
+	if got := reports(&onA); len(got) != 1 {
+		t.Fatalf("a trip that wrote no pause reported one: %v", got)
 	}
 }

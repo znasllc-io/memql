@@ -113,6 +113,11 @@ mutation bundle activateAuthoringBundle {
     ownerUserId: actor.userId
     status: "active"
     activatedAt: now
+    // A live bundle carries no failure reason. A bundle id can be written
+    // again -- an email rule turned off and on restarts at version 1 under
+    // the same derived id -- and the row read-merges, so without this the
+    // reason a breaker paused it with rode along into the live bundle.
+    failureReason: ""
   }
 }
 

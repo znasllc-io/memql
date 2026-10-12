@@ -31,8 +31,11 @@ package clustere2e
 //     claim admits one replica and the other's guard counts the duplicate it
 //     prevented;
 //   - five failed runs on node B trip its breaker, the bundle row reads
-//     paused, both nodes disarm the rule, a reconcile pass does not arm it
-//     again, and a later write fires nothing.
+//     paused, the rule row reads paused with the sentence the app shows, both
+//     nodes disarm the rule, a reconcile pass does not arm it again, and a
+//     later write fires nothing;
+//   - turned off and on again, the rule comes back clean -- the reused bundle
+//     id carries no failure reason -- and fires.
 //
 // # HOW TO CONFIRM IT IS LOAD-BEARING
 //
@@ -80,6 +83,7 @@ type firingReplica struct {
 	scheduler *automations.AuthoredScheduler
 	deps      func() memql.AuthoredRuntimeDeps
 	guard     *automations.ClusterExecutionGuard
+	breaker   *automations.AuthoredBreaker
 
 	// failRuns makes every firing on this node fail before it runs, which is
 	// how the test drives a rule into its breaker.
@@ -161,14 +165,18 @@ func newFiringReplica(t *testing.T, dsn string, ownsTheOwner bool) *firingReplic
 		Logger: logger, Engine: eng, EventBus: r.bus,
 		StepRegistry: automationSteps.NewRegistry(), ClusterGuard: r.guard,
 	})
-	// As app/engine_authored.go wires it: a trip pauses the automation through
-	// the engine, off the failing run's goroutine.
-	breaker := automations.NewAuthoredBreaker(0, func(info automations.BreakerTripInfo) {
+	// As app/engine_authored.go wires it: a trip pauses the version that
+	// failed through the engine, off the failing run's goroutine, unless the
+	// breaker has been reset by then.
+	r.breaker = automations.NewAuthoredBreaker(0, func(info automations.BreakerTripInfo) {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
-			err := eng.PauseTrippedAutomation(ctx, r.deps(), info.Owner, info.Automation,
-				fmt.Sprintf("Paused automatically after %d failed runs in a row.", info.Failures))
+			err := eng.PauseTrippedAutomation(ctx, r.deps(), memql.AuthoredTrip{
+				Owner: info.Owner, Automation: info.Automation, BundleId: info.BundleId, Version: info.Version,
+				Reason:       fmt.Sprintf("Paused automatically after %d failed runs in a row.", info.Failures),
+				StillTripped: func() bool { return r.breaker.IsOpen(info.Owner, info.Automation) },
+			})
 			r.mu.Lock()
 			r.trips = append(r.trips, err)
 			r.mu.Unlock()
@@ -177,7 +185,7 @@ func newFiringReplica(t *testing.T, dsn string, ownsTheOwner bool) *firingReplic
 	scheduler, err := automations.NewAuthoredScheduler(automations.AuthoredSchedulerOptions{
 		Loader:   automations.NewLoader(automations.LoaderOptions{Registry: memorynodes.DefaultRegistry()}),
 		EventBus: r.bus,
-		Breaker:  breaker,
+		Breaker:  r.breaker,
 		Run: func(ctx context.Context, a *automations.Automation, ev *events.Event) error {
 			r.bump(r.ran, a.Name)
 			if r.failRuns.Load() {
@@ -199,6 +207,9 @@ func newFiringReplica(t *testing.T, dsn string, ownsTheOwner bool) *firingReplic
 	deps := memql.AuthoredRuntimeDeps{Registry: r.registry, RegisterHook: scheduler.Activate, DeregisterHook: scheduler.Deactivate}
 	r.deps = func() memql.AuthoredRuntimeDeps { return deps }
 	eng.SetAuthoredRuntimeDeps(r.deps)
+	// The App's handoff to emailrules, which also registers the listener that
+	// marks a rule paused when this node records its breaker's pause.
+	emailrules.Bind(emailrules.EngineAdapter{Engine: eng}, r.deps)
 	ctx, stop := context.WithCancel(context.Background())
 	t.Cleanup(stop)
 	eng.StartAuthoringArmSubscriber(ctx)
@@ -407,9 +418,13 @@ func TestAnEmailRuleFiresOnceWhereItsWriteHappened(t *testing.T) {
 			"disarms that crossed the link %d)", a.scheduler.IsActive(armedOwner, name), b.scheduler.IsActive(armedOwner, name),
 			trips, link.count(events.TopicAuthoringDisarmForBundle(armed.BundleID)))
 	}
-	b.mu.Lock()
-	trips := append([]error(nil), b.trips...)
-	b.mu.Unlock()
+	var trips []error
+	armingEventually(10*time.Second, func() bool {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		trips = append([]error(nil), b.trips...)
+		return len(trips) > 0
+	})
 	if len(trips) != 1 || trips[0] != nil {
 		t.Fatalf("the trip on node B paused the rule with %v, want one clean pause", trips)
 	}
@@ -429,4 +444,50 @@ func TestAnEmailRuleFiresOnceWhereItsWriteHappened(t *testing.T) {
 	if got := facts(); got.firedCount != 3 {
 		t.Fatalf("a paused rule fired: count %d, want the 3 from before the trip", got.firedCount)
 	}
+
+	// --- The rule's own row says it was stopped, and why ---
+	rs, re, rb := readRuleRow(t, a.db, rule)
+	if rs != "paused" || re != emailrules.BreakerStoppedSentence || memql.BareShortId(rb) != memql.BareShortId(armed.BundleID) {
+		t.Fatalf("after the trip the rule row reads status %q, lastError %q, bundleId %q; want paused, %q, the paused bundle %s",
+			rs, re, rb, emailrules.BreakerStoppedSentence, armed.BundleID)
+	}
+
+	// --- Turned off and on again, the rule comes back clean and fires ---
+	if _, err := activator.Retire(ownerCtx, owner, rule); err != nil {
+		t.Fatalf("turn the rule off: %v", err)
+	}
+	if status, _ := readBundleRow(t, a.db, armed.BundleID); status != "retired" {
+		t.Fatalf("turning the rule off left its paused bundle %q", status)
+	}
+	again, err := activator.Activate(ownerCtx, owner, rule)
+	if err != nil || again.Status != "active" {
+		t.Fatalf("turn the rule on again: %+v, %v", again, err)
+	}
+	// Version 1 again, so the same bundle id: the trip's reason must not ride
+	// along into the live bundle.
+	if status, reason := readBundleRow(t, a.db, again.BundleID); status != "active" || reason != "" {
+		t.Fatalf("the re-activated bundle reads %q with failureReason %q; an active bundle carries no failure reason", status, reason)
+	}
+	if rs, re, _ := readRuleRow(t, a.db, rule); rs != "active" || re != "" {
+		t.Fatalf("the re-activated rule reads %q with lastError %q", rs, re)
+	}
+	if !armingEventually(15*time.Second, func() bool { return b.scheduler.IsActive(armedOwner, name) }) {
+		t.Fatal("node B never armed the rule turned on again")
+	}
+	createTodo(b, "after-turn-on-"+suffix)
+	if got := waitFired(4); got.firedCount != 4 {
+		t.Fatalf("the rule turned on again fired to a count of %d, want 4", got.firedCount)
+	}
+}
+
+func readRuleRow(t *testing.T, db *bun.DB, rule string) (status, lastError, bundleID string) {
+	t.Helper()
+	err := db.QueryRowContext(context.Background(), `
+		SELECT COALESCE(payload->>'status', ''), COALESCE(payload->>'lastError', ''), COALESCE(payload->>'bundleId', '')
+		  FROM "MemoryNodes" WHERE id = ? ORDER BY "createdAt" DESC LIMIT 1`,
+		"v1:campaigns:emailRule:"+rule).Scan(&status, &lastError, &bundleID)
+	if err != nil {
+		t.Fatalf("read the rule row: %v", err)
+	}
+	return status, lastError, bundleID
 }

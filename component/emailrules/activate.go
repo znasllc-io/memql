@@ -38,7 +38,12 @@ package emailrules
 // the ENGINE's own sentence on `lastError`, and the app renders that sentence
 // verbatim. The alternative -- a rule that stays `draft` while an error lives in
 // a log line on one replica -- is the silence this whole feature exists to
-// remove.
+// remove. An EDIT that is refused is the one exception to `failed`: the version
+// that was live keeps running, so the row keeps naming it and reading `active`,
+// and `lastError` says why the edit did not take and that the previous version
+// is still running (refuse). The row records what happened -- a caller that
+// hangs up after the activation went live does not stop it being recorded, and
+// one that hangs up before it took effect leaves the row as it was.
 
 import (
 	"context"
@@ -46,6 +51,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -163,14 +169,14 @@ func (a *Activator) Activate(ctx context.Context, owner, ruleID string) (Result,
 	// the ownership gate above has already established that they are the same
 	// person, which is what makes this check mean what it says.
 	if err := a.verifyReadable(ctx, rule); err != nil {
-		return a.fail(ctx, rule.ID, res, err)
+		return a.refuse(ctx, rule.ID, res, state, err)
 	}
 
 	// 1. Generate. A form the generator refuses never reaches the pipeline, and
 	// the refusal is about the FORM, in the operator's own vocabulary.
 	source, err := GenerateAutomation(rule)
 	if err != nil {
-		return a.fail(ctx, rule.ID, res, err)
+		return a.refuse(ctx, rule.ID, res, state, err)
 	}
 	res.ConstructName = ConstructNameFor(rule.ID)
 
@@ -184,7 +190,7 @@ func (a *Activator) Activate(ctx context.Context, owner, ruleID string) (Result,
 		// row is what tells the next activation which version it supersedes.
 		_ = a.writeBundle(ctx, bundleID, rule, state, source)
 		_ = a.recordValidation(ctx, bundleID, false, reasons, strings.Join(reasons, "; "))
-		return a.fail(ctx, rule.ID, res, fmt.Errorf("emailrules: the generated automation does not compile: %s", strings.Join(reasons, "; ")))
+		return a.refuse(ctx, rule.ID, res, state, fmt.Errorf("emailrules: the generated automation does not compile: %s", strings.Join(reasons, "; ")))
 	}
 
 	// 3. Write the rows and both gate verdicts.
@@ -192,13 +198,13 @@ func (a *Activator) Activate(ctx context.Context, owner, ruleID string) (Result,
 	bundleID := bundleIDFor(rule.ID, version)
 	res.BundleID = bundleID
 	if err := a.writeBundle(ctx, bundleID, rule, state, source); err != nil {
-		return a.fail(ctx, rule.ID, res, err)
+		return a.refuse(ctx, rule.ID, res, state, err)
 	}
 	if err := a.recordValidation(ctx, bundleID, true, nil, ""); err != nil {
-		return a.fail(ctx, rule.ID, res, err)
+		return a.refuse(ctx, rule.ID, res, state, err)
 	}
 	if err := a.recordDryRun(ctx, bundleID, rule.ID, res.Lane); err != nil {
-		return a.fail(ctx, rule.ID, res, err)
+		return a.refuse(ctx, rule.ID, res, state, err)
 	}
 
 	// 4. Arm it. THIS is the call that had no production caller.
@@ -211,7 +217,7 @@ func (a *Activator) Activate(ctx context.Context, owner, ruleID string) (Result,
 	// Handing it the bare form refused every activation, for every person,
 	// once the generated construct first compiled.
 	if _, err := a.engine.ActivateApprovedBundle(ctx, owner, bundleID, a.deps()); err != nil {
-		return a.fail(ctx, rule.ID, res, err)
+		return a.refuse(ctx, rule.ID, res, state, err)
 	}
 
 	// 5. Record the success on the rule row.
@@ -314,8 +320,71 @@ func (a *Activator) recordDryRun(ctx context.Context, bundleID, ruleID, lane str
 	return a.store.RecordDryRun(auth.ContextWithInternalOrigin(ctx), bundleID, ruleID, lane)
 }
 
+// record writes what happened onto the rule row, on a context the caller
+// cannot cancel (memql#6022): an activation that went live, or a retire that
+// went through, has happened whether or not the client is still listening,
+// and a row left naming the version it replaced makes turning the rule off
+// retire the wrong bundle and turning it on a conflict with the live one. A
+// refusal or failure the caller abandoned is not recorded at all (abandoned).
 func (a *Activator) record(ctx context.Context, ruleID, status, bundleID, constructName, lastError string) error {
-	return a.store.RecordGeneration(auth.ContextWithInternalOrigin(ctx), ruleID, status, bundleID, constructName, lastError)
+	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
+	return a.store.RecordGeneration(auth.ContextWithInternalOrigin(recordCtx), ruleID, status, bundleID, constructName, lastError)
+}
+
+// recordTimeout bounds a rule-row record that no caller can cancel.
+const recordTimeout = 30 * time.Second
+
+// abandoned reports that the caller gave up before the refusal or failure it
+// would record. Nothing took effect -- an activation that fails undoes what it
+// did before its commit point, and a retire that fails has not retired -- so
+// the row is left as it was: a hang-up is not something the operator can fix
+// on the rule, and "context canceled" is not a reason to show them.
+func abandoned(ctx context.Context) bool {
+	return ctx.Err() != nil
+}
+
+// PreviousVersionStillRunning ends the reason a refused edit records: the
+// version that was live before the edit is still armed and still sending.
+const PreviousVersionStillRunning = "The previous version is still running."
+
+// refuse records a refused activation where the operator is looking.
+//
+// With no version live before it, the rule reads failed (fail). With one live
+// -- an edit that did not take -- nothing about what is running changed:
+// ActivateApprovedBundle leaves the live version armed when it refuses the new
+// one, and every earlier refusal never reached it. So the row keeps naming the
+// live version and keeps reading active, and says why the edit did not take.
+// Recording it as failed, naming the refused bundle, told the app the rule had
+// stopped while it went on sending -- and turning it off then retired the
+// refused bundle and left the live one firing.
+func (a *Activator) refuse(ctx context.Context, ruleID string, res Result, state RuleState, cause error) (Result, error) {
+	if state.Status != "active" || strings.TrimSpace(state.BundleID) == "" {
+		return a.fail(ctx, ruleID, res, cause)
+	}
+	res.Status = "active"
+	res.BundleID = state.BundleID
+	if strings.TrimSpace(state.ConstructName) != "" {
+		res.ConstructName = state.ConstructName
+	}
+	res.Error = cause.Error()
+	if abandoned(ctx) {
+		return res, cause
+	}
+	lastError := asSentence(truncate(cause.Error(), 4000)) + " " + PreviousVersionStillRunning
+	if err := a.record(ctx, ruleID, "active", res.BundleID, res.ConstructName, lastError); err != nil {
+		return res, fmt.Errorf("%w (and the reason could not be recorded on the rule: %v)", cause, err)
+	}
+	return res, cause
+}
+
+// asSentence ends text with a full stop unless it already ends a sentence.
+func asSentence(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" || strings.HasSuffix(text, ".") || strings.HasSuffix(text, "!") || strings.HasSuffix(text, "?") {
+		return text
+	}
+	return text + "."
 }
 
 // fail stamps the refusal where the operator is looking and returns it. Both,
@@ -325,6 +394,9 @@ func (a *Activator) record(ctx context.Context, ruleID, status, bundleID, constr
 func (a *Activator) fail(ctx context.Context, ruleID string, res Result, cause error) (Result, error) {
 	res.Status = "failed"
 	res.Error = cause.Error()
+	if abandoned(ctx) {
+		return res, cause
+	}
 	if err := a.record(ctx, ruleID, "failed", res.BundleID, res.ConstructName, truncate(cause.Error(), 4096)); err != nil {
 		return res, fmt.Errorf("%w (and the reason could not be recorded on the rule: %v)", cause, err)
 	}
@@ -348,8 +420,12 @@ func summaryFor(r Rule) string {
 // old automation stop firing the instant the new one is armed.
 func bundleIDFor(ruleID string, version int) string {
 	sum := sha256.Sum256([]byte(ruleID + "\x00" + fmt.Sprint(version)))
-	return "emr" + hex.EncodeToString(sum[:16])
+	return ruleBundlePrefix + hex.EncodeToString(sum[:16])
 }
+
+// ruleBundlePrefix starts every rule bundle id (bundleIDFor), which is how a
+// bundle is recognised as a rule's without a read.
+const ruleBundlePrefix = "emr"
 
 func constructIDFor(bundleID string) string {
 	sum := sha256.Sum256([]byte(bundleID + "\x00automation"))

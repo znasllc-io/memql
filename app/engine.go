@@ -348,9 +348,12 @@ func (a *App) engineAndBus() {
 
 	// Stand up the owner-scoped authored-construct runtime (epic memql#954,
 	// #961 / #959 live glue): registry + per-owner scheduler (run hook -> the
-	// live Executor) + per-automation breaker (onTrip -> Deactivate +
-	// registry-pause) + the cluster-wide global kill switch. The cluster owner
-	// gate is wired later in the cluster phase.
+	// authored runner: event firings claimed once per event across replicas,
+	// scheduled firings unclaimed) + per-automation breaker (onTrip -> the
+	// engine's PauseTrippedAutomation, which pauses the version that failed on
+	// every replica and records it) + the cluster-wide global kill switch. The
+	// cluster owner gate, which places scheduled firings, is wired later in the
+	// cluster phase.
 	a.wireAuthoredRuntime()
 
 	// Kick off the seed materializer in the background, but only AFTER

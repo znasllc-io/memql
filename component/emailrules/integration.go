@@ -47,10 +47,19 @@ var (
 // Called once from the App during the engine phase, right after the authored
 // runtime exists. Idempotent; a second call replaces the first, which is what a
 // test that stands two engines up needs.
+//
+// The same handoff registers, on an engine that takes one, the listener that
+// marks a rule paused when this node records its breaker's pause
+// (breaker_pause.go). It is registered by name, so binding again replaces it.
 func Bind(engine ActivationEngine, deps func() memql.AuthoredRuntimeDeps) {
 	bindMu.Lock()
-	defer bindMu.Unlock()
 	boundEng, boundDeps, boundSince = engine, deps, time.Now().UTC()
+	bindMu.Unlock()
+	if r, ok := engine.(pauseListenerEngine); ok {
+		r.SetAuthoredPauseListener(IntegrationName, func(ctx context.Context, owner, bundleID string) error {
+			return recordBreakerPause(ctx, engine, owner, bundleID)
+		})
+	}
 }
 
 func bound() (ActivationEngine, func() memql.AuthoredRuntimeDeps, bool) {

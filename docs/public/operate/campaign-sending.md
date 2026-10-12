@@ -363,7 +363,10 @@ uncertain outcomes as refusals.
 An email rule fires once, on the replica where its triggering write happened, and
 the limits its runs draw on (10 concurrent runs and the automation execution
 budget) are counted per replica, so the cluster-wide ceiling is those limits times
-the number of replicas.
+the number of replicas. A rule fires once per event: two identical updates to the
+same row within about an hour count as one, on a single node too. Each replica
+counts failures on its own, so a failing rule can fail up to five times on each
+replica before it stops everywhere.
 
 Other automations that call `campaignSendToRecipient` should supply a stable
 `requestId` for each intended message, such as one signup event's welcome.

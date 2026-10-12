@@ -207,7 +207,11 @@ hand-authored mistakes today too).
   reinvent.
 - **Per-automation circuit breaker** fault-isolates a misbehaving authored
   automation (auto-pause + surface); never cascades. A trip records the pause
-  on the bundle row and disarms the bundle on every replica (memql#6022).
+  on the bundle row and disarms the bundle on every replica (memql#6022). It
+  pauses only the version that failed, and only while its breaker is still
+  open: a fix armed in the meantime is left running. The node that records
+  the pause tells the engine's pause listeners, which is how an email rule's
+  own row comes to read paused.
 - **Multi-node firing:** an event-triggered authored automation fires on the
   node where its triggering event happened, and each event run is claimed once
   across replicas; a scheduled one runs on its owner's assigned node only

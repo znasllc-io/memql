@@ -216,13 +216,24 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 		return ActivationResult{}, fmt.Errorf("authoring: activate bundle %q: %w", bundleId, err)
 	}
 
+	// FROM HERE THE ACTIVATION HAS HAPPENED, and is reported as such, so
+	// everything after the commit point finishes whatever the caller does
+	// (memql#6022): each step below runs on a context the caller cannot
+	// cancel, with its own bound. A client that hung up here used to leave the
+	// superseded version active for good -- nothing else retires it, and the
+	// reconcile pass and boot re-arm treat it as live -- so turning the rule
+	// off later re-armed its OLD definition on every replica.
+	committed := context.WithoutCancel(ctx)
+
 	// 4. Promote net-new deps into the owner's reusable catalog. Best-effort per
 	// construct: a promotion failure does not unwind the activation (the
 	// capability is live; the dep just isn't reusable yet) but IS surfaced.
 	result := ActivationResult{Plan: plan, Retired: plan.SupersedesBundleId}
 	if deps.PromoteCatalog != nil {
+		promoteCtx, cancelPromote := context.WithTimeout(committed, armApplyTimeout)
+		defer cancelPromote()
 		for _, t := range plan.PromoteToCatalog {
-			promo, perr := deps.PromoteCatalog(ctx, t.ConstructId, t.Kind, t.Name, t.Source, bundleId)
+			promo, perr := deps.PromoteCatalog(promoteCtx, t.ConstructId, t.Kind, t.Name, t.Source, bundleId)
 			if perr != nil {
 				if deps.Logger != nil {
 					deps.Logger.Warn("authored dep catalog promotion failed (capability is live; dep not yet reusable)",
@@ -241,7 +252,9 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 	// scheduler key by name, so tearing the old one down would tear the new one
 	// down with it.
 	if plan.SupersedesBundleId != "" {
-		if err := retireBundleRuntime(ctx, store, plan.SupersedesBundleId, owner, deps, plan.registeredKeys()); err != nil {
+		retireCtx, cancelRetire := context.WithTimeout(committed, armApplyTimeout)
+		defer cancelRetire()
+		if err := retireBundleRuntime(retireCtx, store, plan.SupersedesBundleId, owner, deps, plan.registeredKeys()); err != nil {
 			if deps.Logger != nil {
 				deps.Logger.Warn("authored superseded-bundle retirement failed (new version is live)",
 					"bundleId", bundleId, "supersedes", plan.SupersedesBundleId, "error", err)
@@ -250,7 +263,9 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 	}
 
 	// 6. Audit: every activation is recorded.
-	emitAuthoredAudit(ctx, deps, AuthoredAuditEvent{
+	auditCtx, cancelAudit := context.WithTimeout(committed, armApplyTimeout)
+	defer cancelAudit()
+	emitAuthoredAudit(auditCtx, deps, AuthoredAuditEvent{
 		Action:      AuditActionBundleActivated,
 		OwnerUserId: owner,
 		BundleId:    bundleId,
