@@ -19,3 +19,18 @@ var payloadLookups = []payloadLookup{
 	{index: "memory_nodes_recipient_digest_lookup_idx", field: "emailDigest", concepts: []string{"v1:campaigns:recipient"}},
 	{index: "memory_nodes_consent_digest_lookup_idx", field: "emailDigest", concepts: []string{"v1:campaigns:consentEvent"}},
 }
+
+// payloadLookupFor reports whether a lookup index serves field on concept.
+func payloadLookupFor(concept, field string) bool {
+	for _, lookup := range payloadLookups {
+		if lookup.field != field {
+			continue
+		}
+		for _, served := range lookup.concepts {
+			if served == concept {
+				return true
+			}
+		}
+	}
+	return false
+}
