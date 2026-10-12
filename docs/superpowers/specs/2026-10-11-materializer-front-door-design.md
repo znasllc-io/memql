@@ -31,7 +31,9 @@ not change, the design.
    editors use the polling `followComposition`.
 4. **Names are cleaned on the server.** A trailing extension matching the format
    is stripped (`Plan.md` stays `Plan.md`, never `Plan.md.md`) and a name with a
-   slash is refused before anything is written. A stem the planner's triage
+   slash is refused before anything is written ("Enter a name without slashes.";
+   a name with nothing left once the extension is dropped is refused with "Enter a
+   name for the file."). A stem the planner's triage
    chooses is not a person's typing, and a refusal there would come after the
    drafting steps had run, so the planner turns path separators in it into
    hyphens before it calls the Materializer.
@@ -86,7 +88,7 @@ not change, the design.
    comment is sent once more without them and all of them are reported. A Go test
    holds these limits and that wording to the Library's own, and the failure text
    a person sees never carries the construct name `executeNamed` puts in front of
-   a refusal.
+   a refusal, nor the engine's frame (amendment 11).
 8. **A folder the caller cannot use is refused by the server.** `composeMaterialize`
    reads `folderId` as the caller, fresh, and refuses one that is not readable
    (someone else's, deleted, no such id) or that is archived, with "That folder
@@ -120,6 +122,27 @@ not change, the design.
     statements are refused before the recorder runs, and a real statement reaches
     it as sent. A person's client still leaves the statement out to ask for a
     blank file.
+11. **What a person reads is one sentence, and a finished file says what it is**
+    (the whole-branch review's fixes). A refusal reaches a client framed: the call's
+    name in front (`executeNamed`) and the server's "MemQL engine failed to execute
+    query. Details: " around it. The SDK's `refusalSentence`, beside `executeNamed`,
+    takes both off, and a leading Go package name; `startMaterialize` throws and
+    `handOffDescription` reports in those words, and the OS shows every refusal
+    through it. The OS composer checks a name as it is typed with the SDK's
+    `fileNameProblem`, the rule and words of VS Code's New Markdown, which now uses it
+    too. The OS renders a composition's `provenanceNote` (only the stamp step knows
+    why a file carries no provenance) and says what a finished file is: "This file was
+    created blank."; for a described one, "Your description was sent to be written.
+    Open the file to review and approve the draft." once the window has sent it, the
+    failure notice alone when it could not, and "This file was created from a
+    description. Open it to continue." when the window does not know; a file a model
+    wrote keeps "The composed text is in the file." A reference left off the hand-off
+    is named in its own notice, "This reference wasn't attached.", because the SDK's
+    entry is a label that carries no reason. Save as recipe is absent where the
+    recipe could not run. `followComposition` makes its first look 300 ms after the
+    start and the rest an interval apart, and VS Code's New Markdown shows each status
+    in its notification. `composeCancel` decides on a fresh read, so a stop on one
+    replica cannot cancel a composition another replica has finished.
 
 ## In plain terms
 
@@ -480,7 +503,8 @@ constructs the rules ban.
   cancellation calls `composeCancel`, waiting for the Files entry, abort,
   `followComposition` resume; `handOffDescription` posts the comment (with
   attachments) and then requests the revision, a failure comes back as
-  `revisionFailure` without throwing and without the construct name, and a retry
+  `revisionFailure` without throwing and without the construct name or the
+  engine's frame, and a retry
   reuses the same request ids; a stop after the file exists keeps it; a
   described request whose id the hand-off would refuse is refused before it is
   sent.
