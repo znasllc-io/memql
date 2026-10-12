@@ -100,7 +100,13 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 			}
 		}
 	case "createLibraryFile":
+		// @serverOnly, as the engine holds it: blobUrl is a storage path the
+		// node's credential reads back, so an unstamped write is refused.
+		if auth.OriginFromContext(ctx) != auth.OriginInternal {
+			return nil, fmt.Errorf("missing internal origin")
+		}
 		row = maps.Clone(args)
+		row["ownerUserId"] = ac.UserId
 		e.files[stringOf(args["fileId"])] = row
 		if e.afterFile != nil {
 			e.afterFile()
@@ -195,10 +201,12 @@ type materializeUploader struct {
 	bytes []byte
 }
 
-func (u *materializeUploader) Upload(_ context.Context, _, name string, data []byte, _ string) (string, error) {
+func (u *materializeUploader) Upload(_ context.Context, container, name string, data []byte, _ string) (string, error) {
 	u.calls++
 	u.bytes = append([]byte(nil), data...)
-	return "https://storage.test/" + name, nil
+	// The shape the Azure client returns: account host, then container, then
+	// the object -- which is what the Library's key check reads.
+	return "https://storage.test/" + container + "/" + name, nil
 }
 func materializeContext() context.Context {
 	return auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u-alice", Role: auth.RoleWriter})
@@ -1394,7 +1402,7 @@ func TestDescribedMarkdownKeepsCapturingOptedInReferences(t *testing.T) {
 	data := []byte("Launch notes: ship on the first Tuesday")
 	reader := &referenceReader{data: data}
 	i.SetSourceDownloader(reader)
-	e.files["reference-file"] = map[string]any{"name": "launch-notes.md", "blobUrl": "stored-object", "sha256": (pure.Result{Bytes: data}).SHA256()}
+	e.files["reference-file"] = map[string]any{"name": "launch-notes.md", "blobUrl": "library/u-alice/reference-file/launch-notes.md", "ownerUserId": "u-alice", "sha256": (pure.Result{Bytes: data}).SHA256()}
 	a := describedArgs()
 	a.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "reference-file", Label: "Launch notes", Content: true}}
 	compositionId, input := acceptAsAPerson(t, i, a)

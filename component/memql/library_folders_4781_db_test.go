@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // library_folders_4781_db_test.go -- the Files app's folder tree and upload
@@ -257,7 +259,7 @@ func TestLibraryFileCarriesFilingAndProvenance(t *testing.T) {
 	args["uploadedFromWorkerId"] = "wrk-" + suffix
 	args["uploadedFromWorkerName"] = "MacBook-Pro"
 	args["uploadedFromPath"] = "/Users/a/Reports/notes.md"
-	runMutation(t, ctxA, eng, "createLibraryFile", args)
+	runMutation(t, auth.ContextWithInternalOrigin(ctxA), eng, "createLibraryFile", args)
 
 	res, err := eng.Execute(ctxA, fmt.Sprintf(`libraryFileById(fileId: "%s")`, fileId))
 	if err != nil {

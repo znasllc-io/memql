@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -49,7 +50,7 @@ func TestRestorePairReturnsTheArtifactAndFileToTheLibrary(t *testing.T) {
 	ctxA := rowAuthzCallerCtx(userA)
 	ctxB := rowAuthzCallerCtx(userB)
 
-	runMutation(t, ctxA, eng, "createLibraryFile", libraryFileArgs(fileId, userA))
+	runMutation(t, auth.ContextWithInternalOrigin(ctxA), eng, "createLibraryFile", libraryFileArgs(fileId, userA))
 	sourceRef := "v1:library:file:" + fileId
 	artifactId := runMutation(t, ctxA, eng, "createArtifact", map[string]any{
 		"sourceConceptRef": sourceRef,

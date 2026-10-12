@@ -71,7 +71,7 @@ func (e *attachmentVisionEngine) CallAIVision(_ context.Context, req airoute.Res
 func testReviewAttachmentsAcrossReplicas(t *testing.T, f *revisionDB) {
 	referenceID, reference := f.document("# Reference\n\nReference content sentinel.")
 	fileID := fmt.Sprintf("attachment-%d", time.Now().UnixNano())
-	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "createLibraryFile", map[string]any{"fileId": fileID, "name": "Figure.png", "mimeType": "image/png", "size": len(attachmentPNG()), "blobUrl": "https://storage.invalid/verified.png", "source": "uploaded", "format": "image"})
+	f.query(f.engine, auth.ContextWithInternalOrigin(f.ctx), "mutation", "createLibraryFile", map[string]any{"fileId": fileID, "name": "Figure.png", "mimeType": "image/png", "size": len(attachmentPNG()), "blobUrl": "https://storage.invalid/memql-library/library/" + f.owner + "/" + fileID + "/Figure.png", "source": "uploaded", "format": "image"})
 	artifact := f.query(f.engine, f.ctx, "mutation", "createArtifact", map[string]any{"sourceConceptRef": fileID, "ownerUserId": f.owner, "lens": "artifact", "kind": "file", "source": "uploaded", "title": "Figure.png", "format": "image"})[0]
 	imageID := memql.BareShortId(asString(artifact["id"]))
 	store := &attachmentStore{data: attachmentPNG()}

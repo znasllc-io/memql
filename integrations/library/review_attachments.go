@@ -96,7 +96,7 @@ func (i *Integration) reviewAttachments(ctx context.Context, input any) ([]revie
 			if i.blobFetcher == nil {
 				return nil, nil, fmt.Errorf("attachment storage is unavailable")
 			}
-			stream, err := i.blobFetcher.DownloadStreamURL(ctx, stringField(doc.backing, "blobUrl"))
+			stream, err := i.openFileBytes(ctx, doc.owner, stringField(doc.backing, "blobUrl"))
 			if err != nil {
 				return nil, nil, fmt.Errorf("an attachment could not be read: %w", err)
 			}
