@@ -119,8 +119,10 @@ describe("the template that arrives", () => {
     const wait = beginTemplateWait(THERE, "self", true, 0);
     const republished = THERE.map((row) => (row.id === "t2" ? { ...row, status: "ready", createdAt: "2026-10-11T09:00:00Z" } : row));
     expect(arrivedTemplate(wait, republished)).toBeNull();
-    // Nor does one that was put away and brought back.
-    const restored = THERE.map((row) => (row.id === "t3" ? { ...row, status: "draft" } : row));
+    // Nor does one that was put away and brought back published: restored as a
+    // draft it could not end a wait that needs publication anyway, so only a
+    // published restore proves it is the id, not the status, that keeps it out.
+    const restored = THERE.map((row) => (row.id === "t3" ? { ...row, status: "ready" } : row));
     expect(arrivedTemplate(wait, restored)).toBeNull();
   });
 

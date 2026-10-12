@@ -93,6 +93,12 @@ it("matches the editor's own spelling", () => {
   expect(editorNewEmailURI("memql.example.com", "self")).toBe("memql-file://memql.example.com/new-email/self/New%20email");
 });
 
+it("encodes the organization id as one path segment", () => {
+  // An id is the server's to spell; whatever it holds stays one segment, so the
+  // resource keeps its three.
+  expect(editorNewEmailURI("memql.example.com", "a/b")).toBe("memql-file://memql.example.com/new-email/a%2Fb/New%20email");
+});
+
 it("spells the domain in lower case, as the editor does", () => {
   expect(editorNewEmailURI("MemQL.Example.COM", "self")).toBe("memql-file://memql.example.com/new-email/self/New%20email");
   // The browser editor's address is read out of the resource, and a custom
