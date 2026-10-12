@@ -336,27 +336,37 @@ anything; a pass over recipients that all carry a digest writes nothing.
 
 **What a signup holds.** A signup serialises its writes with two advisory locks,
 the storefront's and then the audience's, taken together in one transaction on
-one connection of the pod's pool, which is four connections in the deployed
-configuration. Everything slow is read before the locks (the form, the mailbox
-and the audience's size above, the welcome template), so a slow read delays only
-that visitor. Under the locks the signup checks again only what must be exact
-when it writes: the storefront's binding, the signup row, the suppression list
-and, for a mailbox it is about to add, the audience's room and the mailbox by
-digest, so signups that ran side by side cannot together pass the audience's
-ceiling or add the same person twice. At most one connection fewer than the pool
-holds can be held by locks at once, so the work done under them can always reach
-the database. A signup that cannot take its locks within six seconds answers "Too
-many signups at once. Try again in a moment." and writes nothing. The locks are an
-idle transaction, which PostgreSQL ends after 60 seconds
-(`idle_in_transaction_session_timeout`) and the lock with it, so what runs under
-them is kept to a handful of reads and the writes, and never a roster walk. For a
-mailbox the signup is about to add, two of those reads are the expensive ones (the
-mailbox by digest and the audience's size): the engine answers any recipient read
-from every current recipient in the cluster, which costs one to four seconds each
-at 200,000 recipients, depending on how busy the database is. New subscribers to
-one audience therefore take their turns, and one that waits more than six seconds
-for its turn is told to try again. The single-row reads and the writes are
-milliseconds.
+one connection of the pod's write-gate pool: connections used for nothing else
+(`MEMQL_DB_GATE_POOL_SIZE`, eight by default), so the work under the locks keeps
+all of the request pool, and the locks are not subject to the request pool's
+60-second limit on a session idle in a transaction. A gate session may sit idle
+for five minutes (`MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS`), and a signup stays far
+inside that.
+
+*Uncontended*, which is the usual case: the locks are taken at once. Everything
+slow is read before them (the form, the mailbox and the audience's size above, the
+welcome template), so a slow read delays only that visitor. Under the locks the
+signup checks again only what must be exact when it writes: the storefront's
+binding, the signup row, the suppression list and, for a mailbox it is about to
+add, the audience's room and the mailbox by digest, so signups that ran side by
+side cannot together pass the audience's ceiling or add the same person twice.
+Immediately before each write it asks its gate whether the locks are still held.
+The single-row reads and the writes are milliseconds. The two reads for a new
+mailbox are not: the engine answers any recipient read from every current
+recipient in the cluster, which costs one to four seconds each at 200,000
+recipients, depending on how busy the database is. A new subscriber at that size
+holds the locks for about two of them, and about twenty seconds in all.
+
+*Contended*: new subscribers to one audience take their turns. A signup that has
+waited six seconds for its locks, or for a connection of the gate pool, answers
+"Too many signups at once. Try again in a moment." and writes nothing; at 200,000
+recipients that is more than a couple of new subscribers to one audience at the
+same moment. A signup that gets its locks but is under them for more than thirty
+seconds is stopped before it writes and gives the same answer; consent is written
+first and keyed by the signup, so asking again is safe at every step. If
+PostgreSQL ends the gate's session (an administrator, a failover) the signup finds
+out before it writes and writes nothing. A pod that holds all of its gates at once
+answers busy to the next signup rather than waiting for a connection.
 
 Consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and
@@ -365,9 +375,16 @@ welcome. Changing the recipient's mailbox blocks the queued welcome instead of
 redirecting it to an address that did not consent. Current authority, sender
 availability and suppression are checked again before sending.
 
+A welcome takes the storefront's lock, the audience's and its own send receipt's
+together, in that order, in one transaction on one connection, and spends at most
+the send's timeout plus thirty seconds under them. A lock that is busy at any point
+before the send begins, including the email provider's own (Azure's send receipt),
+is "nothing attempted, try later": the welcome stays pending, nothing is marked
+blocked, and the next worker pass sends it.
+
 **Recent welcomes** shows the latest 50 outcomes, read when the audience opens
-or **Refresh** is selected. A rate limit leaves mail pending for a later worker
-pass. A blocked welcome shows its reason; after resolving it, **Check again**
+or **Refresh** is selected. A rate limit or a busy lock leaves mail pending for a
+later worker pass. A blocked welcome shows its reason; after resolving it, **Check again**
 rechecks that exact saved outcome. An attempt with a lost provider response is
 `uncertain` and is never automatically submitted again. `sent` means the
 transport accepted the message, not proof of inbox delivery. Local capture sends
@@ -450,8 +467,18 @@ This prevents duplicate submissions; it does not guarantee mailbox delivery.
 Requests that omit `requestId` retain the existing per-invocation behavior.
 
 Suppression and preflight refusals make no external send attempt and remain
-retryable. Receipt reads still require current send authority in the recorded
-organization. The internal receipt cannot be forged through client mutations.
+retryable, and so does a send whose coordination lock was busy: the attempt is
+recorded only after every lock the send needs has been taken, including the email
+provider's, so a busy lock leaves no record that an attempt began and the same
+request, made again, goes out. An email rule that finds the lock busy tries again
+within its firing after one, two and four seconds. If it is still busy it reports a
+refusal ("nothing was sent to this recipient; the firing can be made again"),
+stops an audience rule at that recipient, and for a rule that fires when a row is
+created gives the row's claim back, so the event delivered again fires for it. The
+bulk send treats a busy lock as a wait: the delivery keeps its attempt count and the
+campaign pauses for fifteen seconds. Receipt reads still require current send
+authority in the recorded organization. The internal receipt cannot be forged
+through client mutations.
 
 ## Local test inbox
 
