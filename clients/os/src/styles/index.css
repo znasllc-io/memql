@@ -15586,6 +15586,12 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-overview-breakdown li[data-tone="unknown"] > span { background: transparent; box-shadow: inset 0 0 0 1px var(--os-muted); }
 .os-overview-breakdown strong { color: var(--os-ink); font-variant-numeric: tabular-nums; }
 @container overview (max-width: 420px) { .os-overview-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; } }
+/* Five figures (Email's Overview) stand in one row while each label has room to
+ * stay on one line, then in three and two. Four columns left the fifth on a row
+ * of its own, where it read as a different kind of figure. */
+.os-overview-metrics:has(> :nth-child(5):last-child) { grid-template-columns: repeat(5,minmax(0,1fr)); }
+@container overview (max-width: 760px) { .os-overview-metrics:has(> :nth-child(5):last-child) { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@container overview (max-width: 420px) { .os-overview-metrics:has(> :nth-child(5):last-child) { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 .fleet-map-connection { fill: none; stroke: var(--os-line); stroke-width: 2; stroke-dasharray: 5 5; }
 .fleet-map-connection[data-online] { stroke: var(--os-accent); stroke-dasharray: none; }
 .fleet-map-node rect { fill: var(--os-plate); stroke: var(--os-line); }

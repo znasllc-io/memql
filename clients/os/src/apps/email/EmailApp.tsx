@@ -12,8 +12,8 @@ import { AppLogsSection } from "../../logs/AppLogsSection";
 import { accessAdmits, type OsAppProps } from "../../system/registry";
 import { AccountOptionsProvider } from "../accounts/tie";
 import { AudiencesSection } from "./AudiencesSection";
-import { CampaignsOverview } from "./CampaignsOverview";
 import { CampaignsSection } from "./campaigns/CampaignsSection";
+import { OverviewSection } from "./overview/OverviewSection";
 import { RulesSection } from "./RulesSection";
 import { TemplatesSection } from "./TemplatesSection";
 import { useCampaignWrites } from "./actions";
@@ -230,7 +230,7 @@ function EmailSections({
   function section(id: string, active: boolean): ReactNode {
     switch (id) {
       case "overview":
-        return <CampaignsOverview feeds={feeds} navigate={navigate} />;
+        return <OverviewSection feeds={feeds} />;
       case "inbox":
         return <EmailInbox />;
       case "settings":

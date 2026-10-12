@@ -753,6 +753,93 @@ export function useCampaignStats(campaignId: string): Reading<CampaignStats | nu
   return useReading<CampaignStats | null>(null, read, [query, campaignId]);
 }
 
+/** One campaign's answer within a set read together: its breakdown, or the engine's sentence. */
+interface StatsAnswer {
+  value: CampaignStats | null;
+  error: string;
+}
+
+const NO_STATS: ReadonlyMap<string, StatsAnswer> = new Map();
+
+/**
+ * The breakdown of every campaign in a set, read together -- what the Overview
+ * adds up to say how many people opened and clicked (`campaignStats`, the same
+ * server-computed counts a campaign's own page shows, never a client's tally of
+ * a capped page of deliveries).
+ *
+ * EACH CAMPAIGN IS ITS OWN ANSWER, because the engine answers one at a time and
+ * a refusal of one says nothing about the rest. The map holds a `Reading` for
+ * every id asked about, in the shape `useCampaignStats` answers a single one in:
+ * not read yet is `loading` with no value, a refusal is `error` with the
+ * engine's sentence, and an answer is `ready` -- with a value of `null` when the
+ * engine had no breakdown to give, which is not a breakdown of zeros.
+ *
+ * A FEW AT A TIME (`readEach`), so an organization with a month of campaigns is
+ * not that many requests at once, and WHAT IS KNOWN STAYS KNOWN: an answer
+ * outlasts the read of a set that has changed under it and outlasts a later
+ * read of the same campaign that is refused (the sentence is said beside it),
+ * the way `useReading` keeps its last answer through a failure.
+ *
+ * It has no clock. The surface that shows the figures mounts `AutoRefresh` on
+ * `reload`.
+ */
+export function useCampaignStatsFor(campaignIds: readonly string[]): {
+  stats: ReadonlyMap<string, Reading<CampaignStats | null>>;
+  reload: () => Promise<void>;
+} {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  // The set, not the array: callers hand a new array every render.
+  const signature = [...new Set(campaignIds)].filter((id) => id !== "").sort().join("\n");
+  const wanted = useMemo(() => (signature === "" ? [] : signature.split("\n")), [signature]);
+  const read = useMemo(() => {
+    if (query === null || wanted.length === 0) return null;
+    return async (signal: AbortSignal): Promise<ReadonlyMap<string, StatsAnswer>> => {
+      const answers = await readEach(wanted, async (campaignId): Promise<[string, StatsAnswer]> => {
+        try {
+          const first = (await query.campaignStats({ campaignId }, { signal })).rows()[0];
+          return [campaignId, { value: first ? statsFromPayload(first) : null, error: "" }];
+        } catch (err) {
+          // An aborted read is somebody leaving, not an answer.
+          if (signal.aborted) throw err;
+          return [campaignId, { value: null, error: describe(err) }];
+        }
+      }, signal);
+      return new Map(answers);
+    };
+  }, [query, wanted]);
+  const reading = useReading<ReadonlyMap<string, StatsAnswer>>(NO_STATS, read, [query, signature]);
+
+  // The last answer each campaign gave and when, whatever set it was read over.
+  const known = useRef(new Map<string, { value: CampaignStats | null; readAt: string }>());
+  const { reload } = reading;
+  const stats = useMemo(() => {
+    const held = known.current;
+    const out = new Map<string, Reading<CampaignStats | null>>();
+    for (const id of wanted) {
+      const answer = reading.value.get(id);
+      const last = held.get(id);
+      if (answer === undefined) {
+        // Not in the read that landed: a read still on its way, or one for a
+        // set this campaign joined after. What it said before stays.
+        out.set(id, last === undefined
+          ? { value: null, state: "loading", error: "", readAt: "", reload }
+          : { value: last.value, state: "ready", error: "", readAt: last.readAt, reload });
+      } else if (answer.error === "") {
+        held.set(id, { value: answer.value, readAt: reading.readAt });
+        out.set(id, { value: answer.value, state: "ready", error: "", readAt: reading.readAt, reload });
+      } else {
+        out.set(id, { value: last?.value ?? null, state: "error", error: answer.error, readAt: last?.readAt ?? "", reload });
+      }
+    }
+    // A campaign that left the set takes its answer with it.
+    const asked = new Set(wanted);
+    for (const id of held.keys()) if (!asked.has(id)) held.delete(id);
+    return out;
+  }, [wanted, reading.value, reading.readAt, reload]);
+  return { stats, reload };
+}
+
 /** Organization-specific setup, read on demand and checked again by every send.
  * A cluster operator's provider verdict cannot stand in for a client's domain.
  *

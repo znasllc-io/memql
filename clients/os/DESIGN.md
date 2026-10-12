@@ -267,6 +267,8 @@ and measured statistics, and `OverviewBreakdown` for a current distribution.
 Each app supplies facts from its existing authorized reads; unavailable values
 use `Figure` absence semantics instead of zero. Only draw activity history when
 a real time series exists. Keep record lists and editors in their own sections.
+Four figures stand in one row, then two; five stand in one row while each label
+fits on one line, then three, then two.
 
 Maps use `MapHeading` for title alignment, `MapControls` for bottom-right zoom
 and reset actions, and `usePanZoom` with wheel zoom disabled and fitted reset

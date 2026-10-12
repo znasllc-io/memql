@@ -16,7 +16,7 @@ vi.mock("../../src/auth/context", () => ({
 
 const { EmailApp } = await import("../../src/apps/email/EmailApp");
 const { LocalEmailSettingsStore } = await import("../../src/apps/email/settings");
-const { knowledgeOf, listKnowledge, useEmailFeeds, useSeriesFeed, useSignupFormFeed, useSubscriberCounts, useTestSettingsFeed, weakest } = await import("../../src/apps/email/useEmail");
+const { knowledgeOf, listKnowledge, useCampaignStatsFor, useEmailFeeds, useSeriesFeed, useSignupFormFeed, useSubscriberCounts, useTestSettingsFeed, weakest } = await import("../../src/apps/email/useEmail");
 const { absent, figureOf } = await import("../../src/kit/measure");
 const { ACCOUNT_CONCEPT } = await import("../../src/apps/accounts/rows");
 const { SITE_CONCEPT } = await import("../../src/apps/deployables/concepts");
@@ -666,5 +666,134 @@ describe("subscriber counts", () => {
     await waitFor(() => expect(ids.every((id) => result.current.counts.get(id)?.kind === "measured")).toBe(true));
     expect(conn.query.audienceSubscriberCount).toHaveBeenCalledTimes(20);
     expect(most).toBeLessThanOrEqual(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Campaign breakdowns, for the Overview
+// ---------------------------------------------------------------------------
+
+describe("campaign breakdowns", () => {
+  const PAYLOADS: Record<string, Record<string, unknown>> = {
+    a: { sent: 1000, opens: { unique: 300, total: 420 }, clicks: { unique: 50, total: 60 } },
+    b: { sent: 500, opens: { unique: 100, total: 130 }, clicks: { unique: 25, total: 30 } },
+  };
+
+  function answering(connection: Conn, refuse: Record<string, string> = {}) {
+    connection.query.campaignStats.mockImplementation(async (args) => {
+      const id = (args as { campaignId: string }).campaignId;
+      if (refuse[id] !== undefined) throw new Error(refuse[id]);
+      const payload = PAYLOADS[id];
+      return rowsResult(payload === undefined ? [] : [payload as never]);
+    });
+  }
+
+  it("reads each campaign's breakdown once, and has no answer for one until it has", async () => {
+    const conn = fakeConnection();
+    answering(conn);
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    const answer = conn.query.campaignStats.getMockImplementation()!;
+    conn.query.campaignStats.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    h.connection = conn;
+    const { result } = renderHook(() => useCampaignStatsFor(["a", "b", "a", ""]));
+
+    // Not read yet is neither an answer nor a failure.
+    expect(result.current.stats.get("a")).toMatchObject({ value: null, state: "loading", error: "" });
+    expect([...result.current.stats.keys()]).toEqual(["a", "b"]);
+
+    await act(async () => { release(); });
+    await waitFor(() => expect(result.current.stats.get("a")?.state).toBe("ready"));
+    expect(result.current.stats.get("a")?.value?.opensUnique).toEqual({ value: 300, absentBecause: "" });
+    expect(result.current.stats.get("b")?.value?.clicksUnique).toEqual({ value: 25, absentBecause: "" });
+    expect(conn.query.campaignStats).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps one campaign's refusal apart from the others, in the engine's own sentence", async () => {
+    const conn = fakeConnection();
+    answering(conn, { b: "Reading the breakdown is not yours to do." });
+    h.connection = conn;
+    const { result } = renderHook(() => useCampaignStatsFor(["a", "b"]));
+
+    await waitFor(() => expect(result.current.stats.get("b")?.state).toBe("error"));
+    expect(result.current.stats.get("b")).toMatchObject({ value: null, error: "Reading the breakdown is not yours to do." });
+    expect(result.current.stats.get("a")).toMatchObject({ state: "ready", error: "" });
+    expect(result.current.stats.get("a")?.value?.opensUnique.value).toBe(300);
+  });
+
+  it("answers ready with no breakdown when the engine had none to give", async () => {
+    const conn = fakeConnection();
+    answering(conn);
+    h.connection = conn;
+    const { result } = renderHook(() => useCampaignStatsFor(["nobody"]));
+    await waitFor(() => expect(result.current.stats.get("nobody")?.state).toBe("ready"));
+    expect(result.current.stats.get("nobody")?.value).toBeNull();
+  });
+
+  it("keeps what it knows while another campaign is read, and through a refused read", async () => {
+    const conn = fakeConnection();
+    answering(conn);
+    h.connection = conn;
+    const { result, rerender } = renderHook(({ ids }) => useCampaignStatsFor(ids), { initialProps: { ids: ["a"] } });
+    await waitFor(() => expect(result.current.stats.get("a")?.state).toBe("ready"));
+
+    // A campaign that arrives is read; the one already read is not blanked meanwhile.
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    const answer = conn.query.campaignStats.getMockImplementation()!;
+    conn.query.campaignStats.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    rerender({ ids: ["a", "b"] });
+    expect(result.current.stats.get("a")?.value?.opensUnique.value).toBe(300);
+    expect(result.current.stats.get("b")).toMatchObject({ value: null, state: "loading" });
+    await act(async () => { release(); });
+    await waitFor(() => expect(result.current.stats.get("b")?.state).toBe("ready"));
+
+    // A later read of "a" is refused: its last answer stays, and the sentence is said.
+    answering(conn, { a: "Connection interrupted" });
+    await act(async () => { await result.current.reload(); });
+    expect(result.current.stats.get("a")).toMatchObject({ state: "error", error: "Connection interrupted" });
+    expect(result.current.stats.get("a")?.value?.opensUnique.value).toBe(300);
+    expect(result.current.stats.get("b")).toMatchObject({ state: "ready", error: "" });
+
+    // An answer clears it.
+    answering(conn);
+    await act(async () => { await result.current.reload(); });
+    expect(result.current.stats.get("a")).toMatchObject({ state: "ready", error: "" });
+  });
+
+  it("drops a campaign that left the set", async () => {
+    const conn = fakeConnection();
+    answering(conn);
+    h.connection = conn;
+    const { result, rerender } = renderHook(({ ids }) => useCampaignStatsFor(ids), { initialProps: { ids: ["a", "b"] } });
+    await waitFor(() => expect(result.current.stats.get("b")?.state).toBe("ready"));
+    rerender({ ids: ["b"] });
+    expect([...result.current.stats.keys()]).toEqual(["b"]);
+  });
+
+  it("reads a few at a time, however many there are, and nothing for none", async () => {
+    const conn = fakeConnection();
+    let inFlight = 0;
+    let most = 0;
+    conn.query.campaignStats.mockImplementation(async () => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise((settle) => setTimeout(settle, 1));
+      inFlight -= 1;
+      return rowsResult([{ sent: 1, opens: { unique: 1, total: 1 }, clicks: { unique: 0, total: 0 } }]);
+    });
+    h.connection = conn;
+    const ids = Array.from({ length: 20 }, (_, n) => `c${n}`);
+    const { result } = renderHook(() => useCampaignStatsFor(ids));
+    await waitFor(() => expect(ids.every((id) => result.current.stats.get(id)?.state === "ready")).toBe(true));
+    expect(conn.query.campaignStats).toHaveBeenCalledTimes(20);
+    expect(most).toBeLessThanOrEqual(6);
+
+    const none = fakeConnection();
+    h.connection = none;
+    const empty = renderHook(() => useCampaignStatsFor([]));
+    await act(async () => { await empty.result.current.reload(); });
+    expect(none.query.campaignStats).not.toHaveBeenCalled();
+    expect(empty.result.current.stats.size).toBe(0);
   });
 });

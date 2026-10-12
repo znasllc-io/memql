@@ -257,6 +257,15 @@ update` is ready to send, `Autumn sale` waits for its template to be published,
 digest` repeats -- its bar pauses and resumes the series, and
 `&click=Weekly digest|Edit` shows how often and from when.
 
+Email's Overview: `email-overview` is a month of mail (five measured figures and
+the campaigns by state), `email-overview-empty` is first use (real zeros, one
+sentence and `Add a campaign` -- `&click=Add a campaign` follows it to the
+wizard), `email-overview-reading` has every read still on its way (shapes, no
+warning), `email-overview-refused` has three reads refused (dashes and the
+engine's sentences, never a zero) and `email-overview-unmeasured` has a rate the
+engine could not state exactly (a dash with its reason beneath). Take the 520
+capture too: the five figures fall to three and two.
+
 Newsletter signup fixtures: `campaign-newsletter-empty` and `campaign-newsletter-active`. Open the plus control to review setup; use `width=narrow` for the compact layout.
 
 Azure email setup: `azure-email-dns`, `azure-email-provisioning`, and
