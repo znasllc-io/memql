@@ -53,8 +53,12 @@ func renderPDF(d Draft, p Provenance) ([]byte, error) {
 		pdf.Ln(4)
 	}
 	pdf.SetFont("Helvetica", "", 11)
-	for _, para := range splitParagraphs(d.Body) {
-		pdf.MultiCell(0, 6, tr(para), "", "L", false)
+	for _, block := range documentBlocks(d.Body) {
+		if block.table != nil {
+			renderPDFTable(pdf, block.table)
+		} else {
+			pdf.MultiCell(0, 6, tr(block.paragraph), "", "L", false)
+		}
 		pdf.Ln(3)
 	}
 

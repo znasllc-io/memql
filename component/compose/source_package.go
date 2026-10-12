@@ -17,7 +17,7 @@ import (
 // The renderer travels with the artifact, so a later MemQL release cannot
 // change how an old document rebuilds. Dependencies are pinned by go.mod/sum.
 //
-//go:embed recipe.go write.go provenance.go pdf.go docx.go email.go email_images.go deployable.go go.mod go.sum source.LICENSE
+//go:embed recipe.go write.go provenance.go pdf.go pdf_table.go docx.go docx_table.go document_tables.go email.go email_images.go deployable.go go.mod go.sum source.LICENSE
 var rendererSources embed.FS
 
 // BuildSourcePackage verifies that the editable recipe reproduces the delivered

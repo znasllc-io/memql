@@ -16,7 +16,7 @@ func TestSourcePackageRebuildsOutsideTheWorkspace(t *testing.T) {
 	p := Provenance{Title: "Bird report", CreatedAt: time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)}
 	for _, format := range []Format{FormatPDF, FormatDOCX, FormatHTML, FormatCSV, FormatJSON} {
 		t.Run(string(format), func(t *testing.T) {
-			recipe := RenderRecipe{Name: p.Title, Format: format, Draft: Draft{Title: p.Title, Body: "A sample report", Header: []string{"bird"}, Rows: []map[string]any{{"bird": "quail"}}}, Provenance: p}
+			recipe := RenderRecipe{Name: p.Title, Format: format, Draft: Draft{Title: p.Title, Body: "A sample report\n\n| Bird | Count |\n| --- | ---: |\n| Quail | 3 |", Header: []string{"bird"}, Rows: []map[string]any{{"bird": "quail"}}}, Provenance: p}
 			out, err := RenderRecipeBytes(recipe)
 			if err != nil {
 				t.Fatal(err)
