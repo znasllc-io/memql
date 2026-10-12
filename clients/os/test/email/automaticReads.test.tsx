@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -133,8 +133,9 @@ describe("the shared refresh", () => {
     // Every reading on the page has answered: a refresher waits out a first
     // read, so arming one before then would measure nothing.
     await screen.findByText("dana@acme.com");
-    await screen.findByText("No breakdown yet.");
-    await screen.findByText(/Latest 50 · Updates automatically/);
+    await waitFor(() => expect(conn.query.campaignStats).toHaveBeenCalled());
+    await waitFor(() => expect(conn.query.campaignTestRuns).toHaveBeenCalled());
+    await settle();
     const reads = () => conn.query.deliveriesForCampaign.mock.calls.length;
     return { conn, reads, section: (next: string) => view.rerender(app(next)) };
   }

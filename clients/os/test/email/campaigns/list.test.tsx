@@ -108,14 +108,17 @@ describe("the campaigns list", () => {
     expect(within(rowOf("August update")).getByText("Newsletter")).toBeTruthy();
 
     expect(state("Autumn draft")).toBe("Draft");
-    expect(within(rowOf("Launch day")).getByText("Scheduled Oct 14, 9:00")).toBeTruthy();
+    // The time stands beside the state word; it does not say the state again (DESIGN.md rule 7).
+    expect(within(rowOf("Launch day")).getByText("Oct 14, 9:00")).toBeTruthy();
+    expect(within(rowOf("Launch day")).queryByText(/Scheduled Oct/)).toBeNull();
     expect(state("Launch day")).toBe("Scheduled");
     expect(within(rowOf("August update")).getByText("1,204 of 1,250 sent")).toBeTruthy();
     expect(state("August update")).toBe("Sending");
     expect(tone("August update")).toBe("accent");
     expect(within(rowOf("Halfway")).getByText("40 of 100 sent")).toBeTruthy();
     expect(state("Halfway")).toBe("Paused");
-    expect(within(rowOf("July update")).getByText("Sent Oct 3")).toBeTruthy();
+    expect(within(rowOf("July update")).getByText("Oct 3")).toBeTruthy();
+    expect(within(rowOf("July update")).queryByText(/Sent Oct/)).toBeNull();
     expect(state("July update")).toBe("Sent");
     expect(state("Broken send")).toBe("Failed");
     expect(tone("Broken send")).toBe("warn");

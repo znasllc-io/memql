@@ -40,3 +40,11 @@
   height: 100%;
   min-height: 0;
 }
+
+/* ---- A campaign's page ---------------------------------------------------- */
+
+/* "Show more" under who got it: the panel's own gap spaces it from the rows, so
+ * the paragraph adds none of its own. */
+.email-more {
+  margin: 0;
+}

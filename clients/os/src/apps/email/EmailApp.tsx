@@ -154,7 +154,15 @@ function EmailSections({
     (accountId: string) => setSettingsOrganizations((held) => (accountId === "" || held.includes(accountId) ? held : [...held, accountId])),
     [],
   );
-  const recordFeeds = useEmailRecordFeeds(feeds, settingsOrganizations);
+  // THE CAMPAIGNS WHOSE PAGES HAVE OPENED. The series feed reads every draft's
+  // series; a campaign that is no longer a draft may still have one running, and
+  // its page is where it is paused. They accumulate, as the organizations do.
+  const [pageCampaigns, setPageCampaigns] = useState<readonly string[]>([]);
+  const noteCampaign = useCallback(
+    (campaignId: string) => setPageCampaigns((held) => (campaignId === "" || held.includes(campaignId) ? held : [...held, campaignId])),
+    [],
+  );
+  const recordFeeds = useEmailRecordFeeds(feeds, settingsOrganizations, pageCampaigns);
   const writes = useCampaignWrites();
 
   // THE OPEN INTENT (epic memql#4842, #4845): "show this campaign, this
@@ -259,9 +267,9 @@ function EmailSections({
           <CampaignsSection
             feeds={feeds}
             recordFeeds={recordFeeds}
-            writes={writes}
             trackByDefault={settings.trackByDefault}
             openRequest={requests.campaigns}
+            onCampaign={noteCampaign}
           />
         );
     }

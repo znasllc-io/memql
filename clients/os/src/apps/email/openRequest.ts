@@ -147,10 +147,11 @@ export function useOpenSettingsRequest(request: SettingsRequest | undefined, app
 
 /**
  * The record a page shows: whichever one the id names in the section's WHOLE
- * feed, however its list is filtered. The lists leave finished campaigns and
- * archived audiences and templates out unless Settings says otherwise, and
- * search and Ask still reach them -- a page found only in the filtered list
- * would answer a question about last year's send with this year's. `null` while
+ * feed, however its list is filtered. A list may be narrowed by Refine (a
+ * finished campaign outside the Status asked for), and the audiences and
+ * templates lists leave archived ones out unless Settings says otherwise; search
+ * and Ask still reach every one -- a page found only in the filtered list would
+ * answer a question about last year's send with this year's. `null` while
  * the feed has not delivered the record (the list stays on screen and the page
  * opens when it does) and for an id that is not there.
  *

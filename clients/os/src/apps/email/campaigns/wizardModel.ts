@@ -45,6 +45,8 @@ export interface ReviewFacts {
   sendingReady: boolean;
   /** False while sending readiness is still being read: nothing is said about it then, and nothing is offered. */
   sendingKnown: boolean;
+  /** The readiness check itself failed: nothing is known about sending, so it is not called unset. */
+  sendingFailed?: boolean;
   /** The engine's reason sending is not ready, verbatim. */
   sendingReason: string;
   organizationName: string;
@@ -137,6 +139,7 @@ export function reviewReading(draft: CampaignDraft, facts: ReviewFacts, now: Dat
   }
   // Not known yet is neither ready nor a problem: say nothing about it, offer nothing.
   if (!facts.sendingKnown) return { word: "Review the campaign", detail: "", forward: null };
+  if (facts.sendingFailed === true) return missing(WORDS.sendingNotChecked(facts.organizationName), facts.sendingReason);
   if (!facts.sendingReady) return missing(WORDS.sendingNotSetUp(facts.organizationName), facts.sendingReason);
   if (facts.subscribers.kind === "measured" && facts.subscribers.value === 0) return missing(`${facts.audienceName} has no subscribers.`);
   if (draft.when === null) return missing("Choose when it goes");

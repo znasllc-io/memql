@@ -28,6 +28,7 @@ const {
   pagedResult,
   peakSubscriptions,
   rowsResult,
+  templateRow,
   withSession,
 } = await import("./harness");
 
@@ -72,6 +73,12 @@ function pane(id: string): HTMLElement {
 function headMeta(title: string): string | null {
   return screen.getByRole("heading", { level: 3, name: title }).parentElement?.querySelector(".os-head-meta")?.textContent ?? null;
 }
+
+/** A pane's action bar: the state in a word, and the acts it offers. */
+function bar(id: string): HTMLElement {
+  return within(pane(id)).getByRole("group", { name: "What you can do with this" });
+}
+const barActs = (id: string) => within(bar(id)).queryAllByRole("button").map((button) => button.textContent);
 
 function opened(connection: Conn, concept: string): number {
   return connection.subscriptions.subscribeGraph.mock.calls.filter(([, options]) => options.concept === concept).length;
@@ -146,9 +153,9 @@ describe("one subscription per concept", () => {
     const conn = fakeConnection(seed());
     const { section } = mount(conn, "campaigns");
 
-    // A campaign page: its series (the Repeat panel) and its organization's testing settings.
+    // A campaign page: its series (it repeats) and its organization's testing settings.
     fireEvent.click(await within(pane("campaigns")).findByText("August update"));
-    expect(await within(pane("campaigns")).findByText(/Every 2 weeks/)).toBeTruthy();
+    expect(await within(pane("campaigns")).findByText(/^Every 2 weeks from/)).toBeTruthy();
     await waitFor(() => expect(liveSubscriptions(conn).get(TEST_SETTINGS)).toBe(1));
     noConceptHasTwo(conn);
 
@@ -194,7 +201,7 @@ describe("one subscription per concept", () => {
     const conn = fakeConnection(seed());
     const { section } = mount(conn, "campaigns");
     fireEvent.click(await within(pane("campaigns")).findByText("August update"));
-    await within(pane("campaigns")).findByRole("region", { name: "August update progress" });
+    await within(pane("campaigns")).findByRole("region", { name: "Campaign details" });
 
     section("audiences");
     await within(pane("audiences")).findByText("Newsletter");
@@ -205,7 +212,7 @@ describe("one subscription per concept", () => {
     expect(pane("campaigns").hidden).toBe(false);
     expect(pane("audiences").hidden).toBe(true);
     // The campaign page is exactly where it was left, not a fresh list.
-    expect(within(pane("campaigns")).getByRole("region", { name: "August update progress" })).toBeTruthy();
+    expect(within(pane("campaigns")).getByRole("region", { name: "Campaign details" })).toBeTruthy();
     expect(conn.query.campaigns).toHaveBeenCalledTimes(1);
   });
 });
@@ -233,9 +240,9 @@ describe("composed feeds", () => {
     const asked = conn.query.campaignSeriesForCampaign.mock.calls.map(([args]) => (args as { campaignId: string }).campaignId).sort();
     expect(asked).toEqual(["d1", "d2"]);
 
-    // Opening a draft reads nothing more: the panel reads the root's feed.
+    // Opening a draft reads nothing more: its page reads the root's feed.
     fireEvent.click(within(pane("campaigns")).getByText("Welcome series"));
-    expect(await within(pane("campaigns")).findByText(/Every 3 weeks/)).toBeTruthy();
+    expect(await within(pane("campaigns")).findByText(/^Every 3 weeks from/)).toBeTruthy();
     expect(conn.query.campaignSeriesForCampaign).toHaveBeenCalledTimes(2);
     expect(opened(conn, SERIES)).toBe(1);
   });
@@ -249,7 +256,11 @@ describe("composed feeds", () => {
     await within(pane("campaigns")).findByText("Autumn offer");
     await waitFor(() => expect(conn.query.campaignSeriesForCampaign).toHaveBeenCalledTimes(2));
     fireEvent.click(within(pane("campaigns")).getByText("Autumn offer"));
-    expect(await within(pane("campaigns")).findByRole("button", { name: /Set up repeating sends/ })).toBeTruthy();
+    await waitFor(() => expect(barActs("campaigns")).toContain("Edit"));
+    // A draft of its own: not repeating, so neither Pause nor Resume.
+    expect(within(bar("campaigns")).getByText("Draft")).toBeTruthy();
+    expect(barActs("campaigns")).not.toContain("Pause");
+    expect(barActs("campaigns")).not.toContain("Resume");
     expect(within(pane("campaigns")).queryByText(/Every 3 weeks/)).toBeNull();
   });
 });
@@ -259,22 +270,24 @@ describe("composed feeds", () => {
 // ---------------------------------------------------------------------------
 
 describe("one campaign page", () => {
-  it("asks whether sending is set up once, and hands the answer to every panel", async () => {
+  it("asks whether sending is set up once, and hands the answer to every part of the page", async () => {
     const conn = fakeConnection({
       campaigns: [campaignRow({ id: "c1", name: "August update" })],
-      sendingReadiness: [{ ready: false, reason: "Sending isn't set up for Acme.", capture: false }],
+      templates: [templateRow({ id: "v1:campaigns:template:t1" })],
+      sendingReadiness: [{ ready: false, reason: "Verify the sending domain first.", capture: false }],
     });
     mount(conn);
     fireEvent.click(await within(pane("campaigns")).findByText("August update"));
-    // Both the send controls and the test panel say so -- from the one answer.
-    expect(await within(pane("campaigns")).findByText("Sending setup is incomplete or unconfirmed.")).toBeTruthy();
-    expect(within(pane("campaigns")).getByText("Finish sending setup before sending a test.")).toBeTruthy();
+    // The bar, the page and the test all say so -- from the one answer.
+    await waitFor(() => expect(within(bar("campaigns")).getByText("Sending isn't set up for Operator organization.")).toBeTruthy());
+    expect(within(pane("campaigns")).getByText("Verify the sending domain first.")).toBeTruthy();
+    expect(barActs("campaigns")).not.toContain("Send a test");
     await act(async () => {});
     expect(conn.query.campaignSendingReadiness).toHaveBeenCalledTimes(1);
     expect(conn.query.campaignSendingReadiness).toHaveBeenCalledWith({ campaignId: "c1" }, expect.anything());
   });
 
-  it("offers a repeating schedule to a draft and to nothing else", async () => {
+  it("offers repeating to a draft, on its Edit page, and to nothing else", async () => {
     const conn = fakeConnection({
       campaigns: [
         campaignRow({ id: "d1", name: "Draft one" }),
@@ -283,13 +296,17 @@ describe("one campaign page", () => {
     });
     const { view } = mount(conn, "campaigns", { includeArchived: true });
     fireEvent.click(await within(pane("campaigns")).findByText("Draft one"));
-    expect(await within(pane("campaigns")).findByRole("region", { name: "Repeating campaign" })).toBeTruthy();
+    await waitFor(() => expect(barActs("campaigns")).toContain("Edit"));
+    fireEvent.click(within(bar("campaigns")).getByRole("button", { name: "Edit" }));
+    const when = await within(pane("campaigns")).findByLabelText("When");
+    fireEvent.click(when);
+    expect(within(document.getElementById(when.getAttribute("aria-controls")!)!).getByRole("option", { name: "Repeat" })).toBeTruthy();
 
     view.unmount();
     mount(conn, "campaigns", { includeArchived: true });
     fireEvent.click(await within(pane("campaigns")).findByText("Already sent"));
-    await within(pane("campaigns")).findByRole("region", { name: "Already sent progress" });
-    expect(within(pane("campaigns")).queryByRole("region", { name: "Repeating campaign" })).toBeNull();
+    await waitFor(() => expect(barActs("campaigns")).toEqual(["Send a test", "Duplicate"]));
+    expect(barActs("campaigns")).not.toContain("Edit");
   });
 });
 

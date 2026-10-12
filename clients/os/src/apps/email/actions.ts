@@ -3,7 +3,7 @@ import { newShortId, type Connection, type Row } from "@znasllc-io/memql-sdk-cor
 
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
-import { engineSentence, type AudienceRow, type RecipientMode } from "./rows";
+import { campaignName, engineSentence, type AudienceRow, type CampaignRow, type RecipientMode } from "./rows";
 
 // Every write the Email app makes, and the busy/error pair each one owns.
 //
@@ -202,14 +202,26 @@ export interface SendControlState extends WriteState {
 }
 
 /**
+ * Several writes that share ONE place on screen, and so one refusal: the one
+ * pressed LAST. Each write keeps its own refusal until it is called again, so
+ * "the first that has one" was an older act's sentence standing over the
+ * current one -- a Send now refused an hour ago masking the Cancel refused
+ * now, or reading as the reason a later act that worked did not.
+ */
+function useLastPressed(parts: readonly { error: string }[]): { error: string; press: (index: number) => void } {
+  const [last, setLast] = useState(-1);
+  return { error: last >= 0 ? (parts[last]?.error ?? "") : "", press: setLast };
+}
+
+/**
  * The five lifecycle controls, sharing ONE error slot -- and here that is
  * correct rather than a shortcut.
  *
- * They sit in one cluster on one panel, exactly one can be pressed at a time
- * (a draft has Start, a run has Pause), and the refusal always belongs to the
- * one that was just pressed. Splitting them would put five empty slots under
- * five buttons in a row. This is the case the Accounts note's "three different
- * places on screen" rule is drawing a line AGAINST, not an exception to it.
+ * They are acts of one bar, exactly one can be pressed at a time (a draft has
+ * Send now, a run has Pause), and the refusal belongs to the one pressed last.
+ * Splitting them would put five slots under one bar. This is the case the
+ * Accounts note's "three different places on screen" rule is drawing a line
+ * AGAINST, not an exception to it.
  */
 export function useSendControls(): SendControlState {
   const start = useWrite(async (query, campaignId: string) => {
@@ -237,18 +249,151 @@ export function useSendControls(): SendControlState {
   }, false);
 
   const parts = [start, schedule, pause, resume, cancel];
+  const last = useLastPressed(parts);
   return {
     busy: parts.some((p) => p.busy),
-    // The one that actually failed. At most one of these can be in flight, so
-    // "the first non-empty" is "the last thing that was pressed".
-    error: parts.map((p) => p.error).find((e) => e !== "") ?? "",
+    error: last.error,
     reset: () => parts.forEach((p) => p.reset()),
-    start: start.call,
-    schedule: schedule.call,
-    pause: pause.call,
-    resume: resume.call,
-    cancel: cancel.call,
+    start: (campaignId) => { last.press(0); return start.call(campaignId); },
+    schedule: (campaignId, scheduledAt) => { last.press(1); return schedule.call(campaignId, scheduledAt); },
+    pause: (campaignId) => { last.press(2); return pause.call(campaignId); },
+    resume: (campaignId) => { last.press(3); return resume.call(campaignId); },
+    cancel: (campaignId) => { last.press(4); return cancel.call(campaignId); },
   };
+}
+
+/** What a repeat is saved with. A new one has no revision; a change to one names the exact one it was read at. */
+export interface SeriesSave {
+  campaignId: string;
+  intervalWeeks: number;
+  /** RFC 3339: the first occurrence, which the cadence is counted from. */
+  firstSendAt: string;
+  /** IANA zone the cadence keeps its local day and time in. */
+  timeZone: string;
+  expectedRevision?: string;
+}
+
+export interface SeriesControlState extends WriteState {
+  save: (series: SeriesSave) => Promise<boolean>;
+  pause: (campaignId: string, expectedRevision: string) => Promise<boolean>;
+  resume: (campaignId: string, expectedRevision: string) => Promise<boolean>;
+}
+
+/**
+ * Start, change, pause and resume a campaign that repeats.
+ *
+ * EVERY CHANGE NAMES THE REVISION IT WAS READ AT, and the engine refuses a
+ * stale one ("this recurring campaign changed; reload it before saving") rather
+ * than letting two people's changes land on each other. Saving also captures
+ * the campaign as it stands now: an occurrence is made from what the series
+ * holds, so edits to the draft reach the mail only through a save here.
+ */
+export function useSeriesControls(): SeriesControlState {
+  const save = useWrite(async (query, series: SeriesSave) => {
+    const { expectedRevision, ...rest } = series;
+    await query.campaignConfigureSeries({ ...rest, action: "save", ...(expectedRevision ? { expectedRevision } : {}) });
+    return true;
+  }, false);
+  const pause = useWrite(async (query, campaignId: string, expectedRevision: string) => {
+    await query.campaignConfigureSeries({ campaignId, action: "pause", expectedRevision });
+    return true;
+  }, false);
+  const resume = useWrite(async (query, campaignId: string, expectedRevision: string) => {
+    await query.campaignConfigureSeries({ campaignId, action: "resume", expectedRevision });
+    return true;
+  }, false);
+
+  const parts = [save, pause, resume];
+  const last = useLastPressed(parts);
+  return {
+    busy: parts.some((p) => p.busy),
+    error: last.error,
+    reset: () => parts.forEach((p) => p.reset()),
+    save: (series) => { last.press(0); return save.call(series); },
+    pause: (campaignId, revision) => { last.press(1); return pause.call(campaignId, revision); },
+    resume: (campaignId, revision) => { last.press(2); return resume.call(campaignId, revision); },
+  };
+}
+
+export interface DuplicateCampaignState extends WriteState {
+  /**
+   * A new draft with the same audience, template, sender, reply-to and
+   * tracking, named "<name> (copy)" and scheduled for nothing. `copyId` is the
+   * CALLER'S, held until the copy is made: a duplicate whose answer was lost is
+   * tried again as the same copy, never a second one.
+   */
+  duplicate: (campaign: CampaignRow, copyId: string) => Promise<boolean>;
+}
+
+export function useDuplicateCampaign(): DuplicateCampaignState {
+  const { busy, error, reset, call } = useWrite(async (query, campaign: CampaignRow, copyId: string) => {
+    await query.createCampaign({
+      campaignId: copyId,
+      name: `${campaignName(campaign)} (copy)`,
+      audienceId: campaign.audienceId,
+      templateId: campaign.templateId,
+      fromName: omitBlank(campaign.fromName),
+      replyTo: omitBlank(campaign.replyTo),
+      accountId: omitBlank(campaign.accountId),
+      senderIdentityId: omitBlank(campaign.senderIdentityId),
+      trackOpens: campaign.trackOpens,
+      trackClicks: campaign.trackClicks,
+    });
+    return true;
+  }, false);
+  return { busy, error, reset, duplicate: call };
+}
+
+/** What the Edit page changed. A field left out did not change, and is not sent. */
+export interface CampaignChanges {
+  name?: string;
+  audienceId?: string;
+  templateId?: string;
+  replyTo?: string;
+  scheduledAt?: string;
+  accountId?: string;
+  senderIdentityId?: string;
+  trackOpens?: boolean;
+  trackClicks?: boolean;
+}
+
+const OPTIONAL_CHANGES = ["replyTo", "scheduledAt", "accountId", "senderIdentityId", "trackOpens", "trackClicks"] as const;
+
+export interface EditCampaignState extends WriteState {
+  save: (campaign: CampaignRow, changes: CampaignChanges) => Promise<boolean>;
+}
+
+/**
+ * Save what the Edit page changed, and only that.
+ *
+ * `updateCampaign` read-merges: a field it is not sent keeps what is stored, so
+ * a field nobody touched is left out and a change made meanwhile somewhere else
+ * survives. Name, audience and template are REQUIRED by the mutation, so they
+ * always go -- changed, or as stored.
+ *
+ * A FIELD SOMEBODY EMPTIED IS A CHANGE, sent as "": no reply-to (replies come
+ * to the sender), this cluster's own sender, no saved time (sent when somebody
+ * presses Send now). Each of those is what an empty value means on the
+ * concept, and leaving it out would keep the old value while the page said it
+ * was saved. (Add a campaign's own write, `useUpdateCampaign`, still omits its
+ * blanks: those are fields it never sets.)
+ */
+export function useEditCampaign(): EditCampaignState {
+  const { busy, error, reset, call } = useWrite(async (query, campaign: CampaignRow, changes: CampaignChanges) => {
+    const args: Parameters<Connection["query"]["updateCampaign"]>[0] = {
+      campaignId: campaign.id,
+      name: (changes.name ?? campaign.name).trim(),
+      audienceId: changes.audienceId ?? campaign.audienceId,
+      templateId: changes.templateId ?? campaign.templateId,
+    };
+    for (const key of OPTIONAL_CHANGES) {
+      const value = changes[key];
+      if (value !== undefined) Object.assign(args, { [key]: typeof value === "string" ? value.trim() : value });
+    }
+    await query.updateCampaign(args);
+    return true;
+  }, false);
+  return { busy, error, reset, save: call };
 }
 
 export interface TestSendState extends WriteState {
@@ -849,17 +994,17 @@ export function useRuleArming(): RuleArmingState {
 }
 
 /**
- * Every write this app makes, assembled once at the app root.
+ * The writes the audiences, templates, senders and automations sections make,
+ * assembled once at the app root.
  *
  * The sections take what they need. Assembling here rather than per section
  * means a write's busy/error state survives a section switch, which matters
  * for exactly one of them: an import running while somebody looks at their
- * campaigns is still running when they come back.
+ * campaigns is still running when they come back. A campaign's own writes are
+ * its page's (`CampaignPage`, `CampaignEditPage`): a refusal belongs to the
+ * campaign it was about, not to the next one opened.
  */
 export function useCampaignWrites() {
-  const createCampaign = useCreateCampaign();
-  const updateCampaign = useUpdateCampaign();
-  const sendControls = useSendControls();
   const createAudience = useCreateAudience();
   const archiveAudience = useArchiveAudience();
   const addRecipient = useAddRecipient();
@@ -879,9 +1024,6 @@ export function useCampaignWrites() {
   // seventeen deps that can never all be equal is a dependency list somebody
   // has to maintain in exchange for nothing.
   return {
-    createCampaign,
-    updateCampaign,
-    sendControls,
     createAudience,
     archiveAudience,
     addRecipient,

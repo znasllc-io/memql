@@ -172,9 +172,11 @@ describe("a record named by an intent", () => {
   });
 
   it("opens a record the list hides: a finished campaign, an archived audience or template", async () => {
-    // The lists leave these out unless Settings says otherwise; search and Ask
-    // still reach them, and an Opening that stopped at the list would answer a
-    // question about last year's send with this year's.
+    // A finished campaign may be outside what the list is asking (Refine), and
+    // the audiences and templates lists leave archived ones out unless Settings
+    // says otherwise; search and Ask still reach every one, and an opening that
+    // stopped at the list would answer a question about last year's send with
+    // this year's.
     const conn = fakeConnection({
       campaigns: [campaignRow({ id: "done", name: "Last year", status: "sent" })],
       audiences: [audienceRow({ id: "old", name: "Old list", status: "archived" })],
@@ -428,7 +430,7 @@ describe("a section given an open request", () => {
     const [uploads] = useState(fakeUploads);
     switch (name) {
       case "campaigns":
-        return <CampaignsSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} trackByDefault openRequest={request} />;
+        return <CampaignsSection feeds={feeds} recordFeeds={recordFeeds} trackByDefault openRequest={request} />;
       case "audiences":
         return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} includeArchived={false} uploads={uploads} openRequest={request} />;
       case "templates":

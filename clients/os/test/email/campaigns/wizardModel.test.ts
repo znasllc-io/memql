@@ -160,6 +160,14 @@ describe("what Review says", () => {
     }
   });
 
+  it("says it could not check sending, rather than that sending isn't set up, when the check failed", () => {
+    expect(reviewReading(draft(), facts({ sendingReady: false, sendingFailed: true, sendingReason: "the readiness check timed out" }), NOW)).toEqual({
+      word: "Couldn't check sending for Acme.",
+      detail: "the readiness check timed out",
+      forward: null,
+    });
+  });
+
   it("offers nothing forward, and warns of nothing, while sending is still being read", () => {
     expect(reviewReading(draft(), facts({ sendingKnown: false, sendingReady: false, sendingReason: "Sending readiness is not confirmed." }), NOW)).toEqual({
       word: "Review the campaign",

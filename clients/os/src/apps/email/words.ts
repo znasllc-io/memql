@@ -22,6 +22,12 @@ export const WORDS = {
    */
   sendingNotSetUp: (organization: string): string => `Sending isn't set up for ${organization}.`,
 
+  /**
+   * The check itself failed, which is not the same as sending not being set up:
+   * nothing is known about it either way. The read's own error is the detail.
+   */
+  sendingNotChecked: (organization: string): string => `Couldn't check sending for ${organization}.`,
+
   /** A campaign's state, by the engine's status. A status this build does not know has no word. */
   campaign: {
     draft: "Draft",
@@ -39,6 +45,17 @@ export const WORDS = {
     paused: "Repeating paused",
     blocked: "Repeating stopped",
   } as Readonly<Record<string, string>>,
+
+  /** What happened to one recipient of a send, by the delivery's status. */
+  delivery: {
+    sent: "Sent",
+    skipped: "Skipped",
+    failed: "Failed",
+    pending: "Not yet sent",
+  } as Readonly<Record<string, string>>,
+
+  /** How often a campaign repeats: "Every week", "Every 2 weeks". */
+  every: (weeks: number): string => (weeks === 1 ? "Every week" : `Every ${weeks} weeks`),
 
   /** A template that is not published yet. */
   templateDraft: "Draft",

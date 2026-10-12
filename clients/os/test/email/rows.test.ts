@@ -26,6 +26,8 @@ import {
   senderIdentityFromRow,
   sendableCount,
   skipReasonSentence,
+  seriesFor,
+  seriesFromRow,
   statsFromPayload,
   templateFingerprint,
   testSettingFor,
@@ -255,10 +257,20 @@ describe("reading a stats figure", () => {
     expect(stats.opensUnique.absentBecause).toMatch(/distinct/);
   });
 
+  it("reads each figure under the name the engine writes it", () => {
+    // component/campaigns/stats.go: `bounces: {hard}`, `unsubscribed`, `complaints`.
+    const stats = statsFromPayload({ bounces: { hard: 2 }, unsubscribed: 4, complaints: 1 });
+    expect(stats.hardBounces.value).toBe(2);
+    expect(stats.unsubscribes.value).toBe(4);
+    expect(stats.complaints.value).toBe(1);
+  });
+
   it("says soft bounces are not measured rather than reporting zero", () => {
-    const stats = statsFromPayload({ sent: 10 });
-    expect(stats.hardBounces.value).toBeNull();
-    expect(stats.hardBounces.absentBecause).toMatch(/soft bounces/i);
+    const stats = statsFromPayload({ sent: 10, bounces: { hard: 0 } });
+    expect(stats.softBounces.value).toBeNull();
+    expect(stats.softBounces.absentBecause).toMatch(/soft bounces/i);
+    // A hard-bounce count of zero is a measurement, not an absence.
+    expect(stats.hardBounces.value).toBe(0);
   });
 
   it("renders an absent figure as an em dash", () => {
@@ -622,5 +634,39 @@ describe("an organization's testing setting", () => {
     expect(testSettingFor([], "acme")).toBeNull();
     // A row with no organization is nobody's testing setting.
     expect(testSettingFor([{ id: "ts3", audienceId: "a1" }], "")).toBeNull();
+  });
+});
+
+describe("projecting a series", () => {
+  const row = {
+    id: "series-1",
+    sourceCampaignId: "c1",
+    accountId: "acme",
+    name: "Weekly digest",
+    intervalWeeks: 2,
+    timeZone: "America/Phoenix",
+    anchorAt: "2031-10-14T16:00:00Z",
+    nextAt: "2031-10-28T16:00:00Z",
+    status: "blocked",
+    lastCampaignId: "occurrence-1",
+    lastOccurrenceAt: "2031-10-14T16:00:00Z",
+    lastError: "Publish the template before resuming this schedule.",
+    createdAt: "2031-10-14T16:00:01.000001Z",
+  };
+
+  it("reads every field campaignSeriesFull projects", () => {
+    expect(seriesFromRow(row)).toEqual(row);
+  });
+
+  it("reads a series whose fields arrived inside a live event's payload", () => {
+    const { id, createdAt, ...payload } = row;
+    expect(seriesFromRow({ id, createdAt, payload })).toEqual(row);
+  });
+
+  it("finds one campaign's series among every series the feed holds, and none for another", () => {
+    const rows = [row, { ...row, id: "series-2", sourceCampaignId: "c2" }];
+    expect(seriesFor(rows, "c2")?.id).toBe("series-2");
+    expect(seriesFor(rows, "c3")).toBeNull();
+    expect(seriesFor(rows, "")).toBeNull();
   });
 });

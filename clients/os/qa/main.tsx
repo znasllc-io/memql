@@ -4,10 +4,9 @@ import { fakeConnection as filesConnection, artifactRow as filesArtifact, folder
 import { EmailApp } from "../src/apps/email/EmailApp";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
 import { LocalEmailSettingsStore } from "../src/apps/email/settings";
-import { audienceRow as campaignAudience, campaignRow as emailCampaign, fakeConnection as campaignConnection, rowsResult, senderRow as campaignSender, templateRow as emailTemplate, withSession as campaignSession } from "../test/email/harness";
+import { audienceRow as campaignAudience, campaignRow as emailCampaign, deliveryRow as emailDelivery, fakeConnection as campaignConnection, pagedResult as emailPage, rowsResult, senderRow as campaignSender, templateRow as emailTemplate, withSession as campaignSession } from "../test/email/harness";
 import { NewsletterPanel } from "../src/apps/email/NewsletterPanel";
-import { useEmailFeeds, useSeriesFeed, useSignupFormFeed } from "../src/apps/email/useEmail";
-import { RecurrencePanel } from "../src/apps/email/RecurrencePanel";
+import { useEmailFeeds, useSignupFormFeed } from "../src/apps/email/useEmail";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
 import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
@@ -675,13 +674,6 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
 // `syncStatesAll`. Two fixture harnesses rather than one widened one, for the
 // reason the README gives about the fake in general: each is the SUITE's, so a
 // screenshot cannot disagree with what those tests assert.
-const recurrenceQaRow = { id: "qa-series", sourceCampaignId: "qa-campaign", intervalWeeks: 3, timeZone: "America/Phoenix", status: "active", anchorAt: "2026-10-09T16:00:00Z", nextAt: "2026-10-30T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" };
-function RecurrenceQa() {
-  const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
-  const series = useSeriesFeed(["qa-campaign"]);
-  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><RecurrencePanel campaignId="qa-campaign" series={series} /></div>;
-}
-
 const newsletterQaSite = { id: "qa-shop", accountId: "qa-client", title: "Client storefront", status: "live" };
 const newsletterQaBinding = { id: "qa-newsletter", siteId: "qa-shop", accountId: "qa-client", audienceId: "qa-audience", templateId: "qa-welcome", senderIdentityId: "qa-sender", enabled: true, consentText: "Send me product news and offers by email.", createdAt: "2026-10-01T12:00:00Z" };
 function newsletterQaConnection(populated: boolean) {
@@ -727,21 +719,6 @@ const VIEWS: Record<
   "email-campaigns-organizations": emailCampaignsView(true, true),
   "campaign-newsletter-empty": { connect: () => newsletterQaConnection(false), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
   "campaign-newsletter-active": { connect: () => newsletterQaConnection(true), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
-  "campaign-repeat-empty": {
-    connect: () => campaignConnection(),
-    wrap: el => campaignSession(el),
-    render: () => <RecurrenceQa />,
-  },
-  "campaign-repeat-active": {
-    connect: () => campaignConnection({ campaignSeries: [recurrenceQaRow] }),
-    wrap: el => campaignSession(el),
-    render: () => <RecurrenceQa />,
-  },
-  "campaign-repeat-blocked": {
-    connect: () => campaignConnection({ campaignSeries: [{ ...recurrenceQaRow, status: "blocked", lastError: "Publish the template before resuming this schedule." }] }),
-    wrap: el => campaignSession(el),
-    render: () => <RecurrenceQa />,
-  },
   // NEXUS (epic memql#5414): what an automation is for. The procedure's page
   // in the three readings its Reuse panel has -- the evidence deciding, a
   // person's own label over evidence that disagrees, and nothing counted yet
@@ -1258,28 +1235,68 @@ function emailCampaignsView(populated: boolean, organizations = false) {
     emailCampaign({ id: "qa-c-scheduled", name: "Launch day", audienceId: "qa-newsletter", templateId: "qa-welcome", status: "scheduled", scheduledAt: "2031-10-14T16:00:00Z" }),
     emailCampaign({ id: "qa-c-repeat", name: "Weekly digest", audienceId: "qa-signups", templateId: "qa-welcome" }),
     emailCampaign({ id: "qa-c-draft", name: "Autumn sale", audienceId: "qa-newsletter", templateId: "qa-autumn" }),
-    emailCampaign({ id: "qa-c-sent", name: "July update", audienceId: "qa-newsletter", templateId: "qa-august", status: "sent", recipientCount: 1180, sentCount: 1180, completedAt: "2026-10-03T18:00:00Z" }),
+    emailCampaign({ id: "qa-c-ready", name: "October update", audienceId: "qa-newsletter", templateId: "qa-august", senderIdentityId: "qa-news" }),
+    emailCampaign({ id: "qa-c-sent", name: "July update", audienceId: "qa-newsletter", templateId: "qa-august", status: "sent", recipientCount: 1204, sentCount: 1176, skippedCount: 24, failedCount: 4, startedAt: "2026-10-03T16:00:00Z", completedAt: "2026-10-03T18:00:00Z", replyTo: "hello@acme.com" }),
     emailCampaign({ id: "qa-c-failed", name: "Spring promo", audienceId: "qa-signups", templateId: "qa-welcome", status: "failed", lastError: "The sending service refused the sender address." }),
     emailCampaign({ id: "qa-c-cancelled", name: "Holiday preview", audienceId: "qa-newsletter", templateId: "qa-august", status: "cancelled" }),
   ] : [];
   return {
-    connect: () => campaignConnection({
-      ...(organizations ? {
-        accounts: [
-          { id: "self", name: "Operator organization", status: "active" },
-          { id: "qa-client", name: "Client Studio", status: "active" },
-        ],
-      } : {}),
-      campaigns,
-      campaignSeries: populated ? [{ id: "qa-series", sourceCampaignId: "qa-c-repeat", status: "active", intervalWeeks: 1, timeZone: "America/Phoenix", anchorAt: "2031-10-14T16:00:00Z", nextAt: "2031-10-21T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" }] : [],
-      audiences,
-      templates,
-      senderIdentities: [campaignSender({ id: "qa-news", address: "news@acme.com", fromName: "Acme News" })],
-      subscriberCounts: { "qa-newsletter": 1204, "qa-signups": 86, "qa-reviewers": 3 },
-    }),
+    connect: () => {
+      const conn = campaignConnection({
+        ...(organizations ? {
+          accounts: [
+            { id: "self", name: "Operator organization", status: "active" },
+            { id: "qa-client", name: "Client Studio", status: "active" },
+          ],
+        } : {}),
+        campaigns,
+        campaignSeries: populated ? [{ id: "qa-series", sourceCampaignId: "qa-c-repeat", status: "active", intervalWeeks: 1, timeZone: "America/Phoenix", anchorAt: "2031-10-14T16:00:00Z", nextAt: "2031-10-21T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" }] : [],
+        audiences,
+        templates,
+        senderIdentities: [campaignSender({ id: "qa-news", address: "news@acme.com", fromName: "Acme News" })],
+        subscriberCounts: { "qa-newsletter": 1204, "qa-signups": 86, "qa-reviewers": 3 },
+        testSettings: [{ id: "qa-testing", accountId: "self", audienceId: "qa-reviewers", createdAt: "2026-10-01T12:00:00Z" }],
+      });
+      // A campaign page reads its results, its ledger and its tests per campaign:
+      // answered here per campaign, so each page reads as the send it describes.
+      return populated ? emailCampaignReads(conn) : conn;
+    },
     wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
     render: () => <EmailCampaignsPane />,
   };
+}
+
+/** What the campaign pages of the populated scene read: the sent and sending campaigns' results, a ledger, and tests. */
+function emailCampaignReads(conn: ReturnType<typeof campaignConnection>) {
+  const stats: Record<string, Record<string, unknown>> = {
+    "qa-c-sent": { recipients: 1204, pending: 0, sent: 1176, failed: 4, skipped: { total: 24, suppressed: 15, unsubscribed: 9, other: 0 }, bounces: { hard: 3 }, complaints: 1, unsubscribed: 7, opens: { total: 1642, unique: 702 }, clicks: { total: 318, unique: 187 } },
+    "qa-c-sending": { recipients: 1250, pending: 46, sent: 1204, failed: 0, skipped: { total: 0, suppressed: 0, unsubscribed: 0, other: 0 }, bounces: { hard: 0 }, complaints: 0, unsubscribed: 1, opens: { total: 341 }, clicks: { total: 40, unique: 31 } },
+  };
+  const at = (minute: number) => `2026-10-03T16:${String(minute).padStart(2, "0")}:00Z`;
+  const ledger = [
+    emailDelivery({ id: "qa-d6", campaignId: "qa-c-sent", email: "dana@acme.com", status: "sent", sentAt: at(59), createdAt: at(59) }),
+    emailDelivery({ id: "qa-d5", campaignId: "qa-c-sent", email: "lee@client.example", status: "skipped", skipReason: "unsubscribed", sentAt: "", createdAt: at(58) }),
+    emailDelivery({ id: "qa-d4", campaignId: "qa-c-sent", email: "sam@client.example", status: "failed", lastError: "The receiving server said the mailbox is full.", sentAt: "", createdAt: at(57) }),
+    emailDelivery({ id: "qa-d3", campaignId: "qa-c-sent", email: "kim@acme.com", status: "sent", sentAt: at(56), createdAt: at(56) }),
+    emailDelivery({ id: "qa-d2", campaignId: "qa-c-sent", email: "ari@client.example", status: "sent", sentAt: at(55), createdAt: at(55) }),
+  ];
+  const older = [emailDelivery({ id: "qa-d1", campaignId: "qa-c-sent", email: "jo@acme.com", status: "sent", sentAt: at(54), createdAt: at(54) })];
+  const runs = [
+    emailCampaign({ id: "qa-run-2", name: "July update · Test", testSourceCampaignId: "qa-c-sent", audienceId: "qa-reviewers", status: "sent", recipientCount: 3, sentCount: 2, skippedCount: 1, startedAt: "2026-10-02T17:15:00Z", completedAt: "2026-10-02T17:16:00Z" }),
+    emailCampaign({ id: "qa-run-1", name: "July update · Test", testSourceCampaignId: "qa-c-sent", audienceId: "qa-reviewers", status: "sent", recipientCount: 3, sentCount: 3, startedAt: "2026-10-01T15:40:00Z", completedAt: "2026-10-01T15:41:00Z" }),
+  ];
+  const runLedger = [
+    emailDelivery({ id: "qa-rd1", campaignId: "qa-run-2", email: "reviewer@acme.com", status: "sent", sentAt: "2026-10-02T17:15:30Z", createdAt: "2026-10-02T17:15:30Z" }),
+    emailDelivery({ id: "qa-rd2", campaignId: "qa-run-2", email: "editor@acme.com", status: "skipped", skipReason: "unsubscribed", sentAt: "", createdAt: "2026-10-02T17:15:20Z" }),
+    emailDelivery({ id: "qa-rd3", campaignId: "qa-run-2", email: "owner@acme.com", status: "sent", sentAt: "2026-10-02T17:15:10Z", createdAt: "2026-10-02T17:15:10Z" }),
+  ];
+  Object.assign(conn.query, {
+    campaignStats: async ({ campaignId }: { campaignId: string }) => rowsResult(stats[campaignId] ? [stats[campaignId]] : []),
+    deliveriesForCampaign: async ({ campaignId }: { campaignId: string }, opts?: { cursor?: string }) =>
+      campaignId === "qa-run-2" ? rowsResult(runLedger) : campaignId !== "qa-c-sent" ? rowsResult([]) : opts?.cursor ? rowsResult(older) : emailPage(ledger, "qa-more"),
+    campaignTestRuns: async ({ campaignId }: { campaignId: string }) => rowsResult(campaignId === "qa-c-sent" ? runs : []),
+  });
+  return conn;
 }
 
 function EmailCampaignsPane() {
@@ -1747,9 +1764,14 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
 const clicks = (new URLSearchParams(window.location.search).get("click") ?? "").split("|").filter((c) => c !== "");
 clicks.forEach((label, i) => {
   window.setTimeout(() => {
-    // A choice card answers to its name: its note ("1,204 subscribers") is not part of what is pressed.
+    // A choice card and a record row answer to their names: a card's note ("1,204
+    // subscribers") and a row's other lines are not part of what is pressed.
     const target = Array.from(document.querySelectorAll<HTMLElement>("button, [role=tab], [role=radio], a")).find(
-      (el) => (el.textContent ?? "").trim() === label || el.getAttribute("aria-label") === label || el.querySelector(".os-choice-card-name")?.textContent?.trim() === label,
+      (el) =>
+        (el.textContent ?? "").trim() === label ||
+        el.getAttribute("aria-label") === label ||
+        el.querySelector(".os-choice-card-name")?.textContent?.trim() === label ||
+        el.querySelector(".os-row-name")?.textContent?.trim() === label,
     );
     target?.click();
   }, 2500 + i * 1200);

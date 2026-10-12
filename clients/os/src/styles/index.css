@@ -6638,23 +6638,11 @@ a.os-button {
 }
 
 .os-campaign-actions,
-.os-campaign-filters,
-.os-campaign-tracking {
+.os-campaign-filters {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-.os-campaign-tracking {
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 4px;
-  margin: 8px 0;
-}
-.os-campaign-schedule {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--os-line);
 }
 
 .os-campaign-confirm {

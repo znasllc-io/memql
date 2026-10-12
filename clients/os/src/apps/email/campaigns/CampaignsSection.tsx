@@ -1,14 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Send } from "lucide-react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, EmptyState, Head, LiveList, Notice, RecordRow, Refine, Select, type RefineChip } from "../../../kit";
 import { AddButton } from "../../../kit/AddButton";
 import { listCount, type RecordTone } from "../../../kit/RecordRow";
-import { flatten } from "../../../kit/rows";
 import type { ArrivalKind } from "../../../live/arrival";
 import { useLiveView } from "../../../live/liveView";
-import type { CampaignWrites } from "../actions";
 import { recordNamed, useOpenRequest, type OpenRequest } from "../openRequest";
 import {
   audienceProjection,
@@ -17,8 +15,10 @@ import {
   campaignIsFinished,
   campaignName,
   nameOfAudience,
+  seriesFromRow,
   useProjected,
   type CampaignRow,
+  type SeriesRow,
 } from "../rows";
 import type { EmailFeeds, EmailRecordFeeds } from "../useEmail";
 import { shortDay, shortMoment } from "../when";
@@ -59,25 +59,33 @@ function inFacet(campaign: CampaignRow, facet: StatusFacet): boolean {
   return campaign.status === facet;
 }
 
-const text = (row: Record<string, unknown>, key: string): string => (typeof row[key] === "string" ? (row[key] as string) : "");
-
 export function CampaignsSection({
   feeds,
   recordFeeds,
-  writes,
   trackByDefault,
   openRequest,
+  onCampaign,
 }: {
   feeds: EmailFeeds;
   recordFeeds: EmailRecordFeeds;
-  writes: CampaignWrites;
   /** What Add a campaign's tracking switches start at. */
   trackByDefault: boolean;
   /** A campaign to open, or the Add flow to start, from search, Ask or another page. */
   openRequest?: OpenRequest;
+  /**
+   * Told which campaign's page opened. The app root reads a series for every
+   * draft; a campaign that is not one may still have a series running from
+   * when it was, and its page is the only place to pause it.
+   */
+  onCampaign?: (campaignId: string) => void;
 }) {
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
+  // A copy Duplicate made opens when its row arrives; until then the page it was made from stays.
+  const [arriving, setArriving] = useState("");
+  useEffect(() => {
+    if (openId !== "") onCampaign?.(openId);
+  }, [openId, onCampaign]);
   const [search, setSearch] = useState("");
   const [facet, setFacet] = useState<StatusFacet>("");
   useOpenRequest(openRequest, (target) => {
@@ -116,10 +124,10 @@ export function CampaignsSection({
   // for every draft in view, so a row reads "Repeating" without a read of its own.
   const seriesRows = recordFeeds.series.snapshot.rows;
   const seriesByCampaign = useMemo(() => {
-    const held = new Map<string, Record<string, unknown>>();
+    const held = new Map<string, SeriesRow>();
     for (const row of seriesRows) {
-      const series = flatten(row);
-      held.set(text(series, "sourceCampaignId"), series);
+      const series = seriesFromRow(row);
+      held.set(series.sourceCampaignId, series);
     }
     return held;
   }, [seriesRows]);
@@ -131,6 +139,15 @@ export function CampaignsSection({
     () => recordNamed(feeds.campaigns.snapshot.rows, campaignFromRow, openId),
     [feeds.campaigns.snapshot.rows, openId],
   );
+  const arrived = useMemo(
+    () => arriving !== "" && recordNamed(feeds.campaigns.snapshot.rows, campaignFromRow, arriving) !== null,
+    [feeds.campaigns.snapshot.rows, arriving],
+  );
+  useEffect(() => {
+    if (!arrived) return;
+    setOpenId(arriving);
+    setArriving("");
+  }, [arrived, arriving]);
 
   if (adding) {
     return (
@@ -147,7 +164,19 @@ export function CampaignsSection({
     );
   }
   if (open) {
-    return <CampaignPage campaign={open} feeds={feeds} recordFeeds={recordFeeds} writes={writes} onBack={() => setOpenId("")} />;
+    return (
+      <CampaignPage
+        key={open.id}
+        campaign={open}
+        feeds={feeds}
+        recordFeeds={recordFeeds}
+        onBack={() => {
+          setOpenId("");
+          setArriving("");
+        }}
+        onOpenCampaign={setArriving}
+      />
+    );
   }
 
   const failed = feeds.campaigns.snapshot.error !== "";
@@ -216,20 +245,24 @@ export function CampaignsSection({
   );
 }
 
-/** The one time or figure a campaign's state is about, or nothing. */
-function summaryOf(campaign: CampaignRow, series: Record<string, unknown> | null): string {
+/**
+ * The one time or figure a campaign's state is about, or nothing. It stands
+ * beside the state word and never says it again (DESIGN.md rule 7): "Oct 14,
+ * 9:00" beside Scheduled, not "Scheduled Oct 14, 9:00".
+ */
+function summaryOf(campaign: CampaignRow, series: SeriesRow | null): string {
   switch (campaign.status) {
     case "scheduled":
-      return campaign.scheduledAt === "" ? "" : `Scheduled ${shortMoment(campaign.scheduledAt)}`;
+      return campaign.scheduledAt === "" ? "" : shortMoment(campaign.scheduledAt);
     case "sending":
     case "paused":
       return campaign.recipientCount === 0
         ? ""
         : `${campaign.sentCount.toLocaleString("en-US")} of ${campaign.recipientCount.toLocaleString("en-US")} sent`;
     case "sent":
-      return campaign.completedAt === "" ? "" : `Sent ${shortDay(campaign.completedAt)}`;
+      return campaign.completedAt === "" ? "" : shortDay(campaign.completedAt);
     case "draft":
-      return series !== null && text(series, "status") === "active" && text(series, "nextAt") !== "" ? `Next ${shortMoment(text(series, "nextAt"))}` : "";
+      return series !== null && series.status === "active" && series.nextAt !== "" ? `Next ${shortMoment(series.nextAt)}` : "";
     default:
       return "";
   }
@@ -244,13 +277,13 @@ function CampaignLine({
 }: {
   campaign: CampaignRow;
   audience: string;
-  series: Record<string, unknown> | null;
+  series: SeriesRow | null;
   tick: ArrivalKind | null;
   onOpen: () => void;
 }) {
   const finished = campaignIsFinished(campaign);
   // A draft that a series sends from reads as the series does (Ruling 6).
-  const seriesStatus = campaign.status === "draft" && series !== null ? text(series, "status") : "";
+  const seriesStatus = campaign.status === "draft" && series !== null ? series.status : "";
   const state = (seriesStatus === "" ? undefined : WORDS.repeating[seriesStatus]) ?? WORDS.campaign[campaign.status] ?? "";
   // Two states are worth colour: one that is happening, and one that went wrong.
   const tone: RecordTone =

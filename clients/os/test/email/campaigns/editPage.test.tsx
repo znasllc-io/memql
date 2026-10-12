@@ -1,0 +1,263 @@
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+
+import { readTheQuestion } from "../../readTheQuestion";
+import { chooseOption, openSelect } from "../../selectControl";
+import { installSeededAccess } from "../../seededAccess";
+
+const h = vi.hoisted(() => ({ connection: null as unknown }));
+
+vi.mock("../../../src/live/connection", () => ({
+  useOsConnection: () => h.connection,
+  bridgePathFor: (base: string) => base + "_memql/ws",
+  osBridgePath: "/_memql/ws",
+}));
+
+vi.mock("../../../src/auth/context", () => ({
+  useAuthSource: () => ({ bearer: async () => "test-token", refresh: async () => {} }),
+}));
+
+const { EmailApp } = await import("../../../src/apps/email/EmailApp");
+const { LocalEmailSettingsStore } = await import("../../../src/apps/email/settings");
+const { audienceRow, campaignRow, fakeConnection, senderRow, templateRow, withSession } = await import("../harness");
+
+// A CAMPAIGN'S EDIT PAGE (memql#6033, Ruling 7): the fields of a draft, or of
+// the draft a series repeats from, and one bar. Save writes only what changed;
+// Cancel campaign asks by name first. Pinned in one zone with no daylight saving.
+
+type Conn = ReturnType<typeof fakeConnection>;
+
+const ZONE = "America/Phoenix";
+let previousZone: string | undefined;
+
+beforeAll(() => {
+  previousZone = process.env.TZ;
+  process.env.TZ = ZONE;
+});
+
+afterAll(() => {
+  if (previousZone === undefined) delete process.env.TZ;
+  else process.env.TZ = previousZone;
+});
+
+afterEach(() => {
+  installSeededAccess("owner");
+  localStorage.clear();
+});
+
+function seed(over: Parameters<typeof fakeConnection>[0] = {}) {
+  return fakeConnection({
+    audiences: [audienceRow({ id: "a1", name: "Newsletter" }), audienceRow({ id: "a2", name: "Signups" })],
+    templates: [templateRow({ id: "t1", name: "August copy" }), templateRow({ id: "t2", name: "Autumn draft", status: "draft" })],
+    senderIdentities: [senderRow({ id: "s1", address: "news@acme.com" })],
+    subscriberCounts: { a1: 1204, a2: 86 },
+    campaigns: [campaignRow({ id: "c1", audienceId: "a1", templateId: "t1", senderIdentityId: "s1" })],
+    ...over,
+  });
+}
+
+function mountWindow(connection: Conn, session: { role?: string; accountIds?: string[]; everyAccount?: boolean } = {}) {
+  h.connection = connection;
+  const bag = new Map<string, string>();
+  const store = new LocalEmailSettingsStore({ getItem: (k) => bag.get(k) ?? null, setItem: (k, v) => void bag.set(k, v) });
+  function Window() {
+    const [current, setCurrent] = useState("campaigns");
+    return withSession(
+      <EmailApp sectionId={current} navigate={(id) => setCurrent(id)} askContext={() => {}} store={store} uploads={{ upload: vi.fn() }} />,
+      session,
+    );
+  }
+  return render(<Window />);
+}
+
+const bar = () => screen.getByRole("group", { name: "What you can do with this" });
+const barWord = () => bar().querySelector(".os-actbar-word")?.textContent ?? "";
+const barDetail = () => bar().querySelector(".os-actbar-detail")?.textContent ?? "";
+const barActs = () => within(bar()).queryAllByRole("button").map((button) => button.textContent);
+const press = (name: string) => fireEvent.click(within(bar()).getByRole("button", { name }));
+const optionNames = (label: string) => within(openSelect(screen.getByLabelText(label))).getAllByRole("option").map((option) => option.textContent);
+
+async function openEdit(name = "August update") {
+  fireEvent.click(await screen.findByText(name));
+  expect(await screen.findByRole("heading", { level: 3, name })).toBeTruthy();
+  await waitFor(() => expect(barActs()).toContain("Edit"));
+  press("Edit");
+  expect(await screen.findByRole("heading", { level: 3, name: "Edit campaign" })).toBeTruthy();
+}
+
+/** The arguments the one write sent, and nothing it left out. */
+function updated(conn: Conn): Record<string, unknown> {
+  return conn.query.updateCampaign.mock.calls[0]![0];
+}
+
+describe("editing a campaign", () => {
+  it("saves only what changed", async () => {
+    const conn = seed();
+    mountWindow(conn);
+    await openEdit();
+
+    // Nothing changed yet: nothing to save, and nothing to discard.
+    expect(barWord()).toBe("Editing");
+    expect(barActs()).toEqual(["Cancel campaign"]);
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Spring sale" } });
+    fireEvent.change(screen.getByLabelText("Reply to"), { target: { value: "help@acme.com" } });
+    expect(barActs()).toEqual(["Cancel campaign", "Discard changes", "Save"]);
+    press("Save");
+
+    await waitFor(() => expect(conn.query.updateCampaign).toHaveBeenCalledOnce());
+    // The three the engine requires, and the two that changed -- no others.
+    expect(updated(conn)).toEqual({ campaignId: "c1", name: "Spring sale", audienceId: "a1", templateId: "t1", replyTo: "help@acme.com" });
+    expect(Object.keys(updated(conn)).sort()).toEqual(["audienceId", "campaignId", "name", "replyTo", "templateId"]);
+    expect(conn.query.campaignConfigureSeries).not.toHaveBeenCalled();
+    // Back on the campaign's page.
+    expect(await screen.findByRole("heading", { level: 3, name: "August update" })).toBeTruthy();
+  });
+
+  it("clears what is emptied, and saves a time for the draft to be scheduled at", async () => {
+    const conn = seed({ campaigns: [campaignRow({ id: "c1", audienceId: "a1", templateId: "t1", senderIdentityId: "s1", replyTo: "help@acme.com" })] });
+    mountWindow(conn);
+    await openEdit();
+    fireEvent.change(screen.getByLabelText("Reply to"), { target: { value: "" } });
+    chooseOption(screen.getByLabelText("When"), "Schedule");
+    expect(barDetail()).toBe("Choose a time");
+    fireEvent.change(screen.getByLabelText("Send at · America/Phoenix"), { target: { value: "2031-10-14T09:00" } });
+    press("Save");
+    await waitFor(() => expect(conn.query.updateCampaign).toHaveBeenCalledOnce());
+    expect(updated(conn)).toEqual({ campaignId: "c1", name: "August update", audienceId: "a1", templateId: "t1", replyTo: "", scheduledAt: "2031-10-14T16:00:00Z" });
+  });
+
+  it("discards changes without writing anything", async () => {
+    const conn = seed();
+    mountWindow(conn);
+    await openEdit();
+    chooseOption(screen.getByLabelText("Audience"), "Signups");
+    press("Discard changes");
+    expect(await screen.findByRole("heading", { level: 3, name: "August update" })).toBeTruthy();
+    expect(conn.query.updateCampaign).not.toHaveBeenCalled();
+  });
+
+  it("offers published templates first and names a draft one", async () => {
+    mountWindow(seed());
+    await openEdit();
+    expect(optionNames("Template")).toEqual(["August copy", "Autumn draft (Draft)"]);
+  });
+
+  it("Cancel campaign asks by name and cancels the draft", async () => {
+    const conn = seed();
+    mountWindow(conn);
+    await openEdit();
+
+    press("Cancel campaign");
+    expect(within(bar()).getByText("Cancel “August update”? It won't be sent, and it stays on the list as cancelled.")).toBeTruthy();
+    expect(barActs()).toEqual(["Keep", "Cancel campaign"]);
+    // The second click of a double-click is not an answer.
+    press("Cancel campaign");
+    expect(conn.query.cancelCampaign).not.toHaveBeenCalled();
+    press("Keep");
+    expect(barActs()).toEqual(["Cancel campaign"]);
+
+    press("Cancel campaign");
+    await readTheQuestion();
+    press("Cancel campaign");
+    await waitFor(() => expect(conn.query.cancelCampaign).toHaveBeenCalledWith({ campaignId: "c1" }));
+    expect(await screen.findByRole("heading", { level: 3, name: "August update" })).toBeTruthy();
+  });
+
+  it("defaults to the client's organization, filters resources and sends no owner", async () => {
+    installSeededAccess("writer");
+    const conn = seed({
+      accounts: [{ id: "acme", name: "Acme", status: "active" }],
+      audiences: [audienceRow({ id: "a-acme", accountId: "acme", name: "Acme audience" }), audienceRow({ id: "a-other", accountId: "other", name: "Other audience" })],
+      templates: [templateRow({ id: "t-acme", accountId: "acme", name: "Acme copy" }), templateRow({ id: "t-other", accountId: "other", name: "Other copy" })],
+      senderIdentities: [senderRow({ id: "s-acme", accountId: "acme", address: "news@acme.test" })],
+      // A campaign from before organizations, which belongs to nobody yet.
+      campaigns: [campaignRow({ id: "c1", name: "Acme newsletter", accountId: "", audienceId: "a-acme", templateId: "t-acme", senderIdentityId: "" })],
+    });
+    mountWindow(conn, { role: "writer", everyAccount: false, accountIds: ["acme"] });
+    await openEdit("Acme newsletter");
+
+    // One organization to be in: no question about it.
+    expect(screen.queryByLabelText("Organization")).toBeNull();
+    expect(optionNames("Audience")).toEqual(["Acme audience"]);
+    expect(optionNames("Template")).toEqual(["Acme copy"]);
+    // A client organization sends as one of its own senders.
+    expect(barDetail()).toBe("Choose a sender");
+    expect(barActs()).not.toContain("Save");
+    chooseOption(screen.getByLabelText("Sender"), "news@acme.test");
+    press("Save");
+
+    await waitFor(() => expect(conn.query.updateCampaign).toHaveBeenCalledOnce());
+    expect(updated(conn)).toMatchObject({ campaignId: "c1", accountId: "acme", audienceId: "a-acme", templateId: "t-acme", senderIdentityId: "s-acme" });
+    expect(updated(conn)).not.toHaveProperty("ownerUserId");
+  });
+
+  it("a deliberate organization change clears the audience, template and sender", async () => {
+    installSeededAccess("writer");
+    const conn = seed({
+      accounts: [{ id: "other", name: "Other", status: "active" }, { id: "acme", name: "Acme", status: "active" }],
+      audiences: [audienceRow({ id: "a-acme", accountId: "acme", name: "Acme audience" }), audienceRow({ id: "a-other", accountId: "other", name: "Other audience" })],
+      templates: [templateRow({ id: "t-acme", accountId: "acme", name: "Acme copy" })],
+      senderIdentities: [senderRow({ id: "s-acme", accountId: "acme", address: "news@acme.test" })],
+      campaigns: [campaignRow({ id: "c1", name: "Acme newsletter", accountId: "acme", audienceId: "a-acme", templateId: "t-acme", senderIdentityId: "s-acme" })],
+    });
+    mountWindow(conn, { role: "writer", everyAccount: false, accountIds: ["other", "acme"] });
+    await openEdit("Acme newsletter");
+
+    expect(screen.getByLabelText("Organization").textContent).toContain("Acme");
+    chooseOption(screen.getByLabelText("Organization"), "Other");
+    expect(screen.getByLabelText("Audience").textContent).toContain("Choose an audience");
+    expect(screen.getByLabelText("Template").textContent).toContain("Choose a template");
+    expect(screen.getByLabelText("Sender").textContent).toContain("Choose a sender");
+    expect(barDetail()).toBe("Choose an audience");
+    expect(barActs()).toEqual(["Cancel campaign", "Discard changes"]);
+    expect(conn.query.updateCampaign).not.toHaveBeenCalled();
+  });
+
+  it("choosing Repeat turns Save into Start repeating", async () => {
+    const conn = seed();
+    mountWindow(conn);
+    await openEdit();
+
+    chooseOption(screen.getByLabelText("When"), "Repeat");
+    expect(barDetail()).toBe("Choose a time");
+    expect(barActs()).toEqual(["Cancel campaign", "Discard changes"]);
+    chooseOption(screen.getByLabelText("Every"), "2 weeks");
+    fireEvent.change(screen.getByLabelText("Starting · America/Phoenix"), { target: { value: "2031-10-14T09:00" } });
+    expect(barActs()).toEqual(["Cancel campaign", "Discard changes", "Start repeating"]);
+
+    // Starting it is a send to an audience on its own clock: it asks, naming them.
+    press("Start repeating");
+    expect(within(bar()).getByText("Send “August update” to Newsletter every 2 weeks from Tue, Oct 14 at 9:00?")).toBeTruthy();
+    expect(barActs()).toEqual(["Not yet", "Start repeating"]);
+    await readTheQuestion();
+    press("Start repeating");
+    await waitFor(() =>
+      expect(conn.query.campaignConfigureSeries).toHaveBeenCalledWith({
+        campaignId: "c1",
+        action: "save",
+        intervalWeeks: 2,
+        firstSendAt: "2031-10-14T16:00:00Z",
+        timeZone: "America/Phoenix",
+      }),
+    );
+    expect(conn.query.campaignConfigureSeries.mock.calls[0]![0]).not.toHaveProperty("expectedRevision");
+    // Nothing on the campaign itself changed.
+    expect(conn.query.updateCampaign).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { level: 3, name: "August update" })).toBeTruthy();
+  });
+
+  it("says in the engine's words when a save is refused, and keeps what was typed", async () => {
+    const conn = seed();
+    conn.query.updateCampaign.mockRejectedValueOnce(new Error("updateCampaign: the template belongs to another organization"));
+    mountWindow(conn);
+    await openEdit();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Spring sale" } });
+    press("Save");
+    expect(await screen.findByText("Your changes weren't saved.")).toBeTruthy();
+    expect(screen.getByText(/the template belongs to another organization/)).toBeTruthy();
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Spring sale");
+    expect(screen.getByRole("heading", { level: 3, name: "Edit campaign" })).toBeTruthy();
+  });
+});

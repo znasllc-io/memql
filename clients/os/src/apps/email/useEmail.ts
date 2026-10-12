@@ -382,22 +382,29 @@ const NO_IDS: readonly string[] = [];
  * The three composed feeds, over what the root's five are showing.
  *
  * IN VIEW means what the person can act on, which the root's lists already
- * say: a DRAFT can source a series (nothing else repeats, so a sent campaign
- * is not read); an organization with a campaign or an audience here is one
- * whose testing audience a page may name; every audience may have a signup
- * form. Reading these only from the feeds that exist keeps a cluster with no
- * mail from reading anything per id at all.
+ * say: a DRAFT can source a series, and so can a campaign whose page is open --
+ * a draft a series was made from may have been sent by hand since, and the
+ * series it left running is reached from that page alone; an organization with
+ * a campaign or an audience here is one whose testing audience a page may name;
+ * every audience may have a signup form. Reading these only from the feeds that
+ * exist keeps a cluster with no mail from reading anything per id at all.
  *
  * `alsoOrganizations` are organizations a page asks for whatever the lists
  * hold: Settings chooses an organization's testing audience, and an
  * organization with no campaign or audience has nothing in view to ask it by.
+ * `alsoCampaigns` are the campaigns whose pages have been opened, whatever
+ * their state.
  */
-export function useEmailRecordFeeds(feeds: EmailFeeds, alsoOrganizations: readonly string[] = NO_IDS): EmailRecordFeeds {
+export function useEmailRecordFeeds(
+  feeds: EmailFeeds,
+  alsoOrganizations: readonly string[] = NO_IDS,
+  alsoCampaigns: readonly string[] = NO_IDS,
+): EmailRecordFeeds {
   const campaignRows = feeds.campaigns.snapshot.rows;
   const audienceRows = feeds.audiences.snapshot.rows;
   const drafts = useMemo(
-    () => campaignRows.map(campaignFromRow).filter((c) => c.id !== "" && c.status === "draft").map((c) => c.id),
-    [campaignRows],
+    () => [...campaignRows.map(campaignFromRow).filter((c) => c.id !== "" && c.status === "draft").map((c) => c.id), ...alsoCampaigns],
+    [campaignRows, alsoCampaigns],
   );
   const organizations = useMemo(() => {
     const accounts = [...campaignRows.map(campaignFromRow), ...audienceRows.map(audienceFromRow)].map((r) => r.accountId);
@@ -577,24 +584,124 @@ export function useReading<T>(
 
 const NO_ROWS: Row[] = [];
 
+/** One page of a walked read: its rows, and the cursor that continues it ("" when it is the last). */
+interface Page {
+  rows: Row[];
+  cursor: string;
+}
+
+const NO_PAGE: Page = { rows: NO_ROWS, cursor: "" };
+
 /**
- * The per-recipient ledger for one campaign.
+ * The per-recipient ledger of one campaign (or one test run), newest first.
  *
  * `v1:campaigns:delivery` stays out of broadcasts because it produces one row
  * per recipient per send, so the surface that shows it keeps it fresh with an
- * `AutoRefresh` beside it.
+ * `AutoRefresh` on `reload` -- which reads the NEWEST page again -- and asks for
+ * older pages one at a time with `loadMore`.
  */
-export function useCampaignDeliveries(campaignId: string): Reading<Row[]> {
+export interface DeliveryLedger {
+  /** Every row read so far, each once, newest first. */
+  rows: Row[];
+  /** The newest page's read: "loading" until it first lands, "error" when the last one was refused. */
+  state: Reading<Page>["state"];
+  /** The engine's sentence when the newest page's last read was refused; the rows read before stay. */
+  error: string;
+  /** The engine has older rows than these. */
+  more: boolean;
+  /** An older page is on its way. */
+  loadingMore: boolean;
+  /** The engine's sentence when the last older page was refused. */
+  moreError: string;
+  loadMore: () => void;
+  reload: () => Promise<void>;
+}
+
+/**
+ * NOTHING READ IS FORGOTTEN. A row is kept by its id from the first time it is
+ * read, and a newer read of it replaces it -- so a refresh of the newest page
+ * updates the rows it names without dropping the older ones somebody asked for,
+ * and rows a busy send pushes off the newest page stay on screen. The ledger is
+ * never deleted from, so what was read is still true.
+ */
+export function useDeliveryLedger(campaignId: string): DeliveryLedger {
   const connection = useOsConnection();
   const query = connection?.query ?? null;
   const read = useMemo(() => {
     if (query === null || campaignId === "") return null;
-    return async (signal: AbortSignal) => {
+    return async (signal: AbortSignal): Promise<Page> => {
       const result = await query.deliveriesForCampaign({ campaignId }, { signal });
-      return result.rows();
+      return { rows: result.rows(), cursor: result.meta()?.cursor ?? "" };
     };
   }, [query, campaignId]);
-  return useReading<Row[]>(NO_ROWS, read, [query, campaignId]);
+  const newest = useReading<Page>(NO_PAGE, read, [read]);
+
+  // The older pages read so far, for this campaign: another campaign's are not its.
+  const [walked, setWalked] = useState<{ campaignId: string; rows: Row[]; cursor: string; loading: boolean; error: string } | null>(null);
+  const older = walked?.campaignId === campaignId ? walked : null;
+  const seen = useRef<{ campaignId: string; rows: Map<string, Row> }>({ campaignId, rows: new Map() });
+  const walking = useRef(false);
+
+  const rows = useMemo(() => {
+    if (seen.current.campaignId !== campaignId) seen.current = { campaignId, rows: new Map() };
+    const kept = seen.current.rows;
+    for (const row of older?.rows ?? NO_ROWS) kept.set(rowKey(row), row);
+    for (const row of newest.value.rows) kept.set(rowKey(row), row);
+    return [...kept.values()].sort((a, b) => Date.parse(textOf(flatten(b), "createdAt")) - Date.parse(textOf(flatten(a), "createdAt")));
+  }, [campaignId, newest.value.rows, older?.rows]);
+
+  // Older pages continue from the oldest page read; before any, from the newest.
+  const cursor = older === null ? newest.value.cursor : older.cursor;
+
+  const loadMore = useCallback(() => {
+    if (query === null || cursor === "" || walking.current) return;
+    walking.current = true;
+    const held = older?.rows ?? NO_ROWS;
+    setWalked({ campaignId, rows: held, cursor, loading: true, error: "" });
+    void (async () => {
+      try {
+        const result = await query.deliveriesForCampaign({ campaignId }, { cursor });
+        setWalked({ campaignId, rows: [...held, ...result.rows()], cursor: result.meta()?.cursor ?? "", loading: false, error: "" });
+      } catch (err) {
+        setWalked({ campaignId, rows: held, cursor, loading: false, error: describe(err) });
+      } finally {
+        walking.current = false;
+      }
+    })();
+  }, [query, campaignId, cursor, older]);
+
+  return {
+    rows,
+    state: newest.state,
+    error: newest.error,
+    more: cursor !== "",
+    loadingMore: older?.loading ?? false,
+    moreError: older?.error ?? "",
+    loadMore,
+    reload: newest.reload,
+  };
+}
+
+/** A row's id, or its place when a row has none (a mid-write row is still a row). */
+function rowKey(row: Row): string {
+  return textOf(flatten(row), "id") || JSON.stringify(row);
+}
+
+/**
+ * The recent test runs of one campaign, newest first (`campaignTestRuns`).
+ *
+ * A test run is a campaign of its own, with its own audience, counters and
+ * ledger, and the campaigns feed leaves it out: the source's page reads them
+ * and keeps them fresh with an `AutoRefresh` while it is seen.
+ */
+export function useTestRuns(campaignId: string): Reading<Row[]> {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  const read = useMemo(() => {
+    if (query === null || campaignId === "") return null;
+    return async (signal: AbortSignal) => (await query.campaignTestRuns({ campaignId }, { signal })).rows();
+  }, [query, campaignId]);
+  return useReading<Row[]>(NO_ROWS, read, [read]);
 }
 
 /**
@@ -670,6 +777,11 @@ export function useSendingReadiness(accountId: string, senderIdentityId = "", ca
   const reading = useReading<Awaited<ReturnType<NonNullable<typeof read>>> | null>(null, read, [read]);
   return { ...reading, ready: !!live && !!read && reading.state === "ready" && reading.value?.reader === read && reading.value.ready,
     capture: !!live && !!read && reading.state === "ready" && reading.value?.reader === read && reading.value.capture,
+    // THE CHECK FAILED, which says nothing about sending: a refused or broken
+    // read is not an organization whose sending isn't set up, and saying so
+    // would send somebody to fix a setting that is fine. `reason` is then the
+    // read's own error.
+    failed: !!live && !!read && reading.state === "error",
     reason: reading.error || reading.value?.reason || "Sending readiness is not confirmed." };
 }
 

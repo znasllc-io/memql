@@ -314,6 +314,8 @@ export interface CampaignStats {
   skippedUnsubscribed: Figure;
   skippedOther: Figure;
   hardBounces: Figure;
+  /** Never measured: nothing counts a soft bounce per campaign. Always absent, with why. */
+  softBounces: Figure;
   complaints: Figure;
   unsubscribes: Figure;
   opensTotal: Figure;
@@ -324,7 +326,8 @@ export interface CampaignStats {
 
 const UNIQUE_UNMEASURED =
   "Too many recorded events to count distinct recipients exactly, so this is left unstated rather than guessed.";
-const SOFT_BOUNCE_ABSENT = "Nothing measures soft bounces per campaign, so there is no figure here.";
+/** Why there is never a soft-bounce figure. Said once, where the breakdown is. */
+export const SOFT_BOUNCE_ABSENT = "Soft bounces aren't counted per campaign.";
 
 /**
  * Read a figure out of the stats payload.
@@ -353,7 +356,17 @@ export function figureOf(payload: Row, key: string, absentBecause = ""): Figure 
  * costs a line while guessing wrong costs the whole engagement panel. The
  * fallback order is nested first, because the builtin's own description names
  * `opens.unique`.
+ *
+ * THE ENGINE'S OWN NAMES FIRST (component/campaigns/stats.go): hard bounces
+ * are `bounces.hard` and one-click unsubscribes are `unsubscribed`. Read under
+ * other names, both came back absent on every campaign -- and the hard-bounce
+ * line borrowed the soft-bounce sentence for its reason.
  */
+/** The first of two spellings that carries a measurement. */
+function either(first: Figure, second: Figure): Figure {
+  return first.value !== null ? first : second;
+}
+
 export function statsFromPayload(row: Row): CampaignStats {
   const flat = flatten(row);
   const nested = (group: string, leaf: string, flatKey: string, absent = ""): Figure => {
@@ -374,9 +387,10 @@ export function statsFromPayload(row: Row): CampaignStats {
     skippedSuppressed: nested("skipped", "suppressed", "skippedSuppressed"),
     skippedUnsubscribed: nested("skipped", "unsubscribed", "skippedUnsubscribed"),
     skippedOther: nested("skipped", "other", "skippedOther"),
-    hardBounces: figureOf(flat, "hardBounces", SOFT_BOUNCE_ABSENT),
+    hardBounces: nested("bounces", "hard", "hardBounces"),
+    softBounces: { value: null, absentBecause: SOFT_BOUNCE_ABSENT },
     complaints: figureOf(flat, "complaints"),
-    unsubscribes: figureOf(flat, "unsubscribes"),
+    unsubscribes: either(figureOf(flat, "unsubscribed"), figureOf(flat, "unsubscribes")),
     opensTotal: nested("opens", "total", "opensTotal"),
     opensUnique: nested("opens", "unique", "opensUnique", UNIQUE_UNMEASURED),
     clicksTotal: nested("clicks", "total", "clicksTotal"),
@@ -493,6 +507,68 @@ export function testSettingFor(rows: readonly Row[], accountId: string): TestSet
   for (const row of rows) {
     const setting = testSettingFromRow(row);
     if (setting.accountId === accountId) return setting;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Repeating campaigns
+// ---------------------------------------------------------------------------
+
+/**
+ * A campaign that repeats: the series a draft sends from (`campaignSeriesFull`).
+ *
+ * Each occurrence is a campaign of its own, made from what the series CAPTURED
+ * when it was last saved -- so editing the draft changes nothing that goes out
+ * until the series is saved again, and cancelling the draft does not stop it.
+ */
+export interface SeriesRow {
+  id: string;
+  /** The draft the series was made from, and whose page carries its acts. */
+  sourceCampaignId: string;
+  accountId: string;
+  name: string;
+  intervalWeeks: number;
+  /** IANA zone the cadence keeps its local day and time in. */
+  timeZone: string;
+  /** The first occurrence: what the cadence is counted from. */
+  anchorAt: string;
+  nextAt: string;
+  /** active | paused | blocked. */
+  status: string;
+  lastCampaignId: string;
+  lastOccurrenceAt: string;
+  /** Why a blocked series stopped, in the engine's words. Rendered verbatim. */
+  lastError: string;
+  /** The revision a pause, a resume or a save is checked against (`expectedRevision`). */
+  createdAt: string;
+}
+
+export function seriesFromRow(row: Row): SeriesRow {
+  const flat = flatten(row);
+  return {
+    id: rowString(flat, "id"),
+    sourceCampaignId: rowString(flat, "sourceCampaignId"),
+    accountId: rowString(flat, "accountId"),
+    name: rowString(flat, "name"),
+    intervalWeeks: numberOr(flat, "intervalWeeks", 0),
+    timeZone: rowString(flat, "timeZone"),
+    anchorAt: rowString(flat, "anchorAt"),
+    nextAt: rowString(flat, "nextAt"),
+    status: rowString(flat, "status"),
+    lastCampaignId: rowString(flat, "lastCampaignId"),
+    lastOccurrenceAt: rowString(flat, "lastOccurrenceAt"),
+    lastError: rowString(flat, "lastError"),
+    createdAt: rowString(flat, "createdAt"),
+  };
+}
+
+/** One campaign's series, out of every series the app's one series feed holds; null when it has none. */
+export function seriesFor(rows: readonly Row[], campaignId: string): SeriesRow | null {
+  if (campaignId === "") return null;
+  for (const row of rows) {
+    const series = seriesFromRow(row);
+    if (series.sourceCampaignId === campaignId) return series;
   }
   return null;
 }
