@@ -1,19 +1,22 @@
 import { useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { AutoRefresh, Button, Caption, InlineSkeleton, Notice, Panel, RecordList, RecordRow, Subhead, formatMoment } from "../../kit";
-import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
-import { campaignFromRow, deliveryFromRow, type AudienceRow, type CampaignRow } from "./rows";
+import { campaignFromRow, deliveryFromRow, testSettingFor, type AudienceRow, type CampaignRow } from "./rows";
 import { EMAIL_REFRESH_MS, knowledgeOf, useCampaignDeliveries, useReading, type ComposedFeed, type SendingReadiness } from "./useEmail";
 import { useTestSend } from "./actions";
 import { SendBar } from "./SendBar";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 
 const noRows: Row[] = [];
-const text = (row: Record<string, unknown> | null, key: string) => typeof row?.[key] === "string" ? row[key] as string : "";
-/** One organization's testing settings, out of the feed the app root retains for every organization in view. */
-const settingsOf = (feed: ComposedFeed, accountId: string) =>
-  feed.snapshot.rows.map(flatten).find(row => text(row, "accountId") === accountId) ?? null;
+
+/**
+ * What the engine says of a test for a campaign that has no organization
+ * (component/campaigns/test_audience.go), said before anybody asks. The testing
+ * audience is an organization's, and the app's feed is never asked about no
+ * organization, so there is nothing to read and nothing to wait for.
+ */
+const NO_ORGANIZATION = "select an accessible original campaign with an organization";
 
 // The Settings half of this file (choosing an organization's testing audience)
 // is `settings/TestingPanel.tsx`. What stays is the campaign page's: the audience
@@ -26,11 +29,13 @@ export function TestSendPanel({ campaign, audiences, testSettings: settings, sen
 }) {
   const testSend = useTestSend();
   const connection = useOsConnection();
-  const row = settingsOf(settings, campaign.accountId);
+  const setting = testSettingFor(settings.snapshot.rows, campaign.accountId);
   // READING IS NOT A FAULT: a skeleton while the organization's testing audience
   // is being read, a notice only when it was refused or cannot be confirmed.
-  const { knowledge, refusal } = knowledgeOf(settings, campaign.accountId);
-  const audienceId = text(row, "audienceId");
+  const { knowledge, refusal } = campaign.accountId === ""
+    ? { knowledge: "refused" as const, refusal: NO_ORGANIZATION }
+    : knowledgeOf(settings, campaign.accountId);
+  const audienceId = setting?.audienceId ?? "";
   const audience = audiences.find(a => a.id === audienceId && a.accountId === campaign.accountId && a.status === "active");
   const read = useMemo(() => connection ? async (signal: AbortSignal) => (await connection.query.campaignTestRuns({ campaignId: campaign.id }, { signal })).rows() : null, [connection, campaign.id]);
   const history = useReading<Row[]>(noRows, read, [read]);

@@ -467,6 +467,17 @@ describe("one campaign", () => {
     expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
   });
 
+  it("says why a campaign with no organization cannot be tested, in the engine's sentence, instead of loading", async () => {
+    // The testing audience is an organization's, and the feed is never asked
+    // about no organization: waiting for it would wait for ever.
+    const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1", accountId: "" })] });
+    await openCampaign(conn);
+    expect(await screen.findByText("select an accessible original campaign with an organization")).toBeTruthy();
+    expect(screen.queryByText("Loading the testing audience")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send test" }));
+    expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
+  });
+
   it("says the testing audience could not be confirmed when this organization's read was refused", async () => {
     const conn = fakeConnection({ campaigns: [campaignRow({ id: "c1", accountId: "org" })] });
     conn.query.campaignTestSettings.mockRejectedValue(new Error("Reading testing settings is not yours to do."));

@@ -28,6 +28,7 @@ import {
   skipReasonSentence,
   statsFromPayload,
   templateFingerprint,
+  testSettingFor,
   templateFromRow,
 } from "../../src/apps/email/rows";
 import {
@@ -592,5 +593,25 @@ describe("the engine's reply shapes", () => {
     // shape we did not understand.
     expect(unresolvedTagsFrom({} as never)).toEqual([]);
     expect(unresolvedTagsFrom(null)).toEqual([]);
+  });
+});
+
+describe("an organization's testing setting", () => {
+  const rows = [
+    { id: "ts1", accountId: "acme", audienceId: "a1", createdAt: "2026-09-01T00:00:00Z" },
+    { id: "ts2", accountId: "other", audienceId: "", createdAt: "2026-09-02T00:00:00Z" },
+  ];
+
+  it("is the row its organization owns, whatever else the feed holds", () => {
+    expect(testSettingFor(rows, "acme")).toEqual({ id: "ts1", accountId: "acme", audienceId: "a1", createdAt: "2026-09-01T00:00:00Z" });
+    // A setting that names no audience is a setting: none is chosen.
+    expect(testSettingFor(rows, "other")).toMatchObject({ audienceId: "" });
+  });
+
+  it("is nothing for an organization with no row, and for none", () => {
+    expect(testSettingFor(rows, "elsewhere")).toBeNull();
+    expect(testSettingFor([], "acme")).toBeNull();
+    // A row with no organization is nobody's testing setting.
+    expect(testSettingFor([{ id: "ts3", audienceId: "a1" }], "")).toBeNull();
   });
 });

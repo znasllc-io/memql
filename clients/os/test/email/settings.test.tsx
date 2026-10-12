@@ -488,6 +488,8 @@ describe("Add a sender", () => {
     // Reply to is the one optional question: it can be skipped.
     press("Skip");
     expect(await screen.findByText("Send as Acme News <news@acme.com>.")).toBeTruthy();
+    // One word for the thing being added (Ruling 6), in what Review says about it too.
+    expect(screen.queryByText(/mailbox/i)).toBeNull();
     expect(conn.query.createSenderIdentity).not.toHaveBeenCalled();
 
     // Two presses before the page has drawn the first one's busy state: the
@@ -863,6 +865,42 @@ describe("Testing", () => {
     await waitFor(() => expect(select.textContent).toContain("Reviewers"));
   });
 
+  it("offers nothing to save over a testing audience when the audiences could not be read", async () => {
+    // The saved choice names an audience that exists, and the list it would be
+    // chosen from was refused. A list that came back empty is a different thing
+    // from one that was never read: drawn as the first, the Select calls the
+    // saved audience "Unavailable" and offers to clear it.
+    const conn = fakeConnection({ testSettings: [setting] });
+    conn.query.audiences.mockRejectedValue(new Error("Audiences are not yours to read."));
+    mount(conn);
+
+    expect(await screen.findByText("Audiences are not yours to read.")).toBeTruthy();
+    const again = screen.getByRole("button", { name: "Try again" });
+    expect(screen.queryByRole("combobox", { name: "Testing audience" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+    expect(screen.queryByText("Unavailable audience")).toBeNull();
+    expect(conn.query.campaignConfigureTestAudience).not.toHaveBeenCalled();
+
+    // Reading them again brings the choice back, as it was saved.
+    conn.query.audiences.mockImplementation(async () => rowsResult([reviewers]));
+    fireEvent.click(again);
+    const select = await screen.findByRole("combobox", { name: "Testing audience" });
+    await waitFor(() => expect(select.textContent).toContain("Reviewers"));
+    expect(screen.queryByText("Audiences are not yours to read.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+  });
+
+  it("says both when the testing settings and the audiences were refused", async () => {
+    const conn = fakeConnection({ testSettings: [setting] });
+    conn.query.audiences.mockRejectedValue(new Error("Audiences are not yours to read."));
+    conn.query.campaignTestSettings.mockRejectedValue(new Error("Reading testing settings is not yours to do."));
+    mount(conn);
+    expect(await screen.findByText("Audiences are not yours to read.")).toBeTruthy();
+    expect(await screen.findByText("Reading testing settings is not yours to do.")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Try again" })).toHaveLength(2);
+    expect(screen.queryByRole("combobox", { name: "Testing audience" })).toBeNull();
+  });
+
   it("keeps the feed's other organizations when one is refused", async () => {
     const conn = fakeConnection({
       accounts: TWO_ORGANIZATIONS,
@@ -930,6 +968,21 @@ describe("Package", () => {
 // ---------------------------------------------------------------------------
 // Acts that cannot run are absent
 // ---------------------------------------------------------------------------
+
+describe("Package, while it is working", () => {
+  it("shows the act that is running as busy, and disables nothing", async () => {
+    const conn = fakeConnection();
+    // The first read of the installed package never answers.
+    conn.query.packageCampaigns.mockImplementation(() => new Promise(() => {}));
+    mount(conn);
+    await screen.findByRole("heading", { level: 4, name: "Package" });
+
+    for (const name of ["Load package", "Export configuration"]) {
+      expect(screen.getByRole("button", { name }).getAttribute("aria-busy")).toBe("true");
+    }
+    expect(deadButtons()).toEqual([]);
+  });
+});
 
 describe("Settings draws no dead control", () => {
   it("has no disabled button on the page, in a wizard, or on a sender's page", async () => {

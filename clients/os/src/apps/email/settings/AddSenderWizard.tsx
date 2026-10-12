@@ -172,7 +172,7 @@ export function AddSenderWizard({ organizations, initialAccountId, writes, onBac
         <div className="os-app-stack">
           <p>{sendAs(fromName, address, replyTo)}</p>
           <Caption>
-            Adding a sender doesn't create the mailbox or give this cluster access to it. Your email provider has to allow it too.
+            Adding a sender only records it here. Your email provider has to have the address, and has to allow this cluster to send as it.
           </Caption>
         </div>
       ),

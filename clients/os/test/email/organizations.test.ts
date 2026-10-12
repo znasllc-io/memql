@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { AccountRow } from "../../src/apps/accounts/rows";
@@ -72,5 +74,23 @@ describe("words", () => {
   it("uses one word for a sender that has been put away", () => {
     expect(WORDS.archived).toBe("Archived");
     expect(WORDS.active).toBe("Active");
+  });
+
+  // RULING 6: a sender is a sender. The page used to say mailbox, identity and
+  // address for the same thing, and the plan fixed one word for it.
+  const EMAIL = join(__dirname, "..", "..", "src", "apps", "email");
+  const walk = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name);
+      return statSync(path).isDirectory() ? walk(path) : /\.(ts|tsx)$/.test(name) ? [path] : [];
+    });
+
+  it("says sender in the Settings code, never mailbox", () => {
+    const files = [...walk(join(EMAIL, "settings")), join(EMAIL, "acts.ts"), join(EMAIL, "organizations.ts"), join(EMAIL, "words.ts")];
+    expect(files.length).toBeGreaterThan(5);
+    const offenders = files.filter((path) => /mailbox/i.test(readFileSync(path, "utf8"))).map((path) => path.slice(EMAIL.length + 1));
+    expect(offenders).toEqual([]);
+    // The guard can tell the word when it is there.
+    expect(/mailbox/i.test("Adding a sender doesn't create the mailbox")).toBe(true);
   });
 });

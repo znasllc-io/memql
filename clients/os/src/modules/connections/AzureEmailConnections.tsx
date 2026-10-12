@@ -5,11 +5,10 @@ import { AccountPicker } from "../../apps/accounts/AccountPicker";
 import { SELF_ACCOUNT_ID } from "../../apps/accounts/rows";
 import { useAccountOptions } from "../../apps/accounts/tie";
 import { useDefaultOrganization } from "../../apps/accounts/organization";
-import { AutoRefresh, Button, EmptyState, Fact, Facts, Field, Head, Input, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, Subhead, useAppReach, useNow } from "../../kit";
+import { AutoRefresh, Button, EmptyState, Fact, Facts, Field, Head, Input, Notice, Panel, RecordList, RecordRow, RecordListSkeleton, Subhead, canConfigure, useAppReach, useNow } from "../../kit";
 import { AddButton } from "../../kit/AddButton";
 import { Wizard } from "../../kit/Wizard";
 import { ActionBar, type Act } from "../../kit/ActionBar";
-import { roleAdmits } from "../../system/roles";
 import { ClusterAzureEmail } from "./ClusterAzureEmail";
 import { AzureEmailDomainRecords } from "./AzureEmailDomainRecords";
 import { InfoDetail } from "../../kit/InfoDetail";
@@ -20,13 +19,14 @@ import { CampaignPackageConfig } from "./CampaignPackageConfig";
 type ConnectionView = "list" | "detail" | "setup" | "cluster";
 const PROVISION_INTERVAL_MS = 10_000;
 const MAX_PROVISION_CHECKS = 60;
-/** Cluster email and sending domains are an owner's or a developer's to set up. */
-const mayConfigure = (role: string) => roleAdmits(role, { any: ["owner", "developer"] });
+/** The Connections page's pages go back to the page they were opened from. */
+const CONNECTIONS_BACK = "Email settings";
 /** One cluster configuration; organizations own domains and sending identities. */
-export function AzureEmailConnections(props: { manageCluster?: boolean; header?: ReactNode; onBack?: () => void; backLabel?: string; children?: ReactNode }) {
+export function AzureEmailConnections(props: { manageCluster?: boolean; header?: ReactNode }) {
   const { access, config } = useSession();
-  const top = props.header ?? <Head title="Email settings" back={props.onBack ? { label: "Senders", onSelect: props.onBack } : undefined}/>;
-  if (!mayConfigure(access?.role || "")) return <div className="os-app-stack">{top}<Notice sentence="An owner or developer can configure cluster email and client domains."/>{props.children}</div>;
+  const top = props.header ?? <Head title="Email settings"/>;
+  // Cluster email and sending domains are an owner's or a developer's to set up.
+  if (!canConfigure(access?.role || "")) return <div className="os-app-stack">{top}<Notice sentence="An owner or developer can configure cluster email and client domains."/></div>;
   return <EmailSettings key={`${config.domain}:${access?.userId}`} {...props} header={top}/>;
 }
 
@@ -45,7 +45,7 @@ export function ClusterEmailNotice({ cluster }: { cluster: AzureEmailReply }) {
   const { access } = useSession();
   const settings = useAppReach("settings");
   const where = "Configure Azure once in Settings → Connections → Email before adding client domains.";
-  const mayOpen = mayConfigure(access?.role || "") && settings.canOpenWindows && settings.sections.includes("connections");
+  const mayOpen = canConfigure(access?.role || "") && settings.canOpenWindows && settings.sections.includes("connections");
   return <Notice
     sentence={cluster.status === "reauthorize" ? "Cluster email needs signing in again." : "Cluster email isn't set up."}
     next={cluster.capture ? `Test emails are captured in the Email app. ${where}` : where}>
@@ -74,7 +74,7 @@ export function OrganizationSendingDomain({ accountId, name, backLabel, onPane }
   onPane?: (taking: boolean) => void;
 }) {
   const { access } = useSession();
-  if (!mayConfigure(access?.role || "")) return <section className="os-app-stack" aria-label="Sending domain">
+  if (!canConfigure(access?.role || "")) return <section className="os-app-stack" aria-label="Sending domain">
     <Subhead>Sending domain</Subhead>
     <p className="os-caption">An owner or developer sets up sending domains.</p>
   </section>;
@@ -100,7 +100,7 @@ function ConfiguredSendingDomain({ accountId, name, backLabel, onPane }: { accou
   return <OrganizationEmail accountId={accountId} name={name} view={view} setView={setView} backLabel={backLabel} cluster={cluster} clusterNotice/>;
 }
 
-function EmailSettings({ manageCluster = true, header, backLabel = "Email settings", children }: { manageCluster?: boolean; header?: ReactNode; backLabel?: string; children?: ReactNode }) {
+function EmailSettings({ manageCluster = true, header }: { manageCluster?: boolean; header?: ReactNode }) {
   const formID = useId();
   const accounts = useAccountOptions();
   const initial = useDefaultOrganization(accounts);
@@ -125,10 +125,9 @@ function EmailSettings({ manageCluster = true, header, backLabel = "Email settin
       </Panel> : null}
       {cluster && !manageCluster && cluster.status !== "connected" ? <ClusterEmailNotice cluster={cluster}/> : null}
     </section></> : null}
-    {accountId ? <OrganizationEmail key={`${accountId}:${revision}`} accountId={accountId} name={name} view={view} setView={setView} picker={picker} backLabel={backLabel} cluster={cluster}/> :
+    {accountId ? <OrganizationEmail key={`${accountId}:${revision}`} accountId={accountId} name={name} view={view} setView={setView} picker={picker} backLabel={CONNECTIONS_BACK} cluster={cluster}/> :
       <section className="os-app-stack"><Subhead>Sending domain</Subhead>{picker}</section>}
     {view === "list" && accountId ? <CampaignPackageConfig key={accountId} accountId={accountId} organizationName={name} onImported={() => { setRevision(value => value + 1); void call("clusterStatus").then(result => { if (result) setCluster(result); }); }}/> : null}
-    {view === "list" ? children : null}
   </div>;
 }
 

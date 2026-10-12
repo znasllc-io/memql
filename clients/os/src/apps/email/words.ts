@@ -1,10 +1,10 @@
 // THE EMAIL APP'S VOCABULARY (memql#6033, Ruling 6): one word per thing.
 //
-// The app used to say a sender four ways (mailbox, sender, identity, address),
-// a retired one three (retired, filed, disabled), and send readiness in five
-// sentences. Each thing has one word here, and a sentence the app says in more
-// than one place is written once. The state words are the ones a person reads;
-// the engine's own statuses (`disabled`, `ready`, `sent`) are never shown.
+// The app used to have four words for a sender, three for one that was put
+// away (retired, filed, disabled), and five sentences for send readiness.
+// Each thing has one word here, and a sentence the app says in more than one
+// place is written once. The state words are the ones a person reads; the
+// engine's own statuses (`disabled`, `ready`, `sent`) are never shown.
 //
 // THIS FILE GROWS WITH THE APP. It holds what the screens that exist say; each
 // later screen that names a state adds its words here rather than spelling them.

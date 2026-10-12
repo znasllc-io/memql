@@ -76,15 +76,15 @@ export function CampaignPackageConfig({ accountId, organizationName, onImported 
     <Caption>{manifest ? `${manifest.name} · memql-package.yaml` : "Load your package to keep its Deployables and add email configuration to the same file."}</Caption>
     <input ref={file} type="file" accept=".yaml,.yml,application/yaml,text/yaml" aria-label="Package file" hidden onChange={event => { void load(event.currentTarget.files?.[0]); event.currentTarget.value = ""; }}/>
     <div className="os-panel-actions">
-      <Button disabled={busy} onClick={() => file.current?.click()}>Load package</Button>
-      <Button disabled={busy} onClick={() => { void exportConfiguration(); }}>Export configuration</Button>
+      <Button busy={busy} onClick={() => file.current?.click()}>Load package</Button>
+      <Button busy={busy} onClick={() => { void exportConfiguration(); }}>Export configuration</Button>
     </div>
     {domains.length ? <details><summary>Import email configuration</summary>
       <div className="os-app-stack">
         <Field label="Package organization"><Select id="campaign-package-organization" label="Package organization" value={selection} onChange={value => { if (!busy) setSelection(value); }}><option value="">Choose an organization</option>{domains.map(domain => <option key={domain.organization} value={domain.organization}>{domain.organization}</option>)}</Select></Field>
         {chosen ? <><Facts><Fact label="Import for" value={organizationName}/><Fact label="Domain" value={chosen.domain}/><Fact label="Sender" value={chosen.sender ? `${chosen.sender.username}@${chosen.domain}` : "Choose during setup"}/><Fact label="Resource group" value={manifest?.campaigns?.azure.resourceGroup || ""}/></Facts>
           <Caption>Import prepares setup. Microsoft sign-in and domain verification are still required. DNS records are references until checked with Azure.</Caption>
-          <Button disabled={busy} onClick={() => { void run("import", source, selection, true).then(reply => { if (reply?.status === "imported") { setMessage("Configuration imported. Open the sending domain to continue setup."); onImported(); } }); }}>Import for {organizationName}</Button>
+          <Button busy={busy} onClick={() => { void run("import", source, selection, true).then(reply => { if (reply?.status === "imported") { setMessage("Configuration imported. Open the sending domain to continue setup."); onImported(); } }); }}>Import for {organizationName}</Button>
         </> : null}
       </div>
     </details> : null}

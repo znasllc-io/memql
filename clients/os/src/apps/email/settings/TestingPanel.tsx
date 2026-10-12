@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { Button, Caption, ContentSkeleton, Field, Notice, Select, Subhead } from "../../../kit";
-import { flatten } from "../../../kit/rows";
 import { useOsConnection } from "../../../live/connection";
 import type { LiveCollectionHandle } from "../../../live/useLiveCollection";
-import { audienceFromRow } from "../rows";
+import { audienceFromRow, testSettingFor } from "../rows";
 import { knowledgeOf, listKnowledge, weakest, type ComposedFeed } from "../useEmail";
 
 // TESTING: the audience an organization's campaign tests are sent to.
@@ -16,12 +15,14 @@ import { knowledgeOf, listKnowledge, weakest, type ComposedFeed } from "../useEm
 //
 // WHAT IT KNOWS, SAID HONESTLY. No row for an organization is a real answer
 // ("none chosen") and also exactly what an unread or refused organization looks
-// like, so the panel asks the feed which it is: still reading is a skeleton in
-// the shape of the form, a refusal is the engine's sentence with a way to try
-// again, and neither draws a Select to save a guess through. A feed that is
-// behind says so, over the last choice it knew.
-
-const text = (row: Record<string, unknown> | null, key: string) => (typeof row?.[key] === "string" ? (row[key] as string) : "");
+// like, and a list that came back empty is not a list that was never read. So
+// the panel asks the feeds which it is, for BOTH things it depends on -- the
+// organization's saved choice and the audiences it is chosen from: still
+// reading is a skeleton in the shape of the form, a refusal is the engine's
+// sentence with a way to try again, and neither draws a Select to save a guess
+// through. Drawn over a list it could not read, the Select would call a saved
+// audience "Unavailable" and offer to clear it. A feed that is behind says so,
+// over the last choice it knew.
 
 export function TestingPanel({ accountId, audiences, testSettings }: {
   accountId: string;
@@ -29,8 +30,8 @@ export function TestingPanel({ accountId, audiences, testSettings }: {
   testSettings: ComposedFeed;
 }) {
   const connection = useOsConnection();
-  const row = testSettings.snapshot.rows.map(flatten).find((candidate) => text(candidate, "accountId") === accountId) ?? null;
-  const saved = text(row, "audienceId");
+  const setting = testSettingFor(testSettings.snapshot.rows, accountId);
+  const saved = setting?.audienceId ?? "";
   const [choice, setChoice] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,7 +47,8 @@ export function TestingPanel({ accountId, audiences, testSettings }: {
   // The choice is read from the organization's testing settings, and offered
   // from its audiences: it is only as known as the less known of the two.
   const mine = knowledgeOf(testSettings, accountId);
-  const knowledge = weakest(mine.knowledge, listKnowledge(audiences));
+  const audienceList = listKnowledge(audiences);
+  const knowledge = weakest(mine.knowledge, audienceList);
 
   const options = audiences.snapshot.rows
     .map(audienceFromRow)
@@ -60,7 +62,7 @@ export function TestingPanel({ accountId, audiences, testSettings }: {
       await connection.query.campaignConfigureTestAudience({
         accountId,
         audienceId: selected,
-        expectedRevision: text(row, "createdAt") || undefined,
+        expectedRevision: setting?.createdAt || undefined,
       });
       // The one organization that changed is read again; the rest are not.
       testSettings.refresh(accountId);
@@ -75,9 +77,14 @@ export function TestingPanel({ accountId, audiences, testSettings }: {
     <section className="os-app-stack" aria-label="Testing">
       <Subhead actions={knowledge === "known" && dirty ? <Button busy={busy} onClick={() => void save()}>Save</Button> : null}>Testing</Subhead>
       {knowledge === "reading" ? <ContentSkeleton kind="form" label="Loading the testing audience" /> : null}
-      {knowledge === "refused" ? (
+      {mine.knowledge === "refused" ? (
         <Notice tone="error" sentence="The testing audience could not be read." detail={mine.refusal}>
           <Button onClick={() => testSettings.refresh(accountId)}>Try again</Button>
+        </Notice>
+      ) : null}
+      {audienceList === "refused" ? (
+        <Notice tone="error" sentence="The audiences could not be read." detail={audiences.snapshot.error}>
+          <Button onClick={audiences.reseed}>Try again</Button>
         </Notice>
       ) : null}
       {knowledge === "unconfirmed" ? (

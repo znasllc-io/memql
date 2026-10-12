@@ -1,4 +1,5 @@
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { useLayoutEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -437,6 +438,29 @@ describe("a composed feed", () => {
     act(() => result.current.refresh("acme"));
     await waitFor(() => expect(result.current.refusal("acme")).toBe(""));
     expect(result.current.snapshot.error).toBe("");
+  });
+
+  it("still reads an id that joined the set in the same commit as a single-id refresh", async () => {
+    // A refresh that lands between the render that adds an id and the effect that
+    // reads it must not mark the whole set as read: the new id would never be asked.
+    const acme = { id: "ts1", accountId: "acme", audienceId: "a1", createdAt: "2026-09-01T00:00:00Z" };
+    const other = { id: "ts2", accountId: "other", audienceId: "a2", createdAt: "2026-09-02T00:00:00Z" };
+    const conn = fakeConnection({ testSettings: [acme, other] });
+    h.connection = conn;
+    const { result, rerender } = renderHook(
+      ({ ids }) => {
+        const feed = useTestSettingsFeed(ids);
+        // Layout effects run before the feed's own passive one: the refresh is first.
+        useLayoutEffect(() => { if (ids.includes("other")) feed.refresh("acme"); }, [ids.length]);
+        return feed;
+      },
+      { initialProps: { ids: ["acme"] } },
+    );
+    await waitFor(() => expect(result.current.settled("acme")).toBe(true));
+
+    rerender({ ids: ["acme", "other"] });
+    await waitFor(() => expect(result.current.settled("other")).toBe(true));
+    expect(result.current.snapshot.rows.map((row) => row.accountId).sort()).toEqual(["acme", "other"]);
   });
 
   it("reads everything again when a single-id read is asked for while a read is already running", async () => {

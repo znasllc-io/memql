@@ -450,6 +450,46 @@ export function audienceFingerprint(audience: AudienceRow): string {
 }
 
 // ---------------------------------------------------------------------------
+// Testing settings
+// ---------------------------------------------------------------------------
+
+/** What an organization chose to send its campaign tests to (`campaignTestSettingsFull`). */
+export interface TestSettingRow {
+  id: string;
+  accountId: string;
+  /** "" is a setting too: none is chosen. */
+  audienceId: string;
+  /** The revision the engine checks a change against (`expectedRevision`). */
+  createdAt: string;
+}
+
+export function testSettingFromRow(row: Row): TestSettingRow {
+  const flat = flatten(row);
+  return {
+    id: rowString(flat, "id"),
+    accountId: rowString(flat, "accountId"),
+    audienceId: rowString(flat, "audienceId"),
+    createdAt: rowString(flat, "createdAt"),
+  };
+}
+
+/**
+ * One organization's testing setting, out of the rows the app's one
+ * testing-settings feed holds for every organization in view. Null when the
+ * feed holds none for it -- which is "none chosen" or "not read", and the feed
+ * (`settled`, `refusal`) is what says which. An organization of "" has none: a
+ * campaign with no organization has nobody's setting to use.
+ */
+export function testSettingFor(rows: readonly Row[], accountId: string): TestSettingRow | null {
+  if (accountId === "") return null;
+  for (const row of rows) {
+    const setting = testSettingFromRow(row);
+    if (setting.accountId === accountId) return setting;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Recipients
 // ---------------------------------------------------------------------------
 

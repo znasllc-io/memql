@@ -248,11 +248,14 @@ function useComposedFeed(name: string, composition: Composition, ids: readonly s
     concept: composition.concept,
     seed: async (_cursor, signal) => {
       const { wanted: asked, signature: set } = latest.current;
-      seeded.current = set;
       // Taken by the seed that starts first, so it can only ever mean the one a
       // `refresh()` started: any other seed is a whole read.
       const partial = only.current;
       only.current = null;
+      // ONLY A WHOLE READ MARKS THE SET AS READ. A single-id refresh that lands
+      // between the render that added an id and the effect that reads it must
+      // leave that effect something to do, or the new id is never asked.
+      if (partial === null) seeded.current = set;
       // What the collection holds now, by the id each row answers to.
       const held = new Map<string, Row[]>();
       for (const row of handle.current?.source?.snapshot.rows ?? []) {
@@ -430,8 +433,19 @@ export function knowledgeOf(feed: ComposedFeed, id: string): { knowledge: Knowle
   return { knowledge: feed.settled(id) ? "known" : "reading", refusal: "" };
 }
 
-/** What a plain list feed knows: still reading, behind, or known. */
-export function listKnowledge(feed: LiveCollectionHandle<Row>): Exclude<Knowledge, "refused"> {
+/**
+ * What a plain list feed knows: refused, behind, still reading, or known.
+ *
+ * A LIST THAT FAILED TO READ IS NOT AN EMPTY ONE, and the feed's own state does
+ * not say so: a first read that is refused with nothing held ends `live`, with
+ * the engine's sentence on `snapshot.error`. A surface that read only the state
+ * would call it known and draw an empty list -- and offer a choice made against
+ * it. So a sentence on the feed is a refusal, whatever it holds. (A composed
+ * feed's `snapshot.error` carries any id's refusal, so ask `knowledgeOf` about
+ * the id instead.)
+ */
+export function listKnowledge(feed: LiveCollectionHandle<Row>): Knowledge {
+  if (feed.snapshot.error !== "") return "refused";
   if (feedIsBehind(feed.snapshot.state)) return "unconfirmed";
   return feed.snapshot.state === "seeding" ? "reading" : "known";
 }
