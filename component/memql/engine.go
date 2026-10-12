@@ -1131,11 +1131,9 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	}
 
 	// #1730: aggregate count directive. The query was authored with a
-	// `count` clause (no shape), so return a self-describing
-	// {count: N, atLeast: B} envelope computed server-side instead of
-	// materializing rows (atLeast: the read stopped at the window, see
-	// executeCountPlan). The count reflects the deduped, latest-version,
-	// post-filtered set --
+	// `count` clause (no shape), so return a self-describing {count: N}
+	// envelope computed server-side instead of materializing rows. The
+	// count reflects the deduped, latest-version, post-filtered set --
 	// the same pipeline normal queries use -- because a raw SQL COUNT(*)
 	// would over-count under the time-series versioning model (multiple
 	// versions per id) and skip the in-process post-filter / actor folds.
@@ -1396,70 +1394,41 @@ func planIsUnbound(plan *QueryPlan) bool {
 	return plan != nil && strings.TrimSpace(plan.BoundConcept) == ""
 }
 
-// executeCountPlan computes a numeric {count: N, atLeast: B} aggregate for a
-// query authored with the `count` directive (#1730). It runs the same
+// executeCountPlan computes a numeric {count: N} aggregate for a query
+// authored with the `count` directive (#1730). It runs the same
 // dedup + latest-version + post-filter pipeline a normal query uses
 // (via evaluateExpressionSet), then returns the cardinality of the
-// matching set rather than the rows. We fetch up to the engine's window
-// (MaxWindow) so the count is not capped at the smaller default page size
-// (MaxResults) the row path uses. A true SQL-pushdown COUNT(*) is a future
-// optimization tracked separately -- it cannot be a naive COUNT because the
-// versioned hypertable stores multiple rows per id and the latest-version
-// re-filter happens in Go.
-//
-// A COUNT THAT REACHED THE WINDOW SAYS SO (memql#6033). The read stops at the
-// window, so a set larger than it used to answer the window as if it were
-// exact: an audience of 12,000 read 5,000, indistinguishable from one of
-// exactly 5,000 -- and the window is configurable, so a caller cannot guess
-// the ceiling either. The read now asks for one row past the window: finding
-// it means the set is larger, and the answer is the window with atLeast
-// true ("this many or more"). Otherwise atLeast is false, and the count is
-// exact when the filter runs as ONE read whose rows are all kept. It can fall
-// short of the set with atLeast false where it does not: an && the engine
-// cannot compile into one SQL filter is read side by side, each side stopping
-// at window+1, and intersected here; and rows the read returned can be dropped
-// after it (the per-row authorization and staging gates in
-// evaluateExpressionSet), so a read that found window+1 rows can count fewer.
+// matching set rather than the rows. We fetch up to MaxWindow
+// candidates so the count is not silently capped at the smaller
+// default page size (MaxResults) the row path uses. A true SQL-pushdown
+// COUNT(*) is a future optimization; a source that reaches its window
+// is reported as atLeast even when later filtering makes the result short. It cannot be
+// a naive COUNT because the versioned hypertable stores multiple rows
+// per id and the latest-version re-filter happens in Go.
 func (e *MemQLEngine) executeCountPlan(ctx context.Context, plan *QueryPlan, timestamp *time.Time, sorter *compiledSort, startTime time.Time) (*ExecuteResult, error) {
 	if plan.Root == nil {
 		return nil, ErrEmptyQuery
 	}
 
-	window := e.countWindow()
-	set, err := e.evaluateExpressionSet(ctx, plan.Root, timestamp, window+1, sorter)
+	completeness := &countCompleteness{}
+	ctx = context.WithValue(ctx, countCompletenessKey{}, completeness)
+	set, err := e.evaluateExpressionSet(ctx, plan.Root, timestamp, e.config.MaxWindow, sorter)
 	if err != nil {
 		return nil, err
 	}
 
-	count, atLeast := countOf(len(set), window)
+	count := int64(len(set))
 	result := newExecuteResult(nil)
-	result.setOutput(map[string]any{"count": count, "atLeast": atLeast})
+	output := map[string]any{"count": count}
+	if completeness.truncated.Load() {
+		output["atLeast"] = true
+	}
+	result.setOutput(output)
 	result.setIncludeBundle(false)
 	result.SetCount(count)
 
 	e.emitQueryExecutedEvent(startTime, result, false)
 	return result, nil
-}
-
-// countWindow is how many matching rows a count reads before it stops: the
-// engine's window, or -- on an engine configured without one -- the result
-// ceiling the rest of the read path falls back to. The count path reads one
-// row past it (executeCountPlan).
-func (e *MemQLEngine) countWindow() int {
-	if e.config.MaxWindow > 0 {
-		return e.config.MaxWindow
-	}
-	return e.config.MaxResults
-}
-
-// countOf is what a count of `matched` rows says when the read stopped one
-// past `window`: the number itself while it fits, and the window -- at
-// least that many -- once the read found more.
-func countOf(matched, window int) (count int64, atLeast bool) {
-	if window > 0 && matched > window {
-		return int64(window), true
-	}
-	return int64(matched), false
 }
 
 // executeLogicFunctionCall dispatches a top-level multi-step Logic

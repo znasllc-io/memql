@@ -134,3 +134,22 @@ automation campaignJourneyStepWorkflow {
   }
  }
 }
+
+/// Compose an email automation proposal for review; the engine validates and writes nothing.
+@template
+automation campaignJourneyProposalWorkflow {
+ args {
+ sentence string!
+ }
+ catalog := builtin campaignJourneyCatalog()
+ builtin campaignGenerateJourneyProposal(prompt: "composeEmailJourney", data: { sentence: args.sentence, catalog: catalog.encoded })
+}
+
+/// Retirement precedes active work; one failed automation does not stop another.
+@template
+automation campaignJourneyDrainWorkflow {
+ retiring := builtin campaignJourneysToRetire()
+ for id in retiring { builtin campaignRetireJourney(id: id) on error continue }
+ active := builtin campaignActiveJourneys()
+ for id in active { builtin campaignRunJourney(id: id) on error continue }
+}

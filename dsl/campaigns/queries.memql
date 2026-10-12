@@ -1,4 +1,4 @@
-use common.traits.{ statusIsActive, statusIsPending }
+use common.traits.{ statusIsActive, statusIsPending, statusIsArchived }
 
 // campaigns domain -- caller-scoped reads.
 //
@@ -786,6 +786,7 @@ query campaign campaignTestRuns {
 }
 
 /// Internal scan of due single-recipient deliveries deferred by the rate limiter.
+/// actor.userId scoping would omit other owners' work; internal origin and clusterOwner restrict the sweep.
 @actor
 @serverOnly
 query delivery deferredSingleSends {
@@ -830,7 +831,7 @@ query journeyEnrollment journeyEnrollmentCounts {
  count
 }
 
-/// Internal automation state read.
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly
 query journey activeJourneys {
@@ -840,17 +841,17 @@ query journey activeJourneys {
  shape journeyFull
 }
 
-/// Internal automation state read.
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly
 query journey journeysToRetire {
- filter row => actor.isClusterOwner == true && (row.status == "archived" && (row.retiredAt == nil || row.retiredAt == ""))
+ filter row => actor.isClusterOwner == true && (statusIsArchived(row) && (row.retiredAt == nil || row.retiredAt == ""))
  sort "row.createdAt", "asc"
  paginate 50
  shape journeyFull
 }
 
-/// Internal automation state read.
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly
 query journeyEnrollment dueEnrollmentsForJourney {
@@ -864,7 +865,7 @@ query journeyEnrollment dueEnrollmentsForJourney {
  shape journeyEnrollmentFull
 }
 
-/// Internal automation state read.
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly
 query journeyEnrollment openEnrollmentsForJourney {
@@ -877,7 +878,7 @@ query journeyEnrollment openEnrollmentsForJourney {
  shape journeyEnrollmentFull
 }
 
-/// Internal automation state read.
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly
 query journeyEnrollment newestJourneyEnrollment {
@@ -890,7 +891,7 @@ query journeyEnrollment newestJourneyEnrollment {
  shape journeyEnrollmentFull
 }
 
-/// Internal automation state read.
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly
 query journeyEnrollment journeyEnrollmentById {
@@ -901,7 +902,7 @@ query journeyEnrollment journeyEnrollmentById {
  shape journeyEnrollmentFull
 }
 
-/// Internal automation state read.
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly
 query recipient audienceJoinersSince {
@@ -915,7 +916,7 @@ query recipient audienceJoinersSince {
  shape recipientEnrollmentRef
 }
 
-/// Internal automation state read.
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly
 query recipient audienceConfirmationsSince {
@@ -929,7 +930,7 @@ query recipient audienceConfirmationsSince {
  shape recipientEnrollmentRef
 }
 
-/// Internal automation state read.
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
 @actor
 @serverOnly
 query journeyEnrollment waitingEnrollmentsForRecipient {

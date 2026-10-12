@@ -631,10 +631,7 @@ func (s *Store) EachSendableRecipient(ctx context.Context, audienceID string, vi
 	cursor := ""
 	seen := map[string]bool{}
 	for {
-		pageCtx := ctx
-		if cursor != "" {
-			pageCtx = memql.ContextWithCursor(ctx, cursor)
-		}
+		pageCtx := memql.ContextWithCursor(memql.ContextWithFreshRead(ctx), cursor)
 		res, err := s.engine.Execute(pageCtx, call("query", "sendableRecipientsForAudience", arg{"audienceId", memql.BareShortId(audienceID)}))
 		if err != nil {
 			return err
@@ -644,7 +641,10 @@ func (s *Store) EachSendableRecipient(ctx context.Context, audienceID string, vi
 				return nil
 			}
 		}
-		cursor = memql.ResultCursor(res)
+		cursor, err = memql.ResultPageCursor(res)
+		if err != nil {
+			return err
+		}
 		if cursor == "" {
 			return nil
 		}

@@ -210,6 +210,16 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	if digest == "" {
 		return nil, fmt.Errorf("campaigns.sendToRecipient: recipient %q has no usable address", recipientID)
 	}
+	recordOutcome := func(outcome Delivery) error {
+		if receipt != nil && receipt.hold != nil {
+			if err := receipt.hold.Verify(ctx); err != nil {
+				return err
+			}
+		}
+		return detachedWrite(ctx, func(write context.Context) error {
+			return w.recordLoneDelivery(write, args, campaign, recipient, emailRuleID, outcome)
+		})
+	}
 	if sup, suppressed, err := w.store.SuppressionForSend(w.systemActorContext(ctx), campaign.AccountID, digest); err != nil {
 		// A failed lookup must NOT read as "not suppressed". Refusing is the
 		// only safe answer: a delayed message is recoverable, one sent to
@@ -217,7 +227,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		return nil, undecided(fmt.Errorf("campaigns.sendToRecipient: the suppression list could not be consulted, "+
 			"so this send is refused rather than made: %w", err))
 	} else if suppressed {
-		w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{
+		recordOutcome(Delivery{
 			Status: "skipped", SkipReason: sup.Reason,
 		})
 		return resultNode("campaignRecipientSend", map[string]any{
@@ -226,7 +236,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 		})
 	}
 	if recipient.SubscriptionStatus != "" && recipient.SubscriptionStatus != "subscribed" && !(opts.confirm && recipient.SubscriptionStatus == "pending") {
-		w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{
+		recordOutcome(Delivery{
 			Status: "skipped", SkipReason: recipient.SubscriptionStatus,
 		})
 		return resultNode("campaignRecipientSend", map[string]any{
@@ -265,7 +275,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 
 	if !w.allowSend() {
 		if opts.deferWhenLimited && receipt != nil {
-			if err := w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{Status: "pending", NextAttemptAt: w.nowUTC().Add(time.Minute)}); err != nil {
+			if err := recordOutcome(Delivery{Status: "pending", NextAttemptAt: w.nowUTC().Add(time.Minute)}); err != nil {
 				return nil, undecided(err)
 			}
 			return resultNode("campaignRecipientSend", map[string]any{"sent": false, "skipped": false, "deferred": true, "reason": "The send-rate limit is reached; this email will be retried shortly.", "recipientId": recipient.ID, "emailRuleId": emailRuleID})
@@ -300,7 +310,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 	cancel()
 
 	if sendErr != nil {
-		w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{
+		recordOutcome(Delivery{
 			Status: "failed", Attempts: 1, LastError: sendErr.Error(),
 		})
 		return nil, fmt.Errorf("campaigns.sendToRecipient: %w", sendErr)
@@ -308,7 +318,7 @@ func (w *Worker) sendToRecipient(ctx context.Context, args map[string]any, recei
 
 	w.reputation.observeAs(now, identity.Label, recipient.Email, "accepted")
 	w.noteActiveIdentity(identity.Label)
-	w.recordLoneDelivery(ctx, args, campaign, recipient, emailRuleID, Delivery{
+	recordOutcome(Delivery{
 		Status: "sent", SentAt: now, Attempts: 1,
 	})
 	return resultNode("campaignRecipientSend", map[string]any{

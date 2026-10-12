@@ -244,11 +244,11 @@ func (w *Worker) handleSaveJourney(ctx context.Context, args map[string]any, _ i
 	if w.journeyGate == nil {
 		return nil, fmt.Errorf("automation coordination is unavailable")
 	}
-	release, err := w.journeyGate(ctx, "journey:"+id)
+	hold, err := w.journeyGate(context.WithoutCancel(ctx), "journey:"+id)
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	defer hold.Release()
 	if err = w.requireJourneyOrganization(ctx, account); err != nil {
 		return nil, err
 	}
@@ -300,7 +300,7 @@ func (w *Worker) handleSaveJourney(ctx context.Context, args map[string]any, _ i
 	if mutation == "createJourney" {
 		values["accountId"] = account
 	}
-	if err = w.newsletterWrite(ctx, mutation, values); err != nil {
+	if err = w.journeyWrite(ctx, hold, mutation, values); err != nil {
 		return nil, err
 	}
 	return journeyReceipt(id, revision, status, issues)
@@ -315,11 +315,11 @@ func (w *Worker) handleSetJourneyState(ctx context.Context, args map[string]any,
 	if !templateIDPattern.MatchString(id) || w.journeyGate == nil {
 		return nil, fmt.Errorf("select an automation while connected to the cluster")
 	}
-	release, err := w.journeyGate(ctx, "journey:"+id)
+	hold, err := w.journeyGate(context.WithoutCancel(ctx), "journey:"+id)
 	if err != nil {
 		return nil, err
 	}
-	defer release()
+	defer hold.Release()
 	row, err := w.newsletterRow(ctx, "journeyById", "journeyId", id)
 	if err != nil {
 		return nil, err
@@ -376,8 +376,17 @@ func (w *Worker) handleSetJourneyState(ctx context.Context, args map[string]any,
 	}
 	revision := memql.VersionTimeAfter(j.Revision, w.nowUTC())
 	values["status"], values["versionTime"] = target, revision.Format(time.RFC3339Nano)
-	if err = w.newsletterWrite(ctx, "setJourneyStatus", values); err != nil {
+	if err = w.journeyWrite(ctx, hold, "setJourneyStatus", values); err != nil {
 		return nil, err
 	}
 	return journeyReceipt(id, revision, target, issues)
+}
+
+// A journey write keeps the shared lock through its bounded durable append even
+// if the request leaves. Verify before every append; a lost lock permits none.
+func (w *Worker) journeyWrite(ctx context.Context, hold gateHold, mutation string, values map[string]any) error {
+	if err := hold.Verify(ctx); err != nil {
+		return err
+	}
+	return detachedWrite(ctx, func(write context.Context) error { return w.newsletterWrite(write, mutation, values) })
 }

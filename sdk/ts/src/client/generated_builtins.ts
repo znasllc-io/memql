@@ -282,6 +282,29 @@ QueryClient.prototype.campaignConfigureTestAudience = function (this: QueryClien
   return this.executeNamed("campaignConfigureTestAudience", buildCampaignConfigureTestAudience(args), opts);
 };
 
+/** Draft an email automation from one sentence using this organization's resources. Returns a proposal and what it needs, saves nothing. Save it with campaignSaveJourney. */
+export interface CampaignDescribeJourneyArgs {
+  accountId: string;
+  sentence: string;
+}
+
+export function buildCampaignDescribeJourney(args: CampaignDescribeJourneyArgs): string {
+  const parts: string[] = [];
+  parts.push("accountId: " + renderMemQLValue(args.accountId));
+  parts.push("sentence: " + renderMemQLValue(args.sentence));
+  return "builtin campaignDescribeJourney(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    campaignDescribeJourney(args: CampaignDescribeJourneyArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.campaignDescribeJourney = function (this: QueryClient, args: CampaignDescribeJourneyArgs = {} as CampaignDescribeJourneyArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("campaignDescribeJourney", buildCampaignDescribeJourney(args), opts);
+};
+
 /** Import recipients into an audience from a CSV file already uploaded to the Library (memql#4822). The file is read SERVER-SIDE under the caller's own actor, so a file the caller cannot read is a file this cannot import -- the artifact id is not a capability. The header row must carry an `email` column (case-insensitive; `displayName` and `name` are also recognized) and EVERY OTHER COLUMN lands verbatim in the recipient's `fields` map, reachable from a template as {{fields.<key>}}. Per row: the address is normalized and shape-validated, deduplicated against the audience's existing recipients AND against earlier rows of the same file (first occurrence wins). The import refuses WHOLE when the resulting roster would exceed MEMQL_CAMPAIGNS_MAX_AUDIENCE -- it never silently truncates, because a partially-imported list is one nobody knows is partial. Returns {added, duplicates, invalid, total} plus up to 20 sample invalid lines with their line numbers, so the operator's next action is fixing the file rather than guessing at it. Each added recipient also gets a consent grant event with source 'import'. */
 export interface CampaignImportRecipientsArgs {
   /** The audience to import into. The caller must be able to read it. */
