@@ -1,6 +1,8 @@
 import { act, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readTheBar } from "../readTheBar";
+
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
 // The connection is a module-level context read, and its provider dials a
@@ -155,13 +157,26 @@ describe("the pack switch", () => {
     expect(screen.getByText(/read by each node at its NEXT BOOT/i)).toBeTruthy();
 
     await click(screen.getByRole("button", { name: "Disable this pack" }));
-    // The confirm is a step of its own: nothing was sent yet.
+    // The confirm is a step of its own, in the bar's acts like every ask:
+    // nothing was sent yet.
     const sentFlip = () =>
       connection.dispatcher.sendAndWait.mock.calls.some(
         (call) => "setPackEnabled" in (call[0] as Record<string, unknown>),
       );
     expect(sentFlip()).toBe(false);
+    const bar = screen.getByRole("group", { name: "What you can do with this" });
+    expect(within(bar).getAllByRole("button").map((button) => button.textContent)).toEqual(["Cancel", "Disable"]);
+    // Dressed as every ask is: the way out a quiet text act, the act a danger button.
+    expect(within(bar).getByRole("button", { name: "Cancel" }).className).toBe("os-actbar-text");
+    expect(within(bar).getByRole("button", { name: "Disable" }).getAttribute("data-tone")).toBe("danger");
+    expect(within(bar).getByText("Disable referencepack? Nodes keep running it until they restart.").className).toBe("os-actbar-confirm");
 
+    // A double-click on Disable this pack: its second click lands on the
+    // confirmation, and answers nothing.
+    await click(screen.getByRole("button", { name: "Disable" }));
+    expect(sentFlip()).toBe(false);
+
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Disable" }));
     // After: the outcome says the same thing in the past tense, and says
     // nothing running has changed.

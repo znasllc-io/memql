@@ -1043,6 +1043,25 @@ describe("the Live stop", () => {
     expect(connection.callsNamed("siteArchive")).toEqual(['builtin siteArchive(siteId: "site-shop", confirmHostname: "shop")']);
   });
 
+  it("a double-click on Archive does not answer the confirmation it opens", async () => {
+    const paused = siteRow({ ...SHOP, id: "site-shop", status: "disabled" });
+    const { connection, page } = await mountAndOpen({ sites: [paused] }, "shop.memql.example.com");
+    const bar = document.querySelector(".os-actbar") as HTMLElement;
+    await readTheBar();
+    await click(within(bar).getByRole("button", { name: /^Archive/ }));
+    // THE CONFIRMATION IS THE BAR'S CHILDREN, not its acts: the sentence, the
+    // field, Keep it and the act. The second click of a double-click lands on
+    // one of them -- here the way out -- and answers nothing.
+    await click(within(bar).getByRole("button", { name: "Keep it" }));
+    expect(within(bar).getByLabelText("Type shop to confirm")).toBeTruthy();
+    // Read, it answers: the way out puts the acts back.
+    await readTheBar();
+    await click(within(bar).getByRole("button", { name: "Keep it" }));
+    expect(within(bar).queryByLabelText("Type shop to confirm")).toBeNull();
+    expect(barActs(page)).toEqual(["Archive", "Go live"]);
+    expect(connection.callsNamed("siteArchive")).toHaveLength(0);
+  });
+
   it("DELETES an archived standalone, which is what releases its name", async () => {
     // THE FOURTH RUNG (epic memql#4937, D1). Archiving never freed the
     // hostname: liveSiteIdsForHostname excludes `deleted` and never reads
@@ -1060,6 +1079,8 @@ describe("the Live stop", () => {
     const del = within(bar).getByRole("button", { name: "Delete" }) as HTMLButtonElement;
     expect(del.disabled).toBe(true);
     await typeInto(within(bar).getByLabelText("Type shop to confirm") as HTMLInputElement, "shop");
+    // The bar just turned into the confirmation, and takes no press until it is read.
+    await readTheBar();
     await click(del);
     expect(connection.callsNamed("siteDelete")).toEqual(['builtin siteDelete(siteId: "site-shop", confirmHostname: "shop")']);
   });
@@ -1076,6 +1097,7 @@ describe("the Live stop", () => {
     expect(within(bar).getByText(/can be activated again/)).toBeTruthy();
     // THE APP'S NAME, never its hostname.
     await typeInto(within(bar).getByLabelText("Type storefront to confirm") as HTMLInputElement, "storefront");
+    await readTheBar();
     await click(within(bar).getByRole("button", { name: "Deactivate" }));
     await waitFor(() =>
       expect(connection.callsNamed("packageDeactivateDeployable")).toEqual([
@@ -1490,6 +1512,7 @@ describe("deactivating a source-backed deployable", () => {
     expect(within(bar).getByText(/releases/)).toBeTruthy();
     expect(within(bar).getByText(/can be activated again/)).toBeTruthy();
     await typeInto(within(bar).getByLabelText("Type storefront to confirm") as HTMLInputElement, "storefront");
+    await readTheBar();
     await click(barButton("Deactivate"));
 
     await waitFor(() =>

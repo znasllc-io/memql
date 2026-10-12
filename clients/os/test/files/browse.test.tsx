@@ -12,6 +12,7 @@ vi.mock("../../src/live/connection", () => ({
 
 import { ARTIFACT_CONCEPT } from "../../src/apps/files/concepts";
 import { artifactRow, click, emit, fakeConnection, folderRow, renderFiles } from "./harness";
+import { readTheBar } from "../readTheBar";
 
 // The browse surface (epic #4722): live rows with the arrival cue in both
 // directions, the tree, the filters, the inspector's stories and actions.
@@ -209,6 +210,14 @@ describe("the inspector", () => {
     const footer = within(inspector).getByRole("group", { name: "What you can do with this" });
     expect(within(footer).getByText(/Delete "brief\.pdf"\?/)).toBeTruthy();
     expect(within(footer).queryByRole("button", { name: "Open" })).toBeNull();
+    // The question is drawn by the inspector itself, beside no acts of the
+    // bar's; the bar holds its buttons all the same. The second click of a
+    // double-click on Delete lands on the question's own Delete, and answers
+    // nothing.
+    await click(within(footer).getByRole("button", { name: "Delete" }));
+    expect(connection.callsNamed("archiveArtifact")).toEqual([]);
+    expect(within(footer).getByText(/Delete "brief\.pdf"\?/)).toBeTruthy();
+    await readTheBar();
     await click(within(footer).getByRole("button", { name: "Cancel" }));
     expect(within(footer).getByRole("button", { name: "Open" })).toBeTruthy();
     expect(connection.callsNamed("archiveArtifact")).toEqual([]);

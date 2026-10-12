@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { useState } from "react";
@@ -342,8 +342,7 @@ describe("what the guard leaves alone", () => {
     expect(test).toHaveBeenCalledTimes(2);
   });
 
-  it("a bar whose acts stay the same answers at once, whatever it draws beside them", () => {
-    // A refusal said beside the very acts that were there: nothing moved.
+  it("a bar whose acts and what it draws stay the same answers at once, however often it renders", () => {
     const run = vi.fn();
     function SaysWhy({ refusal }: { refusal: string }) {
       return (
@@ -352,7 +351,7 @@ describe("what the guard leaves alone", () => {
         </ActionBar>
       );
     }
-    const view = render(<SaysWhy refusal="" />);
+    const view = render(<SaysWhy refusal="The run was refused." />);
     view.rerender(<SaysWhy refusal="The run was refused." />);
     press("Run");
     expect(run).toHaveBeenCalledTimes(1);
@@ -401,6 +400,137 @@ describe("what the guard leaves alone", () => {
     later(400);
     press("Resume");
     expect(resume).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("everything pressable in a bar, not only its acts", () => {
+  it("holds an ask drawn as the bar's children: the Files Inspector's Delete", () => {
+    // No acts at all: the bar draws its own buttons, and Delete turns them into
+    // [Cancel, Delete] -- the confirmation on the right edge where Delete stood.
+    const remove = vi.fn();
+    function DrawnAsk() {
+      const [asking, setAsking] = useState(false);
+      return (
+        <ActionBar state={asking ? "Delete “report.pdf”?" : "In Library"}>
+          {asking ? (
+            <>
+              <button type="button" className="os-actbar-text" onClick={() => setAsking(false)}>Cancel</button>
+              <button type="button" className="os-button" data-tone="danger" onClick={remove}>Delete</button>
+            </>
+          ) : (
+            <button type="button" className="os-button" data-tone="danger" aria-label="Delete" onClick={() => setAsking(true)}>x</button>
+          )}
+        </ActionBar>
+      );
+    }
+    render(<DrawnAsk />);
+    press("Delete");
+    press("Delete");
+    expect(remove).not.toHaveBeenCalled();
+    expect(within(bar()).getByText("Delete “report.pdf”?")).toBeTruthy();
+    later(400);
+    press("Delete");
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds what a child changes on its own, without the bar rendering again", async () => {
+    // A confirmation row that keeps its own state (DeployablePage's): the bar is
+    // not rendered again when it turns into a question, and is held all the same.
+    const remove = vi.fn();
+    function ConfirmRow() {
+      const [asking, setAsking] = useState(false);
+      return asking ? (
+        <>
+          <span>Remove shop.example.com?</span>
+          <button type="button" className="os-actbar-text" onClick={() => setAsking(false)}>Keep it</button>
+          <button type="button" className="os-button" data-tone="danger" onClick={remove}>Remove</button>
+        </>
+      ) : (
+        <button type="button" className="os-button" onClick={() => setAsking(true)}>Remove</button>
+      );
+    }
+    const row = <ConfirmRow />;
+    render(<ActionBar state="Serving">{row}</ActionBar>);
+    press("Remove");
+    press("Remove");
+    expect(remove).not.toHaveBeenCalled();
+    expect(within(bar()).getByText("Remove shop.example.com?")).toBeTruthy();
+    // The change is noticed when it happens, not when it is next pressed: once
+    // read, the confirmation answers.
+    await act(async () => {});
+    later(400);
+    press("Remove");
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds a refusal that appears beside unchanged acts: what a bar draws is part of what it offers", () => {
+    const run = vi.fn();
+    function SaysWhy({ refusal }: { refusal: string }) {
+      return (
+        <ActionBar state="Ready" acts={[{ label: "Run", tone: "primary", onAct: run }]}>
+          {refusal === "" ? null : <span role="alert">{refusal}</span>}
+        </ActionBar>
+      );
+    }
+    const view = render(<SaysWhy refusal="" />);
+    view.rerender(<SaysWhy refusal="The run was refused." />);
+    press("Run");
+    expect(run).not.toHaveBeenCalled();
+    later(400);
+    press("Run");
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the keyboard too: Enter pressed twice on an ask does not answer it", () => {
+    // A browser turns Enter on a focused button into a click (detail 0), which
+    // jsdom does not; this is that click, after the key that made it.
+    const enter = (name: string) => {
+      const button = within(bar()).getByRole("button", { name });
+      button.focus();
+      fireEvent.keyDown(button, { key: "Enter" });
+      fireEvent.click(button, { detail: 0 });
+    };
+    const send = vi.fn();
+    render(<AskThenSend onSend={send} />);
+    enter("Send now");
+    enter("Send now");
+    expect(send).not.toHaveBeenCalled();
+    expect(screen.getByText("Send “August update” to 1,204 subscribers now?")).toBeTruthy();
+    later(400);
+    enter("Send now");
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds an ask that only changes how its act is dressed", () => {
+    // Archive turns into its own confirmation in place: the same label, now the
+    // danger button rather than a quiet one.
+    const archive = vi.fn();
+    function Retoned() {
+      const [asking, setAsking] = useState(false);
+      return (
+        <ActionBar
+          state={asking ? "Archive it?" : "Active"}
+          acts={[{ label: "Archive", tone: asking ? "danger" : "quiet", onAct: asking ? archive : () => setAsking(true) }]}
+        />
+      );
+    }
+    render(<Retoned />);
+    press("Archive");
+    press("Archive");
+    expect(archive).not.toHaveBeenCalled();
+    later(400);
+    press("Archive");
+    expect(archive).toHaveBeenCalledTimes(1);
+  });
+
+  it("is not held forever by a clock that steps back", () => {
+    const send = vi.fn();
+    render(<AskThenSend onSend={send} />);
+    press("Send now");
+    // The machine's clock is set back a minute: the bar is not held for a minute.
+    later(-60_000);
+    press("Send now");
+    expect(send).toHaveBeenCalledTimes(1);
   });
 });
 

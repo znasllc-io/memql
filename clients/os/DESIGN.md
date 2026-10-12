@@ -133,15 +133,20 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
     one surface, and the person had to know which was which.
     Account and organization details use this footer too: state on the left,
     Back/Disconnect on the right; Cancel/confirmation stay on that same edge.
-    **A bar whose acts change takes no press at all for a moment**
-    (`CONFIRM_SETTLE_MS`, 400 ms) -- whatever changed them, whatever now
-    stands under the pointer, under any label: an ask turning the bar into
-    a question, the way back from one (Discard changes where Keep stood),
-    Pause turning into Resume, a wizard moving to its next step (`scope`).
-    So the second click of a double-click cannot answer a question nobody
-    read, or press what the first click put there. Every bar, decided in
-    the kit; a bar's first acts and acts that did not change are taken at
-    once.
+    **Everything pressable in a bar is held for a moment after the bar
+    changes** (`CONFIRM_SETTLE_MS`, 400 ms): its acts, and whatever it
+    draws beside them -- a typed confirmation's Keep it, a question's own
+    buttons -- by pointer or by keyboard. A change is any change to what
+    the bar offers, whatever caused it and whatever now stands under the
+    pointer: an ask turning the bar into a question, the way back from one
+    (Discard changes where Keep stood), Pause turning into Resume, a
+    refusal drawn beside the acts, an act that only changes its tone, a
+    wizard moving to its next step (`scope`). So the second click of a
+    double-click cannot answer a question nobody read, or press what the
+    first click put there. An ask is the bar's acts (the way out a text
+    act, the act itself the button) with the question drawn beside them.
+    Every bar, decided in the kit; a bar's first acts, and a bar that did
+    not change, take a press at once.
     Read-only repository details offer navigation, not deployment actions.
 
 ## Applying them
