@@ -116,7 +116,7 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
     return () => window.clearTimeout(timer);
   }, [view, advancing, busy, state?.planId, provisionChecks, perform]);
   if (view === "list") return <section className="os-app-stack" aria-label="Sending domains">
-    <div className="os-head"><Subhead>Sending domains</Subhead><div className="os-head-actions">{state && ["unconfigured", "disconnected"].includes(state.status) && !error && connected ? <AddButton label="Add sending domain" onClick={() => setView("setup")}/> : null}</div></div>
+    <Subhead actions={state && ["unconfigured", "disconnected"].includes(state.status) && !error && connected ? <AddButton label="Add sending domain" onClick={() => setView("setup")}/> : null}>Sending domains</Subhead>
     {picker}
     {!state && !error ? <RecordListSkeleton label="Reading sending domain"/> : null}
     {error ? <Notice tone="error" sentence="Sending domain could not be read." detail={error}><Button onClick={() => { void call("status").then(apply); }}>Try again</Button></Notice> : null}
@@ -127,7 +127,7 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
     <Head title={state?.plan?.domain || "Sending domain"} back={{ label: backLabel, onSelect: () => setView("list") }}/>
     <div className="os-action-body os-app-stack"><Panel label="Sending domain"><Facts><Fact label="Organization" value={name}/><Fact label="Sender" value={state?.sender || "Not configured"}/><Fact label="Replies to" value={state?.replyTo || "No reply mailbox configured"}/></Facts></Panel>
       {!connected ? <Notice sentence="Cluster Azure setup needs attention."/> : null}
-      <section className="os-app-stack" aria-label="Azure send processing"><div className="os-head"><Subhead>Send processing</Subhead>{operations === undefined ? <Button busy={busy} onClick={() => { void call("operations").then(result => { if (result) setOperations(result.operations || []); }); }}>Check sends</Button> : <AutoRefresh busy={busy} enabled={!disconnect} onRefresh={async () => { const result = await call("operations"); if (result) setOperations(result.operations || []); }} />}</div>
+      <section className="os-app-stack" aria-label="Azure send processing"><Subhead actions={operations === undefined ? <Button busy={busy} onClick={() => { void call("operations").then(result => { if (result) setOperations(result.operations || []); }); }}>Check sends</Button> : <AutoRefresh busy={busy} enabled={!disconnect} onRefresh={async () => { const result = await call("operations"); if (result) setOperations(result.operations || []); }} />}>Send processing</Subhead>
         <p className="os-caption">Azure processing status does not confirm inbox delivery. Delivery and bounce feedback is not connected yet.</p>
         {operations?.length === 0 ? <p className="os-caption">No Azure sends recorded for this organization.</p> : null}
         {operations?.map(operation => <Panel key={operation.operationId} label="Azure send"><Facts><Fact label="Requested" value={new Date(operation.submittedAt).toLocaleString()}/><Fact label="Processing" value={sendOperationLabel(operation.status)}/></Facts>{operation.detail ? <p className="os-caption">{operation.detail}</p> : null}</Panel>)}

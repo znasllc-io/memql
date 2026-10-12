@@ -31,7 +31,8 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    accessible label and tooltip. Do not replace it with a text button such as
    "Connect GitHub account". A settings page is titled **Settings**; subjects
    such as **GitHub accounts** are sections beneath that title, with their Add
-   control on the section heading. Settings lists use the available width.
+   control on the section heading (`kit` `Subhead` `actions`). Settings lists
+   use the available width.
    Shared record lists draw dividers **only between items**: no top line on
    the first, no bottom line on the last, and no lines for a single item.
    Keep this in the shared list styles, including rows with separate actions
@@ -57,7 +58,10 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    is the shell's selection language, not a field. Ask shares the window header
    and icon controls, app-content text scale and page gutters; its sheet
    dimensions do not define a separate scale for its contents. Selects drop UA chrome
-   (`Select` draws its own currentColor chevron). Forms use `Field` --
+   (`Select` draws its own currentColor chevron). A date and time is
+   `DateTimeInput`, on the line like `Input`; prose is `TextArea`, the one field
+   taller than the line (two lines to start, resizable) with the same radius and
+   text size. Forms use `Field` --
    label above, control on the line; nothing invents a third field size.
 
 6. **Actions are verbs, nouns are nouns.** An action is never styled as a
