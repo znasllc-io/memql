@@ -717,6 +717,13 @@ const notDescribed: [string, MaterializeRequest][] = [
   ["a package", { name: "Notes", format: "markdown", requestId: "req-0005", statement: "Brief", deployableKind: "spa" }],
   ["a described file that is not Markdown", { name: "Notes", format: "txt", requestId: "req-0005", statement: "Brief" }],
   ["a described email JSON", { name: "Notes", format: "json", requestId: "req-0005", statement: "Brief", outputKind: "email_template" }],
+  // The revision workflow reads Markdown and images and cannot read the graph, so
+  // a request to write a document from records keeps the composer, which can.
+  ["Markdown from a query", { name: "Notes", format: "markdown", requestId: "req-0005", statement: "Brief", sources: [{ kind: "query", ref: "query openInvoices()", label: "Invoices" }] }],
+  ["Markdown from a concept row", { name: "Notes", format: "markdown", requestId: "req-0005", statement: "Brief", sources: [{ kind: "concept_row", ref: "inv1", label: "INV-1" }] }],
+  ["Markdown from a file and a query", { name: "Notes", format: "markdown", requestId: "req-0005", statement: "Brief", sources: [
+    { kind: "library_file", ref: "f-notes", label: "Notes" }, { kind: "query", ref: "query openInvoices()", label: "Invoices" },
+  ] }],
 ];
 
 for (const [label, request] of notDescribed) {
@@ -736,6 +743,15 @@ test("isDescribedMarkdown matches the server's rule for a request filed blank", 
   assert.equal(isDescribedMarkdown({ format: "markdown", statement: " Write it " }), true);
   assert.equal(isDescribedMarkdown({ format: "markdown", statement: "Write it", templateId: "  " }), true, "a template of only spaces is no template, as on the server");
   assert.equal(isDescribedMarkdown({ format: "html", statement: "Write it" }), false);
+});
+
+test("isDescribedMarkdown holds for Library files and keeps the composer for anything else", () => {
+  const base = { format: "markdown", statement: "Write it" } as const;
+  assert.equal(isDescribedMarkdown({ ...base, sources: [] }), true, "no sources is still described");
+  assert.equal(isDescribedMarkdown({ ...base, sources: [{ kind: "library_file", ref: "f1", label: "Notes", content: true }] }), true, "files are references the revision workflow can read");
+  assert.equal(isDescribedMarkdown({ ...base, sources: [{ kind: "query", ref: "query q()", label: "Q" }] }), false);
+  assert.equal(isDescribedMarkdown({ ...base, sources: [{ kind: "concept_row", ref: "r1", label: "R" }] }), false);
+  assert.equal(isDescribedMarkdown({ ...base, sources: [{ kind: "library_file", ref: "f1", label: "F" }, { kind: "query", ref: "query q()", label: "Q" }] }), false, "one data source among the files is enough");
 });
 
 // ---------------------------------------------------------------------------

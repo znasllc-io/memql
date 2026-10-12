@@ -36,12 +36,18 @@
 // alone never does: the OS follows on its own live feed and calls
 // handOffDescription itself.
 //
+// A DATA SOURCE KEEPS THE COMPOSER. The revision workflow reads Markdown and
+// images; it cannot read the graph. So a Markdown request with a concept_row or
+// query source is NOT described: the server keeps the composer for it (which
+// reads the records and writes the file), isDescribedMarkdown says false, and
+// materialize hands nothing on. Only Library files travel with a description.
+//
 // REFERENCES THE LIBRARY CANNOT ATTACH ARE REPORTED, NOT FATAL. The Library
 // takes only Markdown (up to 32 KiB) and images as review attachments, and
 // refuses a comment that carries anything else. So the hand-off attaches the
 // library_file sources the Library accepts, opens the revision with them, and
-// returns every other reference (a PDF, a query, a file it cannot find) by label
-// in `unattached` for the caller to show: "2 references were not attached: only
+// returns every other reference (a PDF, a file it cannot find) by label in
+// `unattached` for the caller to show: "2 references were not attached: only
 // Markdown and images can be".
 //
 // handOffDescription derives its two Library request ids from the request id
@@ -131,12 +137,16 @@ const has = (value: string | undefined): boolean => (value ?? "").trim() !== "";
  * Whether the server will file this request EMPTY and keep its statement, for
  * the person's client to hand to the Library's revision workflow. Mirrors
  * `describedMarkdown()` in integrations/compose/materialize.go: Markdown, with
- * a statement, and nothing of its own to compose from. (A draft or section keys
- * also rule it out; startMaterialize never sends either.)
+ * a statement, and nothing of its own to compose from -- no template, recipe or
+ * special output, and no source that is not a Library file (the revision
+ * workflow cannot read a query or a row, so a request with one keeps the
+ * composer). A draft or section keys also rule it out; startMaterialize never
+ * sends either. The two move together.
  */
-export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "outputKind" | "deployableKind">): boolean {
+export function isDescribedMarkdown(request: Pick<MaterializeRequest, "format" | "statement" | "templateId" | "recipeId" | "outputKind" | "deployableKind" | "sources">): boolean {
   return request.format === "markdown" && has(request.statement) &&
-    !has(request.templateId) && !has(request.recipeId) && !has(request.outputKind) && !has(request.deployableKind);
+    !has(request.templateId) && !has(request.recipeId) && !has(request.outputKind) && !has(request.deployableKind) &&
+    (request.sources ?? []).every(source => source.kind === "library_file");
 }
 
 /**

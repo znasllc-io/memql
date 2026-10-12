@@ -256,7 +256,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "execute", Description: "Execute the persisted materialization belonging to the current work run.", Handler: i.handleExecute, ArgsSchema: map[string]string{"compositionId": "string (required) -- the composition this run owns"}},
 		{
 			Name:        "materialize",
-			Description: "Compose the named sources into a file of the chosen format and file it in the Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia=\"materializer\" and that goal's first run, then dispatches the known materializeFile template. A request with nothing to compose from (no statement, draft, sections, sources, template or recipe) files an empty Markdown, text, HTML, CSV or JSON document without a model call. So does a Markdown request that only describes the document (a statement, with no draft, sections, template, recipe or output kind) when a person's own client makes it: the statement stays on the composition for that client to hand to the Library's revision workflow, which writes the document. Inside a work run the composer still writes it from the statement. Returns {compositionId, goalId, runId, format}; the composition reports progress and its outputFileId.",
+			Description: "Compose the named sources into a file of the chosen format and file it in the Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia=\"materializer\" and that goal's first run, then dispatches the known materializeFile template. A request with nothing to compose from (no statement, draft, sections, sources, template or recipe) files an empty Markdown, text, HTML, CSV or JSON document without a model call. So does a Markdown request that only describes the document (a statement, with no draft, sections, template, recipe or output kind, and no source other than Library files) when a person's own client makes it: the statement stays on the composition for that client to hand to the Library's revision workflow, which writes the document. That workflow cannot read the graph, so a request with a concept_row or query source keeps the composer, as does any request inside a work run. A folderId the caller cannot read, or one that has been archived, is refused before anything is written. Returns {compositionId, goalId, runId, format}; the composition reports progress and its outputFileId.",
 			Handler:     i.handleMaterialize,
 			ArgsSchema: map[string]string{
 				"name":           "string (required) -- what to call it, and the filename stem",
@@ -265,7 +265,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"sources":        "[]object -- {kind, ref, label}; kind is concept_row | library_file | query",
 				"draft":          "string -- a draft to start from; empty means the compose step writes it",
 				"templateId":     "string -- v1:compose:template to render through",
-				"folderId":       "string -- v1:library:folder to file the output into",
+				"folderId":       "string -- v1:library:folder to file the output into; refused when the caller cannot read it or it is archived",
 				"accountIds":     "[]string -- account tags; a record, never a visibility scope",
 				"deployableKind": "string -- spa | static | shopify_storefront to produce a package source zip instead of a document",
 				"recipeId":       "string -- the recipe this run came from, when it came from one",

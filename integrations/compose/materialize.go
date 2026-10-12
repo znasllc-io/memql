@@ -70,16 +70,64 @@ func (a materializeArgs) blank() bool {
 
 // describedMarkdown is a Markdown file asked for by DESCRIBING it: a statement,
 // and nothing of the document's own to compose from -- no draft, sections,
-// template, recipe or special output. Sources may come with it; they are what
-// the description is about, and they are passed on with it.
+// template, recipe or special output. Library files may come with it; they are
+// references the revision workflow can read, and they are passed on with the
+// description.
 //
 // Such a request is filed as the empty page with its statement kept on the
 // composition. Writing the document is the Library's revision workflow, and the
 // person's own client hands the description to it: a work run may not (see
 // fromARun).
+//
+// A DATA SOURCE KEEPS THE COMPOSER. The revision workflow reads Markdown and
+// images and cannot read the graph, so a request to write a document from
+// records (a query, a concept row) has something of its own to compose from and
+// only the composer can read it. Filing that request blank would throw the
+// records away. The SDK's isDescribedMarkdown says the same thing; the two move
+// together.
 func (a materializeArgs) describedMarkdown() bool {
 	return a.Format == pure.FormatMarkdown && a.Statement != "" && strings.TrimSpace(a.Draft) == "" &&
-		len(a.SectionKeys) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == ""
+		len(a.SectionKeys) == 0 && a.TemplateId == "" && a.RecipeId == "" && a.OutputKind == "" && a.DeployableKind == "" &&
+		onlyLibraryFiles(a.Sources)
+}
+
+// onlyLibraryFiles says every source is a Library file, or there are none.
+func onlyLibraryFiles(sources []SourceRef) bool {
+	for _, source := range sources {
+		if source.Kind != KindLibraryFile {
+			return false
+		}
+	}
+	return true
+}
+
+// errFolderUnavailable is the refusal for a folder the caller cannot file into,
+// and it is a sentence a person reads (the Materializer returns it as written),
+// which is why it is capitalised and punctuated like one.
+//
+//nolint:staticcheck // ST1005: person-facing copy, not a log fragment.
+var errFolderUnavailable = errors.New("That folder isn't available. Choose another folder.")
+
+// requireUsableFolder refuses a folder the caller cannot file a new file into:
+// one they cannot read (somebody else's, deleted, or no such id) or one that has
+// been archived.
+//
+// IT IS A READ, NOT A TRUST. Creating the file stores whatever folderId it is
+// given, so nothing downstream asks whether the caller can see that folder, and
+// a file filed under one they cannot is a file they cannot find. An archived
+// folder is one the person put in the Bin, and filing into it hides the file
+// from every surface but the Bin. The read runs as the caller (a folder is
+// theirs or it is not there) and fresh, so a folder archived a moment ago on
+// another replica is not filed into on this node's cache.
+func (i *Integration) requireUsableFolder(ctx context.Context, folderId string) error {
+	folder, err := i.store().libraryFolderById(ctx, folderId)
+	if err != nil {
+		return fmt.Errorf("compose: checking the folder: %w", err)
+	}
+	if folder == nil || boolOf(folder["archived"]) {
+		return errFolderUnavailable
+	}
+	return nil
 }
 
 // fromARun says a work run is making this call, and not a person's own client.
@@ -301,6 +349,15 @@ func (i *Integration) materialize(ctx context.Context, userId, userEmail string,
 				"compositionId": compositionId, "goalId": stringOf(existing["goalId"]), "runId": stringOf(existing["runId"]),
 				"format": stringOf(existing["format"]), "status": stringOf(existing["status"]),
 			}, nil
+		}
+	}
+	// THE FOLDER IS CHECKED HERE: after a repeat of an accepted request has had its
+	// chance to find the composition it made (that file exists, and a folder
+	// archived since is no reason to refuse the repeat), and before anything is
+	// read or written for a new one.
+	if a.FolderId != "" {
+		if err := i.requireUsableFolder(ctx, a.FolderId); err != nil {
+			return nil, err
 		}
 	}
 	resolved, err := i.resolve(ctx, a.Sources)

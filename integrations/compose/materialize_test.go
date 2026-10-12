@@ -23,6 +23,8 @@ type materializeEngine struct {
 	compositions   map[string]map[string]any
 	inputs         map[string]map[string]any
 	files          map[string]map[string]any
+	folders        map[string]map[string]any // the Library folders the caller can READ, by id; any other id answers no row
+	folderReads    []bool                    // for each libraryFolderById, whether it asked for a fresh read
 	calls          []string
 	source         map[string]any
 	account        map[string]any
@@ -35,7 +37,7 @@ type materializeEngine struct {
 }
 
 func newMaterializeEngine(t *testing.T) *materializeEngine {
-	return &materializeEngine{t: t, compositions: map[string]map[string]any{}, inputs: map[string]map[string]any{}, files: map[string]map[string]any{}}
+	return &materializeEngine{t: t, compositions: map[string]map[string]any{}, inputs: map[string]map[string]any{}, files: map[string]map[string]any{}, folders: map[string]map[string]any{}}
 }
 func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.ExecuteResult, error) {
 	name, args := materializeCall(e.t, query)
@@ -103,6 +105,9 @@ func (e *materializeEngine) Execute(ctx context.Context, query string) (*memql.E
 		maps.Copy(row, args)
 	case "libraryFileById":
 		row = e.files[stringOf(args["fileId"])]
+	case "libraryFolderById":
+		e.folderReads = append(e.folderReads, memql.FreshReadFromContext(ctx))
+		row = e.folders[stringOf(args["folderId"])]
 	case "sourceRows":
 		row = e.source
 	case "clientAccountById":
@@ -712,6 +717,127 @@ func TestMaterializeStillWritesDocxAndPdfWhenThereIsContent(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// The folder a file is filed into (epic #6023, task #6029)
+// ---------------------------------------------------------------------------
+//
+// folderId is a person's choice or another app's claim, and creating the file
+// stores whatever string it is given: nothing downstream asks whether the caller
+// can see that folder. A file filed under a folder they cannot see is a file they
+// cannot find, and one filed into the Bin is hidden by the very act of filing it.
+// So the request is refused, before anything is written, when the caller cannot
+// read the folder or it has been archived.
+
+const folderUnavailable = "That folder isn't available. Choose another folder."
+
+func folderArgs() materializeArgs {
+	a := blankArgs(pure.FormatMarkdown)
+	a.FolderId = "folder-1"
+	return a
+}
+
+func TestMaterializeRefusesAFolderTheCallerCannotUseBeforeWritingAnything(t *testing.T) {
+	for name, folder := range map[string]map[string]any{
+		"a folder the caller cannot read": nil,
+		"a folder in the Bin":             {"id": "folder-1", "name": "Old reports", "archived": true},
+	} {
+		for where, ctx := range map[string]context.Context{"in a run": nestedMaterializeContext(), "standalone": materializeContext()} {
+			i, e, u := materializeFixture(t)
+			if folder != nil {
+				e.folders["folder-1"] = folder
+			}
+			_, err := i.materialize(ctx, "u-alice", "", folderArgs())
+			// The sentence is the person's: the OS shows it as it is.
+			if err == nil || err.Error() != folderUnavailable {
+				t.Fatalf("%s %s: want the folder refusal verbatim, got %v", name, where, err)
+			}
+			if len(e.compositions) != 0 || len(e.inputs) != 0 || len(e.files) != 0 || u.calls != 0 {
+				t.Fatalf("%s %s: refusal wrote rows: %v %v %v uploads=%d", name, where, e.compositions, e.inputs, e.files, u.calls)
+			}
+			// Reads only: a step looks for the composition it may already have made, and
+			// the folder is read. No composition, input, goal or file follows.
+			for _, made := range e.calls {
+				if made != "libraryFolderById" && made != "compositionExecutionById" {
+					t.Fatalf("%s %s: the refusal went on to %s: %v", name, where, made, e.calls)
+				}
+			}
+		}
+	}
+}
+
+func TestMaterializeFilesIntoAFolderTheCallerCanUse(t *testing.T) {
+	for name, folder := range map[string]map[string]any{
+		"an active folder": {"id": "folder-1", "name": "Reports", "archived": false},
+		// A folder from before the field existed has no `archived` at all, and is not in the Bin.
+		"a folder with no archived field": {"id": "folder-1", "name": "Reports"},
+	} {
+		i, e, _ := materializeFixture(t)
+		e.folders["folder-1"] = folder
+		out, err := i.materialize(nestedMaterializeContext(), "u-alice", "", folderArgs())
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		row := e.compositions[stringOf(out["compositionId"])]
+		if row["status"] != "ready" || row["folderId"] != "folder-1" {
+			t.Fatalf("%s: the composition did not file into the folder: %v", name, row)
+		}
+		if len(e.files) != 1 {
+			t.Fatalf("%s: want one file, got %d", name, len(e.files))
+		}
+		for _, f := range e.files {
+			if f["folderId"] != "folder-1" {
+				t.Fatalf("%s: the file was filed under %v, want folder-1", name, f["folderId"])
+			}
+		}
+	}
+}
+
+// The folder is read when one is named and not otherwise, as the caller (the
+// fixture refuses a read under any other actor), and FRESH: a folder archived a
+// moment ago on another replica must not be filed into because this node's cache
+// has not heard.
+func TestMaterializeReadsTheFolderFreshAndOnlyWhenOneIsNamed(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	e.folders["folder-1"] = map[string]any{"id": "folder-1", "name": "Reports"}
+	if _, err := i.materialize(nestedMaterializeContext(), "u-alice", "", folderArgs()); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.folderReads) != 1 || !e.folderReads[0] {
+		t.Fatalf("the folder must be read once, fresh: %v", e.folderReads)
+	}
+
+	none, ne, _ := materializeFixture(t)
+	if _, err := none.materialize(nestedMaterializeContext(), "u-alice", "", blankArgs(pure.FormatMarkdown)); err != nil {
+		t.Fatal(err)
+	}
+	if len(ne.folderReads) != 0 {
+		t.Fatalf("a request that names no folder read one: %v", ne.folderReads)
+	}
+}
+
+// A repeat finds the composition its first call made. If the folder has been
+// archived since, that repeat must still answer with the composition: the first
+// call was accepted, the file exists, and a refusal now would only hide it.
+func TestMaterializeRepeatedRequestDoesNotAskAboutTheFolderAgain(t *testing.T) {
+	i, e, _ := materializeFixture(t)
+	i.SetGoalOpener(&directMaterializeGoal{})
+	e.folders["folder-1"] = map[string]any{"id": "folder-1", "name": "Reports"}
+	a := folderArgs()
+	a.RequestId = "req-1"
+	first, err := i.materialize(materializeContext(), "u-alice", "", a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.folders["folder-1"]["archived"] = true
+	again, err := i.materialize(materializeContext(), "u-alice", "", a)
+	if err != nil {
+		t.Fatalf("a repeat of an accepted request was refused: %v", err)
+	}
+	if again["compositionId"] != first["compositionId"] || len(e.compositions) != 1 || len(e.folderReads) != 1 {
+		t.Fatalf("the repeat did not return the first composition without a second folder read: first=%v again=%v rows=%d reads=%v", first, again, len(e.compositions), e.folderReads)
+	}
+}
+
 func TestParseMaterializeArgsStripsAMatchingExtensionAndRefusesPaths(t *testing.T) {
 	a, err := parseMaterializeArgs(map[string]any{"name": "Plan.md", "format": "markdown"})
 	if err != nil || a.Name != "Plan" {
@@ -823,6 +949,7 @@ func TestMaterializeNestedCompositionIdIsUnchangedByTheRequestIdField(t *testing
 
 	i, e, _ := materializeFixture(t)
 	e.source = map[string]any{"id": "invoice-1", "amount": 100}
+	e.folders["folder-1"] = map[string]any{"id": "folder-1", "name": "Reports"}
 	out, err := i.materialize(nestedMaterializeContext(), "u-alice", "", a)
 	if err != nil {
 		t.Fatal(err)
@@ -1254,6 +1381,45 @@ func TestDescribedMarkdownWithATemplateStillUsesTheComposer(t *testing.T) {
 	}
 }
 
+// "Write a report from these records" is what a person asks the OS composer for
+// when they pick rows and describe the document. The revision workflow can read
+// the files they attach and nothing else, so filing that request blank would
+// throw the records away: it keeps the composer, which reads them.
+func TestDescribedMarkdownFromDataSourcesStillUsesTheComposer(t *testing.T) {
+	for name, sources := range map[string][]SourceRef{
+		"a query":                    {{Kind: KindQuery, Ref: "sourceRows()", Label: "Invoices"}},
+		"a library file and a query": {{Kind: KindLibraryFile, Ref: "notes-file", Label: "Notes"}, {Kind: KindQuery, Ref: "sourceRows()", Label: "Invoices"}},
+	} {
+		i, e, u := materializeFixture(t)
+		e.source = map[string]any{"id": "invoice-1", "amount": 100}
+		e.files["notes-file"] = map[string]any{"name": "meeting-notes.md", "mimeType": "text/markdown"}
+		a := describedArgs()
+		a.Sources = sources
+		compositionId, input := acceptAsAPerson(t, i, a)
+
+		var asked []ComposeRequest
+		worker := anotherReplica(e, u, materializeComposerFunc(func(_ context.Context, r ComposeRequest) (ComposeReply, error) {
+			asked = append(asked, r)
+			return ComposeReply{Draft: pure.Draft{Body: "Written from the invoices"}}, nil
+		}))
+		if err := adoptTheRun(worker, input); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(asked) != 1 || asked[0].Statement != describedStatement || len(asked[0].Sources) != len(sources) {
+			t.Fatalf("%s: the composer was not asked to write from the statement and every source: %+v", name, asked)
+		}
+		if got := asked[0].Sources[len(sources)-1]; len(got.Rows) != 1 {
+			t.Fatalf("%s: the composer did not receive the query's rows: %+v", name, got)
+		}
+		if !strings.Contains(string(u.bytes), "Written from the invoices") || string(u.bytes) == "\n" {
+			t.Fatalf("%s: a request with data sources must carry the composed document, got %q", name, u.bytes)
+		}
+		if row := e.compositions[compositionId]; row["status"] != "ready" || row["statement"] != describedStatement {
+			t.Fatalf("%s: the request did not complete with its statement: %v", name, row)
+		}
+	}
+}
+
 // The same recovery Task 1 pins for a blank request, for a described one: the
 // resumed pass finds a saved recipe and restores it, so the blank-ness has to be
 // on that recipe -- and the pass that restores it is not the pass that decided.
@@ -1343,14 +1509,15 @@ func TestDescribedMarkdownMeansAStatementAndNothingToComposeFrom(t *testing.T) {
 	if !describedArgs().describedMarkdown() {
 		t.Fatal("a Markdown name and statement alone are a described request")
 	}
-	// What the document is made from, where it goes and the limits its run keeps
-	// are not what makes it a description: references are passed on with it, and a
+	// Where the document goes and the limits its run keeps are not what makes it a
+	// description. Nor are the files it is about: Library files are references the
+	// revision workflow can read, and they are passed on with the description. A
 	// whitespace-only draft is no draft.
 	around := describedArgs()
-	around.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes-file", Label: "Notes"}, {Kind: KindQuery, Ref: "sourceRows()"}}
+	around.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes-file", Label: "Notes"}, {Kind: KindLibraryFile, Ref: "spec-file", Label: "Spec", Content: true}}
 	around.FolderId, around.AccountIds, around.Ceilings, around.Draft, around.RequestId = "folder-1", []string{"account-1"}, map[string]any{"maxRetries": 1}, " \n ", "req-1"
 	if !around.describedMarkdown() {
-		t.Fatal("sources, a folder, account tags, ceilings, a request id and a whitespace-only draft do not stop a request being described")
+		t.Fatal("library files, a folder, account tags, ceilings, a request id and a whitespace-only draft do not stop a request being described")
 	}
 	for name, with := range map[string]func(*materializeArgs){
 		"no statement":   func(a *materializeArgs) { a.Statement = "" },
@@ -1366,12 +1533,24 @@ func TestDescribedMarkdownMeansAStatementAndNothingToComposeFrom(t *testing.T) {
 		"a recipe":       func(a *materializeArgs) { a.RecipeId = "recipe-1" },
 		"an output kind": func(a *materializeArgs) { a.OutputKind = "email_template" },
 		"a deployable":   func(a *materializeArgs) { a.DeployableKind = "spa" },
+		// The revision workflow reads Markdown and images. It cannot read the graph,
+		// so a request with records to write from has something of its own to
+		// compose from, and only the composer can read it.
+		"a query":       func(a *materializeArgs) { a.Sources = []SourceRef{{Kind: KindQuery, Ref: "sourceRows()"}} },
+		"a concept row": func(a *materializeArgs) { a.Sources = []SourceRef{{Kind: KindConceptRow, Ref: "invoice-1"}} },
 	} {
 		a := describedArgs()
 		with(&a)
 		if a.describedMarkdown() {
 			t.Fatalf("a request with %s is not a described Markdown request", name)
 		}
+	}
+	// One data source among the files is enough to keep the composer: the files
+	// would go to the revision workflow and the records could not.
+	mixed := describedArgs()
+	mixed.Sources = []SourceRef{{Kind: KindLibraryFile, Ref: "notes-file"}, {Kind: KindQuery, Ref: "sourceRows()"}}
+	if mixed.describedMarkdown() {
+		t.Fatal("a request with a query among its files is not a described Markdown request")
 	}
 	// A request is blank or described, never both: blank has no words at all.
 	if describedArgs().blank() || blankArgs(pure.FormatMarkdown).describedMarkdown() {
