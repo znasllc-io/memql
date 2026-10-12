@@ -1,8 +1,8 @@
 import { buildLogsRecordClient } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
+import { UserInputError } from "./userError.js";
 
-/** Only messages authored by this extension may be displayed verbatim. */
-export class UserInputError extends Error {}
+export { UserInputError } from "./userError.js";
 export interface Problem { message: string; reference?: string }
 export class ReportedError extends Error {
   constructor(readonly problem: Problem) {

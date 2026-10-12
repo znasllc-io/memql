@@ -25,8 +25,17 @@ export interface OpenDocument {
   resource: Resource; lease: ConnectionLease; content: Uint8Array; mime: string;
   sourceId: string; kind: string; version: number; revision?: string;
   template?: { name: string; accountId: string; status: string };
+  /** The organizations a Library file is labelled with (artifacts only; empty when it has none). */
+  accountIds?: string[];
 }
 const text = (row: Record<string, unknown>, field: string) => typeof row[field] === "string" ? row[field] as string : "";
+/** What a template opens as: its document when it has one, else the custom email its bodies make. */
+function templateText(row: Record<string, unknown>): string {
+  const document = row.document;
+  if (document && typeof document === "object" && !Array.isArray(document)) return JSON.stringify(document, null, 2) + "\n";
+  const preheader = text(row, "preheader");
+  return JSON.stringify({ subject: text(row, "subject"), ...(preheader ? { preheader } : {}), textBody: text(row, "textBody"), htmlBody: text(row, "htmlBody") }, null, 2) + "\n";
+}
 
 export class Documents {
   constructor(private readonly api: EditorConnectionAPI) {}
@@ -56,7 +65,7 @@ export class Documents {
       if (!row) throw new UserInputError("Template not found or unavailable to your organization.");
       const revision = text(row, "createdAt");
       if (!revision) throw new Error("The cluster did not return the template revision.");
-      const content = new TextEncoder().encode(JSON.stringify({ subject: text(row,"subject"), textBody: text(row,"textBody"), htmlBody: text(row,"htmlBody") }, null, 2) + "\n");
+      const content = new TextEncoder().encode(templateText(row));
       return { resource, lease, content, mime: "application/json", sourceId: resource.id, kind: "campaign_template", version: 0, revision,
         template: { name: text(row,"name"), accountId: text(row,"accountId"), status: text(row,"status") } };
     }
@@ -64,6 +73,7 @@ export class Documents {
     if (!artifact || artifact.archived) throw new UserInputError("File not found or unavailable to your account.");
     const sourceId = text(artifact, "sourceConceptRef");
     const kind = text(artifact, "kind");
+    const accountIds = Array.isArray(artifact.accountIds) ? artifact.accountIds.filter((id): id is string => typeof id === "string") : [];
     let mime = text(artifact, "mimeType");
     let version = 0;
     let revision: string | undefined;
@@ -87,7 +97,7 @@ export class Documents {
     } else {
       content = await this.api.readBytes(lease, resource.id);
     }
-    return { resource, lease, sourceId, kind, content, mime, version, revision };
+    return { resource, lease, sourceId, kind, content, mime, version, revision, accountIds };
   }
   async history(document: OpenDocument, beforeVersion?: number): Promise<Record<string, unknown>> {
     const rows = await this.api.execute(document.lease, "libraryDocumentHistory", buildLibraryDocumentHistory({artifactId:document.resource.id,beforeVersion}));

@@ -1,23 +1,1287 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "MemQL email template",
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "subject",
-    "textBody",
-    "htmlBody"
+  "title": "MemQL email",
+  "description": "An email is either a layout (blocks) or custom HTML (textBody and htmlBody).",
+  "oneOf": [
+    {
+      "$ref": "#/definitions/layoutEmail"
+    },
+    {
+      "$ref": "#/definitions/customEmail"
+    }
   ],
-  "properties": {
-    "subject": {
-      "type": "string",
-      "minLength": 1
+  "definitions": {
+    "layoutEmail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "theme",
+        "blocks"
+      ],
+      "properties": {
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 998,
+          "pattern": "^(?=.*[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000])[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "patternErrorMessage": "Enter a subject on one line.",
+          "description": "One line, up to 998 bytes."
+        },
+        "preheader": {
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$",
+          "patternErrorMessage": "The preheader must be one line of 200 characters or fewer.",
+          "description": "The preview line after the subject: one line, up to 200 characters."
+        },
+        "layout": {
+          "type": "string",
+          "description": "The layout this email was made from. Leave it as it is."
+        },
+        "theme": {
+          "$ref": "#/definitions/theme"
+        },
+        "blocks": {
+          "type": "array",
+          "maxItems": 300,
+          "items": {
+            "$ref": "#/definitions/block"
+          }
+        }
+      }
     },
-    "textBody": {
-      "type": "string"
+    "customEmail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subject",
+        "textBody",
+        "htmlBody"
+      ],
+      "properties": {
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 998,
+          "pattern": "^(?=.*[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000])[^\\u0000-\\u001f\\u007f-\\u009f]+$",
+          "patternErrorMessage": "Enter a subject on one line.",
+          "description": "One line, up to 998 bytes."
+        },
+        "preheader": {
+          "type": "string",
+          "maxLength": 200,
+          "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*$",
+          "patternErrorMessage": "The preheader must be one line of 200 characters or fewer.",
+          "description": "The preview line after the subject: one line, up to 200 characters."
+        },
+        "textBody": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "[^\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]",
+          "patternErrorMessage": "Include a plain-text version.",
+          "description": "The plain-text version."
+        },
+        "htmlBody": {
+          "type": "string"
+        }
+      }
     },
-    "htmlBody": {
-      "type": "string"
+    "theme": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "page",
+        "canvas",
+        "primary",
+        "secondary",
+        "accent",
+        "tint",
+        "text",
+        "muted",
+        "headingFont",
+        "bodyFont"
+      ],
+      "properties": {
+        "page": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "patternErrorMessage": "Enter a colour as #rrggbb.",
+          "description": "A colour as #rrggbb."
+        },
+        "canvas": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "patternErrorMessage": "Enter a colour as #rrggbb.",
+          "description": "A colour as #rrggbb."
+        },
+        "primary": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "patternErrorMessage": "Enter a colour as #rrggbb.",
+          "description": "A colour as #rrggbb."
+        },
+        "secondary": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "patternErrorMessage": "Enter a colour as #rrggbb.",
+          "description": "A colour as #rrggbb."
+        },
+        "accent": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "patternErrorMessage": "Enter a colour as #rrggbb.",
+          "description": "A colour as #rrggbb."
+        },
+        "tint": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "patternErrorMessage": "Enter a colour as #rrggbb.",
+          "description": "A colour as #rrggbb."
+        },
+        "text": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "patternErrorMessage": "Enter a colour as #rrggbb.",
+          "description": "A colour as #rrggbb."
+        },
+        "muted": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}$",
+          "patternErrorMessage": "Enter a colour as #rrggbb.",
+          "description": "A colour as #rrggbb."
+        },
+        "headingFont": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9 -]{0,39}$",
+          "patternErrorMessage": "Enter a font name using letters, digits, spaces or hyphens.",
+          "description": "A font name using letters, digits, spaces or hyphens."
+        },
+        "bodyFont": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9 -]{0,39}$",
+          "patternErrorMessage": "Enter a font name using letters, digits, spaces or hyphens.",
+          "description": "A font name using letters, digits, spaces or hyphens."
+        },
+        "webFonts": {
+          "type": "boolean"
+        }
+      }
+    },
+    "block": {
+      "type": "object",
+      "required": [
+        "id",
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+          "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+          "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+        },
+        "type": {
+          "enum": [
+            "image",
+            "heading",
+            "text",
+            "highlight",
+            "button",
+            "divider",
+            "spacer",
+            "section",
+            "columns",
+            "social",
+            "footer",
+            "html"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "image"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "width"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "image"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "align": {
+                "enum": [
+                  "left",
+                  "center",
+                  "right"
+                ]
+              },
+              "src": {
+                "type": "string",
+                "pattern": "^(?:|artifact:[A-Za-z0-9_-]{1,160}|data:image/(?:png|jpeg|gif);base64,[A-Za-z0-9+/]+={0,2})$",
+                "patternErrorMessage": "A picture is artifact:<id> from Files, an embedded PNG, JPEG or GIF, or empty.",
+                "description": "A picture from Files (artifact:<id>) or an embedded PNG, JPEG or GIF. Leave it empty for a placeholder."
+              },
+              "alt": {
+                "type": "string"
+              },
+              "width": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 600
+              },
+              "height": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2000
+              },
+              "href": {
+                "type": "string",
+                "maxLength": 2000,
+                "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
+                "patternErrorMessage": "Enter a web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}.",
+                "description": "A web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}."
+              },
+              "bleed": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "heading"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "heading"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "text": {
+                "type": "string"
+              },
+              "size": {
+                "type": "number",
+                "minimum": 8,
+                "maximum": 96
+              },
+              "lineHeight": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "color": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "align": {
+                "enum": [
+                  "left",
+                  "center",
+                  "right"
+                ]
+              },
+              "italic": {
+                "type": "boolean"
+              },
+              "weight": {
+                "enum": [
+                  0,
+                  400,
+                  700
+                ]
+              },
+              "font": {
+                "enum": [
+                  "heading",
+                  "body",
+                  "base"
+                ]
+              },
+              "letterSpacing": {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,2}(\\.[0-9]{1,3})?em$",
+                "patternErrorMessage": "Enter a length in em, such as 0.05em or -0.02em.",
+                "description": "A length in em, such as 0.05em or -0.02em."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "text"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "text"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "text": {
+                "type": "string",
+                "description": "Markdown: **bold**, *italic*, [label](address), - bullets and 1. numbers."
+              },
+              "size": {
+                "type": "number",
+                "minimum": 8,
+                "maximum": 96
+              },
+              "lineHeight": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "listLineHeight": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "gap": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "color": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "linkColor": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "align": {
+                "enum": [
+                  "left",
+                  "center",
+                  "right"
+                ]
+              },
+              "italic": {
+                "type": "boolean"
+              },
+              "weight": {
+                "enum": [
+                  0,
+                  400,
+                  700
+                ]
+              },
+              "font": {
+                "enum": [
+                  "heading",
+                  "body",
+                  "base"
+                ]
+              },
+              "letterSpacing": {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,2}(\\.[0-9]{1,3})?em$",
+                "patternErrorMessage": "Enter a length in em, such as 0.05em or -0.02em.",
+                "description": "A length in em, such as 0.05em or -0.02em."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "highlight"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "highlight"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "text": {
+                "type": "string"
+              },
+              "size": {
+                "type": "number",
+                "minimum": 8,
+                "maximum": 96
+              },
+              "lineHeight": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "gap": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "color": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "background": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "align": {
+                "enum": [
+                  "left",
+                  "center",
+                  "right"
+                ]
+              },
+              "italic": {
+                "type": "boolean"
+              },
+              "weight": {
+                "enum": [
+                  0,
+                  400,
+                  700
+                ]
+              },
+              "font": {
+                "enum": [
+                  "heading",
+                  "body",
+                  "base"
+                ]
+              },
+              "letterSpacing": {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,2}(\\.[0-9]{1,3})?em$",
+                "patternErrorMessage": "Enter a length in em, such as 0.05em or -0.02em.",
+                "description": "A length in em, such as 0.05em or -0.02em."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "button"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "label"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "button"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "size": {
+                "type": "number",
+                "minimum": 8,
+                "maximum": 96
+              },
+              "color": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "textColor": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "align": {
+                "enum": [
+                  "left",
+                  "center",
+                  "right"
+                ]
+              },
+              "font": {
+                "enum": [
+                  "heading",
+                  "body",
+                  "base"
+                ]
+              },
+              "width": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 600
+              },
+              "href": {
+                "type": "string",
+                "maxLength": 2000,
+                "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
+                "patternErrorMessage": "Enter a web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}.",
+                "description": "A web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}."
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "paddingY": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "divider"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "divider"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "color": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "height": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2000
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "spacer"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "spacer"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "height": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2000
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "section"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "section"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "background": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "inset": {
+                "$ref": "#/definitions/lengths"
+              },
+              "maxWidth": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2000
+              },
+              "cellPadding": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "blocks": {
+                "type": "array",
+                "maxItems": 300,
+                "items": {
+                  "$ref": "#/definitions/block"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "columns"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "columns"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "columns"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "gap": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "background": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "inset": {
+                "$ref": "#/definitions/lengths"
+              },
+              "maxWidth": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2000
+              },
+              "stackBelow": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2000
+              },
+              "columns": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 4,
+                "items": {
+                  "$ref": "#/definitions/column"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "social"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "links"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "social"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "gap": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "maxWidth": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2000
+              },
+              "title": {
+                "type": "string"
+              },
+              "links": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "items": {
+                  "$ref": "#/definitions/socialLink"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "footer"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "footer"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "size": {
+                "type": "number",
+                "minimum": 8,
+                "maximum": 96
+              },
+              "lineHeight": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "gap": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "color": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "linkColor": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "background": {
+                "enum": [
+                  "page",
+                  "canvas",
+                  "primary",
+                  "secondary",
+                  "accent",
+                  "tint",
+                  "text",
+                  "muted",
+                  "white"
+                ],
+                "description": "One of the theme colours."
+              },
+              "font": {
+                "enum": [
+                  "heading",
+                  "body",
+                  "base"
+                ]
+              },
+              "letterSpacing": {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,2}(\\.[0-9]{1,3})?em$",
+                "patternErrorMessage": "Enter a length in em, such as 0.05em or -0.02em.",
+                "description": "A length in em, such as 0.05em or -0.02em."
+              },
+              "inset": {
+                "$ref": "#/definitions/lengths"
+              },
+              "maxWidth": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2000
+              },
+              "cellPadding": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              },
+              "links": {
+                "type": "array",
+                "minItems": 0,
+                "maxItems": 8,
+                "items": {
+                  "$ref": "#/definitions/footerLink"
+                }
+              },
+              "lines": {
+                "type": "array",
+                "maxItems": 12,
+                "items": {
+                  "type": "string",
+                  "maxLength": 300
+                }
+              },
+              "separator": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "after": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 200
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "html"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                "patternErrorMessage": "Use lowercase letters, digits and hyphens.",
+                "description": "Lowercase letters, digits and hyphens. Every block in the email needs its own."
+              },
+              "type": {
+                "const": "html"
+              },
+              "role": {
+                "enum": [
+                  "brand",
+                  "content"
+                ],
+                "description": "Brand blocks are the same in every email made from the layout. Content blocks are the ones you write."
+              },
+              "padding": {
+                "$ref": "#/definitions/lengths"
+              },
+              "html": {
+                "type": "string",
+                "maxLength": 65536
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      ]
+    },
+    "column": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width"
+      ],
+      "properties": {
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100.01,
+          "description": "A percentage of the row."
+        },
+        "cellPadding": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 200
+        },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/block"
+          }
+        }
+      }
+    },
+    "socialLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "network"
+      ],
+      "properties": {
+        "network": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "href": {
+          "type": "string",
+          "maxLength": 2000,
+          "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
+          "patternErrorMessage": "Enter a web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}.",
+          "description": "A web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}."
+        },
+        "icon": {
+          "type": "string",
+          "pattern": "^(?:|artifact:[A-Za-z0-9_-]{1,160}|data:image/(?:png|jpeg|gif);base64,[A-Za-z0-9+/]+={0,2})$",
+          "patternErrorMessage": "A picture is artifact:<id> from Files, an embedded PNG, JPEG or GIF, or empty.",
+          "description": "A picture from Files (artifact:<id>) or an embedded PNG, JPEG or GIF. Leave it empty for a placeholder."
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600
+        }
+      }
+    },
+    "footerLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "href": {
+          "type": "string",
+          "maxLength": 2000,
+          "pattern": "^(?:|\\{\\{unsubscribeUrl\\}\\}|\\{\\{preferencesUrl\\}\\}|\\{\\{viewUrl\\}\\}|\\{\\{confirmUrl\\}\\}|[Hh][Tt][Tt][Pp][Ss]?:\\/\\/(?!\\/*[^\\/?#]*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+|(?:[Mm][Aa][Ii][Ll][Tt][Oo]|[Tt][Ee][Ll]):(?!.*\\{\\{)[^\\u0000-\\u0020\\u007f-\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\"<>`\\\\]+)$",
+          "patternErrorMessage": "Enter a web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}.",
+          "description": "A web address, an email address (mailto:), a phone number (tel:) or a link tag such as {{unsubscribeUrl}}."
+        }
+      }
+    },
+    "lengths": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 200
+      },
+      "description": "Top, right, bottom and left, in pixels."
     }
   }
 }

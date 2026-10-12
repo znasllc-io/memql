@@ -80,6 +80,71 @@ test("campaign template saves use the opened client and exact revision", async (
   assert.equal(opened.revision,"2026-10-01T12:00:01Z");
 });
 
+const emailTheme = { page: "#eef0f3", canvas: "#ffffff", primary: "#1f5f8b", secondary: "#5b8fb9", accent: "#d9534f", tint: "#f6f4ef", text: "#2b2b2b", muted: "#8a8f98", headingFont: "Georgia", bodyFont: "Arial" };
+const openTemplate = async (row: Record<string, unknown>) => {
+  const lease = { domain: "client.example", name: "client", generation: 3 };
+  const api = { connect: async () => lease, execute: async (_lease: unknown, name: string) => name === "templateById" ? [row] : [] } as unknown as EditorConnectionAPI;
+  return new Documents(api).read("memql-file://client.example/templates/template/Welcome.email.json");
+};
+
+test("a template row that carries a document opens as that document", async () => {
+  const document = { subject: "Welcome", preheader: "Soon", layout: "builtin:letter", theme: emailTheme, blocks: [{ id: "headline", type: "heading", text: "Thanks for joining us" }, { id: "cta", type: "button", label: "Go", href: "{{confirmUrl}}" }] };
+  const opened = await openTemplate({ id: "template", name: "Welcome", accountId: "client-org", subject: "Stored subject", textBody: "Stored text", htmlBody: "<p>Stored</p>", status: "draft", createdAt: "2026-10-01T12:00:00Z", document });
+  const text = new TextDecoder().decode(opened.content);
+  assert.deepEqual(JSON.parse(text), document);
+  assert.equal(text, JSON.stringify(document, null, 2) + "\n");
+  assert.equal(opened.kind, "campaign_template");
+  assert.equal(opened.revision, "2026-10-01T12:00:00Z");
+  assert.deepEqual(opened.template, { name: "Welcome", accountId: "client-org", status: "draft" });
+  assert.equal(opened.accountIds, undefined, "a template's organization is its account, not a label");
+  // A document that is not an object is not a document: the row opens as the custom email it also carries.
+  for (const document of [null, "text", 7, ["x"]]) {
+    const row = { id: "template", name: "Welcome", accountId: "client-org", subject: "Hi", textBody: "Hello", htmlBody: "", status: "draft", createdAt: "2026-10-01T12:00:00Z", document };
+    assert.deepEqual(JSON.parse(new TextDecoder().decode((await openTemplate(row)).content)), { subject: "Hi", textBody: "Hello", htmlBody: "" });
+  }
+});
+
+test("a template row without a document opens as a custom email", async () => {
+  const row = { id: "template", name: "Welcome", accountId: "client-org", subject: "Hi", textBody: "Hello", htmlBody: "<p>Hello</p>", status: "ready", createdAt: "2026-10-01T12:00:00Z" };
+  const plain = new TextDecoder().decode((await openTemplate(row)).content);
+  assert.equal(plain, JSON.stringify({ subject: "Hi", textBody: "Hello", htmlBody: "<p>Hello</p>" }, null, 2) + "\n");
+  assert.ok(!plain.includes("preheader"), "an empty preheader is left out");
+  const withPreheader = new TextDecoder().decode((await openTemplate({ ...row, preheader: "Soon" })).content);
+  assert.equal(withPreheader, JSON.stringify({ subject: "Hi", preheader: "Soon", textBody: "Hello", htmlBody: "<p>Hello</p>" }, null, 2) + "\n");
+  assert.deepEqual(Object.keys(JSON.parse(withPreheader)), ["subject", "preheader", "textBody", "htmlBody"]);
+  assert.ok(!new TextDecoder().decode((await openTemplate({ ...row, preheader: "" })).content).includes("preheader"));
+  assert.ok(!new TextDecoder().decode((await openTemplate({ ...row, preheader: 5 })).content).includes("preheader"), "a preheader that is not text is left out");
+  const emptyBodies = new TextDecoder().decode((await openTemplate({ id: "template", name: "Welcome", accountId: "client-org", subject: "Hi", createdAt: "2026-10-01T12:00:00Z" })).content);
+  assert.deepEqual(JSON.parse(emptyBodies), { subject: "Hi", textBody: "", htmlBody: "" });
+});
+
+test("an artifact's organization labels travel with the opened file", async () => {
+  const lease = { domain: "client.example", name: "client", generation: 4 };
+  let labels: unknown = ["client-org"];
+  const api = {
+    connect: async () => lease,
+    readBytes: async () => new TextEncoder().encode("{}"),
+    execute: async (_lease: unknown, name: string) => {
+      if (name === "libraryArtifactById") return [{ id: "abc", kind: "file", sourceConceptRef: "file-1", mimeType: "application/json", accountIds: labels }];
+      if (name === "libraryFileById") return [{ id: "file-1", name: "Welcome.email.json", mimeType: "application/json", versionNumber: 2 }];
+      throw new Error(`unexpected ${name}`);
+    },
+  } as unknown as EditorConnectionAPI;
+  const files = new Documents(api);
+  const uri = "memql-file://client.example/artifacts/abc/Welcome.email.json";
+  assert.deepEqual((await files.read(uri)).accountIds, ["client-org"]);
+  labels = ["client-org", "other-org"];
+  assert.deepEqual((await files.read(uri)).accountIds, ["client-org", "other-org"]);
+  labels = ["client-org", 7, null, "other-org"];
+  assert.deepEqual((await files.read(uri)).accountIds, ["client-org", "other-org"], "only text labels are kept");
+  labels = [];
+  assert.deepEqual((await files.read(uri)).accountIds, []);
+  labels = undefined;
+  assert.deepEqual((await files.read(uri)).accountIds, [], "a file with no labels reads as an empty list");
+  labels = "client-org";
+  assert.deepEqual((await files.read(uri)).accountIds, [], "a label that is not a list is no label");
+});
+
 test("revision requests and decisions stay on the document lease and refuse another artifact", async () => {
   const lease = { domain: "client.example", name: "client", generation: 9 };
   const calls: { name: string; call: string }[] = [];
