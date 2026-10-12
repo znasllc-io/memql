@@ -1034,7 +1034,16 @@ jobs:
         # the render halves self-skip without kustomize or kubectl on the
         # runner, and the text-level halves, which are the ones that must not
         # skip, do not.
-        run: go test -count=1 -timeout=300s ./ ./integrations ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+        #
+        # `./integrations/customdomain` holds the gate that reads
+        # docs/public/operate/front-door.md and pins its upgrade backfill to
+        # what the custom-domain and door builders label and annotate
+        # (TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel). It
+        # lives beside the builders, and `./integrations` alone is that
+        # module's root package, not its subpackages, so a docs-only PR
+        # changing the command reached no lane that checks it. DB-free and
+        # under a second.
+        run: go test -count=1 -timeout=300s ./ ./integrations ./integrations/customdomain ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       #
@@ -1319,7 +1328,7 @@ jobs:
           # import graph can see: added for every change, including Go source.
           # The SAME list as go-checks' gate-inputs step, held to it by
           # scripts/dev/gate_inputs_lane_scope_test.go.
-          GATE_PACKAGES: ./ ./integrations ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
+          GATE_PACKAGES: ./ ./integrations ./integrations/customdomain ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/... ./component/auth/... ./deploy/...
           # The trees whose packages the node-tag passes test. A selected
           # package under one of them (or a changed file only a node tag
           # compiles) runs the tag passes; scripts/ci/selection's live test
