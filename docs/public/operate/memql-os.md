@@ -251,7 +251,7 @@ Two consequences worth knowing:
 | **Cluster** | Readiness, modules, data origins, agents, and the audit trail |
 | **Training** | Training from Library files and reviewing knowledge |
 | **Materializer** | Making a new file from a description, from your data, or both |
-| **Campaigns** | Mail audiences, templates, senders, rules, and sending |
+| **Email** | Campaigns, automations, audiences, templates and, for owners and developers, the capture inbox |
 | **Stores** | Shopify store configuration, health, subscriptions, and mirror state |
 | **Users** | People, roles, invitations, enrolment, and sessions |
 | **Accounts** | Accounts the cluster works for and their configuration |

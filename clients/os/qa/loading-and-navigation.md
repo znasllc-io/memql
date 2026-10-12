@@ -13,7 +13,7 @@ verification is tracked separately from a passing typecheck.
 | Bin | Shared `LiveList` handles initial reads and preserves archived rows during refresh. |
 | Files | Shared live lists and explicit file-version skeletons; the folder hierarchy and version chronology retain their navigation model. |
 | Deployables | Shared list reads, map, source metadata, repository/account choices, compose prerequisites, versions, domain guidance, traffic, inline workspace values and store connections. Ordered deployment/setup rails remain workflows. |
-| Campaigns | Shared live collections; audience members, template sample, delivery ledger and breakdown reads. Recipient filters remain filters. |
+| Email | Shared live collections; audience members, template sample, delivery ledger and breakdown reads. Recipient filters remain filters. |
 | Concepts | Registry, concept details, initial rows and additional pages. Schema and row inspectors retain their split view. |
 | Logs | Search/tail data and settings reads; loaded virtual rows remain usable on refresh. |
 | Materializer | Live collections and composer prerequisite form. A starting setup from another app moves the window to the Composer section with the form filled in; the form is local state, so it has no placeholder. A described file's Files entry is awaited on a live feed, and the notices that follow it appear in place and are announced, never as a placeholder. |

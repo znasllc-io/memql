@@ -162,7 +162,7 @@ engine's own "no streaming provider available".
 ## What it does NOT cover
 
 The core, and deliberately nothing else. Every app has its own **Set up** group
-at the top of its Settings section — Campaigns' unsubscribe secret, the GitHub
+at the top of its Settings section — Email's unsubscribe secret, the GitHub
 App, workbenches, local apps — and those stay there. This is what a cluster
 needs before anybody gets useful work out of it, not everything a cluster can
 be told.

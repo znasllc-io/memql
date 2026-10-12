@@ -5,7 +5,6 @@ import { EmailApp } from "../src/apps/email/EmailApp";
 import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConnections";
 import { LocalEmailSettingsStore } from "../src/apps/email/settings";
 import { audienceRow as campaignAudience, campaignRow as emailCampaign, deliveryRow as emailDelivery, fakeConnection as campaignConnection, pagedResult as emailPage, rowsResult, ruleRow as emailRule, senderRow as campaignSender, templateRow as emailTemplate, withSession as campaignSession } from "../test/email/harness";
-import { NewsletterPanel } from "../src/apps/email/NewsletterPanel";
 import { useEmailFeeds, useSignupFormFeed } from "../src/apps/email/useEmail";
 import { EmailNavigationContext } from "../src/apps/email/openRequest";
 import { OverviewSection } from "../src/apps/email/overview/OverviewSection";
@@ -676,20 +675,6 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
 // `syncStatesAll`. Two fixture harnesses rather than one widened one, for the
 // reason the README gives about the fake in general: each is the SUITE's, so a
 // screenshot cannot disagree with what those tests assert.
-const newsletterQaSite = { id: "qa-shop", accountId: "qa-client", title: "Client storefront", status: "live" };
-const newsletterQaBinding = { id: "qa-newsletter", siteId: "qa-shop", accountId: "qa-client", audienceId: "qa-audience", templateId: "qa-welcome", senderIdentityId: "qa-sender", enabled: true, consentText: "Send me product news and offers by email.", createdAt: "2026-10-01T12:00:00Z" };
-function newsletterQaConnection(populated: boolean) {
-  return campaignConnection({ sites: [newsletterQaSite], newsletters: populated ? [newsletterQaBinding] : [],
-    templates: [{ id: "qa-welcome", accountId: "qa-client", name: "Thanks for subscribing", status: "ready" }],
-    senderIdentities: [{ id: "qa-sender", accountId: "qa-client", address: "hello@client.example", status: "active" }],
-    welcomes: populated ? [{ id: "qa-sent", email: "alex@example.test", displayName: "Alex", requestedAt: "2026-10-01T13:00:00Z", status: "sent" }, { id: "qa-blocked", email: "jordan@example.test", displayName: "Jordan", requestedAt: "2026-10-01T13:02:00Z", status: "blocked", lastError: "This sender is disabled. Review the sending identity before continuing." }] : [],
-  });
-}
-function NewsletterQa() {
-  const resources = useEmailFeeds();
-  const signupForms = useSignupFormFeed(["qa-audience"]);
-  const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
-  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><NewsletterPanel audienceId="qa-audience" accountId="qa-client" resources={resources} signupForms={signupForms} /></div>;
 }
 
 const VIEWS: Record<
@@ -733,8 +718,6 @@ const VIEWS: Record<
   // notice -- the cluster refusing a refresh, and the connection dropping.
   "email-overview-interrupted": emailOverviewInterruptedView("refused"),
   "email-overview-reconnecting": emailOverviewInterruptedView("disconnected"),
-  "campaign-newsletter-empty": { connect: () => newsletterQaConnection(false), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
-  "campaign-newsletter-active": { connect: () => newsletterQaConnection(true), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
   // NEXUS (epic memql#5414): what an automation is for. The procedure's page
   // in the three readings its Reuse panel has -- the evidence deciding, a
   // person's own label over evidence that disagrees, and nothing counted yet
