@@ -1058,19 +1058,23 @@ Frames are JSON encodings of the existing protobuf envelopes. A typical request/
 }
 ```
 
-The bridge enforces a small per-connection window (four concurrent queries and a 5 MiB frame limit). Clients should reuse a single socket and listen for `queryResult.done` or `queryError` payloads.
+The bridge enforces a small per-connection window (four concurrent queries). Clients should reuse a single socket and listen for `queryResult.done` or `queryError` payloads.
 
 One answer can be as large as 32 MiB, the limit of the gRPC stream in both directions, which the bridge shares so that it can receive anything the server sends. An answer over that is never sent: the request that asked gets a `queryError` with code `ResourceExhausted`, metadata `code` of `RESULT_TOO_LARGE` (with `sizeBytes` and `limitBytes`), and a sentence that names the size and the limit. The socket and every other request carry on. Ask for fewer rows or fewer fields, or read one row by id, and try again.
+
+A request from the browser can be as large as the same 32 MiB (`MEMQL_WS_MAX_MESSAGE_BYTES`), which a template save with a large document needs. A request over the limit fails by itself, the same way: a `queryError` with code `ResourceExhausted`, metadata `code` of `REQUEST_TOO_LARGE` (with `sizeBytes` and `limitBytes`) and a sentence that names the size and the limit, carrying the ids the request came with so that the client that sent it can match the refusal to it. The socket and every other request carry on. To do this the bridge reads and discards up to twice the limit; a message larger than that closes the connection, since a client that sends without end is not one request that failed. The ids are looked for in the first 64 KiB and the last 4 KiB of the message, which is where clients write them.
+
+The time allowed to write a message to the browser is `MEMQL_WS_WRITE_TIMEOUT_MS` plus one second for each MiB of the message, so a large answer is not cut off on an ordinary connection. No keepalive ping is sent while a message is being written, nor while one is arriving and bytes of it are still coming; a sender that stops in the middle of a message is not exempt from the keepalive.
 
 Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MEMQL_WS_DIAL_TIMEOUT_MS` | How long to wait when dialing the internal gRPC server. | `5000` |
-| `MEMQL_WS_WRITE_TIMEOUT_MS` | Per-message write deadline applied to the WebSocket. | `10000` |
+| `MEMQL_WS_WRITE_TIMEOUT_MS` | Per-message write deadline applied to the WebSocket, plus one second for each MiB of the message. | `10000` |
 | `MEMQL_WS_MAX_CONCURRENT_REQUESTS` | Maximum in-flight `executeQuery` messages per WebSocket. | `4` |
-| `MEMQL_WS_MAX_MESSAGE_BYTES` | Maximum accepted frame size from the browser. | `5242880` (5 MiB) |
-| `MEMQL_WS_PING_INTERVAL_MS` | Interval for server-side WebSocket keepalive pings. Prevents idle connection timeouts on edge/proxy infrastructure. Set to `0` to disable. | `30000` (30s) |
+| `MEMQL_WS_MAX_MESSAGE_BYTES` | Largest request accepted from the browser. A larger one fails by itself with a sentence (see above). | `33554432` (32 MiB, the server's own message cap) |
+| `MEMQL_WS_PING_INTERVAL_MS` | Interval for server-side WebSocket keepalive pings. Prevents idle connection timeouts on edge/proxy infrastructure. Set to `0` to disable. | `15000` (15s) |
 
 ## The internal query form
 
