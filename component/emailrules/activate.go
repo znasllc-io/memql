@@ -38,17 +38,21 @@ package emailrules
 // the ENGINE's own sentence on `lastError`, and the app renders that sentence
 // verbatim. The alternative -- a rule that stays `draft` while an error lives in
 // a log line on one replica -- is the silence this whole feature exists to
-// remove. An EDIT that is refused is the one exception to `failed`: the version
+// remove. An EDIT that is refused is the exception to `failed`: the version
 // that was live keeps running, so the row keeps naming it and reading `active`,
 // and `lastError` says why the edit did not take and that the previous version
-// is still running (refuse). The row records what happened -- a caller that
-// hangs up after the activation went live does not stop it being recorded, and
-// one that hangs up before it took effect leaves the row as it was.
+// is still running -- decided from a fresh read of the row and the bundle it
+// names, and written against the version of the row read, so a breaker's
+// pause, another activation or a failed turn-off that landed meanwhile is not
+// overwritten (refuse). The row records what happened -- a caller that hangs
+// up after the activation went live does not stop it being recorded, and an
+// attempt that ended because the caller hung up leaves the row as it was.
 
 import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -324,58 +328,150 @@ func (a *Activator) recordDryRun(ctx context.Context, bundleID, ruleID, lane str
 // cannot cancel (memql#6022): an activation that went live, or a retire that
 // went through, has happened whether or not the client is still listening,
 // and a row left naming the version it replaced makes turning the rule off
-// retire the wrong bundle and turning it on a conflict with the live one. A
-// refusal or failure the caller abandoned is not recorded at all (abandoned).
+// retire the wrong bundle and turning it on a conflict with the live one. An
+// attempt the caller abandoned is not recorded at all (abandoned).
 func (a *Activator) record(ctx context.Context, ruleID, status, bundleID, constructName, lastError string) error {
+	return a.recordAt(ctx, ruleID, time.Time{}, status, bundleID, constructName, lastError)
+}
+
+// recordAt is record, conditional on the rule row still being the version
+// read at `at` -- a compare-and-set: a record that lost the race to another
+// write fails with memql.ErrRowVersionChanged instead of overwriting what
+// landed in between. A zero `at` (a read that carried no version) records
+// unconditionally.
+func (a *Activator) recordAt(ctx context.Context, ruleID string, at time.Time, status, bundleID, constructName, lastError string) error {
 	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 	defer cancel()
-	return a.store.RecordGeneration(auth.ContextWithInternalOrigin(recordCtx), ruleID, status, bundleID, constructName, lastError)
+	return a.store.RecordGeneration(auth.ContextWithInternalOrigin(fencedOnRule(recordCtx, ruleID, at)), ruleID, status, bundleID, constructName, lastError)
+}
+
+// fencedOnRule makes a write conditional on the version of the rule row that
+// was read. A zero version leaves the write as it was: a zero witness would
+// require the row to be absent, which refuses every write to a rule that
+// exists.
+func fencedOnRule(ctx context.Context, ruleID string, at time.Time) context.Context {
+	if at.IsZero() {
+		return ctx
+	}
+	return memql.ContextWithRowVersionFence(ctx, RuleConcept, ruleID, at)
 }
 
 // recordTimeout bounds a rule-row record that no caller can cancel.
 const recordTimeout = 30 * time.Second
 
-// abandoned reports that the caller gave up before the refusal or failure it
-// would record. Nothing took effect -- an activation that fails undoes what it
-// did before its commit point, and a retire that fails has not retired -- so
-// the row is left as it was: a hang-up is not something the operator can fix
-// on the rule, and "context canceled" is not a reason to show them.
-func abandoned(ctx context.Context) bool {
-	return ctx.Err() != nil
+// recordAttempts bounds how often a record conditional on the row it read is
+// decided again after another write landed on the row in between.
+const recordAttempts = 3
+
+// abandoned reports whether an attempt ended because its caller gave up: the
+// error it ended with IS the caller's cancellation or deadline. Nothing took
+// effect -- an activation that fails undoes what it did before its commit
+// point, and a retire that fails has not retired -- so the row is left as it
+// was: a hang-up is not something the operator can fix on the rule, and
+// "context canceled" is not a reason to show them. A refusal on the merits
+// that completes after the caller left is not abandoned: it is the operator's
+// to read on the row.
+func abandoned(cause error) bool {
+	return errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded)
 }
 
 // PreviousVersionStillRunning ends the reason a refused edit records: the
 // version that was live before the edit is still armed and still sending.
 const PreviousVersionStillRunning = "The previous version is still running."
 
-// refuse records a refused activation where the operator is looking.
+// refuse records a refused activation where the operator is looking -- or
+// leaves the row alone, when what it says is still true or is someone else's
+// account.
 //
-// With no version live before it, the rule reads failed (fail). With one live
-// -- an edit that did not take -- nothing about what is running changed:
-// ActivateApprovedBundle leaves the live version armed when it refuses the new
-// one, and every earlier refusal never reached it. So the row keeps naming the
-// live version and keeps reading active, and says why the edit did not take.
-// Recording it as failed, naming the refused bundle, told the app the rule had
-// stopped while it went on sending -- and turning it off then retired the
-// refused bundle and left the live one firing.
+// The refusal changed nothing about what is running: ActivateApprovedBundle
+// leaves a live version armed when it refuses a new one, and every earlier
+// refusal never reached it. What the row should say depends on what is true
+// NOW, not on the state read when this attempt began -- a breaker may have
+// paused the live version meanwhile, another activation may have gone live, a
+// turn-off may have failed -- so the row and the bundle it names are re-read
+// fresh, and the record is written against the version of the row that was
+// read (recordAt), decided again if another write lands in between:
+//
+//   - the row names a different bundle than when this attempt began: another
+//     activation, a retire or an edit wrote it since, and it is left alone;
+//   - it reads active and names a bundle that reads active: the version that
+//     was live keeps running, so the row keeps naming it and reading active,
+//     and says why the edit did not take and that the previous version is
+//     still running;
+//   - the bundle it names reads active but the row does not -- a turn-off that
+//     failed reads failed -- or the row reads paused naming the bundle a
+//     breaker stopped: left alone, so the row keeps naming the bundle a
+//     turn-off must reach, and a stop keeps its account;
+//   - otherwise nothing it names is running: the rule reads failed with the
+//     refusal, naming this attempt's bundle -- or, when this attempt wrote
+//     none, the one it named.
 func (a *Activator) refuse(ctx context.Context, ruleID string, res Result, state RuleState, cause error) (Result, error) {
-	if state.Status != "active" || strings.TrimSpace(state.BundleID) == "" {
-		return a.fail(ctx, ruleID, res, cause)
-	}
-	res.Status = "active"
-	res.BundleID = state.BundleID
-	if strings.TrimSpace(state.ConstructName) != "" {
-		res.ConstructName = state.ConstructName
-	}
 	res.Error = cause.Error()
-	if abandoned(ctx) {
+	if abandoned(cause) {
+		return asRead(res, state), cause
+	}
+	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
+	for attempt := 0; attempt < recordAttempts; attempt++ {
+		now, found, err := a.store.RuleStateByID(memql.ContextWithFreshRead(readCtx), ruleID)
+		if err != nil {
+			return res, fmt.Errorf("%w (and the rule could not be read again to record it: %v)", cause, err)
+		}
+		if !found || !sameBundle(now.BundleID, state.BundleID) {
+			return asRead(res, now), cause
+		}
+		named := strings.TrimSpace(now.BundleID)
+		live := false
+		if named != "" {
+			status, _, err := a.store.BundleStatus(memql.ContextWithFreshRead(readCtx), named)
+			if err != nil {
+				return res, fmt.Errorf("%w (and the version the rule names could not be read to record it: %v)", cause, err)
+			}
+			live = status == "active"
+		}
+		var status, bundleID, constructName, lastError string
+		switch {
+		case live && now.Status == "active":
+			status, bundleID, constructName = "active", named, now.ConstructName
+			lastError = asSentence(truncate(cause.Error(), 4000)) + " " + PreviousVersionStillRunning
+		case live, now.Status == "paused" && named != "":
+			return asRead(res, now), cause
+		default:
+			status, bundleID, constructName = "failed", res.BundleID, res.ConstructName
+			if bundleID == "" {
+				bundleID = named
+			}
+			lastError = truncate(cause.Error(), 4096)
+		}
+		if constructName == "" {
+			constructName = now.ConstructName
+		}
+		err = a.recordAt(ctx, ruleID, now.VersionAt, status, bundleID, constructName, lastError)
+		if errors.Is(err, memql.ErrRowVersionChanged) {
+			continue
+		}
+		if err != nil {
+			return res, fmt.Errorf("%w (and the reason could not be recorded on the rule: %v)", cause, err)
+		}
+		res.Status, res.BundleID, res.ConstructName = status, bundleID, constructName
 		return res, cause
 	}
-	lastError := asSentence(truncate(cause.Error(), 4000)) + " " + PreviousVersionStillRunning
-	if err := a.record(ctx, ruleID, "active", res.BundleID, res.ConstructName, lastError); err != nil {
-		return res, fmt.Errorf("%w (and the reason could not be recorded on the rule: %v)", cause, err)
+	return res, fmt.Errorf("%w (and the rule kept changing, so the reason was not recorded on it)", cause)
+}
+
+// asRead is a refusal's result as the rule row reads: what is true, rather
+// than what this attempt would have made it.
+func asRead(res Result, row RuleState) Result {
+	res.Status, res.BundleID = row.Status, row.BundleID
+	if strings.TrimSpace(row.ConstructName) != "" {
+		res.ConstructName = row.ConstructName
 	}
-	return res, cause
+	return res
+}
+
+// sameBundle compares two bundle ids however each is spelled.
+func sameBundle(a, b string) bool {
+	return memql.BareShortId(strings.TrimSpace(a)) == memql.BareShortId(strings.TrimSpace(b))
 }
 
 // asSentence ends text with a full stop unless it already ends a sentence.
@@ -394,7 +490,7 @@ func asSentence(text string) string {
 func (a *Activator) fail(ctx context.Context, ruleID string, res Result, cause error) (Result, error) {
 	res.Status = "failed"
 	res.Error = cause.Error()
-	if abandoned(ctx) {
+	if abandoned(cause) {
 		return res, cause
 	}
 	if err := a.record(ctx, ruleID, "failed", res.BundleID, res.ConstructName, truncate(cause.Error(), 4096)); err != nil {

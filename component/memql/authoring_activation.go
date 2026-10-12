@@ -65,6 +65,10 @@ type AuthoringBundleRow struct {
 	Version            int                `json:"version"`
 	SupersedesBundleId string             `json:"supersedesBundleId"`
 	DryRunReport       BundleDryRunReport `json:"dryRunReport"`
+	// CreatedAt is the version of the row that was read -- the witness a
+	// write conditional on that read is fenced on (ContextWithRowVersionFence).
+	// Zero when the read did not carry one.
+	CreatedAt time.Time `json:"-"`
 }
 
 // AuthoringConstructRow is the parsed v1:authoring:construct projection: the

@@ -319,6 +319,18 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// and still not yours to write".
 		{Path: "authoring/mutations.memql", Name: "recordConstructGoalSignature"}: true,
 
+		// memql#6022. A bundle that reads active is armed on every replica --
+		// the boot re-arm, each reconcile pass and the arm broadcast all follow
+		// the row -- so `active` is the claim that the gates passed. Scoping to
+		// actor.userId is not the missing piece: the bundle IS its owner's, and
+		// the owner is exactly who the gates stand in front of. What a caller
+		// may not do is make the claim at all; the gated activation and the
+		// durable promote write it under internal origin, and the breaker's
+		// pause is the system's own decision. Raw writes are held at the write
+		// chokepoint too (component/memql/authoring_bundle_activation_write_guard.go).
+		{Path: "authoring/mutations.memql", Name: "activateAuthoringBundle"}:  true,
+		{Path: "authoring/mutations.memql", Name: "setAuthoringBundleStatus"}: true,
+
 		// epic memql#4966. workRunsInFlight is the wait-and-abandon sweep's
 		// read. (A2 briefly carried a closeWorkGoal beside it; epic A3's
 		// updateWorkGoal is the same write with a wider argument list, so

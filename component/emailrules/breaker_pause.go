@@ -12,6 +12,8 @@ package emailrules
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -39,10 +41,21 @@ func (a EngineAdapter) SetAuthoredPauseListener(name string, listener memql.Auth
 //
 // Only a bundle shaped like a rule's is read: every rule bundle id is derived
 // from the rule's id and version (bundleIDFor), which is also how the bundle
-// is traced back to its rule (Store.RuleOfBundle). The rule is marked only
-// while its row is active and names this bundle; a rule that moved on -- an
-// edit armed a newer version, or it was turned off -- is left as it is. The
-// reads and the write run as the rule's owner -- the bundle's owner, which
+// is traced back to its rule (Store.RuleOfBundle). Everything it acts on is
+// read fresh -- the listener runs after the pause went out, and the rule or
+// the bundle may have moved on since:
+//
+//   - the bundle must still read paused: one turned on again since is not
+//     this pause's to mark;
+//   - the rule is marked only while its row reads active and names this
+//     bundle: a rule that moved on -- an edit armed a newer version, or it was
+//     turned off -- is left as it is;
+//   - the write is conditional on the version of the row read (a
+//     compare-and-set). Another write landing in between -- a firing's count,
+//     an edit -- makes it fail with memql.ErrRowVersionChanged, and the row is
+//     read and decided again.
+//
+// The reads and the write run as the rule's owner -- the bundle's owner, which
 // activation requires to be the same person -- and the write with internal
 // origin, as every write of the engine's account of a rule does.
 func recordBreakerPause(ctx context.Context, engine Engine, owner, bundleID string) error {
@@ -51,16 +64,23 @@ func recordBreakerPause(ctx context.Context, engine Engine, owner, bundleID stri
 	}
 	ownerCtx := auth.ContextWithUserActor(ctx, owner)
 	store := NewStore(engine)
-	ruleID, ok, err := store.RuleOfBundle(ownerCtx, bundleID)
-	if err != nil || !ok {
+	ruleID, status, ok, err := store.RuleOfBundle(memql.ContextWithFreshRead(ownerCtx), bundleID)
+	if err != nil || !ok || status != "paused" {
 		return err
 	}
-	state, found, err := store.RuleStateByID(ownerCtx, ruleID)
-	if err != nil || !found {
-		return err
+	for attempt := 0; attempt < recordAttempts; attempt++ {
+		state, found, err := store.RuleStateByID(memql.ContextWithFreshRead(ownerCtx), ruleID)
+		if err != nil || !found {
+			return err
+		}
+		if state.Status != "active" || !sameBundle(state.BundleID, bundleID) {
+			return nil
+		}
+		err = store.RecordGeneration(auth.ContextWithInternalOrigin(fencedOnRule(ownerCtx, ruleID, state.VersionAt)),
+			ruleID, "paused", state.BundleID, state.ConstructName, BreakerStoppedSentence)
+		if !errors.Is(err, memql.ErrRowVersionChanged) {
+			return err
+		}
 	}
-	if state.Status != "active" || memql.BareShortId(state.BundleID) != memql.BareShortId(bundleID) {
-		return nil
-	}
-	return store.RecordGeneration(auth.ContextWithInternalOrigin(ownerCtx), ruleID, "paused", state.BundleID, state.ConstructName, BreakerStoppedSentence)
+	return fmt.Errorf("emailrules: rule %q kept changing, so the breaker's pause of %q was not recorded on it", ruleID, bundleID)
 }

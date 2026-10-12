@@ -102,8 +102,16 @@ mutation bundle recordBundleDryRun {
 
 /// Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The
 /// authored-construct runtime (#959) registers the bundle's constructs on this transition; member
-/// constructs are flipped to active via setConstructStatus.
+/// constructs are flipped to active via setConstructStatus. @serverOnly (memql#6022): every replica
+/// arms every bundle that reads active -- the boot re-arm, each reconcile pass and the arm
+/// broadcast all follow this row -- so `active` must mean the gated activation ran. SCOPING TO
+/// actor.userId IS NOT THE FIX: the bundle is already its owner's, and the owner is exactly who the
+/// gates stand in front of; what must not be caller-writable is the claim that the gates passed.
+/// Its writers are the gated activation (ActivateApprovedBundle) and the durable promote, under
+/// internal origin. A raw insert() or update() never consults this annotation, so the transition
+/// is also held at the write chokepoint: component/memql/authoring_bundle_activation_write_guard.go.
 @actor
+@serverOnly
 mutation bundle activateAuthoringBundle {
   args {
     bundleId  string!
@@ -113,22 +121,28 @@ mutation bundle activateAuthoringBundle {
     ownerUserId: actor.userId
     status: "active"
     activatedAt: now
-    // A live bundle carries no failure reason. A bundle id can be written
-    // again -- an email rule turned off and on restarts at version 1 under
-    // the same derived id -- and the row read-merges, so without this the
-    // reason a breaker paused it with rode along into the live bundle.
+    // A live bundle carries no failure reason and no retirement. A bundle id
+    // can be written again -- an email rule turned off and on restarts at
+    // version 1 under the same derived id -- and the row read-merges, so
+    // without these the reason a breaker paused it with, and the time it was
+    // retired, rode along into the live bundle.
     failureReason: ""
+    retiredAt: ""
   }
 }
 
-/// Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user
-/// hold), retired (superseded or removed), or failed. retiredAt is stamped by
-/// retireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.
+/// Generic lifecycle transition for the remaining bundle states: paused (the circuit breaker),
+/// draft, or failed. retiredAt is stamped by retireAuthoringBundle, and active is
+/// activateAuthoringBundle's alone. failureReason optional. @serverOnly (memql#6022): the breaker's
+/// pause is the system's own decision, recorded under internal origin, and no client calls it.
+/// SCOPING TO actor.userId IS NOT THE FIX: the row is already its owner's -- what it records is
+/// the engine's account of a bundle's lifecycle, which a caller may not assert for their own rows.
 @actor
+@serverOnly
 mutation bundle setAuthoringBundleStatus {
   args {
     bundleId       string!
-    status         enum("draft", "paused", "active", "failed")!
+    status         enum("draft", "paused", "failed")!
     failureReason  string
   }
   update {

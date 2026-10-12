@@ -216,7 +216,9 @@ func (a *App) wireAuthoredRuntime() {
 
 // pauseTrippedAuthoredAutomation pauses an automation whose breaker tripped on
 // every replica: the engine stops it here, records the pause on its bundle row
-// and broadcasts the disarm. A pause that cannot be recorded leaves it stopped
+// and broadcasts the disarm. The log says what the trip actually did -- a trip
+// can find a fix already armed, or the rule turned on again, or its bundle
+// retired elsewhere -- and a pause that cannot be recorded leaves it stopped
 // on this node only, which is what the warning says.
 func (a *App) pauseTrippedAuthoredAutomation(info automations.BreakerTripInfo) {
 	if a.engine == nil {
@@ -237,13 +239,31 @@ func (a *App) pauseTrippedAuthoredAutomation(info automations.BreakerTripInfo) {
 			return a.authoredBreaker != nil && a.authoredBreaker.IsOpen(info.Owner, info.Automation)
 		},
 	}
-	if err := a.engine.PauseTrippedAutomation(ctx, a.AuthoredRuntimeDeps(), trip); err != nil {
-		a.Logger.Warn("authored automation paused on this node only -- the pause could not be recorded, so other replicas may still run it",
-			"owner", info.Owner, "automation", info.Automation, "error", err)
+	outcome, err := a.engine.PauseTrippedAutomation(ctx, a.AuthoredRuntimeDeps(), trip)
+	if err != nil {
+		msg := "authored automation paused on this node only -- the pause could not be recorded, so other replicas may still run it"
+		if outcome == memql.TripPaused {
+			msg = "authored automation's pause is recorded, but this node could not finish taking it out -- the other replicas stop it at their next reconcile pass"
+		}
+		a.Logger.Warn(msg, "owner", info.Owner, "automation", info.Automation, "bundleId", info.BundleId, "outcome", outcome, "error", err)
 		return
 	}
-	a.Logger.Info("authored automation paused on every replica after its circuit breaker tripped",
-		"owner", info.Owner, "automation", info.Automation)
+	msg, ok := tripLogMessages[outcome]
+	if !ok {
+		msg = "authored automation's circuit breaker tripped"
+	}
+	a.Logger.Info(msg, "owner", info.Owner, "automation", info.Automation, "bundleId", info.BundleId,
+		"version", info.Version, "outcome", outcome)
+}
+
+// tripLogMessages is what each trip outcome logs: what happened, not what was
+// meant to.
+var tripLogMessages = map[memql.AuthoredTripOutcome]string{
+	memql.TripPaused:          "authored automation paused on every replica after its circuit breaker tripped",
+	memql.TripBundleNotActive: "authored automation's circuit breaker tripped, but its bundle was no longer active -- nothing was recorded; it was taken out on every replica",
+	memql.TripStoppedHere:     "authored automation's circuit breaker tripped; it was not armed from a bundle, so it is stopped on this node only",
+	memql.TripVersionNotHeld:  "authored automation's circuit breaker tripped, but this node no longer runs the version that failed -- nothing was paused",
+	memql.TripBreakerReset:    "authored automation's circuit breaker tripped, but it was turned on again before the trip applied -- nothing was paused",
 }
 
 // breakerPauseReason is the sentence a breaker's pause leaves on the bundle

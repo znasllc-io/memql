@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -30,10 +31,24 @@ const (
 // recordEmailRuleGeneration is applied to it, so later reads see what was
 // recorded. It honours a cancelled context the way a database driver does,
 // and records the actor each call ran as.
+//
+// With versions tracked (track), the row also carries the version a read
+// returns as its createdAt, every write moves it on, and a write fenced on the
+// rule row is refused with memql.ErrRowVersionChanged when the row moved on
+// since the version the last read handed out -- the database's compare-and-
+// set, as far as these tests need it. beforeRecord lands another writer's
+// write in the instant before the next record.
 type rowEngine struct {
 	*fakeEngine
 	actors []string
+
+	version      time.Time // the rule row's current version; zero = not tracked
+	readVersion  time.Time // the version the last rule read handed out
+	beforeRecord func()    // runs once, before the next record is applied
+	rejected     int       // fenced records refused because the row moved on
 }
+
+const emailRuleConcept = "v1:campaigns:emailRule"
 
 var recordArg = regexp.MustCompile(`(status|bundleId|constructName|lastError): "((?:[^"\\]|\\.)*)"`)
 
@@ -41,18 +56,52 @@ func (e *rowEngine) Execute(ctx context.Context, q string) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	record := strings.HasPrefix(q, "mutation recordEmailRuleGeneration")
+	if record && e.beforeRecord != nil {
+		before := e.beforeRecord
+		e.beforeRecord = nil
+		before()
+	}
+	if record && !e.version.IsZero() && e.rule != nil &&
+		memql.HasRowVersionFence(ctx, emailRuleConcept, str(e.rule, "id")) && !e.version.Equal(e.readVersion) {
+		e.rejected++
+		return nil, memql.ErrRowVersionChanged
+	}
 	actor := ""
 	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
 		actor = ac.UserId
 	}
 	e.actors = append(e.actors, actor)
 	out, err := e.fakeEngine.Execute(ctx, q)
-	if err == nil && strings.HasPrefix(q, "mutation recordEmailRuleGeneration") && e.rule != nil {
+	if err == nil && record && e.rule != nil {
+		fields := map[string]any{}
 		for _, m := range recordArg.FindAllStringSubmatch(q, -1) {
-			e.rule[m[1]] = strings.ReplaceAll(m[2], `\"`, `"`)
+			fields[m[1]] = strings.ReplaceAll(m[2], `\"`, `"`)
 		}
+		e.write(fields)
+	}
+	if err == nil && strings.HasPrefix(q, "query emailRuleById") {
+		e.readVersion = e.version
 	}
 	return out, err
+}
+
+// track starts tracking the rule row's versions.
+func (e *rowEngine) track() {
+	e.version = time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	e.rule["createdAt"] = e.version
+}
+
+// write applies fields to the rule row -- a record, or another writer's write
+// -- and, when versions are tracked, moves the row to its next version.
+func (e *rowEngine) write(fields map[string]any) {
+	for k, v := range fields {
+		e.rule[k] = v
+	}
+	if !e.version.IsZero() {
+		e.version = e.version.Add(time.Millisecond)
+		e.rule["createdAt"] = e.version
+	}
 }
 
 // records are the rule-row records in the order they were made, with the
@@ -126,11 +175,12 @@ func TestABreakerPauseMarksTheRulePaused(t *testing.T) {
 }
 
 // TestABreakerPauseOfABundleTheRuleNoLongerRunsChangesNothing: the pause marks
-// a rule only while the rule reads active and runs the paused bundle. A bundle
-// that is not an email rule's is not read at all; a rule that moved on -- an
-// edit armed a newer version, or it was turned off -- is left as it is, and so
-// is one that does not read active; and a bundle whose row names a rule that
-// does not derive its id names no rule.
+// a rule only while the rule reads active and runs the paused bundle, and only
+// while that bundle still reads paused. A bundle that is not an email rule's is
+// not read at all; a rule that moved on -- an edit armed a newer version, or it
+// was turned off -- is left as it is, and so is one that does not read active;
+// a bundle turned on again since is not marked; and a bundle whose row names a
+// rule that does not derive its id names no rule.
 func TestABreakerPauseOfABundleTheRuleNoLongerRunsChangesNothing(t *testing.T) {
 	v1, bundle := ruleBundle(testRule, 1)
 	v2, _ := ruleBundle(testRule, 2)
@@ -140,6 +190,10 @@ func TestABreakerPauseOfABundleTheRuleNoLongerRunsChangesNothing(t *testing.T) {
 	refused := liveRule(v1)
 	refused["status"] = "failed"
 	refused["lastError"] = "authoring: the generated automation does not compile"
+	// Turned off and on again before the listener ran: the same bundle id reads
+	// active, and the pause it was told about no longer stands.
+	_, turnedOnAgain := ruleBundle(testRule, 1)
+	turnedOnAgain["status"] = "active"
 	otherRules, claimed := ruleBundle("v1:campaigns:emailRule:other0001", 1)
 	claimed["dryRunReport"] = map[string]any{"rule": testRule}
 
@@ -153,6 +207,7 @@ func TestABreakerPauseOfABundleTheRuleNoLongerRunsChangesNothing(t *testing.T) {
 		{"an edit armed a newer version", liveRule(v2), bundle, v1, true},
 		{"the rule was turned off", turnedOff, bundle, v1, true},
 		{"the rule does not read active", refused, bundle, v1, true},
+		{"the bundle no longer reads paused", liveRule(v1), turnedOnAgain, v1, false},
 		{"the bundle's row names a rule that does not derive it", liveRule(otherRules), claimed, otherRules, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -332,5 +387,242 @@ func TestAnAttemptTheCallerAbandonsLeavesTheRuleAsItWas(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestABreakerPauseIsWrittenAgainstTheRowItRead: the pause is recorded on the
+// rule row it read, as a compare-and-set. Another write lands between the read
+// and the write: a firing's count is re-read and the pause written over it; an
+// edit that armed a newer version leaves the rule alone -- the pause was about
+// a version the rule no longer runs.
+func TestABreakerPauseIsWrittenAgainstTheRowItRead(t *testing.T) {
+	paused, bundle := ruleBundle(testRule, 1)
+	v2, _ := ruleBundle(testRule, 2)
+
+	t.Run("a firing lands in between", func(t *testing.T) {
+		e := &rowEngine{fakeEngine: &fakeEngine{rule: liveRule(paused), bundle: bundle}}
+		e.track()
+		e.beforeRecord = func() { e.write(map[string]any{"firedCount": 4}) }
+		if err := recordBreakerPause(context.Background(), e, testOwner, paused); err != nil {
+			t.Fatalf("record the pause: %v", err)
+		}
+		if e.rule["status"] != "paused" || e.rule["lastError"] != BreakerStoppedSentence || e.rule["firedCount"] != 4 {
+			t.Fatalf("the rule reads %q / %q, firedCount %v; want paused with the sentence, over the firing's count",
+				e.rule["status"], e.rule["lastError"], e.rule["firedCount"])
+		}
+		if e.rejected != 1 {
+			t.Fatalf("%d writes were refused for a row that moved on; the first write must be conditional on the row it read", e.rejected)
+		}
+	})
+
+	t.Run("an edit lands in between", func(t *testing.T) {
+		e := &rowEngine{fakeEngine: &fakeEngine{rule: liveRule(paused), bundle: bundle}}
+		e.track()
+		e.beforeRecord = func() { e.write(map[string]any{"bundleId": v2, "status": "active", "lastError": ""}) }
+		if err := recordBreakerPause(context.Background(), e, testOwner, paused); err != nil {
+			t.Fatalf("record the pause: %v", err)
+		}
+		if e.rule["status"] != "active" || e.rule["bundleId"] != v2 || e.rule["lastError"] != "" {
+			t.Fatalf("the pause of version 1 was written over the edit that armed version 2: the rule reads %q, %q, %q",
+				e.rule["status"], e.rule["bundleId"], e.rule["lastError"])
+		}
+		if e.rejected != 1 {
+			t.Fatalf("%d writes were refused; the write must have been conditional on the row it read", e.rejected)
+		}
+	})
+}
+
+// TestARefusedEditDuringATripLeavesTheRulePaused is the re-review's probe C:
+// version 1 keeps failing while the person saves an edit. Its breaker trips
+// while the edit is in flight, the node that records the pause marks the rule
+// paused, and then the edit is refused. The rule does not go back to reading
+// active "still running" -- version 1 is paused on every replica.
+func TestARefusedEditDuringATripLeavesTheRulePaused(t *testing.T) {
+	v1, bundle := ruleBundle(testRule, 1)
+	bundle["status"] = "active"
+	e := &rowEngine{fakeEngine: &fakeEngine{rule: liveRule(v1), bundle: bundle}}
+	refusal := errors.New("authoring: automation emailRuleAb12cd34 does not compile on this node")
+	e.activate = func(_, bundleID string) error {
+		if bundleID == v1 {
+			return nil
+		}
+		e.bundle["status"] = "paused"
+		if err := recordBreakerPause(context.Background(), e, testOwner, v1); err != nil {
+			t.Fatalf("the pause listener: %v", err)
+		}
+		return refusal
+	}
+
+	if _, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), testOwner, testRule); !errors.Is(err, refusal) {
+		t.Fatalf("a refused edit must say so, got %v", err)
+	}
+	if e.rule["status"] != "paused" || e.rule["lastError"] != BreakerStoppedSentence || e.rule["bundleId"] != v1 {
+		t.Fatalf("a refused edit during a trip left the rule reading %q / %q, naming %q; the breaker's pause stands",
+			e.rule["status"], e.rule["lastError"], e.rule["bundleId"])
+	}
+}
+
+// TestARefusedEditAfterAFailedTurnOffKeepsNamingTheLiveVersion: turning the
+// rule off failed, so the row reads failed while still naming the version that
+// is running. An edit refused after that does not move the row onto the refused
+// bundle: turning the rule off again must reach the version that is running.
+func TestARefusedEditAfterAFailedTurnOffKeepsNamingTheLiveVersion(t *testing.T) {
+	live, bundle := ruleBundle(testRule, 1)
+	bundle["status"] = "active"
+	failedOff := liveRule(live)
+	failedOff["status"] = "failed"
+	failedOff["lastError"] = "authoring: retire bundle: the database went away"
+	e := &rowEngine{fakeEngine: &fakeEngine{rule: failedOff, bundle: bundle}}
+	refusal := errors.New("authoring: automation emailRuleAb12cd34 does not compile on this node")
+	e.activate = func(_, bundleID string) error {
+		if bundleID != live {
+			return refusal
+		}
+		return nil
+	}
+
+	if _, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), testOwner, testRule); !errors.Is(err, refusal) {
+		t.Fatalf("a refused edit must say so, got %v", err)
+	}
+	if e.rule["bundleId"] != live || e.rule["status"] != "failed" || e.rule["lastError"] != failedOff["lastError"] {
+		t.Fatalf("after a refused edit the row reads %q naming %q (%q); it must still name the running version %q",
+			e.rule["status"], e.rule["bundleId"], e.rule["lastError"], live)
+	}
+	var retired string
+	e.retire = func(_, bundleID string) error { retired = bundleID; return nil }
+	if _, err := NewActivator(e, deps()).Retire(ownerCtx(auth.RoleOwner), testOwner, testRule); err != nil {
+		t.Fatalf("turn the rule off: %v", err)
+	}
+	if retired != live {
+		t.Fatalf("turning the rule off retired %q; the version that is running is %q", retired, live)
+	}
+}
+
+// TestARefusedEditLeavesARowAnotherActivationChanged: while this edit ran,
+// another activation of the rule went live and the row now names it. The
+// refusal leaves that row alone -- it is the other activation's account, and
+// "the previous version" this edit read is no longer what is running.
+func TestARefusedEditLeavesARowAnotherActivationChanged(t *testing.T) {
+	v1, bundle := ruleBundle(testRule, 1)
+	bundle["status"] = "active"
+	v3 := "v1:authoring:bundle:" + bundleIDFor(testRule, 3)
+	e := &rowEngine{fakeEngine: &fakeEngine{rule: liveRule(v1), bundle: bundle}}
+	refusal := errors.New("authoring: automation emailRuleAb12cd34 does not compile on this node")
+	e.activate = func(_, bundleID string) error {
+		if bundleID == v1 {
+			return nil
+		}
+		e.rule["bundleId"], e.rule["status"], e.rule["lastError"] = v3, "active", ""
+		return refusal
+	}
+
+	if _, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), testOwner, testRule); !errors.Is(err, refusal) {
+		t.Fatalf("a refused edit must say so, got %v", err)
+	}
+	if e.rule["bundleId"] != v3 || e.rule["status"] != "active" || e.rule["lastError"] != "" {
+		t.Fatalf("a refused edit overwrote the row another activation wrote: it reads %q naming %q (%q)",
+			e.rule["status"], e.rule["bundleId"], e.rule["lastError"])
+	}
+}
+
+// TestARefusalThatCompletesAfterTheCallerLeftIsRecorded: the caller hangs up,
+// and the activation is then refused on its merits. That refusal is recorded
+// -- it is the operator's to read on the row -- because what decides
+// "abandoned" is the error the attempt ended with, not whether anyone is still
+// listening.
+func TestARefusalThatCompletesAfterTheCallerLeftIsRecorded(t *testing.T) {
+	ctx, hangUp := context.WithCancel(ownerCtx(auth.RoleOwner))
+	defer hangUp()
+	e := &rowEngine{fakeEngine: &fakeEngine{rule: ruleRow()}}
+	refusal := errors.New("authoring: automation emailRuleAb12cd34 does not compile on this node")
+	e.activate = func(_, _ string) error { hangUp(); return refusal }
+
+	if _, err := NewActivator(e, deps()).Activate(ctx, testOwner, testRule); !errors.Is(err, refusal) {
+		t.Fatalf("the refusal must be reported, got %v", err)
+	}
+	if e.rule["status"] != "failed" || e.rule["lastError"] != refusal.Error() {
+		t.Fatalf("a refusal that completed after the caller left reads %q / %v on the rule; it must be recorded",
+			e.rule["status"], e.rule["lastError"])
+	}
+}
+
+// TestARefusedEditDoesNotOverwriteAPauseThatLandsAsItRecords is probe C's
+// other order: the refused edit has read the row -- active, naming version 1,
+// which reads active -- when the breaker's pause of version 1 lands, in the
+// instant before the refusal is recorded. The record is conditional on the row
+// it read, so it is decided again, and the pause stands.
+func TestARefusedEditDoesNotOverwriteAPauseThatLandsAsItRecords(t *testing.T) {
+	v1, bundle := ruleBundle(testRule, 1)
+	bundle["status"] = "active"
+	e := &rowEngine{fakeEngine: &fakeEngine{rule: liveRule(v1), bundle: bundle}}
+	e.track()
+	refusal := errors.New("authoring: automation emailRuleAb12cd34 does not compile on this node")
+	e.activate = func(_, bundleID string) error {
+		if bundleID == v1 {
+			return nil
+		}
+		e.beforeRecord = func() {
+			e.bundle["status"] = "paused"
+			e.write(map[string]any{"status": "paused", "lastError": BreakerStoppedSentence})
+		}
+		return refusal
+	}
+
+	if _, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), testOwner, testRule); !errors.Is(err, refusal) {
+		t.Fatalf("a refused edit must say so, got %v", err)
+	}
+	if e.rule["status"] != "paused" || e.rule["lastError"] != BreakerStoppedSentence || e.rule["bundleId"] != v1 {
+		t.Fatalf("a refusal recorded over the breaker's pause that landed as it recorded: the rule reads %q / %q, naming %q",
+			e.rule["status"], e.rule["lastError"], e.rule["bundleId"])
+	}
+	if e.rejected != 1 {
+		t.Fatalf("%d records were refused for a row that moved on; the refusal's record must be conditional on the row it read", e.rejected)
+	}
+}
+
+// TestARefusedEditDoesNotClaimAPausedVersionIsRunning: the row still reads
+// active naming version 1, but version 1 reads paused -- its breaker stopped it
+// and the pause has not reached the rule yet. A refused edit does not tell the
+// operator the previous version is still running: nothing is, so the rule
+// reads failed with the refusal.
+func TestARefusedEditDoesNotClaimAPausedVersionIsRunning(t *testing.T) {
+	v1, bundle := ruleBundle(testRule, 1)
+	e := &rowEngine{fakeEngine: &fakeEngine{rule: liveRule(v1), bundle: bundle}} // bundle reads paused
+	refusal := errors.New("authoring: automation emailRuleAb12cd34 does not compile on this node")
+	e.activate = func(_, bundleID string) error {
+		if bundleID == v1 {
+			return nil
+		}
+		return refusal
+	}
+
+	if _, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), testOwner, testRule); !errors.Is(err, refusal) {
+		t.Fatalf("a refused edit must say so, got %v", err)
+	}
+	if e.rule["status"] != "failed" || e.rule["lastError"] != refusal.Error() {
+		t.Fatalf("a refused edit over a paused version reads %q / %q; nothing is running, so it reads failed with the refusal alone",
+			e.rule["status"], e.rule["lastError"])
+	}
+}
+
+// TestARefusalBeforeAnyBundleKeepsTheRowsVersion: an earlier attempt was
+// refused and its bundle is what the row names. This attempt is refused before
+// it writes a bundle at all -- the template is no longer readable -- so the row
+// keeps naming the earlier one: it is what tells the next activation which
+// version comes next.
+func TestARefusalBeforeAnyBundleKeepsTheRowsVersion(t *testing.T) {
+	v2, bundle := ruleBundle(testRule, 2)
+	bundle["status"] = "failed"
+	failed := liveRule(v2)
+	failed["status"] = "failed"
+	failed["lastError"] = "an earlier refusal"
+	e := &rowEngine{fakeEngine: &fakeEngine{rule: failed, bundle: bundle, noTemplate: true}}
+
+	if _, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), testOwner, testRule); err == nil {
+		t.Fatal("an activation whose template cannot be read must be refused")
+	}
+	if e.rule["status"] != "failed" || e.rule["bundleId"] != v2 || e.rule["lastError"] == "an earlier refusal" {
+		t.Fatalf("the row reads %q naming %q (%q); want the new refusal, still naming the version that came before",
+			e.rule["status"], e.rule["bundleId"], e.rule["lastError"])
 	}
 }

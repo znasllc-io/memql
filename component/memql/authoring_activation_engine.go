@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
@@ -211,7 +212,17 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 	}
 
 	// 3. Lifecycle: bundle dryRunPassed -> active. The commit point.
-	if err := store.SetBundleActive(ctx, bundleId); err != nil {
+	//
+	// The commit write itself already runs on a bounded context the caller
+	// cannot cancel (memql#6022). A hang-up in the middle of the statement can
+	// commit the row and still report "context canceled" -- and undoing an
+	// activation around a bundle row that reads active leaves every replica's
+	// reconcile arming it while the caller, and the rule, read it as never
+	// turned on.
+	committed := context.WithoutCancel(ctx)
+	commitCtx, cancelCommit := context.WithTimeout(committed, armApplyTimeout)
+	defer cancelCommit()
+	if err := store.SetBundleActive(commitCtx, bundleId); err != nil {
 		undo.run(ctx, store, deps, live)
 		return ActivationResult{}, fmt.Errorf("authoring: activate bundle %q: %w", bundleId, err)
 	}
@@ -223,7 +234,6 @@ func ActivateApprovedBundleWithStore(ctx context.Context, store ActivationStore,
 	// superseded version active for good -- nothing else retires it, and the
 	// reconcile pass and boot re-arm treat it as live -- so turning the rule
 	// off later re-armed its OLD definition on every replica.
-	committed := context.WithoutCancel(ctx)
 
 	// 4. Promote net-new deps into the owner's reusable catalog. Best-effort per
 	// construct: a promotion failure does not unwind the activation (the
@@ -485,7 +495,14 @@ func (s *engineActivationStore) LoadBundle(ctx context.Context, bundleId string)
 	if err != nil {
 		return AuthoringBundleRow{}, err
 	}
-	return parseBundleRow(node.GetId(), payload)
+	row, err := parseBundleRow(node.GetId(), payload)
+	if err != nil {
+		return AuthoringBundleRow{}, err
+	}
+	if at := node.GetCreatedAt(); at != nil && at.IsValid() {
+		row.CreatedAt = at.AsTime()
+	}
+	return row, nil
 }
 
 func (s *engineActivationStore) LoadConstructs(ctx context.Context, bundleId string) ([]AuthoringConstructRow, error) {
@@ -512,8 +529,12 @@ func (s *engineActivationStore) LoadConstructs(ctx context.Context, bundleId str
 	return out, nil
 }
 
+// SetBundleActive is the gated activation's commit write. activateAuthoringBundle
+// is @serverOnly, and the write guard refuses any other way to make a bundle
+// read active (authoring_bundle_activation_write_guard.go), so it stamps
+// internal origin, inline: this is the one call the gates stand in front of.
 func (s *engineActivationStore) SetBundleActive(ctx context.Context, bundleId string) error {
-	_, err := s.engine.Execute(ctx, fmt.Sprintf(`mutation activateAuthoringBundle(bundleId:%s)`, langparser.QuoteString(bundleId)))
+	_, err := s.engine.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`mutation activateAuthoringBundle(bundleId:%s)`, langparser.QuoteString(bundleId)))
 	return err
 }
 

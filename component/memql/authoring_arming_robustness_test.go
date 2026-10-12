@@ -48,6 +48,10 @@ type faultyStore struct {
 	readErr     map[string]error // LoadBundle, by bundle id
 	afterRetire func()           // runs once a retire has been written: the caller hangs up
 	afterActive func()           // runs once a bundle has been marked active: the caller hangs up
+	// midActive runs once while the commit write is in flight: the row is
+	// written, the caller hangs up, and the write reports the caller's
+	// context error -- as a driver can for a statement that committed.
+	midActive func()
 }
 
 func newFaultyStore() *faultyStore {
@@ -88,9 +92,17 @@ func (s *faultyStore) SetBundleActive(ctx context.Context, id string) error {
 		return err
 	}
 	s.mu.Lock()
+	mid := s.midActive
+	s.midActive = nil
 	hangUp := s.afterActive
 	s.afterActive = nil
 	s.mu.Unlock()
+	if mid != nil {
+		mid()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
 	if hangUp != nil {
 		hangUp()
 	}
@@ -606,5 +618,35 @@ func TestATurnedOffRuleStaysOffAfterAHungUpEdit(t *testing.T) {
 	}
 	if c := held(t, deps, "automation", "autoOff"); c != nil {
 		t.Fatalf("the rule was turned off and the next reconcile armed bundle %s version %d again", c.BundleId, c.Version)
+	}
+}
+
+// TestAHangUpDuringTheCommitWriteStillActivates: the caller hangs up while the
+// commit write itself is in flight. The row was written -- a driver can commit
+// a statement and still report the cancellation -- so the activation has
+// happened, and it is reported and finished as one: not undone around a bundle
+// row that reads active, which every replica's reconcile would arm while the
+// rule read as never turned on. The commit write runs on the bounded context
+// the caller cannot cancel, like everything after it.
+func TestAHangUpDuringTheCommitWriteStillActivates(t *testing.T) {
+	store := newFaultyStore()
+	hooks := &armHooks{}
+	deps := hooks.deps(NewAuthoredRuntimeRegistry())
+	b := store.addBundle("v1:authoring:bundle:commit-hang", 1, "", BundleDryRunPassed, [2]string{"automation", "autoCommitHang"})
+	ctx, hangUp := context.WithCancel(context.Background())
+	defer hangUp()
+	store.midActive = hangUp
+
+	if _, err := ActivateApprovedBundleWithStore(ctx, store, armTestOwner, b, deps); err != nil {
+		t.Fatalf("the commit write went through, so the activation must be reported live: %v", err)
+	}
+	if st := store.bundleStatus(b); st != BundleActive {
+		t.Fatalf("the bundle reads %q after an activation whose commit write went through", st)
+	}
+	if st := store.constructStatus(b, "autoCommitHang"); st != "active" {
+		t.Fatalf("the construct row reads %q; an activation that happened is not undone", st)
+	}
+	if c := held(t, deps, "automation", "autoCommitHang"); c == nil || c.BundleId != b {
+		t.Fatalf("an activation whose commit write went through left nothing armed: %+v", c)
 	}
 }

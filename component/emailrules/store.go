@@ -135,22 +135,33 @@ func (s *Store) RuleStateByID(ctx context.Context, ruleID string) (RuleState, bo
 	return ruleStateFromRow(rows[0]), true, nil
 }
 
-// RuleOfBundle names the rule a generated bundle was built for, read under
-// the caller's own actor. The bundle's dry-run report records the rule
-// (RecordDryRun), and the bundle id is derived from that rule and the bundle's
-// version (bundleIDFor) -- so the id is re-derived from what the row says, and
-// a bundle whose row names a rule that does not derive it names none.
-func (s *Store) RuleOfBundle(ctx context.Context, bundleID string) (string, bool, error) {
+// RuleOfBundle names the rule a generated bundle was built for, and the
+// bundle's status, read under the caller's own actor. The bundle's dry-run
+// report records the rule (RecordDryRun), and the bundle id is derived from
+// that rule and the bundle's version (bundleIDFor) -- so the id is re-derived
+// from what the row says, and a bundle whose row names a rule that does not
+// derive it names none.
+func (s *Store) RuleOfBundle(ctx context.Context, bundleID string) (ruleID, status string, ok bool, err error) {
+	rows, err := s.rows(ctx, call("query", "authoringBundleById", arg{"bundleId", memql.BareShortId(bundleID)}))
+	if err != nil || len(rows) == 0 {
+		return "", "", false, err
+	}
+	report, _ := rows[0]["dryRunReport"].(map[string]any)
+	ruleID = strings.TrimSpace(str(report, "rule"))
+	if ruleID == "" || bundleIDFor(ruleID, integer(rows[0], "version")) != memql.BareShortId(bundleID) {
+		return "", "", false, nil
+	}
+	return ruleID, str(rows[0], "status"), true, nil
+}
+
+// BundleStatus reads an authoring bundle's status under the caller's own
+// actor. found is false when the bundle is not readable as the caller.
+func (s *Store) BundleStatus(ctx context.Context, bundleID string) (status string, found bool, err error) {
 	rows, err := s.rows(ctx, call("query", "authoringBundleById", arg{"bundleId", memql.BareShortId(bundleID)}))
 	if err != nil || len(rows) == 0 {
 		return "", false, err
 	}
-	report, _ := rows[0]["dryRunReport"].(map[string]any)
-	ruleID := strings.TrimSpace(str(report, "rule"))
-	if ruleID == "" || bundleIDFor(ruleID, integer(rows[0], "version")) != memql.BareShortId(bundleID) {
-		return "", false, nil
-	}
-	return ruleID, true, nil
+	return str(rows[0], "status"), true, nil
 }
 
 func ruleStateFromRow(r map[string]any) RuleState {
@@ -160,6 +171,7 @@ func ruleStateFromRow(r map[string]any) RuleState {
 		ConstructName: str(r, "constructName"),
 		LastError:     str(r, "lastError"),
 		FiredCount:    integer(r, "firedCount"),
+		VersionAt:     rowTime(r, "createdAt"),
 	}
 }
 
@@ -170,7 +182,15 @@ type RuleState struct {
 	ConstructName string
 	LastError     string
 	FiredCount    int
+	// VersionAt is the createdAt of the version read: the witness a record
+	// conditional on this read is fenced on (memql.ContextWithRowVersionFence).
+	// Zero when the read did not carry one.
+	VersionAt time.Time
 }
+
+// RuleConcept is the email rule's concept id: what a write conditional on
+// the rule row is fenced on.
+const RuleConcept = "v1:campaigns:emailRule"
 
 func ruleFromRow(r map[string]any) Rule {
 	return Rule{

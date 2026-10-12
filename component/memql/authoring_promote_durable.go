@@ -921,7 +921,10 @@ func (s *enginePromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, 
 	}
 	// createAuthoringBundle inserts status "draft"; transition it to
 	// active so the boot re-hydration's system-active enumeration picks it up.
-	if _, err := s.engine.Execute(ctx, fmt.Sprintf(`mutation activateAuthoringBundle(bundleId:%s)`, languageParser.QuoteString(bundleId))); err != nil {
+	// activateAuthoringBundle is @serverOnly (memql#6022) and this promote is
+	// the gated path -- the owner-only gate and Gate 1's compile/bind stand in
+	// front of it -- so the one write stamps internal origin, inline.
+	if _, err := s.engine.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(`mutation activateAuthoringBundle(bundleId:%s)`, languageParser.QuoteString(bundleId))); err != nil {
 		return err
 	}
 	return nil

@@ -74,8 +74,10 @@ func seedActiveAuthoringBundle(t *testing.T, ctx context.Context, eng *MemQLEngi
 	if _, err := eng.Execute(ctx, create); err != nil {
 		t.Fatalf("create bundle: %v", err)
 	}
+	// activateAuthoringBundle is @serverOnly (memql#6022): the seed stands in
+	// for the gated activation, which writes it under internal origin.
 	activate := fmt.Sprintf(`activateAuthoringBundle(bundleId:%q)`, bundleId)
-	if _, err := eng.Execute(ctx, activate); err != nil {
+	if _, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), activate); err != nil {
 		t.Fatalf("activate bundle: %v", err)
 	}
 }

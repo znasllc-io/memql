@@ -1077,6 +1077,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+	// A BUNDLE BECOMES ACTIVE only through the gated activation (memql#6022),
+	// at the same seam and for the same reasons: every replica arms every
+	// bundle that reads active, the read-merge carries status through writes
+	// that never name it, and an owner's before-write hook could otherwise set
+	// it. See authoring_bundle_activation_write_guard.go.
+	if conceptMeta.Name == conceptAuthoringBundle {
+		if err := validateBundleActivationServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 	// PROTECTED OUTBOUND ROWS -- secret targets and server-staged deliveries --
 	// are server-written only (memql#5480), at the same seam for the ladder's
 	// reasons: the rule is about a CHANGE, so it needs the stored row and the

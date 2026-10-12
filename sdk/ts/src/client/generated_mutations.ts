@@ -29,28 +29,6 @@ QueryClient.prototype.acknowledgeAttention = function (this: QueryClient, args: 
   return this.executeNamed("acknowledgeAttention", buildAcknowledgeAttention(args), opts);
 };
 
-/** Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via setConstructStatus. */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["activateAuthoringBundle"] in generated_concepts.ts).
-export interface ActivateAuthoringBundleArgs {
-  bundleId: string;
-}
-
-export function buildActivateAuthoringBundle(args: ActivateAuthoringBundleArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  return "mutation activateAuthoringBundle(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    activateAuthoringBundle(args: ActivateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.activateAuthoringBundle = function (this: QueryClient, args: ActivateAuthoringBundleArgs = {} as ActivateAuthoringBundleArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("activateAuthoringBundle", buildActivateAuthoringBundle(args), opts);
-};
-
 /** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.ts).
 export interface AddRecipientArgs {
@@ -6443,33 +6421,6 @@ declare module "./query.js" {
 
 QueryClient.prototype.setAuthoredAutomationsEnabled = function (this: QueryClient, args: SetAuthoredAutomationsEnabledArgs = {} as SetAuthoredAutomationsEnabledArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setAuthoredAutomationsEnabled", buildSetAuthoredAutomationsEnabled(args), opts);
-};
-
-/** Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by retireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional. */
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["setAuthoringBundleStatus"] in generated_concepts.ts).
-export interface SetAuthoringBundleStatusArgs {
-  bundleId: string;
-  // Enum: draft | paused | active | failed
-  status: string;
-  failureReason?: string;
-}
-
-export function buildSetAuthoringBundleStatus(args: SetAuthoringBundleStatusArgs): string {
-  const parts: string[] = [];
-  parts.push("bundleId: " + renderMemQLValue(args.bundleId));
-  parts.push("status: " + renderMemQLValue(args.status));
-  if (args.failureReason !== undefined) parts.push("failureReason: " + renderMemQLValue(args.failureReason));
-  return "mutation setAuthoringBundleStatus(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    setAuthoringBundleStatus(args: SetAuthoringBundleStatusArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.setAuthoringBundleStatus = function (this: QueryClient, args: SetAuthoringBundleStatusArgs = {} as SetAuthoringBundleStatusArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("setAuthoringBundleStatus", buildSetAuthoringBundleStatus(args), opts);
 };
 
 /** Flip the published flag (and optional hours) without a deploy. */

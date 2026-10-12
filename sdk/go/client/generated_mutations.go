@@ -42,28 +42,6 @@ func AcknowledgeAttentionBuild(args AcknowledgeAttentionArgs) string {
 	return b.String()
 }
 
-// ActivateAuthoringBundle -- Activate a bundle after Gate 3 approval: status -> active and activatedAt stamped. The authored-construct runtime (#959) registers the bundle's constructs on this transition; member constructs are flipped to active via setConstructStatus.
-//
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["activateAuthoringBundle"] in generated_concepts.go).
-type ActivateAuthoringBundleArgs struct {
-	BundleId string
-}
-
-// ActivateAuthoringBundle calls the engine mutation activateAuthoringBundle.
-func (qc *QueryClient) ActivateAuthoringBundle(ctx context.Context, args ActivateAuthoringBundleArgs) (*Result, error) {
-	call := ActivateAuthoringBundleBuild(args)
-	return qc.executeNamed(ctx, "activateAuthoringBundle", call)
-}
-
-func ActivateAuthoringBundleBuild(args ActivateAuthoringBundleArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation activateAuthoringBundle(")
-	b.WriteString("bundleId: ")
-	b.WriteString(quoteMemQL(args.BundleId))
-	b.WriteString(")")
-	return b.String()
-}
-
 // AddRecipient -- Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.go).
@@ -11334,43 +11312,6 @@ func SetAuthoredAutomationsEnabledBuild(args SetAuthoredAutomationsEnabledArgs) 
 	b.WriteString("mutation setAuthoredAutomationsEnabled(")
 	b.WriteString("enabled: ")
 	b.WriteString(fmt.Sprintf("%v", args.Enabled))
-	b.WriteString(")")
-	return b.String()
-}
-
-// SetAuthoringBundleStatus -- Generic lifecycle transition for the remaining bundle states: paused (circuit breaker / user hold), retired (superseded or removed), or failed. retiredAt is stamped by retireAuthoringBundle; this mutation handles pause/unpause + failed. failureReason optional.
-//
-// Bound concept: v1:authoring:bundle (machine-readable: BoundConcepts["setAuthoringBundleStatus"] in generated_concepts.go).
-type SetAuthoringBundleStatusArgs struct {
-	BundleId string
-	// Enum: draft | paused | active | failed
-	Status        string
-	FailureReason string
-}
-
-// SetAuthoringBundleStatus calls the engine mutation setAuthoringBundleStatus.
-func (qc *QueryClient) SetAuthoringBundleStatus(ctx context.Context, args SetAuthoringBundleStatusArgs) (*Result, error) {
-	call := SetAuthoringBundleStatusBuild(args)
-	return qc.executeNamed(ctx, "setAuthoringBundleStatus", call)
-}
-
-func SetAuthoringBundleStatusBuild(args SetAuthoringBundleStatusArgs) string {
-	var b strings.Builder
-	b.WriteString("mutation setAuthoringBundleStatus(")
-	b.WriteString("bundleId: ")
-	b.WriteString(quoteMemQL(args.BundleId))
-	if b.Len() > 34 {
-		b.WriteString(", ")
-	}
-	b.WriteString("status: ")
-	b.WriteString(quoteMemQL(args.Status))
-	if args.FailureReason != "" {
-		if b.Len() > 34 {
-			b.WriteString(", ")
-		}
-		b.WriteString("failureReason: ")
-		b.WriteString(quoteMemQL(args.FailureReason))
-	}
 	b.WriteString(")")
 	return b.String()
 }

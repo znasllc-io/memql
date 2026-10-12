@@ -625,7 +625,20 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// nothing else. Asserted in
 		// component/memql/pack_flip_internal_origin_test.go (the stamp's
 		// placement, and a refused caller never reaching the engine).
-		"component/memql": "seed materialiser, authoring capability store (both boot-time), the module-readiness writer (epic memql#5077), the loop-stops reader (memql#5384), the sharing ledger's window read and the two machine acts (epic memql#5327 -- REQUEST-DERIVED, and each one stamps a LOCAL context for ONE rendered call after the caller's ownership of the machine has already been proven through the authorized workersForUser read; asserted by test/dslconformance's TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin, which sees RenderCall since that epic), and the Modules pack flip (REQUEST-DERIVED, downstream of AuthorizeSetPackEnabled in SetPackEnabled; asserted by component/memql/pack_flip_internal_origin_test.go)",
+		//
+		// The sixth, the authored bundle's lifecycle writes (memql#6022):
+		// activateAuthoringBundle and setAuthoringBundleStatus became
+		// @serverOnly, because every replica arms every bundle that reads
+		// active. Their writers stamp inline at the one Execute each: the
+		// gated activation's commit write (SetBundleActive -- REQUEST-DERIVED,
+		// reached only through ActivateApprovedBundle, which refuses a bundle
+		// that is not dryRunPassed or not the caller's, behind the callers'
+		// own CanAuthor gates), the durable promote (downstream of the
+		// owner-only promote gate) and the breaker's pause (server-initiated).
+		// The write guard that holds the transition for raw writes is asserted
+		// against a real database in
+		// component/memql/authoring_bundle_activation_guard_db_test.go.
+		"component/memql": "seed materialiser, authoring capability store (both boot-time), the module-readiness writer (epic memql#5077), the loop-stops reader (memql#5384), the sharing ledger's window read and the two machine acts (epic memql#5327 -- REQUEST-DERIVED, and each one stamps a LOCAL context for ONE rendered call after the caller's ownership of the machine has already been proven through the authorized workersForUser read; asserted by test/dslconformance's TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin, which sees RenderCall since that epic), the Modules pack flip (REQUEST-DERIVED, downstream of AuthorizeSetPackEnabled in SetPackEnabled; asserted by component/memql/pack_flip_internal_origin_test.go), and the authored bundle's activation and breaker-pause writes (memql#6022 -- the gated activation's commit write is REQUEST-DERIVED, behind ActivateApprovedBundle's dryRunPassed and owner checks)",
 		// SERVER-INITIATED, not request-derived -- the same class as
 		// integrations/agent/worker below rather than the three exceptions
 		// above, and the distinction is worth stating because this package

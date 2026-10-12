@@ -122,7 +122,7 @@ func TestCompileSectionsDB_ACataloguedSectionRunsFromTheDraft(t *testing.T) {
 		write(false, "createAuthoringConstruct", map[string]any{"constructId": constructId, "bundleId": bundleId, "kind": "automation",
 			"name": name, "targetNamespace": authoredTargetNamespace, "source": catalogSource(name, "Answer a section.", arg)})
 		write(false, "setConstructStatus", map[string]any{"constructId": constructId, "status": "active"})
-		write(false, "activateAuthoringBundle", map[string]any{"bundleId": bundleId})
+		write(true, "activateAuthoringBundle", map[string]any{"bundleId": bundleId}) // @serverOnly: the gated activation's write
 		write(false, "catalogueConstruct", map[string]any{"constructId": constructId, "catalogKey": name, "catalogMatchText": "kind:automation intent:Answer a section.", "fromBundleId": bundleId})
 		write(true, "recordConstructGoalSignature", map[string]any{"constructId": constructId, "goalSignature": work.SectionSignature(workSection(usable[n]))})
 	}

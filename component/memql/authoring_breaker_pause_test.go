@@ -63,6 +63,19 @@ func tripOf(name, bundleId string, version int) AuthoredTrip {
 	return AuthoredTrip{Owner: armTestOwner, Automation: name, BundleId: bundleId, Version: version, Reason: tripReason}
 }
 
+// applyTrip applies a trip on eng and fails the test unless it did what want
+// says it should.
+func applyTrip(t *testing.T, ctx context.Context, eng *MemQLEngine, store pauseStore, deps AuthoredRuntimeDeps, trip AuthoredTrip, want AuthoredTripOutcome) {
+	t.Helper()
+	outcome, err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, trip)
+	if err != nil {
+		t.Fatalf("trip of %s: %v", trip.Automation, err)
+	}
+	if outcome != want {
+		t.Fatalf("the trip of %s did %q, want %q", trip.Automation, outcome, want)
+	}
+}
+
 // TestABreakerTripPausesTheAutomationOnEveryReplica: node A's breaker trips on
 // an automation both nodes hold. The trip records the pause on the bundle row,
 // takes the bundle out of node A, and broadcasts the disarm, so node B takes it
@@ -99,9 +112,7 @@ func TestABreakerTripPausesTheAutomationOnEveryReplica(t *testing.T) {
 		t.Fatal("setup: node B should hold autoTrip")
 	}
 
-	if err := engA.pauseTrippedAutomationWithStore(ctx, store, depsA, tripOf("autoTrip", bundleId, 1)); err != nil {
-		t.Fatalf("pause the tripped automation: %v", err)
-	}
+	applyTrip(t, ctx, engA, store, depsA, tripOf("autoTrip", bundleId, 1), TripPaused)
 
 	// Durable: the bundle row says paused, with why, written as its owner.
 	if got := store.recorded(); len(got) != 1 || got[0] != (pauseWrite{armTestOwner, bundleId, tripReason}) {
@@ -160,9 +171,7 @@ func TestATripOnAnAutomationWhoseBundleIsNoLongerActiveRecordsNoPause(t *testing
 	var disarms atomic.Int64
 	bus.Subscribe("authoring.disarm.#", func(events.Event) { disarms.Add(1) })
 
-	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoTripGone", bundleId, 1)); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
+	applyTrip(t, ctx, eng, store, deps, tripOf("autoTripGone", bundleId, 1), TripBundleNotActive)
 	if got := store.recorded(); len(got) != 0 {
 		t.Fatalf("a trip wrote a pause onto a bundle that is not active: %+v", got)
 	}
@@ -193,9 +202,9 @@ func TestATripThatCannotRecordThePauseStillStopsThisNode(t *testing.T) {
 	var disarms atomic.Int64
 	bus.Subscribe("authoring.disarm.#", func(events.Event) { disarms.Add(1) })
 
-	err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoTripLocal", bundleId, 1))
-	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
-		t.Fatalf("a pause that could not be recorded must say so, got %v", err)
+	outcome, err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoTripLocal", bundleId, 1))
+	if err == nil || !strings.Contains(err.Error(), "database unavailable") || outcome != TripStoppedHere {
+		t.Fatalf("a pause that could not be recorded must say so and stop it here only, got %q, %v", outcome, err)
 	}
 	c := held(t, deps, "automation", "autoTripLocal")
 	if c == nil || c.Status != AuthoredPaused || hooks.count("deregister autoTripLocal") == 0 {
@@ -236,9 +245,7 @@ func TestATripFinishesWhenItsCallerHangsUp(t *testing.T) {
 
 	ctx, hangUp := context.WithCancel(context.Background())
 	hangUp()
-	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoHangup", bundleId, 1)); err != nil {
-		t.Fatalf("a trip whose caller hung up: %v", err)
-	}
+	applyTrip(t, ctx, eng, store, deps, tripOf("autoHangup", bundleId, 1), TripPaused)
 	if st := store.bundleStatus(bundleId); st != BundlePaused || len(store.recorded()) != 1 {
 		t.Fatalf("a trip whose caller hung up left the bundle %q (pauses written %+v)", st, store.recorded())
 	}
@@ -270,9 +277,7 @@ func TestATripOfAnOlderVersionLeavesTheNewerOneArmed(t *testing.T) {
 	}
 	calls0, _ := hooks.snapshot()
 
-	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoFixed", v1, 1)); err != nil {
-		t.Fatalf("a trip of a version no longer held: %v", err)
-	}
+	applyTrip(t, ctx, eng, store, deps, tripOf("autoFixed", v1, 1), TripVersionNotHeld)
 	if st := store.bundleStatus(v2); st != BundleActive || len(store.recorded()) != 0 {
 		t.Fatalf("a trip caused by version 1 paused version 2: it reads %q, pauses written %+v", st, store.recorded())
 	}
@@ -286,9 +291,7 @@ func TestATripOfAnOlderVersionLeavesTheNewerOneArmed(t *testing.T) {
 	// An entry is the bundle AND the version it was armed from: a trip naming
 	// this bundle id at another version -- an id written again at a later
 	// version -- is not this entry's either.
-	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoFixed", v2, 1)); err != nil {
-		t.Fatalf("a trip of another version of the held bundle: %v", err)
-	}
+	applyTrip(t, ctx, eng, store, deps, tripOf("autoFixed", v2, 1), TripVersionNotHeld)
 	if st := store.bundleStatus(v2); st != BundleActive || len(store.recorded()) != 0 {
 		t.Fatalf("a trip of version 1 of bundle %s paused its version 2: it reads %q, pauses written %+v", v2, st, store.recorded())
 	}
@@ -313,9 +316,7 @@ func TestATripWhoseBreakerWasResetPausesNothing(t *testing.T) {
 	trip := tripOf("autoReset", b, 1)
 	trip.StillTripped = func() bool { return false }
 
-	if err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, trip); err != nil {
-		t.Fatalf("a trip whose breaker was reset: %v", err)
-	}
+	applyTrip(t, ctx, eng, store, deps, trip, TripBreakerReset)
 	if st := store.bundleStatus(b); st != BundleActive || len(store.recorded()) != 0 {
 		t.Fatalf("a reset breaker's trip paused the bundle: it reads %q, pauses written %+v", st, store.recorded())
 	}
@@ -372,9 +373,7 @@ func TestARecordedPauseIsReportedToTheListenersOnce(t *testing.T) {
 		}
 	}
 
-	if err := engA.pauseTrippedAutomationWithStore(ctx, store, depsA, tripOf("autoHeard", bundleId, 1)); err != nil {
-		t.Fatalf("pause: %v", err)
-	}
+	applyTrip(t, ctx, engA, store, depsA, tripOf("autoHeard", bundleId, 1), TripPaused)
 	if !eventually(2*time.Second, func() bool { return held(t, depsB, "automation", "autoHeard") == nil }) {
 		t.Fatal("setup: node B never disarmed the paused bundle")
 	}
@@ -392,10 +391,96 @@ func TestARecordedPauseIsReportedToTheListenersOnce(t *testing.T) {
 		BundleId: bundleId, Version: 1, Source: "automation autoHeard { }"}}, depsA); err != nil {
 		t.Fatalf("setup: hold the retired bundle again: %v", err)
 	}
-	if err := engA.pauseTrippedAutomationWithStore(ctx, store, depsA, tripOf("autoHeard", bundleId, 1)); err != nil {
-		t.Fatalf("pause of a retired bundle: %v", err)
-	}
+	applyTrip(t, ctx, engA, store, depsA, tripOf("autoHeard", bundleId, 1), TripBundleNotActive)
 	if got := reports(&onA); len(got) != 1 {
 		t.Fatalf("a trip that wrote no pause reported one: %v", got)
+	}
+}
+
+// TestAStalledPauseListenerDoesNotHoldBackTheStop: the node that records a
+// pause stops the automation on every replica FIRST and only then tells its
+// listeners, on a bound of their own. A listener that stalls -- a slow
+// database, a rule row that keeps changing -- must not delay the disarm the
+// other replicas are waiting for, nor spend the time the broadcast needs.
+func TestAStalledPauseListenerDoesNotHoldBackTheStop(t *testing.T) {
+	ctx := context.Background()
+	store := &pauseRecordingStore{armTestStore: newArmTestStore()}
+	bundleId := store.addBundle("v1:authoring:bundle:trip-stall", 1, "", BundleActive, [2]string{"automation", "autoStall"})
+
+	busA := events.NewBus()
+	t.Cleanup(busA.Close)
+	engA := &MemQLEngine{}
+	engA.SetEventBus(busA)
+	depsA := (&armHooks{}).deps(NewAuthoredRuntimeRegistry())
+	_, busB, depsB, _ := newArmNode(t, store)
+	busA.Subscribe("authoring.disarm.#", func(ev events.Event) {
+		ev.OriginNodeId = "node-A"
+		busB.Publish(ev)
+	})
+	for _, deps := range []AuthoredRuntimeDeps{depsA, depsB} {
+		if _, err := armBundleWithStore(ctx, store, armTestOwner, bundleId, deps); err != nil {
+			t.Fatalf("setup: arm: %v", err)
+		}
+	}
+	// The listener stalls until the other replica has stopped the automation,
+	// or two seconds pass.
+	var stoppedWhileStalled atomic.Bool
+	engA.SetAuthoredPauseListener("stall", func(context.Context, string, string) error {
+		stoppedWhileStalled.Store(eventually(2*time.Second, func() bool { return held(t, depsB, "automation", "autoStall") == nil }))
+		return nil
+	})
+
+	applyTrip(t, ctx, engA, store, depsA, tripOf("autoStall", bundleId, 1), TripPaused)
+	if !stoppedWhileStalled.Load() {
+		t.Fatal("the other replica was still running the automation while the pause listener stalled: the disarm went out after the listeners")
+	}
+}
+
+// constructReadFailing is the shared store whose construct reads fail once
+// failConstructs is set.
+type constructReadFailing struct {
+	*pauseRecordingStore
+	failConstructs atomic.Bool
+}
+
+func (s *constructReadFailing) LoadConstructsForOwner(ctx context.Context, owner, id string) ([]AuthoringConstructRow, error) {
+	if s.failConstructs.Load() {
+		return nil, errors.New("database unavailable")
+	}
+	return s.pauseRecordingStore.LoadConstructsForOwner(ctx, owner, id)
+}
+
+// TestATripThatCannotFinishTakingTheBundleOutStillReportsThePause: the pause
+// is recorded, and then this node cannot finish taking the bundle out -- its
+// constructs cannot be read. The trip still reports the pause as recorded,
+// because every replica's reconcile pass reads the bundle paused; the
+// listeners are told; and the error says this node did not finish and that
+// nothing was broadcast.
+func TestATripThatCannotFinishTakingTheBundleOutStillReportsThePause(t *testing.T) {
+	ctx := context.Background()
+	store := &constructReadFailing{pauseRecordingStore: &pauseRecordingStore{armTestStore: newArmTestStore()}}
+	bundleId := store.addBundle("v1:authoring:bundle:trip-half", 1, "", BundleActive, [2]string{"automation", "autoHalf"})
+	eng, bus, deps, _ := newArmNode(t, store)
+	if _, err := armBundleWithStore(ctx, store, armTestOwner, bundleId, deps); err != nil {
+		t.Fatalf("setup: arm: %v", err)
+	}
+	var told, disarms atomic.Int32
+	eng.SetAuthoredPauseListener("probe", func(context.Context, string, string) error { told.Add(1); return nil })
+	bus.Subscribe("authoring.disarm.#", func(events.Event) { disarms.Add(1) })
+	store.failConstructs.Store(true)
+
+	outcome, err := eng.pauseTrippedAutomationWithStore(ctx, store, deps, tripOf("autoHalf", bundleId, 1))
+	if outcome != TripPaused || err == nil || !strings.Contains(err.Error(), "not broadcast") {
+		t.Fatalf("a recorded pause this node could not finish did %q, %v; want %q and an error saying so", outcome, err, TripPaused)
+	}
+	if st := store.bundleStatus(bundleId); st != BundlePaused {
+		t.Fatalf("the bundle reads %q; the pause was recorded", st)
+	}
+	if n := told.Load(); n != 1 {
+		t.Fatalf("the listeners were told %d times; the pause is recorded, so they are told once", n)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if n := disarms.Load(); n != 0 {
+		t.Fatalf("%d disarms were broadcast for a take-out this node did not finish", n)
 	}
 }

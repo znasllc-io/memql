@@ -92,7 +92,9 @@ type firingReplica struct {
 	mu    sync.Mutex
 	ran   map[string]int // automation name -> firings handed to the runner here
 	gated map[string]int // owner -> owner gate consultations here
-	trips []error        // the outcome of each pause a trip ran here
+	trips []error        // the error of each pause a trip ran here
+	// tripOutcomes is what each of those pauses did.
+	tripOutcomes []memql.AuthoredTripOutcome
 }
 
 func (r *firingReplica) bump(counter map[string]int, key string) {
@@ -172,13 +174,14 @@ func newFiringReplica(t *testing.T, dsn string, ownsTheOwner bool) *firingReplic
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
-			err := eng.PauseTrippedAutomation(ctx, r.deps(), memql.AuthoredTrip{
+			outcome, err := eng.PauseTrippedAutomation(ctx, r.deps(), memql.AuthoredTrip{
 				Owner: info.Owner, Automation: info.Automation, BundleId: info.BundleId, Version: info.Version,
 				Reason:       fmt.Sprintf("Paused automatically after %d failed runs in a row.", info.Failures),
 				StillTripped: func() bool { return r.breaker.IsOpen(info.Owner, info.Automation) },
 			})
 			r.mu.Lock()
 			r.trips = append(r.trips, err)
+			r.tripOutcomes = append(r.tripOutcomes, outcome)
 			r.mu.Unlock()
 		}()
 	})
@@ -425,8 +428,11 @@ func TestAnEmailRuleFiresOnceWhereItsWriteHappened(t *testing.T) {
 		trips = append([]error(nil), b.trips...)
 		return len(trips) > 0
 	})
-	if len(trips) != 1 || trips[0] != nil {
-		t.Fatalf("the trip on node B paused the rule with %v, want one clean pause", trips)
+	b.mu.Lock()
+	outcomes := append([]memql.AuthoredTripOutcome(nil), b.tripOutcomes...)
+	b.mu.Unlock()
+	if len(trips) != 1 || trips[0] != nil || len(outcomes) != 1 || outcomes[0] != memql.TripPaused {
+		t.Fatalf("the trip on node B did %v with %v, want one clean pause", outcomes, trips)
 	}
 	status, reason := readBundleRow(t, a.db, armed.BundleID)
 	if status != "paused" || !strings.Contains(reason, "failed runs in a row") {
