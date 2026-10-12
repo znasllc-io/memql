@@ -1061,12 +1061,15 @@ var consentMutations = map[string]string{
 // LibraryFileRef is what the CSV import needs off the Library: where the
 // bytes are and what the row says they are.
 type LibraryFileRef struct {
-	FileID   string
-	Name     string
-	MimeType string
-	Size     int
-	BlobURL  string
-	Archived bool
+	FileID string
+	// OwnerUserID is who the row belongs to. The import holds BlobURL to this
+	// owner's own library/{owner}/ prefix before it reads a byte.
+	OwnerUserID string
+	Name        string
+	MimeType    string
+	Size        int
+	BlobURL     string
+	Archived    bool
 }
 
 // LibraryFileForArtifact resolves a Library artifact id to its backing file
@@ -1116,12 +1119,13 @@ func (s *Store) LibraryFileForArtifact(ctx context.Context, artifactID string) (
 	}
 	f := fileRows[0]
 	return LibraryFileRef{
-		FileID:   bare(str(f, "id")),
-		Name:     str(f, "name"),
-		MimeType: str(f, "mimeType"),
-		Size:     integer(f, "size"),
-		BlobURL:  str(f, "blobUrl"),
-		Archived: boolean(f, "archived"),
+		FileID:      bare(str(f, "id")),
+		OwnerUserID: str(f, "ownerUserId"),
+		Name:        str(f, "name"),
+		MimeType:    str(f, "mimeType"),
+		Size:        integer(f, "size"),
+		BlobURL:     str(f, "blobUrl"),
+		Archived:    boolean(f, "archived"),
 	}, "", nil
 }
 

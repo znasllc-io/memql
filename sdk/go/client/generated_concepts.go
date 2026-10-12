@@ -459,7 +459,6 @@ var BoundConcepts = map[string]string{
 	"createGeneratedOutput":                            "v1:library:generatedOutput",
 	"createIdentity":                                   "v1:identity:identity",
 	"createIdentityProvider":                           "v1:cluster:identityProvider",
-	"createLibraryFile":                                "v1:library:file",
 	"createLibraryFileChunk":                           "v1:library:fileChunk",
 	"createLibraryFolder":                              "v1:library:folder",
 	"createLibraryWatchedFolder":                       "v1:library:watchedFolder",

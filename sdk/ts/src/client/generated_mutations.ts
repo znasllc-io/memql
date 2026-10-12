@@ -2342,65 +2342,6 @@ QueryClient.prototype.createIdentityProvider = function (this: QueryClient, args
   return this.executeNamed("createIdentityProvider", buildCreateIdentityProvider(args), opts);
 };
 
-/** Create a Library file row for bytes already written to blob storage. Owner-acted: ownerUserId is stamped from actor.userId, so a file can only ever be created for the person the call runs as. format is the caller's MIME-derived classification, defaulting to 'other' (the metadata-only card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus. That status is STAMPED rather than accepted is load-bearing beyond this mutation: indexFileOnCreate filters on `row.status == "stored"` so it promotes exactly once, because graph.node.created fires on every write and a second promotion would wipe the artifact's labels -- a caller-supplied status would let a later write re-enter that state. indexFileOnCreate folds the new row into the Library index automatically. */
-// Bound concept: v1:library:file (machine-readable: BoundConcepts["createLibraryFile"] in generated_concepts.ts).
-export interface CreateLibraryFileArgs {
-  backupWorkerId?: string;
-  backupPath?: string;
-  producedByRunId?: string;
-  producedByStepKey?: string;
-  fileId: string;
-  name: string;
-  mimeType: string;
-  size: number;
-  sha256?: string;
-  blobUrl: string;
-  // Enum: uploaded | exported | agent_generated | derived | app_session | vision_input | pipeline
-  source: string;
-  // Enum: markdown | document | pdf | spreadsheet | image | text | conversation | other
-  format?: string;
-  summary?: string;
-  folderId?: string;
-  uploadedFromWorkerId?: string;
-  uploadedFromWorkerName?: string;
-  uploadedFromPath?: string;
-  /** {app, model, effort, sessionId} when an app session produced this. Absent otherwise. */
-  producedBy?: Record<string, unknown>;
-}
-
-export function buildCreateLibraryFile(args: CreateLibraryFileArgs): string {
-  const parts: string[] = [];
-  if (args.backupWorkerId !== undefined) parts.push("backupWorkerId: " + renderMemQLValue(args.backupWorkerId));
-  if (args.backupPath !== undefined) parts.push("backupPath: " + renderMemQLValue(args.backupPath));
-  if (args.producedByRunId !== undefined) parts.push("producedByRunId: " + renderMemQLValue(args.producedByRunId));
-  if (args.producedByStepKey !== undefined) parts.push("producedByStepKey: " + renderMemQLValue(args.producedByStepKey));
-  parts.push("fileId: " + renderMemQLValue(args.fileId));
-  parts.push("name: " + renderMemQLValue(args.name));
-  parts.push("mimeType: " + renderMemQLValue(args.mimeType));
-  parts.push("size: " + renderMemQLValue(args.size));
-  if (args.sha256 !== undefined) parts.push("sha256: " + renderMemQLValue(args.sha256));
-  parts.push("blobUrl: " + renderMemQLValue(args.blobUrl));
-  parts.push("source: " + renderMemQLValue(args.source));
-  if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
-  if (args.summary !== undefined) parts.push("summary: " + renderMemQLValue(args.summary));
-  if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
-  if (args.uploadedFromWorkerId !== undefined) parts.push("uploadedFromWorkerId: " + renderMemQLValue(args.uploadedFromWorkerId));
-  if (args.uploadedFromWorkerName !== undefined) parts.push("uploadedFromWorkerName: " + renderMemQLValue(args.uploadedFromWorkerName));
-  if (args.uploadedFromPath !== undefined) parts.push("uploadedFromPath: " + renderMemQLValue(args.uploadedFromPath));
-  if (args.producedBy !== undefined) parts.push("producedBy: " + renderMemQLValue(args.producedBy));
-  return "mutation createLibraryFile(" + parts.join(", ") + ")";
-}
-
-declare module "./query.js" {
-  interface QueryClient {
-    createLibraryFile(args: CreateLibraryFileArgs, opts?: QueryCallOptions): Promise<Result>;
-  }
-}
-
-QueryClient.prototype.createLibraryFile = function (this: QueryClient, args: CreateLibraryFileArgs = {} as CreateLibraryFileArgs, opts?: QueryCallOptions): Promise<Result> {
-  return this.executeNamed("createLibraryFile", buildCreateLibraryFile(args), opts);
-};
-
 /** Write one chunk of a Library file's extracted text, ready for embedding. Owner-acted: ownerUserId is stamped from actor.userId, and the analysis pass runs under the file owner, so a chunk always lands owned by the same person as its file. artifactId is resolved by the pass through libraryArtifactBySourceConceptRef so a similarity hit folds up to the Library row with no second read. */
 // Bound concept: v1:library:fileChunk (machine-readable: BoundConcepts["createLibraryFileChunk"] in generated_concepts.ts).
 export interface CreateLibraryFileChunkArgs {
