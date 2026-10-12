@@ -830,7 +830,12 @@ and one-click opt-outs serialize across replicas and shared mailbox memberships.
 
 Each page's token is encrypted and authenticated for that page alone. A view
 token cannot confirm a subscription. The recipient's current organization and
-mailbox must still match the token. Confirmation links expire after 30 days;
+mailbox must still match the token. A confirmation received after an automation's
+confirmation timeout resumes after that step only while the automation is active.
+It keeps the same enrollment and cannot revive an earlier audience membership.
+Subscribing again from preferences records a new membership for future enrollments.
+Retrying a confirmation is safe if the subscription was saved before its automation
+could resume. Confirmation links expire after 30 days;
 preferences and view links do not expire. A missing saved message returns an
 unavailable page. A failed write returns `503` with `Retry-After: 30`, so the
 person can safely retry the same link.

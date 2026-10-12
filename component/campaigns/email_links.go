@@ -93,7 +93,14 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 			h.retry(rw, err)
 			return
 		}
-		h.finishChoice = func() { hold.Release(); h.store = handler.store }
+		choiceHeld := true
+		h.finishChoice = func() {
+			if choiceHeld {
+				choiceHeld = false
+				hold.Release()
+				h.store = handler.store
+			}
+		}
 		defer h.finishChoice()
 		h.store = NewStore(emailPageGateEngine{Engine: h.store.engine, hold: hold})
 	}
@@ -129,7 +136,10 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 	if kind == LinkConfirm {
 		if recipient.SubscriptionStatus == "subscribed" && !blocked {
 			if r.Method == http.MethodPost {
-				h.nudge(r.Context(), p)
+				if err := h.nudge(r.Context(), p); err != nil {
+					h.retry(rw, err)
+					return
+				}
 			}
 			h.subscribed(rw, org)
 			return
@@ -143,7 +153,10 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 				h.retry(rw, err)
 				return
 			}
-			h.nudge(r.Context(), p)
+			if err := h.nudge(r.Context(), p); err != nil {
+				h.retry(rw, err)
+				return
+			}
 			h.subscribed(rw, org)
 			return
 		}
@@ -173,14 +186,12 @@ func (h *EmailLinkHandler) grant(owner context.Context, p LinkPayload, eventID, 
 	}
 	return h.store.RecordConsent(owner, ConsentGrant, ConsentRecord{EventID: eventID, EmailDigest: p.EmailDigest, Source: source, RecipientID: p.RecipientID, CampaignID: p.CampaignID, AccountID: p.AccountID, OccurredAt: h.now().UTC()})
 }
-func (h *EmailLinkHandler) nudge(ctx context.Context, p LinkPayload) {
+func (h *EmailLinkHandler) nudge(ctx context.Context, p LinkPayload) error {
 	if h.finishChoice != nil {
 		h.finishChoice()
 		h.finishChoice = nil
 	}
-	if err := h.store.NudgeWaitingEnrollments(h.system(ctx), p.RecipientID, h.now().UTC(), h.enrollments); err != nil {
-		h.logger.Warn("subscription saved; waiting automations will re-check at their deadline", "error", err)
-	}
+	return h.store.NudgeWaitingEnrollments(h.system(ctx), p.RecipientID, h.now().UTC(), h.enrollments)
 }
 func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, owner, system context.Context, p LinkPayload, recipient Recipient, org, token string, blocked bool) {
 	_, globalFound, err := h.store.SuppressionByDigest(system, p.EmailDigest)
@@ -205,12 +216,23 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 			writeEmailPage(rw, 200, "Unsubscribed", `<h1>You're unsubscribed.</h1><p>You won't get `+emailsFrom(org)+`.</p>`)
 			return
 		case "subscribe":
+			if recipient.SubscriptionStatus == "subscribed" && !blocked {
+				if err := h.nudge(r.Context(), p); err != nil {
+					h.retry(rw, err)
+					return
+				}
+				h.subscribed(rw, org)
+				return
+			}
 			if pending {
 				if err := h.confirm(owner, p, ConsentSourcePreferences); err != nil {
 					h.retry(rw, err)
 					return
 				}
-				h.nudge(r.Context(), p)
+				if err := h.nudge(r.Context(), p); err != nil {
+					h.retry(rw, err)
+					return
+				}
 				h.subscribed(rw, org)
 				return
 			}
@@ -230,7 +252,10 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 					h.retry(rw, err)
 					return
 				}
-				h.nudge(r.Context(), p)
+				if err := h.nudge(r.Context(), p); err != nil {
+					h.retry(rw, err)
+					return
+				}
 				h.subscribed(rw, org)
 				return
 			}

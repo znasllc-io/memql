@@ -78,10 +78,20 @@ func TestEmailLinkPagesDB(t *testing.T) {
 				t.Fatalf("blocked=%v want=%v err=%v", found, want, err)
 			}
 		}
+		original := storedRecipient(t, n.store, n.owner, rid)
 		apply("unsubscribe")
 		blocked(true)
 		apply("subscribe")
 		blocked(false)
+		renewed := storedRecipient(t, n.store, n.owner, rid)
+		if !templateTime(renewed["joinedAt"]).After(templateTime(original["joinedAt"])) {
+			t.Fatal("subscribe again did not begin a new membership", original, renewed)
+		}
+		apply("subscribe")
+		replayed := storedRecipient(t, n.store, n.owner, rid)
+		if !templateTime(replayed["joinedAt"]).Equal(templateTime(renewed["joinedAt"])) {
+			t.Fatal("replayed subscription restarted membership", renewed, replayed)
+		}
 		row, err := n.store.organizationSuppression(n.system, n.org, digest)
 		if err != nil || str(row, "liftedAt") == "" {
 			t.Fatal(row, err)

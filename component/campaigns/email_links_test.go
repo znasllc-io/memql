@@ -212,6 +212,20 @@ func TestConfirmRetryAfterTheGrantDoesNotGrantTwice(t *testing.T) {
 		t.Fatal(rr.Code, e.calls)
 	}
 }
+func TestConfirmRetryAfterNudgeFailureDoesNotConfirmTwice(t *testing.T) {
+	e, h := newEmailPageEngine("pending")
+	e.fail = "query waitingEnrollmentsForRecipient"
+	token := emailPageToken(t, LinkConfirm, emailPagePayload())
+	rr := pageRequest(h, "POST", ConfirmPath, token, "")
+	if rr.Code != 503 || str(e.roster[0], "subscriptionStatus") != "subscribed" {
+		t.Fatal(rr.Code, e.calls)
+	}
+	e.fail = ""
+	rr = pageRequest(h, "POST", ConfirmPath, token, "")
+	if rr.Code != 200 || len(e.mutations("recordConsentGrant")) != 1 || len(e.mutations("confirmRecipientSubscription")) != 1 {
+		t.Fatal(rr.Code, e.calls)
+	}
+}
 func TestPreferencesGetShowsTheStateWithoutWriting(t *testing.T) {
 	for _, status := range []string{"pending", "subscribed", "unsubscribed", "bounced", "complained"} {
 		t.Run(status, func(t *testing.T) {
