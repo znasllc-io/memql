@@ -228,7 +228,7 @@ func (s *ACSSender) lockDelivery(ctx context.Context, key string) (func(), error
 		if memql.IsWriteGateBusy(err) {
 			return nil, &SendError{
 				Throttled: true, RetryAfter: acsBusyRetryAfter,
-				Detail: "Azure send coordination is busy, so nothing was submitted; it will be tried again later (" + memql.ErrWriteGateBusy.Error() + ")",
+				Detail: "Azure send coordination is busy, so nothing was submitted; try again in a moment (" + memql.ErrWriteGateBusy.Error() + ")",
 				Cause:  err,
 			}
 		}
