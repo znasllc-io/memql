@@ -88,6 +88,6 @@ func campaignPage(ctx context.Context, ids []string, operation func(context.Cont
 
 func campaignWorkflowCapabilities() []string {
 	return []string{
-		"campaignPromoteSeries", "campaignDrainWelcomes", "campaignRetryDeferredSends", "campaignDrainJourneys", "campaignJourneyExit", "campaignJourneyComplete", "campaignJourneyAdvance", "campaignJourneyWait", "campaignJourneyAwaitConfirmation", "campaignJourneySend", "campaignPromoteSchedules", "campaignApplyWarmup", "campaignDrainableJobs", "campaignDrainJob", "campaignFlushReputation", "campaignProcessSelected",
+		"campaignJourneysToRetire", "campaignActiveJourneys", "campaignRetireJourney", "campaignRunJourney", "campaignJourneyCatalog", "campaignGenerateJourneyProposal", "campaignPromoteSeries", "campaignDrainWelcomes", "campaignRetryDeferredSends", "campaignDrainJourneys", "campaignJourneyExit", "campaignJourneyComplete", "campaignJourneyAdvance", "campaignJourneyWait", "campaignJourneyAwaitConfirmation", "campaignJourneySend", "campaignPromoteSchedules", "campaignApplyWarmup", "campaignDrainableJobs", "campaignDrainJob", "campaignFlushReputation", "campaignProcessSelected",
 	}
 }

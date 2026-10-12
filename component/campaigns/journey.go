@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -16,8 +17,8 @@ const journeyEnrollLag = 2 * time.Minute
 const journeyDuePages = 5
 const journeyMaxAttempts = 3
 
-func journeyEnrollmentID(journeyID, recipientID string) string {
-	return sha256Hex("campaign-journey-enrollment\x00" + bare(journeyID) + "\x00" + bare(recipientID))
+func journeyEnrollmentID(journeyID, recipientID string, joinedAt time.Time) string {
+	return sha256Hex("campaign-journey-enrollment\x00" + bare(journeyID) + "\x00" + bare(recipientID) + "\x00" + joinedAt.UTC().Format(time.RFC3339Nano))
 }
 func journeyRequestID(enrollmentID, stepID string) string {
 	return "journey-" + bare(enrollmentID) + "-" + stepID
@@ -25,32 +26,50 @@ func journeyRequestID(enrollmentID, stepID string) string {
 
 func (w *Worker) drainJourneys(ctx, systemCtx context.Context) {
 	systemCtx = auth.ContextWithInternalOrigin(memql.ContextWithFreshRead(systemCtx))
-	for _, name := range []string{"journeysToRetire", "activeJourneys"} {
+	selected := map[string]map[string]any{}
+	read := func(name string) (any, error) {
+		ids := []string{}
 		cursor := ""
+		seen := map[string]bool{}
 		for page := 0; page < journeyDuePages; page++ {
 			rows, next, err := w.store.rowsPage(systemCtx, cursor, call("query", name))
 			if err != nil {
-				w.logger.Warn("campaigns: automation scan failed", "error", err)
-				break
+				return nil, err
 			}
-			ids := []string{}
-			selected := map[string]map[string]any{}
 			for _, row := range rows {
-				id := str(row, "id")
-				ids = append(ids, id)
-				selected[id] = row
+				key := name + ":" + str(row, "id")
+				selected[key] = row
+				ids = append(ids, key)
 			}
-			_ = campaignPage(ctx, ids, func(ctx context.Context, id string) error {
-				if name == "journeysToRetire" {
-					return w.retireJourney(ctx, systemCtx, selected[id])
-				}
-				return w.runJourney(ctx, systemCtx, selected[id])
-			})
-			if next == "" || next == cursor {
+			if next == "" {
 				break
 			}
+			if seen[next] {
+				return nil, fmt.Errorf("automation scan repeated a cursor")
+			}
+			seen[next] = true
 			cursor = next
 		}
+		return ids, nil
+	}
+	operate := func(name string, op func(context.Context, context.Context, map[string]any) error) workflowhost.Operation {
+		return func(ctx context.Context, a map[string]any) (any, error) {
+			key := str(a, "id")
+			row, ok := selected[key]
+			if !ok || !strings.HasPrefix(key, name+":") {
+				return nil, fmt.Errorf("automation outside this scan")
+			}
+			return nil, op(ctx, systemCtx, row)
+		}
+	}
+	_, err := workflowhost.Run(ctx, "campaignJourneyDrainWorkflow", nil, workflowhost.Options{Logger: w.logger, Operations: map[string]workflowhost.Operation{
+		"campaignJourneysToRetire": func(context.Context, map[string]any) (any, error) { return read("journeysToRetire") },
+		"campaignActiveJourneys":   func(context.Context, map[string]any) (any, error) { return read("activeJourneys") },
+		"campaignRetireJourney":    operate("journeysToRetire", w.retireJourney),
+		"campaignRunJourney":       operate("activeJourneys", w.runJourney),
+	}})
+	if err != nil {
+		w.logger.Warn("campaigns: automation drain failed", "error", err)
 	}
 }
 
@@ -62,12 +81,12 @@ func (w *Worker) runJourney(ctx, systemCtx context.Context, scanned map[string]a
 	if w.journeyGate == nil {
 		return fmt.Errorf("automation coordination is unavailable")
 	}
-	release, err := w.journeyGate(ctx, "journey:"+id)
+	hold, err := w.journeyGate(context.WithoutCancel(ctx), "journey:"+id)
 	if err != nil {
 		return err
 	}
 	err = func() error {
-		defer release()
+		defer hold.Release()
 		row, err := w.newsletterRow(systemCtx, "journeyById", "journeyId", id)
 		if err != nil || row == nil {
 			return err
@@ -112,7 +131,7 @@ func (w *Worker) runJourney(ctx, systemCtx context.Context, scanned map[string]a
 				if triggered.Before(j.ActivatedAt) || triggered.IsZero() {
 					continue
 				}
-				enrollmentID := journeyEnrollmentID(id, str(r, "id"))
+				enrollmentID := journeyEnrollmentID(id, str(r, "id"), templateTime(r["joinedAt"]))
 				existing, err := w.newsletterRow(systemCtx, "journeyEnrollmentById", "enrollmentId", enrollmentID)
 				if err != nil {
 					return err
@@ -124,7 +143,7 @@ func (w *Worker) runJourney(ctx, systemCtx context.Context, scanned map[string]a
 				if digest == "" {
 					continue
 				} // The digest sweep repairs pre-feature rows; consent identity is never guessed.
-				if err = w.newsletterWrite(actor, "enrollJourneyRecipient", map[string]any{"enrollmentId": enrollmentID, "journeyId": id, "accountId": j.AccountID, "recipientId": bare(str(r, "id")), "emailDigest": digest, "stepId": j.Steps[0].ID, "enrolledAt": w.nowUTC().Format(time.RFC3339Nano), "triggeredAt": triggered.Format(time.RFC3339Nano)}); err != nil {
+				if err = w.journeyWrite(actor, hold, "enrollJourneyRecipient", map[string]any{"enrollmentId": enrollmentID, "journeyId": id, "accountId": j.AccountID, "recipientId": bare(str(r, "id")), "emailDigest": digest, "stepId": j.Steps[0].ID, "enrolledAt": w.nowUTC().Format(time.RFC3339Nano), "triggeredAt": triggered.Format(time.RFC3339Nano)}); err != nil {
 					return err
 				}
 			}
@@ -232,6 +251,8 @@ func (w *Worker) advanceEnrollment(ctx, systemCtx context.Context, journey journ
 	switch {
 	case !found:
 		exitReason = "removed"
+	case id != journeyEnrollmentID(j.ID, recipient.ID, recipient.JoinedAt):
+		exitReason = "membership renewed"
 	case !sameOrganization(j.AccountID, recipient.AccountID) || EmailDigest(recipient.Email) != str(row, "emailDigest"):
 		exitReason = "address changed"
 	case recipient.SubscriptionStatus == "unsubscribed" || recipient.SubscriptionStatus == "bounced" || recipient.SubscriptionStatus == "complained":
@@ -359,11 +380,11 @@ func (w *Worker) retireJourney(ctx, systemCtx context.Context, scanned map[strin
 	if w.journeyGate == nil {
 		return fmt.Errorf("automation coordination is unavailable")
 	}
-	release, err := w.journeyGate(ctx, "journey:"+id)
+	hold, err := w.journeyGate(context.WithoutCancel(ctx), "journey:"+id)
 	if err != nil {
 		return err
 	}
-	defer release()
+	defer hold.Release()
 	row, err := w.newsletterRow(systemCtx, "journeyById", "journeyId", id)
 	if err != nil || row == nil {
 		return err
@@ -377,11 +398,11 @@ func (w *Worker) retireJourney(ctx, systemCtx context.Context, scanned map[strin
 			return err
 		}
 		if len(open) == 0 {
-			return w.newsletterWrite(systemCtx, "recordJourneyDrain", map[string]any{"journeyId": id, "retiredAt": w.nowUTC().Format(time.RFC3339Nano), "versionTime": memql.VersionTimeAfter(templateTime(row["createdAt"]), w.nowUTC()).Format(time.RFC3339Nano)})
+			return w.journeyWrite(systemCtx, hold, "recordJourneyDrain", map[string]any{"journeyId": id, "retiredAt": w.nowUTC().Format(time.RFC3339Nano), "versionTime": memql.VersionTimeAfter(templateTime(row["createdAt"]), w.nowUTC()).Format(time.RFC3339Nano)})
 		}
 		for _, e := range open {
 			// Advancing also owns this journey gate, so no send can race retirement.
-			if err = w.newsletterWrite(systemCtx, "advanceJourneyEnrollment", map[string]any{"enrollmentId": bare(str(e, "id")), "stepIndex": integer(e, "stepIndex"), "status": "exited", "exitReason": "automation retired", "completedAt": w.nowUTC().Format(time.RFC3339Nano), "versionTime": memql.VersionTimeAfter(templateTime(e["createdAt"]), w.nowUTC()).Format(time.RFC3339Nano)}); err != nil {
+			if err = w.journeyWrite(systemCtx, hold, "advanceJourneyEnrollment", map[string]any{"enrollmentId": bare(str(e, "id")), "stepIndex": integer(e, "stepIndex"), "status": "exited", "exitReason": "automation retired", "completedAt": w.nowUTC().Format(time.RFC3339Nano), "versionTime": memql.VersionTimeAfter(templateTime(e["createdAt"]), w.nowUTC()).Format(time.RFC3339Nano)}); err != nil {
 				return err
 			}
 		}

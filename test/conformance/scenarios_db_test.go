@@ -34,6 +34,7 @@ package conformance
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -54,6 +55,8 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
+	"github.com/znasllc-io/memql/component/campaigns"
+	"github.com/znasllc-io/memql/component/database"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/emailrules"
 	"github.com/znasllc-io/memql/component/events"
@@ -405,6 +408,14 @@ func newScenarioRig(t *testing.T, env *Env, autos map[string]*automations.Automa
 		autos: autos,
 		quiet: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		run:   strconv.FormatInt(time.Now().UnixNano()%1_000_000_000, 36),
+	}
+	gates, err := database.NewGatePool(os.Getenv("MEMQL_DATABASE_DSN"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gates.Close() })
+	if err := env.Eng.RegisterIntegration(campaigns.NewWorker(storeEngine{env.Eng}, nil, nil, r.quiet, func() *sql.DB { return gates })); err != nil {
+		t.Fatal(err)
 	}
 	// The event-email rules' builtin reaches the emailrules integration, a
 	// self-registering plug-in the app materializes at boot; the rig
@@ -1114,4 +1125,8 @@ func (f *failOnce) Execute(ctx context.Context, step *automations.Step, stepCtx 
 		return &automations.StepResult{StepId: step.ID, StartedAt: now, CompletedAt: now, Status: "failed", Error: msg}, fmt.Errorf("%s", msg)
 	}
 	return f.inner.Execute(ctx, step, stepCtx)
+}
+
+func (e storeEngine) OrganizationCapable(ctx context.Context, account, verb, resource string) bool {
+	return e.eng.OrganizationCapable(ctx, account, verb, resource)
 }

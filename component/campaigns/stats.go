@@ -24,10 +24,9 @@ import (
 // # Every bucket that CAN be a count IS one
 //
 // The engine has no group-by, so an aggregate is either one `count` query per
-// bucket or a Go fold over rows. A count is exact at any audience size and
-// costs one round trip; a fold is bounded by whatever page the read came back
-// on. The buckets here are therefore mostly counts, and the two that are not
-// say so.
+// bucket or a Go fold over rows. A count costs one round trip and carries
+// atLeast when its source window saturates. This response preserves that signal
+// per field; readers must not compute exact rates from those lower bounds.
 //
 // # The two figures that are honest about their limits
 //
@@ -98,7 +97,9 @@ func (w *Worker) handleStats(ctx context.Context, args map[string]any, _ int) ([
 }
 
 func (w *Worker) campaignStats(ctx context.Context, campaign Campaign) (campaignStatsResult, error) {
-	recipients, err := w.store.RosterSize(ctx, campaign.AudienceID)
+	observation := &countObservation{bounded: map[string]bool{}}
+	ctx = context.WithValue(ctx, countObservationKey{}, observation)
+	recipients, err := w.store.count(ctx, call("query", "audienceRosterSize", arg{"audienceId", campaign.AudienceID}))
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +167,7 @@ func (w *Worker) campaignStats(ctx context.Context, campaign Campaign) (campaign
 		return nil, err
 	}
 
-	return campaignStatsResult{
+	out := campaignStatsResult{
 		"campaignId": campaign.ID,
 		"recipients": recipients,
 		"pending":    pending,
@@ -188,7 +189,52 @@ func (w *Worker) campaignStats(ctx context.Context, campaign Campaign) (campaign
 		"unsubscribed": unsubscribes,
 		"opens":        opens,
 		"clicks":       clicks,
-	}, nil
+	}
+	atLeast := map[string]bool{}
+	for query, bounded := range observation.bounded {
+		if !bounded {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(query, "query audienceRosterSize"):
+			atLeast["recipients"] = true
+		case strings.HasPrefix(query, "query campaignDeliveryCountByStatus"):
+			for _, status := range []string{"pending", "sent", "failed", "skipped"} {
+				if strings.Contains(query, `status: "`+status+`"`) {
+					if status == "skipped" {
+						atLeast["skipped.total"] = true
+					} else {
+						atLeast[status] = true
+					}
+				}
+			}
+		case strings.HasPrefix(query, "query campaignSkipCountByReason"):
+			if strings.Contains(query, `"unsubscribed"`) {
+				atLeast["skipped.unsubscribed"] = true
+			} else {
+				atLeast["skipped.suppressed"] = true
+			}
+		case strings.HasPrefix(query, "query campaignConsentCountByKind"):
+			for kind, field := range map[string]string{ConsentBounce: "bounces.hard", ConsentComplaint: "complaints", ConsentWithdraw: "unsubscribed"} {
+				if strings.Contains(query, `kind: "`+kind+`"`) {
+					atLeast[field] = true
+				}
+			}
+		case strings.HasPrefix(query, "query campaignEngagementCountByKind"):
+			if strings.Contains(query, `kind: "open"`) {
+				atLeast["opens.total"] = true
+			} else {
+				atLeast["clicks.total"] = true
+			}
+		}
+	}
+	if len(atLeast) > 0 {
+		out["atLeast"] = atLeast
+	}
+	if atLeast["skipped.total"] || atLeast["skipped.suppressed"] || atLeast["skipped.unsubscribed"] {
+		delete(out["skipped"].(map[string]any), "other")
+	}
+	return out, nil
 }
 
 // engagementStats returns {total, unique} for one engagement kind, with

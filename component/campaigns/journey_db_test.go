@@ -68,7 +68,11 @@ func TestJourneyAcrossIndependentReplicas(t *testing.T) {
 		}
 		wg.Wait()
 	}
-	enrollmentID := journeyEnrollmentID(fmt.Sprint(args["journeyId"]), recipient)
+	member, found, err := n.store.RecipientByID(n.owner, recipient)
+	if err != nil || !found {
+		t.Fatalf("recipient: %v %v", found, err)
+	}
+	enrollmentID := journeyEnrollmentID(fmt.Sprint(args["journeyId"]), recipient, member.JoinedAt)
 	enrollment := func() map[string]any {
 		t.Helper()
 		r, err := n.worker.newsletterRow(n.system, "journeyEnrollmentById", "enrollmentId", enrollmentID)
