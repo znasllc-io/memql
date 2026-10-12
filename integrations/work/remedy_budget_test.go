@@ -39,7 +39,7 @@ func TestReplanBudgetApprovalResumesTheRemedyAcrossReplicas(t *testing.T) {
 	peer, peerEng, _ := newActsIntegration(t)
 	// The budget path nests two different keyed gates; the generic recorder
 	// uses one mutex for every key. The database test exercises the real locks.
-	peer.decisionGate = func(context.Context, string) (func(), error) { return func() {}, nil }
+	peer.decisionGate = func(context.Context, ...string) (func(), error) { return func() {}, nil }
 	approval["id"] = approval["approvalId"]
 	approval["ownerUserId"] = actOwner
 	peerEng.reply("workApprovalsForOwner", approval)

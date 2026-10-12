@@ -188,6 +188,7 @@ func TestCompileDB_ReplyBudgetIsDurableAcrossReplicasAndClockSkew(t *testing.T) 
 	// connection from the engine's reads/writes, as in the production pool.
 	peer := workHeadsPeer(t, db)
 	receiver := New(dispatchDBEngine(t, peer), testLogger(), func() *bun.DB { return peer })
+	receiver.SetGateDB(testGates(t))
 	receiver.SetNow(func() time.Time { return time.Now().Add(-time.Hour) })
 	if err := receiver.LimitReplyBudget(ctx, owner, runID); err != nil {
 		t.Fatal(err)
@@ -578,6 +579,7 @@ func TestCompileDB_QuickEstimatePromotesAcrossReplicasWithoutResettingSpend(t *t
 	ctx = common.ContextWithRun(ctx, rc)
 	peer := workHeadsPeer(t, db)
 	receiver := New(dispatchDBEngine(t, peer), testLogger(), func() *bun.DB { return peer })
+	receiver.SetGateDB(testGates(t))
 	receiver.SetNow(func() time.Time { return time.Now().Add(-time.Hour) })
 	if err := receiver.LimitReplyBudget(ctx, owner, runID); err != nil {
 		t.Fatal(err)

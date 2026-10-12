@@ -2,7 +2,6 @@ package work
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -44,13 +43,11 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 	}
 	receipt = ReviewGoalIdentity(owner, requestKey)
 	identity := receipt.GoalID
-	var db *sql.DB
-	if i.bunDB != nil {
-		if handle := i.bunDB(); handle != nil {
-			db = handle.DB
-		}
+	gates, err := i.gatePool()
+	if err != nil {
+		return receipt, err
 	}
-	release, err := memql.AcquireWriteGate(ctx, db, "work-review-goal:"+identity)
+	release, err := memql.AcquireWriteGate(ctx, gates, "work-review-goal:"+identity)
 	if err != nil {
 		return receipt, err
 	}

@@ -77,6 +77,11 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 	// hypertable (memql#5252); the readiness collapse deletes in bounded,
 	// committed batches, which a .sql file can only write as one statement
 	// (memql#5604).
+	//
+	// The recipient email digest is NOT among them (memql#6022): it adds a field
+	// the previous release's replicas cannot write, so it is filled in by a sweep
+	// the campaigns worker runs after a rollout (recipient_email_digest.go), never
+	// by a migration that would run before one.
 	registerSiteOwnerRestamp(m, logger)
 	registerMemoryNodesConceptIndex(m, logger)
 	registerMemoryNodesConceptIndexVerified(m, logger)

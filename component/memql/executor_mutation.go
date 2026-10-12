@@ -1077,6 +1077,28 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, err
 		}
 	}
+	// A BUNDLE BECOMES ACTIVE only through the gated activation (memql#6022),
+	// at the same seam and for the same reasons: every replica arms every
+	// bundle that reads active, the read-merge carries status through writes
+	// that never name it, and an owner's before-write hook could otherwise set
+	// it. See authoring_bundle_activation_write_guard.go. And a bundle COMES
+	// TO EXIST only as a server pipeline's write: a rule's next bundle id is
+	// known before it is written, and a bundle another person created there
+	// first would block its owner. See authoring_bundle_create_write_guard.go.
+	// And a GATE'S VERDICT is the server's claim that the gate ran: a work
+	// template runs from a validated bundle, and a bundle activates from
+	// dryRunPassed. See authoring_bundle_verdict_write_guard.go.
+	if conceptMeta.Name == conceptAuthoringBundle {
+		if err := validateBundleCreateServerOnly(ctx, organizationPrior); err != nil {
+			return nil, meta, err
+		}
+		if err := validateBundleVerdictServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+		if err := validateBundleActivationServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
 	// PROTECTED OUTBOUND ROWS -- secret targets and server-staged deliveries --
 	// are server-written only (memql#5480), at the same seam for the ladder's
 	// reasons: the rule is about a CHANGE, so it needs the stored row and the
@@ -1170,6 +1192,18 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// worker_sharing_write_guard.go.
 	if conceptMeta.Name == WorkerRegistrationConcept {
 		if err := validateWorkerConsentServerOnly(ctx, organizationPrior, payload); err != nil {
+			return nil, meta, err
+		}
+	}
+	// A BUNDLE'S MEMBERS are what its gates saw (memql#6022): a construct
+	// joins a bundle, or changes what it arms, only as the server's write
+	// into its owner's bundle before that bundle has passed its dry run.
+	// Here, beside the sharing guard and for its reason: it judges the
+	// OWNER, which is final only after the stamps above -- a raw insert's
+	// owner is stamped there. Before canonicalization, so it compares owners
+	// and bundle ids tolerantly. See authoring_construct_write_guard.go.
+	if conceptMeta.Name == memorynodes.ConceptAuthoringConstruct {
+		if err := e.validateConstructMembership(ctx, organizationPrior, payload); err != nil {
 			return nil, meta, err
 		}
 	}

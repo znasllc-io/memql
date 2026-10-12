@@ -291,6 +291,93 @@ complained-about or suppressed addresses are not silently resubscribed.
 
 Repeated submissions converge on one signup and one intended welcome per
 normalized address and audience, even across deployables and worker replicas.
+An address already in the audience is found by its digest, the SHA-256 of the
+trimmed, lower-cased address, which the engine puts on each recipient it adds,
+instead of by reading the whole audience. A recipient written before the digest
+existed has none until the digest sweep reaches it, so the rows without a digest
+are checked by their address as well. Any row for the mailbox that has
+unsubscribed, bounced or complained keeps the form from enrolling it again or
+sending it a welcome, including a row opted out by hand and a row beside a
+duplicate for the same mailbox. The lookup is not an index read: the cost of
+each signup grows with the number of recipients in the cluster.
+
+The digest lookup returns at most 50 memberships. If it fills that page, the
+signup and row-address email rule refuse to proceed: an opted-out duplicate
+could be beyond the page. No consent, enrollment or send follows that incomplete
+answer. Consolidate duplicate memberships while preserving any opt-out before
+retrying; the digest sweep does not remove duplicates.
+
+**Rolling out the digest.** The digest is put on existing recipients by a sweep
+in the campaigns worker, not by a migration. A recipient record refuses a field
+it does not declare, so a replica still running the previous release cannot
+update a recipient that carries a digest: an unsubscribe it receives answers the
+retry page, a bounce or complaint it handles cannot be applied to the recipient,
+and a by-hand change through it errors, until that replica is gone. A migration
+would run before the new replicas start and stamp every recipient while the
+previous release is still serving, so the sweep runs ten minutes after each node
+starts and hourly after that, when a rollout is normally over. It runs whether or
+not campaign sending is enabled on the node (MEMQL_CAMPAIGNS_ENABLED), because
+signups and email rules write recipients either way. The ten minutes is a guess,
+not a check: a rollout that outlasts it is swept while an old replica still
+serves, and the recipients that pass reaches cannot be updated by that replica
+until it is gone. New recipients carry the digest from the first request of the
+new release, and rolling back to a release before the digest leaves them in the
+same state, so roll forward instead. Replicas sweep side by side without waiting
+for each other: a pass that finds a batch's lock taken skips the batch, tries it
+once more at its end, and leaves what is still held for the next pass.
+
+Until the sweep has been through, a signup always reads one page of the
+audience's recipients that have no digest as well, and once it has that page is
+empty. While an audience holds a full page of them (50), which is every audience
+of 50 or more recipients between a rollout and the first sweep, the signup reads
+the audience page by page (500 recipients a page, about two seconds a page with
+200,000 recipients in the cluster) and stops at the first row for the address
+that opted out. That is the cost the digest removed, so it stops after ten pages:
+in an audience of more than 5,000 recipients it does not start (the audience's
+size says it cannot rule an opt-out out), and the form asks the visitor to try
+again later at once. An email rule that sends to an address on a row has no such
+read, and declines to fire and says so in its refusals. The sweep logs "put the
+address digest on recipients written without one" with a count when it stamps
+anything; a pass over recipients that all carry a digest writes nothing.
+
+**What a signup holds.** A signup serialises its writes with two advisory locks,
+the storefront's and then the audience's, taken together in one transaction on
+one connection of the pod's write-gate pool: connections used for nothing else
+(`MEMQL_DB_GATE_POOL_SIZE`, four by default), so the work under the locks keeps
+all of the request pool, and the locks are not subject to the request pool's
+60-second limit on a session idle in a transaction. A gate session may sit idle
+for five minutes (`MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS`), and a signup stays far
+inside that.
+
+*Uncontended*, which is the usual case: the locks are taken at once. Everything
+slow is read before them (the form, the mailbox and the audience's size above, the
+welcome template), so a slow read delays only that visitor. Under the locks the
+signup checks again only what must be exact when it writes: the storefront's
+binding, the signup row, the suppression list and, for a mailbox it is about to
+add, the audience's room and the mailbox by digest, so signups that ran side by
+side cannot together pass the audience's ceiling or add the same person twice.
+Immediately before each write it asks its gate whether the locks are still held.
+The single-row reads and the writes are milliseconds. The two reads for a new
+mailbox are not: the engine answers any recipient read from every current
+recipient in the cluster, which costs one to four seconds each at 200,000
+recipients, depending on how busy the database is. A new subscriber at that size
+holds the locks for about two of them, and about twenty seconds in all.
+
+*Contended*: new subscribers to one audience take their turns. A signup that has
+waited six seconds for its locks, or for a connection of the gate pool, answers
+"Too many signups at once. Try again in a moment." and writes nothing; at 200,000
+recipients that is more than a couple of new subscribers to one audience at the
+same moment. A signup that gets its locks but is under them for more than thirty
+seconds starts no further write and gives the same answer; a write already under
+way when its time runs out, or when the visitor leaves, is waited for (up to ten
+seconds, past the database's own eight-second limit on a statement) and commits
+while the locks are still held, never after them. Consent is written first and
+keyed by the signup, so asking again is safe at every step. If PostgreSQL ends the
+gate's session (an administrator, a failover) the signup finds out before its next
+write and makes none. A pod whose gate connections are all held (four signups,
+welcomes or other gates at the same moment) makes the next signup wait for one, up
+to the same six seconds, and then give the same answer.
+
 Consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and
 published welcome content. Editing the template later does not rewrite that
@@ -298,9 +385,21 @@ welcome. Changing the recipient's mailbox blocks the queued welcome instead of
 redirecting it to an address that did not consent. Current authority, sender
 availability and suppression are checked again before sending.
 
+A welcome takes the storefront's lock, the audience's and its own send receipt's
+together, in that order, in one transaction on one connection, and spends at most
+the send's timeout plus thirty seconds under them. A lock that is busy at any point
+before the send begins, including the email provider's own (Azure's send receipt),
+is "nothing attempted, try later": the welcome stays pending, nothing is marked
+blocked, and the next worker pass sends it. So is a welcome whose time under its
+locks runs out, or whose worker stops, before its send begins, and one whose
+storefront could not be read: only a send that began ends a welcome, and its
+outcome is recorded even when the send outlasts the welcome's time. A welcome is
+marked blocked only for a reason of its own (the newsletter or its storefront was
+turned off, the reviewed template cannot be read, the send was refused).
+
 **Recent welcomes** shows the latest 50 outcomes, read when the audience opens
-or **Refresh** is selected. A rate limit leaves mail pending for a later worker
-pass. A blocked welcome shows its reason; after resolving it, **Check again**
+or **Refresh** is selected. A rate limit or a busy lock leaves mail pending for a
+later worker pass. A blocked welcome shows its reason; after resolving it, **Check again**
 rechecks that exact saved outcome. An attempt with a lost provider response is
 `uncertain` and is never automatically submitted again. `sent` means the
 transport accepted the message, not proof of inbox delivery. Local capture sends
@@ -360,6 +459,14 @@ Email rules supply a stable identifier automatically for each event and recipien
 Their firing reports count suppressed and replayed sends as skipped, and show
 uncertain outcomes as refusals.
 
+An email rule fires once, on the replica where its triggering write happened, and
+the limits its runs draw on (10 concurrent runs and the automation execution
+budget) are counted per replica, so the cluster-wide ceiling is those limits times
+the number of replicas. A rule fires once per event: two identical updates to the
+same row within about an hour count as one, on a single node too. Each replica
+counts failures on its own, so a failing rule can fail up to five times on each
+replica before it stops everywhere.
+
 Other automations that call `campaignSendToRecipient` should supply a stable
 `requestId` for each intended message, such as one signup event's welcome.
 Keep that identifier unchanged when retrying the same event. The recipient,
@@ -375,8 +482,18 @@ This prevents duplicate submissions; it does not guarantee mailbox delivery.
 Requests that omit `requestId` retain the existing per-invocation behavior.
 
 Suppression and preflight refusals make no external send attempt and remain
-retryable. Receipt reads still require current send authority in the recorded
-organization. The internal receipt cannot be forged through client mutations.
+retryable, and so does a send whose coordination lock was busy: the attempt is
+recorded only after every lock the send needs has been taken, including the email
+provider's, so a busy lock leaves no record that an attempt began and the same
+request, made again, goes out. An email rule that finds the lock busy tries again
+within its firing after one, two and four seconds. If it is still busy it reports a
+refusal ("nothing was sent to this recipient; the firing can be made again"),
+stops an audience rule at that recipient, and for a rule that fires when a row is
+created gives the row's claim back, so the event delivered again fires for it. The
+bulk send treats a busy lock as a wait: the delivery keeps its attempt count and the
+campaign pauses for fifteen seconds. Receipt reads still require current send
+authority in the recorded organization. The internal receipt cannot be forged
+through client mutations.
 
 ## Local test inbox
 

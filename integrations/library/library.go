@@ -89,11 +89,19 @@ type Integration struct {
 
 // NewIntegration wires the engine handle. The factory is in plugin.go;
 // this constructor is exposed for tests that supply a stub engine.
-func NewIntegration(engine memql.IntegrationEngineAccess, database ...func() *sql.DB) *Integration {
+//
+// gateDB resolves the pool the document and file version write gates run on
+// (database.Database.GateDB, memql#6022): never the request pool the engine
+// works on. Without one the gates refuse, saying which wiring is missing.
+func NewIntegration(engine memql.IntegrationEngineAccess, gateDB ...func() *sql.DB) *Integration {
+	var resolve func() *sql.DB
+	if len(gateDB) > 0 {
+		resolve = gateDB[0]
+	}
 	gate := func(ctx context.Context, key string) (func(), error) {
-		var db *sql.DB
-		if len(database) > 0 && database[0] != nil {
-			db = database[0]()
+		db, err := memql.ResolveWriteGatePool(resolve, "library", "pass database.Database.GateDB to library.NewIntegration (a node's plug-in takes it from PluginContext.GateDB; a test or a tool opens one with database.NewGatePool)")
+		if err != nil {
+			return nil, err
 		}
 		return memql.AcquireWriteGate(ctx, db, key)
 	}

@@ -20,6 +20,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/steps"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -336,8 +337,16 @@ func newRevisionDB(t *testing.T) *revisionDB {
 			t.Fatal(err)
 		}
 		e.SetLogicRunner(automations.NewLogicRunner(e, steps.NewRegistry(), e.Logger))
-		lib := NewIntegration(e, func() *sql.DB { return db.DB })
+		// The write gates of both integrations run on a pool of their own, as the
+		// Database component opens it (memql#6022), not on the engine's pool.
+		gates, gerr := database.NewGatePool(dbtest.DSN(), 0)
+		if gerr != nil {
+			t.Fatal(gerr)
+		}
+		t.Cleanup(func() { _ = gates.Close() })
+		lib := NewIntegration(e, func() *sql.DB { return gates })
 		w := work.New(e, e.Logger, func() *bun.DB { return db })
+		w.SetGateDB(func() *sql.DB { return gates })
 		lib.SetReviewGoals(w)
 		for _, integration := range []memql.IntegrationProvider{lib, w, f.ai} {
 			if err = e.RegisterIntegration(integration); err != nil {

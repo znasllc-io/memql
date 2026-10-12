@@ -67,15 +67,18 @@ func nonClusterOwnerCtx(userId string) context.Context {
 
 // seedActiveAuthoringBundle creates a draft authoring bundle owned by the
 // caller, then activates it (status -> active) so it satisfies the
-// statusIsActive half of systemActiveAuthoringBundles' filter.
+// statusIsActive half of systemActiveAuthoringBundles' filter. Both writes are
+// @serverOnly (memql#6022): the seed stands in for the server pipelines, which
+// write them under internal origin.
 func seedActiveAuthoringBundle(t *testing.T, ctx context.Context, eng *MemQLEngine, bundleId string) {
 	t.Helper()
 	create := fmt.Sprintf(`createAuthoringBundle(bundleId:%q,title:%q)`, bundleId, "actor-postfilter #1659 guard")
-	if _, err := eng.Execute(ctx, create); err != nil {
+	if _, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), create); err != nil {
 		t.Fatalf("create bundle: %v", err)
 	}
+	retireWhenDone(t, eng, ctx, bundleId)
 	activate := fmt.Sprintf(`activateAuthoringBundle(bundleId:%q)`, bundleId)
-	if _, err := eng.Execute(ctx, activate); err != nil {
+	if _, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), activate); err != nil {
 		t.Fatalf("activate bundle: %v", err)
 	}
 }

@@ -1,22 +1,28 @@
 package automations
 
-// authored_owner_gate.go -- cluster leader-gating for owner-scoped authored
-// automations (epic memql#954, issue #959, increment 4).
+// authored_owner_gate.go -- cluster leader-gating for owner-scoped SCHEDULED
+// authored automations (epic memql#954, issue #959, increment 4).
 //
-// Every node runs the authored scheduler, so an authored automation's trigger
-// fires on each node that subscribed it -- and a cron entry ticks on each node
-// independently. For the SAME reason the core scheduler gates cron firings to
-// one cluster-wide leader (#561, cron_leader.go), the authored runtime must
-// gate too, or an owner's authored automation runs once-per-replica.
+// Every node runs the authored scheduler, so a scheduled authored automation's
+// cron entry ticks on each node that armed it, independently. For the SAME
+// reason the core scheduler gates cron firings to one cluster-wide leader
+// (#561, cron_leader.go), the authored runtime must gate too, or an owner's
+// scheduled automation runs once-per-replica.
+//
+// EVENT triggers are not gated here (memql#6022, F2). A trigger event for an
+// arbitrary concept is heard only on the node where it happened -- forwarding
+// is default-deny -- so an event firing runs on that node, wherever the owner
+// is assigned (AuthoredScheduler.fireOnEvent); gating it here sent nothing for
+// every write that landed off the owner's node.
 //
 // But the authored layer is OWNER-SCOPED, and the issue asks specifically to
 // "define which node owns an owner's authored automations." So instead of one
-// global leader running EVERY owner's automations (a hot spot), this gate
+// global leader running EVERY owner's schedules (a hot spot), this gate
 // DISTRIBUTES owners across the live nodes: a deterministic assignment maps
-// each ownerUserId to exactly one node. A node runs an owner's authored
-// automation firing only when it is that owner's assigned node. The assignment
-// is stable (same owner -> same node while membership is unchanged) and
-// rebalances when the node set changes.
+// each ownerUserId to exactly one node. A node runs an owner's scheduled
+// firing only when it is that owner's assigned node. The assignment is stable
+// (same owner -> same node while membership is unchanged) and rebalances when
+// the node set changes.
 //
 // Determinism: assignment is hash(ownerUserId) over the SORTED live node ids,
 // so every node computes the identical owner->node map from the same
@@ -25,8 +31,8 @@ package automations
 // routing.
 //
 // Single-node / dev: when the membership view is empty or has one node, this
-// node owns every owner (the pre-cluster behaviour), so authored automations
-// fire normally on a single node without any gating overhead.
+// node owns every owner (the pre-cluster behaviour), so scheduled authored
+// automations fire normally on a single node without any gating overhead.
 
 import (
 	"hash/fnv"
@@ -34,14 +40,15 @@ import (
 )
 
 // MembershipFunc returns the current set of live node ids in the cluster
-// (including this node). The authored owner gate reads it on every firing so a
-// membership change rebalances owner assignments without a restart. An empty
-// or nil result means "single node" -- this node owns everything.
+// (including this node). The authored owner gate reads it on every scheduled
+// firing so a membership change rebalances owner assignments without a
+// restart. An empty or nil result means "single node" -- this node owns
+// everything.
 type MembershipFunc func() []string
 
-// AuthoredOwnerGate decides whether THIS node owns a given owner's authored
-// automations, so an owner's authored automation fires once cluster-wide
-// (on its assigned node) rather than once per replica.
+// AuthoredOwnerGate decides whether THIS node owns a given owner's scheduled
+// authored automations, so an owner's schedule fires once cluster-wide (on its
+// assigned node) rather than once per replica.
 type AuthoredOwnerGate struct {
 	selfNodeId string
 	membership MembershipFunc
@@ -56,9 +63,9 @@ func NewAuthoredOwnerGate(selfNodeId string, membership MembershipFunc) *Authore
 }
 
 // OwnsOwner reports whether this node is the assigned runner for ownerUserId's
-// authored automations. It is the func wired into the authored scheduler's
-// owner gate. Owner with empty id is never owned (defensive -- an unowned
-// firing should not run anywhere rather than everywhere).
+// scheduled authored automations. It is the func wired into the authored
+// scheduler's owner gate. Owner with empty id is never owned (defensive -- an
+// unowned firing should not run anywhere rather than everywhere).
 func (g *AuthoredOwnerGate) OwnsOwner(ownerUserId string) bool {
 	if g == nil {
 		return true // no gate configured -> run (single-node / dev)

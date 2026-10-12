@@ -7098,6 +7098,30 @@ QueryClient.prototype.recipientById = function (this: QueryClient, args: Recipie
   return this.executeNamed("recipientById", buildRecipientById(args), opts);
 };
 
+/** The memberships for one mailbox in one audience, by address digest. Organization-authorized. The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a signup or a row-address rule finds a page of the rows a mailbox holds without walking the roster. Matches are in any subscription state, oldest first: the same mailbox can hold more than one row (a manual add beside an earlier row, a race), and one can have opted out while another has not. A FULL page cannot rule out another opted-out row beyond it; the caller must refuse rather than assume it saw every membership. A row carries a digest only if it was written by addRecipient or filled in by the digest sweep, so a mailbox can also hold rows this does not return: recipientsWithoutDigestInAudience is the other half. The caller checks each row's own address before it believes the key; a raw write can set a digest that is not its address's. */
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientInAudienceByDigest"] in generated_concepts.ts).
+export interface RecipientInAudienceByDigestArgs {
+  audienceId: string;
+  emailDigest: string;
+}
+
+export function buildRecipientInAudienceByDigest(args: RecipientInAudienceByDigestArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  parts.push("emailDigest: " + renderMemQLValue(args.emailDigest));
+  return "query recipientInAudienceByDigest(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recipientInAudienceByDigest(args: RecipientInAudienceByDigestArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recipientInAudienceByDigest = function (this: QueryClient, args: RecipientInAudienceByDigestArgs = {} as RecipientInAudienceByDigestArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recipientInAudienceByDigest", buildRecipientInAudienceByDigest(args), opts);
+};
+
 /** Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the caller conjunct is doubly load-bearing here. */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsForAudience"] in generated_concepts.ts).
 export interface RecipientsForAudienceArgs {
@@ -7118,6 +7142,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.recipientsForAudience = function (this: QueryClient, args: RecipientsForAudienceArgs = {} as RecipientsForAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("recipientsForAudience", buildRecipientsForAudience(args), opts);
+};
+
+/** One page of the rows of an audience that carry no address digest, oldest first. Organization-authorized. Those are the rows written before the digest existed, by a replica still running the previous release, or by a raw write, until the digest sweep fills them in. A lookup by digest cannot see them, so a signup or a row-address rule reads this page too and compares each row's address; a FULL page proves nothing about the rows beyond it and the caller must not read it as "no such row". */
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsWithoutDigestInAudience"] in generated_concepts.ts).
+export interface RecipientsWithoutDigestInAudienceArgs {
+  audienceId: string;
+}
+
+export function buildRecipientsWithoutDigestInAudience(args: RecipientsWithoutDigestInAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "query recipientsWithoutDigestInAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    recipientsWithoutDigestInAudience(args: RecipientsWithoutDigestInAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.recipientsWithoutDigestInAudience = function (this: QueryClient, args: RecipientsWithoutDigestInAudienceArgs = {} as RecipientsWithoutDigestInAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("recipientsWithoutDigestInAudience", buildRecipientsWithoutDigestInAudience(args), opts);
 };
 
 /** Returns active data records. Optional filters: partitionId, recordType, validationState, importSource */

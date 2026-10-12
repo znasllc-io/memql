@@ -251,25 +251,6 @@ func BuildDryRunMutationCall(bundleId string, report BundleDryRunReport) (string
 	return "recordBundleDryRun(" + renderDryRunMemQLValue(args) + ")", nil
 }
 
-// PersistDryRunReport records a dry-run report on its bundle via
-// recordBundleDryRun (the Gate-2 persist path referenced by
-// dsl/authoring/mutations.memql). It transitions the bundle to dryRunPassed /
-// failed and stores the trace + side-effect manifest + cost estimate as the
-// approval artifact. Requires a live engine DB (the mutation writes a row).
-func PersistDryRunReport(ctx context.Context, engine *MemQLEngine, bundleId string, report BundleDryRunReport) error {
-	if engine == nil {
-		return fmt.Errorf("PersistDryRunReport requires an engine")
-	}
-	call, err := BuildDryRunMutationCall(bundleId, report)
-	if err != nil {
-		return err
-	}
-	if _, err := engine.Execute(ctx, call); err != nil {
-		return fmt.Errorf("persist dry-run report for bundle %q: %w", bundleId, err)
-	}
-	return nil
-}
-
 // reportToObject round-trips the report through JSON into a map[string]any so it
 // can be rendered as a MemQL object literal. Using the JSON tags keeps the
 // persisted object shape identical to the v1:authoring:bundle.dryRunReport

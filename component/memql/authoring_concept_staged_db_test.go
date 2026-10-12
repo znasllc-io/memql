@@ -59,15 +59,36 @@ import (
 // are the production ones; it exists only because the durable promote generates
 // the bundle + construct ids internally and returns neither, and the read-back
 // needs the bundle id.
+//
+// It also retires every bundle it creates when the test ends. A durable promote
+// ends by activating its bundle, and an active bundle is armed by every
+// replica's reconcile pass and boot re-arm in every run after the test, in a
+// database that is shared and never truncated (memql#6022).
 type recordingPromoteStore struct {
 	*enginePromoteStore
+	t           *testing.T
 	bundleId    string
 	constructId string
 }
 
+// newRecordingPromoteStore is the store for a durable promote a test drives
+// through the real engine: use it for every one, so no test leaves a promote
+// bundle active.
+func newRecordingPromoteStore(t *testing.T, eng *MemQLEngine) *recordingPromoteStore {
+	t.Helper()
+	return &recordingPromoteStore{enginePromoteStore: &enginePromoteStore{engine: eng}, t: t}
+}
+
+// CreatePromoteBundle registers the retirement as soon as the bundle exists --
+// before the promote activates it -- so a test that stops midway still cleans up.
+// ctx is the owner's envelope, which is what the retire runs under.
 func (s *recordingPromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, title, summary string) error {
 	s.bundleId = bundleId
-	return s.enginePromoteStore.CreatePromoteBundle(ctx, bundleId, title, summary)
+	if err := s.enginePromoteStore.CreatePromoteBundle(ctx, bundleId, title, summary); err != nil {
+		return err
+	}
+	retireWhenDone(s.t, s.engine, ctx, bundleId)
+	return nil
 }
 
 func (s *recordingPromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, origin, status string) error {
@@ -111,7 +132,7 @@ func promoteConceptThroughTheRealStore(t *testing.T, eng *MemQLEngine, ctx conte
 	c, ok := reg.Lookup(owner, "concept", "stagedWidget")
 	require.True(t, ok, "session define did not register concept stagedWidget")
 
-	store := &recordingPromoteStore{enginePromoteStore: &enginePromoteStore{engine: eng}}
+	store := newRecordingPromoteStore(t, eng)
 	require.NoError(t,
 		eng.promoteConstructDurableWithStore(ctx, store, nil, owner, c, opts...),
 		"durable promote through the REAL store")

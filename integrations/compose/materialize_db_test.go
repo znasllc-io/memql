@@ -19,6 +19,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/steps"
 	pure "github.com/znasllc-io/memql/component/compose"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
@@ -52,10 +53,31 @@ func materializeDBEngine(t *testing.T) *memql.MemQLEngine {
 	return e
 }
 
+// gatedWork is the work spine as a node builds it: its write gates on a pool of
+// their own (database.NewGatePool, as the node's database opens GateDB;
+// memql#6022), never on the engine's.
+func gatedWork(t *testing.T, e *memql.MemQLEngine) *work.Integration {
+	t.Helper()
+	w := work.New(e, e.Logger)
+	w.SetGateDB(composeGatePool(t))
+	return w
+}
+
+// composeGatePool opens one replica's write-gate pool.
+func composeGatePool(t *testing.T) func() *sql.DB {
+	t.Helper()
+	gates, err := database.NewGatePool(dbtest.DSN(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gates.Close() })
+	return func() *sql.DB { return gates }
+}
+
 func TestMaterializeDB_SharedCompositionKeepsSourcesPrivate(t *testing.T) {
 	e := materializeDBEngine(t)
 	i := New(e, e.Logger)
-	i.SetGoalOpener(work.New(e, e.Logger))
+	i.SetGoalOpener(gatedWork(t, e))
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	owner, member := "compose-owner-"+suffix, "compose-member-"+suffix
 	account, group := "compose-account-"+suffix, "compose-group-"+suffix
@@ -136,7 +158,7 @@ func TestMaterializeDB_AcceptThenAdoptOnAnotherEngine(t *testing.T) {
 	accepting := materializeDBEngine(t)
 	executing := materializeDBEngine(t)
 	accept := New(accepting, accepting.Logger)
-	accept.SetGoalOpener(work.New(accepting, accepting.Logger))
+	accept.SetGoalOpener(gatedWork(t, accepting))
 	worker := New(executing, executing.Logger)
 	if err := executing.RegisterIntegration(worker); err != nil {
 		t.Fatal(err)
