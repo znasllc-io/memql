@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
@@ -415,6 +416,7 @@ describe("the gate on a live deployable's page", () => {
   it("confirms the live version by NAMING it", async () => {
     const connection = openPage({ deployments: { "pkg-acme": [GATE, SERVED_V2] } });
     await atTheGate();
+    await readTheBar();
     await click(barAct("Deploy"));
     expect(connection.callsNamed("packageDeploy")).toEqual([
       'builtin packageDeploy(packageId: "pkg-acme", confirm: true, placements: {web: {target: "serving"}}, deploymentId: "dep-parked")',
@@ -427,6 +429,7 @@ describe("the gate on a live deployable's page", () => {
     await click(option("Candidate"));
     expect(option("Candidate").getAttribute("aria-checked")).toBe("true");
     expect(barActs()).toEqual(["Cancel", "Deploy as candidate"]);
+    await readTheBar();
     await click(barAct("Deploy as candidate"));
     expect(connection.callsNamed("packageDeploy")).toEqual([
       'builtin packageDeploy(packageId: "pkg-acme", confirm: true, placements: {web: {target: "candidate"}}, deploymentId: "dep-parked")',
@@ -456,6 +459,7 @@ describe("the gate on a live deployable's page", () => {
     expect(barActs()).toEqual(["Cancel", "Deploy as candidate"]);
     // ...and the person can still choose otherwise, which the confirm says.
     await click(option("Live version"));
+    await readTheBar();
     await click(barAct("Deploy"));
     expect(connection.callsNamed("packageDeploy")).toEqual([
       'builtin packageDeploy(packageId: "pkg-acme", confirm: true, placements: {web: {target: "serving"}}, deploymentId: "dep-parked")',
@@ -495,6 +499,7 @@ describe("the gate on a live deployable's page", () => {
     openPage({ deployments: { "pkg-acme": [GATE, SERVED_V2] }, deployError: refusal });
     await atTheGate();
     await click(option("Candidate"));
+    await readTheBar();
     await click(barAct("Deploy as candidate"));
     const choice = document.querySelector(".deployable-deploy-target") as HTMLElement;
     await waitFor(() => expect(choice.textContent).toContain("deploy it as the live version, or ship the MemQL on its own first"));
@@ -593,6 +598,8 @@ describe("the compose flow's confirm", () => {
     );
     const act = async (name: string) => {
       await waitFor(() => expect([...document.querySelectorAll(".os-actbar-acts button")].some((b) => b.textContent?.trim() === name)).toBe(true));
+      // The act joined a bar that has just changed, and such a bar takes no press for a moment.
+      await readTheBar();
       await click([...document.querySelectorAll<HTMLButtonElement>(".os-actbar-acts button")].find((b) => b.textContent?.trim() === name));
     };
     await act("Choose addresses");

@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
@@ -394,6 +395,8 @@ describe("the promotion", () => {
     // The bar's accessible name carries the deployable too ("Promote the
     // candidate Storefront"), so the match is on the act's own words.
     const promote = await screen.findByRole("button", { name: /^Promote the candidate/ });
+    // The act joined the bar as the page was read, and a bar that has just changed takes no press for a moment.
+    await readTheBar();
     await click(promote);
 
     // THE VERSION IS NAMED ON THE WIRE, which is the whole safety of the
