@@ -34,6 +34,7 @@ import {
   audienceName,
   audienceProjection,
   campaignFromRow,
+  isPublished,
   senderIsRetired,
   senderLabel,
   senderProjection,
@@ -201,7 +202,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
   // Published first: a draft can be chosen, and Review says what it still needs.
   const templates = allTemplates
     .filter((t) => t.accountId === accountId && !templateIsArchived(t))
-    .sort((a, b) => Number(b.status === "ready") - Number(a.status === "ready"));
+    .sort((a, b) => Number(isPublished(b)) - Number(isPublished(a)));
   const senders = allSenders.filter((s) => s.accountId === accountId && !senderIsRetired(s));
   const audience = allAudiences.find((a) => a.id === draft.audienceId);
   const template = allTemplates.find((t) => t.id === draft.templateId);
@@ -269,7 +270,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
         : null;
   // A run to the testing audience needs what a real send needs; a copy to an
   // address reads a draft template too. Either needs sending set up.
-  const canTest = target !== null && sending.ready && (target.kind === "me" || template?.status === "ready");
+  const canTest = target !== null && sending.ready && (target.kind === "me" || (template !== undefined && isPublished(template)));
 
   // ---- the writes ----------------------------------------------------------
   const create = useCreateCampaign();
@@ -693,7 +694,7 @@ export function AddCampaignWizard({ feeds, recordFeeds, trackByDefault, onBack, 
                   voice="prose"
                   value={draft.templateId}
                   options={templates.map(
-                    (t): ChoiceOption => ({ value: t.id, label: templateName(t), description: t.status === "ready" ? undefined : WORDS.templateDraft }),
+                    (t): ChoiceOption => ({ value: t.id, label: templateName(t), description: isPublished(t) ? undefined : WORDS.templateDraft }),
                   )}
                   onChange={(templateId) => {
                     // Choosing one that is already here is an answer too: stop waiting for another.

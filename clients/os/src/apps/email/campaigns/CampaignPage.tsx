@@ -18,6 +18,7 @@ import {
   audienceProjection,
   campaignFromRow,
   campaignName,
+  isPublished,
   senderLabel,
   senderProjection,
   sendBreakdown,
@@ -252,7 +253,7 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
   const target = testTargetFor(campaign, testing?.knowledge ?? null, setting, audiences, audiencesKnown, access?.primaryEmail ?? "");
   // A run to the testing audience sends what a real send sends; a copy to an
   // address reads a draft template too. Either needs sending set up.
-  const canTest = target !== null && sending.ready && (target.kind === "me" || template?.status === "ready");
+  const canTest = target !== null && sending.ready && (target.kind === "me" || (template !== undefined && isPublished(template)));
 
   const facts: CampaignFacts = {
     campaign,

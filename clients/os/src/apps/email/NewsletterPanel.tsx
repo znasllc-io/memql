@@ -7,6 +7,7 @@ import { flatten } from "../../kit/rows";
 import { feedIsBehind, type LiveCollectionHandle } from "../../live/useLiveCollection";
 import { useSites } from "../deployables/useSites";
 import { useConfigureNewsletter, useRetryNewsletterWelcome } from "./actions";
+import { isPublished, templateFromRow } from "./rows";
 import { EMAIL_REFRESH_MS, useNewsletterWelcomes, type EmailFeeds } from "./useEmail";
 
 const text = (row: Record<string, unknown>, key: string) => typeof row[key] === "string" ? row[key] as string : "";
@@ -38,7 +39,7 @@ export function NewsletterPanel({ audienceId, accountId, resources, signupForms:
   const [copyError, setCopyError] = useState("");
   const rows = feed.snapshot.rows.map(flatten).filter(row => text(row, "audienceId") === audienceId);
   const siteRows = sites.snapshot.rows.map(flatten).filter(row => row.accountId === accountId && !row.systemOwned && row.status !== "disabled");
-  const templateRows = resources.templates.snapshot.rows.map(flatten).filter(row => row.accountId === accountId && (row.status === "ready" || row.id === templateId));
+  const templateRows = resources.templates.snapshot.rows.map(flatten).filter(row => row.accountId === accountId && (isPublished(templateFromRow(row)) || row.id === templateId));
   const senderRows = resources.senders.snapshot.rows.map(flatten).filter(row => row.accountId === accountId && (row.status !== "disabled" || row.id === senderIdentityId));
   const unavailable = [sites, resources.templates, resources.senders].filter(value => !!value.snapshot.error || feedIsBehind(value.snapshot.state));
   const blocked = [feed, sites, resources.templates, resources.senders].some(value => value.snapshot.state === "seeding" || feedIsBehind(value.snapshot.state) || !!value.snapshot.error);
@@ -74,7 +75,7 @@ export function NewsletterPanel({ audienceId, accountId, resources, signupForms:
         <Field label="Deployable">{editing.id ? <Caption>{siteName(siteId)}</Caption> : <Select id={`newsletter-site-${audienceId}`} label="Newsletter deployable" value={siteId} onChange={setSiteId}>
           <option value="">Select</option>{siteRows.filter(row => row.id === siteId || !rows.some(binding => binding.siteId === row.id)).map(row => <option key={text(row,"id")} value={text(row,"id")}>{text(row,"title") || text(row,"hostname")}</option>)}
         </Select>}</Field>
-        <Field label="Welcome template"><Select id={`newsletter-template-${audienceId}`} label="Welcome template" value={templateId} onChange={setTemplateId}><option value="">Select a published template</option>{templateRows.map(row => <option key={text(row,"id")} value={text(row,"id")}>{text(row,"name")}{row.status !== "ready" ? " · Not published" : ""}</option>)}{templateId && !templateRows.some(row => row.id === templateId) ? <option value={templateId}>Unavailable template</option> : null}</Select></Field>
+        <Field label="Welcome template"><Select id={`newsletter-template-${audienceId}`} label="Welcome template" value={templateId} onChange={setTemplateId}><option value="">Select a published template</option>{templateRows.map(row => <option key={text(row,"id")} value={text(row,"id")}>{text(row,"name")}{isPublished(templateFromRow(row)) ? "" : " · Not published"}</option>)}{templateId && !templateRows.some(row => row.id === templateId) ? <option value={templateId}>Unavailable template</option> : null}</Select></Field>
         <Field label="Sender"><Select id={`newsletter-sender-${audienceId}`} label="Welcome sender" value={senderIdentityId} onChange={setSender}><option value="">Select</option>{senderRows.map(row => <option key={text(row,"id")} value={text(row,"id")}>{text(row,"fromName") || text(row,"address")}{row.status === "disabled" ? " · Disabled" : ""}</option>)}{senderIdentityId && !senderRows.some(row => row.id === senderIdentityId) ? <option value={senderIdentityId}>Unavailable sender</option> : null}</Select></Field>
         <Field label="Consent sentence"><Input id={`newsletter-consent-${audienceId}`} value={consentText} onChange={setConsent} label="Signup consent sentence" /></Field>
         <Check checked={enabled} onChange={setEnabled}>Accept signups and send a welcome</Check>

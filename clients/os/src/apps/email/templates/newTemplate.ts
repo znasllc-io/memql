@@ -1,6 +1,6 @@
 import { editorNewEmailURL } from "../../../items/editorPreference";
 import { openHandoff, type HandoffPorts } from "../../../items/vscode";
-import { templateIsArchived, templateName, type TemplateRow } from "../rows";
+import { isPublished, templateIsArchived, templateName, type TemplateRow } from "../rows";
 
 // THE WAIT FOR A NEW TEMPLATE (memql#6033, Ruling 9).
 //
@@ -51,9 +51,6 @@ export function beginTemplateWait(
 ): TemplateWait {
   return { accountId, known: new Set(templates.map((template) => template.id)), startedAt: now, requirePublished };
 }
-
-/** `ready` is the engine's word for a template that has been published. */
-const isPublished = (template: TemplateRow): boolean => template.status === "ready";
 
 /**
  * The first template in the wait's organization that ends the wait: its id was

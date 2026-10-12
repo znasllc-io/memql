@@ -1,7 +1,7 @@
 import type { ActionBarTone } from "../../../kit/ActionBar";
 import type { Figure } from "../../../kit/measure";
 import type { ActSpec } from "../acts";
-import { campaignName, templateName, type CampaignRow, type SeriesRow, type TemplateRow } from "../rows";
+import { campaignName, isPublished, templateName, type CampaignRow, type SeriesRow, type TemplateRow } from "../rows";
 import { browserZone, momentWords, whenWords } from "../when";
 import { WORDS } from "../words";
 import type { When } from "./wizardModel";
@@ -104,7 +104,7 @@ function blocker(f: CampaignFacts): Blocker | null {
   if (f.templateKnown === false) return null;
   const template = f.template;
   if (template === undefined || template.accountId !== campaign.accountId || template.status === "archived") return { kind: "said", sentence: "Choose a published template." };
-  if (template.status !== "ready") return { kind: "said", sentence: `Publish “${templateName(template)}” before sending.` };
+  if (!isPublished(template)) return { kind: "said", sentence: `Publish “${templateName(template)}” before sending.` };
   const sending = sendingBlocker(f);
   if (sending !== CLEAR) return sending;
   if (f.subscribers?.kind === "measured" && f.subscribers.value === 0) return { kind: "said", sentence: `${f.audienceName || "Its audience"} has no subscribers.` };

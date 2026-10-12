@@ -16,6 +16,7 @@ import {
   audienceName,
   audienceProjection,
   campaignName,
+  isPublished,
   senderIsRetired,
   senderLabel,
   senderProjection,
@@ -158,7 +159,7 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
   const audiences = allAudiences.filter((a) => a.accountId === accountId && (!audienceIsArchived(a) || a.id === draft.audienceId));
   const templates = allTemplates
     .filter((t) => t.accountId === accountId && (!templateIsArchived(t) || t.id === draft.templateId))
-    .sort((a, b) => Number(b.status === "ready") - Number(a.status === "ready"));
+    .sort((a, b) => Number(isPublished(b)) - Number(isPublished(a)));
   const senders = allSenders.filter((s) => s.accountId === accountId && (!senderIsRetired(s) || s.id === draft.senderIdentityId));
   const audience = audiences.find((a) => a.id === draft.audienceId);
   const senderChosen = draft.senderIdentityId === "" ? operator : senders.some((s) => s.id === draft.senderIdentityId);
@@ -509,7 +510,7 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
                 {templates.map((t) => (
                   <option key={t.id} value={t.id}>
                     {templateName(t)}
-                    {t.status === "ready" ? "" : ` (${templateIsArchived(t) ? WORDS.archived.toLowerCase() : WORDS.templateDraft})`}
+                    {isPublished(t) ? "" : ` (${templateIsArchived(t) ? WORDS.archived.toLowerCase() : WORDS.templateDraft})`}
                   </option>
                 ))}
               </Select>

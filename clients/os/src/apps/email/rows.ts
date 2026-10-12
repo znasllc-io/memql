@@ -692,6 +692,15 @@ export function templateIsArchived(template: TemplateRow): boolean {
   return template.status === "archived";
 }
 
+/**
+ * Whether a template is published: `ready` is the engine's word for it, and a
+ * person reads Published. Asked here and nowhere else, so the app has one answer
+ * to "can this be sent" rather than eight spellings of it.
+ */
+export function isPublished(template: TemplateRow): boolean {
+  return template.status === "ready";
+}
+
 /** A COPY EDIT IS IN. Somebody else fixing a typo in a template a campaign is
  *  about to send is precisely the news the cue is for, and no body field moves
  *  on a timer. The list carries no body, so the edit is told by the revision:

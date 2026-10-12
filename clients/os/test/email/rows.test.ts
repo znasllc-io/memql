@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -15,6 +17,7 @@ import {
   formatFigure,
   formatRate,
   insertAt,
+  isPublished,
   mergeTagsFor,
   rateOf,
   recipientFromRow,
@@ -204,6 +207,15 @@ describe("the other four cues", () => {
       id: "t1", ownerUserId: "v1:identity:user:me", name: "August copy", subject: "What we shipped", status: "ready", accountId: "self",
       layoutId: "builtin:letter", preheader: "Why we started", sourceArtifactId: "", createdAt: "2026-08-01T00:00:00Z",
     });
+  });
+
+  it("says a template is published by the engine's word for it, and nothing else", () => {
+    // `ready` is the engine's word; a person reads Published. Every other
+    // status, and one this build does not know, is not published.
+    expect(isPublished(templateFromRow(templateRow({ id: "t1", status: "ready" })))).toBe(true);
+    for (const status of ["draft", "archived", "", "published", "READY"]) {
+      expect(isPublished(templateFromRow(templateRow({ id: "t1", status })))).toBe(false);
+    }
   });
 
   it("rings on a mailbox being retired", () => {
@@ -649,5 +661,44 @@ describe("projecting a series", () => {
     expect(seriesFor(rows, "c2")?.id).toBe("series-2");
     expect(seriesFor(rows, "c3")).toBeNull();
     expect(seriesFor(rows, "")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// One question, asked in one place
+// ---------------------------------------------------------------------------
+
+describe("whether a template is published", () => {
+  const EMAIL = join(__dirname, "..", "..", "src", "apps", "email");
+
+  function walk(dir: string): string[] {
+    const out: string[] = [];
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) out.push(...walk(path));
+      else if (/\.(ts|tsx)$/.test(name)) out.push(path);
+    }
+    return out;
+  }
+
+  /** A status compared with the engine's word for published, either way round. */
+  const ASKS_READY = /\bstatus\s*[!=]==?\s*["']ready["']|["']ready["']\s*[!=]==?\s*[\w.?]*\bstatus\b/;
+
+  it("is asked through isPublished, never spelled out where it is needed", () => {
+    // rows.ts says it once, beside templateIsArchived; nothing else in the app
+    // compares a status with "ready" (readiness readings say `state`, not `status`).
+    const askers = walk(EMAIL)
+      .filter((path) => ASKS_READY.test(readFileSync(path, "utf8")))
+      .map((path) => path.slice(EMAIL.length + 1));
+    expect(askers).toEqual(["rows.ts"]);
+  });
+
+  it("can tell the question from its neighbours", () => {
+    for (const text of ['t.status === "ready"', "template?.status !== 'ready'", 'row.status=="ready"', '"ready" === template.status']) {
+      expect(ASKS_READY.test(text)).toBe(true);
+    }
+    for (const text of ['sending.state === "ready"', 'roster.state === "ready" ? 1 : 0', "isPublished(template)"]) {
+      expect(ASKS_READY.test(text)).toBe(false);
+    }
   });
 });

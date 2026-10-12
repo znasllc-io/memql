@@ -1,6 +1,6 @@
 import type { Figure } from "../../../kit/measure";
 import type { ActSpec } from "../acts";
-import { templateName, type TemplateRow } from "../rows";
+import { isPublished, templateName, type TemplateRow } from "../rows";
 import { localToInstant, momentWords, whenWords } from "../when";
 import { WORDS } from "../words";
 
@@ -134,7 +134,7 @@ export function reviewReading(draft: CampaignDraft, facts: ReviewFacts, now: Dat
   const missing = (word: string, detail = "") => ({ word, detail: detail || note, forward: null });
 
   const template = facts.template;
-  if (template && template.status !== "ready") {
+  if (template && !isPublished(template)) {
     return missing(template.status === "draft" ? `Publish “${templateName(template)}” before sending.` : "Choose a published template.");
   }
   // Not known yet is neither ready nor a problem: say nothing about it, offer nothing.
