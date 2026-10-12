@@ -1,7 +1,7 @@
 import { AccountPicker } from "../accounts/AccountPicker";
 import { accountIsArchived, type AccountRow } from "../accounts/rows";
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, Chip, Fact, Facts, Field, FormRow, Head, Input, Notice, RecordList, RecordRow, Select, Subhead } from "../../kit";
 import { ActionBar } from "../../kit/ActionBar";
@@ -43,11 +43,15 @@ export interface ComposerSectionProps {
   error: string;
   /**
    * A starting setup another app opened the composer with. Applied ONCE, when
-   * it arrives, over a fresh form; the person's own edits after that are theirs.
-   * The folder it may name is not applied here -- the composer has no folder
-   * control, and the app checks the folder is readable when the file is made.
+   * it arrives, over a fresh form: format, sources, output kind, and the folder
+   * and way back it may name. The composer has no folder control, so the folder
+   * is held with the form and sent as it is -- the cluster refuses one the person
+   * cannot use, and that refusal is shown. The person's own edits after that are
+   * theirs. Applying it is the last thing a setup does: `onApplied` tells the app
+   * it can let go, and nothing of it outlives the form.
    */
   initial?: ComposeSetup;
+  onApplied?: (setup: ComposeSetup) => void;
   /**
    * The name of the app that sent the person here to make the open file, when
    * they can go back to it. Absent where there is nowhere to go back to.
@@ -68,7 +72,11 @@ export interface ComposerSectionProps {
     templateId: string;
     deployableKind: string;
     outputKind: string;
-  }) => void;
+    /** From a setup; "" for the Library root. */
+    folderId: string;
+    /** From a setup: where the person goes back to after this file. */
+    returnTo: ReturnTo | null;
+  }) => Promise<boolean>;
   onAct: (act: ActId) => void;
   /** Clears the open composition and returns to a blank form. */
   onNewComposition: () => void;
@@ -80,12 +88,7 @@ interface PickedSource {
   label: string;
 }
 
-// The setups this window has already applied. A setup is a standing
-// instruction the app holds until it is replaced, and the composer is mounted
-// and unmounted as the person moves between sections: remembering by the
-// setup ITSELF, rather than in this component, is what stops coming back to
-// Compose from putting the form back the way another app left it.
-const appliedSetups = new WeakSet<ComposeSetup>();
+type ReturnTo = NonNullable<ComposeSetup["returnTo"]>;
 
 /** The sources once each: the same file listed twice is one source, as it is when a person picks it twice. */
 function distinct(sources: ComposeSource[]): ComposeSource[] {
@@ -110,6 +113,7 @@ export function ComposerSection({
   busy,
   error,
   initial,
+  onApplied,
   backTo,
   description,
   onMaterialize,
@@ -126,10 +130,19 @@ export function ComposerSection({
   // from a sender's setup, needs the JSON format, and goes if that is changed.
   const [outputKind, setOutputKind] = useState("");
   const [picked, setPicked] = useState<ComposeSource[]>([]);
+  // THE FOLDER AND THE WAY BACK ARE FORM STATE like everything else a setup
+  // fills in, with no control of their own. They are sent up with the other
+  // facts, so they live exactly as long as this form: a remount is a form
+  // nobody sent anything to, and the file they were for uses them up.
+  const [folderId, setFolderId] = useState("");
+  const [returnTo, setReturnTo] = useState<ReturnTo | null>(null);
+  // Which setup the form holds. A reply to an ask made under an earlier one must
+  // not use up the folder and the way back of a setup that arrived after it.
+  const generation = useRef(0);
 
   useEffect(() => {
-    if (initial === undefined || appliedSetups.has(initial)) return;
-    appliedSetups.add(initial);
+    if (initial === undefined) return;
+    generation.current += 1;
     // A new setup is a new file. What the person typed for the last one is not
     // part of it; the organization they chose is, as it always is, theirs.
     setName("");
@@ -139,7 +152,33 @@ export function ComposerSection({
     setFormat(initial.format ?? (initial.outputKind ? "json" : defaultFormat));
     setOutputKind(initial.outputKind ?? "");
     setPicked(distinct(initial.sources ?? []));
+    setFolderId(initial.folderId ?? "");
+    setReturnTo(initial.returnTo ?? null);
+    onApplied?.(initial);
   }, [initial]);
+
+  function materialize() {
+    const held = generation.current;
+    void onMaterialize({
+      name,
+      statement,
+      accountIds: [accountId],
+      format,
+      sources: picked,
+      templateId,
+      deployableKind,
+      outputKind,
+      folderId,
+      returnTo,
+    }).then((made) => {
+      // The setup's folder and way back were for the file just made. A refusal
+      // keeps them -- the same form asked again is the same ask.
+      if (made && generation.current === held) {
+        setFolderId("");
+        setReturnTo(null);
+      }
+    });
+  }
 
   const composables = useComposableConcepts(showUnmarkedConcepts);
   const resolved = useResolvedSources(picked);
@@ -255,13 +294,19 @@ export function ComposerSection({
       {error ? <Notice tone="error" sentence={error} /> : null}
       {/* WHAT BECAME OF THE DESCRIPTION, in place. The file is there either
           way, so neither is an error: the first says what to do about it, the
-          second only names what the Library could not take. */}
-      {open && description?.failure ? (
-        <Notice tone="warn" sentence={DESCRIPTION_NOT_SENT} next={DESCRIPTION_NOT_SENT_NEXT} detail={description.failure} />
-      ) : null}
-      {open && description && description.unattached.length > 0 ? (
-        <Notice tone="info" sentence={notAttachedSentence(description.unattached)} />
-      ) : null}
+          second only names what the Library could not take. It arrives a moment
+          after "Ready" without the person having done anything, so it is
+          announced -- in a status region that is ALREADY here, because one that
+          appears together with its text is not reliably announced. It has no box
+          of its own (`display: contents`), so an empty one costs no grid row. */}
+      <div className="os-mz-status" role="status">
+        {open && description?.failure ? (
+          <Notice tone="warn" sentence={DESCRIPTION_NOT_SENT} next={DESCRIPTION_NOT_SENT_NEXT} detail={description.failure} />
+        ) : null}
+        {open && description && description.unattached.length > 0 ? (
+          <Notice tone="info" sentence={notAttachedSentence(description.unattached)} />
+        ) : null}
+      </div>
 
       <ActionBar
         state={stateLine(open, draftState)}
@@ -273,16 +318,7 @@ export function ComposerSection({
           busy: busy && a.id === "materialize",
           onAct: () => {
             if (a.id === "materialize") {
-              onMaterialize({
-                name,
-                statement,
-                accountIds: [accountId],
-                format,
-                sources: picked,
-                templateId,
-                deployableKind,
-                outputKind,
-              });
+              materialize();
               return;
             }
             onAct(a.id);

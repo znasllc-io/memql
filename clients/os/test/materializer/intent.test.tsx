@@ -80,6 +80,18 @@ describe("Materializer starting setup", () => {
     expect(readComposeIntent({ compose: { outputKind: "newsletter" } })).toEqual({});
   });
 
+  // An email template is a JSON document, which the cluster enforces. A setup that
+  // pairs the kind with another format cannot be made, so the kind is the half
+  // that goes: the sender's format is what it asked for by name.
+  it("keeps the email template kind only with JSON, or with no format at all", () => {
+    expect(readComposeIntent({ compose: { outputKind: "email_template" } })).toEqual({ outputKind: "email_template" });
+    expect(readComposeIntent({ compose: { format: "json", outputKind: "email_template" } })).toEqual({ format: "json", outputKind: "email_template" });
+    expect(readComposeIntent({ compose: { format: "html", outputKind: "email_template" } })).toEqual({ format: "html" });
+    expect(readComposeIntent({ compose: { format: "markdown", outputKind: "email_template" } })).toEqual({ format: "markdown" });
+    // A format this cluster does not write is dropped first, which leaves none.
+    expect(readComposeIntent({ compose: { format: "exe", outputKind: "email_template" } })).toEqual({ outputKind: "email_template" });
+  });
+
   it("takes a folder only as a non-empty string", () => {
     expect(readComposeIntent({ compose: { folderId: "" } })).toEqual({});
     expect(readComposeIntent({ compose: { folderId: "  " } })).toEqual({});

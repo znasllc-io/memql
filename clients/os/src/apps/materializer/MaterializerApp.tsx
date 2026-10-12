@@ -137,14 +137,16 @@ export function MaterializerApp({
 
   const [openCompositionId, setOpenCompositionId] = useState("");
 
-  // THE STARTING SETUP ANOTHER APP OPENED THE COMPOSER WITH, until the file it
-  // was for has been asked for. It is for ONE file: its folder is filed into
-  // once, and the next composition in this window starts from the person's own
-  // choices. Held here, not in the composer, because the composer is mounted and
-  // unmounted as the person moves between sections.
+  // THE STARTING SETUP ANOTHER APP OPENED THE COMPOSER WITH, until the composer
+  // has taken it. It waits here only because the composer may not be on screen
+  // yet (the window can be on another section); once the composer has applied it
+  // -- format, sources, folder and way back, together, into the form -- the app
+  // lets go, and the form is where it lives and dies. That is the one rule for a
+  // remount, an abandoned form and the first file alike.
   const [setup, setSetup] = useState<ComposeSetup | null>(null);
-  // WHERE THE PERSON GOES BACK TO, for the file that setup made. It belongs to
-  // that composition and no other, and ends when they start another file.
+  // WHERE THE PERSON GOES BACK TO, for the file the form just made. It comes up
+  // with that form's facts, belongs to that composition and no other, and ends
+  // when they start another file.
   const [returnFor, setReturnFor] = useState<{ compositionId: string; appId: string; sectionId: string } | null>(null);
 
   const compositionRows = useMemo(
@@ -237,6 +239,13 @@ export function MaterializerApp({
   useEffect(() => {
     if (applied.current) return;
     applied.current = true;
+    // A WINDOW OPENED FOR AN INSTRUCTION WAS OPENED WHERE ITS SENDER ASKED. The
+    // preference is for a window nobody asked anything of, and by section alone
+    // the two cannot be told apart: Compose is both the shell's default and the
+    // one a sender names. So a pending intent is the sender speaking, and it wins
+    // -- otherwise this runs after the intent's own navigation and moves the
+    // window off the section it was sent to.
+    if (intent !== undefined) return;
     const shellDefault = MATERIALIZER_SECTIONS[0]?.id ?? "";
     if (sectionId !== shellDefault) return;
     if (settings.defaultSection && settings.defaultSection !== sectionId) {
@@ -307,25 +316,25 @@ export function MaterializerApp({
       busy={materialize.busy || compositionActs.busy}
       error={openError || materialize.error || compositionActs.error}
       initial={setup ?? undefined}
+      // Let go of THAT setup. A newer one may have arrived while the composer was
+      // taking this one, and it is not this one's to clear.
+      onApplied={(applied) => setSetup((now) => (now === applied ? null : now))}
       backTo={backTo}
       description={description}
       onNewComposition={() => {
         setOpenCompositionId("");
         setReturnFor(null);
       }}
-      onMaterialize={(facts) => {
-        const from = setup;
-        void materialize
-          .materialize({ ...facts, folderId: from?.folderId ?? "" })
-          .then((id) => {
-            if (!id) return;
-            setOpenCompositionId(id);
-            // The setup was for this file. Its return trip is kept for it,
-            // and nothing else of it outlives the file.
-            setSetup(null);
-            setReturnFor(from?.returnTo ? { compositionId: id, ...from.returnTo } : null);
-          });
-      }}
+      onMaterialize={({ returnTo, ...request }) =>
+        materialize.materialize(request).then((id) => {
+          if (id === "") return false;
+          setOpenCompositionId(id);
+          // The way back the form carried is kept for the file it made, and
+          // for no other.
+          setReturnFor(returnTo ? { compositionId: id, ...returnTo } : null);
+          return true;
+        })
+      }
       onAct={(act) => {
         if (open === null) return;
         switch (act) {

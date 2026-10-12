@@ -29,9 +29,18 @@
 // it was still composing the payload; what survives is typed.
 //
 // BARE IDS ONLY, per the identifiers contract: a sender hands over the ids it
-// holds and never composes, parses or compares a canonical one. The Materializer
-// does not trust `folderId` either -- it checks the person can read that folder
-// before it files anything there (see useMaterialize).
+// holds and never composes, parses or compares a canonical one.
+//
+// THE FOLDER IS THE CLUSTER'S TO ACCEPT. The composer carries `folderId` with the
+// rest of the setup and sends it as it is; compose refuses a folder the person
+// cannot read, or one that has been archived, before anything is written, and the
+// refusal ("That folder isn't available. Choose another folder.") is shown as it
+// was worded. The app does not check it first: a check of its own would turn that
+// refusal into a file filed quietly at the top, somewhere nobody chose.
+//
+// A SETUP LIVES AND DIES WITH THE FORM IT FILLED IN. Its format, sources, folder
+// and return target are applied once, together, to a fresh form; leaving the
+// composer abandons that form, and the first file made from it uses them up.
 //
 // SECTION IDS ARE CONTRACT. `openApp` to a section an app does not declare moves
 // nobody and says nothing; test/materializer/intent.test.tsx pins this one
@@ -57,10 +66,14 @@ export interface ComposeSource {
 
 export interface ComposeSetup {
   format?: ComposeFormat;
-  /** Where to file it. A bare Library folder id the person must be able to read. */
+  /** Where to file it: a bare Library folder id. The cluster refuses one the person cannot read or that is archived. */
   folderId?: string;
   sources?: ComposeSource[];
-  /** An email template. Needs the JSON format, which the composer chooses when none is given. */
+  /**
+   * An email template, which is a JSON document: the composer chooses JSON when
+   * no format is given, and the reader drops the kind when another format is
+   * named (the sender's format is what it asked for by name).
+   */
   outputKind?: "email_template";
   /** Where the person goes back to once the file exists. */
   returnTo?: { appId: string; sectionId: string };
@@ -121,7 +134,7 @@ export function readComposeIntent(payload: Record<string, unknown>): ComposeSetu
       })
     : [];
   if (sources.length > 0) setup.sources = sources;
-  if (raw["outputKind"] === "email_template") setup.outputKind = "email_template";
+  if (raw["outputKind"] === "email_template" && (format === undefined || format === "json")) setup.outputKind = "email_template";
   const returnTo = readReturnTo(raw["returnTo"]);
   if (returnTo !== null) setup.returnTo = returnTo;
   return setup;

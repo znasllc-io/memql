@@ -134,9 +134,12 @@ export function actsFor(c: CompositionRow | null, draft: DraftState, backTo?: st
   if (backTo !== undefined && c.status === "ready") {
     // In front of the primary act, which stays last.
     acts.splice(Math.max(acts.length - 1, 0), 0, { id: "returnToApp", label: `Back to ${backTo}`, tone: "quiet", text: true });
-    // THE BAR HOLDS THREE, and the one that gives way is Archive: housekeeping
-    // the Materialized list still offers on this same composition, and the act
-    // somebody who has just made a file reaches for least.
+    // THE BAR HOLDS THREE, and the one that gives way is Archive: housekeeping,
+    // and the act somebody who has just made a file reaches for least. It is NOT
+    // offered anywhere else meanwhile (the Materialized list's rows carry no acts),
+    // so this is Archive absent for as long as the trip is live. It comes back the
+    // moment the person presses Compose another, which ends the trip: from then on
+    // this composition offers Archive wherever it is opened.
     const archive = acts.findIndex((a) => a.id === "archive");
     if (acts.length > 3 && archive >= 0) acts.splice(archive, 1);
   }

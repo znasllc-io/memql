@@ -90,8 +90,6 @@ export interface FakeSeed {
    */
   artifactsByFile?: Record<string, Row>;
   filesById?: Record<string, Row>;
-  /** What `libraryFolderById` can read, by row id. */
-  folders?: Row[];
   /** What the Library answers a document comment / a revision request with. */
   commentReply?: Row;
   revisionReply?: Row;
@@ -141,9 +139,11 @@ export function fakeConnection(seed: FakeSeed = {}) {
         fileRow(seed.artifactsByFile, seed.outputArtifact, args),
       ),
       libraryFileById: vi.fn(async (args: Record<string, unknown>) => fileRow(seed.filesById, seed.outputFile, args)),
-      libraryFolderById: vi.fn(async (args: Record<string, unknown>) =>
-        rowsResult((seed.folders ?? []).filter((row) => row["id"] === args["folderId"])),
-      ),
+      // A TRIPWIRE, NOT A FIXTURE. The app never reads a folder itself: the
+      // cluster decides whether a folder can be filed into (compose refuses one
+      // the caller cannot read or that is archived), and the app shows that
+      // answer. This exists so a test can prove no read was made.
+      libraryFolderById: vi.fn(async (_args: Record<string, unknown>) => rowsResult([])),
       libraryAddDocumentComment: write(seed.commentReply ?? ({ saved: true, commentId: "comment-1" } as Row)),
       libraryRequestDocumentRevision: write(seed.revisionReply ?? ({ runId: "run-1", proposal: "proposal-1" } as Row)),
       composeMaterialize: write(seed.materializeReply),

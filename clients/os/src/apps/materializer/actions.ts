@@ -1,8 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import {
   isDescribedMarkdown,
-  rowString,
-  sameEntityId,
   startMaterialize,
   type MaterializeExecute,
   type MaterializeRequest,
@@ -62,9 +60,10 @@ export interface MaterializeFacts {
   sources: ComposeSource[];
   templateId: string;
   /**
-   * A folder somebody ELSE named (another app's starting setup), or "" for the
-   * Library root. It is a claim: the call checks the person can read it before
-   * anything is filed there, and drops it when they cannot.
+   * The folder to file into, or "" for the Library root. It comes from another
+   * app's starting setup, since the composer has no folder control. It is sent as
+   * it is: the cluster refuses a folder the person cannot read or that is
+   * archived, and the refusal is shown beside the control as it was worded.
    */
   folderId: string;
   accountIds: string[];
@@ -108,29 +107,6 @@ type Query = NonNullable<ReturnType<typeof useOsConnection>>["query"];
  */
 export function executeOver(query: Pick<Query, "executeNamed">): MaterializeExecute {
   return (name, call) => query.executeNamed(name, call).then((result) => result.rows());
-}
-
-/**
- * The folder, when the person can read it; "" when they cannot.
- *
- * A folder id arrives from another app, and an id from another app can be
- * stale (the folder was archived since), foreign (it is not theirs) or wrong.
- * NOTHING DOWNSTREAM CHECKS IT: `composeMaterialize` hands the id to the file's
- * creation, which stores whatever string it is given, so a file filed under a
- * folder the person cannot see would simply be somewhere they cannot find it.
- * Filing at the top, where they look first, is the better miss -- so the claim
- * is checked here, as the person, and dropped when it fails. An archived folder
- * is somewhere a file was put away, not somewhere to put one; and a read that
- * could not be made proves nothing either way, so it is dropped too.
- */
-async function readableFolder(query: Query, folderId: string): Promise<string> {
-  try {
-    const row = (await query.libraryFolderById({ folderId })).rows()[0];
-    if (row === undefined || !sameEntityId(rowString(row, "id"), folderId) || row["archived"] === true) return "";
-    return folderId;
-  } catch {
-    return "";
-  }
 }
 
 /**
@@ -203,7 +179,7 @@ export function useMaterialize(): MaterializeState {
       setCompositionId("");
       try {
         const statement = facts.statement.trim();
-        const folderId = facts.folderId.trim() === "" ? "" : await readableFolder(query, facts.folderId.trim());
+        const folderId = facts.folderId.trim();
         // AN UNANSWERED OPTIONAL IS OMITTED, never sent empty: an optional
         // field given "" is a value the engine writes, and "the caller said
         // nothing" and "the caller said empty" are different statements.
@@ -218,6 +194,9 @@ export function useMaterialize(): MaterializeState {
           ...(facts.accountIds.length > 0 ? { accountIds: facts.accountIds } : {}),
           ...(facts.deployableKind ? { deployableKind: facts.deployableKind } : {}),
         };
+        // THE KEY IS THE FACTS AS THEY WERE CLAIMED, the folder included, and nothing
+        // above rewrites them: a retry of the same form is the same ask whether or
+        // not the cluster accepted its folder the first time.
         const key = JSON.stringify(request);
         if (ask.current?.key !== key) ask.current = { key, id: newId() };
         const requestId = ask.current.id;

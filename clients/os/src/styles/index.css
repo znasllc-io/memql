@@ -11162,6 +11162,14 @@ a.os-button {
   height: 100%;
 }
 
+/* THE LIVE REGION FOR WHAT ARRIVES AFTER "Ready". It is always mounted, so a
+ * notice that appears inside it is announced, and it draws no box: an empty one
+ * is not a grid row, so it adds no gap to the composer, and a notice inside it
+ * is a grid row of `.os-mz` exactly as it was before the region existed. */
+.os-mz-status {
+  display: contents;
+}
+
 /* THE COLUMNS ARE THE COMPOSITION'S OWN STRUCTURE: what goes in, what it
  * is, what comes out. The middle is fluid because it holds prose; the
  * outer two are fixed-measure because they hold controls. */
