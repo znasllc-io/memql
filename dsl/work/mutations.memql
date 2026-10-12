@@ -33,11 +33,11 @@
 /// are -- and both are bound with no default, so a writer that has neither writes neither. routing
 /// is the owner's routing choice the run is opened with (v1:work:run.routing), bound with no default
 /// for the same reason: a run nobody chose for writes none. heartbeatAt is accepted for a run that
-/// opens LATE -- a scheduled firing's, held until its first write (component/automations/journal.go)
-/// -- so the first version of the row is already live: the work sweep judges a running run by
-/// heartbeatAt, else startedAt, and a late run's startedAt is the firing's own, minutes old. Bound
-/// with no default for the same reason: a writer that names none writes none, and every other run's
-/// first heartbeat is still the one its first receipt writes.
+/// opens LATE -- a scheduled firing's or a directly called logic's, held until its first write
+/// (component/automations/journal.go) -- so the first version of the row is already live: the work
+/// sweep judges a running run by heartbeatAt, else startedAt, and a late run's startedAt may be
+/// minutes old. Bound with no default for the same reason: a writer that names none writes none, and
+/// every other writer names none, so its rows are unchanged.
 @serverOnly
 @actor
 mutation run createWorkRun {

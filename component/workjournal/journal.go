@@ -372,9 +372,12 @@ func (j *Journal) Begin(ctx context.Context, w Work) (*Run, error) {
 	if err := j.exec(ctx, runCall); err != nil {
 		return nil, fmt.Errorf("workjournal: open run: %w", err)
 	}
-	// The first heartbeat rides this write: `createWorkRun` takes no
-	// heartbeatAt, and a run whose driver dies before the first tick is then
-	// judged from the moment it opened rather than from its start time alone.
+	// The first heartbeat rides this write, so a run whose driver dies before
+	// the first tick is judged from the moment it opened rather than from its
+	// start time alone. `createWorkRun` accepts an optional heartbeatAt (a held
+	// automation run opens with one); passing it on the open instead, which
+	// would save this version for a run with no step order to record, is
+	// release-2 work.
 	opened := []string{arg("runId", runID), arg("heartbeatAt", started.Format(time.RFC3339Nano))}
 	if len(order) > 0 {
 		opened = append(opened, stringListArg("stepOrder", order))
