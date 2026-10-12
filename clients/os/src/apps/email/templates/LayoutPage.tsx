@@ -27,8 +27,11 @@ import { Preview } from "./Preview";
 // that is the editor's "Save as layout".
 //
 // WHO AND WHERE FROM, NEVER AN ID. "Saved from" is the template published from
-// the same Library file, else the file's own title, else nothing; "Saved by" is
-// a person the roster names, "You" for the person looking, else nothing.
+// the same Library file, else the file's own title, else nothing -- an archive
+// does not change where a layout came from. "Changed by" is a person the roster
+// names, "You" for the person looking, else nothing, and "Changed" is when: the
+// engine stamps both on every save, archive and restore, so they say who last
+// changed it, not who first saved it.
 
 type Lifecycle = "archive" | "restore";
 
@@ -57,8 +60,8 @@ export function LayoutPage({ layout, layouts, templates, onBack }: {
   const name = layoutTitle(layout);
 
   // ---- what it is and where it came from -----------------------------------
-  // An organization's layout is read whole: who saved it, and its document when
-  // the listing had to leave it out. A built-in is not a row, and has neither.
+  // An organization's layout is read whole: who changed it last, and its document
+  // when the listing had to leave it out. A built-in is not a row, and has neither.
   const record = useLayoutRecord(builtIn ? "" : (layout.layoutId ?? ""), layout.revision ?? "");
   const source = layout.sourceArtifactId ?? "";
   const fromTemplate = source === "" ? undefined : templates.find((t) => t.accountId === layout.accountId && t.sourceArtifactId === source);
@@ -66,8 +69,8 @@ export function LayoutPage({ layout, layouts, templates, onBack }: {
   const savedFrom = fromTemplate !== undefined ? templateName(fromTemplate) : fileTitle.value;
   const nameOf = usePeopleNames();
   // "you" in a sentence; a fact starts with it. A person's own name is as they spell it.
-  const savedByWho = deployedByLabel(record.value?.ownerUserId ?? "", access?.userId ?? "", nameOf);
-  const savedBy = savedByWho === "you" ? "You" : savedByWho;
+  const changedByWho = deployedByLabel(record.value?.ownerUserId ?? "", access?.userId ?? "", nameOf);
+  const changedBy = changedByWho === "you" ? "You" : changedByWho;
 
   // ---- the email it makes ---------------------------------------------------
   // A built-in is previewed for the first organization in view; its document is
@@ -152,7 +155,7 @@ export function LayoutPage({ layout, layouts, templates, onBack }: {
     );
   }
 
-  const savedAt = layout.revision ?? "";
+  const changedAt = layout.revision ?? "";
   return (
     <div className="os-action-pane" data-os-page-context={JSON.stringify({ page: "Layout", name })}>
       <div className="os-action-body os-app-stack">
@@ -163,8 +166,8 @@ export function LayoutPage({ layout, layouts, templates, onBack }: {
             <Fact label="Organization" value={builtIn ? WORDS.builtIn : organizationName(accounts, layout.accountId)} />
             <Fact label="Description" value={layout.description} />
             {builtIn || savedFrom === "" ? null : <Fact label="Saved from" value={savedFrom} />}
-            {builtIn || savedBy === "" ? null : <Fact label="Saved by" value={savedBy} />}
-            {builtIn || savedAt === "" ? null : <Fact label="Saved" value={momentWords(savedAt, zone)} />}
+            {builtIn || changedBy === "" ? null : <Fact label={WORDS.changedBy} value={changedBy} />}
+            {builtIn || changedAt === "" ? null : <Fact label={WORDS.changed} value={momentWords(changedAt, zone)} />}
           </Facts>
         </Panel>
         {preview()}

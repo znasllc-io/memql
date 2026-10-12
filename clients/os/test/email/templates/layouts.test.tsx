@@ -298,7 +298,7 @@ describe("a layout's page", () => {
     await waitFor(() => expect(barWord()).toBe("Archived"));
   });
 
-  it("says what a layout was saved from and by whom, without printing an id", async () => {
+  it("says what a layout was saved from, and who changed it last and when, without printing an id", async () => {
     const conn = fakeConnection({
       accounts: ORGANIZATIONS,
       templates: [templateRow({ id: "t9", name: "Welcome 2", accountId: "acme", sourceArtifactId: "art-1" })],
@@ -333,26 +333,29 @@ describe("a layout's page", () => {
       await screen.findByRole("list", { name: "Layouts" });
     };
 
-    // Saved from the file a template was published from: the template's name. By a person the roster names.
+    // Saved from the file a template was published from: the template's name.
+    // Changed last by a person the roster names -- every save, archive and
+    // restore stamps who did it, so "saved by" would name whoever archived it.
     let facts = await page("From a template");
-    await waitFor(() => expect(fact(facts, "Saved by")).toBe("Dana Lee"));
+    await waitFor(() => expect(fact(facts, "Changed by")).toBe("Dana Lee"));
+    expect([...facts.querySelectorAll("dt")].map((term) => term.textContent)).toEqual(["Organization", "Description", "Saved from", "Changed by", "Changed"]);
     expect(fact(facts, "Saved from")).toBe("Welcome 2");
     expect(fact(facts, "Organization")).toBe("Acme");
-    expect(fact(facts, "Saved")).toMatch(/Oct 3/);
+    expect(fact(facts, "Changed")).toMatch(/Oct 3/);
     await back();
 
-    // No template from that file: the file's own title. Saved by the person looking.
+    // No template from that file: the file's own title. Changed last by the person looking.
     facts = await page("From a file");
     await waitFor(() => expect(fact(facts, "Saved from")).toBe("Autumn letter.email.json"));
-    await waitFor(() => expect(fact(facts, "Saved by")).toBe("You"));
+    await waitFor(() => expect(fact(facts, "Changed by")).toBe("You"));
     await back();
 
     // Neither the file nor the person can be named: both facts are left out, never an id.
     facts = await page("From nowhere");
     await waitFor(() => expect(conn.query.libraryArtifactById).toHaveBeenCalledWith({ artifactId: "art-3" }, expect.anything()));
-    await waitFor(() => expect(fact(facts, "Saved")).not.toBeNull());
+    await waitFor(() => expect(fact(facts, "Changed")).not.toBeNull());
     expect(fact(facts, "Saved from")).toBeNull();
-    expect(fact(facts, "Saved by")).toBeNull();
+    expect(fact(facts, "Changed by")).toBeNull();
     expect(document.body.textContent).not.toMatch(/stranger|art-3|l3\b/);
   });
 

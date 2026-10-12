@@ -218,7 +218,7 @@ export function TemplatePage({ template, layouts, onBack, onOpenLayout, onReread
             <Fact label="Layout" value={layoutFact} />
             <Fact label="Subject" value={template.subject} />
             {template.preheader === "" ? null : <Fact label="Preheader" value={template.preheader} />}
-            <Fact label="Changed" value={template.createdAt === "" ? "" : momentWords(template.createdAt, zone)} />
+            <Fact label={WORDS.changed} value={template.createdAt === "" ? "" : momentWords(template.createdAt, zone)} />
           </Facts>
         </Panel>
         {preview()}

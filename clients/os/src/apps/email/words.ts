@@ -89,6 +89,14 @@ export const WORDS = {
   customLayout: "Custom",
 
   /**
+   * When a template or a layout last changed, and who changed it: a page's
+   * facts. Every save, archive and restore stamps both, so "saved" would name
+   * whoever last put it away.
+   */
+  changed: "Changed",
+  changedBy: "Changed by",
+
+  /**
    * Where a layout that ships with the renderer comes from, said where an
    * organization's own layout names its organization. A built-in layout has no
    * state of its own.
