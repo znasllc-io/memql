@@ -472,10 +472,17 @@ func (s *session) readLoop() error {
 		if err != nil {
 			return err
 		}
+		// JSON is measured by its shape as it arrives (request_shape.go): decoding a
+		// request costs a hundred times its size and more, so one with too many values
+		// in it is refused before it is decoded, and is not even held whole.
+		var shape *jsonShape
+		if msgType == websocket.MessageText {
+			shape = &jsonShape{}
+		}
 		// A message has started to arrive. It is moving while bytes of it keep
 		// coming, and no ping is due meanwhile (see messageMoving).
 		s.reading.Add(1)
-		data, over, err := readRequest(&progressReader{r: reader, session: s}, s.maxBytes)
+		data, over, err := readRequest(&progressReader{r: reader, session: s}, s.maxBytes, shape)
 		s.reading.Add(-1)
 		if err != nil {
 			return err
@@ -485,14 +492,22 @@ func (s *session) readLoop() error {
 		}
 		s.noteTraffic()
 		if over != nil {
-			// A request over the limit fails by itself. Returning from here would
-			// end the session, and every other request on the socket with it.
+			// A request over the limit, or over a bound of its shape, fails by itself.
+			// Returning from here would end the session, and every other request on
+			// the socket with it.
 			s.refuseOversizedRequest(msgType, over)
 			continue
 		}
 
 		clientMsg := &memqlv1.MemqlClientMessage{}
 		if msgType == websocket.MessageBinary {
+			// Protocol buffers decode at about a hundred bytes a value, and are measured
+			// by their shape before they are, as JSON is while it arrives.
+			if excess, over := measureProto(data).over(); over {
+				messageID, requestID := idsOfProtoPrefix(data)
+				s.refuseRequest(messageID, requestID, excess)
+				continue
+			}
 			if err := proto.Unmarshal(data, clientMsg); err != nil {
 				return err
 			}
@@ -533,7 +548,7 @@ func (s *session) readLoop() error {
 		messageID, requestID := clientMsg.GetMessageId(), clientMsg.GetExecuteQuery().GetRequestId()
 		assignRequestId(clientMsg)
 		if size, ok := withinServerCap(clientMsg, s.serverBytes); !ok {
-			s.refuseRequest(messageID, requestID, int64(size), int64(s.serverBytes))
+			s.refuseRequest(messageID, requestID, overLimit{unit: inBytes, size: int64(size), limit: int64(s.serverBytes)})
 			continue
 		}
 

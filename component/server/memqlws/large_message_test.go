@@ -321,7 +321,7 @@ func TestReadRequestKeepsTheStartAndTheEndOfAnOversizedMessage(t *testing.T) {
 	}
 	for _, n := range []int{limit, limit + 1, limit + 50, limit + idTailBytes - 1, limit + idTailBytes, limit + 10*idTailBytes + 7} {
 		message := body(n)
-		data, over, err := readRequest(bytes.NewReader(message), limit)
+		data, over, err := readRequest(bytes.NewReader(message), limit, nil)
 		require.NoError(t, err)
 		if n <= limit {
 			require.Nil(t, over)

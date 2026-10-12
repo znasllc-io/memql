@@ -3,6 +3,7 @@ package memqlws
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -26,7 +27,8 @@ import (
 // its limit, and what is past it is counted and thrown away: the request is
 // refused with a sentence, by the id it came with, and the session carries on. A
 // message past twice the limit is still the end of the connection, because a
-// client that sends without end is not one request that failed.
+// client that sends without end is not one request that failed. A request over a
+// bound of its shape (request_shape.go) is refused the same way.
 
 // readLimit is the limit the WebSocket library enforces: twice the bridge's own,
 // so that a request over the limit can be read to its end and refused.
@@ -37,27 +39,50 @@ func readLimit(limit int64) int64 {
 	return 2 * limit
 }
 
-// oversizedRequest is a request that was over the limit: the start and the end of
-// it, which is all that is kept, and how large it was.
+// oversizedRequest is a request that was over the limit, or over a bound of its
+// shape: the start and the end of it, which is all that is kept, how large it was,
+// and, for JSON, what it held.
 type oversizedRequest struct {
 	prefix []byte
 	tail   []byte
 	size   int64
+	shape  requestShape
 }
 
-// readRequest reads one message from r. A message within limit comes back whole.
-// One over it comes back as an oversizedRequest: its first idPrefixBytes, its last
-// idTailBytes, and the number of bytes in all, the rest read and discarded. An
-// error is a connection that failed, or one that went past the library's own limit
-// and was closed.
-func readRequest(r io.Reader, limit int64) ([]byte, *oversizedRequest, error) {
+// excess is what an oversized request is refused for: its bytes when there are
+// more of them than limit, and otherwise its shape.
+func (o *oversizedRequest) excess(limit int64) overLimit {
+	if o.size > limit {
+		return overLimit{unit: inBytes, size: o.size, limit: limit}
+	}
+	over, _ := o.shape.over()
+	return over
+}
+
+// readRequest reads one message from r. A message within limit comes back whole,
+// and so does JSON text (a shape to measure it by) within the bounds of its shape.
+// One over either comes back as an oversizedRequest: its first idPrefixBytes, its
+// last idTailBytes, the number of bytes in all and, for JSON, its shape, the rest
+// read, measured and discarded. JSON is measured as it arrives, so what is kept of
+// a request over a bound of its shape stops where it went over. An error is a
+// connection that failed, or one that went past the library's own limit and was
+// closed.
+func readRequest(r io.Reader, limit int64, shape *jsonShape) ([]byte, *oversizedRequest, error) {
+	var measured *shapeReader
+	if shape != nil {
+		measured = &shapeReader{r: r, shape: shape, stopAtBound: true}
+		r = measured
+	}
 	var buf bytes.Buffer
 	n, err := buf.ReadFrom(io.LimitReader(r, limit+1))
-	if err != nil {
+	if err != nil && !errors.Is(err, errOverItsShape) {
 		return nil, nil, err
 	}
-	if n <= limit {
+	if err == nil && n <= limit && !shape.finish() {
 		return buf.Bytes(), nil, nil
+	}
+	if measured != nil {
+		measured.stopAtBound = false // the rest is read whole, and measured
 	}
 	prefix := append([]byte(nil), buf.Bytes()[:min(buf.Len(), idPrefixBytes)]...)
 	tail := &tailKeeper{max: idTailBytes}
@@ -67,7 +92,12 @@ func readRequest(r io.Reader, limit int64) ([]byte, *oversizedRequest, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return nil, &oversizedRequest{prefix: prefix, tail: tail.b, size: n + rest}, nil
+	over := &oversizedRequest{prefix: prefix, tail: tail.b, size: n + rest}
+	if shape != nil {
+		shape.finish()
+		over.shape = shape.requestShape
+	}
+	return nil, over, nil
 }
 
 // tailKeeper keeps the last max bytes written to it.
@@ -90,11 +120,11 @@ func (t *tailKeeper) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-// refuseOversizedRequest answers a request that was over the limit with an error
-// for that request alone.
+// refuseOversizedRequest answers a request that was over the limit, or over a bound
+// of its shape, with an error for that request alone.
 func (s *session) refuseOversizedRequest(msgType websocket.MessageType, over *oversizedRequest) {
 	messageID, requestID := idsOfAnOversizedRequest(msgType, over.prefix, over.tail)
-	s.refuseRequest(messageID, requestID, over.size, s.maxBytes)
+	s.refuseRequest(messageID, requestID, over.excess(s.maxBytes))
 }
 
 // withinServerCap says whether the server will take msg. The server limits the
@@ -110,30 +140,85 @@ func withinServerCap(msg *memqlv1.MemqlClientMessage, limit int) (size int, ok b
 
 // refuseRequest answers a request that cannot be forwarded with an error for that
 // request alone, by the ids it came with (requestID, or the message id when there
-// is none), and the sentence for a request that is too large.
-func (s *session) refuseRequest(messageID, requestID string, size, limit int64) {
+// is none), and the sentence for what it is over.
+func (s *session) refuseRequest(messageID, requestID string, over overLimit) {
 	named := requestID
 	if named == "" {
 		named = messageID
 	}
-	s.logDebug("memql ws request refused: too large", "request_id", named, "bytes", size, "limit", limit)
+	s.logDebug("memql ws request refused: over a limit", "request_id", named, "unit", string(over.unit), "size", over.size, "limit", over.limit)
 	s.queueLocalErrorItem(&queuedLocalError{
 		requestId: named,
 		correlate: messageID,
 		code:      codes.ResourceExhausted,
-		message:   requestTooLargeSentence(size, limit),
-		metadata: map[string]string{
-			"code":       "REQUEST_TOO_LARGE",
-			"sizeBytes":  strconv.FormatInt(size, 10),
-			"limitBytes": strconv.FormatInt(limit, 10),
-		},
+		message:   over.sentence(),
+		metadata:  over.metadata(),
 	})
+}
+
+// overLimit is what a request is refused for: what it was measured in, how much of
+// it the request has, and how much one request may have.
+type overLimit struct {
+	unit        limitUnit
+	size, limit int64
+}
+
+// limitUnit is what a request is measured in.
+type limitUnit string
+
+const (
+	// inBytes is its size: the bytes that arrived, or its encoding as the server
+	// will count it.
+	inBytes limitUnit = "bytes"
+	// inValues is how many values it holds (see maxRequestValues).
+	inValues limitUnit = "values"
+	// inLevels is how deeply they nest (see maxRequestDepth).
+	inLevels limitUnit = "levels"
+)
+
+// sentence is what the person whose request it was is told. A request too deep is
+// told the bound and not its own depth, which the measure of protocol buffers
+// stops at the bound to find.
+func (o overLimit) sentence() string {
+	switch o.unit {
+	case inValues:
+		return fmt.Sprintf("This request is too large to send: it holds %s values and one request can hold at most %s. Send less at once and try again.",
+			groupedDigits(o.size), groupedDigits(o.limit))
+	case inLevels:
+		return fmt.Sprintf("This request is nested too deeply to send: one request can go at most %s levels deep. Send it with less nesting and try again.",
+			groupedDigits(o.limit))
+	default:
+		return requestTooLargeSentence(o.size, o.limit)
+	}
+}
+
+// metadata is what the refusal tells a client in a form it can read.
+func (o overLimit) metadata() map[string]string {
+	size, limit := strconv.FormatInt(o.size, 10), strconv.FormatInt(o.limit, 10)
+	switch o.unit {
+	case inValues:
+		return map[string]string{"code": "REQUEST_TOO_LARGE", "values": size, "limitValues": limit}
+	case inLevels:
+		return map[string]string{"code": "REQUEST_TOO_DEEP", "limitDepth": limit}
+	default:
+		return map[string]string{"code": "REQUEST_TOO_LARGE", "sizeBytes": size, "limitBytes": limit}
+	}
 }
 
 // requestTooLargeSentence is what the person whose request it was is told.
 func requestTooLargeSentence(size, limit int64) string {
 	return fmt.Sprintf("This request is too large to send: it is %s and one request can carry at most %s. Send less at once and try again.",
 		describeBytes(size), describeBytes(limit))
+}
+
+// groupedDigits writes n for a person, with a comma between each group of three
+// digits.
+func groupedDigits(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
 }
 
 // describeBytes writes a size for a person: whole MiB or KiB as such, anything else
