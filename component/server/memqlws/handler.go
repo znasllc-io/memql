@@ -343,6 +343,8 @@ type session struct {
 	// to it right now. See messageMoving.
 	reading atomic.Int32
 	writing atomic.Int32
+	// turn lets one message at a time be written. See writeMessage.
+	turn turnLock
 	// pingTimeout is how long a ping may wait for its pong.
 	pingTimeout time.Duration
 
@@ -531,6 +533,18 @@ func (s *session) writeLoop() error {
 }
 
 func (s *session) writeMessage(payload []byte) error {
+	// A message's deadline is for writing it, so it starts when it is the message's
+	// turn. The WebSocket library writes one message at a time and a message waits
+	// for the writer under the same context its write is limited by, so a refusal
+	// queued behind an answer that is still going (which may hold the writer for the
+	// answer's own scaled deadline, 42 s for 32 MiB) gave up at its own, shorter
+	// one: the error was discarded, and the call it was for never settled. Waiting
+	// for the turn ends only with the session, and a write that then stalls is cut
+	// by its deadline, which closes the connection where it can be seen.
+	if err := s.turn.acquire(s.ctx); err != nil {
+		return err
+	}
+	defer s.turn.release()
 	ctx, cancel := context.WithTimeout(s.ctx, writeDeadline(s.writeLimit, len(payload)))
 	defer cancel()
 	// A message being written is its own sign of life: no ping is due while it
@@ -544,6 +558,25 @@ func (s *session) writeMessage(payload []byte) error {
 	}
 	return err
 }
+
+// turnLock is a lock whose waiters give up when their context ends. The zero value
+// is ready to use.
+type turnLock struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func (l *turnLock) acquire(ctx context.Context) error {
+	l.once.Do(func() { l.ch = make(chan struct{}, 1) })
+	select {
+	case l.ch <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (l *turnLock) release() { <-l.ch }
 
 // writeDeadline is the time allowed to write a message of size bytes: the base,
 // which a small message gets, and a second more for each MiB of it.
