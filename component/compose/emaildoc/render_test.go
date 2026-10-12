@@ -947,6 +947,83 @@ func TestRenderReturnsAnErrorOnlyForACancelledContext(t *testing.T) {
 	}
 }
 
+// A reader that will read no more pictures says so with ErrTooManyPictures, and
+// the email is told it has too many pictures (once), not that a picture could
+// not be read: the picture is fine, and the way on is to use fewer.
+func TestRenderReportsPicturesAReaderWillNotReadAsTooMany(t *testing.T) {
+	reads := map[string]int{}
+	reader := resolverFunc(func(_ context.Context, id string) (Image, error) {
+		reads[id]++
+		if id == "a1" {
+			return pngImage(t, 2, 2), nil
+		}
+		// Wrapped, as a reader that says more than the bare sentence would.
+		return Image{}, fmt.Errorf("a preview reads nine pictures: %w", ErrTooManyPictures)
+	})
+	t.Run("a layout", func(t *testing.T) {
+		clear(reads)
+		d := oneBlock(Block{ID: "p1", Type: "image", Src: "artifact:a1", Width: 10})
+		d.Blocks = append([]Block{
+			{ID: "p2", Type: "image", Src: "artifact:b2", Width: 10, Alt: "Two"},
+			{ID: "p3", Type: "image", Src: "artifact:b3", Width: 10},
+			{ID: "p4", Type: "image", Src: "artifact:b2", Width: 10},
+		}, d.Blocks...)
+		r := mustRender(t, d, reader, RenderOptions{})
+		if n := countIssues(r.Issues, IssueImagesLimit); n != 1 {
+			t.Errorf("images_limit said %d times, want once: %+v", n, r.Issues)
+		}
+		if hasIssue(r.Issues, IssueImageUnavailable) {
+			t.Errorf("a picture that was not read is reported as one that could not be: %+v", r.Issues)
+		}
+		for _, issue := range r.Issues {
+			if issue.Code == IssueImagesLimit && issue.Message != picturesOverBudget {
+				t.Errorf("message = %q, want %q", issue.Message, picturesOverBudget)
+			}
+		}
+		if n := strings.Count(r.HTML, "data:image/png"); n != 1 {
+			t.Errorf("%d pictures embedded, want only the one that was read", n)
+		}
+		// Each is asked for once, however often it is used.
+		if reads["a1"] != 1 || reads["b2"] != 1 || reads["b3"] != 1 {
+			t.Errorf("reads: %v", reads)
+		}
+	})
+	t.Run("custom HTML", func(t *testing.T) {
+		clear(reads)
+		d := Document{Subject: "x", TextBody: "x", HTMLBody: `<img src="artifact:b2" alt="Two"><img src="artifact:a1"><img src="artifact:b3"><img src="artifact:b2">`}
+		r := mustRender(t, d, reader, RenderOptions{})
+		if n := countIssues(r.Issues, IssueImagesLimit); n != 1 || hasIssue(r.Issues, IssueImageUnavailable) {
+			t.Errorf("issues: %+v", r.Issues)
+		}
+		// The ones not read stay as they were written, and the one read is embedded.
+		if n := strings.Count(r.HTML, "data:image/png"); n != 1 || strings.Count(r.HTML, "artifact:b2") != 2 {
+			t.Errorf("HTML: %s", r.HTML)
+		}
+		if reads["b2"] != 1 {
+			t.Errorf("reads: %v", reads)
+		}
+	})
+	t.Run("a render that is cancelled is cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		cancelling := resolverFunc(func(context.Context, string) (Image, error) {
+			cancel()
+			return Image{}, ErrTooManyPictures
+		})
+		if _, err := Render(ctx, oneBlock(Block{ID: "p", Type: "image", Src: "artifact:z", Width: 10}), cancelling, RenderOptions{}); !errors.Is(err, context.Canceled) {
+			t.Errorf("got %v", err)
+		}
+	})
+	t.Run("only the sentence of this error", func(t *testing.T) {
+		// Any other error is a picture that could not be read.
+		other := resolverFunc(func(context.Context, string) (Image, error) { return Image{}, errors.New("too many requests") })
+		r := mustRender(t, oneBlock(Block{ID: "p", Type: "image", Src: "artifact:z", Width: 10}), other, RenderOptions{})
+		if !hasIssue(r.Issues, IssueImageUnavailable) || hasIssue(r.Issues, IssueImagesLimit) {
+			t.Errorf("issues: %+v", r.Issues)
+		}
+	})
+}
+
 func TestEachPictureIsReadOnce(t *testing.T) {
 	reads := map[string]int{}
 	counting := resolverFunc(func(_ context.Context, id string) (Image, error) {

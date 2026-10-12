@@ -424,8 +424,8 @@ func Parse(data []byte) (Document, error) {
 	if !utf8.Valid(data) {
 		return Document{}, errNotUTF8
 	}
-	if hasControlCharacter(data) {
-		return Document{}, errControlCharacter
+	if off, found := firstControlCharacter(data); found {
+		return Document{}, controlRefusal(data, off)
 	}
 	fields, err := readDocument(data)
 	if err != nil {
@@ -434,10 +434,11 @@ func Parse(data []byte) (Document, error) {
 	return parseDocument(fields)
 }
 
-// hasControlCharacter reports whether the file holds a C0 control character
-// (U+0000 to U+001F) other than tab, newline and carriage return, written as
-// itself or as an escape in a string: \u00XX, \b and \f. It reads the bytes of
-// the file and nothing more, so a file of them is refused for the price of
+// firstControlCharacter finds the first C0 control character (U+0000 to
+// U+001F) in the file other than tab, newline and carriage return, written as
+// itself or as an escape in a string: \u00XX, \b and \f. It returns the offset
+// where the character begins (for an escape, the backslash). It reads the bytes
+// of the file and nothing more, so a file of them is refused for the price of
 // looking at it; the escapes are read as JSON reads them, so a backslash that
 // is itself escaped does not begin one.
 //
@@ -446,7 +447,7 @@ func Parse(data []byte) (Document, error) {
 // hold NUL at all: the engine would store the six characters of its escape
 // instead, so the email that is sent would differ from the one that was
 // saved, and a retry of the same save would no longer be recognised as one.
-func hasControlCharacter(data []byte) bool {
+func firstControlCharacter(data []byte) (int, bool) {
 	inString := false
 	for i := 0; i < len(data); i++ {
 		c := data[i]
@@ -454,7 +455,7 @@ func hasControlCharacter(data []byte) bool {
 			if c == '"' {
 				inString = true
 			} else if refusedControl(c) {
-				return true
+				return i, true
 			}
 			continue
 		}
@@ -462,27 +463,28 @@ func hasControlCharacter(data []byte) bool {
 		case c == '"':
 			inString = false
 		case c == '\\':
+			at := i
 			i++
 			if i >= len(data) {
-				return false
+				return 0, false
 			}
 			switch data[i] {
 			case 'b', 'f':
-				return true
+				return at, true
 			case 'u':
 				if i+4 >= len(data) {
-					return false
+					return 0, false
 				}
 				if r, ok := hexValue(data[i+1 : i+5]); ok && r < 0x20 && refusedControl(byte(r)) {
-					return true
+					return at, true
 				}
 				i += 4
 			}
 		case refusedControl(c):
-			return true
+			return i, true
 		}
 	}
-	return false
+	return 0, false
 }
 
 // refusedControl reports whether c is a C0 control character that is not text.

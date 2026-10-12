@@ -43,7 +43,7 @@ const (
 	tooLargeToWrite = "This email is larger than 8 MiB once it is written out. Shorten it or use fewer pictures."
 	sampleTooLarge  = "The sample values are too large. Use up to 100 fields of up to 1,000 characters each."
 	fileTooLarge    = "This email file is larger than 2 MiB. Use fewer or smaller pictures."
-	controlRefused  = "This email contains a character that can't be saved. Remove it and try again."
+	controlRefused  = "This email contains a character that can't be saved, in the plain-text body. Remove it and try again."
 )
 
 // previewEngine is the package's fake engine plus a record of the organization

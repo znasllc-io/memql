@@ -704,27 +704,34 @@ func TestParseSizeRefusalIsASentenceForAPerson(t *testing.T) {
 // without a word, and none of the others means anything in an email. Tab,
 // newline and carriage return are the three that are text.
 func TestParseRefusesControlCharacters(t *testing.T) {
-	const refused = "This email contains a character that can't be saved. Remove it and try again."
+	// The sentence names where the character is, so that a person can find one
+	// that cannot be seen: the field, or the block by its id and the field of it.
+	// Where the file does not say (a character between the pieces of it), it is
+	// the sentence without a place.
+	const generic = "This email contains a character that can't be saved. Remove it and try again."
+	at := func(where string) string {
+		return "This email contains a character that can't be saved, " + where + ". Remove it and try again."
+	}
 	// Where a string can sit in a file. Each is a template with the string "@@@"
-	// where the character goes.
-	places := []struct{ name, doc string }{
-		{"subject", `{"subject":"a@@@b","textBody":"y","htmlBody":""}`},
-		{"preheader", `{"subject":"x","preheader":"a@@@b","textBody":"y","htmlBody":""}`},
-		{"text body", `{"subject":"x","textBody":"a@@@b","htmlBody":""}`},
-		{"html body", `{"subject":"x","textBody":"y","htmlBody":"<p>a@@@b</p>"}`},
-		{"heading", layoutJSON(`{"id":"h","type":"heading","text":"a@@@b"}`)},
-		{"text block", layoutJSON(`{"id":"t","type":"text","text":"a@@@b"}`)},
-		{"button label", layoutJSON(`{"id":"b","type":"button","label":"a@@@b","href":"https://example.com"}`)},
-		{"button link", layoutJSON(`{"id":"b","type":"button","label":"Go","href":"https://example.com/a@@@b"}`)},
-		{"image alt", layoutJSON(`{"id":"i","type":"image","width":100,"alt":"a@@@b"}`)},
-		{"html block", layoutJSON(`{"id":"x","type":"html","html":"<p>a@@@b</p>"}`)},
-		{"footer line", layoutJSON(`{"id":"f","type":"footer","lines":["a@@@b"]}`)},
-		{"footer link label", layoutJSON(`{"id":"f","type":"footer","links":[{"label":"a@@@b","href":"https://example.com"}]}`)},
-		{"inside a column", layoutJSON(`{"id":"c","type":"columns","columns":[{"width":100,"blocks":[{"id":"t","type":"text","text":"a@@@b"}]}]}`)},
-		{"block id", layoutJSON(`{"id":"h@@@","type":"spacer","height":4}`)},
-		{"layout name", `{"subject":"x","layout":"builtin:a@@@b","theme":` + neutralTheme() + `,"blocks":[]}`},
-		{"theme font", `{"subject":"x","theme":` + strings.Replace(neutralTheme(), `"Georgia"`, `"Geo@@@gia"`, 1) + `,"blocks":[]}`},
-		{"a key", `{"subject":"x","te@@@xtBody":"y","htmlBody":""}`},
+	// where the character goes, and the place the sentence names.
+	places := []struct{ name, doc, where string }{
+		{"subject", `{"subject":"a@@@b","textBody":"y","htmlBody":""}`, "in the subject"},
+		{"preheader", `{"subject":"x","preheader":"a@@@b","textBody":"y","htmlBody":""}`, "in the preheader"},
+		{"text body", `{"subject":"x","textBody":"a@@@b","htmlBody":""}`, "in the plain-text body"},
+		{"html body", `{"subject":"x","textBody":"y","htmlBody":"<p>a@@@b</p>"}`, "in the HTML body"},
+		{"heading", layoutJSON(`{"id":"h","type":"heading","text":"a@@@b"}`), `in block "h" (text)`},
+		{"text block", layoutJSON(`{"id":"t","type":"text","text":"a@@@b"}`), `in block "t" (text)`},
+		{"button label", layoutJSON(`{"id":"b","type":"button","label":"a@@@b","href":"https://example.com"}`), `in block "b" (label)`},
+		{"button link", layoutJSON(`{"id":"b","type":"button","label":"Go","href":"https://example.com/a@@@b"}`), `in block "b" (href)`},
+		{"image alt", layoutJSON(`{"id":"i","type":"image","width":100,"alt":"a@@@b"}`), `in block "i" (alt)`},
+		{"html block", layoutJSON(`{"id":"x","type":"html","html":"<p>a@@@b</p>"}`), `in block "x" (html)`},
+		{"footer line", layoutJSON(`{"id":"f","type":"footer","lines":["a@@@b"]}`), `in block "f" (lines)`},
+		{"footer link label", layoutJSON(`{"id":"f","type":"footer","links":[{"label":"a@@@b","href":"https://example.com"}]}`), `in block "f" (links)`},
+		{"inside a column", layoutJSON(`{"id":"c","type":"columns","columns":[{"width":100,"blocks":[{"id":"t","type":"text","text":"a@@@b"}]}]}`), `in block "t" (text)`},
+		{"block id", layoutJSON(`{"id":"h@@@","type":"spacer","height":4}`), "in the id of a block"},
+		{"layout name", `{"subject":"x","layout":"builtin:a@@@b","theme":` + neutralTheme() + `,"blocks":[]}`, "in the layout name"},
+		{"theme font", `{"subject":"x","theme":` + strings.Replace(neutralTheme(), `"Georgia"`, `"Geo@@@gia"`, 1) + `,"blocks":[]}`, "in the theme"},
+		{"a key", `{"subject":"x","te@@@xtBody":"y","htmlBody":""}`, "in a field name"},
 	}
 	// Every C0 character but the three that are text, as the \u escape in both
 	// cases of hexadecimal digits, and the short escapes of backspace and form
@@ -741,29 +748,30 @@ func TestParseRefusesControlCharacters(t *testing.T) {
 		var missed []string
 		var first error
 		for _, escape := range escapes {
-			if _, err := Parse([]byte(strings.Replace(place.doc, "@@@", escape, 1))); err == nil || err.Error() != refused {
+			if _, err := Parse([]byte(strings.Replace(place.doc, "@@@", escape, 1))); err == nil || err.Error() != at(place.where) {
 				if missed = append(missed, escape); first == nil {
 					first = err
 				}
 			}
 		}
 		if len(missed) > 0 {
-			t.Errorf("%s: %d of %d escapes were not refused with %q (%s, ...); the first got %v", place.name, len(missed), len(escapes), refused, missed[0], first)
+			t.Errorf("%s: %d of %d escapes were not refused with %q (%s, ...); the first got %v", place.name, len(missed), len(escapes), at(place.where), missed[0], first)
 		}
 	}
 
 	t.Run("a control character written into the file itself", func(t *testing.T) {
 		// Not valid JSON either, but a person is told what to remove, not that
 		// the JSON is wrong. Inside a string and between the pieces of the file.
-		for _, doc := range []string{
-			"{\"subject\":\"a\x00b\",\"textBody\":\"y\",\"htmlBody\":\"\"}",
-			"{\"subject\":\"a\x01b\",\"textBody\":\"y\",\"htmlBody\":\"\"}",
-			"{\"subject\":\"x\",\"textBody\":\"y\",\"htmlBody\":\"\"}\x00",
-			"\x1f{\"subject\":\"x\",\"textBody\":\"y\",\"htmlBody\":\"\"}",
-			"{\"subject\":\"x\",\x0b\"textBody\":\"y\",\"htmlBody\":\"\"}",
+		for _, c := range []struct{ doc, want string }{
+			{"{\"subject\":\"a\x00b\",\"textBody\":\"y\",\"htmlBody\":\"\"}", at("in the subject")},
+			{"{\"subject\":\"a\x01b\",\"textBody\":\"y\",\"htmlBody\":\"\"}", at("in the subject")},
+			// Between the pieces of the file it is in no field.
+			{"{\"subject\":\"x\",\"textBody\":\"y\",\"htmlBody\":\"\"}\x00", generic},
+			{"\x1f{\"subject\":\"x\",\"textBody\":\"y\",\"htmlBody\":\"\"}", generic},
+			{"{\"subject\":\"x\",\x0b\"textBody\":\"y\",\"htmlBody\":\"\"}", generic},
 		} {
-			if _, err := Parse([]byte(doc)); err == nil || err.Error() != refused {
-				t.Errorf("%q: want %q, got %v", doc, refused, err)
+			if _, err := Parse([]byte(c.doc)); err == nil || err.Error() != c.want {
+				t.Errorf("%q: want %q, got %v", c.doc, c.want, err)
 			}
 		}
 	})
@@ -803,8 +811,8 @@ func TestParseRefusesControlCharacters(t *testing.T) {
 			switch {
 			case c.ok && err != nil:
 				t.Errorf("%s: %v", c.name, err)
-			case !c.ok && (err == nil || err.Error() != refused):
-				t.Errorf("%s: want %q, got %v", c.name, refused, err)
+			case !c.ok && (err == nil || err.Error() != at(`in block "t" (text)`)):
+				t.Errorf("%s: want %q, got %v", c.name, at(`in block "t" (text)`), err)
 			}
 		}
 	})
@@ -824,8 +832,117 @@ func TestParseRefusesControlCharacters(t *testing.T) {
 		pre, post, _ := strings.Cut(layoutJSON(`{"id":"t","type":"text","text":"@@@"}`), "@@@")
 		doc := []byte(pre + strings.Repeat(`\u0000`, (MaxBytes-len(pre)-len(post))/6) + post)
 		var err error
-		if allocated := allocatedBy(func() { _, err = Parse(doc) }); err == nil || err.Error() != refused || allocated > 1<<20 {
-			t.Errorf("want %q before reading anything, got %v after %d bytes", refused, err, allocated)
+		if allocated := allocatedBy(func() { _, err = Parse(doc) }); err == nil || err.Error() != at(`in block "t" (text)`) || allocated > 1<<20 {
+			t.Errorf("want %q before reading anything, got %v after %d bytes", at(`in block "t" (text)`), err, allocated)
+		}
+	})
+}
+
+// The place a control character is named is read from the file by its shape,
+// without reading the file: the block is the nearest object in a list called
+// blocks, named by its id wherever in the object that is written, and the field
+// is the member of it the character is in.
+func TestParseControlCharacterNamesWhereItIs(t *testing.T) {
+	at := func(where string) string {
+		return "This email contains a character that can't be saved, " + where + ". Remove it and try again."
+	}
+	const generic = "This email contains a character that can't be saved. Remove it and try again."
+	long := strings.Repeat("k", 300)
+	for _, c := range []struct{ name, doc, want string }{
+		{"a block is named by an id written after the field", layoutJSON(`{"type":"text","text":"a\u0000b","id":"late"}`), at(`in block "late" (text)`)},
+		{"a block is named by an id written before it", layoutJSON(`{"id":"early","type":"text","text":"a\u0000b"}`), at(`in block "early" (text)`)},
+		{"the nearest block of nested ones", layoutJSON(`{"id":"outer","type":"section","blocks":[{"id":"inner","type":"text","text":"a\u0000b"}]}`), at(`in block "inner" (text)`)},
+		{"a block in a column of a section", layoutJSON(`{"id":"s","type":"section","blocks":[{"id":"c","type":"columns","columns":[{"width":100,"blocks":[{"id":"deep","type":"heading","text":"a\u0000b"}]}]}]}`), at(`in block "deep" (text)`)},
+		{"the second block, not the first", layoutJSON(`{"id":"one","type":"text","text":"fine"},{"id":"two","type":"text","text":"a\u0000b"}`), at(`in block "two" (text)`)},
+		{"the first of two characters", layoutJSON(`{"id":"one","type":"text","text":"a\u0001b"},{"id":"two","type":"text","text":"a\u0000b"}`), at(`in block "one" (text)`)},
+		{"a block without an id", layoutJSON(`{"type":"text","text":"a\u0000b"}`), at(`in a block (text)`)},
+		{"an id that is not text", layoutJSON(`{"id":7,"type":"text","text":"a\u0000b"}`), at(`in a block (text)`)},
+		{"an id with an escape in it", layoutJSON(`{"id":"caf\u00e9","type":"text","text":"a\u0000b"}`), at(`in block "café" (text)`)},
+		// The first character is the one named; the id read after it may hold another.
+		{"an id with a character in it, after the first", layoutJSON(`{"type":"text","text":"a\u0000b","id":"h\u0001"}`), at(`in block "h\x01" (text)`)},
+		{"an id with a character in it comes first", layoutJSON(`{"id":"h\u0001","type":"text","text":"a\u0000b"}`), at("in the id of a block")},
+		{"an id written twice", layoutJSON(`{"id":"first","id":"second","type":"text","text":"a\u0000b"}`), at(`in block "first" (text)`)},
+		{"a member of the block that holds a list", layoutJSON(`{"id":"f","type":"footer","lines":["fine","a\u0000b"]}`), at(`in block "f" (lines)`)},
+		{"the id of the block itself", layoutJSON(`{"id":"x\u0000","type":"text","text":"fine"}`), at("in the id of a block")},
+		// Not the id itself but something in the field the id should be.
+		{"a list where the id should be", layoutJSON(`{"id":["a\u0000b"],"type":"text"}`), at("in a block (id)")},
+		// The id read is the block's own, not that of a block it holds.
+		{"the id of the block and not of the one inside it", layoutJSON(`{"type":"section","blocks":[{"id":"inner","type":"text","text":"x"}],"id":"outer","background":"a\u0000b"}`), at(`in block "outer" (background)`)},
+		{"a block that holds blocks and has no id", layoutJSON(`{"type":"section","blocks":[{"id":"inner","type":"text","text":"x"}],"background":"a\u0000b"}`), at("in a block (background)")},
+		{"a field with an odd name is not named", layoutJSON(`{"id":"t","type":"text","te xt":"a\u0000b"}`), at(`in block "t"`)},
+		{"a field with a very long name is not named", layoutJSON(`{"id":"t","type":"text","` + long + `":"a\u0000b"}`), at(`in block "t"`)},
+		{"a field the format does not have", `{"subject":"x","mystery":"a\u0000b","textBody":"y","htmlBody":""}`, at(`in the field "mystery"`)},
+		{"a field with a very long name at the top", `{"subject":"x","` + long + `":"a\u0000b","textBody":"y","htmlBody":""}`, generic},
+		{"the theme", `{"subject":"x","theme":{"page":"a\u0000b"},"blocks":[]}`, at("in the theme")},
+		{"in the list of blocks but not in a block", `{"subject":"x","theme":` + neutralTheme() + `,"blocks":["a\u0000b"]}`, at("in the blocks")},
+		{"a file that is a list", `["a\u0000b"]`, generic},
+		{"a file that is a string", `"a\u0000b"`, generic},
+		{"a string after the end of the file's object", `{"subject":"x","textBody":"y","htmlBody":""} "a\u0000b"`, generic},
+		{"a character written into a key", `{"subject":"x","te\u0000xtBody":"y","htmlBody":""}`, at("in a field name")},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := Parse([]byte(c.doc)); err == nil || err.Error() != c.want {
+				t.Fatalf("want %q, got %v", c.want, err)
+			}
+		})
+	}
+
+	t.Run("a document nested past anything the format has says no place", func(t *testing.T) {
+		doc := strings.Repeat("[", 100000) + `"a\u0000b"` + strings.Repeat("]", 100000)
+		var err error
+		if allocated := allocatedBy(func() { _, err = Parse([]byte(doc)) }); err == nil || err.Error() != generic || allocated > 1<<20 {
+			t.Fatalf("want %q cheaply, got %v after %d bytes", generic, err, allocated)
+		}
+	})
+
+	t.Run("an id too long to read is not named", func(t *testing.T) {
+		doc := layoutJSON(`{"type":"text","text":"a\u0000b","id":"` + strings.Repeat("x", 2*maxIDBytes) + `"}`)
+		if _, err := Parse([]byte(doc)); err == nil || err.Error() != at(`in a block (text)`) {
+			t.Fatalf("got %v", err)
+		}
+	})
+
+	t.Run("a hostile id is quoted and clipped", func(t *testing.T) {
+		doc := layoutJSON(`{"id":"` + strings.Repeat("x", 5000) + `","type":"text","text":"a\u0000b"}`)
+		_, err := Parse([]byte(doc))
+		if err == nil || !strings.HasPrefix(err.Error(), `This email contains a character that can't be saved, in block "xxx`) || len(err.Error()) > 300 {
+			t.Fatalf("got %d bytes: %.200v", len(fmt.Sprint(err)), err)
+		}
+	})
+}
+
+// A sentence about a control character holds no control character of its own,
+// and is found for any file whatever, without a panic: the place is read out of
+// a file that is not yet known to be JSON.
+func FuzzControlRefusal(f *testing.F) {
+	for _, seed := range []string{
+		layoutJSON(`{"id":"t","type":"text","text":"a\u0000b"}`),
+		layoutJSON(`{"type":"text","text":"a\u0000b","id":"late"}`),
+		`{"subject":"a\bb"}`,
+		"{\"subject\":\"a\x01b\"",
+		`[[[{"blocks":[{"id":"x\u0001"}]}]]]`,
+		`{"blocks":[{"id":"\\\u0000`,
+		`{"a":{"blocks":[{"blocks":[{"id":"q","t\u0000":1}]}]}}`,
+	} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		off, found := firstControlCharacter(data)
+		if !found {
+			return
+		}
+		if off < 0 || off >= len(data) {
+			t.Fatalf("offset %d outside a file of %d bytes", off, len(data))
+		}
+		message := controlRefusal(data, off).Error()
+		if !strings.HasPrefix(message, "This email contains a character that can't be saved") ||
+			!strings.HasSuffix(message, "Remove it and try again.") || len(message) > 400 {
+			t.Fatalf("not the sentence: %q", message)
+		}
+		for _, r := range message {
+			if r < 0x20 || r == 0x7f {
+				t.Fatalf("the sentence holds a control character: %q", message)
+			}
 		}
 	})
 }
