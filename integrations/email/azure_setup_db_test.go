@@ -86,7 +86,7 @@ func TestAzureSetupSessionSurvivesReplicaHopAndRefusesAnotherActor(t *testing.T)
 		if first == nil {
 			first = e
 		}
-		setup := &azureSetup{store: &connectionStore{engine: NewConfigWriter(e), gateDB: func() *sql.DB { return db.DB }}, protocol: protocol, now: func() time.Time { return now }, canManage: func(ctx context.Context, account string) bool {
+		setup := &azureSetup{store: &connectionStore{engine: NewConfigWriter(e), gateDB: replicaGatePool(t)}, protocol: protocol, now: func() time.Time { return now }, canManage: func(ctx context.Context, account string) bool {
 			return e.OrganizationCapable(ctx, account, auth.VerbUpdate, auth.ResourceData)
 		}}
 		instances[n] = NewIntegration(NewLogSender(nil), nil)

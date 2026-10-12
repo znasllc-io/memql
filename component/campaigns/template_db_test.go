@@ -43,7 +43,7 @@ func TestTemplatePublicationChecksExactRevisionAcrossReplicas(t *testing.T) {
 			t.Fatal(err)
 		}
 		engines[n] = e
-		workers[n] = NewWorker(deliveryDBEngine{e}, nil, nil, quietLogger(), func() *sql.DB { return db.DB })
+		workers[n] = NewWorker(deliveryDBEngine{e}, nil, nil, quietLogger(), gatePoolFor(t))
 	}
 	workers[0].now = func() time.Time { return time.Date(2029, 1, 1, 0, 0, 0, 0, time.UTC) }
 	workers[1].now = func() time.Time { return time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC) }

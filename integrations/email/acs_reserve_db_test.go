@@ -43,6 +43,19 @@ func (g *gatedOperations) lock(ctx context.Context, key string) (func(), error) 
 	return memql.AcquireWriteGatesWithin(ctx, g.pool, g.waitFor, "email-operation:"+key)
 }
 
+// replicaGatePool opens one replica's write-gate pool, as its database opens one
+// (database.NewGatePool at the deployed size; memql#6022): the connection store's
+// and the send receipts' gates hold their locks there, never on the engine's pool.
+func replicaGatePool(t *testing.T) func() *sql.DB {
+	t.Helper()
+	gates, err := database.NewGatePool(dbtest.DSN(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gates.Close() })
+	return func() *sql.DB { return gates }
+}
+
 func reserveFixture(t *testing.T, poolSize int) (*ACSSender, *gatedOperations, *sql.DB) {
 	t.Helper()
 	reachable, err := dbtest.EnsureSchema(context.Background())

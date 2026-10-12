@@ -377,14 +377,22 @@ func newEmptyNewsletter(t *testing.T, name string) *digestNewsletter {
 func newGatedWorker(t *testing.T, eng *memql.MemQLEngine, db *bun.DB, sender *recordingSender) *Worker {
 	t.Helper()
 	worker := newTestWorker(t, deliveryDBEngine{eng}, sender)
+	wired := NewWorker(deliveryDBEngine{eng}, nil, nil, quietLogger(), gatePoolFor(t))
+	worker.newsletterGate, worker.templateGate, worker.singleSendGate = wired.newsletterGate, wired.templateGate, wired.singleSendGate
+	return worker
+}
+
+// gatePoolFor opens the write-gate pool of one replica, shaped as a node's
+// database opens its own (database.NewGatePool at the deployed size): a gate holds
+// its lock on a connection of this pool, never on the engine's (memql#6022).
+func gatePoolFor(t *testing.T) func() *sql.DB {
+	t.Helper()
 	gates, err := database.NewGatePool(dbtest.DSN(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = gates.Close() })
-	wired := NewWorker(deliveryDBEngine{eng}, nil, nil, quietLogger(), func() *sql.DB { return gates })
-	worker.newsletterGate, worker.templateGate, worker.singleSendGate = wired.newsletterGate, wired.templateGate, wired.singleSendGate
-	return worker
+	return func() *sql.DB { return gates }
 }
 
 // setUpStorefront gives the tenant a sender, a published welcome template, a site

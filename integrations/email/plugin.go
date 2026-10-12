@@ -3,6 +3,7 @@ package email
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
@@ -22,6 +23,12 @@ import (
 // stash; that target has never existed and the seeder reads a .env file.)
 func init() {
 	memql.RegisterPlugin("email", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
+		// The Azure connection state and its send receipts take write gates on the
+		// gate pool (memql#6022) and on nothing else; a context without it is
+		// refused here rather than by the first connection an operator saves.
+		if pctx.GateDB == nil {
+			return nil, fmt.Errorf("email plug-in: no GateDB in plugin context: its Azure connection state and send receipts take write gates on the gate pool (database.Database.GateDB; a test or a tool opens one with database.NewGatePool)")
+		}
 		writer := NewConfigWriter(pctx.Engine)
 		// The connection store's gate and the Azure send receipts' run on the gate
 		// pool (memql#6022), not on the request pool the engine works on.

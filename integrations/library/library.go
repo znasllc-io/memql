@@ -92,12 +92,16 @@ type Integration struct {
 //
 // gateDB resolves the pool the document and file version write gates run on
 // (database.Database.GateDB, memql#6022): never the request pool the engine
-// works on. Without one the gates refuse.
+// works on. Without one the gates refuse, saying which wiring is missing.
 func NewIntegration(engine memql.IntegrationEngineAccess, gateDB ...func() *sql.DB) *Integration {
+	var resolve func() *sql.DB
+	if len(gateDB) > 0 {
+		resolve = gateDB[0]
+	}
 	gate := func(ctx context.Context, key string) (func(), error) {
-		var db *sql.DB
-		if len(gateDB) > 0 && gateDB[0] != nil {
-			db = gateDB[0]()
+		db, err := memql.ResolveWriteGatePool(resolve, "library", "pass database.Database.GateDB to library.NewIntegration (a node's plug-in takes it from PluginContext.GateDB; a test or a tool opens one with database.NewGatePool)")
+		if err != nil {
+			return nil, err
 		}
 		return memql.AcquireWriteGate(ctx, db, key)
 	}

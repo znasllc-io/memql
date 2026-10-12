@@ -33,6 +33,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/automations/steps"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
@@ -204,13 +205,20 @@ func TestDecompositionSpendsIntelligenceOnceDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	gate := &sectionCatalogBridge{engine: e}
+	// The node's write-gate pool (memql#6022): the work plug-in takes its
+	// decision gates there and refuses a plug-in context without it.
+	gates, err := database.NewGatePool(dbtest.DSN(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gates.Close() })
 	for _, name := range []string{"work", "procedure"} {
 		found := false
 		for _, p := range memql.RegisteredPlugins() {
 			if p.Name != name {
 				continue
 			}
-			prov, err := p.Factory(memql.PluginContext{Logger: quiet, Engine: e, BunDB: func() *bun.DB { return db }, AdmitSourceRow: memql.AdmitSourceRow})
+			prov, err := p.Factory(memql.PluginContext{Logger: quiet, Engine: e, BunDB: func() *bun.DB { return db }, GateDB: func() *sql.DB { return gates }, AdmitSourceRow: memql.AdmitSourceRow})
 			if err != nil {
 				t.Fatalf("materialize the %s plug-in: %v", name, err)
 			}

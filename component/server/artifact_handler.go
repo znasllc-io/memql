@@ -1751,13 +1751,18 @@ var _ LibraryStore = (*EngineLibraryStore)(nil)
 //
 // gateDB resolves the pool the file-version write gate runs on
 // (database.Database.GateDB, memql#6022): never the request pool the engine
-// works on. Without one the gate refuses.
+// works on. Without one the gate refuses, saying which wiring is missing.
 func NewEngineLibraryStore(engine MemQLExecutor, gateDB ...func() *sql.DB) *EngineLibraryStore {
+	var resolve func() *sql.DB
+	if len(gateDB) > 0 {
+		resolve = gateDB[0]
+	}
 	return &EngineLibraryStore{engine: engine, versionGate: func(ctx context.Context, key string) (func(), error) {
-		if len(gateDB) == 0 || gateDB[0] == nil {
-			return nil, fmt.Errorf("file version coordination is unavailable")
+		db, err := memql.ResolveWriteGatePool(resolve, "library file versions", "pass database.Database.GateDB to server.NewEngineLibraryStore (a test or a tool opens one with database.NewGatePool)")
+		if err != nil {
+			return nil, err
 		}
-		return memql.AcquireWriteGate(ctx, gateDB[0](), "library-file:"+memql.BareShortId(key))
+		return memql.AcquireWriteGate(ctx, db, "library-file:"+memql.BareShortId(key))
 	}}
 }
 

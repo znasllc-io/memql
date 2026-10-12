@@ -68,7 +68,7 @@ type Integration struct {
 
 	// gateDB is the pool this integration's write gates run on (memql#6022):
 	// connections used for nothing else, never the request pool bunDB hands out.
-	// Unset, a gate refuses ("shared write coordination is unavailable") rather
+	// Unset, a gate refuses -- naming the wiring it lacks (gates below) -- rather
 	// than take a connection the work under it needs.
 	gateDB func() *sql.DB
 
@@ -177,7 +177,11 @@ func New(engine Engine, logger *slog.Logger, database ...func() *bun.DB) *Integr
 		i.bunDB = database[0]
 	}
 	i.decisionGate = func(ctx context.Context, key string) (func(), error) {
-		return memql.AcquireWriteGate(ctx, i.gatePool(), "work-approval-decision:"+memql.BareShortId(key))
+		db, err := i.gates()
+		if err != nil {
+			return nil, err
+		}
+		return memql.AcquireWriteGate(ctx, db, "work-approval-decision:"+memql.BareShortId(key))
 	}
 	i.rowsInFlight = i.runsInFlight
 	return i
@@ -192,6 +196,13 @@ func init() {
 		// hand-waved (component/memql/plugins.go states the rule).
 		if pctx.AdmitSourceRow == nil {
 			return nil, fmt.Errorf("work plug-in: no AdmitSourceRow in plugin context")
+		}
+		// The same for the gate pool (memql#6022). Every decision this spine
+		// makes -- an approval decided, a goal cancelled or re-run, a question
+		// parked, a review goal opened -- takes a write gate on it and on nothing
+		// else; without it the spine would materialize and refuse each of them.
+		if pctx.GateDB == nil {
+			return nil, fmt.Errorf("work plug-in: no GateDB in plugin context: its approval decisions, goal lifecycle and review goals take write gates on the gate pool (database.Database.GateDB; a test or a tool opens one with database.NewGatePool)")
 		}
 		i := New(pctx.Engine, pctx.Logger)
 		i.bunDB = pctx.BunDB
@@ -213,12 +224,13 @@ func init() {
 // on (memql#6022): the gate pool, not the request pool.
 func (i *Integration) SetGateDB(gate func() *sql.DB) { i.gateDB = gate }
 
-// gatePool resolves the gate pool, or nil when none is wired.
-func (i *Integration) gatePool() *sql.DB {
-	if i == nil || i.gateDB == nil {
-		return nil
+// gates resolves the gate pool, or says which wiring is missing.
+func (i *Integration) gates() (*sql.DB, error) {
+	var resolve func() *sql.DB
+	if i != nil {
+		resolve = i.gateDB
 	}
-	return i.gateDB()
+	return memql.ResolveWriteGatePool(resolve, "work", "give it database.Database.GateDB with Integration.SetGateDB (a node's plug-in takes it from PluginContext.GateDB; a test or a tool opens one with database.NewGatePool)")
 }
 
 // SetCompiler installs the compile surface. Called once, from the node that

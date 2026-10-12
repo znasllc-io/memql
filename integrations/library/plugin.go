@@ -2,6 +2,7 @@ package library
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/znasllc-io/memql/component/fileprocessor"
 	"github.com/znasllc-io/memql/component/memql"
@@ -19,7 +20,12 @@ import (
 // runs at process start.
 func init() {
 	memql.RegisterPlugin("library", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		// The document and file version gates run on the gate pool (memql#6022).
+		// The document and file version gates run on the gate pool (memql#6022)
+		// and on nothing else: without it every edit, restore, fork and review
+		// decision would be refused, so the plug-in refuses first.
+		if pctx.GateDB == nil {
+			return nil, fmt.Errorf("library plug-in: no GateDB in plugin context: its document and file version writes take write gates on the gate pool (database.Database.GateDB; a test or a tool opens one with database.NewGatePool)")
+		}
 		i := NewIntegration(pctx.Engine, pctx.GateDB)
 		i.SetLogger(pctx.Logger)
 		// The analysis pass's text extractor (memql#4342). Built from the

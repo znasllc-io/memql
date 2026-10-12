@@ -90,7 +90,11 @@ type PluginContext struct {
 	// and a gate must be taken on it, never on the pool BunDB() hands out: the
 	// work under a gate needs a connection of that pool, and its sessions end an
 	// idle transaction after 60 s, taking the gate's lock with them (memql#6022).
-	// Use it for gates and for nothing else.
+	// Use it for gates and for nothing else. A plug-in that takes gates REFUSES a
+	// context without it, at construction: the alternative is a capability that
+	// works until its first decision and then answers that coordination is
+	// unavailable. A test or a tool that builds such a plug-in gives it a pool
+	// from database.NewGatePool.
 	GateDB func() *sql.DB
 
 	// ResolveVisionProvider RESOLVES a vision-capable provider through the

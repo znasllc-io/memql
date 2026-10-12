@@ -43,7 +43,11 @@ func (i *Integration) openReviewGoal(ctx context.Context, requestKey string, g D
 	}
 	receipt = ReviewGoalIdentity(owner, requestKey)
 	identity := receipt.GoalID
-	release, err := memql.AcquireWriteGate(ctx, i.gatePool(), "work-review-goal:"+identity)
+	gates, err := i.gates()
+	if err != nil {
+		return receipt, err
+	}
+	release, err := memql.AcquireWriteGate(ctx, gates, "work-review-goal:"+identity)
 	if err != nil {
 		return receipt, err
 	}

@@ -237,13 +237,19 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	p.refreshCron.claims = p.workflowClaims
 	p.reactiveLoop = NewReactiveLoop(p.engine, p.logger)
 	p.reactiveLoop.claims = p.workflowClaims
-	p.reactiveLoop.writeGate = func(ctx context.Context, id string) (func(), error) {
-		if p.gateDBGetter == nil || p.gateDBGetter() == nil {
-			return nil, fmt.Errorf("standing directive requires a shared database")
-		}
-		return memql.AcquireWriteGate(ctx, p.gateDBGetter(), "agent-directive:"+strings.TrimPrefix(id, "v1:agents:agent:"))
-	}
+	p.reactiveLoop.writeGate = p.directiveGate
 	return p, nil
+}
+
+// directiveGate serialises a standing directive's write across replicas, on the
+// gate pool (WithGateDBGetter; memql#6022). Without one it says which wiring is
+// missing.
+func (p *PlannerIntegration) directiveGate(ctx context.Context, id string) (func(), error) {
+	db, err := memql.ResolveWriteGatePool(p.gateDBGetter, "planner", "wire database.Database.GateDB with planner.WithGateDBGetter (a test or a tool opens one with database.NewGatePool)")
+	if err != nil {
+		return nil, err
+	}
+	return memql.AcquireWriteGate(ctx, db, "agent-directive:"+strings.TrimPrefix(id, "v1:agents:agent:"))
 }
 
 // SetAgentForwarder installs the agent-turn forwarder. Called from

@@ -88,6 +88,29 @@ func IsWriteGateBusy(err error) bool {
 // finish -- the request pool, 60 s. See the header.
 var ErrWriteGatePoolUnsuitable = errors.New("write gates need a pool whose sessions may sit idle in a transaction for minutes, not the request pool")
 
+// ErrWriteGatePoolMissing is what a write gate answers when its caller was given
+// no pool to take it on: whoever built the caller did not wire the gate pool
+// (database.Database.GateDB), or wired a resolver that has none. It is not busy:
+// nothing was attempted, and waiting will not change it -- the wiring must. Every
+// caller that takes gates says, with it, which wiring it lacks
+// (ResolveWriteGatePool).
+var ErrWriteGatePoolMissing = errors.New("shared write coordination is unavailable: no write-gate pool was wired")
+
+// ResolveWriteGatePool resolves the pool a caller's write gates run on, or says
+// which wiring is missing: `who` names the caller, `setter` how it is given its
+// pool. A caller built without a resolver and a resolver that has no pool (the
+// database has not started, has stopped, or could not open its gate pool) are two
+// different mistakes and are told apart.
+func ResolveWriteGatePool(resolve func() *sql.DB, who, setter string) (*sql.DB, error) {
+	if resolve == nil {
+		return nil, fmt.Errorf("%s: %w: it was built without one; %s", who, ErrWriteGatePoolMissing, setter)
+	}
+	if db := resolve(); db != nil {
+		return db, nil
+	}
+	return nil, fmt.Errorf("%s: %w: its pool resolver has none -- the database has not started, has stopped, or could not open its write-gate pool (its log says \"failed to open the write-gate pool\")", who, ErrWriteGatePoolMissing)
+}
+
 // ErrWriteGateLost is what a held gate answers when its locks are no longer
 // held: PostgreSQL ended its session (an idle limit, an administrator, a failover)
 // and the advisory locks went with it without a word to the holder. A holder asks
@@ -177,7 +200,8 @@ type GateHold struct {
 // verifies immediately before them.
 func AcquireGateHold(ctx context.Context, db *sql.DB, wait time.Duration, keys ...string) (*GateHold, error) {
 	if db == nil {
-		return nil, fmt.Errorf("shared write coordination is unavailable")
+		return nil, fmt.Errorf("%w: a caller of a write gate is handed database.Database.GateDB -- on a node through "+
+			"PluginContext.GateDB or its own constructor, in a test or a tool from database.NewGatePool", ErrWriteGatePoolMissing)
 	}
 	if len(keys) == 0 {
 		return nil, fmt.Errorf("a write gate needs a key")
