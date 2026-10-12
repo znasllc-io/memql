@@ -1993,6 +1993,54 @@ func TestFooterText(t *testing.T) {
 	}
 }
 
+// TestFooterLinkWithoutAnAddressIsReported pins that a footer link, which is
+// drawn as a link with its words underlined, is reported when it has no
+// address, as a button or a social link without one is: the same code and
+// wording, naming the footer and the link's label, and nothing else about the
+// email changes.
+func TestFooterLinkWithoutAnAddressIsReported(t *testing.T) {
+	long := strings.Repeat("L", 70)
+	d := Document{Subject: "x", Theme: neutral(), Blocks: []Block{
+		{ID: "cta", Type: "button", Label: "Go"},
+		{ID: "legal", Type: "footer", Links: []Link{
+			{Label: "Contact us"},
+			{Label: "Unsubscribe", Href: TagUnsubscribeURL},
+			{Label: "Privacy", Href: ""},
+			{Label: long},
+		}},
+	}}
+	r := mustRender(t, d, nil, RenderOptions{})
+	want := []Issue{
+		{Code: IssueLinkMissing, Block: "cta", Message: `Add a link to "Go".`},
+		{Code: IssueLinkMissing, Block: "legal", Message: `Add a link to "Contact us".`},
+		{Code: IssueLinkMissing, Block: "legal", Message: `Add a link to "Privacy".`},
+		{Code: IssueLinkMissing, Block: "legal", Message: `Add a link to "` + strings.Repeat("L", 60) + `...".`},
+	}
+	if len(r.Issues) != len(want) {
+		t.Fatalf("want %+v, got %+v", want, r.Issues)
+	}
+	for i := range want {
+		if r.Issues[i] != want[i] {
+			t.Errorf("issue %d: want %+v, got %+v", i, want[i], r.Issues[i])
+		}
+	}
+	// The words stay as they were: underlined in a span of their own, not in a
+	// link, and the link beside them still a link.
+	if !strings.Contains(r.HTML, `<span style="text-decoration:underline;color:#5b8fb9;white-space:pre-wrap">Contact us</span><span style="color:#5b8fb9;white-space:pre-wrap">    |    </span><a href="{{unsubscribeUrl}}"`) {
+		t.Fatalf("want the words of a link without an address left as they are:\n%s", r.HTML)
+	}
+	if want := "Go\n\nContact us\nUnsubscribe: {{unsubscribeUrl}}\nPrivacy\n" + long + "\n"; r.Text != want {
+		t.Fatalf("text part: got %q, want %q", r.Text, want)
+	}
+	// Given an address each, or with no links at all, a footer reports nothing.
+	d.Blocks[0].Href = "https://example.com/go"
+	d.Blocks[1].Links = []Link{{Label: "Contact us", Href: "mailto:hello@example.com"}, {Label: "Unsubscribe", Href: TagUnsubscribeURL}}
+	d.Blocks = append(d.Blocks, Block{ID: "bare", Type: "footer", Lines: []string{"Acme"}})
+	if r = mustRender(t, d, nil, RenderOptions{}); len(r.Issues) != 0 {
+		t.Fatalf("want a footer with every address given, and one without links, to be quiet: %+v", r.Issues)
+	}
+}
+
 func TestTextPartOfContainers(t *testing.T) {
 	d := Document{Subject: "x", Theme: neutral(), Blocks: []Block{
 		{ID: "intro", Type: "heading", Text: "Intro"},
@@ -2055,7 +2103,8 @@ func TestSocialAndFooterLinksCountAsLinks(t *testing.T) {
 		{ID: "s", Type: "social", Links: []Link{{Network: "Worse", Href: "javascript:alert(2)"}, {Network: "Icon", Href: "javascript:alert(3)", Icon: "artifact:a1"}}},
 	}}
 	r := mustRender(t, d, fakeImages{"a1": pngImage(t, 2, 2)}, RenderOptions{})
-	if strings.Contains(r.HTML, "javascript") || strings.Contains(r.Text, "javascript") || countIssues(r.Issues, IssueLinkMissing) != 2 || hasIssue(r.Issues, IssueUnsubscribeMissing) {
+	// Three links have no usable address: the footer's and both of the social block's.
+	if strings.Contains(r.HTML, "javascript") || strings.Contains(r.Text, "javascript") || countIssues(r.Issues, IssueLinkMissing) != 3 || hasIssue(r.Issues, IssueUnsubscribeMissing) {
 		t.Fatalf("a bad address reached the email, or was not missing: %+v\n%s", r.Issues, r.HTML)
 	}
 }

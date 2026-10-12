@@ -106,7 +106,7 @@
     {
       "id": "ask",
       "type": "button",
-      "role": "brand",
+      "role": "content",
       "size": 20.3,
       "color": "primary",
       "width": 305,

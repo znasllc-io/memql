@@ -234,7 +234,7 @@ var builtinRoles = map[string]string{
 		"rule-1=brand promo=brand promo-space=brand promo-title=brand promo-text=brand promo-picture=brand " +
 		"follow=brand social=brand rule-2=brand footer=brand",
 	"builtin:article": "logo=brand banner=content body=content intro=content highlight=content article=content " +
-		"question=brand question-more=brand ask=brand " +
+		"question=brand question-more=brand ask=content " +
 		"signature=brand signature-photo=brand signature-space=brand signature-name=brand signature-title=brand " +
 		"rule=brand footer=brand",
 	"builtin:spotlight": "logo=brand spotlight=content message-box=content message=content cta=content follow=brand social=brand footer=brand",
@@ -285,17 +285,19 @@ func TestLayoutsSplitBrandAndContent(t *testing.T) {
 
 // TestBuiltinRenderIssuesAreOnlyPlaceholdersAndLinks lists what a person has
 // to supply before a built-in layout can be sent: its pictures, and the
-// destinations of its buttons and social links. Nothing else is wrong with a
-// layout that comes out of the box (it carries its unsubscribe link, its
-// pictures are all placeholders and no address is made up).
+// destinations of its buttons, social links and the footer's "Contact us".
+// Nothing else is wrong with a layout that comes out of the box (it carries its
+// unsubscribe link, its pictures are all placeholders and no address is made
+// up).
 func TestBuiltinRenderIssuesAreOnlyPlaceholdersAndLinks(t *testing.T) {
 	wantIssues := map[string]string{
-		"builtin:confirmation": "image_missing:logo image_missing:hero",
+		"builtin:confirmation": "image_missing:logo image_missing:hero link_missing:footer",
 		"builtin:letter": "image_missing:logo link_missing:cta image_missing:signature-photo image_missing:signature-name " +
-			"image_missing:promo-picture link_missing:social link_missing:social link_missing:social",
-		"builtin:article": "image_missing:logo image_missing:banner link_missing:ask image_missing:signature-photo image_missing:signature-name",
+			"image_missing:promo-picture link_missing:social link_missing:social link_missing:social link_missing:footer",
+		"builtin:article": "image_missing:logo image_missing:banner link_missing:ask image_missing:signature-photo image_missing:signature-name " +
+			"link_missing:footer",
 		"builtin:spotlight": "image_missing:logo image_missing:spotlight link_missing:cta " +
-			"link_missing:social link_missing:social link_missing:social",
+			"link_missing:social link_missing:social link_missing:social link_missing:footer",
 	}
 	for _, info := range Layouts() {
 		t.Run(info.ID, func(t *testing.T) {
@@ -309,6 +311,11 @@ func TestBuiltinRenderIssuesAreOnlyPlaceholdersAndLinks(t *testing.T) {
 					t.Errorf("unexpected issue %+v", issue)
 				}
 				got = append(got, issue.Code+":"+issue.Block)
+				// The footer's issue names its link: "Contact us" is the one
+				// without an address.
+				if issue.Block == "footer" && issue.Message != `Add a link to "Contact us".` {
+					t.Errorf("the footer's issue should name its link: %+v", issue)
+				}
 			}
 			if joined := strings.Join(got, " "); joined != wantIssues[info.ID] {
 				t.Errorf("issues:\n got %s\nwant %s", joined, wantIssues[info.ID])

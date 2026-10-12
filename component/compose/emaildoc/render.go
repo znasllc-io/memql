@@ -40,7 +40,7 @@ const (
 	IssueImageMissing       = "image_missing"       // an image block without a picture
 	IssueImageUnavailable   = "image_unavailable"   // a picture that cannot be read or sent
 	IssueImagesLimit        = "images_limit"        // more than MaxImages pictures or MaxImageBytes bytes of them
-	IssueLinkMissing        = "link_missing"        // a button without a link
+	IssueLinkMissing        = "link_missing"        // a button, a social link or a footer link without an address
 	IssueUnsubscribeMissing = "unsubscribe_missing" // a layout without a {{unsubscribeUrl}} link
 	IssueConfirmMissing     = "confirm_missing"     // no {{confirmUrl}} link, when RequireConfirm
 	IssueEmailTooLarge      = "email_too_large"     // more HTML than sending takes, its pictures embedded

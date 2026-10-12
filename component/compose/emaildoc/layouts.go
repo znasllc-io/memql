@@ -17,9 +17,9 @@ import (
 // What a layout leaves to whoever uses it is what Render reports as issues.
 // Every picture is a placeholder (image_missing), and every address is empty
 // except the link merge tags: a made-up one would be sent as it is, with
-// nothing to say it was never replaced, so a button or a social link without
-// one is reported (link_missing) until someone gives it a destination. The
-// words are an example to write over.
+// nothing to say it was never replaced, so a button, a social link or a
+// footer link without one is reported (link_missing) until someone gives it a
+// destination. The words are an example to write over.
 //
 // Each block has a role. Brand blocks are the frame an organization keeps the
 // same from one email to the next (the logo, dividers, signature, follow links

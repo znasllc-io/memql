@@ -647,7 +647,9 @@ func (r *renderer) socialLink(block string, link Link, room float64) error {
 // (a pipe with four spaces either side by default) and, under them, its lines.
 // Its text is 14 pixels on 22 by default, the lines muted and the links in
 // the secondary colour, gap pixels below the links and after below the lines
-// (none by default).
+// (none by default). A link without an address (or with one that breaks the
+// link rule) is its words alone, underlined like the others, and is reported
+// as link_missing, as a button or a social link without one is.
 func (r *renderer) footer(b Block, pad [4]float64) error {
 	size, lineHeight := number(orNumber(b.Size, 14)), number(orNumber(b.LineHeight, 22))
 	style := emphasis(400, false, b.LetterSpacing) + r.fontFamily(b.Font, "base")
@@ -670,6 +672,9 @@ func (r *renderer) footer(b Block, pad [4]float64) error {
 					label := `<span style="text-decoration:underline;color:` + linkColour + `;white-space:pre-wrap">` + escapeText(link.Label) + `</span>`
 					if href := r.link(link.Href); href != "" {
 						label = `<a href="` + attr(href) + `" target="_blank" rel="noopener nofollow" style="color:` + linkColour + `;text-decoration:inherit">` + label + `</a>`
+					} else {
+						// Its words are drawn as a link, so a reader takes them for one.
+						r.issue(IssueLinkMissing, b.ID, `Add a link to "`+clip(link.Label, 60)+`".`)
 					}
 					out.WriteString(label)
 					if err := r.grown(); err != nil {
