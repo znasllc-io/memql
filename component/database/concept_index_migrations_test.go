@@ -8,12 +8,14 @@ import (
 	"github.com/uptrace/bun/migrate"
 )
 
-// THE PAIR IS GO, REGISTERED ONCE, AND NAMED FROM ITS FILES. bun derives a Go
-// migration's version and comment from the file its Register call sits in, so
-// a registration moved into another file would run under the wrong version --
-// possibly one a cluster has already recorded as applied. And bun's Register
-// appends without looking, so a set registered twice would run each twice.
-func TestTheConceptIndexMigrationsAreGoRegisteredOnceUnderTheirFileNames(t *testing.T) {
+// THE INDEX MIGRATIONS ARE GO, REGISTERED ONCE, AND NAMED FROM THEIR FILES.
+// bun derives a Go migration's version and comment from the file its Register
+// call sits in, so a registration moved into another file would run under the
+// wrong version -- possibly one a cluster has already recorded as applied. And
+// bun's Register appends without looking, so a set registered twice would run
+// each twice. The payload lookup indexes are held to the same rule as the
+// concept-index pair: each is a Go migration for the same reasons.
+func TestTheIndexMigrationsAreGoRegisteredOnceUnderTheirFileNames(t *testing.T) {
 	m := migrate.NewMigrations()
 	registerTimescaleMigrations(m, nil)
 	registerTimescaleMigrations(m, nil)
@@ -22,7 +24,10 @@ func TestTheConceptIndexMigrationsAreGoRegisteredOnceUnderTheirFileNames(t *test
 	for _, mig := range m.Sorted() {
 		byVersion[mig.Name] = append(byVersion[mig.Name], mig)
 	}
-	for _, name := range []string{memoryNodesConceptIndexMigrationName, memoryNodesConceptIndexVerifiedMigrationName} {
+	for _, name := range []string{
+		memoryNodesConceptIndexMigrationName, memoryNodesConceptIndexVerifiedMigrationName,
+		workJournalLookupMigrationName, emailDigestLookupMigrationName,
+	} {
 		version, comment, _ := strings.Cut(name, "_")
 		got := byVersion[version]
 		if len(got) != 1 {
