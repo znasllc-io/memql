@@ -81,9 +81,6 @@ var (
 // equal attributes is the one that stays, and what browsers repair (an implied
 // tbody, a paragraph that a table ends) is repaired. Every element and attribute
 // of that result is checked again, so nothing the parser added can slip by.
-//
-// The result of reading it again is itself: safeMarkup(safeMarkup(s)) is
-// safeMarkup(s).
 func safeMarkup(src string) (string, error) {
 	if err := checkTokens(src); err != nil {
 		return "", err

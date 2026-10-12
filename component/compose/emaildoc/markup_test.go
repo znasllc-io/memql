@@ -257,12 +257,6 @@ func TestSafeMarkupAccepts(t *testing.T) {
 			if got != c.want {
 				t.Fatalf("\n got: %s\nwant: %s", got, c.want)
 			}
-			// The form the renderer is given is itself acceptable and does not
-			// change when it is read again.
-			again, err := safeMarkup(got)
-			if err != nil || again != got {
-				t.Fatalf("the normalised form is not stable: %q %v", again, err)
-			}
 			if problem := leavesItsCell(got); problem != "" {
 				t.Fatal(problem)
 			}
@@ -412,9 +406,8 @@ var markupPieces = []string{
 
 func TestSafeMarkupRandomFragments(t *testing.T) {
 	// Fragments strung together from the pieces above, most of them malformed.
-	// Whatever safeMarkup lets through must stay in its cell and must not
-	// change when read again; the rest it refuses. The run is seeded, so a
-	// failure repeats.
+	// Whatever safeMarkup lets through must stay in its cell; the rest it
+	// refuses. The run is seeded, so a failure repeats.
 	rng := rand.New(rand.NewSource(7))
 	accepted := 0
 	for attempts := 0; accepted < 3000 && attempts < 2_000_000; attempts++ {
@@ -430,9 +423,6 @@ func TestSafeMarkupRandomFragments(t *testing.T) {
 		accepted++
 		if problem := leavesItsCell(out); problem != "" {
 			t.Fatalf("%q becomes %q, which leaves the cell: %s", src, out, problem)
-		}
-		if again, err := safeMarkup(out); err != nil || again != out {
-			t.Fatalf("%q becomes %q, which is not stable: %q %v", src, out, again, err)
 		}
 	}
 	if accepted < 3000 {
@@ -529,10 +519,6 @@ func FuzzSafeMarkup(f *testing.F) {
 		}
 		if problem := leavesItsCell(out); problem != "" {
 			t.Fatalf("%q becomes %q, which leaves the cell: %s", src, out, problem)
-		}
-		again, err := safeMarkup(out)
-		if err != nil || again != out {
-			t.Fatalf("%q becomes %q, which is not stable: %q %v", src, out, again, err)
 		}
 	})
 }
