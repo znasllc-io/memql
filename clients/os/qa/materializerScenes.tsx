@@ -1,3 +1,4 @@
+import { readiness, verdict } from "../test/setup/harness";
 import { useEffect, useState } from "react";
 import { MaterializerApp } from "../src/apps/materializer/MaterializerApp";
 import { MakeWizard } from "../src/apps/materializer/MakeWizard";
@@ -234,7 +235,8 @@ function FileScene({ variant }: { variant: string }) {
       variant === "failed" ? "The source file is no longer available." : "",
     archived: variant === "archived",
     deployableKind: variant === "package" ? "spa" : "",
-    format: variant === "package" ? "zip" : "pdf",
+    format: variant === "package" ? "zip" : variant === "described" ? "markdown" : "pdf",
+    ...(variant === "described" ? { modelsUsed: [], provenanceEmbedded: false, provenanceNote: "Created for a description.", sources: [], templateId: "" } : {}),
   });
   const c = compositionFromRow(raw);
   return (
@@ -245,7 +247,7 @@ function FileScene({ variant }: { variant: string }) {
       filedIn="Reports"
       templateName="Quarterly report"
       organizationName="Example company"
-      caption={variant === "failed" ? "" : "The composed text is in the file."}
+      caption={variant === "failed" || variant === "described" ? "" : "The composed text is in the file."}
       recipeSaved={false}
       description={
         variant === "described"
@@ -280,6 +282,7 @@ const wrap = (el: React.JSX.Element) =>
         {el}
       </div>
     </OsProvider>,
+    { readiness: readiness(true, [verdict("storage", "configured"), verdict("ai", "configured")]) },
   );
 const view = (render: () => React.JSX.Element, s: FakeSeed = seed) => ({
   connect: () => fakeConnection(s),
