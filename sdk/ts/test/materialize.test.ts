@@ -131,6 +131,72 @@ test("followComposition resolves a ready composition and never hands anything of
 });
 
 // ---------------------------------------------------------------------------
+// When it looks
+// ---------------------------------------------------------------------------
+//
+// A blank file can be ready, with its Files entry, well inside two seconds, and
+// the upload it replaces was instant. So the first look comes 300 ms after the
+// start; the rest keep the whole interval, so a slow composition is not read
+// more often than before.
+
+const FIRST_LOOK_MS = 300;
+
+// Lets every promise that is ready settle, past the follow's chain of awaits.
+const settle = async () => { for (let n = 0; n < 5; n++) await new Promise<void>(resolve => setImmediate(resolve)); };
+
+test("the first look comes 300 ms after the start, and each one after it a whole interval later", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const f = fake({
+    compositionById: [[{ status: "composing" }], [{ status: "composing" }], [{ status: "ready", outputFileId: "f1" }]],
+    libraryArtifactForFile: [[{ id: "a1", title: "Notes.md" }]],
+  });
+  let now = 0;
+  const looks: number[] = [];
+  const execute: MaterializeExecute = (name, call) => {
+    if (name === "compositionById") looks.push(now);
+    return f.execute(name, call);
+  };
+  const run = followComposition({ execute }, "c1");
+  const advance = async (ms: number) => { now += ms; t.mock.timers.tick(ms); await settle(); };
+  await settle();
+  assert.deepEqual(looks, [], "the composition was read before the first wait");
+  await advance(FIRST_LOOK_MS - 1);
+  assert.deepEqual(looks, []);
+  await advance(1);
+  assert.deepEqual(looks, [FIRST_LOOK_MS], "the first look did not come at 300 ms");
+  await advance(1999);
+  assert.deepEqual(looks, [FIRST_LOOK_MS], "a later look came before the whole interval");
+  await advance(1);
+  assert.deepEqual(looks, [FIRST_LOOK_MS, FIRST_LOOK_MS + 2000]);
+  await advance(2000);
+  assert.deepEqual(looks, [FIRST_LOOK_MS, FIRST_LOOK_MS + 2000, FIRST_LOOK_MS + 4000]);
+  assert.equal((await run).artifactId, "a1");
+});
+
+test("a caller's own interval keeps its length, and a shorter one is never stretched to 300 ms", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  for (const [interval, first, second] of [[5000, FIRST_LOOK_MS, FIRST_LOOK_MS + 5000], [100, 100, 200]] as const) {
+    const f = fake({ compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1" }]], libraryArtifactForFile: [[{ id: "a1" }]] });
+    let now = 0;
+    const looks: number[] = [];
+    const execute: MaterializeExecute = (name, call) => {
+      if (name === "compositionById") looks.push(now);
+      return f.execute(name, call);
+    };
+    const run = followComposition({ execute, intervalMs: interval }, "c1");
+    await settle();
+    now += first;
+    t.mock.timers.tick(first);
+    await settle();
+    now += second - first;
+    t.mock.timers.tick(second - first);
+    await settle();
+    assert.deepEqual(looks, [first, second], `interval ${interval}`);
+    assert.equal((await run).artifactId, "a1");
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Stopping
 // ---------------------------------------------------------------------------
 
@@ -169,7 +235,7 @@ test("a stop while a ready composition waits for its Files entry takes one last 
   const controller = new AbortController();
   const f = fake({ compositionById: [[{ status: "ready", outputFileId: "f1", name: "Brief" }]], libraryArtifactForFile: [[], [{ id: "a1", title: "Brief.md" }]] });
   const run = followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1");
-  setTimeout(() => controller.abort(), 12);
+  setTimeout(() => controller.abort(), FIRST_LOOK_MS + 12);
   assert.deepEqual(await run, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md" });
   assert.equal(f.named("composeCancel").length, 0, "a ready composition is not cancelled");
   assert.equal(f.named("libraryArtifactForFile").length, 2);
@@ -182,7 +248,7 @@ test("a stop while a ready composition's Files entry is still missing ends the f
   const controller = new AbortController();
   const f = fake({ compositionById: [[{ status: "ready", outputFileId: "f1" }]], libraryArtifactForFile: [[]] });
   const run = followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1");
-  setTimeout(() => controller.abort(), 12);
+  setTimeout(() => controller.abort(), FIRST_LOOK_MS + 12);
   await assert.rejects(run, MaterializeCancelled);
   assert.equal(f.named("composeCancel").length, 0, "a ready composition is not cancelled");
   assert.equal(f.named("libraryArtifactForFile").length, 2, "one look when it was found ready, one last look at the stop");
@@ -206,7 +272,8 @@ test("a stop already in effect when the Files entry was looked for does not look
 // composition's own status. The stop must not throw the file away on the strength of a look that
 // is out of date.
 const alreadyFinished = (status: string): Rows => [{ compositionId: "c1", status, cancelled: false, note: "that composition had already finished, so nothing was stopped" }];
-const stoppedAfter = (run: Promise<unknown>, controller: AbortController) => { setTimeout(() => controller.abort(), 12); return run; };
+// The stop lands in the wait after the first look, which comes FIRST_LOOK_MS after the start.
+const stoppedAfter = (run: Promise<unknown>, controller: AbortController) => { setTimeout(() => controller.abort(), FIRST_LOOK_MS + 12); return run; };
 
 test("a composition that finishes while the stop is on its way keeps its file", async () => {
   const controller = new AbortController();
@@ -1034,7 +1101,7 @@ test("a stop during the wait for a described file's Files entry still returns th
   let looks = 0;
   const f = fake(describedScript({ libraryArtifactForFile: () => (++looks > 1 ? [{ id: "a1", title: "Brief.md" }] : []) }));
   const run = materialize({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, described);
-  setTimeout(() => controller.abort(), 12);
+  setTimeout(() => controller.abort(), FIRST_LOOK_MS + 12);
   assert.deepEqual(await run, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md", revisionFailure: STOPPED_BEFORE_SENT });
   assert.equal(f.named("libraryAddDocumentComment").length, 0);
   assert.equal(f.named("composeCancel").length, 0);

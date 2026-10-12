@@ -332,8 +332,8 @@ Behaviour:
 
 1. Calls `composeMaterialize`. No `compositionId` in the reply throws
    "Materializer did not confirm a composition. Check its history before retrying."
-2. Polls `compositionById` every two seconds, reporting each status through
-   `onStatus`.
+2. Polls `compositionById`, reporting each status through `onStatus`: the
+   first look 300 ms after the start, the rest every two seconds.
 3. `failed` throws the composition's `failureReason`. `cancelled` throws a
    `MaterializeCancelled` error the caller can ignore.
 4. `ready` resolves `outputFileId` to its artifact with

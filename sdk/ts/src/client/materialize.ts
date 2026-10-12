@@ -109,7 +109,8 @@ export interface MaterializeRequest { name: string; format: MaterializeFormat; r
 /**
  * What the helpers need from their caller. `signal` stops the follow and
  * cancels the composition; `onStatus` hears every poll's status; `intervalMs`
- * is the poll interval (default two seconds).
+ * is the poll interval (default two seconds). The first look comes sooner, 300
+ * ms after the start (or the interval, when that is shorter).
  */
 export interface MaterializePorts { execute: MaterializeExecute; signal?: AbortSignal; onStatus?: (status: string) => void; intervalMs?: number }
 /**
@@ -126,6 +127,11 @@ export class MaterializeCancelled extends Error {}
 export class MaterializeFailed extends Error {}
 
 const DEFAULT_INTERVAL_MS = 2000;
+// A blank file can be ready, with its Files entry, well before one interval has
+// passed, and the upload New Markdown used before was instant. So the first look
+// comes this long after the start; the rest keep the interval, so a composition
+// that takes a while is not read more often than before.
+const FIRST_LOOK_MS = 300;
 const STOPPED = "Stopped";
 const STOP_REASON = "Stopped by the person";
 const RUN_STOPPED = "The run stopped before the file was finished.";
@@ -290,7 +296,8 @@ async function deadRunMessage(execute: MaterializeExecute, runId: string): Promi
 
 /**
  * Polls the composition until it is ready and has its Files entry, reporting
- * each status through `onStatus`. Throws MaterializeFailed with the
+ * each status through `onStatus`: the first look 300 ms after the start, the
+ * rest one interval apart. Throws MaterializeFailed with the
  * composition's reason (or its run's, when the run stopped first) and
  * MaterializeCancelled when it was stopped.
  *
@@ -351,8 +358,16 @@ export async function followComposition(ports: MaterializePorts, compositionId: 
     }
     throw new MaterializeCancelled(STOPPED);
   };
+  // Every look is made after a wait: the first a short one, the rest the
+  // interval. A stop during any wait (or already in effect) ends it at once.
+  let wait = Math.min(FIRST_LOOK_MS, interval);
   for (;;) {
-    if (signal?.aborted) return stop();
+    try {
+      await pause(wait, signal);
+    } catch {
+      return stop();
+    }
+    wait = interval;
     const row = await read();
     const file = settled(row);
     if (file) {
@@ -369,11 +384,6 @@ export async function followComposition(ports: MaterializePorts, compositionId: 
       const dead = runId ? await deadRunMessage(execute, runId) : "";
       if (dead) throw new MaterializeFailed(dead);
       ports.onStatus?.(rowString(row, "status"));
-    }
-    try {
-      await pause(interval, signal);
-    } catch {
-      return stop();
     }
   }
 }

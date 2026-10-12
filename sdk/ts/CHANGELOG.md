@@ -8,8 +8,9 @@ Notable changes to the client-agnostic runtime core. Entries are newest first.
 
 **`materialize` and its parts -- the one way a client creates a file**
 (`@znasllc-io/memql-sdk-core/client`, memql#6023). `materialize(ports, request)`
-starts a composition, follows it until the file has its Files entry, and returns
-`{ compositionId, fileId, artifactId, name }`. `startMaterialize` and
+starts a composition, follows it until the file has its Files entry (the first
+look 300 ms after the start, the rest one `intervalMs` apart, two seconds by
+default), and returns `{ compositionId, fileId, artifactId, name }`. `startMaterialize` and
 `followComposition` are its two halves, for a client that follows its own live
 feed or polls; `isDescribedMarkdown` says which requests the cluster files empty;
 `handOffDescription` gives such a file's description to the Library's revision
