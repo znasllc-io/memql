@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../../readTheBar";
 import { chooseOption } from "../../selectControl";
@@ -94,5 +94,52 @@ describe("Adding and describing", () => {
   });
   it("discards a proposal when the words change", async () => {
     mount(setup()); fireEvent.click(await screen.findByRole("button", { name: "Add an automation" })); fireEvent.click(screen.getByRole("button", { name: "Describe it instead" })); const text = screen.getByLabelText("Describe the automation"); fireEvent.change(text, { target: { value: "Welcome people" } }); await press("Draft it"); await screen.findByText("Welcome new subscribers."); fireEvent.change(text, { target: { value: "A different plan" } }); expect(document.querySelector('[data-proposal="true"]')).toBeNull(); expect(screen.getByRole("button", { name: "Draft it" })).toBeTruthy();
+  });
+  it.each(["proposal", "refusal"] as const)("ignores a late %s for words that changed while drafting", async outcome => {
+    const conn = setup();
+    let resolve!: (value: ReturnType<typeof rowsResult>) => void;
+    let reject!: (error: Error) => void;
+    conn.query.campaignDescribeJourney.mockImplementationOnce(() => new Promise((yes, no) => { resolve = yes; reject = no; }));
+    mount(conn);
+    fireEvent.click(await screen.findByRole("button", { name: "Add an automation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Describe it instead" }));
+    const text = screen.getByLabelText("Describe the automation");
+    fireEvent.change(text, { target: { value: "An old request" } });
+    await press("Draft it");
+    await waitFor(() => expect(conn.query.campaignDescribeJourney).toHaveBeenCalledOnce());
+    fireEvent.change(text, { target: { value: "A different plan" } });
+    await act(async () => {
+      if (outcome === "refusal") reject(new Error("The old request was refused."));
+      else resolve(rowsResult([{ proposal: { name: "Old proposal", trigger: journey.trigger, steps: journey.steps }, explanation: "The old request was drafted.", issues: [] }]));
+    });
+    expect((text as HTMLTextAreaElement).value).toBe("A different plan");
+    expect(document.querySelector('[data-proposal="true"]')).toBeNull();
+    expect(screen.queryByText(/The old request was/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+    await press("Draft it");
+    await screen.findByText("Welcome new subscribers.");
+    expect(conn.query.campaignDescribeJourney).toHaveBeenLastCalledWith({ accountId: "self", sentence: "A different plan" });
+    expect(conn.query.campaignSaveJourney).not.toHaveBeenCalled();
+  });
+  it("leaves a new description alone when the previous page unmounted during drafting", async () => {
+    const conn = setup();
+    let resolve!: (value: ReturnType<typeof rowsResult>) => void;
+    conn.query.campaignDescribeJourney.mockImplementationOnce(() => new Promise(yes => { resolve = yes; }));
+    const view = mount(conn);
+    fireEvent.click(await screen.findByRole("button", { name: "Add an automation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Describe it instead" }));
+    fireEvent.change(screen.getByLabelText("Describe the automation"), { target: { value: "Old page" } });
+    await press("Draft it");
+    view.unmount();
+    mount(conn);
+    fireEvent.click(await screen.findByRole("button", { name: "Add an automation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Describe it instead" }));
+    fireEvent.change(screen.getByLabelText("Describe the automation"), { target: { value: "New page" } });
+    await act(async () => { resolve(rowsResult([{ proposal: { name: "Old proposal", trigger: journey.trigger, steps: journey.steps }, explanation: "The old page was drafted.", issues: [] }])); });
+    expect(screen.queryByText("The old page was drafted.")).toBeNull();
+    expect(document.querySelector('[data-proposal="true"]')).toBeNull();
+    expect((screen.getByLabelText("Describe the automation") as HTMLTextAreaElement).value).toBe("New page");
+    expect(screen.getByRole("button", { name: "Draft it" })).toBeTruthy();
+    expect(conn.query.campaignSaveJourney).not.toHaveBeenCalled();
   });
 });
