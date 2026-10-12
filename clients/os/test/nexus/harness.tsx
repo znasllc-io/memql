@@ -72,7 +72,7 @@ export interface FakeEvent {
   gapBefore: boolean;
 }
 
-function fakeSubscriptions() {
+function fakeSubscriptions(onEvent?: (concept: string, payload: Row) => void) {
   const handlers = new Map<string, Set<(event: FakeEvent) => void>>();
   return {
     subscribeGraph(handler: (event: FakeEvent) => void, opts: { concept?: string }) {
@@ -83,6 +83,7 @@ function fakeSubscriptions() {
       return () => set.delete(handler);
     },
     emit(concept: string, payload: Row, kind = "NODE_UPDATED") {
+      onEvent?.(concept, payload);
       for (const handler of handlers.get(concept) ?? []) {
         handler({
           subscriptionId: "sub-1",
@@ -138,6 +139,7 @@ export interface FakeSeed {
 }
 
 export function fakeConnection(seed: FakeSeed = {}) {
+  const runRows = new Map((seed.runs ?? []).map((row) => [String(row.id), row]));
   const read = (rows: Row[] | Error | undefined) =>
     vi.fn(async (_args: Record<string, unknown>, _opts?: unknown) => {
       if (rows instanceof Error) throw rows;
@@ -164,9 +166,13 @@ export function fakeConnection(seed: FakeSeed = {}) {
       workGoalsForOwner: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult(seed.goals ?? []),
       ),
-      workRunsForOwner: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
+      workRunSummariesForOwner: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult(seed.runs ?? []),
       ),
+      workRunSummaryForOwner: vi.fn(async (args: Record<string, unknown>, _opts?: unknown) => {
+        const row = seed.byId?.[String(args.runId)] ?? runRows.get(String(args.runId));
+        return rowsResult(row ? [row] : []);
+      }),
       workApprovalsForOwner: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult(seed.approvals ?? []),
       ),
@@ -251,7 +257,9 @@ export function fakeConnection(seed: FakeSeed = {}) {
         return bundleResult(row ? [row] : []);
       }),
     },
-    subscriptions: fakeSubscriptions(),
+    subscriptions: fakeSubscriptions((concept, row) => {
+      if (concept === "v1:work:run") runRows.set(String(row.id), row);
+    }),
     dispatcher: { sendAndWait: vi.fn() },
   };
 }
