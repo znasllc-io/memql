@@ -1,26 +1,20 @@
 import { useState } from "react";
-import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
-import { useLiveCollection, feedIsBehind } from "../../live/useLiveCollection";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { feedIsBehind, type LiveCollectionHandle } from "../../live/useLiveCollection";
 import { Button, Caption, Chip, Field, Notice, Panel, Select, Subhead } from "../../kit";
 import { flatten } from "../../kit/rows";
 import { useConfigureSeries } from "./actions";
 
-const concept = "v1:campaigns:campaignSeries";
 const text = (row: Record<string, unknown>, key: string) => typeof row[key] === "string" ? row[key] as string : "";
 
-export function RecurrencePanel({ campaignId }: { campaignId: string }) {
-  const feed = useLiveCollection<Row>(`campaigns:series:${campaignId}`, connection => ({
-    concept,
-    seed: async (_cursor, signal) => ({ rows: (await connection.query.campaignSeriesForCampaign({ campaignId }, { signal })).rows(), nextCursor: "" }),
-    reread: async (id, signal) => (await getRowByConceptAndId(connection.query, concept, id, { signal })) as Row | null,
-    inScope: row => text(flatten(row), "sourceCampaignId") === campaignId,
-    paged: false,
-  }));
+/** One campaign's repeating schedule, read from the series feed the app root
+ *  retains for every campaign in view: opening a campaign subscribes to nothing. */
+export function RecurrencePanel({ campaignId, series: feed }: { campaignId: string; series: LiveCollectionHandle<Row> }) {
   const write = useConfigureSeries();
   const [editing, setEditing] = useState(false);
   const [weeks, setWeeks] = useState("2");
   const [first, setFirst] = useState("");
-  const row = feed.snapshot.rows[0] ? flatten(feed.snapshot.rows[0]) : null;
+  const row = feed.snapshot.rows.map(flatten).find(series => text(series, "sourceCampaignId") === campaignId) ?? null;
   const zone = row ? text(row, "timeZone") : Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const status = row ? text(row, "status") : "";
   const unavailable = feed.snapshot.state === "seeding" || feedIsBehind(feed.snapshot.state) || !!feed.snapshot.error;

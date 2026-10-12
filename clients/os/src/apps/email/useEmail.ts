@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { getRowByConceptAndId, type Concept, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  getRowByConceptAndId,
+  type Concept,
+  type Connection,
+  type Result,
+  type Row,
+} from "@znasllc-io/memql-sdk-core/client";
 
 import { useSession } from "../../chrome/access";
+import { absent, figureFrom, type Figure } from "../../kit/measure";
 import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
@@ -11,16 +18,22 @@ import {
   EMAIL_RULE_CONCEPT,
   SENDER_IDENTITY_CONCEPT,
   TEMPLATE_CONCEPT,
+  audienceFromRow,
   authoredAutomationsFrom,
+  campaignFromRow,
   statsFromPayload,
   type AuthoredAutomationsState,
   type CampaignStats,
 } from "./rows";
 
 // Operator records use graph subscriptions. High-volume delivery, engagement
-// and recipient rows stay out of mesh broadcasts; visible views re-read their
-// bounded queries automatically. Requests never overlap and pause in hidden tabs.
-export const CAMPAIGN_REFRESH_MS = 5_000;
+// and recipient rows stay out of mesh broadcasts, so those are bounded
+// on-demand READINGS -- and a reading has no clock of its own. The surface that
+// shows one mounts the kit's `AutoRefresh` beside it, which re-reads it every
+// EMAIL_REFRESH_MS once the previous read has settled, and only while the
+// surface is SEEN: not while its pane is parked behind another tab, not while
+// the browser tab is hidden, not while the window is offline.
+export const EMAIL_REFRESH_MS = 5_000;
 
 // ---------------------------------------------------------------------------
 // The five live feeds
@@ -38,95 +51,70 @@ export const CAMPAIGN_REFRESH_MS = 5_000;
 // sender; the audiences list wants to say which campaigns used a roster. A
 // per-section feed would mean the same concept subscribed twice the moment
 // somebody opened two of those, which is the failure the rule names.
+//
+// EVERY PAGE, NOT THE FIRST. Each list read answers a page and a cursor, and
+// the seed walks the cursor inside the one collection, so paging never tears
+// the subscription down. A feed that stopped at the first page would show an
+// operator fifty campaigns and let them believe it was all of them.
+
+/** The options for one page of a walked list: the first page carries no cursor. */
+const pageOf = (cursor: string, signal: AbortSignal) => ({ signal, ...(cursor !== "" ? { cursor } : {}) });
+
+/** A concept's own list, every page, retained once. */
+function useListFeed(
+  key: string,
+  concept: string,
+  list: (connection: Connection, cursor: string, signal: AbortSignal) => Promise<Result>,
+  inScope?: (row: Row) => boolean,
+): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(key, (connection) => ({
+    concept,
+    inScope,
+    seed: async (cursor, signal) => {
+      const result = await list(connection, cursor, signal);
+      return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+    },
+    reread: async (rowId, signal) => {
+      const row = await getRowByConceptAndId(connection.query, concept, rowId, { signal });
+      return (row as Row) ?? null;
+    },
+  }));
+}
 
 export function useCampaignFeed(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("campaigns:campaigns", (connection) => ({
-    concept: CAMPAIGN_CONCEPT,
-    inScope: row => !flatten(row).testSourceCampaignId,
+  return useListFeed(
+    "campaigns:campaigns",
+    CAMPAIGN_CONCEPT,
     // NO STATUS ARGUMENT. `campaigns` takes an optional one and the filed
     // toggle deliberately does not pass it: seeding filtered would make the
     // toggle re-run the read and re-baseline every arrival cue, so revealing
     // rows the browser already had would announce them as new.
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.campaigns({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
-    },
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, CAMPAIGN_CONCEPT, rowId, { signal });
-      return (row as Row) ?? null;
-    },
-    paged: false,
-  }));
+    (connection, cursor, signal) => connection.query.campaigns({}, pageOf(cursor, signal)),
+    (row) => !flatten(row).testSourceCampaignId,
+  );
 }
 
 export function useAudienceFeed(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("campaigns:audiences", (connection) => ({
-    concept: AUDIENCE_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.audiences({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
-    },
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, AUDIENCE_CONCEPT, rowId, { signal });
-      return (row as Row) ?? null;
-    },
-    paged: false,
-  }));
+  return useListFeed("campaigns:audiences", AUDIENCE_CONCEPT, (connection, cursor, signal) =>
+    connection.query.audiences({}, pageOf(cursor, signal)));
 }
 
 export function useTemplateFeed(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("campaigns:templates", (connection) => ({
-    concept: TEMPLATE_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.templates({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
-    },
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, TEMPLATE_CONCEPT, rowId, { signal });
-      return (row as Row) ?? null;
-    },
-    paged: false,
-  }));
+  return useListFeed("campaigns:templates", TEMPLATE_CONCEPT, (connection, cursor, signal) =>
+    connection.query.templates({}, pageOf(cursor, signal)));
 }
 
 export function useSenderFeed(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("campaigns:senders", (connection) => ({
-    concept: SENDER_IDENTITY_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.senderIdentities({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
-    },
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(
-        connection.query,
-        SENDER_IDENTITY_CONCEPT,
-        rowId,
-        { signal },
-      );
-      return (row as Row) ?? null;
-    },
-    paged: false,
-  }));
+  return useListFeed("campaigns:senders", SENDER_IDENTITY_CONCEPT, (connection, cursor, signal) =>
+    connection.query.senderIdentities({}, pageOf(cursor, signal)));
 }
 
 export function useRuleFeed(): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>("campaigns:rules", (connection) => ({
-    concept: EMAIL_RULE_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.emailRules({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
-    },
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, EMAIL_RULE_CONCEPT, rowId, {
-        signal,
-      });
-      return (row as Row) ?? null;
-    },
-    paged: false,
-  }));
+  return useListFeed("campaigns:rules", EMAIL_RULE_CONCEPT, (connection, cursor, signal) =>
+    connection.query.emailRules({}, pageOf(cursor, signal)));
 }
 
-export interface CampaignFeeds {
+export interface EmailFeeds {
   campaigns: LiveCollectionHandle<Row>;
   audiences: LiveCollectionHandle<Row>;
   templates: LiveCollectionHandle<Row>;
@@ -136,13 +124,187 @@ export interface CampaignFeeds {
 
 /** The app root's five, retained together so every section is a reading of
  *  the same snapshots. */
-export function useCampaignFeeds(): CampaignFeeds {
+export function useEmailFeeds(): EmailFeeds {
   return {
     campaigns: useCampaignFeed(),
     audiences: useAudienceFeed(),
     templates: useTemplateFeed(),
     senders: useSenderFeed(),
     rules: useRuleFeed(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The feeds composed over ids
+// ---------------------------------------------------------------------------
+//
+// A series, a testing audience and a signup form are each read PER ID -- the
+// engine answers "the series of THIS campaign", "the testing settings of THIS
+// organization", "the forms of THIS audience" -- and each used to be its own
+// collection per open page: a subscription opened for every campaign, every
+// Settings visit and every audience somebody looked at. A concept that is read
+// per id is still ONE concept. So each has one collection, retained at the app
+// root, whose seed reads the ids in view and whose subscription carries every
+// row of the concept for the one stream.
+//
+// THE KEY NAMES THE CONCEPT ONLY. `useLiveCollection` says a key must encode
+// what is READ, and the ids are what is read -- but a key that carried them
+// would restart the collection, and so open a SECOND subscription over the
+// concept for as long as the released one lingers, every time a draft arrives
+// or leaves. The ids travel in a ref the seed and the event filter read, and a
+// change to the SET re-runs the one seed. The collection keeps its rows while
+// it does (the read replaces membership once it lands), so nothing a person is
+// looking at is unmounted for it.
+
+/** How many ids a composed seed reads at once. A burst of one request per
+ *  draft would be a burst of hundreds in a cluster that keeps many. */
+const READ_CONCURRENCY = 6;
+/** The runaway-cursor guard for a walked per-id read, as LiveCollection's own. */
+const MAX_PAGES = 50;
+
+interface Composition {
+  concept: string;
+  /** The id, of the set the feed is read over, that a row answers to. */
+  ownerOf: (row: Row) => string;
+  /** One id's rows. */
+  readFor: (connection: Connection, id: string, signal: AbortSignal) => Promise<Row[]>;
+}
+
+/** `read` for each id, a few at a time. The first refusal ends it: a feed that
+ *  could not read every id it was asked about does not claim to hold the rest. */
+async function readEach<T>(ids: readonly string[], read: (id: string) => Promise<T>, signal: AbortSignal): Promise<T[]> {
+  const answers: T[] = [];
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    while (next < ids.length && !failed && !signal.aborted) {
+      const at = next++;
+      try { answers[at] = await read(ids[at]!); }
+      catch (err) { failed = true; throw err; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, ids.length) }, worker));
+  return answers;
+}
+
+/** Every page of one id's read, by the cursor each page hands back. */
+async function everyPage(read: (cursor: string) => Promise<Result>): Promise<Row[]> {
+  const rows: Row[] = [];
+  let cursor = "";
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const result = await read(cursor);
+    rows.push(...result.rows());
+    cursor = result.meta()?.cursor ?? "";
+    if (cursor === "") break;
+  }
+  return rows;
+}
+
+const textOf = (row: Row, key: string): string => (typeof row[key] === "string" ? (row[key] as string) : "");
+
+function useComposedFeed(name: string, composition: Composition, ids: readonly string[]): LiveCollectionHandle<Row> {
+  // The SET, not the array: callers hand a new array every render.
+  const signature = [...new Set(ids)].filter((id) => id !== "").sort().join("\n");
+  const wanted = useMemo(() => new Set(signature === "" ? [] : signature.split("\n")), [signature]);
+  const latest = useRef({ wanted, signature });
+  latest.current = { wanted, signature };
+  /** The set the last seed STARTED with, so a change after it re-reads. */
+  const seeded = useRef<string | null>(null);
+
+  const feed = useLiveCollection<Row>(`campaigns:${name}`, (connection) => ({
+    concept: composition.concept,
+    seed: async (_cursor, signal) => {
+      const { wanted: asked, signature: set } = latest.current;
+      seeded.current = set;
+      const answers = await readEach([...asked], (id) => composition.readFor(connection, id, signal), signal);
+      return { rows: answers.flat(), nextCursor: "" };
+    },
+    // The stream carries every row of the concept the caller may see; this
+    // feed holds the ones it was asked about.
+    inScope: (row) => latest.current.wanted.has(composition.ownerOf(flatten(row))),
+    reread: async (rowId, signal) => {
+      const row = await getRowByConceptAndId(connection.query, composition.concept, rowId, { signal });
+      return (row as Row) ?? null;
+    },
+    paged: false,
+  }));
+
+  const reseed = feed.reseed;
+  useEffect(() => {
+    if (seeded.current !== null && seeded.current !== signature) reseed();
+    // The set is the only trigger; `reseed` is read fresh each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signature]);
+
+  return feed;
+}
+
+/** The repeating schedule of every campaign in view: one subscription over
+ *  `v1:campaigns:campaignSeries`, `campaignSeriesForCampaign` read per id. */
+export function useSeriesFeed(campaignIds: readonly string[]): LiveCollectionHandle<Row> {
+  return useComposedFeed("series", {
+    concept: "v1:campaigns:campaignSeries",
+    ownerOf: (row) => textOf(row, "sourceCampaignId"),
+    readFor: async (connection, campaignId, signal) =>
+      (await connection.query.campaignSeriesForCampaign({ campaignId }, { signal })).rows(),
+  }, campaignIds);
+}
+
+/** The testing audience of every organization in view: one subscription over
+ *  `v1:campaigns:testSettings`, `campaignTestSettings` read per id. */
+export function useTestSettingsFeed(accountIds: readonly string[]): LiveCollectionHandle<Row> {
+  return useComposedFeed("test-settings", {
+    concept: "v1:campaigns:testSettings",
+    ownerOf: (row) => textOf(row, "accountId"),
+    readFor: async (connection, accountId, signal) =>
+      (await connection.query.campaignTestSettings({ accountId }, { signal })).rows(),
+  }, accountIds);
+}
+
+/** The signup forms of every audience in view: one subscription over
+ *  `v1:campaigns:newsletterBinding`, `newslettersForAudience` read per id and
+ *  walked to its last page. */
+export function useSignupFormFeed(audienceIds: readonly string[]): LiveCollectionHandle<Row> {
+  return useComposedFeed("signup-forms", {
+    concept: "v1:campaigns:newsletterBinding",
+    ownerOf: (row) => textOf(row, "audienceId"),
+    readFor: (connection, audienceId, signal) =>
+      everyPage((cursor) => connection.query.newslettersForAudience({ audienceId }, pageOf(cursor, signal))),
+  }, audienceIds);
+}
+
+export interface EmailRecordFeeds {
+  series: LiveCollectionHandle<Row>;
+  testSettings: LiveCollectionHandle<Row>;
+  signupForms: LiveCollectionHandle<Row>;
+}
+
+/**
+ * The three composed feeds, over what the root's five are showing.
+ *
+ * IN VIEW means what the person can act on, which the root's lists already
+ * say: a DRAFT can source a series (nothing else repeats, so a sent campaign
+ * is not read); an organization with a campaign or an audience here is one
+ * whose testing audience a page may name; every audience may have a signup
+ * form. Reading these only from the feeds that exist keeps a cluster with no
+ * mail from reading anything per id at all.
+ */
+export function useEmailRecordFeeds(feeds: EmailFeeds): EmailRecordFeeds {
+  const campaignRows = feeds.campaigns.snapshot.rows;
+  const audienceRows = feeds.audiences.snapshot.rows;
+  const drafts = useMemo(
+    () => campaignRows.map(campaignFromRow).filter((c) => c.id !== "" && c.status === "draft").map((c) => c.id),
+    [campaignRows],
+  );
+  const organizations = useMemo(() => {
+    const accounts = [...campaignRows.map(campaignFromRow), ...audienceRows.map(audienceFromRow)].map((r) => r.accountId);
+    return [...new Set(accounts.filter((id) => id !== ""))];
+  }, [campaignRows, audienceRows]);
+  const audiences = useMemo(() => audienceRows.map(audienceFromRow).map((a) => a.id).filter((id) => id !== ""), [audienceRows]);
+  return {
+    series: useSeriesFeed(drafts),
+    testSettings: useTestSettingsFeed(organizations),
+    signupForms: useSignupFormFeed(audiences),
   };
 }
 
@@ -164,70 +326,100 @@ export interface Reading<T> {
   error: string;
   /** Last successful read. Errors retain this timestamp and the last answer. */
   readAt: string;
-  reload: () => void;
+  /**
+   * Read again now. Whatever is still on its way is stale from this moment and
+   * is aborted; the last answer stays on screen until the new one lands.
+   *
+   * The promise settles when the read that SUPERSEDES the others does -- and
+   * never rejects, because a failed read is this reading's `error`. That is
+   * what lets `AutoRefresh` (which awaits it) count its interval from the end
+   * of a read: a slow cluster gets one request at a time, not a new one every
+   * tick aborting the last before it can answer.
+   */
+  reload: () => Promise<void>;
 }
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Reads immediately, optionally refreshing while visible. Keep the last good
- * answer during background reads, abort stale requests, and retry failures. */
+interface Snapshot<T> {
+  reader: ((signal: AbortSignal) => Promise<T>) | null;
+  value: T;
+  state: Reading<T>["state"];
+  error: string;
+  readAt: string;
+}
+
+/**
+ * Reads once when `deps` change, and again when asked. NO TIMER: the surface
+ * that shows the answer mounts `AutoRefresh` beside it and gives it `reload`,
+ * so a pane that is parked, a tab that is hidden and a window that is offline
+ * stop reading without this hook knowing about any of them.
+ *
+ * It keeps the last good answer through a background read and through a
+ * failure, aborts a read its successor makes stale, and ignores a late answer
+ * from one that was aborted.
+ */
 export function useReading<T>(
   empty: T,
   read: ((signal: AbortSignal) => Promise<T>) | null,
   deps: readonly unknown[],
-  refreshEveryMs = 0,
 ): Reading<T> {
-  const [snapshot, setSnapshot] = useState({ reader: read, value: empty,
-    state: "idle" as Reading<T>["state"], error: "", readAt: "" });
-  const [nonce, setNonce] = useState(0);
-  const reload = useCallback(() => setNonce(n => n + 1), []);
+  const [snapshot, setSnapshot] = useState<Snapshot<T>>({ reader: read, value: empty, state: "idle", error: "", readAt: "" });
+  const latest = useRef(read);
+  latest.current = read;
+  const inFlight = useRef<AbortController | null>(null);
+  /** The `reload()` promises still waiting for a read to settle. */
+  const waiting = useRef<Array<() => void>>([]);
+  const settle = useCallback(() => {
+    const done = waiting.current;
+    waiting.current = [];
+    for (const resolve of done) resolve();
+  }, []);
+
+  /** Start a read, and make every read before it stale. THE READ STARTS HERE,
+   *  not on the next render: a caller that awaits `reload()` is waiting on the
+   *  read itself, never on React getting round to scheduling it. */
+  const start = useCallback((reader: (signal: AbortSignal) => Promise<T>) => {
+    inFlight.current?.abort();
+    const controller = new AbortController();
+    inFlight.current = controller;
+    void (async () => {
+      try {
+        const value = await reader(controller.signal);
+        if (controller.signal.aborted) return;
+        setSnapshot({ reader, value, state: "ready", error: "", readAt: new Date().toISOString() });
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        setSnapshot((previous) => ({ ...previous, reader, state: "error", error: describe(err) }));
+      }
+      // A read that was aborted settles nothing: its waiters stay waiting for
+      // the read that replaced it.
+      settle();
+    })();
+  }, [settle]);
+
+  const reload = useCallback(() => {
+    const reader = latest.current;
+    if (reader === null) return Promise.resolve();
+    return new Promise<void>((resolve) => { waiting.current.push(resolve); start(reader); });
+  }, [start]);
+
+  // A window that closes with a refresher mid-wait must not leave it waiting.
+  useEffect(() => () => { inFlight.current?.abort(); settle(); }, [settle]);
 
   useEffect(() => {
-    if (read === null) return;
-    let disposed = false;
-    let inFlight = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let controller: AbortController | undefined;
-    setSnapshot(previous => previous.reader === read && previous.readAt ? previous :
+    if (read === null) { inFlight.current?.abort(); settle(); return; }
+    setSnapshot((previous) => previous.reader === read && previous.readAt ? previous :
       { reader: read, value: empty, state: "loading", error: "", readAt: "" });
-    const visible = () => document.visibilityState !== "hidden";
-    const run = async () => {
-      if (disposed || inFlight || (refreshEveryMs > 0 && !visible())) return;
-      clearTimeout(timer);
-      inFlight = true;
-      controller = new AbortController();
-      try {
-        const value = await read(controller.signal);
-        if (!disposed) setSnapshot({ reader: read, value, state: "ready", error: "", readAt: new Date().toISOString() });
-      } catch (err) {
-        if (!disposed) setSnapshot(previous => ({ ...previous, state: "error", error: describe(err) }));
-      } finally {
-        inFlight = false;
-        if (!disposed && refreshEveryMs > 0 && visible()) timer = setTimeout(() => void run(), refreshEveryMs);
-      }
-    };
-    const wake = () => { clearTimeout(timer); if (visible()) void run(); };
-    if (refreshEveryMs > 0) {
-      document.addEventListener("visibilitychange", wake);
-      window.addEventListener("focus", wake);
-      window.addEventListener("online", wake);
-    }
-    void run();
-    return () => {
-      disposed = true;
-      clearTimeout(timer);
-      controller?.abort();
-      document.removeEventListener("visibilitychange", wake);
-      window.removeEventListener("focus", wake);
-      window.removeEventListener("online", wake);
-    };
+    start(read);
+    // The caller's deps say when what is read has changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, nonce, refreshEveryMs]);
+  }, deps);
 
   if (read === null || snapshot.reader !== read) return { value: empty, state: read ? "loading" : "idle", error: "", readAt: "", reload };
-  return { ...snapshot, reload };
+  return { value: snapshot.value, state: snapshot.state, error: snapshot.error, readAt: snapshot.readAt, reload };
 }
 
 const NO_ROWS: Row[] = [];
@@ -235,8 +427,9 @@ const NO_ROWS: Row[] = [];
 /**
  * The per-recipient ledger for one campaign.
  *
- * Automatically re-read while visible. `v1:campaigns:delivery` stays out of
- * broadcasts because it produces one row per recipient per send.
+ * `v1:campaigns:delivery` stays out of broadcasts because it produces one row
+ * per recipient per send, so the surface that shows it keeps it fresh with an
+ * `AutoRefresh` beside it.
  */
 export function useCampaignDeliveries(campaignId: string): Reading<Row[]> {
   const connection = useOsConnection();
@@ -248,7 +441,7 @@ export function useCampaignDeliveries(campaignId: string): Reading<Row[]> {
       return result.rows();
     };
   }, [query, campaignId]);
-  return useReading<Row[]>(NO_ROWS, read, [query, campaignId], CAMPAIGN_REFRESH_MS);
+  return useReading<Row[]>(NO_ROWS, read, [query, campaignId]);
 }
 
 /**
@@ -270,7 +463,7 @@ export function useAudienceRecipients(audienceId: string): Reading<Row[]> {
       return result.rows();
     };
   }, [query, audienceId]);
-  return useReading<Row[]>(NO_ROWS, read, [query, audienceId], CAMPAIGN_REFRESH_MS);
+  return useReading<Row[]>(NO_ROWS, read, [query, audienceId]);
 }
 
 /**
@@ -281,9 +474,9 @@ export function useAudienceRecipients(audienceId: string): Reading<Row[]> {
  * every campaign past the page bound and did so silently. Every bucket that
  * can be an exact COUNT is one here, at any audience size.
  *
- * It refreshes automatically while visible, including after a send finishes
- * because opens, clicks and unsubscribes can arrive later. The main bar also
- * receives the campaign row's progress through its existing subscription.
+ * It is refreshed while it is seen, including after a send finishes because
+ * opens, clicks and unsubscribes can arrive later. The main bar also receives
+ * the campaign row's progress through its existing subscription.
  */
 export function useCampaignStats(campaignId: string): Reading<CampaignStats | null> {
   const connection = useOsConnection();
@@ -297,11 +490,15 @@ export function useCampaignStats(campaignId: string): Reading<CampaignStats | nu
       return first ? statsFromPayload(first) : null;
     };
   }, [query, campaignId]);
-  return useReading<CampaignStats | null>(null, read, [query, campaignId], CAMPAIGN_REFRESH_MS);
+  return useReading<CampaignStats | null>(null, read, [query, campaignId]);
 }
 
 /** Organization-specific setup, read on demand and checked again by every send.
- * A cluster operator's provider verdict cannot stand in for a client's domain. */
+ * A cluster operator's provider verdict cannot stand in for a client's domain.
+ *
+ * ONE READ PER PAGE. A campaign's page asks once and hands the answer to every
+ * panel that needs it (`SendingReadiness`); two panels each asking was two
+ * identical `campaignSendingReadiness` reads for one fact. */
 export function useSendingReadiness(accountId: string, senderIdentityId = "", campaignId = "") {
   const connection = useOsConnection();
   const { readiness } = useSession();
@@ -322,6 +519,9 @@ export function useSendingReadiness(accountId: string, senderIdentityId = "", ca
     capture: !!live && !!read && reading.state === "ready" && reading.value?.reader === read && reading.value.capture,
     reason: reading.error || reading.value?.reason || "Sending readiness is not confirmed." };
 }
+
+/** What `useSendingReadiness` answers, for a page to pass down. */
+export type SendingReadiness = ReturnType<typeof useSendingReadiness>;
 
 const NO_CONCEPTS: Concept[] = [];
 
@@ -416,12 +616,64 @@ export function useAuthoredAutomations(): Reading<AuthoredAutomationsState> {
   return useReading<AuthoredAutomationsState>("unknown", read, [query]);
 }
 
-
-/** Signup receipts are shopper-volume data; refresh the bounded visible view. */
+/** Signup receipts are shopper-volume data: a bounded view, kept fresh by the
+ *  `AutoRefresh` beside it while it is seen. */
 export function useNewsletterWelcomes(audienceId: string): Reading<Row[]> {
   const connection = useOsConnection();
   const query = connection?.query ?? null;
   const read = useMemo(() => query === null ? null : async (signal: AbortSignal) =>
     (await query.newsletterWelcomesForAudience({ audienceId }, { signal })).rows(), [query, audienceId]);
-  return useReading<Row[]>(NO_ROWS, read, [query, audienceId], CAMPAIGN_REFRESH_MS);
+  return useReading<Row[]>(NO_ROWS, read, [query, audienceId]);
+}
+
+const NO_COUNTS: ReadonlyMap<string, Figure> = new Map();
+
+/**
+ * How many people each audience in view can be mailed now.
+ *
+ * ONE READ PER AUDIENCE, because the engine counts one audience at a time
+ * (`audienceSubscriberCount`, a server-side aggregate: the only honest number
+ * for a list too large to page through). The figures are `Figure`s, so the
+ * three things a count can be stay three things:
+ *
+ *   - NOT READ YET is `absent("unread")` -- every audience asked about starts
+ *     there, and a zero would be this window claiming an empty list;
+ *   - a number is `measured`, zero included: a list the engine counted and
+ *     found empty is genuinely zero;
+ *   - a refusal or a failure is `absent("failed", <the engine's sentence>)`,
+ *     for THAT audience alone -- one list the caller may not count does not
+ *     take the others' numbers with it.
+ *
+ * Subscribers join and leave through imports and signups that are routing
+ * exclusions, so there is no event to follow: the surface that shows the
+ * numbers mounts an `AutoRefresh` on `reload`.
+ */
+export function useSubscriberCounts(audienceIds: readonly string[]): { counts: ReadonlyMap<string, Figure>; reload: () => Promise<void> } {
+  const connection = useOsConnection();
+  const query = connection?.query ?? null;
+  // The set, not the array: callers hand a new array every render.
+  const signature = [...new Set(audienceIds)].filter((id) => id !== "").sort().join("\n");
+  const wanted = useMemo(() => (signature === "" ? [] : signature.split("\n")), [signature]);
+  const read = useMemo(() => {
+    if (query === null || wanted.length === 0) return null;
+    return async (signal: AbortSignal): Promise<ReadonlyMap<string, Figure>> => {
+      const answers = await Promise.all(wanted.map(async (audienceId): Promise<[string, Figure]> => {
+        try {
+          const result = await query.audienceSubscriberCount({ audienceId }, { signal });
+          return [audienceId, figureFrom(result.rows()[0] ?? null, "count")];
+        } catch (err) {
+          // An aborted read is somebody leaving, not an answer.
+          if (signal.aborted) throw err;
+          return [audienceId, absent("failed", describe(err))];
+        }
+      }));
+      return new Map(answers);
+    };
+  }, [query, wanted]);
+  const reading = useReading<ReadonlyMap<string, Figure>>(NO_COUNTS, read, [query, signature]);
+  const counts = useMemo(
+    () => new Map(wanted.map((id): [string, Figure] => [id, reading.value.get(id) ?? absent("unread")])),
+    [wanted, reading.value],
+  );
+  return { counts, reload: reading.reload };
 }

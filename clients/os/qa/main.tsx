@@ -6,7 +6,7 @@ import { AzureEmailConnections } from "../src/modules/connections/AzureEmailConn
 import { DEFAULT_EMAIL_SETTINGS } from "../src/apps/email/settings";
 import { fakeConnection as campaignConnection, rowsResult, withSession as campaignSession } from "../test/email/harness";
 import { NewsletterPanel } from "../src/apps/email/NewsletterPanel";
-import { useCampaignFeeds } from "../src/apps/email/useEmail";
+import { useEmailFeeds, useEmailRecordFeeds, useSeriesFeed, useSignupFormFeed } from "../src/apps/email/useEmail";
 import { RecurrencePanel } from "../src/apps/email/RecurrencePanel";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
@@ -678,7 +678,8 @@ function PreviewPage({ site }: { site: ReturnType<typeof siteFromRow> }) {
 const recurrenceQaRow = { id: "qa-series", sourceCampaignId: "qa-campaign", intervalWeeks: 3, timeZone: "America/Phoenix", status: "active", anchorAt: "2026-10-09T16:00:00Z", nextAt: "2026-10-30T16:00:00Z", createdAt: "2026-10-01T12:00:00Z" };
 function RecurrenceQa() {
   const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
-  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><RecurrencePanel campaignId="qa-campaign" /></div>;
+  const series = useSeriesFeed(["qa-campaign"]);
+  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><RecurrencePanel campaignId="qa-campaign" series={series} /></div>;
 }
 
 const newsletterQaSite = { id: "qa-shop", accountId: "qa-client", title: "Client storefront", status: "live" };
@@ -691,9 +692,10 @@ function newsletterQaConnection(populated: boolean) {
   });
 }
 function NewsletterQa() {
-  const resources = useCampaignFeeds();
+  const resources = useEmailFeeds();
+  const signupForms = useSignupFormFeed(["qa-audience"]);
   const narrow = new URLSearchParams(window.location.search).get("width") === "narrow";
-  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><NewsletterPanel audienceId="qa-audience" accountId="qa-client" resources={resources} /></div>;
+  return <div className="os-window-content" style={{ maxWidth: narrow ? 390 : 880, margin: "0 auto" }}><NewsletterPanel audienceId="qa-audience" accountId="qa-client" resources={resources} signupForms={signupForms} /></div>;
 }
 
 const VIEWS: Record<
@@ -1212,7 +1214,9 @@ function campaignSettingsView(connected: boolean) {
 }
 function CampaignSettingsPane() {
   const [settings, setSettings] = useState(DEFAULT_EMAIL_SETTINGS);
-  return <WindowBody fallback="Email"><CampaignsSettingsSection settings={settings} update={patch => setSettings(old => ({ ...old, ...patch }))}/></WindowBody>;
+  const feeds = useEmailFeeds();
+  const recordFeeds = useEmailRecordFeeds(feeds);
+  return <WindowBody fallback="Email"><CampaignsSettingsSection feeds={feeds} recordFeeds={recordFeeds} settings={settings} update={patch => setSettings(old => ({ ...old, ...patch }))}/></WindowBody>;
 }
 
 function AccountsPane() {

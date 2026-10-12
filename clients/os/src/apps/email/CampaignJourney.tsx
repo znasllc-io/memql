@@ -33,7 +33,7 @@ import { NewTemplate } from "./TemplatesSection";
 import { editorTemplateURL } from "../../items/editorPreference";
 import { openHandoff } from "../../items/vscode";
 import type { CampaignWrites } from "./actions";
-import type { CampaignFeeds } from "./useEmail";
+import type { EmailFeeds } from "./useEmail";
 
 const STEPS = ["Sending setup", "Sender", "Audience", "Content", "Review"];
 
@@ -46,7 +46,7 @@ export function CampaignJourney({
   trackByDefault,
   onDone,
 }: {
-  feeds: CampaignFeeds;
+  feeds: EmailFeeds;
   writes: CampaignWrites;
   uploads: UploadProvider;
   trackByDefault: boolean;

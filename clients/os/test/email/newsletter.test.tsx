@@ -4,6 +4,7 @@ import { chooseOption, openSelect } from "../selectControl";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 import { NewsletterPanel, newsletterFormHTML } from "../../src/apps/email/NewsletterPanel";
+import { useSignupFormFeed } from "../../src/apps/email/useEmail";
 import { fakeConnection, withSession } from "./harness";
 import type { LiveCollectionHandle } from "../../src/live/useLiveCollection";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -13,10 +14,16 @@ const resources = { templates: rows([{ id: "t1", accountId: "client", name: "Wel
 const binding = { id: "n1", siteId: "site", accountId: "client", audienceId: "audience", templateId: "t1", senderIdentityId: "s1", enabled: true, consentText: "Email me the client newsletter.", createdAt: "2026-10-01T12:00:00Z" };
 const site = { id: "site", accountId: "client", title: "Client storefront", status: "live" };
 
+// The panel reads the signup forms the app root retains; this is that root for one audience.
+function Signup() {
+  const signupForms = useSignupFormFeed(["audience"]);
+  return <NewsletterPanel audienceId="audience" accountId="client" resources={resources} signupForms={signupForms} />;
+}
+
 describe("newsletter connection", () => {
   it("offers the audience organization's resources in the opened setup", async () => {
     const conn = fakeConnection({ sites: [site, { id: "foreign", accountId: "other", title: "Other storefront", status: "live" }] }); h.connection = conn;
-    render(withSession(<NewsletterPanel audienceId="audience" accountId="client" resources={resources} />));
+    render(withSession(<Signup />));
     const add = await screen.findByRole("button", { name: "Connect a signup form" });
     await waitFor(() => expect(add.hasAttribute("disabled")).toBe(false));
     fireEvent.click(add);
@@ -32,7 +39,7 @@ describe("newsletter connection", () => {
   it("uses the saved revision to disable a connection and recheck a blocked welcome", async () => {
     const welcome = { id: "signup", status: "blocked", requestedAt: "2026-10-01T12:01:00Z", createdAt: "2026-10-01T12:02:00Z", lastError: "Sender needs attention." };
     const conn = fakeConnection({ sites: [site], newsletters: [binding], welcomes: [welcome] }); h.connection = conn;
-    render(withSession(<NewsletterPanel audienceId="audience" accountId="client" resources={resources} />));
+    render(withSession(<Signup />));
     fireEvent.click(await screen.findByRole("button", { name: /Client storefront/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Accept signups and send a welcome" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

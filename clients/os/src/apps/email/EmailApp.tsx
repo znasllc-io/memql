@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Mail } from "lucide-react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
@@ -9,7 +9,8 @@ import { Button, EmptyState, Fact, Facts, Head, AutoRefresh, Input, Notice, Pane
 import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
 import { AppLogsSection } from "../../logs/AppLogsSection";
-import type { OsAppProps } from "../../system/registry";
+import { accessAdmits, type OsAppProps } from "../../system/registry";
+import { AccountOptionsProvider } from "../accounts/tie";
 import { AudiencesSection } from "./AudiencesSection";
 import { CampaignsOverview } from "./CampaignsOverview";
 import { CampaignsSection } from "./CampaignsSection";
@@ -21,10 +22,11 @@ import { useCampaignWrites } from "./actions";
 import { emailPreview } from "./preview";
 import {
   EMAIL_SECTIONS,
+  EMAIL_SECTION_IDS,
   LocalEmailSettingsStore,
   type EmailSettings,
   type EmailSettingsStore } from "./settings";
-import { useCampaignFeeds } from "./useEmail";
+import { useEmailFeeds, useEmailRecordFeeds } from "./useEmail";
 
 // Email: writing mail, sending it, and knowing what happened (epic memql#4827 /
 // #4828 / #4830), and the capture inbox that shows what a test cluster did
@@ -34,7 +36,7 @@ import { useCampaignFeeds } from "./useEmail";
 // window and a second place to look for what happened to a message.
 //
 // ===========================================================================
-// FIVE FEEDS AT THE ROOT, ONE PER CONCEPT
+// FIVE FEEDS AT THE ROOT, ONE PER CONCEPT -- AND THREE MORE, COMPOSED
 // ===========================================================================
 // The one-feed rule is per CONCEPT, not per app (the Packages rule): what must
 // never happen is two subscriptions over the SAME concept, free to disagree
@@ -46,6 +48,18 @@ import { useCampaignFeeds } from "./useEmail";
 // editor lists the campaigns that use it. A per-section feed would open a
 // second subscription over one concept the moment somebody opened two
 // sections, which is exactly the failure the rule names.
+//
+// A series, a testing audience and a signup form are read per id (the series
+// OF this campaign), and used to be one collection per open page. Each is now
+// ONE collection here, composed over the ids the five lists are showing
+// (`useEmailRecordFeeds`), and the account list every picker reads is retained
+// once under `AccountOptionsProvider` -- so with a campaign page, an audience
+// page and Settings all open, no concept has two subscriptions.
+//
+// SECTIONS ARE RETAINED PANES (Fleet's pattern). A section stays mounted,
+// hidden, once it has been opened, so a wizard's answers and an edit's unsaved
+// changes survive a tab switch -- and a hidden pane's `AutoRefresh` stops, so
+// parking a tab costs no reads.
 //
 // NO MANIFEST ROLE, and the reason is the concepts' tier rather than a
 // judgment made here: every operator-facing campaigns concept is
@@ -93,7 +107,8 @@ export function EmailApp({
     [uploads, authSource],
   );
 
-  const feeds = useCampaignFeeds();
+  const feeds = useEmailFeeds();
+  const recordFeeds = useEmailRecordFeeds(feeds);
   const writes = useCampaignWrites();
 
   function updateSettings(patch: Partial<EmailSettings>) {
@@ -122,61 +137,65 @@ export function EmailApp({
     // ONCE PER MOUNT, WHICH IS ONCE PER WINDOW.
   }, []);
 
-  if (sectionId === "overview") return <CampaignsOverview feeds={feeds} navigate={navigate} />;
+  // A section the manifest does not declare reads as the campaigns list, as
+  // it always has.
+  const current = EMAIL_SECTION_IDS.includes(sectionId) ? sectionId : "campaigns";
+  const [visited, setVisited] = useState<string[]>([current]);
+  useEffect(() => { setVisited(held => held.includes(current) ? held : [...held, current]); }, [current]);
+  const panes = Array.from(new Set([...visited, current]));
 
-  if (sectionId === "inbox") return <EmailInbox />;
-
-  if (sectionId === "settings") {
-    return <CampaignsSettingsSection feeds={feeds} settings={settings} update={updateSettings} />;
-  }
-  if (sectionId === "logs") {
-    return (
-      <AppLogsSection
-        app="email"
-        subjectConcepts={EMAIL_LOG_CONCEPTS}
-        intent={intent}
-        consumeIntent={consumeIntent}
-      />
-    );
+  function section(id: string, active: boolean): ReactNode {
+    switch (id) {
+      case "overview":
+        return <CampaignsOverview feeds={feeds} navigate={navigate} />;
+      case "inbox":
+        return <EmailInbox />;
+      case "settings":
+        return <CampaignsSettingsSection feeds={feeds} recordFeeds={recordFeeds} settings={settings} update={updateSettings} />;
+      case "logs":
+        return (
+          <AppLogsSection
+            app="email"
+            subjectConcepts={EMAIL_LOG_CONCEPTS}
+            // Only the pane in view takes an instruction: a parked Logs pane
+            // would otherwise consume one meant for the section on screen.
+            intent={active ? intent : undefined}
+            consumeIntent={consumeIntent}
+          />
+        );
+      case "audiences":
+        return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} uploads={uploadProvider} showFiled={settings.showFiled} />;
+      case "templates":
+        return <TemplatesSection feeds={feeds} writes={writes} showFiled={settings.showFiled} />;
+      case "senders":
+        return <SendersSection feeds={feeds} writes={writes} showFiled={settings.showFiled} />;
+      case "rules":
+        return <RulesSection feeds={feeds} writes={writes} showFiled={settings.showFiled} />;
+      default:
+        return (
+          <CampaignsSection
+            feeds={feeds}
+            recordFeeds={recordFeeds}
+            writes={writes}
+            showFiled={settings.showFiled}
+            trackByDefault={settings.trackByDefault}
+            uploads={uploadProvider}
+          />
+        );
+    }
   }
 
   return (
-    <>
-      {sectionId === "audiences" ? (
-        <AudiencesSection
-          feeds={feeds}
-          writes={writes}
-          uploads={uploadProvider}
-          showFiled={settings.showFiled}
-        />
-      ) : sectionId === "templates" ? (
-        <TemplatesSection
-          feeds={feeds}
-          writes={writes}
-          showFiled={settings.showFiled}
-        />
-      ) : sectionId === "senders" ? (
-        <SendersSection
-          feeds={feeds}
-          writes={writes}
-          showFiled={settings.showFiled}
-        />
-      ) : sectionId === "rules" ? (
-        <RulesSection
-          feeds={feeds}
-          writes={writes}
-          showFiled={settings.showFiled}
-        />
-      ) : (
-        <CampaignsSection
-          feeds={feeds}
-          writes={writes}
-          showFiled={settings.showFiled}
-          trackByDefault={settings.trackByDefault}
-          uploads={uploadProvider}
-          />
-      )}
-    </>
+    <AccountOptionsProvider>
+      {panes.map(id => {
+        const declared = EMAIL_SECTIONS.find(candidate => candidate.id === id);
+        // Re-checked on every render: a pane parked behind another tab goes
+        // the moment the person's access to it does.
+        if (!declared || !accessAdmits(declared.requires)) return null;
+        const active = id === current;
+        return <div className="email-pane" data-email-section={id} key={id} hidden={!active}>{section(id, active)}</div>;
+      })}
+    </AccountOptionsProvider>
   );
 }
 

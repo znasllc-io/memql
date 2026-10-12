@@ -51,7 +51,7 @@ import {
   type RecipientMode,
   type SentencePart,
 } from "./rows";
-import { useAuthoredAutomations, useTriggerConcepts, type CampaignFeeds } from "./useEmail";
+import { useAuthoredAutomations, useTriggerConcepts, type EmailFeeds } from "./useEmail";
 
 // Rules: "when this happens, email that to those people."
 //
@@ -84,7 +84,7 @@ export function RulesSection({
   writes,
   showFiled,
 }: {
-  feeds: CampaignFeeds;
+  feeds: EmailFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
 }) {

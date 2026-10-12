@@ -6610,6 +6610,14 @@ a.os-button {
   flex-shrink: 0;
 }
 
+/* Email keeps every section it has opened mounted, so a wizard's answers and an
+ * edit's unsaved changes survive a tab switch. The wrapper takes no box of its
+ * own -- a page lays out as it did when it was the window's only child -- and
+ * a parked one is `display: none`, which also takes it out of the tab order
+ * and the accessibility tree (and is what stops its `AutoRefresh`). */
+.email-pane { display: contents; }
+.email-pane[hidden] { display: none; }
+
 .os-campaign-detail {
   display: flex;
   flex-direction: column;

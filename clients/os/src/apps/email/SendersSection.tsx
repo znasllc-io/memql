@@ -34,7 +34,7 @@ import {
   senderLabel,
   type SenderIdentityRow,
 } from "./rows";
-import type { CampaignFeeds } from "./useEmail";
+import type { EmailFeeds } from "./useEmail";
 
 // Campaign authors select organization-owned, verified sender identities.
 // Cluster Settings owns Azure authorization; domain setup reuses that access.
@@ -45,7 +45,7 @@ export function SendersSection({
   writes,
   showFiled,
 }: {
-  feeds: CampaignFeeds;
+  feeds: EmailFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
 }) {

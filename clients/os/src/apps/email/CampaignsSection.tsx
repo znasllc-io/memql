@@ -1,7 +1,6 @@
 import { ContentSkeleton, InlineSkeleton } from "../../kit/ContentSkeleton";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { RecordList, listCount } from "../../kit/RecordRow";
-import { useSendingReadiness } from "./useEmail";
 import { useSession } from "../../chrome/access";
 import { editorTemplateURL } from "../../items/editorPreference";
 import { openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
@@ -17,6 +16,7 @@ import { useAccountOptions } from "../accounts/tie";
 import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import { accountNameFrom } from "../accounts/rows";
 import {
+  AutoRefresh,
   Button,
   EmptyState,
   Caption,
@@ -57,23 +57,34 @@ import {
   type SenderIdentityRow,
   type TemplateRow,
 } from "./rows";
-import { useCampaignDeliveries, useCampaignStats, type CampaignFeeds } from "./useEmail";
+import {
+  EMAIL_REFRESH_MS,
+  useCampaignDeliveries,
+  useCampaignStats,
+  useSendingReadiness,
+  type EmailFeeds,
+  type EmailRecordFeeds,
+  type SendingReadiness,
+} from "./useEmail";
 
 // The campaigns list and one campaign in full.
 //
 // The list is LIVE (`v1:campaigns:campaign` broadcasts both verbs). The
-// detail refreshes delivery records and server-computed statistics
-// automatically without broadcasting recipient-volume events.
+// detail keeps delivery records and server-computed statistics fresh with an
+// `AutoRefresh` beside each reading, without broadcasting recipient-volume
+// events, and reads the series and testing settings the app root retains.
 
 export function CampaignsSection({
   feeds,
+  recordFeeds,
   writes,
   showFiled,
   trackByDefault,
   uploads,
 }: {
   uploads: UploadProvider;
-  feeds: CampaignFeeds;
+  feeds: EmailFeeds;
+  recordFeeds: EmailRecordFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
   trackByDefault: boolean;
@@ -138,6 +149,7 @@ export function CampaignsSection({
           audiences={audiences}
           templates={templates}
           templateFeed={feeds.templates}
+          recordFeeds={recordFeeds}
           senders={senders}
           writes={writes}
         />
@@ -292,22 +304,29 @@ function CampaignDetail({
   audiences,
   templates,
   templateFeed,
+  recordFeeds,
   senders,
   writes,
 }: {
   campaign: CampaignRow;
   audiences: AudienceRow[];
   templates: TemplateRow[];
-  templateFeed: CampaignFeeds["templates"];
+  templateFeed: EmailFeeds["templates"];
+  recordFeeds: EmailRecordFeeds;
   senders: SenderIdentityRow[];
   writes: CampaignWrites;
 }) {
   const stats = useCampaignStats(campaign.id);
   const accounts = useAccountOptions();
+  // ONE READ OF SENDING READINESS FOR THE WHOLE PAGE: the send controls and
+  // the test panel both need the answer, and each asking was two identical
+  // `campaignSendingReadiness` reads for one fact.
+  const sending = useSendingReadiness(campaign.accountId, campaign.senderIdentityId, campaign.id);
   const [editing, setEditing] = useState(false);
 
   return (
     <div className="os-campaign-detail">
+      <AutoRefresh onRefresh={stats.reload} busy={stats.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
       <Panel label={`${campaignName(campaign)} progress`}>
         <div className="os-campaign-detail-head">
           <Subhead>Campaign results</Subhead>
@@ -361,12 +380,14 @@ function CampaignDetail({
         </Facts>
       </Panel>
 
-      <TestSendPanel key={campaign.id} campaign={campaign} audiences={audiences} />
+      <TestSendPanel key={campaign.id} campaign={campaign} audiences={audiences}
+        testSettings={recordFeeds.testSettings} sending={sending} />
 
       <SendControls campaign={campaign} writes={writes}
         template={templates.find(template => template.id === campaign.templateId)}
-        templateFeed={templateFeed} />
-      <RecurrencePanel campaignId={campaign.id} />
+        templateFeed={templateFeed} sending={sending} />
+      {/* Only a DRAFT sources a series, and only drafts are read for one. */}
+      {campaign.status === "draft" ? <RecurrencePanel campaignId={campaign.id} series={recordFeeds.series} /> : null}
 
       <StatsPanel stats={stats} />
 
@@ -416,16 +437,15 @@ function CampaignDetail({
  * when they hesitate. "Send to 4,182 people?" is a different question from
  * "Send?" and it is the one being asked.
  */
-function SendControls({ campaign, writes, template, templateFeed }: {
+function SendControls({ campaign, writes, template, templateFeed, sending }: {
   campaign: CampaignRow; writes: CampaignWrites; template?: TemplateRow;
-  templateFeed: CampaignFeeds["templates"];
+  templateFeed: EmailFeeds["templates"]; sending: SendingReadiness;
 }) {
   const { config } = useSession();
   const [editorNotice, setEditorNotice] = useState("");
   const templatesCurrent = templateFeed.snapshot.state === "live" && !templateFeed.snapshot.error;
   const ownTemplate = template?.accountId === campaign.accountId;
   const templateReady = templatesCurrent && ownTemplate && template?.status === "ready";
-  const sending = useSendingReadiness(campaign.accountId, campaign.senderIdentityId, campaign.id);
   const readyToSend = sending.ready;
   const readyToStart = readyToSend && templateReady;
   const controls = writes.sendControls;
@@ -706,6 +726,7 @@ function DeliveriesPanel({ campaignId }: { campaignId: string }) {
 
   return (
     <Panel label="Who got it">
+      <AutoRefresh onRefresh={ledger.reload} busy={ledger.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
       <div className="os-campaign-detail-head">
         <Subhead meta={ledger.state === "ready" && !ledger.error ? `${rows.length} read` : undefined}>Who got it</Subhead>
       </div>

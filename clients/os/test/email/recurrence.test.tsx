@@ -4,7 +4,14 @@ import { chooseOption } from "../selectControl";
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 vi.mock("../../src/live/connection", () => ({ useOsConnection: () => h.connection }));
 import { RecurrencePanel } from "../../src/apps/email/RecurrencePanel";
+import { useSeriesFeed } from "../../src/apps/email/useEmail";
 import { fakeConnection, withSession } from "./harness";
+
+// The panel reads the series feed the app root retains; this is that root for one campaign.
+function Repeat({ campaignId }: { campaignId: string }) {
+  const series = useSeriesFeed([campaignId]);
+  return <RecurrencePanel campaignId={campaignId} series={series} />;
+}
 
 const series = { id: "series", sourceCampaignId: "c1", status: "active", intervalWeeks: 2, timeZone: "America/Phoenix", anchorAt: "2028-01-02T16:00:00Z", nextAt: "2028-01-16T16:00:00Z", createdAt: "2027-10-01T12:00:00.000001Z", lastError: "" };
 
@@ -12,7 +19,7 @@ describe("recurring campaign controls", () => {
   it("opens the schedule setup and submits a selected date and cadence", async () => {
     const conn = Object.assign(fakeConnection(), {});
     h.connection = conn;
-    render(withSession(<RecurrencePanel campaignId="c1" />));
+    render(withSession(<Repeat campaignId="c1" />));
     const setup = await screen.findByRole("button", { name: /Set up repeating sends/ });
     await waitFor(() => expect(setup.hasAttribute("disabled")).toBe(false));
     fireEvent.click(setup);
@@ -23,7 +30,7 @@ describe("recurring campaign controls", () => {
   });
   it("uses the saved revision to pause and ignores another campaign's live changes", async () => {
     const conn = fakeConnection({ campaignSeries: [series] }); h.connection = conn;
-    render(withSession(<RecurrencePanel campaignId="c1" />));
+    render(withSession(<Repeat campaignId="c1" />));
     const pause = await screen.findByRole("button", { name: "Pause future sends" });
     await waitFor(() => expect(pause.hasAttribute("disabled")).toBe(false));
     await act(async () => conn.subscriptions.emit("v1:campaigns:campaignSeries", { ...series, id: "other", sourceCampaignId: "c2", intervalWeeks: 40 }));

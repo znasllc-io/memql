@@ -1,13 +1,13 @@
 import { useState } from "react";
-import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { AddButton } from "../../kit/AddButton";
-import { Button, Caption, Check, Field, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead, formatMoment } from "../../kit";
+import { AutoRefresh, Button, Caption, Check, Field, Input, Notice, Panel, RecordList, RecordRow, Select, Subhead, formatMoment } from "../../kit";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 import { flatten } from "../../kit/rows";
-import { useLiveCollection, feedIsBehind } from "../../live/useLiveCollection";
+import { feedIsBehind, type LiveCollectionHandle } from "../../live/useLiveCollection";
 import { useSites } from "../deployables/useSites";
 import { useConfigureNewsletter, useRetryNewsletterWelcome } from "./actions";
-import { useNewsletterWelcomes, type CampaignFeeds } from "./useEmail";
+import { EMAIL_REFRESH_MS, useNewsletterWelcomes, type EmailFeeds } from "./useEmail";
 
 const text = (row: Record<string, unknown>, key: string) => typeof row[key] === "string" ? row[key] as string : "";
 const escapeHTML = (value: string) => value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -15,15 +15,15 @@ export function newsletterFormHTML(row: Record<string, unknown>): string {
   return `<form method="post" action="/_memql/forms/campaigns/subscribe">\n  <label>Email <input type="email" name="email" required maxlength="320" autocomplete="email"></label>\n  <label>Name <input name="displayName" maxlength="120" autocomplete="name"></label>\n  <label><input type="checkbox" name="consent" value="yes" required> ${escapeHTML(text(row, "consentText"))}</label>\n  <input type="hidden" name="consentRevision" value="${escapeHTML(text(row, "createdAt"))}">\n  <button type="submit">Subscribe</button>\n</form>`;
 }
 
-export function NewsletterPanel({ audienceId, accountId, resources }: { audienceId: string; accountId: string; resources: Pick<CampaignFeeds, "templates" | "senders"> }) {
+/** One audience's signup forms, read from the feed the app root retains for
+ *  every audience in view: opening an audience subscribes to nothing. */
+export function NewsletterPanel({ audienceId, accountId, resources, signupForms: feed }: {
+  audienceId: string;
+  accountId: string;
+  resources: Pick<EmailFeeds, "templates" | "senders">;
+  signupForms: LiveCollectionHandle<Row>;
+}) {
   const sites = useSites();
-  const feed = useLiveCollection<Row>(`campaigns:newsletters:${audienceId}`, connection => ({
-    concept: "v1:campaigns:newsletterBinding",
-    seed: async (_cursor, signal) => ({ rows: (await connection.query.newslettersForAudience({ audienceId }, { signal })).rows(), nextCursor: "" }),
-    reread: async (id, signal) => (await getRowByConceptAndId(connection.query, "v1:campaigns:newsletterBinding", id, { signal })) as Row | null,
-    inScope: row => text(flatten(row), "audienceId") === audienceId,
-    paged: false,
-  }));
   const write = useConfigureNewsletter();
   const retry = useRetryNewsletterWelcome();
   const welcomes = useNewsletterWelcomes(audienceId);
@@ -36,7 +36,7 @@ export function NewsletterPanel({ audienceId, accountId, resources }: { audience
   const [formFor, setFormFor] = useState("");
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState("");
-  const rows = feed.snapshot.rows.map(flatten);
+  const rows = feed.snapshot.rows.map(flatten).filter(row => text(row, "audienceId") === audienceId);
   const siteRows = sites.snapshot.rows.map(flatten).filter(row => row.accountId === accountId && !row.systemOwned && row.status !== "disabled");
   const templateRows = resources.templates.snapshot.rows.map(flatten).filter(row => row.accountId === accountId && (row.status === "ready" || row.id === templateId));
   const senderRows = resources.senders.snapshot.rows.map(flatten).filter(row => row.accountId === accountId && (row.status !== "disabled" || row.id === senderIdentityId));
@@ -90,6 +90,7 @@ export function NewsletterPanel({ audienceId, accountId, resources }: { audience
     </div> : null}
     {rows.length && !editing && !formFor ? <>
       <Subhead>Recent welcomes</Subhead>
+      <AutoRefresh onRefresh={welcomes.reload} busy={welcomes.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
       {welcomes.state === "loading" && !welcomes.value.length ? <RecordListSkeleton rows={2} label="Recent welcome messages" /> : null}
       {welcomes.error ? <Notice tone="error" sentence="Welcome outcomes could not be read." detail={welcomes.error} /> : null}
       <RecordList>{welcomes.value.map(flatten).map(row => <RecordRow key={text(row,"id")} name={text(row,"displayName") || text(row,"email") || "Subscriber"} secondary={text(row,"lastError") || formatMoment(text(row,"requestedAt"))} state={text(row,"status")} actions={row.status === "blocked" ? <Button busy={retry.busy} onClick={() => void retry.call({ signupId: text(row,"id"), expectedRevision: text(row,"createdAt") }).then(ok => { if (ok) welcomes.reload(); })}>Check again</Button> : undefined} />)}</RecordList>

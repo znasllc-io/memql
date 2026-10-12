@@ -1,7 +1,7 @@
 import { readiness, verdict } from "../setup/harness";
 import type { Readiness } from "../../src/live/readiness";
 import type { ReactNode } from "react";
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 import { Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { SessionProvider } from "../../src/chrome/access";
@@ -18,6 +18,12 @@ import { UNKNOWN_RUNTIME_CONFIG, type OsRuntimeConfig } from "../../src/cluster/
 
 export function rowsResult(rows: Row[]): Result {
   return new Result({ data: rows } as never);
+}
+
+/** A full page with a continuation cursor, as the engine answers a list it has more of.
+ *  An empty cursor is the last page, which is what `rowsResult` already gives. */
+export function pagedResult(rows: Row[], cursor: string): Result {
+  return new Result({ data: rows, meta: { cursor } } as never);
 }
 
 export function bundleResult(rows: Row[]): Result {
@@ -39,22 +45,31 @@ export interface FakeEvent {
 }
 
 export interface FakeSubscriptions {
-  subscribeGraph: (handler: (event: FakeEvent) => void, opts: { concept?: string }) => () => void;
+  /** A spy, so a test can say how many subscriptions a concept was asked for. */
+  subscribeGraph: Mock<(handler: (event: FakeEvent) => void, opts: { concept?: string }) => () => void>;
   emit: (concept: string, payload: Row, kind?: string) => void;
+  /** Concept -> subscriptions open right now (a released one no longer counts). */
+  open: () => Map<string, number>;
+  /** Concept -> the most subscriptions it ever had open at once. */
+  peak: () => Map<string, number>;
 }
 
 function fakeSubscriptions(): FakeSubscriptions {
-  const handlers = new Map<string, Set<(event: FakeEvent) => void>>();
+  const handlers = new Map<string, Set<{ handler: (event: FakeEvent) => void }>>();
+  const peaks = new Map<string, number>();
   return {
-    subscribeGraph(handler, opts) {
+    subscribeGraph: vi.fn((handler: (event: FakeEvent) => void, opts: { concept?: string }) => {
       const concept = opts.concept ?? "*";
+      // One entry per CALL, so the same function subscribed twice counts twice.
+      const entry = { handler };
       const set = handlers.get(concept) ?? new Set();
-      set.add(handler);
+      set.add(entry);
       handlers.set(concept, set);
-      return () => set.delete(handler);
-    },
+      peaks.set(concept, Math.max(peaks.get(concept) ?? 0, set.size));
+      return () => { set.delete(entry); };
+    }),
     emit(concept, payload, kind = "NODE_UPDATED") {
-      for (const handler of handlers.get(concept) ?? []) {
+      for (const { handler } of [...(handlers.get(concept) ?? [])]) {
         handler({
           subscriptionId: "sub-1",
           kind,
@@ -66,7 +81,22 @@ function fakeSubscriptions(): FakeSubscriptions {
         });
       }
     },
+    open: () => new Map([...handlers].filter(([, set]) => set.size > 0).map(([concept, set]) => [concept, set.size])),
+    peak: () => new Map(peaks),
   };
+}
+
+/** Concept -> how many live subscriptions the connection holds open now. The
+ *  one-subscription-per-concept rule reads this: no value may exceed one. */
+export function liveSubscriptions(connection: { subscriptions: FakeSubscriptions }): Map<string, number> {
+  return connection.subscriptions.open();
+}
+
+/** Concept -> the most subscriptions it ever had open together. `liveSubscriptions`
+ *  is a photograph; this is the film, so a doubling that lasted between two
+ *  assertions (a lingering release, a restart on a changed key) is still seen. */
+export function peakSubscriptions(connection: { subscriptions: FakeSubscriptions }): Map<string, number> {
+  return connection.subscriptions.peak();
 }
 
 export interface FakeSeed {
@@ -101,13 +131,25 @@ export interface FakeSeed {
    *  harness whose default produced it would put a warning on every test. */
   integrationStatus?: Row[] | Error;
   sendingReadiness?: Row[] | Error;
+  /** Audience id -> `audienceSubscriberCount`'s answer. An Error is a refused
+   *  read; an audience not named here is an empty one (the engine answers 0). */
+  subscriberCounts?: Record<string, number | Error>;
   concepts?: { id: string; domain: string; entity: string }[];
 }
 
-function reader(rows: Row[] | Error | undefined) {
-  return vi.fn(async (_args?: unknown, _opts?: unknown) => {
+/**
+ * A named read answering the seeded rows.
+ *
+ * `scope` is the query's own `filter`, for the reads the engine answers PER ID
+ * (`campaignSeriesForCampaign`, `campaignTestSettings`, `newslettersForAudience`):
+ * a double that handed every id the whole seed would let a feed that mixed one
+ * id's rows into another's pass, and the composed feeds read exactly these.
+ */
+function reader(rows: Row[] | Error | undefined, scope?: (row: Row, args: Record<string, unknown>) => boolean) {
+  return vi.fn(async (args?: unknown, _opts?: unknown) => {
     if (rows instanceof Error) throw rows;
-    return rowsResult(rows ?? []);
+    const wanted = (args ?? {}) as Record<string, unknown>;
+    return rowsResult(scope ? (rows ?? []).filter((row) => scope(row, wanted)) : rows ?? []);
   });
 }
 
@@ -126,17 +168,17 @@ export function fakeConnection(seed: FakeSeed = {}) {
   return {
     query: {
       sitesAll: reader(seed.sites),
-      newslettersForAudience: reader(seed.newsletters),
+      newslettersForAudience: reader(seed.newsletters, (row, args) => row.audienceId === args.audienceId),
       newsletterWelcomesForAudience: reader(seed.welcomes),
       campaignConfigureNewsletter: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ saved: true }])),
       campaignRetryNewsletterWelcome: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ queued: true }])),
       // The five live seeds.
       campaigns: reader(seed.campaigns),
-      campaignTestSettings: reader(seed.testSettings),
+      campaignTestSettings: reader(seed.testSettings, (row, args) => row.accountId === args.accountId),
       campaignTestRuns: reader(seed.testRuns),
       campaignConfigureTestAudience: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ saved: true }])),
       campaignTestAudienceSend: vi.fn(async (_args: Record<string, unknown>) => rowsResult([{ testRunId: "test-run" }])),
-      campaignSeriesForCampaign: reader(seed.campaignSeries),
+      campaignSeriesForCampaign: reader(seed.campaignSeries, (row, args) => row.sourceCampaignId === args.campaignId),
       campaignConfigureSeries: reader([]),
       audiences: reader(seed.audiences),
       templates: reader(seed.templates),
@@ -146,6 +188,11 @@ export function fakeConnection(seed: FakeSeed = {}) {
       // The on-demand reads.
       deliveriesForCampaign: reader(seed.deliveriesForCampaign),
       recipientsForAudience: reader(seed.recipientsForAudience),
+      audienceSubscriberCount: vi.fn(async (args: { audienceId?: string }, _opts?: unknown) => {
+        const answer = seed.subscriberCounts?.[args.audienceId ?? ""];
+        if (answer instanceof Error) throw answer;
+        return rowsResult([{ count: answer ?? 0 }]);
+      }),
       campaignStats: reader(seed.campaignStats),
       campaignsForAccount: reader(seed.campaignsForAccount),
       integrationStatus: reader(seed.integrationStatus ?? [HEALTHY_EMAIL]),

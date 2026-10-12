@@ -12,6 +12,7 @@ import { useAccountOptions } from "../accounts/tie";
 import { organizationChosen, useDefaultOrganization } from "../accounts/organization";
 import type { UploadProvider } from "../../items/upload";
 import {
+  AutoRefresh,
   Button,
   EmptyState,
   Caption,
@@ -43,20 +44,23 @@ import {
   type AudienceRow,
   type RecipientRow,
 } from "./rows";
-import { useAudienceRecipients, type CampaignFeeds } from "./useEmail";
+import { EMAIL_REFRESH_MS, useAudienceRecipients, type EmailFeeds, type EmailRecordFeeds } from "./useEmail";
 
 // Audiences: who a campaign goes to, and how they got there.
 //
-// The audience list subscribes to operator changes. The roster refreshes
-// automatically while visible: CSV-sized recipient bursts stay out of broadcasts.
+// The audience list subscribes to operator changes. The roster is kept fresh
+// by an `AutoRefresh` beside it while it is seen: CSV-sized recipient bursts
+// stay out of broadcasts.
 
 export function AudiencesSection({
   feeds,
+  recordFeeds,
   writes,
   uploads,
   showFiled,
 }: {
-  feeds: CampaignFeeds;
+  feeds: EmailFeeds;
+  recordFeeds: EmailRecordFeeds;
   writes: CampaignWrites;
   uploads: UploadProvider;
   showFiled: boolean;
@@ -112,6 +116,7 @@ export function AudiencesSection({
           key={open.id}
           audience={open}
           resources={feeds}
+          signupForms={recordFeeds.signupForms}
           writes={writes}
           uploads={uploads}
           onArchived={() => setOpenId("")}
@@ -200,9 +205,13 @@ export function AudienceDetail({
   onArchived,
   onReadiness,
   resources,
+  signupForms,
 }: {
   audience: AudienceRow;
-  resources?: CampaignFeeds;
+  /** The root's feeds, and its signup forms, for the page that connects a
+   *  storefront. Absent where an audience is shown inside another flow. */
+  resources?: EmailFeeds;
+  signupForms?: EmailRecordFeeds["signupForms"];
   writes: CampaignWrites;
   uploads: UploadProvider;
   onArchived: () => void;
@@ -218,6 +227,7 @@ export function AudienceDetail({
 
   return (
     <div className="os-campaign-detail">
+      <AutoRefresh onRefresh={roster.reload} busy={roster.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
       <Panel label={`${audienceName(audience)} details`}>
         <div className="os-campaign-detail-head">
           <Subhead>{audienceName(audience)}</Subhead>
@@ -248,7 +258,9 @@ export function AudienceDetail({
         ) : null}
       </Panel>
 
-      {resources ? <NewsletterPanel audienceId={audience.id} accountId={audience.accountId} resources={resources} /> : null}
+      {resources && signupForms ? (
+        <NewsletterPanel audienceId={audience.id} accountId={audience.accountId} resources={resources} signupForms={signupForms} />
+      ) : null}
 
       <ImportPanel
         audience={audience}

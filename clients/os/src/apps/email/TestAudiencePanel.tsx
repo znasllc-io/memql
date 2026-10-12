@@ -1,33 +1,26 @@
 import { useMemo, useState } from "react";
-import { getRowByConceptAndId, type Row } from "@znasllc-io/memql-sdk-core/client";
-import { Button, Caption, Field, Notice, Panel, RecordList, RecordRow, Select, Subhead, formatMoment } from "../../kit";
+import type { Row } from "@znasllc-io/memql-sdk-core/client";
+import { AutoRefresh, Button, Caption, Field, Notice, Panel, RecordList, RecordRow, Select, Subhead, formatMoment } from "../../kit";
 import { flatten } from "../../kit/rows";
 import { useOsConnection } from "../../live/connection";
-import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
+import type { LiveCollectionHandle } from "../../live/useLiveCollection";
 import { AccountPicker } from "../accounts/AccountPicker";
 import { useAccountOptions } from "../accounts/tie";
 import { useDefaultOrganization } from "../accounts/organization";
 import { audienceFromRow, campaignFromRow, deliveryFromRow, type AudienceRow, type CampaignRow } from "./rows";
-import { CAMPAIGN_REFRESH_MS, useCampaignDeliveries, useReading, useSendingReadiness } from "./useEmail";
+import { EMAIL_REFRESH_MS, useCampaignDeliveries, useReading, type SendingReadiness } from "./useEmail";
 import { useTestSend } from "./actions";
 import { SendBar } from "./SendBar";
 import { RecordListSkeleton } from "../../kit/RecordListSkeleton";
 
-const concept = "v1:campaigns:testSettings";
 const noRows: Row[] = [];
 const text = (row: Record<string, unknown> | null, key: string) => typeof row?.[key] === "string" ? row[key] as string : "";
-function useTestSettings(accountId: string) {
-  return useLiveCollection<Row>(`campaigns:test-settings:${accountId}`, connection => ({
-    concept,
-    seed: async (_cursor, signal) => ({ rows: accountId ? (await connection.query.campaignTestSettings({ accountId }, { signal })).rows() : [], nextCursor: "" }),
-    reread: async (id, signal) => (await getRowByConceptAndId(connection.query, concept, id, { signal })) as Row | null,
-    inScope: row => text(flatten(row), "accountId") === accountId,
-    paged: false,
-  }));
-}
 const unavailable = (feed: LiveCollectionHandle<Row>) => feed.snapshot.state !== "live" || !!feed.snapshot.error;
+/** One organization's testing settings, out of the feed the app root retains for every organization in view. */
+const settingsOf = (feed: LiveCollectionHandle<Row>, accountId: string) =>
+  feed.snapshot.rows.map(flatten).find(row => text(row, "accountId") === accountId) ?? null;
 
-export function TestAudienceSettings({ audiences }: { audiences: LiveCollectionHandle<Row> }) {
+export function TestAudienceSettings({ audiences, testSettings }: { audiences: LiveCollectionHandle<Row>; testSettings: LiveCollectionHandle<Row> }) {
   const accounts = useAccountOptions();
   const defaultAccountId = useDefaultOrganization(accounts);
   const [chosen, setChosen] = useState("");
@@ -35,14 +28,13 @@ export function TestAudienceSettings({ audiences }: { audiences: LiveCollectionH
   return <Panel label="Testing audience"><Subhead>Testing audience</Subhead>
     <Caption>Choose the internal audience that receives campaign tests for each organization. Manage its addresses in Audiences.</Caption>
     <Field label="Organization"><AccountPicker id="test-organization" label="Testing organization" required accounts={accounts} value={accountId} onChange={setChosen} /></Field>
-    {accountId ? <TestAudienceChoice key={accountId} accountId={accountId} audiences={audiences} /> : null}
+    {accountId ? <TestAudienceChoice key={accountId} accountId={accountId} audiences={audiences} feed={testSettings} /> : null}
   </Panel>;
 }
 
-function TestAudienceChoice({ accountId, audiences }: { accountId: string; audiences: LiveCollectionHandle<Row> }) {
+function TestAudienceChoice({ accountId, audiences, feed }: { accountId: string; audiences: LiveCollectionHandle<Row>; feed: LiveCollectionHandle<Row> }) {
   const connection = useOsConnection();
-  const feed = useTestSettings(accountId);
-  const row = feed.snapshot.rows[0] ? flatten(feed.snapshot.rows[0]) : null;
+  const row = settingsOf(feed, accountId);
   const saved = text(row, "audienceId");
   const [choice, setChoice] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -72,21 +64,24 @@ function TestAudienceChoice({ accountId, audiences }: { accountId: string; audie
   </>;
 }
 
-export function TestSendPanel({ campaign, audiences }: { campaign: CampaignRow; audiences: AudienceRow[] }) {
+/** `sending` is the campaign page's own reading, asked for once and handed to
+ *  every panel that needs it. */
+export function TestSendPanel({ campaign, audiences, testSettings: settings, sending }: {
+  campaign: CampaignRow; audiences: AudienceRow[]; testSettings: LiveCollectionHandle<Row>; sending: SendingReadiness;
+}) {
   const testSend = useTestSend();
   const connection = useOsConnection();
-  const settings = useTestSettings(campaign.accountId);
-  const row = settings.snapshot.rows[0] ? flatten(settings.snapshot.rows[0]) : null;
+  const row = settingsOf(settings, campaign.accountId);
   const audienceId = text(row, "audienceId");
   const audience = audiences.find(a => a.id === audienceId && a.accountId === campaign.accountId && a.status === "active");
-  const sending = useSendingReadiness("", "", campaign.id);
   const read = useMemo(() => connection ? async (signal: AbortSignal) => (await connection.query.campaignTestRuns({ campaignId: campaign.id }, { signal })).rows() : null, [connection, campaign.id]);
-  const history = useReading<Row[]>(noRows, read, [read], CAMPAIGN_REFRESH_MS);
+  const history = useReading<Row[]>(noRows, read, [read]);
   const [expanded, setExpanded] = useState("");
   const ready = sending.ready && !unavailable(settings) && !!audience && audienceId !== campaign.audienceId;
   const send = async () => { if (ready && await testSend.send(campaign.id, audienceId)) history.reload(); };
   const runs = history.value.map(campaignFromRow);
   return <Panel label="Send a test"><Subhead>Test results</Subhead>
+    <AutoRefresh onRefresh={history.reload} busy={history.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
     <Caption>{audience ? `Testing audience: ${audience.name}` : "Choose a testing audience for this organization in Settings."}</Caption>
     {audienceId === campaign.audienceId ? <Notice tone="warn" sentence="Choose a separate testing audience in Settings." /> : null}
     {unavailable(settings) ? <Notice tone="warn" sentence="Testing audience is not confirmed." next="Waiting for the connection to recover." /> : null}
@@ -110,6 +105,7 @@ export function TestSendPanel({ campaign, audiences }: { campaign: CampaignRow; 
 function TestDeliveries({ run }: { run: CampaignRow }) {
   const deliveries = useCampaignDeliveries(run.id);
   return <>
+    <AutoRefresh onRefresh={deliveries.reload} busy={deliveries.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
     {run.lastError ? <Notice tone="warn" sentence="This test needs attention." detail={run.lastError} /> : null}
     {deliveries.state === "loading" && !deliveries.value.length ? <RecordListSkeleton rows={2} label="Test deliveries" /> : null}
     {deliveries.error ? <Notice tone="error" sentence="Deliveries could not be read." detail={deliveries.error} /> : null}

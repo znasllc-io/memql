@@ -4,18 +4,18 @@ import { Overview, OverviewBreakdown } from "../../kit/Overview";
 import { InfoDetail } from "../../kit/InfoDetail";
 import { absent, figureOf } from "../../kit/measure";
 import { campaignFromRow, audienceFromRow, templateFromRow } from "./rows";
-import type { CampaignFeeds } from "./useEmail";
+import type { EmailFeeds } from "./useEmail";
 
 export function CampaignsOverview({
   feeds,
   navigate,
 }: {
-  feeds: CampaignFeeds;
+  feeds: EmailFeeds;
   navigate: (id: string) => void;
 }) {
   const campaigns = feeds.campaigns.snapshot.rows.map(campaignFromRow);
   const current = feeds.campaigns.snapshot.state === "live" && !feeds.campaigns.snapshot.error;
-  const count = (key: keyof CampaignFeeds, n: number) =>
+  const count = (key: keyof EmailFeeds, n: number) =>
     feeds[key].snapshot.error
       ? absent("failed", feeds[key].snapshot.error)
       : feeds[key].snapshot.state === "live"
