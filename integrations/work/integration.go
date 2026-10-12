@@ -53,8 +53,13 @@ const resultConcept = "v1:work:result"
 
 // Integration exposes the work capabilities.
 type Integration struct {
-	engine                 Engine
-	decisionGate           func(context.Context, string) (func(), error)
+	engine Engine
+
+	// decisionGate takes the decision locks for the keys it is given, in the
+	// order given, with ONE acquisition: one transaction on one connection of
+	// the gate pool (memql.AcquireWriteGates). A flow that needs several names
+	// them together rather than taking one inside another (memql#6022).
+	decisionGate           func(context.Context, ...string) (func(), error)
 	reviewValidators       map[string]func(context.Context, map[string]any) error
 	reviewAnswerValidators map[string]func(context.Context, map[string]any, map[string]any) error
 	logger                 *slog.Logger
@@ -176,12 +181,16 @@ func New(engine Engine, logger *slog.Logger, database ...func() *bun.DB) *Integr
 	if len(database) > 0 {
 		i.bunDB = database[0]
 	}
-	i.decisionGate = func(ctx context.Context, key string) (func(), error) {
+	i.decisionGate = func(ctx context.Context, keys ...string) (func(), error) {
 		db, err := i.gates()
 		if err != nil {
 			return nil, err
 		}
-		return memql.AcquireWriteGate(ctx, db, "work-approval-decision:"+memql.BareShortId(key))
+		locks := make([]string, len(keys))
+		for n, key := range keys {
+			locks[n] = "work-approval-decision:" + memql.BareShortId(key)
+		}
+		return memql.AcquireWriteGates(ctx, db, locks...)
 	}
 	i.rowsInFlight = i.runsInFlight
 	return i

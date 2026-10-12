@@ -56,52 +56,57 @@ func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, appro
 		return "", fmt.Errorf("human decision requires the current owned work run")
 	}
 	hash := workstate.ArtifactHash(subject)
-	id := "question-" + workstate.ArtifactHash(map[string]any{"run": memql.BareShortId(runID), "step": rc.StepKey, "question": hash, "kind": approvalKind})[:32]
+	first := "question-" + workstate.ArtifactHash(map[string]any{"run": memql.BareShortId(runID), "step": rc.StepKey, "question": hash, "kind": approvalKind})[:32]
 	if i.decisionGate == nil {
 		return "", fmt.Errorf("feedback coordination is unavailable")
 	}
-	release, err := i.decisionGate(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	defer release()
-	ctx = memql.ContextWithFreshRead(ownerActor(ctx, owner))
-	run, err := i.store().runForOwner(ctx, runID)
-	if err != nil {
-		return "", err
-	}
-	if run == nil || run["cancelRequested"] == true || (rowString(run, "status") != runStatusRunning && rowString(run, "status") != runStatusWaiting) {
-		return "", fmt.Errorf("feedback run is no longer active")
-	}
-	existing, err := i.store().query(ctx, "query "+call("workApprovalForOwner", map[string]any{"approvalId": id}))
-	if err != nil {
-		return "", err
-	}
-	// Renewal names the expired receipt, so every replica discovers the same
-	// successor. Hold that successor's decision lock too: an answer arriving
-	// while it is created must never be overwritten by the park below.
-	for renewals := 0; approvalKind == "scopeElevation" && len(existing) > 0 && rowString(existing[0], "decision") != "rejected"; renewals++ {
-		until, valid := rowTime(existing[0], "expiresAt")
-		if valid && i.clock().Before(until) {
-			break
+	read := memql.ContextWithFreshRead(ownerActor(ctx, owner))
+	// THE CHAIN'S LOCKS ARE ONE ACQUISITION. Renewal names the expired receipt,
+	// so every replica discovers the same successor, and an answer arriving at
+	// any receipt of the chain while it is walked must never be overwritten by
+	// the park below: every receipt the chain runs through is a decision lock.
+	// Taken one inside another they were a gate connection each, and a chain
+	// longer than the gate pool could never be renewed (memql#6022). So: walk the
+	// chain without its locks, take every key it ran through in chain order --
+	// the same order for every replica, since the chain is a function of its
+	// first receipt -- in one transaction on one connection, and walk it again
+	// under them. The locked walk is the answer; one that went past the keys
+	// held (a grant expired in between) is walked and locked again.
+	var (
+		id       string
+		existing []map[string]any
+	)
+	for attempt := 1; ; attempt++ {
+		// Only computer access renews; every other question is its first receipt.
+		walked := []string{first}
+		if approvalKind == "scopeElevation" {
+			var err error
+			if walked, _, err = i.renewalChain(read, approvalKind, first); err != nil {
+				return "", err
+			}
 		}
-		if renewals >= 100 {
-			return "", fmt.Errorf("computer access has expired too many times; start fresh work")
-		}
-		id = "question-" + workstate.ArtifactHash(map[string]any{"renewalOf": id})[:32]
-		unlock, lockErr := i.decisionGate(ctx, id)
-		if lockErr != nil {
-			return "", lockErr
-		}
-		defer unlock()
-		existing, err = i.store().query(ctx, "query "+call("workApprovalForOwner", map[string]any{"approvalId": id}))
+		release, err := i.decisionGate(ctx, walked...)
 		if err != nil {
 			return "", err
 		}
+		locked, rows, err := i.renewalChain(read, approvalKind, first)
+		if err != nil {
+			release()
+			return "", err
+		}
+		if len(locked) <= len(walked) {
+			defer release()
+			id, existing = locked[len(locked)-1], rows
+			break
+		}
+		release()
+		if attempt == renewalLockAttempts {
+			return "", fmt.Errorf("computer access kept expiring while it was being renewed; try again")
+		}
 	}
-	// Re-read after acquiring a successor lock, which may have waited behind
-	// a person's decision on another replica.
-	run, err = i.store().runForOwner(ctx, runID)
+	// Read under the locks, which may have waited behind a person's decision on
+	// another replica.
+	run, err := i.store().runForOwner(read, runID)
 	if err != nil {
 		return "", err
 	}
@@ -117,7 +122,7 @@ func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, appro
 		}
 	}
 	if len(existing) == 0 {
-		_, err = i.RaiseApproval(ctx, owner, ApprovalSeed{ApprovalId: id, RunId: runID, StepKey: rc.StepKey, Kind: approvalKind, Subject: subject, ArtifactHash: hash, Question: question, Options: options, ExpiresAt: expires})
+		_, err = i.RaiseApproval(read, owner, ApprovalSeed{ApprovalId: id, RunId: runID, StepKey: rc.StepKey, Kind: approvalKind, Subject: subject, ArtifactHash: hash, Question: question, Options: options, ExpiresAt: expires})
 		if err != nil {
 			return "", err
 		}
@@ -125,10 +130,48 @@ func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, appro
 	if rowString(run, "status") == runStatusWaiting {
 		return id, nil
 	}
-	if err := i.store().updateRun(ctx, runID, map[string]any{"versionTime": rfc(workRowVersionAfter(run["createdAt"], i.clock())), "status": runStatusWaiting, "waitingOn": map[string]any{"kind": "approval", "subject": id, "approvalKind": approvalKind, "since": rfc(i.clock().UTC())}}); err != nil {
+	if err := i.store().updateRun(read, runID, map[string]any{"versionTime": rfc(workRowVersionAfter(run["createdAt"], i.clock())), "status": runStatusWaiting, "waitingOn": map[string]any{"kind": "approval", "subject": id, "approvalKind": approvalKind, "since": rfc(i.clock().UTC())}}); err != nil {
 		return "", err
 	}
 	return id, nil
+}
+
+// maxScopeRenewals bounds a computer-access question's renewal chain: past it the
+// person is told to start fresh work rather than renew again.
+const maxScopeRenewals = 100
+
+// renewalLockAttempts is how many times a renewal walks its chain and locks it
+// before it gives up: a second walk differs from the first only when a grant
+// expired between them, so a third is already rare.
+const renewalLockAttempts = 3
+
+// renewalChain walks a question's receipts from its first: every receipt the
+// question runs through now -- for computer access, each expired grant and its
+// successor in turn -- ending with the one that answers for it, and that
+// receipt's rows (none when it does not exist yet). Every other kind of question
+// is its first receipt alone.
+func (i *Integration) renewalChain(ctx context.Context, approvalKind, first string) ([]string, []map[string]any, error) {
+	chain := []string{first}
+	existing, err := i.store().query(ctx, "query "+call("workApprovalForOwner", map[string]any{"approvalId": first}))
+	if err != nil {
+		return nil, nil, err
+	}
+	for renewals := 0; approvalKind == "scopeElevation" && len(existing) > 0 && rowString(existing[0], "decision") != "rejected"; renewals++ {
+		until, valid := rowTime(existing[0], "expiresAt")
+		if valid && i.clock().Before(until) {
+			break
+		}
+		if renewals >= maxScopeRenewals {
+			return nil, nil, fmt.Errorf("computer access has expired too many times; start fresh work")
+		}
+		next := "question-" + workstate.ArtifactHash(map[string]any{"renewalOf": chain[len(chain)-1]})[:32]
+		chain = append(chain, next)
+		existing, err = i.store().query(ctx, "query "+call("workApprovalForOwner", map[string]any{"approvalId": next}))
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return chain, existing, nil
 }
 
 func validateFeedbackAnswer(subject map[string]any, decision string, answer map[string]any) error {
