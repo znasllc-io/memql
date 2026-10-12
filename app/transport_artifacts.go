@@ -4,7 +4,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"strings"
 

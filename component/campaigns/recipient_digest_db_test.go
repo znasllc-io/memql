@@ -21,6 +21,16 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
+// These cases share a booted engine; each subtest owns and cleans its rows.
+func TestRecipientDigestDB(t *testing.T) {
+	f := newDigestFixture(t)
+	f.run(t, "AddRecipientStampsTheMailboxDigest", f.TestAddRecipientStampsTheMailboxDigest)
+	f.run(t, "RecipientDigestBackfill", f.TestRecipientDigestBackfill)
+	f.run(t, "SignupFindsTheExistingMembershipByDigest", f.TestSignupFindsTheExistingMembershipByDigest)
+	f.run(t, "SignupAddsANewAddressAndCountsTheAudienceForItsCap", f.TestSignupAddsANewAddressAndCountsTheAudienceForItsCap)
+	f.run(t, "ASignupOnAnotherReplicaSeesAMemberWhoUnsubscribedAfterItLastLooked", f.TestASignupOnAnotherReplicaSeesAMemberWhoUnsubscribedAfterItLastLooked)
+}
+
 // recipient_digest_db_test.go -- the recipient digest against a REAL engine and
 // a REAL Postgres (memql#6022, F9): that the stamp lands on the row, that the
 // backfill reaches a row written without one, and that a signup finds an
@@ -29,6 +39,29 @@ import (
 // The database is shared with other tracks' runs and never truncated, so every
 // case names its rows with an id nothing else can mint, counts only its own
 // audience, and removes what it wrote when it ends.
+
+// digestFixture lives for one parent test, never across independent tests that
+// may replace the process's concept registry. Workers, gate pools, and tenant
+// rows remain per case. Replica tests still boot a separate engine and cache.
+type digestFixture struct {
+	engine *memql.MemQLEngine
+	db     *bun.DB
+}
+
+func newDigestFixture(t *testing.T) *digestFixture {
+	t.Helper()
+	engine, db := digestDBEngine(t)
+	return &digestFixture{engine: engine, db: db}
+}
+
+func (f *digestFixture) run(t *testing.T, name string, test func(*testing.T)) {
+	t.Helper()
+	t.Run(name, func(t *testing.T) {
+		maxOpen := f.db.Stats().MaxOpenConnections
+		t.Cleanup(func() { f.db.SetMaxOpenConns(maxOpen) })
+		test(t)
+	})
+}
 
 // digestDBEngine boots one real engine against the shared test database.
 func digestDBEngine(t *testing.T) (*memql.MemQLEngine, *bun.DB) {
@@ -89,10 +122,9 @@ type digestTenant struct {
 	suffix   string
 }
 
-func newDigestTenant(t *testing.T, name string) *digestTenant {
+func (f *digestFixture) newDigestTenant(t *testing.T, name string) *digestTenant {
 	t.Helper()
-	eng, db := digestDBEngine(t)
-	return newDigestTenantOn(t, eng, db, name)
+	return newDigestTenantOn(t, f.engine, f.db, name)
 }
 
 // newDigestTenantOn is a tenant on an engine the test already booted, for the
@@ -148,8 +180,8 @@ func versionsOf(t *testing.T, db *bun.DB, recipientID string) (versions int, new
 // NORMALIZED address, whatever spelling was typed, and it is still there after
 // a later write to the row -- the unsubscribe is an update, and a digest an
 // update dropped would make the member unfindable exactly when it matters.
-func TestAddRecipientStampsTheMailboxDigest(t *testing.T) {
-	d := newDigestTenant(t, "digest-stamp")
+func (f *digestFixture) TestAddRecipientStampsTheMailboxDigest(t *testing.T) {
+	d := f.newDigestTenant(t, "digest-stamp")
 	recipient := d.suffix + "-rec"
 
 	if err := d.store.AddRecipient(d.owner, recipient, d.audience, " Foo@Example.TEST ", "", "manual", d.org, nil); err != nil {
@@ -240,8 +272,8 @@ func sweepThese(t *testing.T, db *bun.DB, recipientIDs ...string) int {
 //
 // The sweep runs over a copy of this one row in a scratch schema (sweepThese), not
 // over the shared table.
-func TestRecipientDigestBackfill(t *testing.T) {
-	d := newDigestTenant(t, "digest-backfill")
+func (f *digestFixture) TestRecipientDigestBackfill(t *testing.T) {
+	d := f.newDigestTenant(t, "digest-backfill")
 	eng, db, owner, store := d.engine, d.db, d.owner, d.store
 	recipient := d.suffix + "-rec"
 
@@ -363,9 +395,9 @@ type digestNewsletter struct {
 
 // newEmptyNewsletter is a newsletter whose audience holds nobody: the form posts
 // subscriber@example.test, and a case plants whatever rows it needs.
-func newEmptyNewsletter(t *testing.T, name string) *digestNewsletter {
+func (f *digestFixture) newEmptyNewsletter(t *testing.T, name string) *digestNewsletter {
 	t.Helper()
-	d := newDigestTenant(t, name)
+	d := f.newDigestTenant(t, name)
 	sender := &recordingSender{}
 	worker := newGatedWorker(t, d.engine, d.db, sender)
 	return setUpStorefront(t, d, worker, sender)
@@ -423,9 +455,9 @@ func setUpStorefront(t *testing.T, d *digestTenant, worker *Worker, sender *reco
 }
 
 // newDigestNewsletter is a newsletter whose audience already holds one member.
-func newDigestNewsletter(t *testing.T, name string) *digestNewsletter {
+func (f *digestFixture) newDigestNewsletter(t *testing.T, name string) *digestNewsletter {
 	t.Helper()
-	n := newEmptyNewsletter(t, name)
+	n := f.newEmptyNewsletter(t, name)
 	n.member = n.suffix + "-rec"
 	n.execute(t, n.owner, call("mutation", "addRecipient", arg{"recipientId", n.member}, arg{"audienceId", n.audience}, arg{"accountId", n.org}, arg{"email", " Subscriber@Example.TEST "}))
 	return n
@@ -455,8 +487,8 @@ func (n *digestNewsletter) roster(t *testing.T) []Recipient {
 // address under another spelling, and the signup finds it by its digest -- it
 // reads no roster, adds no second membership, and the signup names the member
 // that was there.
-func TestSignupFindsTheExistingMembershipByDigest(t *testing.T) {
-	n := newDigestNewsletter(t, "digest-signup")
+func (f *digestFixture) TestSignupFindsTheExistingMembershipByDigest(t *testing.T) {
+	n := f.newDigestNewsletter(t, "digest-signup")
 	actual := n.worker.store.engine
 	counting := &rosterReadCounter{Engine: actual}
 	n.worker.store.engine = counting
@@ -492,8 +524,8 @@ func TestSignupFindsTheExistingMembershipByDigest(t *testing.T) {
 // is added without a roster read, carries its own digest from the first write,
 // and is refused at the audience ceiling by a COUNT -- while the member already
 // in a full audience is still accepted.
-func TestSignupAddsANewAddressAndCountsTheAudienceForItsCap(t *testing.T) {
-	n := newDigestNewsletter(t, "digest-cap")
+func (f *digestFixture) TestSignupAddsANewAddressAndCountsTheAudienceForItsCap(t *testing.T) {
+	n := f.newDigestNewsletter(t, "digest-cap")
 	actual := n.worker.store.engine
 	counting := &rosterReadCounter{Engine: actual}
 	n.worker.store.engine = counting
@@ -551,8 +583,8 @@ func TestSignupAddsANewAddressAndCountsTheAudienceForItsCap(t *testing.T) {
 // (TestSignupFindsTheExistingMembershipByDigest): two engines in one test process
 // share an invalidation channel, so no test here can make one of them lag. This
 // pins the behaviour itself across two engines on one database.
-func TestASignupOnAnotherReplicaSeesAMemberWhoUnsubscribedAfterItLastLooked(t *testing.T) {
-	n := newDigestNewsletter(t, "digest-replica")
+func (f *digestFixture) TestASignupOnAnotherReplicaSeesAMemberWhoUnsubscribedAfterItLastLooked(t *testing.T) {
+	n := f.newDigestNewsletter(t, "digest-replica")
 	other := n.replica(t)
 	digest := EmailDigest("subscriber@example.test")
 

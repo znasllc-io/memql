@@ -15,6 +15,14 @@ import (
 	"github.com/znasllc-io/memql/integrations/email"
 )
 
+// These cases share a booted engine; each subtest owns and cleans its rows.
+func TestBusyGatesDB(t *testing.T) {
+	f := newDigestFixture(t)
+	f.run(t, "AWelcomeWhoseSendLockIsBusyStaysPendingAndGoesOutOnTheNextPass", f.TestAWelcomeWhoseSendLockIsBusyStaysPendingAndGoesOutOnTheNextPass)
+	f.run(t, "AWelcomeTakesItsLocksOnOneConnection", f.TestAWelcomeTakesItsLocksOnOneConnection)
+	f.run(t, "AnAttemptIsRecordedOnlyAfterTheTransportsLockIsReserved", f.TestAnAttemptIsRecordedOnlyAfterTheTransportsLockIsReserved)
+}
+
 // busy_gate_db_test.go -- a lock that was busy is "nothing attempted, try later"
 // on every path that sends mail, against a real engine and Postgres (memql#6022,
 // F9 fix round 3).
@@ -82,8 +90,8 @@ func welcomeReceiptID(signup map[string]any) string {
 // no verdict is written -- a blocked welcome is never retried, and this one was not
 // refused, only early. Nothing was attempted: no receipt, no mail. The next pass,
 // with the lock free, sends it.
-func TestAWelcomeWhoseSendLockIsBusyStaysPendingAndGoesOutOnTheNextPass(t *testing.T) {
-	n := newEmptyNewsletter(t, "welcome-busy")
+func (f *digestFixture) TestAWelcomeWhoseSendLockIsBusyStaysPendingAndGoesOutOnTheNextPass(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "welcome-busy")
 	signup := pendingWelcome(t, n)
 	receiptID := welcomeReceiptID(signup)
 	release := holdsKey(t, n, singleSendLock(receiptID))
@@ -125,8 +133,8 @@ func TestAWelcomeWhoseSendLockIsBusyStaysPendingAndGoesOutOnTheNextPass(t *testi
 // on one connection. Taken one inside another they are a connection each, and a
 // pod whose gate pool is nearly spent could find the welcome holding two and
 // waiting for a third. Here the pool IS one connection.
-func TestAWelcomeTakesItsLocksOnOneConnection(t *testing.T) {
-	n := newEmptyNewsletter(t, "welcome-one")
+func (f *digestFixture) TestAWelcomeTakesItsLocksOnOneConnection(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "welcome-one")
 	signup := pendingWelcome(t, n)
 	tiny, err := database.NewGatePool(dbtest.DSN(), 1)
 	if err != nil {
@@ -180,8 +188,8 @@ func (s *reservingSender) Reserve(ctx context.Context, msg email.Message, _ emai
 // busy, nothing was attempted -- no receipt exists -- and the same request, made
 // again, goes out. Were the receipt written first, the refusal would leave a
 // message whose receipt says an attempt began, which replay never sends again.
-func TestAnAttemptIsRecordedOnlyAfterTheTransportsLockIsReserved(t *testing.T) {
-	n := newEmptyNewsletter(t, "reserve-first")
+func (f *digestFixture) TestAnAttemptIsRecordedOnlyAfterTheTransportsLockIsReserved(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "reserve-first")
 	recipient := n.suffix + "-rcp"
 	n.execute(t, n.owner, call("mutation", "addRecipient", arg{"recipientId", recipient}, arg{"audienceId", n.audience}, arg{"accountId", n.org}, arg{"email", "reserve@example.test"}))
 	args := map[string]any{"templateId": n.suffix + "-tpl", "recipientId": recipient, "senderIdentityId": n.suffix + "-sender", "requestId": "reserve-first-once"}

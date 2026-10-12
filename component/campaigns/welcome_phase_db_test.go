@@ -14,6 +14,15 @@ import (
 	"github.com/znasllc-io/memql/integrations/email"
 )
 
+// These cases share a booted engine; each subtest owns and cleans its rows.
+func TestWelcomePhaseDB(t *testing.T) {
+	f := newDigestFixture(t)
+	f.run(t, "AWelcomeWhoseTimeRunsOutBeforeItsSendBeginsStaysPending", f.TestAWelcomeWhoseTimeRunsOutBeforeItsSendBeginsStaysPending)
+	f.run(t, "AWelcomeWhoseTransportIsBusyStaysPendingAndGoesOutOnTheNextPass", f.TestAWelcomeWhoseTransportIsBusyStaysPendingAndGoesOutOnTheNextPass)
+	f.run(t, "AWelcomeWhoseSendBeganIsEndedByItEvenPastItsPhase", f.TestAWelcomeWhoseSendBeganIsEndedByItEvenPastItsPhase)
+	f.run(t, "AWelcomeWritesNoVerdictAfterItsLocksWereLost", f.TestAWelcomeWritesNoVerdictAfterItsLocksWereLost)
+}
+
 // welcome_phase_db_test.go -- only a send that began can end a welcome
 // (memql#6022, F9 fix round 4).
 //
@@ -49,13 +58,13 @@ func (e *slowWhileHeld) Execute(ctx context.Context, q string) (any, error) {
 // in the reads that decide whether the welcome may be sent, or in the send's own
 // first read. Either way nothing was attempted: the welcome stays pending -- no
 // verdict, no receipt, no mail -- and the next pass sends it.
-func TestAWelcomeWhoseTimeRunsOutBeforeItsSendBeginsStaysPending(t *testing.T) {
+func (f *digestFixture) TestAWelcomeWhoseTimeRunsOutBeforeItsSendBeginsStaysPending(t *testing.T) {
 	for _, slow := range []string{
 		"query newsletterForSite",      // the storefront's configuration, read under the locks
 		"query campaignSingleSendById", // the send's first read, before any attempt
 	} {
 		t.Run(strings.TrimPrefix(slow, "query "), func(t *testing.T) {
-			n := newEmptyNewsletter(t, "welcome-late")
+			n := f.newEmptyNewsletter(t, "welcome-late")
 			signup := pendingWelcome(t, n)
 			receiptID := welcomeReceiptID(signup)
 			actual := n.worker.store.engine
@@ -113,8 +122,8 @@ func TestAWelcomeWhoseTimeRunsOutBeforeItsSendBeginsStaysPending(t *testing.T) {
 // recorded) is busy. Nothing was attempted -- no receipt, no mail -- so the welcome
 // is not blocked; the drain ends its pass on the busy answer and the next pass,
 // with the transport free, sends it.
-func TestAWelcomeWhoseTransportIsBusyStaysPendingAndGoesOutOnTheNextPass(t *testing.T) {
-	n := newEmptyNewsletter(t, "welcome-transport-busy")
+func (f *digestFixture) TestAWelcomeWhoseTransportIsBusyStaysPendingAndGoesOutOnTheNextPass(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "welcome-transport-busy")
 	signup := pendingWelcome(t, n)
 	receiptID := welcomeReceiptID(signup)
 	sender := &reservingSender{recordingSender: n.sender, busyFor: 1}
@@ -157,8 +166,8 @@ func TestAWelcomeWhoseTransportIsBusyStaysPendingAndGoesOutOnTheNextPass(t *test
 // ended by that send, sent, although its time under the locks is over: the
 // verdict of a send that began is written whatever the time, while the locks are
 // held.
-func TestAWelcomeWhoseSendBeganIsEndedByItEvenPastItsPhase(t *testing.T) {
-	n := newEmptyNewsletter(t, "welcome-slow-send")
+func (f *digestFixture) TestAWelcomeWhoseSendBeganIsEndedByItEvenPastItsPhase(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "welcome-slow-send")
 	signup := pendingWelcome(t, n)
 	// The send must begin inside the phase (the reads before it have ample time on
 	// a shared database) and end after it.
@@ -186,8 +195,8 @@ func TestAWelcomeWhoseSendBeganIsEndedByItEvenPastItsPhase(t *testing.T) {
 // verdict is not written -- another replica may hold the locks by now -- and
 // nothing is lost: the next pass finds the send's receipt and records the welcome
 // as sent without sending it again.
-func TestAWelcomeWritesNoVerdictAfterItsLocksWereLost(t *testing.T) {
-	n := newEmptyNewsletter(t, "welcome-lost")
+func (f *digestFixture) TestAWelcomeWritesNoVerdictAfterItsLocksWereLost(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "welcome-lost")
 	signup := pendingWelcome(t, n)
 	actual := n.worker.store.engine
 	ender := &sessionEnder{Engine: actual, admin: n.db.DB, key: newsletterLock("audience", n.audience), t: t,

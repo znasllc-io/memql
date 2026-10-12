@@ -10,6 +10,21 @@ import (
 	"time"
 )
 
+// These cases share a booted engine; each subtest owns and cleans its rows.
+func TestSignupGatesDB(t *testing.T) {
+	f := newDigestFixture(t)
+	f.run(t, "ASlowMailboxReadDoesNotBlockASecondSignupOnTheSameStorefront", f.TestASlowMailboxReadDoesNotBlockASecondSignupOnTheSameStorefront)
+	f.run(t, "FourSignupsOnFourStorefrontsCompleteOnAFourConnectionPool", f.TestFourSignupsOnFourStorefrontsCompleteOnAFourConnectionPool)
+	f.run(t, "AnAudienceOverTheScanLimitIsAnsweredAtOnce", f.TestAnAudienceOverTheScanLimitIsAnsweredAtOnce)
+	f.run(t, "ConcurrentSignupsAtTheCapAddOnlyUpToTheCap", f.TestConcurrentSignupsAtTheCapAddOnlyUpToTheCap)
+	f.run(t, "TwoConcurrentSignupsForTheSameNewAddressMakeOneMember", f.TestTwoConcurrentSignupsForTheSameNewAddressMakeOneMember)
+	f.run(t, "TwoStorefrontsOnOneAudienceTakeOneMemberForOneAddress", f.TestTwoStorefrontsOnOneAudienceTakeOneMemberForOneAddress)
+	f.run(t, "AMailboxAddedAfterTheReadIsAdoptedNotAddedAgain", f.TestAMailboxAddedAfterTheReadIsAdoptedNotAddedAgain)
+	f.run(t, "AMailboxThatOptedOutMeanwhileIsNotWelcomed", f.TestAMailboxThatOptedOutMeanwhileIsNotWelcomed)
+	f.run(t, "AGatePastItsWaitGivesThePersonTheSentence", f.TestAGatePastItsWaitGivesThePersonTheSentence)
+	f.run(t, "NothingSlowRunsWhileASignupHoldsItsLocks", f.TestNothingSlowRunsWhileASignupHoldsItsLocks)
+}
+
 // signup_gates_db_test.go -- what a public signup holds while it works
 // (memql#6022, F9 fix round 2), against a REAL engine and a REAL Postgres.
 //
@@ -22,9 +37,9 @@ import (
 
 // newStorefronts is n tenants on ONE engine, one pool and one worker -- a pod
 // serving n storefronts -- each with a newsletter bound to its own audience.
-func newStorefronts(t *testing.T, name string, n int) (*Worker, []*digestNewsletter) {
+func (f *digestFixture) newStorefronts(t *testing.T, name string, n int) (*Worker, []*digestNewsletter) {
 	t.Helper()
-	eng, db := digestDBEngine(t)
+	eng, db := f.engine, f.db
 	sender := &recordingSender{}
 	worker := newGatedWorker(t, eng, db, sender)
 	stores := make([]*digestNewsletter, 0, n)
@@ -83,8 +98,8 @@ func (e *slowMailbox) Execute(ctx context.Context, q string) (any, error) {
 // under the storefront's locks they hold a pool connection for all of it and make
 // every other signup of the storefront wait: a second signup failed after 10 s with
 // a raw "i/o timeout" while the first was still reading.
-func TestASlowMailboxReadDoesNotBlockASecondSignupOnTheSameStorefront(t *testing.T) {
-	n := newEmptyNewsletter(t, "gate-slow")
+func (f *digestFixture) TestASlowMailboxReadDoesNotBlockASecondSignupOnTheSameStorefront(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "gate-slow")
 	actual := n.worker.store.engine
 	slow := &slowMailbox{Engine: actual, digest: EmailDigest("slow@example.test"), entered: make(chan struct{}), release: make(chan struct{})}
 	n.worker.store.engine = slow
@@ -133,8 +148,8 @@ func TestASlowMailboxReadDoesNotBlockASecondSignupOnTheSameStorefront(t *testing
 // request pool's, so four signups that all hold locks at once still find a request
 // connection each. (With the locks on the request pool, four storefronts is the whole
 // pool: every signup holds one and starves the others' reads until its deadline.)
-func TestFourSignupsOnFourStorefrontsCompleteOnAFourConnectionPool(t *testing.T) {
-	worker, stores := newStorefronts(t, "gate-four", 4)
+func (f *digestFixture) TestFourSignupsOnFourStorefrontsCompleteOnAFourConnectionPool(t *testing.T) {
+	worker, stores := f.newStorefronts(t, "gate-four", 4)
 	stores[0].db.DB.SetMaxOpenConns(4)
 
 	errs := make([]error, len(stores))
@@ -205,8 +220,8 @@ func (e hugeAudience) Execute(ctx context.Context, q string) (any, error) {
 // TestAnAudienceOverTheScanLimitIsAnsweredAtOnce: a roster walk that can only end
 // in "cannot tell" is seconds a page spent on nothing. The audience's size is one
 // count, and an audience bigger than the walk will read is answered from that.
-func TestAnAudienceOverTheScanLimitIsAnsweredAtOnce(t *testing.T) {
-	n := newEmptyNewsletter(t, "gate-huge")
+func (f *digestFixture) TestAnAudienceOverTheScanLimitIsAnsweredAtOnce(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "gate-huge")
 	limit := mailboxRosterScanPages
 	mailboxRosterScanPages = 3
 	actual := n.worker.store.engine
@@ -316,8 +331,8 @@ func signupsTogether(worker *Worker, owner context.Context, forms []map[string]a
 // before the locks as a fast refusal, and N signups that run side by side all pass
 // it on the same count. The check that holds is the one made again under the
 // audience's lock, immediately before the add.
-func TestConcurrentSignupsAtTheCapAddOnlyUpToTheCap(t *testing.T) {
-	n := newDigestNewsletter(t, "gate-cap") // the audience holds one member
+func (f *digestFixture) TestConcurrentSignupsAtTheCapAddOnlyUpToTheCap(t *testing.T) {
+	n := f.newDigestNewsletter(t, "gate-cap") // the audience holds one member
 	n.worker.cfg.MaxAudience = 3
 	const visitors = 5
 
@@ -356,8 +371,8 @@ func TestConcurrentSignupsAtTheCapAddOnlyUpToTheCap(t *testing.T) {
 // this address" before either writes. The audience gets one member and one signup,
 // and the signup names that member -- the second signup finds the first's signup
 // under the lock and is accepted without a second add.
-func TestTwoConcurrentSignupsForTheSameNewAddressMakeOneMember(t *testing.T) {
-	n := newEmptyNewsletter(t, "gate-same")
+func (f *digestFixture) TestTwoConcurrentSignupsForTheSameNewAddressMakeOneMember(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "gate-same")
 	actual := n.worker.store.engine
 	n.worker.store.engine = meetingEngine{Engine: actual, prefix: "query recipientsWithoutDigestInAudience", meeting: newMeeting(2)}
 	defer func() { n.worker.store.engine = actual }()
@@ -390,8 +405,8 @@ func TestTwoConcurrentSignupsForTheSameNewAddressMakeOneMember(t *testing.T) {
 // The same address, signed up on both at once after both have read "nobody has it",
 // is one member and one signup, which names that member: the audience's lock is
 // where the two meet, and the second finds the first's signup under it.
-func TestTwoStorefrontsOnOneAudienceTakeOneMemberForOneAddress(t *testing.T) {
-	n := newEmptyNewsletter(t, "gate-two-sites")
+func (f *digestFixture) TestTwoStorefrontsOnOneAudienceTakeOneMemberForOneAddress(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "gate-two-sites")
 	second := n.suffix + "-site-two"
 	n.execute(t, n.owner, call("mutation", "createSite", arg{"siteId", second}, arg{"accountId", n.org}, arg{"hostname", n.suffix + "-two.example.test"}, arg{"bundleRef", "sites/newsletter/test"}, arg{"kind", "static"}))
 	nodes, err := n.worker.handleConfigureNewsletter(n.owner, map[string]any{"siteId": second, "audienceId": n.audience, "templateId": n.suffix + "-tpl", "senderIdentityId": n.suffix + "-sender", "consentText": "I agree to receive Client's newsletter by email.", "enabled": true}, 0)
@@ -449,8 +464,8 @@ func (e *addsMeanwhile) Execute(ctx context.Context, q string) (any, error) {
 // made again, so a row that appeared in between is the member and the signup does
 // not add a second row for the same person -- who would then be on every campaign
 // twice.
-func TestAMailboxAddedAfterTheReadIsAdoptedNotAddedAgain(t *testing.T) {
-	n := newEmptyNewsletter(t, "gate-meanwhile")
+func (f *digestFixture) TestAMailboxAddedAfterTheReadIsAdoptedNotAddedAgain(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "gate-meanwhile")
 	manual := n.suffix + "-manual"
 	actual := n.worker.store.engine
 	n.worker.store.engine = &addsMeanwhile{Engine: actual, add: func() {
@@ -482,8 +497,8 @@ func TestAMailboxAddedAfterTheReadIsAdoptedNotAddedAgain(t *testing.T) {
 // TestAMailboxThatOptedOutMeanwhileIsNotWelcomed: the same window, with the row that
 // appeared in between already opted out. Re-applying the verdict under the lock
 // refuses the signup and writes nothing.
-func TestAMailboxThatOptedOutMeanwhileIsNotWelcomed(t *testing.T) {
-	n := newEmptyNewsletter(t, "gate-meanwhile-out")
+func (f *digestFixture) TestAMailboxThatOptedOutMeanwhileIsNotWelcomed(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "gate-meanwhile-out")
 	manual := n.suffix + "-manual"
 	actual := n.worker.store.engine
 	n.worker.store.engine = &addsMeanwhile{Engine: actual, add: func() {
@@ -525,8 +540,8 @@ func holdsLock(t *testing.T, n *digestNewsletter, key string) (release func()) {
 // -- not shown the driver's "i/o timeout" or the server's "canceling statement due to
 // statement timeout" -- nothing is written, and the server is not left with a waiter
 // that would take the lock later in a transaction nobody finishes.
-func TestAGatePastItsWaitGivesThePersonTheSentence(t *testing.T) {
-	n := newEmptyNewsletter(t, "gate-busy")
+func (f *digestFixture) TestAGatePastItsWaitGivesThePersonTheSentence(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "gate-busy")
 	release := holdsLock(t, n, "site:"+bare(argString(n.args, "siteId")))
 	defer release()
 	wait := newsletterGateWait
@@ -582,8 +597,8 @@ func (e *lockWatcher) Execute(ctx context.Context, q string) (any, error) {
 // welcome template's checks, before it takes the locks. Under them it asks only the
 // single-row questions and the two that must be exact (the mailbox by digest, the
 // audience's size), and writes.
-func TestNothingSlowRunsWhileASignupHoldsItsLocks(t *testing.T) {
-	n := newEmptyNewsletter(t, "gate-short")
+func (f *digestFixture) TestNothingSlowRunsWhileASignupHoldsItsLocks(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "gate-short")
 	for i := 0; i < digestLessWindow; i++ {
 		n.plantRaw(t, fmt.Sprintf("bare-%02d", i), fmt.Sprintf("bare%02d@example.test", i), "subscribed", "")
 	}

@@ -10,6 +10,19 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
+// These cases share a booted engine; each subtest owns and cleans its rows.
+func TestRecipientConsentDB(t *testing.T) {
+	f := newDigestFixture(t)
+	f.run(t, "AnOptOutBeyondTheDigestPageCannotBeWelcomed", f.TestAnOptOutBeyondTheDigestPageCannotBeWelcomed)
+	f.run(t, "AHandOptedOutDuplicateRefusesTheFormWhicheverRowComesFirst", f.TestAHandOptedOutDuplicateRefusesTheFormWhicheverRowComesFirst)
+	f.run(t, "ADigestLessOptOutRefusesTheForm", f.TestADigestLessOptOutRefusesTheForm)
+	f.run(t, "ADigestLessSubscriberIsAdoptedNotDuplicated", f.TestADigestLessSubscriberIsAdoptedNotDuplicated)
+	f.run(t, "ADigestLessOptOutBesideAStampedSubscriberStillRefuses", f.TestADigestLessOptOutBesideAStampedSubscriberStillRefuses)
+	f.run(t, "AForgedDigestIsAMissNotAMember", f.TestAForgedDigestIsAMissNotAMember)
+	f.run(t, "ADigestLessOptOutBeyondTheFirstPageStillRefuses", f.TestADigestLessOptOutBeyondTheFirstPageStillRefuses)
+	f.run(t, "ASignupIsNotTakenWhenTheAudienceCannotBeSearchedToTheEnd", f.TestASignupIsNotTakenWhenTheAudienceCannotBeSearchedToTheEnd)
+}
+
 // recipient_consent_db_test.go -- a public form never reopens a mailbox that
 // opted out (memql#6022, F9 fix round 1), against a REAL engine and a REAL
 // Postgres.
@@ -102,8 +115,8 @@ func (n *digestNewsletter) assertTheFormDidNothing(t *testing.T, rosterBefore in
 	}
 }
 
-func TestAnOptOutBeyondTheDigestPageCannotBeWelcomed(t *testing.T) {
-	n := newEmptyNewsletter(t, "consent-digest-page")
+func (f *digestFixture) TestAnOptOutBeyondTheDigestPageCannotBeWelcomed(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "consent-digest-page")
 	for i := 0; i < digestWindow; i++ {
 		n.addStamped(t, fmt.Sprintf("sibling-%d", i), consentMailbox, "subscribed")
 	}
@@ -120,7 +133,7 @@ func TestAnOptOutBeyondTheDigestPageCannotBeWelcomed(t *testing.T) {
 // hold more than one row (a manual add beside an earlier row, a race), and the
 // engine lists them by the time of their last write. The form refuses when ANY
 // of them is not subscribed, whichever the list puts first.
-func TestAHandOptedOutDuplicateRefusesTheFormWhicheverRowComesFirst(t *testing.T) {
+func (f *digestFixture) TestAHandOptedOutDuplicateRefusesTheFormWhicheverRowComesFirst(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		rows func(n *digestNewsletter, t *testing.T)
@@ -146,7 +159,7 @@ func TestAHandOptedOutDuplicateRefusesTheFormWhicheverRowComesFirst(t *testing.T
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			n := newEmptyNewsletter(t, "consent-dup")
+			n := f.newEmptyNewsletter(t, "consent-dup")
 			tc.rows(n, t)
 			before := len(n.roster(t))
 			if before != 2 {
@@ -161,10 +174,10 @@ func TestAHandOptedOutDuplicateRefusesTheFormWhicheverRowComesFirst(t *testing.T
 // TestADigestLessOptOutRefusesTheForm: a row with no digest is invisible to a
 // lookup by digest, and an opt-out on it must still stop the form. The old scan
 // found it by comparing addresses.
-func TestADigestLessOptOutRefusesTheForm(t *testing.T) {
+func (f *digestFixture) TestADigestLessOptOutRefusesTheForm(t *testing.T) {
 	for _, status := range []string{"unsubscribed", "bounced", "complained"} {
 		t.Run(status, func(t *testing.T) {
-			n := newEmptyNewsletter(t, "consent-bare")
+			n := f.newEmptyNewsletter(t, "consent-bare")
 			n.plantRaw(t, "old", " Subscriber@Example.TEST ", status, "")
 			n.signup(t)
 			n.assertTheFormDidNothing(t, 1)
@@ -175,8 +188,8 @@ func TestADigestLessOptOutRefusesTheForm(t *testing.T) {
 // TestADigestLessSubscriberIsAdoptedNotDuplicated: a subscribed row with no
 // digest is the member. The form uses it; a second subscribed row for the same
 // mailbox would put the person on every campaign twice.
-func TestADigestLessSubscriberIsAdoptedNotDuplicated(t *testing.T) {
-	n := newEmptyNewsletter(t, "consent-adopt")
+func (f *digestFixture) TestADigestLessSubscriberIsAdoptedNotDuplicated(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "consent-adopt")
 	old := n.plantRaw(t, "old", " Subscriber@Example.TEST ", "subscribed", "")
 	n.signup(t)
 
@@ -198,10 +211,10 @@ func TestADigestLessSubscriberIsAdoptedNotDuplicated(t *testing.T) {
 // TestADigestLessOptOutBesideAStampedSubscriberStillRefuses: the lookup by digest
 // finds the stamped row, which is subscribed, and the opt-out is on a sibling that
 // has no digest. The mailbox opted out; the form must not welcome it.
-func TestADigestLessOptOutBesideAStampedSubscriberStillRefuses(t *testing.T) {
+func (f *digestFixture) TestADigestLessOptOutBesideAStampedSubscriberStillRefuses(t *testing.T) {
 	for _, stampedFirst := range []bool{true, false} {
 		t.Run(fmt.Sprintf("stamped row written first=%v", stampedFirst), func(t *testing.T) {
-			n := newEmptyNewsletter(t, "consent-mixed")
+			n := f.newEmptyNewsletter(t, "consent-mixed")
 			if stampedFirst {
 				n.addStamped(t, "new", " Subscriber@Example.TEST ", "subscribed")
 				n.plantRaw(t, "old", "SUBSCRIBER@example.test", "unsubscribed", "")
@@ -219,10 +232,10 @@ func TestADigestLessOptOutBesideAStampedSubscriberStillRefuses(t *testing.T) {
 // digest that is not the digest of its own address (a raw write). The form checks
 // the address before it believes the key: a row for someone else is not this
 // mailbox, whatever it says, and neither blocks nor stands in for the signup.
-func TestAForgedDigestIsAMissNotAMember(t *testing.T) {
+func (f *digestFixture) TestAForgedDigestIsAMissNotAMember(t *testing.T) {
 	for _, status := range []string{"unsubscribed", "subscribed"} {
 		t.Run(status, func(t *testing.T) {
-			n := newEmptyNewsletter(t, "consent-forged")
+			n := f.newEmptyNewsletter(t, "consent-forged")
 			forged := n.plantRaw(t, "forged", "someone-else@example.test", status, EmailDigest(consentMailbox))
 			n.signup(t)
 
@@ -244,8 +257,8 @@ func TestAForgedDigestIsAMissNotAMember(t *testing.T) {
 // digest is one bounded page. An audience that has not been stamped yet can hold
 // far more than a page of them, and the opt-out may be on any one: a full page
 // that does not name the mailbox proves nothing, so the form reads the roster.
-func TestADigestLessOptOutBeyondTheFirstPageStillRefuses(t *testing.T) {
-	n := newEmptyNewsletter(t, "consent-page")
+func (f *digestFixture) TestADigestLessOptOutBeyondTheFirstPageStillRefuses(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "consent-page")
 	for i := 0; i < digestLessWindow+10; i++ {
 		n.plantRaw(t, fmt.Sprintf("filler-%03d", i), fmt.Sprintf("filler%03d@example.test", i), "subscribed", "")
 	}
@@ -290,8 +303,8 @@ func (e endlessAudience) Execute(ctx context.Context, q string) (any, error) {
 // "I did not find an opt-out" proves nothing, and a public form that guessed would
 // welcome a mailbox that may have opted out. It says it cannot take the
 // subscription for now, and writes nothing: no signup, no consent, no row.
-func TestASignupIsNotTakenWhenTheAudienceCannotBeSearchedToTheEnd(t *testing.T) {
-	n := newEmptyNewsletter(t, "consent-undecidable")
+func (f *digestFixture) TestASignupIsNotTakenWhenTheAudienceCannotBeSearchedToTheEnd(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "consent-undecidable")
 	limit := mailboxRosterScanPages
 	mailboxRosterScanPages = 3
 	actual := n.worker.store.engine

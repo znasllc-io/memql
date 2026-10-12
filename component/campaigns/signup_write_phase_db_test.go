@@ -11,6 +11,14 @@ import (
 	"github.com/znasllc-io/memql/component/database"
 )
 
+// These cases share a booted engine; each subtest owns and cleans its rows.
+func TestSignupWritePhaseDB(t *testing.T) {
+	f := newDigestFixture(t)
+	f.run(t, "ASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks", f.TestASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks)
+	f.run(t, "ASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits", f.TestASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits)
+	f.run(t, "AWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits", f.TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits)
+}
+
 // signup_write_phase_db_test.go -- a signup's write commits while its locks are
 // held, or does not start (memql#6022, F9 fix round 4).
 //
@@ -91,8 +99,8 @@ func (n *digestNewsletter) lockHeld(t *testing.T, key string) func() bool {
 // lands while the consent is being written. The write is waited for and commits
 // while the locks are held; nothing is written after it, and the person is told to
 // try again (consent first, keyed by the signup, makes that safe).
-func TestASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks(t *testing.T) {
-	n := newEmptyNewsletter(t, "phase-straddle")
+func (f *digestFixture) TestASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "phase-straddle")
 	actual := n.worker.store.engine
 	// The phase leaves the reads before the write ample time (a shared database may
 	// be slow), and the write outlasts it.
@@ -131,8 +139,8 @@ func TestASignupWriteThatOutlastsItsPhaseCommitsUnderItsLocks(t *testing.T) {
 // request ends while the consent is being written. The locks stay held until the
 // write has committed -- the gate's transaction is not the request's -- and
 // nothing is written after it.
-func TestASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits(t *testing.T) {
-	n := newEmptyNewsletter(t, "phase-gone")
+func (f *digestFixture) TestASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "phase-gone")
 	request, leave := context.WithCancel(n.owner)
 	defer leave()
 	actual := n.worker.store.engine
@@ -164,8 +172,8 @@ func TestASignupWhoseVisitorLeavesDuringAWriteKeepsItsLocksUntilItCommits(t *tes
 // TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits: the
 // same for a welcome. The worker stops while the welcome's verdict is being
 // written; the locks stay held until it commits, and the welcome is sent.
-func TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits(t *testing.T) {
-	n := newEmptyNewsletter(t, "welcome-stopped")
+func (f *digestFixture) TestAWelcomeWhoseDrainStopsDuringItsVerdictKeepsItsLocksUntilItCommits(t *testing.T) {
+	n := f.newEmptyNewsletter(t, "welcome-stopped")
 	signup := pendingWelcome(t, n)
 	drain, stop := context.WithCancel(context.Background())
 	defer stop()
