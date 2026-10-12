@@ -423,14 +423,18 @@ they come.
 **Order by the version, not by arrival** (memql#6033). Events are not delivered
 in the order they were written -- the bus hands each event to its subscribers
 on its own goroutine -- and a read can answer after an event it is newer than.
-Every node event and every read carries the row's version time, `createdAt`
-(above): keep the NEWER copy of a row whichever arrives last, and refuse one
-older than the copy held. Compare the instants at every fractional digit, not
-the strings: RFC 3339 trims trailing zeros, so `.3251Z` is the earlier instant
-and the larger string beside `.325101Z`. And once a row is out of the list -- a
-removal that carried a time, or a newer copy outside the read's scope -- keep
-the version that took it out, so a late OLDER copy does not bring the deleted
-or out-of-scope row back.
+Every node event carries the row's version time, `createdAt` (above). A read
+carries it only where it was asked for: a shaped read that projects
+`row.createdAt` does, and so does a read of one row by its id, which returns the
+stored node; a shape that leaves it out answers rows with no version time to
+compare, and a consumer then has only the order things arrived in. Project
+`row.createdAt` in the shape of any list that is folded with events. Keep the
+NEWER copy of a row whichever arrives last, and refuse one older than the copy
+held. Compare the instants at every fractional digit, not the strings: RFC 3339
+trims trailing zeros, so `.3251Z` is the earlier instant and the larger string
+beside `.325101Z`. And once a row is out of the list -- a removal that carried a
+time, or a newer copy outside the read's scope -- keep the version that took it
+out, so a late OLDER copy does not bring the deleted or out-of-scope row back.
 
 **The non-goals, and why.** There is no polling heartbeat anywhere: the
 socket, gap detection and re-seed ARE the safety net. There is no durable
