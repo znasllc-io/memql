@@ -14,19 +14,22 @@ import (
 
 	"github.com/uptrace/bun/driver/pgdriver"
 
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 )
 
 // write_gate_db_test.go -- the write gate against a real PostgreSQL
-// (memql#6022, F9 fix round 2).
+// (memql#6022, F9 fix rounds 2 and 3).
 //
-// A gate is a transaction that holds an advisory lock, and so a connection, until it
-// is released. What the tests pin is what that does to the pool it sits on: how many
-// connections one caller holds, how many callers can hold one at once, and how a
-// wait for the lock ends.
+// A gate is a transaction that holds an advisory lock, and so a connection, until
+// it is released. What the tests pin is where that connection comes from (a pool
+// of its own, never the one its holder works on), what the session is allowed to
+// do while it waits (sit idle in the transaction for minutes), and how a wait for
+// the lock ends.
 
-// gateDB opens a pool of its own for a test: maxOpen connections, none for 0.
-func gateDB(t *testing.T, maxOpen int) *sql.DB {
+// gateReachable reports whether the test database is up, failing under
+// MEMQL_REQUIRE_DB=1 and skipping otherwise.
+func gateReachable(t *testing.T) bool {
 	t.Helper()
 	reachable, err := dbtest.EnsureSchema(context.Background())
 	if err != nil {
@@ -34,10 +37,52 @@ func gateDB(t *testing.T, maxOpen int) *sql.DB {
 	}
 	if !reachable {
 		dbtest.Unreachable(t, "write gate", dbtest.DSN(), nil)
+		return false
+	}
+	return true
+}
+
+// gateDB opens a plain pool for a test: maxOpen connections, none for 0. Its
+// sessions carry no limits of their own, like a bare connection to the test
+// server.
+func gateDB(t *testing.T, maxOpen int) *sql.DB {
+	t.Helper()
+	if !gateReachable(t) {
 		return nil
 	}
 	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN())))
 	db.SetMaxOpenConns(maxOpen)
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// deployedGatePool is a gate pool as the Database component opens it: the
+// deployed session parameters and the given size.
+func deployedGatePool(t *testing.T, size int) *sql.DB {
+	t.Helper()
+	if !gateReachable(t) {
+		return nil
+	}
+	db, err := database.NewGatePool(dbtest.DSN(), size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// requestLikePool is a pool whose sessions carry the request pool's deployed
+// limits: a statement timeout of 8 s and 60 s idle in a transaction.
+func requestLikePool(t *testing.T, size int) *sql.DB {
+	t.Helper()
+	if !gateReachable(t) {
+		return nil
+	}
+	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()), pgdriver.WithConnParams(map[string]any{
+		"statement_timeout":                   fmt.Sprint(database.DefaultRequestStatementTimeout.Milliseconds()),
+		"idle_in_transaction_session_timeout": fmt.Sprint(database.DefaultRequestIdleInTxTimeout.Milliseconds()),
+	})))
+	db.SetMaxOpenConns(size)
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
@@ -95,11 +140,9 @@ func waiters(t *testing.T, db *sql.DB, key string) int {
 }
 
 // TestAcquireWriteGatesTakesEveryLockOnOneConnection: a caller that needs two locks
-// names both and holds ONE connection for them. Two gates taken one after the other
-// are two transactions, two connections, and a deadlock when two callers do it on a
-// small pool.
+// names both and holds ONE connection for them.
 func TestAcquireWriteGatesTakesEveryLockOnOneConnection(t *testing.T) {
-	pool, other := gateDB(t, 4), gateDB(t, 0)
+	pool, other := deployedGatePool(t, 4), gateDB(t, 0)
 	first, second := gateKey(t, "site"), gateKey(t, "audience")
 
 	release, err := AcquireWriteGates(context.Background(), pool, first, second)
@@ -129,7 +172,7 @@ func TestAcquireWriteGatesTakesEveryLockOnOneConnection(t *testing.T) {
 // TestWriteGateKeysAreTakenInTheOrderGiven: the order is the caller's to keep fixed,
 // and the gate keeps it: while it waits for the second key it holds the first.
 func TestWriteGateKeysAreTakenInTheOrderGiven(t *testing.T) {
-	pool, other := gateDB(t, 4), gateDB(t, 0)
+	pool, other := deployedGatePool(t, 4), gateDB(t, 0)
 	first, second := gateKey(t, "first"), gateKey(t, "second")
 	releaseSecond := holder(t, other, second)
 
@@ -163,7 +206,7 @@ func TestWriteGateKeysAreTakenInTheOrderGiven(t *testing.T) {
 // the lock. A client-side timeout would leave the backend waiting, to take the lock
 // later in a transaction nobody finishes.
 func TestAGateWaitEndsOnTheServerWithNoWaiterLeft(t *testing.T) {
-	pool, other := gateDB(t, 4), gateDB(t, 0)
+	pool, other := deployedGatePool(t, 4), gateDB(t, 0)
 	key := gateKey(t, "busy")
 	holder(t, other, key)
 
@@ -191,82 +234,305 @@ func TestAGateWaitEndsOnTheServerWithNoWaiterLeft(t *testing.T) {
 	release()
 }
 
-// TestAGateWaitIsBelowEveryLimitItDependsOn: the wait is 6 s, under the request
-// pool's statement_timeout (8 s, component/database defaultStatementTimeoutMs) and
-// under pgdriver's read deadline (10 s). Raising it past either puts the end of the
-// wait in the hands of a timer that does not clean up after itself.
-func TestAGateWaitIsBelowEveryLimitItDependsOn(t *testing.T) {
-	if writeGateWait+writeGateGrace >= 8*time.Second {
-		t.Errorf("a gate waits %s (and its statement context %s longer): the request pool cancels a statement at 8 s, and that cancellation would end the wait instead of the gate's own lock_timeout",
-			writeGateWait, writeGateGrace)
+// TestTheLockWaitEndsAtTheCallersDeadline: a caller with 300 ms left does not
+// wait six seconds for a lock. The server is told to give up when the caller's
+// deadline is nearly up -- not at the gate's default wait, which would leave a
+// request for the lock on the server long after the caller stopped listening.
+func TestTheLockWaitEndsAtTheCallersDeadline(t *testing.T) {
+	pool, other := deployedGatePool(t, 4), gateDB(t, 0)
+	key := gateKey(t, "caller-deadline")
+	holder(t, other, key)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := AcquireWriteGates(ctx, pool, key)
+	elapsed := time.Since(started)
+
+	if err == nil {
+		t.Fatal("the gate was taken while another session held it")
 	}
-	if gateHeldTooLong >= 60*time.Second {
-		t.Errorf("a gate is reported as held too long at %s: PostgreSQL ends an idle transaction at 60 s (idle_in_transaction_session_timeout) and the lock with it", gateHeldTooLong)
+	if !errors.Is(err, ErrWriteGateBusy) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("the gate answered %v, want the gate's busy answer or the caller's own deadline", err)
+	}
+	if elapsed > 1500*time.Millisecond {
+		t.Errorf("a caller with 300ms left waited %s for a lock", elapsed)
+	}
+	// The server's request for the lock ends with the wait, not seconds later.
+	deadline := time.Now().Add(time.Second)
+	for waiters(t, other, key) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("a request for the lock is still waiting on the server %s after the caller's deadline", time.Since(started).Round(time.Millisecond))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if inUse := pool.Stats().InUse; inUse != 0 {
+		t.Errorf("%d connections are still held", inUse)
 	}
 }
 
-// TestGatesNeverTakeTheWholePool: a gate holder needs a connection of the pool it
-// holds a connection of, for the work the gate exists to protect. Gates that could
-// take every connection leave their holders nothing to work with. With four
-// connections three gates can be open, the fourth caller waits for a place -- not
-// for a connection -- and the last connection stays free.
-func TestGatesNeverTakeTheWholePool(t *testing.T) {
-	pool := gateDB(t, 4)
-	var releases []func()
-	for i := 0; i < 3; i++ {
-		release, err := AcquireWriteGates(context.Background(), pool, gateKey(t, fmt.Sprintf("holder%d", i)))
-		if err != nil {
-			t.Fatalf("gate %d: %v", i, err)
-		}
-		releases = append(releases, release)
+// TestAGateWaitIsBelowEveryLimitItDependsOn: the lock wait is below the driver's
+// read deadline -- the CLIENT's, which cannot tell the server to stop waiting --
+// and a gated phase is short against the gate session's idle limit. The numbers
+// are read from where they are set, not repeated here.
+func TestAGateWaitIsBelowEveryLimitItDependsOn(t *testing.T) {
+	read := pgdriver.NewConnector().Config().ReadTimeout
+	if read <= 0 {
+		t.Fatalf("pgdriver reports no read deadline (%s); the test needs the number it enforces", read)
 	}
+	if writeGateWait+writeGateGrace >= read {
+		t.Errorf("a gate waits %s (and its statement context %s longer): the driver abandons a read at %s, which would end the wait instead of the gate's own lock_timeout",
+			writeGateWait, writeGateGrace, read)
+	}
+	// A gate session carries no statement timeout of its own, so nothing else ends
+	// the wait (gate_pool_test.go pins the parameters; the session is checked next).
+	if gateHeldTooLong >= database.DefaultGateIdleInTxTimeout {
+		t.Errorf("a gate is reported as held too long at %s: the gate session is ended by PostgreSQL at %s, so the report would come after the lock was gone",
+			gateHeldTooLong, database.DefaultGateIdleInTxTimeout)
+	}
+	// And the pool a gate must be refused on is the one it is not built for.
+	if database.DefaultRequestIdleInTxTimeout >= minGateIdleTimeout {
+		t.Errorf("the request pool ends an idle transaction at %s, which the gate would accept (minimum %s)",
+			database.DefaultRequestIdleInTxTimeout, minGateIdleTimeout)
+	}
+	if minGateIdleTimeout >= database.DefaultGateIdleInTxTimeout {
+		t.Errorf("the gate pool's idle limit (%s) is not above the minimum a gate accepts (%s)", database.DefaultGateIdleInTxTimeout, minGateIdleTimeout)
+	}
+}
+
+// TestAGateSessionHasNoStatementTimeoutToCutItsWait: against the real pool the
+// Database component opens, a lock wait of six seconds (and a hold of minutes)
+// is not cut by a statement timeout.
+func TestAGateSessionHasNoStatementTimeoutToCutItsWait(t *testing.T) {
+	pool, other := deployedGatePool(t, 2), gateDB(t, 0)
+	key := gateKey(t, "slow-holder")
+	release := holder(t, other, key)
+	defer release()
+
+	// A wait that would be cancelled by the request pool's statement timeout
+	// (8 s) is not: it ends at the gate's own wait.
+	started := time.Now()
+	_, err := AcquireWriteGatesWithin(context.Background(), pool, 1500*time.Millisecond, key)
+	if !errors.Is(err, ErrWriteGateBusy) {
+		t.Fatalf("the gate answered %v, want ErrWriteGateBusy", err)
+	}
+	if elapsed := time.Since(started); elapsed < 1200*time.Millisecond {
+		t.Errorf("a wait of 1.5s ended after %s", elapsed)
+	}
+	var statement string
+	conn, err := pool.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.QueryRowContext(context.Background(), "SHOW statement_timeout").Scan(&statement); err != nil {
+		t.Fatal(err)
+	}
+	if statement != "0" {
+		t.Errorf("a gate session has a statement_timeout of %q", statement)
+	}
+}
+
+// TestGatesTakeNoConnectionFromTheRequestPool: a gate holder needs a connection
+// of the request pool for the work the gate exists to protect, and with gates on
+// a pool of their own it always has one. Six gates are held; the request pool,
+// four connections, runs four statements at once.
+func TestGatesTakeNoConnectionFromTheRequestPool(t *testing.T) {
+	gates, requests := deployedGatePool(t, 8), requestLikePool(t, 4)
+
+	var releases []func()
 	defer func() {
 		for _, release := range releases {
 			release()
 		}
 	}()
-
-	// The work a holder does: it needs a connection, and one is there.
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	var one int
-	if err := pool.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
-		t.Fatalf("the gate holders left no connection for their own work: %v", err)
+	for i := 0; i < 6; i++ {
+		release, err := AcquireWriteGates(context.Background(), gates, gateKey(t, fmt.Sprintf("holder%d", i)))
+		if err != nil {
+			t.Fatalf("gate %d: %v", i, err)
+		}
+		releases = append(releases, release)
+	}
+	if inUse := gates.Stats().InUse; inUse != 6 {
+		t.Fatalf("%d gate connections are in use, want 6", inUse)
+	}
+	if inUse := requests.Stats().InUse; inUse != 0 {
+		t.Fatalf("%d request-pool connections are in use by gates, want none", inUse)
 	}
 
-	// A fourth caller waits for a place, and gives up as busy.
+	// The holders' work: four statements at once on the four connections, each
+	// taking a fifth of a second. Waiting for a connection would take twice that.
 	started := time.Now()
-	_, err := AcquireWriteGatesWithin(context.Background(), pool, 300*time.Millisecond, gateKey(t, "fourth"))
+	var wg sync.WaitGroup
+	errs := make(chan error, 4)
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_, err := requests.ExecContext(ctx, "SELECT pg_sleep(0.2)")
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("the work under the gates: %v", err)
+		}
+	}
+	if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {
+		t.Errorf("four statements on four request connections took %s: the work waited for connections", elapsed)
+	}
+}
+
+// TestThreeCallersEachHoldingOneGateAndAskingForASecondComplete: a caller that
+// holds a gate and asks for another needs a second connection of the gate pool.
+// With the pool the size it is deployed at, three callers doing it at once are
+// six connections and all complete. (On a pool of three they deadlock: each holds
+// the connection the others wait for. See the mutation check in the round report.)
+func TestThreeCallersEachHoldingOneGateAndAskingForASecondComplete(t *testing.T) {
+	pool := deployedGatePool(t, database.DefaultGatePoolSize)
+
+	var holding, finished sync.WaitGroup
+	allHolding := make(chan struct{})
+	holding.Add(3)
+	errs := make(chan error, 3)
+	for i := 0; i < 3; i++ {
+		finished.Add(1)
+		go func(i int) {
+			defer finished.Done()
+			first, err := AcquireWriteGatesWithin(context.Background(), pool, 3*time.Second, gateKey(t, fmt.Sprintf("outer%d", i)))
+			if err != nil {
+				holding.Done()
+				errs <- fmt.Errorf("caller %d's first gate: %w", i, err)
+				return
+			}
+			defer first()
+			holding.Done()
+			<-allHolding // every caller holds its first gate before any asks for a second
+			second, err := AcquireWriteGatesWithin(context.Background(), pool, 3*time.Second, gateKey(t, fmt.Sprintf("inner%d", i)))
+			if err != nil {
+				errs <- fmt.Errorf("caller %d's second gate: %w", i, err)
+				return
+			}
+			second()
+			errs <- nil
+		}(i)
+	}
+	holding.Wait()
+	close(allHolding)
+	finished.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// TestMoreGatesThanThePoolHoldsWaitForAConnectionAndThenAreBusy: the number of
+// gates open at once is the size of the pool and nothing else. The caller that
+// finds them all held waits for a connection of the GATE pool and gives up as
+// busy; when one is given back it takes it.
+func TestMoreGatesThanThePoolHoldsWaitForAConnectionAndThenAreBusy(t *testing.T) {
+	pool := deployedGatePool(t, 2)
+	first, err := AcquireWriteGates(context.Background(), pool, gateKey(t, "one"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := AcquireWriteGates(context.Background(), pool, gateKey(t, "two"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second()
+
+	started := time.Now()
+	_, err = AcquireWriteGatesWithin(context.Background(), pool, 300*time.Millisecond, gateKey(t, "three"))
 	if !errors.Is(err, ErrWriteGateBusy) {
-		t.Fatalf("a fourth gate on a four-connection pool answered %v, want ErrWriteGateBusy", err)
+		t.Fatalf("a third gate on a pool of two answered %v, want ErrWriteGateBusy", err)
 	}
 	if elapsed := time.Since(started); elapsed > 3*time.Second {
-		t.Errorf("the fourth caller waited %s for a 300ms wait", elapsed)
+		t.Errorf("the third caller waited %s for a 300ms wait", elapsed)
 	}
 
-	// A place is given back and the fourth caller takes it.
-	releases[0]()
-	releases = releases[1:]
-	release, err := AcquireWriteGatesWithin(context.Background(), pool, time.Second, gateKey(t, "fourth-again"))
+	first()
+	release, err := AcquireWriteGatesWithin(context.Background(), pool, time.Second, gateKey(t, "three-again"))
 	if err != nil {
 		t.Fatalf("after a gate was released: %v", err)
 	}
 	release()
 }
 
-// TestAGateOnAPoolWithNoLimitHasNoLimit: nothing to protect, nothing bounded.
-func TestAGateOnAPoolWithNoLimitHasNoLimit(t *testing.T) {
-	pool := gateDB(t, 0)
-	var releases []func()
-	for i := 0; i < 8; i++ {
-		release, err := AcquireWriteGates(context.Background(), pool, gateKey(t, fmt.Sprintf("n%d", i)))
-		if err != nil {
-			t.Fatalf("gate %d: %v", i, err)
-		}
-		releases = append(releases, release)
-	}
-	for _, release := range releases {
+// TestAGateIsRefusedOnAPoolThatEndsIdleTransactionsEarly: the request pool ends a
+// session idle in a transaction after 60 s, and the advisory lock goes with it
+// without a word to the holder. A gate on such a pool is a lock that may be gone
+// while its holder goes on writing, so the gate says no -- at once, loudly, on
+// the first use -- instead of working until the day a phase outlasts the limit.
+func TestAGateIsRefusedOnAPoolThatEndsIdleTransactionsEarly(t *testing.T) {
+	pool, other := requestLikePool(t, 4), gateDB(t, 0)
+	key := gateKey(t, "wrong-pool")
+
+	release, err := AcquireWriteGates(context.Background(), pool, key)
+	if err == nil {
 		release()
+		t.Fatal("a gate was taken on a pool that ends idle transactions after 60 s")
+	}
+	if !errors.Is(err, ErrWriteGatePoolUnsuitable) {
+		t.Fatalf("the gate answered %v, want ErrWriteGatePoolUnsuitable", err)
+	}
+	if lockedElsewhere(t, other, key) {
+		t.Error("the refused gate left its lock held")
+	}
+	if inUse := pool.Stats().InUse; inUse != 0 {
+		t.Errorf("%d connections are held by the refused gate", inUse)
+	}
+}
+
+// TestAGateIsAcceptedOnAPoolWithNoIdleLimit: a session with no
+// idle_in_transaction_session_timeout (the test server's, an operator's who set 0)
+// cannot lose its lock that way.
+func TestAGateIsAcceptedOnAPoolWithNoIdleLimit(t *testing.T) {
+	pool := gateDB(t, 2)
+	release, err := AcquireWriteGates(context.Background(), pool, gateKey(t, "unlimited"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+}
+
+// TestAGateIsReleasedWithItsContext: the transaction is bound to the caller's
+// context, so a caller that is cancelled gives the lock back instead of holding
+// it for a goroutine that is gone.
+func TestAGateIsReleasedWithItsContext(t *testing.T) {
+	pool, other := deployedGatePool(t, 2), gateDB(t, 0)
+	key := gateKey(t, "bound")
+	ctx, cancel := context.WithCancel(context.Background())
+	release, err := AcquireWriteGates(ctx, pool, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if !lockedElsewhere(t, other, key) {
+		t.Fatal("the lock is not held")
+	}
+
+	cancel()
+	deadline := time.Now().Add(3 * time.Second)
+	for lockedElsewhere(t, other, key) {
+		if time.Now().After(deadline) {
+			t.Fatal("the lock outlived its caller's context")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestAGateWithoutAPoolIsUnavailable: no pool is no coordination, and the
+// caller is told so rather than handed a gate that guards nothing.
+func TestAGateWithoutAPoolIsUnavailable(t *testing.T) {
+	if _, err := AcquireWriteGates(context.Background(), nil, "k"); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("a gate without a pool answered %v, want 'unavailable'", err)
 	}
 }
 
@@ -274,7 +540,7 @@ func TestAGateOnAPoolWithNoLimitHasNoLimit(t *testing.T) {
 // without telling the holder. The gate cannot stop that; it can say that it was
 // held long enough for it to have happened.
 func TestAGateHeldTooLongSaysSo(t *testing.T) {
-	pool := gateDB(t, 4)
+	pool := deployedGatePool(t, 4)
 	var logged bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))

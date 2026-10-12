@@ -48,6 +48,7 @@ limits.
 
 ```
 per_process       =  main_pool_limit + direct_pool_limit + migration_pool_limit
+                     + gate_pool_limit
 peak_connections  =  Σ_over_workloads( peak_concurrent_processes × per_process )
                   +  separate_jobs_and_monitors + operator_and_backup_headroom
 
@@ -65,9 +66,22 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   Jobs and scheduled monitors. Do not count an in-process startup migration
   again as a separate Job; count actual independent Jobs separately.
 - With the shipped main pool limit of four, a configured direct pool adds up to
-  four and a startup migration adds one: budget up to nine per process. If no
-  direct DSN is configured, direct calls share the main pool. Any additional
-  independent database pool must be counted too.
+  four, a startup migration adds one, and the write-gate pool (below) adds up to
+  eight: budget up to seventeen per process. If no direct DSN is configured,
+  direct calls share the main pool. Any additional independent database pool
+  must be counted too.
+- **The write-gate pool** (`MEMQL_DB_GATE_POOL_SIZE`, default eight) holds the
+  transactions of write gates -- the advisory locks that serialise a signup, a
+  library file version, an approval decision -- and nothing else. A gate is taken
+  on these connections, never on the main pool, so the work its holder does keeps
+  all of the main pool's connections, and the sessions may sit idle in a
+  transaction for minutes (`MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS`, five) where the
+  main pool's end an idle transaction after sixty seconds and take the lock with
+  it. The pool opens a connection only while that many gates are held at once,
+  keeps two warm and closes the rest after two idle minutes, so steady state is
+  about two per process and the eight is the burst. A caller that finds all of
+  them held waits up to six seconds and then answers that coordination is busy;
+  raise the size only if the budget above has the room.
 
 ## The knobs (per-pod pool — `component/database/database.go`)
 
@@ -79,6 +93,8 @@ Source of truth is the code; defaults are conservative and overridable per env:
 | `MAX_IDLE_CONNS` | 1 | warm idle connections kept per pod |
 | `CONN_MAX_LIFETIME_MS` | 3600000 (1h) | rotate connections hourly (bounds long-lived leaks) |
 | `CONN_MAX_IDLE_TIME_MS` | 120000 (2m) | close idle connections after 2 min (reclaims slack) |
+| `MEMQL_DB_GATE_POOL_SIZE` | 8 | hard cap on the write-gate pool (see the budget above); not under the `MEMORY_NODES_DATABASE_` prefix |
+| `MEMQL_DB_GATE_IDLE_IN_TX_TIMEOUT_MS` | 300000 (5m) | how long a write-gate session may sit idle in its transaction; a gate refuses a pool below two minutes |
 
 `MAX_OPEN_CONNS` is a **hard cap on that pool**, not on the whole pod. The
 memory-nodes instance reads the `MEMORY_NODES_DATABASE_` prefix; the shared

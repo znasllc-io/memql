@@ -45,8 +45,14 @@ type (
 		// held session (epic memql#1925). nil when DIRECT_DSN is unset, in
 		// which case DirectBunDB() falls back to the main (pooled) Bun -- so
 		// local/dev without a pooler is unaffected (env-agnostic).
-		DirectDB     *sql.DB
-		DirectBun    *bun.DB
+		DirectDB  *sql.DB
+		DirectBun *bun.DB
+		// Gate is the pool write gates run on (gate_pool.go): connections used
+		// for nothing else, so a gate holder never waits for one to do its work
+		// and a session sitting idle in a gate's transaction is not held to the
+		// request pool's limits. nil when it was not opened; there is no fallback
+		// to the request pool.
+		Gate         *sql.DB
 		ticker       *time.Ticker
 		firstPing    bool
 		isRunning    bool
@@ -115,6 +121,7 @@ type (
 		maxConnRetriesIntervalMs int
 		sqlOpener                SQLOpener
 		migrationOpener          SQLOpener // nil: migrate over the request pool
+		gateOpener               SQLOpener // nil: no gate pool (gate_pool.go)
 		bunFactory               BunFactory
 		bunOptions               []BunOption
 		migrator                 Migrator
@@ -294,6 +301,7 @@ func defaultConfig() *config {
 		driverName:               "bun:pg",
 		sqlOpener:                pgSQLOpener(sessionConnParams),
 		migrationOpener:          pgSQLOpener(migrationConnParams),
+		gateOpener:               pgSQLOpener(gateConnParams),
 		bunFactory: func(db *sql.DB) (*bun.DB, error) {
 			if db == nil {
 				return nil, fmt.Errorf("bun factory: nil sql.DB")
@@ -593,6 +601,7 @@ func (d *Database) WithSQLOpener(opener SQLOpener) DatabaseArg {
 		if opener != nil {
 			c.sqlOpener = opener
 			c.migrationOpener = nil
+			c.gateOpener = nil
 		}
 	})
 }
@@ -819,10 +828,12 @@ func (d *Database) ClosePool(ctx context.Context) sql.DBStats {
 	bunDB := d.Bun
 	directDB := d.DirectDB
 	directBun := d.DirectBun
+	gate := d.Gate
 	d.DB = nil
 	d.Bun = nil
 	d.DirectDB = nil
 	d.DirectBun = nil
+	d.Gate = nil
 	d.isRunning = false
 	d.Unlock()
 
@@ -840,6 +851,10 @@ func (d *Database) ClosePool(ctx context.Context) sql.DBStats {
 
 	if directDB != nil {
 		_ = directDB.Close()
+	}
+
+	if gate != nil {
+		_ = gate.Close()
 	}
 
 	return stats
@@ -924,6 +939,19 @@ func (d *Database) logPoolStats() {
 		"waitCount", stats.WaitCount,
 		"waitDuration", stats.WaitDuration.String(),
 	)
+
+	// The write-gate pool is a second budget against the same ceiling; a gate
+	// that waits for a connection here is the pod being busy, and the line says so.
+	if gate := d.GateDB(); gate != nil {
+		g := gate.Stats()
+		d.Logger.Info("db gate pool stats",
+			"open", g.OpenConnections,
+			"inUse", g.InUse,
+			"maxOpen", g.MaxOpenConnections,
+			"waitCount", g.WaitCount,
+			"waitDuration", g.WaitDuration.String(),
+		)
+	}
 }
 
 func (d *Database) prepareForRun(ctx context.Context) (context.Context, context.CancelFunc, error) {
@@ -960,6 +988,10 @@ func (d *Database) prepareForRun(ctx context.Context) (context.Context, context.
 	// leaves DirectBun nil so DirectBunDB() falls back to the main pool rather
 	// than blocking startup (epic memql#1925).
 	d.openDirectPool()
+
+	// The pool write gates run on (memql#6022): its own connections, so a gate
+	// holder never waits for one to do its work. Best-effort like the direct pool.
+	d.openGatePool()
 
 	// Migrations run on the DIRECT endpoint when configured: the bun migrator
 	// takes a session-scoped pg_advisory_lock held across the whole migration,
@@ -1008,11 +1040,13 @@ func (d *Database) cleanupAfterRun() {
 	bunDB := d.Bun
 	directDB := d.DirectDB
 	directBun := d.DirectBun
+	gate := d.Gate
 	d.ticker = nil
 	d.DB = nil
 	d.Bun = nil
 	d.DirectDB = nil
 	d.DirectBun = nil
+	d.Gate = nil
 	d.isRunning = false
 	d.Unlock()
 
@@ -1034,6 +1068,10 @@ func (d *Database) cleanupAfterRun() {
 
 	if directDB != nil {
 		_ = directDB.Close()
+	}
+
+	if gate != nil {
+		_ = gate.Close()
 	}
 }
 

@@ -2,7 +2,6 @@ package email
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -24,16 +23,9 @@ import (
 func init() {
 	memql.RegisterPlugin("email", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 		writer := NewConfigWriter(pctx.Engine)
-		azure := &azureSetup{store: &connectionStore{engine: writer, database: func() *sql.DB {
-			if pctx.BunDB == nil {
-				return nil
-			}
-			db := pctx.BunDB()
-			if db == nil {
-				return nil
-			}
-			return db.DB
-		}}, protocol: newAzureProtocol("")}
+		// The connection store's gate and the Azure send receipts' run on the gate
+		// pool (memql#6022), not on the request pool the engine works on.
+		azure := &azureSetup{store: &connectionStore{engine: writer, gateDB: pctx.GateDB}, protocol: newAzureProtocol("")}
 		if engine, ok := pctx.Engine.(interface {
 			OrganizationCapable(context.Context, string, string, string) bool
 		}); ok {

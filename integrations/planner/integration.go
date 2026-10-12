@@ -28,6 +28,7 @@ package planner
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -119,8 +120,12 @@ type PlannerIntegration struct {
 	eventBus       *events.Bus
 	agentForwarder AgentForwarder
 	// dbGetter is the lazy *bun.DB accessor. The two consumers it had --
-	dbGetter        func() *bun.DB
-	directDBGetter  func() *bun.DB
+	dbGetter       func() *bun.DB
+	directDBGetter func() *bun.DB
+	// gateDBGetter resolves the pool this integration's write gates run on
+	// (memql#6022): connections used for nothing else, not the pooled or the
+	// direct handle above, whose connections the work under a gate needs.
+	gateDBGetter    func() *sql.DB
 	agentLoop       *PlannerAgentLoop
 	workGoals       responsibilityGoals
 	intakeDispatch  *ResponsibilityIntakeDispatcher
@@ -182,6 +187,13 @@ func WithDirectDBGetter(getter func() *bun.DB) PlannerArg {
 	return func(p *PlannerIntegration) { p.directDBGetter = getter }
 }
 
+// WithGateDBGetter wires the accessor for the pool this integration's write
+// gates run on (memql#6022): the database component's gate pool, never the
+// request pool or the direct endpoint. Unset, a gate refuses.
+func WithGateDBGetter(getter func() *sql.DB) PlannerArg {
+	return func(p *PlannerIntegration) { p.gateDBGetter = getter }
+}
+
 // WithClusterClaimer wires the cross-replica plan-execution claim
 // (memql#1363). Pass the app's ClusterExecutionGuard so the planner's
 // plan-execution dispatch shares the automation guard's DB-PK claim table,
@@ -226,10 +238,10 @@ func NewPlannerIntegration(_ context.Context, opts ...PlannerArg) (*PlannerInteg
 	p.reactiveLoop = NewReactiveLoop(p.engine, p.logger)
 	p.reactiveLoop.claims = p.workflowClaims
 	p.reactiveLoop.writeGate = func(ctx context.Context, id string) (func(), error) {
-		if p.directDBGetter == nil || p.directDBGetter() == nil {
+		if p.gateDBGetter == nil || p.gateDBGetter() == nil {
 			return nil, fmt.Errorf("standing directive requires a shared database")
 		}
-		return memql.AcquireWriteGate(ctx, p.directDBGetter().DB, "agent-directive:"+strings.TrimPrefix(id, "v1:agents:agent:"))
+		return memql.AcquireWriteGate(ctx, p.gateDBGetter(), "agent-directive:"+strings.TrimPrefix(id, "v1:agents:agent:"))
 	}
 	return p, nil
 }

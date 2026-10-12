@@ -1748,12 +1748,16 @@ type EngineLibraryStore struct {
 var _ LibraryStore = (*EngineLibraryStore)(nil)
 
 // NewEngineLibraryStore creates a LibraryStore backed by a MemQL engine.
-func NewEngineLibraryStore(engine MemQLExecutor, database ...func() *sql.DB) *EngineLibraryStore {
+//
+// gateDB resolves the pool the file-version write gate runs on
+// (database.Database.GateDB, memql#6022): never the request pool the engine
+// works on. Without one the gate refuses.
+func NewEngineLibraryStore(engine MemQLExecutor, gateDB ...func() *sql.DB) *EngineLibraryStore {
 	return &EngineLibraryStore{engine: engine, versionGate: func(ctx context.Context, key string) (func(), error) {
-		if len(database) == 0 || database[0] == nil {
+		if len(gateDB) == 0 || gateDB[0] == nil {
 			return nil, fmt.Errorf("file version coordination is unavailable")
 		}
-		return memql.AcquireWriteGate(ctx, database[0](), "library-file:"+memql.BareShortId(key))
+		return memql.AcquireWriteGate(ctx, gateDB[0](), "library-file:"+memql.BareShortId(key))
 	}}
 }
 

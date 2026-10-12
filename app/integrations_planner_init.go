@@ -61,6 +61,9 @@ func (a *App) setupPlannerIntegration() {
 		// (pooling epic memql#1925). DirectBunDB falls back to the main pool
 		// when DIRECT_DSN is unset, so local / dev behavior is unchanged.
 		planner.WithDirectDBGetter(a.db.DirectBunDB),
+		// The standing-directive write gate runs on the database component's gate
+		// pool (memql#6022), not on either handle above.
+		planner.WithGateDBGetter(a.gateDBGetter()),
 		// Cross-replica plan-execution claim (memql#1363): the plan-approved
 		// event reaches every planner replica; the shared cluster guard's
 		// DB-PK claim makes exactly one replica dispatch the agent turn.

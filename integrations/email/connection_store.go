@@ -18,9 +18,11 @@ import (
 // supplies a logical key only after its actor/organization check. Reads bypass
 // process caches and updates serialize in PostgreSQL across every replica.
 type connectionStore struct {
-	engine   ConfigWriter
-	database func() *sql.DB
-	now      func() time.Time
+	engine ConfigWriter
+	// gateDB resolves the pool this store's write gates run on (memql#6022): the
+	// database component's gate pool, never the request pool the engine works on.
+	gateDB func() *sql.DB
+	now    func() time.Time
 }
 
 func emailStateContext(ctx context.Context) context.Context {
@@ -67,8 +69,8 @@ func (s *connectionStore) read(ctx context.Context, key string, target any) (boo
 // lock. A network-backed update must itself use bounded request deadlines.
 func (s *connectionStore) change(ctx context.Context, key string, target any, change func(found bool) error) error {
 	var db *sql.DB
-	if s != nil && s.database != nil {
-		db = s.database()
+	if s != nil && s.gateDB != nil {
+		db = s.gateDB()
 	}
 	release, err := memql.AcquireWriteGate(ctx, db, "email-connection:"+emailStateID(key))
 	if err != nil {

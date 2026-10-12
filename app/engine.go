@@ -231,7 +231,7 @@ func (a *App) engineAndBus() {
 		clusterGuard,
 		a.campaignEmailSender,
 		a.Logger,
-		a.semanticCacheDBGetter(),
+		a.gateDBGetter(),
 	)
 	// memql#6022: the sweep that puts the address digest on recipients written
 	// without one. It runs from the worker, ten minutes after this node boots and

@@ -183,7 +183,11 @@ type Worker struct {
 // time rather than at construction, mirroring the outbound email
 // transport: on a booting node the plug-in registry may not be populated
 // yet, and a sender captured at wiring time would be nil forever.
-func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() email.Sender, logger *slog.Logger, database ...func() *sql.DB) *Worker {
+//
+// gateDB resolves the pool the worker's write gates run on
+// (database.Database.GateDB, memql#6022): connections used for nothing else,
+// never the request pool the engine works on. Without one every gate refuses.
+func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() email.Sender, logger *slog.Logger, gateDB ...func() *sql.DB) *Worker {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -191,15 +195,15 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 	return &Worker{
 		testGate: func(ctx context.Context, key string) (func(), error) {
 			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
+			if len(gateDB) > 0 && gateDB[0] != nil {
+				db = gateDB[0]()
 			}
 			return memql.AcquireWriteGate(ctx, db, "campaign-test:"+key)
 		},
 		newsletterGate: func(ctx context.Context, keys ...string) (func(), error) {
 			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
+			if len(gateDB) > 0 && gateDB[0] != nil {
+				db = gateDB[0]()
 			}
 			prefixed := make([]string, len(keys))
 			for i, key := range keys {
@@ -209,22 +213,22 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 		},
 		seriesGate: func(ctx context.Context, key string) (func(), error) {
 			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
+			if len(gateDB) > 0 && gateDB[0] != nil {
+				db = gateDB[0]()
 			}
 			return memql.AcquireWriteGate(ctx, db, "campaign-series:"+key)
 		},
 		singleSendGate: func(ctx context.Context, key string) (func(), error) {
 			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
+			if len(gateDB) > 0 && gateDB[0] != nil {
+				db = gateDB[0]()
 			}
 			return memql.AcquireWriteGate(ctx, db, "campaign-single-send:"+key)
 		},
 		templateGate: func(ctx context.Context, key string) (func(), error) {
 			var db *sql.DB
-			if len(database) > 0 && database[0] != nil {
-				db = database[0]()
+			if len(gateDB) > 0 && gateDB[0] != nil {
+				db = gateDB[0]()
 			}
 			return memql.AcquireWriteGate(ctx, db, "campaign-template:"+key)
 		},

@@ -40,7 +40,7 @@ func TestEmailConnectionStateIsEncryptedAndSerializedAcrossReplicas(t *testing.T
 		}
 		engine = e
 		clock := time.Date(2029-n, 1, 1, 0, 0, 0, 0, time.UTC)
-		stores[n] = &connectionStore{engine: NewConfigWriter(e), database: func() *sql.DB { return db.DB }, now: func() time.Time { return clock }}
+		stores[n] = &connectionStore{engine: NewConfigWriter(e), gateDB: func() *sql.DB { return db.DB }, now: func() time.Time { return clock }}
 	}
 	key := fmt.Sprintf("session-%d", time.Now().UnixNano())
 	const credential = "private-azure-credential-never-returned"

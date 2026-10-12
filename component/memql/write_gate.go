@@ -12,79 +12,91 @@ import (
 	"time"
 )
 
+// write_gate.go -- the write gate (memql#6022, F9 fix rounds 2 and 3).
+//
+// A write gate serialises a multi-statement capability across replicas: a
+// transaction that takes a transaction-scoped advisory lock and sits idle in it
+// until its holder releases it.
+//
+// # Where the connection comes from
+//
+// A gate is taken on a pool of its own (component/database, gate_pool.go;
+// MEMQL_DB_GATE_POOL_SIZE connections, 8 by default), never on the request pool
+// its holder does its work on. Gates on the request pool took the connections the
+// work under them needed, and the request pool ends a session idle in a transaction
+// after 60 s -- ending the advisory lock with it, silently, while the holder went
+// on writing. The gate pool's sessions are allowed minutes idle, and the callers
+// bound their own gated phases far below that.
+//
+// The pool is the only limit on how many gates are open at once. There is no
+// per-process slot count: with a pool that carries nothing else, "every connection
+// is held by a gate" is not a deadlock, just a caller that waits (up to the wait
+// below) and is told the pod is busy.
+//
+// A gate REFUSES a pool whose sessions are ended earlier than minGateIdleTimeout
+// (the request pool's 60 s): handing a gate the wrong pool fails on its first use,
+// loudly, instead of working until the day a phase outlasts the limit.
+//
+// # The wait
+//
+// A gate waits at most writeGateWait, in total, for a connection of the pool and
+// its locks. The lock part is enforced by the SERVER with a lock_timeout on the
+// gate's own transaction, set from what is left of the wait -- and of the CALLER'S
+// deadline, whichever is sooner. A client-side timeout would leave the request
+// for the lock on the server: pgdriver's read deadline (10 s) abandons the read
+// and the backend keeps waiting, to take the lock later in a transaction nobody
+// will finish. The wait stays below that deadline, so the server's refusal is
+// always read.
+
 // ErrWriteGateBusy is what a write gate answers when it could not be taken in time:
-// another holder has the lock, or the pod has no gate slot or connection to spare.
-// Nothing was written; the caller may try again, and should say so in words a
-// person can read -- the cause is not theirs to see.
+// another holder has the lock, or every connection of the gate pool is held.
+// NOTHING WAS ATTEMPTED: the caller may try again later, and a path that sends
+// mail must treat it as exactly that -- never as a final outcome of the message,
+// because no send began. It should say so in words a person can read when it
+// reaches one; the cause is not theirs to see.
 var ErrWriteGateBusy = errors.New("shared write coordination is busy; try again")
 
-// writeGateWait is how long a write gate waits, in total, for everything it needs:
-// a place among the pool's gate holders, a connection, and its locks.
-//
-// A gate is a transaction on the request pool, and the request pool's backends run
-// with three limits that decide what a wait can be (component/database/database.go,
-// sessionConnParams):
-//
-//   - statement_timeout, 8 s by default: the SERVER cancels a lock wait at 8 s, with
-//     "canceling statement due to statement timeout" -- not at the 15 s this file used
-//     to name, and in words nobody should read;
-//   - pgdriver's read deadline, 10 s, which is the CLIENT's: a pool without a
-//     statement_timeout (a test's, an operator's who raised it) has a lock wait fail at
-//     10 s with "i/o timeout" while its backend keeps waiting, and when the holder lets
-//     go the orphan takes the lock in a transaction nobody will finish (measured in
-//     component/database/latest_row_index.go);
-//   - idle_in_transaction_session_timeout, 60 s: a gate is idle in its transaction
-//     while the holder works, and at 60 s PostgreSQL ends the session and the lock
-//     goes with it, silently. See gateHeldTooLong.
-//
-// So the wait is enforced by a `lock_timeout` on the gate's own transaction, and it
-// is set below both of the first two: 6 s. The server then cancels the statement
-// itself, at a time that does not depend on how the pool was configured, with an
-// error that is recognised (ErrWriteGateBusy) and no waiter left behind.
+// ErrWriteGatePoolUnsuitable is what a write gate answers when the pool it was
+// given ends idle transactions sooner than a gated phase can be trusted to
+// finish -- the request pool, 60 s. See the header.
+var ErrWriteGatePoolUnsuitable = errors.New("write gates need a pool whose sessions may sit idle in a transaction for minutes, not the request pool")
+
+// writeGateWait is how long a write gate waits, in total, for a connection of the
+// gate pool and its locks. It is below pgdriver's read deadline (10 s), the
+// client's: a lock wait that outlasts it fails with "i/o timeout" while its backend
+// keeps waiting (the header). The gate session carries no statement_timeout of its
+// own, so nothing on the server cuts the wait but the lock_timeout the gate sets.
 const writeGateWait = 6 * time.Second
 
 // writeGateGrace is how much longer than the wait the client keeps a lock statement's
 // context, so the server's lock_timeout error is read before the client gives up.
 const writeGateGrace = time.Second
 
+// gateCallerMargin is how much sooner than the caller's own deadline the server is
+// told to give up, so its refusal arrives before the caller's context cancels the
+// read (and abandons the backend) rather than after.
+const gateCallerMargin = 100 * time.Millisecond
+
+// minGateIdleTimeout is the shortest idle-in-transaction limit a gate accepts on
+// its pool: every gated phase is bounded at under a minute, and PostgreSQL must
+// not end the session under a live one. The request pool's is 60 s.
+const minGateIdleTimeout = 2 * time.Minute
+
 // gateHeldTooLong is when releasing a gate says that it was held long enough to be
-// at risk (a variable only so a test can shorten it). PostgreSQL ends an idle
-// transaction at idle_in_transaction_session_timeout (60 s by default) and the
-// advisory lock with it, without telling the holder, so a gated section is meant to
-// last seconds. This is the sign that one did not.
-var gateHeldTooLong = 30 * time.Second
+// at risk (a variable only so a test can shorten it). The gate session is ended by
+// PostgreSQL at its idle limit (5 min by default) and the advisory lock with it,
+// without telling the holder; every gated phase is bounded far below that, and
+// this is the sign that one was not.
+var gateHeldTooLong = 2 * time.Minute
 
-// gateSlots holds, per pool, how many write gates may be open at once. See slotsFor.
-var gateSlots sync.Map // *sql.DB -> chan struct{}
-
-// slotsFor returns the channel that bounds the gates open on db, or nil when its
-// pool has no connection limit.
-//
-// A gate is a transaction, so it holds a connection of the pool until it is
-// released, and whatever the holder does meanwhile -- the reads and writes the gate
-// exists to serialise -- needs a connection of the same pool. Gates that held every
-// connection would leave their own holders nothing to work with, and the pod would
-// wait out the holders' deadlines with nothing else reaching the database: four
-// signups on a four-connection pool did exactly that. So at most one connection
-// fewer than the pool's size can be held by gates, and the last is always free for
-// the work done under them. (A pool of one has no such connection to spare, and a
-// gate holder on it cannot work; nothing can be done about that here.)
-func slotsFor(db *sql.DB) chan struct{} {
-	if v, ok := gateSlots.Load(db); ok {
-		return v.(chan struct{})
-	}
-	limit := db.Stats().MaxOpenConnections
-	if limit <= 0 {
-		return nil
-	}
-	v, _ := gateSlots.LoadOrStore(db, make(chan struct{}, max(1, limit-1)))
-	return v.(chan struct{})
-}
+// gatePoolsAccepted holds the pools whose sessions were checked and accepted.
+var gatePoolsAccepted sync.Map // *sql.DB -> struct{}
 
 // AcquireWriteGate serializes a multi-statement capability across replicas.
 // Callers must read fresh while holding it and stamp the write after that read.
-// The transaction holds only the advisory lock; engine writes use their normal
-// connections. A process crash releases the lock in PostgreSQL.
+// The transaction holds only the advisory lock; the work under it uses the
+// caller's own (request) connections. A process crash releases the lock in
+// PostgreSQL. db is the GATE pool (database.Database.GateDB).
 func AcquireWriteGate(ctx context.Context, db *sql.DB, key string) (func(), error) {
 	return AcquireWriteGates(ctx, db, key)
 }
@@ -92,24 +104,22 @@ func AcquireWriteGate(ctx context.Context, db *sql.DB, key string) (func(), erro
 // AcquireWriteGates takes the locks for several keys, in the order given, in ONE
 // transaction on ONE connection, and returns the function that releases them all.
 //
-// Two gates taken one after the other are two transactions and two connections, and
-// two callers that each hold one and wait for another connection wait for each
-// other: on a four-connection pool, two signups on two storefronts did exactly that.
-// A caller that needs several locks names them all here. The order is the caller's
-// to keep fixed: every caller that takes both of two keys must take them in the same
-// order, or two of them can each hold the lock the other wants.
+// A caller that needs several locks names them all here: two gates taken one after
+// the other are two connections, and a caller that holds one while it waits for a
+// second can only make progress if the pool has room for the second. The order is
+// the caller's to keep fixed: every caller that takes both of two keys must take
+// them in the same order, or two of them can each hold the lock the other wants.
 //
 // It waits at most writeGateWait for everything together and then returns
-// ErrWriteGateBusy with nothing held. The number of gates open at once per pool is
-// bounded (see slotsFor).
+// ErrWriteGateBusy with nothing held.
 func AcquireWriteGates(ctx context.Context, db *sql.DB, keys ...string) (func(), error) {
 	return AcquireWriteGatesWithin(ctx, db, writeGateWait, keys...)
 }
 
 // AcquireWriteGatesWithin is AcquireWriteGates with the wait chosen by the caller;
-// zero is the default. A wait is only meaningful below the request pool's
-// statement_timeout and pgdriver's read deadline (see writeGateWait): a longer one
-// is enforced by whichever of those fires first, not by the gate.
+// zero is the default. A wait is only meaningful below pgdriver's read deadline
+// (see the header): a longer one is enforced by the client's timer, which cannot
+// tell the server to stop waiting. The caller's own deadline shortens it further.
 func AcquireWriteGatesWithin(ctx context.Context, db *sql.DB, wait time.Duration, keys ...string) (func(), error) {
 	if db == nil {
 		return nil, fmt.Errorf("shared write coordination is unavailable")
@@ -120,25 +130,35 @@ func AcquireWriteGatesWithin(ctx context.Context, db *sql.DB, wait time.Duration
 	if wait <= 0 {
 		wait = writeGateWait
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// The wait ends at the sooner of its own limit and the caller's deadline; when
+	// the caller's is the sooner the server is told to give up a little before it.
 	deadline := time.Now().Add(wait)
+	serverDeadline := deadline
+	if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(deadline) {
+		deadline = callerDeadline
+		serverDeadline = callerDeadline.Add(-gateCallerMargin)
+	}
+	if !time.Now().Before(serverDeadline) {
+		return nil, context.DeadlineExceeded
+	}
 	waitCtx, cancelWait := context.WithDeadline(ctx, deadline)
 	defer cancelWait()
 
-	slot, err := takeGateSlot(waitCtx, db)
-	if err != nil {
+	if err := checkGatePool(waitCtx, db); err != nil {
 		return nil, gateWaitError(ctx, err)
 	}
 	conn, err := db.Conn(waitCtx)
 	if err != nil {
-		slot()
 		return nil, gateWaitError(ctx, err)
 	}
 	// The transaction lives as long as the caller's context, not the wait's: it must
-	// outlast this function.
+	// outlast this function, and it is rolled back when the caller's context ends.
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		_ = conn.Close()
-		slot()
 		return nil, err
 	}
 	taken := time.Now()
@@ -146,24 +166,23 @@ func AcquireWriteGatesWithin(ctx context.Context, db *sql.DB, wait time.Duration
 	release := func() {
 		once.Do(func() {
 			if held := time.Since(taken); held > gateHeldTooLong {
-				slog.Warn("a write gate was held long enough that PostgreSQL may have ended it: an idle transaction is ended at idle_in_transaction_session_timeout (60 s by default) and the advisory lock goes with it, without a word to the holder",
+				slog.Warn("a write gate was held long enough that PostgreSQL may have ended it: a gate session is ended at its idle_in_transaction_session_timeout and the advisory lock goes with it, without a word to the holder",
 					"held", held.Round(time.Second).String(), "keys", keys)
 			}
 			_ = tx.Rollback()
 			_ = conn.Close()
-			slot()
 		})
 	}
 
-	lockCtx, cancelLock := context.WithDeadline(ctx, deadline.Add(writeGateGrace))
+	lockCtx, cancelLock := context.WithDeadline(ctx, serverDeadline.Add(writeGateGrace))
 	defer cancelLock()
 	for _, key := range keys {
-		remaining := time.Until(deadline)
+		remaining := time.Until(serverDeadline)
 		if remaining <= 0 {
 			release()
 			return nil, ErrWriteGateBusy
 		}
-		// The server enforces what is left of the wait (see writeGateWait).
+		// The server enforces what is left of the wait (see the header).
 		if _, err = tx.ExecContext(lockCtx, "SELECT set_config('lock_timeout', $1, true)", strconv.FormatInt(max(1, remaining.Milliseconds()), 10)); err != nil {
 			release()
 			return nil, gateWaitError(ctx, err)
@@ -176,28 +195,37 @@ func AcquireWriteGatesWithin(ctx context.Context, db *sql.DB, wait time.Duration
 	return release, nil
 }
 
-// takeGateSlot waits for a place among the pool's gate holders and returns the
-// function that gives it back.
-func takeGateSlot(ctx context.Context, db *sql.DB) (func(), error) {
-	slots := slotsFor(db)
-	if slots == nil {
-		return func() {}, nil
+// checkGatePool refuses a pool whose sessions are ended too soon for a gate, once
+// per pool. A limit of 0 is no limit. A failed check is not remembered: a
+// transient error must not condemn a pool, and an accepted pool is never asked
+// again.
+func checkGatePool(ctx context.Context, db *sql.DB) error {
+	if _, ok := gatePoolsAccepted.Load(db); ok {
+		return nil
 	}
-	select {
-	case slots <- struct{}{}:
-		return func() { <-slots }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	var ms int64
+	if err := db.QueryRowContext(ctx, `SELECT setting::bigint FROM pg_settings WHERE name = 'idle_in_transaction_session_timeout'`).Scan(&ms); err != nil {
+		return err
 	}
+	if limit := time.Duration(ms) * time.Millisecond; limit > 0 && limit < minGateIdleTimeout {
+		slog.Error("a write gate was asked to run on a pool whose sessions are ended after "+limit.String()+" idle in a transaction; it refuses, because the advisory lock would go with the session while its holder went on writing. Gates belong on the gate pool (database.Database.GateDB), not the request pool",
+			"limit", limit.String(), "minimum", minGateIdleTimeout.String())
+		return fmt.Errorf("%w (this pool's limit is %s, the least a gate accepts is %s)", ErrWriteGatePoolUnsuitable, limit, minGateIdleTimeout)
+	}
+	gatePoolsAccepted.Store(db, struct{}{})
+	return nil
 }
 
 // gateWaitError turns the ways a gate's wait can end into one answer: the caller's
-// own cancellation is theirs to see, and everything else that is the wait running
-// out -- the gate's deadline, the server's lock_timeout (55P03), the pool's
-// statement_timeout (57014) -- is ErrWriteGateBusy.
+// own cancellation is theirs to see, a pool that was refused stays refused, and
+// everything else that is the wait running out -- the gate's deadline, the server's
+// lock_timeout (55P03), a statement timeout (57014) -- is ErrWriteGateBusy.
 func gateWaitError(caller context.Context, err error) error {
 	if caller.Err() != nil {
 		return caller.Err()
+	}
+	if errors.Is(err, ErrWriteGatePoolUnsuitable) {
+		return err
 	}
 	msg := err.Error()
 	if errors.Is(err, context.DeadlineExceeded) ||

@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -82,6 +83,15 @@ type PluginContext struct {
 	// between statements and would drop a held session-scoped lock
 	// (epic memql#1925). Bulk traffic must NOT use this getter.
 	DirectBunDB func() *bun.DB
+
+	// GateDB returns the pool WRITE GATES run on (AcquireWriteGate), or nil on a
+	// node without a database. It is a pool of its own -- connections used for
+	// nothing else, whose sessions may sit idle in a transaction for minutes --
+	// and a gate must be taken on it, never on the pool BunDB() hands out: the
+	// work under a gate needs a connection of that pool, and its sessions end an
+	// idle transaction after 60 s, taking the gate's lock with them (memql#6022).
+	// Use it for gates and for nothing else.
+	GateDB func() *sql.DB
 
 	// ResolveVisionProvider RESOLVES a vision-capable provider through the
 	// router, or returns nil when no door to one is open.

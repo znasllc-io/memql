@@ -89,12 +89,8 @@ func (a *App) mountLibraryArtifactEndpoints(uploader server.FileUploader, contai
 		Bucket:     container,
 		Uploader:   uploader,
 		Downloader: downloader,
-		Store: server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: a.engine}, func() *sql.DB {
-			if a.db == nil || a.db.BunDB() == nil {
-				return nil
-			}
-			return a.db.BunDB().DB
-		}),
+		// The file-version gate runs on the gate pool (memql#6022).
+		Store:    server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: a.engine}, a.gateDBGetter()),
 		Analyzer: a.newLibraryAnalyzer(uploader),
 		Sessions: uploadsession.NewStore(&AttachmentEngineAdapter{Engine: a.engine}),
 		Blocks:   blocks,

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"database/sql"
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/integrations/library"
 )
@@ -19,12 +18,9 @@ func (a *App) wireLibraryIntegration(uploader server.FileUploader, bucket string
 	if work := a.lookupWorkIntegration(); work != nil {
 		integ.SetReviewGoals(work)
 	}
-	imageStore := server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: a.engine}, func() *sql.DB {
-		if db := a.BunDB(); db != nil {
-			return db.DB
-		}
-		return nil
-	})
+	// The store's file-version gate runs on the gate pool (memql#6022), not on the
+	// request pool the engine under it works on.
+	imageStore := server.NewEngineLibraryStore(&AttachmentEngineAdapter{Engine: a.engine}, a.gateDBGetter())
 	integ.SetRevisionFiles(&libraryRevisionFiles{uploader: uploader, bucket: bucket, store: imageStore})
 	integ.SetImageAssets(&libraryImageAssets{engine: &AttachmentEngineAdapter{Engine: a.engine}, store: imageStore, uploader: uploader, bucket: bucket})
 	if reader, ok := uploader.(library.BlobFetcher); ok {

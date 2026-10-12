@@ -66,6 +66,12 @@ type Integration struct {
 	// records the DSL queries that would replace it).
 	bunDB func() *bun.DB
 
+	// gateDB is the pool this integration's write gates run on (memql#6022):
+	// connections used for nothing else, never the request pool bunDB hands out.
+	// Unset, a gate refuses ("shared write coordination is unavailable") rather
+	// than take a connection the work under it needs.
+	gateDB func() *sql.DB
+
 	// admitRow is the per-row authorization gate applied to the rows the
 	// sweeps fetch THEMSELVES. A hand-rolled SELECT passes through neither
 	// the parser nor the filter path, so nothing is injected into it and
@@ -171,13 +177,7 @@ func New(engine Engine, logger *slog.Logger, database ...func() *bun.DB) *Integr
 		i.bunDB = database[0]
 	}
 	i.decisionGate = func(ctx context.Context, key string) (func(), error) {
-		var db *sql.DB
-		if i.bunDB != nil {
-			if handle := i.bunDB(); handle != nil {
-				db = handle.DB
-			}
-		}
-		return memql.AcquireWriteGate(ctx, db, "work-approval-decision:"+memql.BareShortId(key))
+		return memql.AcquireWriteGate(ctx, i.gatePool(), "work-approval-decision:"+memql.BareShortId(key))
 	}
 	i.rowsInFlight = i.runsInFlight
 	return i
@@ -195,6 +195,7 @@ func init() {
 		}
 		i := New(pctx.Engine, pctx.Logger)
 		i.bunDB = pctx.BunDB
+		i.SetGateDB(pctx.GateDB)
 		i.admitRow = pctx.AdmitSourceRow
 		if archiveContainer() != "" {
 			uploader, err := azureblob.New(context.Background())
@@ -206,6 +207,18 @@ func init() {
 		}
 		return i, nil
 	})
+}
+
+// SetGateDB installs the resolver of the pool this integration's write gates run
+// on (memql#6022): the gate pool, not the request pool.
+func (i *Integration) SetGateDB(gate func() *sql.DB) { i.gateDB = gate }
+
+// gatePool resolves the gate pool, or nil when none is wired.
+func (i *Integration) gatePool() *sql.DB {
+	if i == nil || i.gateDB == nil {
+		return nil
+	}
+	return i.gateDB()
 }
 
 // SetCompiler installs the compile surface. Called once, from the node that

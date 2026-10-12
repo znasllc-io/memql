@@ -33,8 +33,8 @@ type storedACSOperations struct{ connection *connectionStore }
 
 func (s *storedACSOperations) lock(ctx context.Context, key string) (func(), error) {
 	var db *sql.DB
-	if s != nil && s.connection != nil && s.connection.database != nil {
-		db = s.connection.database()
+	if s != nil && s.connection != nil && s.connection.gateDB != nil {
+		db = s.connection.gateDB()
 	}
 	return memql.AcquireWriteGate(ctx, db, "email-operation:"+key)
 }
