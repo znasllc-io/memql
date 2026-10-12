@@ -414,6 +414,8 @@ shape testSettings campaignTestSettingsFull {
 @row
 shape delivery deferredSendRef {
  row.id
+ status
+ lastError
  ownerUserId
  accountId
  recipientId

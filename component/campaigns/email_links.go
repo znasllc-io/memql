@@ -345,7 +345,8 @@ func (h *EmailLinkHandler) retry(rw http.ResponseWriter, err error) {
 }
 
 // A lost database session must stop the remaining writes of a multi-row choice.
-// Keeping this wrapper request-local also covers the shared unsubscribe helper.
+// A started write must finish before the page releases its gate, even if the
+// request or phase ends meanwhile. This also covers the shared unsubscribe helper.
 type emailPageGateEngine struct {
 	Engine
 	hold gateHold
@@ -356,6 +357,13 @@ func (e emailPageGateEngine) Execute(ctx context.Context, query string) (any, er
 		if err := e.hold.Verify(ctx); err != nil {
 			return nil, err
 		}
+		var result any
+		err := detachedWrite(ctx, func(writeCtx context.Context) error {
+			var err error
+			result, err = e.Engine.Execute(writeCtx, query)
+			return err
+		})
+		return result, err
 	}
 	return e.Engine.Execute(ctx, query)
 }

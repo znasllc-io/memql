@@ -174,6 +174,8 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 	}
 	want := map[serverOnlyKey]bool{
 		// Durable email automation coordination; public callers use gated capabilities.
+		{Path: "campaigns/queries.memql", Name: "deferredSingleSendById"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "settleDeferredSingleSend"}:     true,
 		{Path: "campaigns/queries.memql", Name: "deferredSingleSends"}:            true,
 		{Path: "campaigns/queries.memql", Name: "activeJourneys"}:                 true,
 		{Path: "campaigns/queries.memql", Name: "journeysToRetire"}:               true,
@@ -478,6 +480,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Only its handler derives organization/digest and writes engine state;
 		// actor scoping would either exclude mail clients or admit forged claims.
 		{Path: "campaigns/mutations.memql", Name: "recordOrganizationSuppression"}: true,
+		// Rejoining also comes from a mailed token, without an actor.userId
+		// session. Caller ownership cannot prove renewed consent. The verified
+		// preferences handler records that consent under shared locks before
+		// lifting only the token's organization opt-out, never a safety block.
+		{Path: "campaigns/mutations.memql", Name: "liftOrganizationSuppression"}: true,
 		// An actor may request a send, but only the provider adapter can attest
 		// that an attempt began. The receipt and its replay read are private.
 		// Ownership cannot attest locked scheduling or a committed occurrence.

@@ -115,7 +115,9 @@ func (s *Store) nudgeEnrollment(ctx context.Context, recipientID string, at time
 	if err := hold.Verify(phase); err != nil {
 		return err
 	}
-	return s.execServerOnly(phase, call("mutation", mutation, args...))
+	return detachedWrite(phase, func(writeCtx context.Context) error {
+		return s.execServerOnly(writeCtx, call("mutation", mutation, args...))
+	})
 }
 
 func (s *Store) consentExists(ctx context.Context, eventID string) (bool, error) {
