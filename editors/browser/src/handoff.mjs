@@ -8,7 +8,7 @@ export function requestedResource(pageURL) {
   const parts = resource.pathname.split('/').filter(Boolean).map(decodeURIComponent);
   if (resource.protocol !== 'memql-file:' || resource.username || resource.password || resource.port || resource.search || resource.hash ||
       resource.hostname !== page.hostname.slice('vscode.'.length) || parts.length !== 3 ||
-      !['artifacts', 'templates'].includes(parts[0]) || !/^[\w-]{1,160}$/.test(parts[1]) || !parts[2] || /[\\/\u0000-\u001f\u007f]/.test(parts[2])) {
+      !['artifacts', 'templates', 'new-email'].includes(parts[0]) || !/^[\w-]{1,160}$/.test(parts[1]) || !parts[2] || /[\\/\u0000-\u001f\u007f]/.test(parts[2])) {
     throw new Error('This file link does not belong to this MemQL installation. Open it again from MemQL OS.');
   }
   return resource.href;

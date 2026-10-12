@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PDFDocument } from "pdf-lib";
 import { changePDF } from "../src/pdf.js";
-import { Documents, isZip, resourceFrom } from "../src/documents.js";
+import { Documents, isZip, newEmailResource, resourceFrom } from "../src/documents.js";
+import { UserInputError } from "../src/problems.js";
 import { newTemplate, readTemplate } from "../src/templates.js";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
@@ -29,6 +30,57 @@ test("only single, well-formed MemQL resources can be opened", () => {
   assert.equal(resourceFrom("memql-file://client.example/artifacts/abc/report.pdf").id, "abc");
   for (const value of ["https://client.example/artifacts/abc/report.pdf", "memql-file://user@client.example/artifacts/abc/a", "memql-file://client.example/artifacts/abc/a?token=secret", "memql-file://client.example/artifacts/abc/a%2Fb", "memql-file://client.example/artifacts/a%0A/a"]) assert.throws(() => resourceFrom(value));
 });
+
+test("a New email link names an organization and opens no file", async () => {
+  const link = "memql-file://client.example/new-email/client-org/New%20email";
+  assert.deepEqual(resourceFrom(link), { domain: "client.example", kind: "new-email", id: "client-org", name: "New email" });
+  assert.equal(newEmailResource("Client.Example", "client-org"), link);
+  for (const bad of [
+    "memql-file://client.example/new/email?account=client-org&returnTo=email",
+    "memql-file://client.example/new-email/client-org",
+    "memql-file://client.example/new-email/v1:accounts:account:client-org/New%20email",
+    "memql-file://client.example/new-email/client-org/New%20email?returnTo=email",
+    "memql-file://client.example/new-email/client-org/a%2Fb",
+  ]) assert.throws(() => resourceFrom(bad), bad);
+  assert.throws(() => newEmailResource("client.example", "v1:accounts:account:x"));
+  const api = { connect: async () => { throw new Error("must not connect"); } } as unknown as EditorConnectionAPI;
+  await assert.rejects(new Documents(api).read(link), /opens a page, not a file/);
+});
+
+test("the New email builder returns the one canonical link or refuses", () => {
+  // clients/os pins this same literal for its own builder; the OS cannot import editors/, so the string is the contract.
+  assert.equal(newEmailResource("memql.example.com", "self"), "memql-file://memql.example.com/new-email/self/New%20email");
+  const longest = "a".repeat(160);
+  assert.equal(resourceFrom(newEmailResource("client.example", longest)).id, longest);
+  const refusal = (error: unknown) => error instanceof UserInputError && error.message === "Invalid MemQL file link.";
+  // An id is a bare id as written: resourceFrom decodes, so "%61" would read as "a" and "a%2Fb" as a path.
+  for (const id of ["", "a".repeat(161), "a b", "a/b", "a?b", "a#b", "%61", "a%2Fb", "é", "v1:accounts:account:x"]) {
+    assert.throws(() => newEmailResource("client.example", id), refusal, `id ${JSON.stringify(id)}`);
+  }
+  // A domain that reshapes the link (a slash, a port, a user, a query, a fragment, nothing at all) is refused, never reshaped.
+  for (const domain of ["", "client.example/", "client.example/x", "client.example:8080", "user@client.example", "client.example?x=1", "client.example#x", "client example"]) {
+    assert.throws(() => newEmailResource(domain, "client-org"), refusal, `domain ${JSON.stringify(domain)}`);
+  }
+});
+
+test("a New email link has no bytes to read or save", async () => {
+  const link = newEmailResource("client.example", "client-org");
+  const lease = { domain: "client.example", name: "client", generation: 1 };
+  const calls: string[] = [];
+  const untouched = (name: string) => async () => { calls.push(name); throw new Error(`${name} must not be called`); };
+  const api = { connect: untouched("connect"), execute: untouched("execute"), readBytes: untouched("readBytes"),
+    uploadFile: untouched("uploadFile"), uploadVersion: untouched("uploadVersion") } as unknown as EditorConnectionAPI;
+  const documents = new Documents(api);
+  await assert.rejects(documents.read(link), /opens a page, not a file/);
+  await assert.rejects(documents.read(link, lease), /opens a page, not a file/);
+  // A kind that would otherwise upload a new version: only the link's kind can be the reason for the refusal.
+  const opened = { resource: resourceFrom(link), lease, content: new Uint8Array(), mime: "text/plain", sourceId: "file", kind: "file", version: 1 };
+  await assert.rejects(documents.save(opened, new TextEncoder().encode("x")), /opens a page, not a file/);
+  assert.deepEqual(calls, []);
+  assert.equal(opened.version, 1);
+  assert.equal(opened.content.length, 0);
+});
+
 test("email template files validate independently of a cluster", () => {
   assert.equal(readTemplate(newTemplate()).subject, "Thanks for subscribing");
   assert.throws(() => readTemplate('{"subject":"hello\\nworld","textBody":"x","htmlBody":""}'));

@@ -2,7 +2,7 @@ import { configureProblems, ProblemReporter, UserInputError, userOperation } fro
 import { setProblemOutput, showProblem } from "./problemUI.js";
 import * as vscode from "vscode";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
-import { Documents, isZip, resourceFrom, type OpenDocument } from "./documents.js";
+import { Documents, isZip, NEW_EMAIL_IS_A_PAGE, resourceFrom, type OpenDocument } from "./documents.js";
 import { newTemplate } from "./templates.js";
 import { TemplateEditor } from "./templateEditor.js";
 import { TemplatePublisher } from "./templatePublish.js";
@@ -45,13 +45,25 @@ class MemQLFiles implements vscode.FileSystemProvider {
     }
     return pending;
   }
+  /**
+   * A New email link names a page, not a file, so it answers from the link alone: no network call, no bytes, no writes.
+   * Anything that is not a well-formed New email link takes the unchanged path, which refuses a bad link as it always did.
+   */
+  private isNewEmail(uri: vscode.Uri): boolean {
+    try { return resourceFrom(uri.toString()).kind === "new-email"; } catch { return false; }
+  }
   async stat(uri: vscode.Uri): Promise<vscode.FileStat> {
+    if (this.isNewEmail(uri)) return { type: vscode.FileType.File, ctime: 0, mtime: 0, size: 0, permissions: vscode.FilePermission.Readonly };
     const doc = await this.load(uri);
     return { type: vscode.FileType.File, ctime: 0, mtime: Date.parse(doc.revision || "") || doc.version, size: doc.content.length,
       permissions: ["file", "generated_output", "campaign_template"].includes(doc.kind) ? undefined : vscode.FilePermission.Readonly };
   }
-  async readFile(uri: vscode.Uri): Promise<Uint8Array> { return new Uint8Array((await this.load(uri)).content); }
+  async readFile(uri: vscode.Uri): Promise<Uint8Array> {
+    if (this.isNewEmail(uri)) return new Uint8Array();
+    return new Uint8Array((await this.load(uri)).content);
+  }
   async writeFile(uri: vscode.Uri, content: Uint8Array): Promise<void> {
+    if (this.isNewEmail(uri)) throw vscode.FileSystemError.NoPermissions(NEW_EMAIL_IS_A_PAGE);
     const doc = this.documents.get(uri.toString());
     if (!doc) throw vscode.FileSystemError.NoPermissions("Open and read the current file before saving a new version.");
     await userOperation("save the file", () => this.files.save(doc, content));

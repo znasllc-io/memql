@@ -6,16 +6,34 @@ import {
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
-export interface Resource { domain: string; kind: "artifacts" | "templates"; id: string; name: string }
+/** A "new-email" resource is a page, not a file: its id is the organization (a bare account id) it opens for and its name is the tab title. */
+export interface Resource { domain: string; kind: "artifacts" | "templates" | "new-email"; id: string; name: string }
 export function resourceFrom(uri: string): Resource {
   const parsed = new URL(uri);
   const segments = parsed.pathname.split("/").filter(Boolean).map(decodeURIComponent);
   if (parsed.protocol !== "memql-file:" || parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash ||
-      !parsed.hostname || segments.length !== 3 || !["artifacts", "templates"].includes(segments[0]) || !/^[\w-]{1,160}$/.test(segments[1])) {
+      !parsed.hostname || segments.length !== 3 || !["artifacts", "templates", "new-email"].includes(segments[0]) || !/^[\w-]{1,160}$/.test(segments[1])) {
     throw new UserInputError("Invalid MemQL file link.");
   }
   if (!segments[2] || /[\\/\u0000-\u001f]/.test(segments[2])) throw new UserInputError("Invalid file name.");
   return { domain: parsed.hostname.toLowerCase(), kind: segments[0] as Resource["kind"], id: segments[1], name: segments[2] };
+}
+/** Why a New email link is never read, saved or written: the page it opens has no bytes. */
+export const NEW_EMAIL_IS_A_PAGE = "A New email link opens a page, not a file.";
+/**
+ * The link that opens the New email page for one organization (a bare account id): three path segments
+ * and no query, so it fits the grammar every validator enforces. clients/os/src/items/editorPreference.ts
+ * builds this same string, byte for byte; change the link in both places or in neither.
+ */
+export function newEmailResource(domain: string, accountId: string): string {
+  const host = domain.toLowerCase();
+  const link = `memql-file://${host}/new-email/${accountId}/${encodeURIComponent("New email")}`;
+  let parsed: Resource | undefined;
+  try { parsed = resourceFrom(link); } catch { /* not a link; refused below */ }
+  // The id is checked as written (resourceFrom decodes, so "%61" would read as "a"), and the host must
+  // come back as given: a slash in it would have reshaped the link.
+  if (!/^[\w-]{1,160}$/.test(accountId) || parsed?.domain !== host) throw new UserInputError("Invalid MemQL file link.");
+  return link;
 }
 export function isZip(name: string, mime = "", bytes?: Uint8Array): boolean {
   return /\.zip$/i.test(name) || /^(application\/zip|application\/x-zip-compressed)(;|$)/i.test(mime) ||
@@ -58,6 +76,7 @@ export class Documents {
   }
   async read(uri: string, openedLease?: ConnectionLease): Promise<OpenDocument> {
     const resource = resourceFrom(uri);
+    if (resource.kind === "new-email") throw new Error(NEW_EMAIL_IS_A_PAGE);
     const lease = openedLease ?? await this.api.connect(resource.domain);
     if (lease.domain !== resource.domain) throw new UserInputError("This file belongs to another cluster.");
     if (resource.kind === "templates") {
@@ -178,6 +197,7 @@ export class Documents {
     if (result.resumeError) throw new UserInputError("Your decision was saved, but the job could not start. Retry to recover the same job.");
   }
   async save(document: OpenDocument, content: Uint8Array): Promise<void> {
+    if (document.resource.kind === "new-email") throw new Error(NEW_EMAIL_IS_A_PAGE);
     if (isZip(document.resource.name, document.mime, document.content)) throw new UserInputError("ZIP files are downloads; they cannot be edited or extracted here.");
     if (document.kind === "campaign_template" && document.template) {
       const result = (await this.api.execute(document.lease, "campaignSaveTemplate", buildCampaignSaveTemplate({
