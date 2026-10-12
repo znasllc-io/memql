@@ -1,0 +1,67 @@
+{
+  "automation": "campaigns/automations.memql campaignJourneyStepWorkflow",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "exitReason": "s-exitReason",
+            "finished": true,
+            "kind": "s-kind",
+            "subscription": "s-subscription",
+            "waiting": true
+          },
+          "topic": "automation.invocation.campaignJourneyStepWorkflow"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "reason": "s-exitReason"
+            },
+            "kind": "builtin",
+            "name": "campaignJourneyExit"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "exitReason": "s-exitReason",
+            "finished": true,
+            "kind": "s-kind",
+            "subscription": "s-subscription",
+            "waiting": true
+          },
+          "topic": "automation.invocation.campaignJourneyStepWorkflow"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "reason": "s-exitReason"
+            },
+            "kind": "builtin",
+            "name": "campaignJourneyExit"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
