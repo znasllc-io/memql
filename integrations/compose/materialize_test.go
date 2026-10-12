@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -1490,9 +1492,11 @@ func TestDescribedMarkdownInsideARunStillUsesTheComposer(t *testing.T) {
 	}
 }
 
-// fromARun is the Library's own test for "a person is not making this call":
-// handleRequestDocumentRevision refuses when a run id is on the context.
-func TestFromARunIsTheConditionTheLibraryRefusesARevisionRequestFor(t *testing.T) {
+// fromARun is true for a context that names a run and for nothing else. That it
+// is the Library's own test for "a person is not making this call" is true by
+// construction (both read common.RunFromContext) and cannot be seen from here:
+// this package never calls the Library.
+func TestFromARunIsTrueOnlyForAContextThatNamesARun(t *testing.T) {
 	if fromARun(materializeContext()) {
 		t.Fatal("a call with no run on its context is a person's")
 	}
@@ -1501,7 +1505,168 @@ func TestFromARunIsTheConditionTheLibraryRefusesARevisionRequestFor(t *testing.T
 	}
 	noRunId := common.ContextWithRun(materializeContext(), common.RunContext{GoalId: "v1:work:goal:nexus", StepKey: "file", OwnerUserId: "u-alice"})
 	if fromARun(noRunId) {
-		t.Fatal("a run context with no run id is what the Library lets through, so it is a person's")
+		t.Fatal("a run context with no run id is a person's: the Library lets it through")
+	}
+	// A run with no goal is still a run: it is not nested (its composition has no
+	// goal to attach to) but the Library still refuses it, so there is still no
+	// client to hand a description on.
+	noGoal := common.ContextWithRun(materializeContext(), common.RunContext{RunId: "v1:work:run:orphan", StepKey: "file", OwnerUserId: "u-alice"})
+	if !fromARun(noGoal) {
+		t.Fatal("a run that names no goal is still a run, and not a person's")
+	}
+}
+
+// The composeFile tool is how an AGENT asks for a file, and an agent is always
+// asked to write something: the Materializer files an EMPTY document for a
+// request with nothing to compose from, which is what a person's client asks for
+// on purpose and what an agent never means. So the tool reaches the Materializer
+// through composeMaterializeWritten, which refuses a statement that says nothing.
+func TestComposeFileRefusesAStatementThatSaysNothing(t *testing.T) {
+	for name, statement := range map[string]any{"empty": "", "spaces": "   ", "line breaks": "\n\t \n", "missing": nil} {
+		i, e, u := materializeFixture(t)
+		args := map[string]any{"name": "Heroes", "format": "markdown"}
+		if statement != nil {
+			args["statement"] = statement
+		}
+		_, err := i.handleMaterializeWritten(nestedMaterializeContext(), args, 0)
+		if err == nil || !strings.Contains(err.Error(), "statement") {
+			t.Fatalf("%s: err = %v, want a refusal that names the statement", name, err)
+		}
+		if len(e.compositions) != 0 || len(e.inputs) != 0 || len(e.files) != 0 || u.calls != 0 {
+			t.Fatalf("%s: a refused request wrote something: %d compositions, %d inputs, %d files, %d uploads", name, len(e.compositions), len(e.inputs), len(e.files), u.calls)
+		}
+	}
+}
+
+func TestComposeFileWithAStatementIsComposedFromIt(t *testing.T) {
+	i, e, u := materializeFixture(t)
+	var asked []ComposeRequest
+	i.SetComposer(materializeComposerFunc(func(_ context.Context, r ComposeRequest) (ComposeReply, error) {
+		asked = append(asked, r)
+		return ComposeReply{Draft: pure.Draft{Body: "Ten heroes, ranked"}}, nil
+	}))
+	if _, err := i.handleMaterializeWritten(nestedMaterializeContext(), map[string]any{"name": "Heroes", "format": "markdown", "statement": "Rank ten heroes"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0].Statement != "Rank ten heroes" {
+		t.Fatalf("the composer was not asked to write from the statement: %+v", asked)
+	}
+	if len(e.compositions) != 1 || !strings.Contains(string(u.bytes), "Ten heroes, ranked") {
+		t.Fatalf("the file was not composed from the statement: %d compositions, %q", len(e.compositions), u.bytes)
+	}
+}
+
+// The tool, the builtin it calls, the capability that builtin names and the
+// handler registered under that name are four things in three places, and the
+// refusal only protects an agent if every link holds. This walks the chain from
+// the DSL, so a tool pointed back at composeMaterialize (which files a blank
+// document for an empty statement) fails here and not in front of an agent.
+func TestComposeFileReachesTheStatementEntryThroughTheDeclaredChain(t *testing.T) {
+	tools := readRepoFile(t, filepath.Join("dsl", "compose", "tools.memql"))
+	header := regexp.MustCompile(`(?s)((?:@[^\n]*\n)+)tool composeFile \{`).FindStringSubmatch(tools)
+	if header == nil {
+		t.Fatal("dsl/compose/tools.memql no longer declares `tool composeFile`; update this test with it")
+	}
+	handler := regexp.MustCompile(`@handler\(type="function", name="([A-Za-z0-9_]+)"\)`).FindStringSubmatch(header[1])
+	if handler == nil {
+		t.Fatalf("composeFile has no function handler:\n%s", header[1])
+	}
+	if handler[1] == "composeMaterialize" {
+		t.Fatal("composeFile calls composeMaterialize, which files an empty document for an empty statement: it must call the entry that refuses one")
+	}
+	builtins := readRepoFile(t, filepath.Join("dsl", "compose", "builtins.memql"))
+	declaration := regexp.MustCompile(`(?s)((?:@[^\n]*\n)+)builtin ` + handler[1] + ` \{(.*?)\n\}`).FindStringSubmatch(builtins)
+	if declaration == nil {
+		t.Fatalf("composeFile calls %s and dsl/compose/builtins.memql declares no builtin by that name", handler[1])
+	}
+	executor := regexp.MustCompile(`@executor\("integration\.compose\.([A-Za-z0-9_]+)"\)`).FindStringSubmatch(declaration[1])
+	if executor == nil {
+		t.Fatalf("builtin %s names no integration.compose executor:\n%s", handler[1], declaration[1])
+	}
+	if !regexp.MustCompile(`\bstatement\s+string!`).MatchString(declaration[2]) {
+		t.Fatalf("builtin %s does not require a statement:\n%s", handler[1], declaration[2])
+	}
+	if strings.Contains(declaration[1], "@sdk") {
+		t.Fatalf("builtin %s is the agent tool's entry and is not an SDK construct: a person's client uses composeMaterialize", handler[1])
+	}
+	i, e, u := materializeFixture(t)
+	var entry *memql.IntegrationCapability
+	for _, c := range i.Capabilities() {
+		if c.Name == executor[1] {
+			entry = &c
+		}
+	}
+	if entry == nil {
+		t.Fatalf("builtin %s names the capability %q and nothing registers it", handler[1], executor[1])
+	}
+	_, err := entry.Handler(nestedMaterializeContext(), map[string]any{"name": "Heroes", "format": "markdown", "statement": ""}, 0)
+	if err == nil || !strings.Contains(err.Error(), "statement") {
+		t.Fatalf("the capability the tool reaches filed something for an empty statement: err = %v", err)
+	}
+	if len(e.compositions) != 0 || len(e.files) != 0 || u.calls != 0 {
+		t.Fatal("the refused request wrote something")
+	}
+}
+
+// filedSize reads the size of a filed file's row, strictly: a row with no size,
+// or one that is not a whole number of bytes, is an error and not zero.
+// runCountOf answers 0 for all of those, which is right for a counter that starts
+// at nothing and wrong for a check that a file was sized at nothing.
+func filedSize(file map[string]any) (int, error) {
+	raw, ok := file["size"]
+	if !ok {
+		return 0, errors.New("the file row carries no size")
+	}
+	switch n := raw.(type) {
+	case int:
+		if n >= 0 {
+			return n, nil
+		}
+	case int64:
+		if n >= 0 {
+			return int(n), nil
+		}
+	case float64:
+		if n >= 0 && n == float64(int(n)) {
+			return int(n), nil
+		}
+	case json.Number:
+		if v, err := n.Int64(); err == nil && v >= 0 {
+			return int(v), nil
+		}
+	}
+	return 0, fmt.Errorf("the file row's size %v (%T) is not a whole number of bytes", raw, raw)
+}
+
+func TestFiledSizeIsReadStrictly(t *testing.T) {
+	for name, tc := range map[string]struct {
+		row  map[string]any
+		want int
+	}{
+		"zero as a decoded number": {map[string]any{"size": float64(0)}, 0},
+		"one as a decoded number":  {map[string]any{"size": float64(1)}, 1},
+		"an int":                   {map[string]any{"size": 7}, 7},
+		"an int64":                 {map[string]any{"size": int64(9)}, 9},
+		"a json number":            {map[string]any{"size": json.Number("12")}, 12},
+	} {
+		if got, err := filedSize(tc.row); err != nil || got != tc.want {
+			t.Errorf("%s: filedSize = %d, %v; want %d", name, got, err, tc.want)
+		}
+	}
+	for name, row := range map[string]map[string]any{
+		"no row at all":         nil,
+		"no size":               {"name": "Blank.txt"},
+		"a null size":           {"size": nil},
+		"a string":              {"size": "0"},
+		"a fraction":            {"size": 1.5},
+		"a negative number":     {"size": float64(-1)},
+		"a negative int":        {"size": -3},
+		"a bad json number":     {"size": json.Number("x")},
+		"a type it cannot read": {"size": []int{0}},
+	} {
+		if got, err := filedSize(row); err == nil {
+			t.Errorf("%s was read as %d; a size that is not there or not a number must be an error", name, got)
+		}
 	}
 }
 
@@ -1561,9 +1726,14 @@ func TestDescribedMarkdownMeansAStatementAndNothingToComposeFrom(t *testing.T) {
 // The Library lists a file by its summary, and "Materialized from no sources"
 // reads as a fault on a file that was never going to have any.
 func TestBlankAndDescribedFilesAreSummarisedAsCreatedBlank(t *testing.T) {
+	// Each request files exactly one file: a summary read off a file that was never
+	// filed, or off a second file that is not the one asked for, proves nothing.
 	i, e, _ := materializeFixture(t)
 	if _, err := i.materialize(nestedMaterializeContext(), "u-alice", "", blankArgs(pure.FormatMarkdown)); err != nil {
 		t.Fatal(err)
+	}
+	if len(e.files) != 1 {
+		t.Fatalf("a blank request filed %d files, want exactly one", len(e.files))
 	}
 	for _, f := range e.files {
 		if f["summary"] != "Created blank." {
@@ -1576,6 +1746,9 @@ func TestBlankAndDescribedFilesAreSummarisedAsCreatedBlank(t *testing.T) {
 	if err := adoptTheRun(anotherReplica(de, du, nil), input); err != nil {
 		t.Fatal(err)
 	}
+	if len(de.files) != 1 {
+		t.Fatalf("a described request filed %d files, want exactly one", len(de.files))
+	}
 	if f := de.files[stringOf(de.compositions[compositionId]["outputFileId"])]; f["summary"] != "Created blank." {
 		t.Fatalf("a described file's summary = %q, want Created blank.", f["summary"])
 	}
@@ -1584,6 +1757,9 @@ func TestBlankAndDescribedFilesAreSummarisedAsCreatedBlank(t *testing.T) {
 	ordinary, oe, _ := materializeFixture(t)
 	if _, err := ordinary.materialize(nestedMaterializeContext(), "u-alice", "", materializeDraft()); err != nil {
 		t.Fatal(err)
+	}
+	if len(oe.files) != 1 {
+		t.Fatalf("an ordinary request filed %d files, want exactly one", len(oe.files))
 	}
 	for _, f := range oe.files {
 		if f["summary"] != "Materialized from no sources." {

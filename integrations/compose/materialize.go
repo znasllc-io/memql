@@ -132,12 +132,22 @@ func (i *Integration) requireUsableFolder(ctx context.Context, folderId string) 
 
 // fromARun says a work run is making this call, and not a person's own client.
 // It is the condition under which the Library refuses a revision request ("a
-// person must prepare the document revision request",
-// integrations/library/revision.go), so it is also the condition under which
-// there is no client to hand a description on.
+// person must prepare the document revision request", handleRequestDocumentRevision
+// and the revision-item changes in integrations/library), so it is also the
+// condition under which there is no client to hand a description on.
+//
+// RunFromContext answers true only for a context that names a run
+// (RunContext.IsRun), which is the Library's own test; nothing is added to it
+// here, so the two cannot disagree about what a run is.
+//
+// It is not `nested`, which materialize works out for a different question: a
+// nested call is one whose composition BELONGS to the run, so it also needs the
+// run's goal to attach to. A run that names no goal is still a run -- the
+// Library still refuses it, and there is still no client -- while its
+// composition opens a goal of its own like a person's.
 func fromARun(ctx context.Context) bool {
-	rc, ok := common.RunFromContext(ctx)
-	return ok && rc.RunId != ""
+	_, ok := common.RunFromContext(ctx)
+	return ok
 }
 
 func (i *Integration) handleMaterialize(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -154,6 +164,25 @@ func (i *Integration) handleMaterialize(ctx context.Context, args map[string]any
 		return nil, err
 	}
 	return i.resultNode(out), nil
+}
+
+// handleMaterializeWritten is materialize for the composeFile agent tool, which
+// must say what to write. The Materializer files an EMPTY document for a request
+// with nothing to compose from -- what a person's client asks for on purpose --
+// and an agent that sent no statement did not ask for that: it expects a file
+// with something in it, and would be told one was made. So an empty statement is
+// refused here, with words it can act on, and everything else is materialize.
+//
+// The refusal comes after the principal check, as materialize's own refusals do,
+// so a caller that is not signed in is told that first.
+func (i *Integration) handleMaterializeWritten(ctx context.Context, args map[string]any, n int) ([]memorynodes.MemoryNode, error) {
+	if _, err := requirePrincipal(ctx); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(stringOf(args["statement"])) == "" {
+		return nil, errors.New("compose: composeFile needs a statement saying what the file should contain")
+	}
+	return i.handleMaterialize(ctx, args, n)
 }
 
 func parseMaterializeArgs(args map[string]any) (materializeArgs, error) {

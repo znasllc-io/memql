@@ -4,12 +4,12 @@
 /// PDF, DOCX and other compound formats automatically include a reproducible source ZIP;
 /// the completed receipt returns outputFileId and sourceFileId. No separate ZIP-building step
 /// or template lookup is needed. With no selected template, use the Materializer default style.
-@handler(type="function", name="composeMaterialize")
+@handler(type="function", name="composeMaterializeWritten")
 @requiresAgentRole("assistant", "specialist")
 @executionTime("slow")
 tool composeFile {
   name       string!   @description("Descriptive filename stem, without a path.")
-  statement  string!   @description("Complete instructions for the requested content.")
+  statement  string!   @description("Complete instructions for the requested content. A call with an empty statement is refused; say what the file should contain.")
   format     string!   @description("markdown, html, txt, csv, json, docx or pdf.")
   draft      string    @description("Optional finished or starting draft to use when composing.")
   sources    array  @description("Optional source references: {kind, ref, label}; kind is concept_row, library_file or query.")

@@ -256,7 +256,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 		{Name: "execute", Description: "Execute the persisted materialization belonging to the current work run.", Handler: i.handleExecute, ArgsSchema: map[string]string{"compositionId": "string (required) -- the composition this run owns"}},
 		{
 			Name:        "materialize",
-			Description: "Compose the named sources into a file of the chosen format and file it in the Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia=\"materializer\" and that goal's first run, then dispatches the known materializeFile template. A request with nothing to compose from (no statement, draft, sections, sources, template or recipe) files an empty Markdown, text, HTML, CSV or JSON document without a model call. So does a Markdown request that only describes the document (a statement, with no draft, sections, template, recipe or output kind, and no source other than Library files) when a person's own client makes it: the statement stays on the composition for that client to hand to the Library's revision workflow, which writes the document. That workflow cannot read the graph, so a request with a concept_row or query source keeps the composer, as does any request inside a work run. A folderId the caller cannot read, or one that has been archived, is refused before anything is written. Returns {compositionId, goalId, runId, format}; the composition reports progress and its outputFileId.",
+			Description: "Compose the named sources into a file of the chosen format and file it in the Library. Opens a v1:compose:composition, a v1:work:goal with requestedVia=\"materializer\" and that goal's first run, then dispatches the known materializeFile template. A request with nothing to compose from (no statement, draft, sections, sources, template or recipe) files an empty Markdown, text, HTML, CSV or JSON document without a model call. So does a Markdown request that only describes the document (a statement, with no draft, sections, template, recipe, output kind or deployable kind, and no source other than Library files) outside a work run: the statement stays on the composition for the caller to hand to the Library's revision workflow, as the person, which writes the document. That workflow cannot read the graph, so a request with a concept_row or query source keeps the composer, as does any request inside a work run. A folderId the caller cannot read, or one that has been archived, is refused before anything is written. Returns {compositionId, goalId, runId, format}; the composition reports progress and its outputFileId.",
 			Handler:     i.handleMaterialize,
 			ArgsSchema: map[string]string{
 				"name":           "string (required) -- what to call it, and the filename stem",
@@ -271,6 +271,19 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 				"recipeId":       "string -- the recipe this run came from, when it came from one",
 				"ceilings":       "object -- the goal's ceilings; a zero is 'unset', never 'nothing allowed'",
 				"requestId":      "string -- the caller's own id for this request; repeating it returns the same composition instead of starting another",
+			},
+		},
+		{
+			Name:        "materializeWritten",
+			Description: "The composeFile agent tool's entry into the Materializer: materialize for a request that must say what to write. A statement that is empty or only spaces is refused, because a request with nothing to compose from files an empty document, which is what a person's client asks for on purpose and an agent never means. Otherwise it is materialize, with the arguments the tool carries.",
+			Handler:     i.handleMaterializeWritten,
+			ArgsSchema: map[string]string{
+				"name":      "string (required) -- what to call it, and the filename stem",
+				"statement": "string (required) -- what the file should contain; refused when empty",
+				"format":    "string (required) -- markdown | html | txt | csv | json | docx | pdf",
+				"draft":     "string -- a draft to start from; empty means the compose step writes it",
+				"sources":   "[]object -- {kind, ref, label}; kind is concept_row | library_file | query",
+				"folderId":  "string -- v1:library:folder to file the output into",
 			},
 		},
 		{

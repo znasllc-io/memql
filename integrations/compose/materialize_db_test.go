@@ -423,7 +423,14 @@ func TestMaterializeDB_BlankTextIsReadyAsAZeroByteFile(t *testing.T) {
 	if out.upload.calls != 1 || len(out.upload.bytes) != 0 {
 		t.Fatalf("blank text uploaded %q in %d uploads, want one empty file", out.upload.bytes, out.upload.calls)
 	}
-	if out.file == nil || out.file["name"] != "Blank.txt" || out.file["status"] != "ready" || runCountOf(out.file["size"]) != 0 {
+	// A size the row does not carry, or carries as something else, is not zero:
+	// runCountOf answers 0 for both, which would make this check pass on a file
+	// the engine never sized.
+	size, err := filedSize(out.file)
+	if err != nil || size != 0 {
+		t.Fatalf("the filed blank text does not have a size of exactly 0: %d, %v (%v)", size, err, out.file)
+	}
+	if out.file == nil || out.file["name"] != "Blank.txt" || out.file["status"] != "ready" {
 		t.Fatalf("the filed blank text is not a ready empty Blank.txt: %v", out.file)
 	}
 	if out.journal.Status != "succeeded" {

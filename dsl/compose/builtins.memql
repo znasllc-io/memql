@@ -26,8 +26,8 @@
 @sdk
 @executor("integration.compose.materialize")
 builtin composeMaterialize {
-  name           string!   @description("What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is.")
-  statement      string    @description("What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind, and no source that is not a Library file) is created EMPTY when a person's own client asks, and the statement stays on its composition: the client hands it to the Library's revision workflow, which writes the document. That workflow reads Markdown and images and cannot read the graph, so a concept_row or query source keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement.")
+  name           string!   @description("What to call it, and the filename stem of the output. A name with a slash is refused (folderId chooses where it is filed), and one trailing extension that already names the format is dropped, because the extension is added when the file is filed: Plan.md is filed as Plan.md, never Plan.md.md.")
+  statement      string    @description("What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind, and no source that is not a Library file) is created EMPTY outside a work run, and the statement stays on its composition: the caller hands it to the Library's revision workflow, as the person (the SDK's handOffDescription), which writes the document. That workflow reads Markdown and images and cannot read the graph, so a concept_row or query source keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement.")
   format         string!   @description("markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.")
   outputKind     string    @description("email_template produces a validated .email.json with subject, editable HTML, and plain-text alternative; requires format json. Empty creates an ordinary document. The result is a draft, never published or sent automatically.")
   sources        []object  @description("What to compose from: a list of {kind, ref, label, content?} where kind is concept_row | library_file | query. Set content=true only for a library_file to capture its bytes as reference input, including bounded inspection of supported ZIP members. A `query` source is a SELECTION and is resolved at run time under your own actor, which is what makes it re-runnable; the other two name one row each.")
@@ -40,6 +40,21 @@ builtin composeMaterialize {
   recipeId       string    @description("v1:compose:recipe this run came from, when it came from one. Stamps the composition and bumps the recipe's run count.")
   ceilings       object    @description("{tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.")
   requestId      string    @description("Caller-chosen id for this request. Repeating it returns the same composition instead of starting another, so a double click makes one file.")
+}
+
+/// The composeFile agent tool's entry into the Materializer: composeMaterialize for a request
+/// that must say what to write. A statement that is empty or only spaces is refused, because a
+/// request with nothing to compose from files an EMPTY document -- what a person's client asks
+/// for on purpose, and what an agent asked to write a file never means. Not an SDK construct:
+/// a person's client calls composeMaterialize.
+@executor("integration.compose.materializeWritten")
+builtin composeMaterializeWritten {
+  name       string!   @description("Descriptive filename stem, without a path.")
+  statement  string!   @description("Complete instructions for the requested content. Refused when empty.")
+  format     string!   @description("markdown, html, txt, csv, json, docx or pdf.")
+  draft      string    @description("Optional finished or starting draft to use when composing.")
+  sources    []object  @description("Optional source references: {kind, ref, label}; kind is concept_row, library_file or query.")
+  folderId   string    @description("Optional Library folder; omitted means the Library root.")
 }
 
 /// Run one of your recipes again: resolve its selectors NOW, compose, render and file. Returns
