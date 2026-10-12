@@ -15,9 +15,9 @@ beforeEach(() => localStorage.clear());
 function mount(seed: Parameters<typeof fakeConnection>[0] = {}, setup: Parameters<typeof composeIntent>[0] = { format: "markdown" }) {
  const conn=fakeConnection({materializeReply:{compositionId:"made"} as Row,...seed}); h.connection=conn;
  const tab={navigate:vi.fn(),close:vi.fn()},ports={reserve:vi.fn(()=>tab),navigate:vi.fn(),schedule:vi.fn(()=>()=>{})};
- const store=memoryStore(); let go!:(section:string)=>void; const navigate=vi.fn((section:string)=>go(section));
- function Harness(){const [section,setSection]=useState("composer");go=setSection;return withSession(<MaterializerApp sectionId={section} navigate={navigate} askContext={()=>{}} store={store} handoffPorts={ports} intent={{id:"setup",payload:composeIntent(setup)}} consumeIntent={()=>{}}/>);}
- render(<Harness/>); return {conn,tab,ports,navigate,go:(section:string)=>act(()=>go(section))};
+ const store=memoryStore(); let go!:(section:string)=>void; let sendIntent!:(intent:{id:string;payload:Record<string,unknown>})=>void; const navigate=vi.fn((section:string)=>go(section));
+ function Harness(){const [section,setSection]=useState("composer");const [intent,setIntent]=useState({id:"setup",payload:composeIntent(setup)});go=setSection;sendIntent=setIntent;return withSession(<MaterializerApp sectionId={section} navigate={navigate} askContext={()=>{}} store={store} handoffPorts={ports} intent={intent} consumeIntent={()=>{}}/>);}
+ render(<Harness/>); return {conn,tab,ports,navigate,go:(section:string)=>act(()=>go(section)),open:(id:string)=>act(()=>sendIntent({id:`open-${id}`,payload:{compositionId:id}}))};
 }
 async function name(value="Notes"){fireEvent.change(await screen.findByRole("textbox",{name:"Name"}),{target:{value}});}
 async function describe(){fireEvent.click(screen.getByRole("button",{name:/^Describe/}));fireEvent.change(await screen.findByRole("textbox",{name:"Describe what you want"}),{target:{value:"Write a brief"}});}
@@ -36,3 +36,46 @@ it("does not overwrite content when the server composed a predicted blank file",
 it.each(["failed","cancelled"])("closes the tab when the file is %s",async status=>{const {conn,tab}=mount();await name();await make();await making();act(()=>conn.subscriptions.emit(CONCEPT,ready({status,outputFileId:"",failureReason:"No budget left"})));expect(await screen.findByRole("button",{name:"Start over"})).toBeTruthy();expect(tab.close).toHaveBeenCalledOnce();});
 it("reserves nothing for an external editor",async()=>{localStorage.setItem("memql-os-editor-v1","vscode");const {ports}=mount();await name();await make();await making();expect(ports.reserve).not.toHaveBeenCalled();});
 it("a CSV reference goes to the composer with its content",async()=>{const file=libraryFileRow({id:"csv",name:"figures.csv"});const {conn,ports}=mount({libraryFiles:[file]},{format:"markdown",sources:[{kind:"library_file",ref:"csv",label:"Figures"}]});await name();await describe();await make();await making();expect(sent(conn)?.sources).toEqual([{kind:"library_file",ref:"csv",label:"Figures",content:true}]);expect(ports.reserve).not.toHaveBeenCalled();act(()=>conn.subscriptions.emit(CONCEPT,ready({statement:"Write a brief"})));await act(async()=>{});expect(conn.query.libraryAddDocumentComment).not.toHaveBeenCalled();});
+
+it("a pending ask abandoned through section navigation cannot keep the next file busy", async () => {
+  const { conn, go } = mount();
+  let finish!: () => void;
+  conn.query.composeMaterialize.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(rowsResult([{ compositionId: "old" } as Row])); }));
+  await name("Old ask"); await make();
+  await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+  go("settings");
+  await act(async () => finish());
+  go("composer");
+  fireEvent.click(screen.getByRole("button", { name: /^Name/ }));
+  await name("New ask"); await make();
+  await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledTimes(2));
+  expect(sent(conn, 1)).toMatchObject({ name: "New ask" });
+  expect(sent(conn, 1)?.requestId).not.toBe(sent(conn)?.requestId);
+});
+it("a recipe reply cannot take back a window moved to Settings", async () => {
+  const { conn, go, navigate } = mount({ recipes: [{ id: "recipe", name: "Daily brief", format: "markdown", description: "Write the daily brief", status: "active", sources: [], createdAt: "2026-10-01T12:00:00Z" } as Row] });
+  let finish!: () => void;
+  conn.query.composeRunRecipe.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(rowsResult([{ compositionId: "from-recipe" } as Row])); }));
+  go("recipes");
+  fireEvent.click(await screen.findByText("Daily brief"));
+  await readTheBar(); fireEvent.click(screen.getByRole("button", { name: "Run it again" }));
+  await waitFor(() => expect(conn.query.composeRunRecipe).toHaveBeenCalledOnce());
+  go("settings"); navigate.mockClear();
+  await act(async () => finish());
+  expect(navigate).not.toHaveBeenCalled();
+  expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
+});
+
+it("opening another running file keeps an older Make reply from replacing it", async () => {
+  const { conn, open } = mount();
+  let finish!: () => void;
+  conn.query.composeMaterialize.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(rowsResult([{ compositionId: "old" } as Row])); }));
+  await name("Old ask"); await make();
+  await waitFor(() => expect(conn.query.composeMaterialize).toHaveBeenCalledOnce());
+  act(() => conn.subscriptions.emit(CONCEPT, ready({ id: "chosen", name: "Chosen file", status: "composing", outputFileId: "" })));
+  open("chosen");
+  await making();
+  await act(async () => finish());
+  await readTheBar(); fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  await waitFor(() => expect(conn.query.composeCancel).toHaveBeenCalledWith({ compositionId: "chosen", reason: "Stopped by the person" }));
+});

@@ -40,33 +40,66 @@ export type ActId =
   | "returnToApp";
 
 /** The finished record's acts; making belongs to the wizard. */
-export function pageActs(c: CompositionRow, options: { backTo?: string; recipeCanRun: boolean; recipeSaved: boolean }): ActSpec[] {
-  if (c.archived) return [
-    ...(c.outputFileId ? [{ id: "openFile" as const, label: "Open in editor", text: true }] : []),
-    { id: "restore", label: "Restore", tone: "primary" },
-  ];
+export function pageActs(
+  c: CompositionRow,
+  options: { backTo?: string; recipeCanRun: boolean; recipeSaved: boolean },
+): ActSpec[] {
+  if (c.archived)
+    return [
+      ...(c.outputFileId
+        ? [{ id: "openFile" as const, label: "Open in editor", text: true }]
+        : []),
+      { id: "restore", label: "Restore", tone: "primary" },
+    ];
   if (isRunning(c.status)) return [];
-  if (c.status === "failed" || c.status === "cancelled") return [
-    { id: "archive", label: "Archive", text: true },
-    { id: "startOver", label: "Start over", tone: "primary" },
-  ];
-  if (c.status !== "ready") return [{ id: "archive", label: "Archive", text: true }];
+  if (c.status === "failed" || c.status === "cancelled")
+    return [
+      { id: "archive", label: "Archive", text: true },
+      { id: "startOver", label: "Start over", tone: "primary" },
+    ];
+  if (c.status !== "ready")
+    return [{ id: "archive", label: "Archive", text: true }];
   const wayBack: ActSpec = options.backTo
     ? { id: "returnToApp", label: `Back to ${options.backTo}`, text: true }
     : { id: "archive", label: "Archive", text: true };
-  if (c.deployableKind) return [wayBack,
-    ...(c.outputFileId ? [{ id: "openFile" as const, label: "Download", text: true }] : []),
-    { id: "openDeployables", label: "Deploy it", tone: "primary" },
-  ];
+  if (c.deployableKind)
+    return [
+      wayBack,
+      ...(c.outputFileId
+        ? [{ id: "openFile" as const, label: "Download", text: true }]
+        : []),
+      { id: "openDeployables", label: "Deploy it", tone: "primary" },
+    ];
   const save = options.recipeCanRun && !options.recipeSaved && !c.recipeId;
-  return [wayBack,
-    ...(save ? [{ id: "saveRecipe" as const, label: "Save as recipe", text: true }]
-      : options.backTo ? [{ id: "archive" as const, label: "Archive", text: true }] : []),
-    ...(c.outputFileId ? [{ id: "openFile" as const, label: "Open in editor", tone: "primary" as const }] : []),
+  return [
+    wayBack,
+    ...(save
+      ? [{ id: "saveRecipe" as const, label: "Save as recipe", text: true }]
+      : options.backTo
+        ? [{ id: "archive" as const, label: "Archive", text: true }]
+        : []),
+    ...(c.outputFileId
+      ? [
+          {
+            id: "openFile" as const,
+            label: "Open in editor",
+            tone: "primary" as const,
+          },
+        ]
+      : []),
   ];
 }
 
-export function pageState(c: CompositionRow): { word: string; detail?: string } {
-  if (c.archived) return { word: "Archived", detail: "The file is still in Files." };
-  return { word: statusWord(c.status), ...(c.status === "failed" ? { detail: c.failureReason || "No reason recorded." } : {}) };
+export function pageState(c: CompositionRow): {
+  word: string;
+  detail?: string;
+} {
+  if (c.archived)
+    return { word: "Archived", detail: "The file is still in Files." };
+  return {
+    word: statusWord(c.status),
+    ...(c.status === "failed"
+      ? { detail: c.failureReason || "No reason recorded." }
+      : {}),
+  };
 }

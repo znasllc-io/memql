@@ -1,4 +1,9 @@
-import type { CompositionRow, CompositionStatus, ModelRow, SourceRow } from "./rows";
+import type {
+  CompositionRow,
+  CompositionStatus,
+  ModelRow,
+  SourceRow,
+} from "./rows";
 
 // words.ts -- every state word and every sentence this app says, in one
 // place, as pure functions.
@@ -55,7 +60,9 @@ export function statusWord(status: CompositionStatus): string {
  * sentence renders where the composition opens, beside the acts that
  * follow from it -- which is where somebody can do something about it.
  */
-export function statusTone(status: CompositionStatus): "neutral" | "accent" | "muted" {
+export function statusTone(
+  status: CompositionStatus,
+): "neutral" | "accent" | "muted" {
   switch (status) {
     case "ready":
       return "accent";
@@ -65,10 +72,6 @@ export function statusTone(status: CompositionStatus): "neutral" | "accent" | "m
     default:
       return "neutral";
   }
-}
-
-export function isTerminal(status: CompositionStatus): boolean {
-  return status === "ready" || status === "failed" || status === "cancelled";
 }
 
 export function isRunning(status: CompositionStatus): boolean {
@@ -97,28 +100,16 @@ export function formatWord(format: string): string {
   }
 }
 
-/** The formats this cluster can write, in the order the Target offers them. */
-export const FORMATS = ["markdown", "html", "txt", "csv", "json", "docx", "pdf"] as const;
-
-/**
- * The two formats named in the brief that this cluster does not offer,
- * with the reason.
- *
- * THE SURFACE SAYS THIS RATHER THAN OMITTING IT. An absent option with
- * no account of itself reads as something nobody got round to building
- * -- the rule the Bin states about its missing retention control and
- * Domains states about its missing re-check button.
- */
-export const UNOFFERED_FORMATS: { name: string; why: string }[] = [
-  {
-    name: "Audio",
-    why: "needs a compose-then-speak pipeline with a spending ceiling of its own",
-  },
-  { name: "Video", why: "needs a generation provider this cluster does not have" },
-];
-
-/** The deployable kinds, matching what the cluster actually serves. */
-export const DEPLOYABLE_KINDS = ["spa", "static", "shopify_storefront"] as const;
+/** The formats this cluster can write, in the order the wizard offers them. */
+export const FORMATS = [
+  "markdown",
+  "html",
+  "txt",
+  "csv",
+  "json",
+  "docx",
+  "pdf",
+] as const;
 
 export function deployableWord(kind: string): string {
   switch (kind) {
@@ -198,27 +189,13 @@ export function modelsPhrase(models: ModelRow[]): string {
  * record is the only copy" there would be a claim about a file that does
  * not exist yet.
  */
-export function provenanceClaim(embedded: boolean | null, format: string): string {
+export function provenanceClaim(
+  embedded: boolean | null,
+  format: string,
+): string {
   if (embedded === null) return "";
   if (embedded) return "the file carries it";
   return `${formatWord(format)} has nowhere to put it — the record is the only copy`;
-}
-
-/** The empty state of the Materialized list: an invitation, not a mood. */
-export const MATERIALIZED_EMPTY =
-  "Nothing materialized yet. Pick some rows in Compose and make the first file.";
-
-export const TEMPLATES_EMPTY =
-  "No templates yet. Upload a document to your Library, then bind it here to make its shape repeatable.";
-
-export const RECIPES_EMPTY =
-  "No recipes yet. Materialize something, then save it as a recipe to make it again next quarter.";
-
-/** What a failure says. It names the fix where there is one. */
-export function failureSentence(c: CompositionRow): string {
-  const reason = c.failureReason.trim();
-  if (reason) return reason;
-  return "This composition stopped and recorded no reason. The Logs section holds the lines for this app.";
 }
 
 // ---------------------------------------------------------------------------
@@ -239,9 +216,11 @@ export function failureSentence(c: CompositionRow): string {
 // description, and whether that worked.
 
 export const CREATED_BLANK = "This file was created blank.";
-export const DESCRIPTION_SENT = "Your description was sent to be written. Open the file to review and approve the draft.";
-export const CREATED_FROM_DESCRIPTION = "This file was created from a description. Open it to continue.";
-export const COMPOSED_IN_FILE = "The composed text is in the file. Open it to read what was made.";
+export const DESCRIPTION_SENT =
+  "Your description was sent to be written. Open it in the editor to review and approve the draft.";
+export const CREATED_FROM_DESCRIPTION =
+  "This file was created from a description. Open it in the editor to continue.";
+export const COMPOSED_IN_FILE = "The composed text is in the file.";
 
 /**
  * The caption under "What was asked for" on a finished file, or "" for none:
@@ -262,10 +241,15 @@ export function madeCaption(
 ): string {
   if (c.status !== "ready") return "";
   const statement = c.statement.trim() !== "";
-  if (!statement && sources.length === 0 && models.length === 0) return CREATED_BLANK;
+  if (!statement && sources.length === 0 && models.length === 0)
+    return CREATED_BLANK;
   const described =
     describedHere ||
-    (statement && c.format === "markdown" && models.length === 0 && c.provenanceEmbedded === false && sources.every((source) => source.kind === "library_file"));
+    (statement &&
+      c.format === "markdown" &&
+      models.length === 0 &&
+      c.provenanceEmbedded === false &&
+      sources.every((source) => source.kind === "library_file"));
   if (!described) return COMPOSED_IN_FILE;
   if (outcome === undefined) return CREATED_FROM_DESCRIPTION;
   return outcome.failure === "" ? DESCRIPTION_SENT : "";
@@ -281,10 +265,12 @@ export function madeCaption(
 // who reads "failed" over a file they can open would go looking for a loss.
 
 /** The description could not be handed on. The cluster's own reason rides beside it, verbatim. */
-export const DESCRIPTION_NOT_SENT = "The file was created, but the description was not sent for writing.";
+export const DESCRIPTION_NOT_SENT =
+  "The file was created, but the description was not sent for writing.";
 
 /** What to do about it: the editor's empty page is where a description is sent from. */
-export const DESCRIPTION_NOT_SENT_NEXT = "Open the file and choose Describe document to send it again.";
+export const DESCRIPTION_NOT_SENT_NEXT =
+  "Open it in the editor and choose Describe document to send it again.";
 
 // The SDK opens a hand-off's failure with this (handOffDescription's
 // revisionFailure). The notice's own sentence already says it, first.
@@ -292,7 +278,9 @@ const NOT_SENT_LEAD = "The description could not be sent for writing: ";
 
 /** A hand-off's failure as the notice's detail: the cluster's reason, without the SDK's lead-in saying again what the notice says. */
 export function notSentDetail(failure: string): string {
-  return failure.startsWith(NOT_SENT_LEAD) ? failure.slice(NOT_SENT_LEAD.length) : failure;
+  return failure.startsWith(NOT_SENT_LEAD)
+    ? failure.slice(NOT_SENT_LEAD.length)
+    : failure;
 }
 
 /**

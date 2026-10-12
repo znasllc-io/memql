@@ -1,7 +1,27 @@
+import {
+  FileText,
+  FileSpreadsheet,
+  Braces,
+  FileCode,
+  FileArchive,
+  FileType,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { AddButton } from "../../kit/AddButton";
-import { Button, EmptyState, Head, LiveList, Notice, Refine, RecordRow, Select, listCount, useLiveView, type LiveListSource } from "../../kit";
+import {
+  Button,
+  EmptyState,
+  Head,
+  LiveList,
+  Notice,
+  Refine,
+  RecordRow,
+  Select,
+  listCount,
+  useLiveView,
+  type LiveListSource,
+} from "../../kit";
 import type { Row as SdkRow } from "@znasllc-io/memql-sdk-core/client";
 import { ProvenanceMark } from "./Provenance";
 import {
@@ -76,7 +96,11 @@ export function MaterializedSection({
       if (!showArchived && c.archived) return false;
       if (format !== "" && c.format !== format) return false;
       const q = search.trim().toLowerCase();
-      if (q !== "" && !c.name.toLowerCase().includes(q) && !c.statement.toLowerCase().includes(q)) {
+      if (
+        q !== "" &&
+        !c.name.toLowerCase().includes(q) &&
+        !c.statement.toLowerCase().includes(q)
+      ) {
         return false;
       }
       return true;
@@ -86,18 +110,42 @@ export function MaterializedSection({
   const chips = useMemo(() => {
     const out: { id: string; label: string; onRemove: () => void }[] = [];
     if (format !== "") {
-      out.push({ id: "format", label: formatWord(format), onRemove: () => setFormat("") });
+      out.push({
+        id: "format",
+        label: formatWord(format),
+        onRemove: () => setFormat(""),
+      });
     }
     return out;
   }, [format]);
 
   return (
     <div className="mz-list-section">
-      <Head navigation={navigation} title="Materialized" meta={<CountMeta view={view} showArchived={showArchived} />}>
-        <Refine search={search} onSearch={setSearch} label="Refine what is listed" chips={chips}>
-          <Select id="mz-kind-filter" label="Kind of file" value={format} onChange={setFormat}>
+      <Head
+        navigation={navigation}
+        title="Materialized"
+        meta={<CountMeta view={view} showArchived={showArchived} />}
+      >
+        <Refine
+          search={search}
+          onSearch={setSearch}
+          label="Refine what is listed"
+          chips={chips}
+        >
+          <Select
+            id="mz-kind-filter"
+            label="Kind of file"
+            value={format}
+            onChange={setFormat}
+          >
             <option value="">Any kind</option>
-            {["markdown", "html", "txt", "csv", "json", "docx", "pdf"].map(f=><option key={f} value={f}>{formatWord(f)}</option>)}
+            {["markdown", "html", "txt", "csv", "json", "docx", "pdf"].map(
+              (f) => (
+                <option key={f} value={f}>
+                  {formatWord(f)}
+                </option>
+              ),
+            )}
           </Select>
         </Refine>
         <AddButton label="Make a file" onClick={onMake} />
@@ -108,10 +156,31 @@ export function MaterializedSection({
       <LiveList<SdkRow>
         source={view}
         label="Everything materialized"
-        emptyContent={<EmptyState title={search.trim() || format ? "No matches" : "No files made yet"}>
-          {search.trim() || format ? "Clear the filters to see everything." : `Make a file to start.${showArchived ? "" : " Archived ones are hidden. Include them in Settings."}`}
-        </EmptyState>}
-        errorContent={<><Notice tone="error" sentence="This cluster did not return what you made." detail={source?.snapshot.error}/><Button tone="quiet" onClick={onRetry}>Try again</Button></>}
+        emptyContent={
+          source?.snapshot.error ? null : (
+            <EmptyState
+              title={
+                search.trim() || format ? "No matches" : "No files made yet"
+              }
+            >
+              {search.trim() || format
+                ? "Clear the filters to see everything."
+                : `Make a file to start.${showArchived ? "" : " Archived ones are hidden. Include them in Settings."}`}
+            </EmptyState>
+          )
+        }
+        errorContent={
+          <>
+            <Notice
+              tone="error"
+              sentence="This cluster did not return what you made."
+              detail={source?.snapshot.error}
+            />
+            <Button tone="quiet" onClick={onRetry}>
+              Try again
+            </Button>
+          </>
+        }
         rowId={(raw) => compositionFromRow(raw).id}
         fingerprint={(raw) => compositionFingerprint(compositionFromRow(raw))}
         renderRow={(raw) => {
@@ -163,13 +232,26 @@ function CompositionListRow({
   current: boolean;
   onOpen: () => void;
 }) {
+  const Glyph = composition.deployableKind
+    ? FileArchive
+    : (
+        {
+          csv: FileSpreadsheet,
+          json: Braces,
+          html: FileCode,
+          txt: FileType,
+        } as Record<string, typeof FileText>
+      )[composition.format] || FileText;
   return (
     <RecordRow
+      icon={<Glyph size={18} aria-hidden />}
       name={composition.name || "Untitled"}
       current={current}
       dim={composition.archived}
       onOpen={onOpen}
-      secondary={composition.deployableKind ? "Package" : formatWord(composition.format)}
+      secondary={
+        composition.deployableKind ? "Package" : formatWord(composition.format)
+      }
       state={statusWord(composition.status)}
       tone={composition.status === "ready" ? "accent" : "muted"}
     >

@@ -8,7 +8,12 @@ import {
   type MaterializeSource,
 } from "@znasllc-io/memql-sdk-core/client";
 
-import { COMPOSE_FORMATS, type ComposeFormat, type ComposeSetup, type ComposeSource } from "../../items/materialize";
+import {
+  COMPOSE_FORMATS,
+  type ComposeFormat,
+  type ComposeSetup,
+  type ComposeSource,
+} from "../../items/materialize";
 import type { CompositionRow, SourceRow, TemplateRow } from "./rows";
 import { deployableWord, formatWord } from "./words";
 
@@ -96,7 +101,15 @@ export interface MakeDraft {
   passed: { from: boolean; describe: boolean };
 }
 
-export type MakeStepId = "kind" | "template" | "from" | "describe" | "name" | "folder" | "organization" | "file";
+export type MakeStepId =
+  | "kind"
+  | "template"
+  | "from"
+  | "describe"
+  | "name"
+  | "folder"
+  | "organization"
+  | "file";
 
 /**
  * What this window has read. `files` is the facts of the person's Library files it has read
@@ -140,14 +153,18 @@ export interface AnswerNames {
   account(id: string): string;
 }
 
-export type MakeAct = "cancel" | "next" | "make" | "setUpInference" | "stop" | "leave";
+export type MakeAct =
+  "cancel" | "next" | "make" | "setUpInference" | "stop" | "leave";
 
 // ---------------------------------------------------------------------------
 // The steps and the kinds of file
 // ---------------------------------------------------------------------------
 
 /** Each step's name and what it asks (spec 2.1). */
-export const MAKE_STEPS: Record<MakeStepId, { name: string; sentence: string }> = {
+export const MAKE_STEPS: Record<
+  MakeStepId,
+  { name: string; sentence: string }
+> = {
   kind: { name: "Kind of file", sentence: "What comes out." },
   template: { name: "Template", sentence: "How it looks." },
   from: { name: "From", sentence: "What to make it from." },
@@ -175,15 +192,28 @@ export function fileKindEntry(kind: FileKind): FileKindEntry {
     case "document":
       return { value: kind.format, kind, label: formatWord(kind.format) };
     case "package":
-      return { value: kind.deployableKind, kind, label: `${deployableWord(kind.deployableKind)} package`, description: PACKAGE_DESCRIPTION };
+      return {
+        value: kind.deployableKind,
+        kind,
+        label: `${deployableWord(kind.deployableKind)} package`,
+        description: PACKAGE_DESCRIPTION,
+      };
     case "emailTemplate":
-      return { value: "emailTemplate", kind, label: "Email template", description: EMAIL_TEMPLATE_DESCRIPTION };
+      return {
+        value: "emailTemplate",
+        kind,
+        label: "Email template",
+        description: EMAIL_TEMPLATE_DESCRIPTION,
+      };
   }
 }
 
 const KINDS_IN_ORDER: readonly FileKind[] = [
   ...COMPOSE_FORMATS.map((format): FileKind => ({ kind: "document", format })),
-  ...PACKAGE_KINDS.map((deployableKind): FileKind => ({ kind: "package", deployableKind })),
+  ...PACKAGE_KINDS.map((deployableKind): FileKind => ({
+    kind: "package",
+    deployableKind,
+  })),
   { kind: "emailTemplate" },
 ];
 
@@ -193,7 +223,8 @@ const KINDS_IN_ORDER: readonly FileKind[] = [
  * format is sent. The email template is the last, and the wizard offers it only to a draft
  * that already is one, which only a sender's setup makes.
  */
-export const FILE_KINDS: readonly FileKindEntry[] = KINDS_IN_ORDER.map(fileKindEntry);
+export const FILE_KINDS: readonly FileKindEntry[] =
+  KINDS_IN_ORDER.map(fileKindEntry);
 
 /** The format the cluster is asked for: a document's own, HTML for a package, JSON for an email template. */
 export function formatOf(kind: FileKind): ComposeFormat {
@@ -221,7 +252,10 @@ const holds = (text: string): boolean => text.trim() !== "";
  * comes from, so there is no canonical form to reconcile; sameEntityId is for comparing an id
  * from one source with an id from another (a template row against a draft's templateId).
  */
-function distinct(items: readonly { kind: string; ref: string; label: string }[], accept: (kind: string) => kind is Ingredient["kind"]): Ingredient[] {
+function distinct(
+  items: readonly { kind: string; ref: string; label: string }[],
+  accept: (kind: string) => kind is Ingredient["kind"],
+): Ingredient[] {
   const seen = new Set<string>();
   const out: Ingredient[] = [];
   for (const { kind, ref, label } of items) {
@@ -234,13 +268,23 @@ function distinct(items: readonly { kind: string; ref: string; label: string }[]
 }
 
 // Exhaustive by construction: a source kind added to the setup contract is a compile error here.
-const INGREDIENT_KINDS: Record<Ingredient["kind"], true> = { concept_row: true, library_file: true, query: true };
-const isIngredientKind = (kind: string): kind is Ingredient["kind"] => Object.hasOwn(INGREDIENT_KINDS, kind);
+const INGREDIENT_KINDS: Record<Ingredient["kind"], true> = {
+  concept_row: true,
+  library_file: true,
+  query: true,
+};
+const isIngredientKind = (kind: string): kind is Ingredient["kind"] =>
+  Object.hasOwn(INGREDIENT_KINDS, kind);
 
 function emptyDraft(format: ComposeFormat): MakeDraft {
   return {
     fileKind: { kind: "document", format },
-    templateId: "", ingredients: [], statement: "", name: "", folderId: "", accountId: "",
+    templateId: "",
+    ingredients: [],
+    statement: "",
+    name: "",
+    folderId: "",
+    accountId: "",
     passed: { from: false, describe: false },
   };
 }
@@ -254,13 +298,20 @@ function emptyDraft(format: ComposeFormat): MakeDraft {
  * readComposeIntent has it. The setup's way back is the app's to keep; it is no part of what
  * a file is made from.
  */
-export function draftFromSetup(setup: ComposeSetup | null, defaultFormat: ComposeFormat): MakeDraft {
+export function draftFromSetup(
+  setup: ComposeSetup | null,
+  defaultFormat: ComposeFormat,
+): MakeDraft {
   const plus = emptyDraft(defaultFormat);
   if (setup === null) return plus;
-  const emailTemplate = setup.outputKind === "email_template" && (setup.format === undefined || setup.format === "json");
+  const emailTemplate =
+    setup.outputKind === "email_template" &&
+    (setup.format === undefined || setup.format === "json");
   return {
     ...plus,
-    fileKind: emailTemplate ? { kind: "emailTemplate" } : { kind: "document", format: setup.format ?? defaultFormat },
+    fileKind: emailTemplate
+      ? { kind: "emailTemplate" }
+      : { kind: "document", format: setup.format ?? defaultFormat },
     ingredients: distinct(setup.sources ?? [], isIngredientKind),
     folderId: setup.folderId ?? "",
     passed: { from: true, describe: true },
@@ -269,10 +320,16 @@ export function draftFromSetup(setup: ComposeSetup | null, defaultFormat: Compos
 
 function kindOfComposition(c: CompositionRow): FileKind {
   if (c.outputKind === "email_template") return { kind: "emailTemplate" };
-  const deployableKind = PACKAGE_KINDS.find((candidate) => candidate === c.deployableKind);
+  const deployableKind = PACKAGE_KINDS.find(
+    (candidate) => candidate === c.deployableKind,
+  );
   if (deployableKind !== undefined) return { kind: "package", deployableKind };
   // A record names a format this app writes; one it does not know falls back to the first kind.
-  return { kind: "document", format: COMPOSE_FORMATS.find((candidate) => candidate === c.format) ?? "markdown" };
+  return {
+    kind: "document",
+    format:
+      COMPOSE_FORMATS.find((candidate) => candidate === c.format) ?? "markdown",
+  };
 }
 
 /**
@@ -280,11 +337,14 @@ function kindOfComposition(c: CompositionRow): FileKind {
  * waits and the wizard opens on Describe. The sources are the ones the record kept, once each.
  * The record's organization is its first.
  */
-export function draftFromComposition(c: CompositionRow, sources: readonly SourceRow[]): MakeDraft {
+export function draftFromComposition(
+  c: CompositionRow,
+  sources: readonly SourceRow[],
+): MakeDraft {
   return {
     fileKind: kindOfComposition(c),
     templateId: c.templateId,
-    ...(c.layoutId ? { layoutId:c.layoutId } : {}),
+    ...(c.layoutId ? { layoutId: c.layoutId } : {}),
     ingredients: distinct(sources, isIngredientKind),
     statement: c.statement,
     name: c.name,
@@ -299,9 +359,16 @@ export function draftFromComposition(c: CompositionRow, sources: readonly Source
 // ---------------------------------------------------------------------------
 
 /** The live templates that make this draft's kind: those of its format, or naming none (an archived one is not offered). */
-export function templatesFor(draft: MakeDraft, facts: MakeFacts): TemplateRow[] {
+export function templatesFor(
+  draft: MakeDraft,
+  facts: MakeFacts,
+): TemplateRow[] {
   const format = formatOf(draft.fileKind);
-  return facts.templates.filter((template) => !template.archived && (template.format === "" || template.format === format));
+  return facts.templates.filter(
+    (template) =>
+      !template.archived &&
+      (template.format === "" || template.format === format),
+  );
 }
 
 /**
@@ -314,9 +381,14 @@ export function templatesFor(draft: MakeDraft, facts: MakeFacts): TemplateRow[] 
  * reads. The component applies this again once the templates have loaded. The draft itself is
  * returned when there is nothing to let go.
  */
-export function keepUsableTemplate(draft: MakeDraft, facts: MakeFacts): MakeDraft {
+export function keepUsableTemplate(
+  draft: MakeDraft,
+  facts: MakeFacts,
+): MakeDraft {
   if (draft.templateId === "" || !facts.templatesLoaded) return draft;
-  const usable = templatesFor(draft, facts).some((template) => sameEntityId(template.id, draft.templateId));
+  const usable = templatesFor(draft, facts).some((template) =>
+    sameEntityId(template.id, draft.templateId),
+  );
   return usable ? draft : { ...draft, templateId: "" };
 }
 
@@ -332,9 +404,22 @@ export function keepUsableTemplate(draft: MakeDraft, facts: MakeFacts): MakeDraf
  *    (D9: ordinary files ask for no organization). A draft that is not an email template and
  *    already carries one, as an older record's does, keeps it.
  */
-export function withKind(draft: MakeDraft, kind: FileKind, facts: MakeFacts): MakeDraft {
-  const leavingEmailTemplate = draft.fileKind.kind === "emailTemplate" && kind.kind !== "emailTemplate";
-  return keepUsableTemplate({ ...draft, fileKind: kind, ...(leavingEmailTemplate ? { layoutId:undefined } : {}), accountId: leavingEmailTemplate ? "" : draft.accountId }, facts);
+export function withKind(
+  draft: MakeDraft,
+  kind: FileKind,
+  facts: MakeFacts,
+): MakeDraft {
+  const leavingEmailTemplate =
+    draft.fileKind.kind === "emailTemplate" && kind.kind !== "emailTemplate";
+  return keepUsableTemplate(
+    {
+      ...draft,
+      fileKind: kind,
+      ...(leavingEmailTemplate ? { layoutId: undefined } : {}),
+      accountId: leavingEmailTemplate ? "" : draft.accountId,
+    },
+    facts,
+  );
 }
 
 /**
@@ -345,15 +430,20 @@ export function stepsOf(draft: MakeDraft, facts: MakeFacts): MakeStepId[] {
   const steps: MakeStepId[] = ["kind"];
   if (templatesFor(draft, facts).length > 0) steps.push("template");
   steps.push("from", "describe", "name", "folder");
-  if (draft.fileKind.kind === "emailTemplate" || draft.accountId !== "") steps.push("organization");
+  if (draft.fileKind.kind === "emailTemplate" || draft.accountId !== "")
+    steps.push("organization");
   steps.push("file");
   return steps;
 }
 
-const optionalState = (held: boolean, passed: boolean): MakeStepState => (held ? "done" : passed ? "skipped" : "waiting");
-const fromState = (draft: MakeDraft): MakeStepState => optionalState(draft.ingredients.length > 0, draft.passed.from);
-const describeState = (draft: MakeDraft): MakeStepState => optionalState(holds(draft.statement), draft.passed.describe);
-const nameProblem = (draft: MakeDraft): string | undefined => fileNameProblem(draft.name, formatOf(draft.fileKind));
+const optionalState = (held: boolean, passed: boolean): MakeStepState =>
+  held ? "done" : passed ? "skipped" : "waiting";
+const fromState = (draft: MakeDraft): MakeStepState =>
+  optionalState(draft.ingredients.length > 0, draft.passed.from);
+const describeState = (draft: MakeDraft): MakeStepState =>
+  optionalState(holds(draft.statement), draft.passed.describe);
+const nameProblem = (draft: MakeDraft): string | undefined =>
+  fileNameProblem(draft.name, formatOf(draft.fileKind));
 
 /**
  * Where a step stands on the rail. Kind of file, Template and Folder start answered. From
@@ -367,7 +457,11 @@ const nameProblem = (draft: MakeDraft): string | undefined => fileNameProblem(dr
  * No step's state reads the facts; the signature takes them so that every function of the
  * model is called with the same pair.
  */
-export function stepState(step: MakeStepId, draft: MakeDraft, _facts: MakeFacts): MakeStepState {
+export function stepState(
+  step: MakeStepId,
+  draft: MakeDraft,
+  _facts: MakeFacts,
+): MakeStepState {
   switch (step) {
     case "kind":
     case "template":
@@ -392,7 +486,11 @@ export function stepState(step: MakeStepId, draft: MakeDraft, _facts: MakeFacts)
  * changed before trying again.
  */
 export function openingStep(draft: MakeDraft, facts: MakeFacts): MakeStepId {
-  return stepsOf(draft, facts).find((step) => stepState(step, draft, facts) === "waiting") ?? "describe";
+  return (
+    stepsOf(draft, facts).find(
+      (step) => stepState(step, draft, facts) === "waiting",
+    ) ?? "describe"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -403,7 +501,9 @@ const DESCRIBE_LIMIT = 60;
 
 /** Nothing picked, one name, "A and B", or "A, B and 3 more". */
 export function ingredientsPhrase(ingredients: readonly Ingredient[]): string {
-  const [first, second, ...rest] = ingredients.map((ingredient) => ingredient.label);
+  const [first, second, ...rest] = ingredients.map(
+    (ingredient) => ingredient.label,
+  );
   if (first === undefined) return "Nothing picked";
   if (second === undefined) return first;
   if (rest.length === 0) return `${first} and ${second}`;
@@ -417,14 +517,18 @@ export function ingredientsPhrase(ingredients: readonly Ingredient[]): string {
  * limit falls. Characters are counted as the person sees them, so a cut never splits one.
  */
 export function describeAnswer(statement: string): string {
-  const line = (statement.trim().split(/\r\n|[\r\n\u2028\u2029]/, 1)[0] ?? "").trimEnd();
+  const line = (
+    statement.trim().split(/\r\n|[\r\n\u2028\u2029]/, 1)[0] ?? ""
+  ).trimEnd();
   if (line === "") return "Not described";
   const letters = Array.from(line);
   if (letters.length <= DESCRIBE_LIMIT) return line;
   const head = letters.slice(0, DESCRIBE_LIMIT).join("");
   // A space right after the limit means the head ends on a whole word; otherwise the last
   // word in it is partial and goes.
-  const at = /\s/.test(letters[DESCRIBE_LIMIT] ?? "") ? -1 : head.search(/\s\S*$/);
+  const at = /\s/.test(letters[DESCRIBE_LIMIT] ?? "")
+    ? -1
+    : head.search(/\s\S*$/);
   return `${(at > 0 ? head.slice(0, at) : head).trimEnd()}…`;
 }
 
@@ -433,26 +537,40 @@ export function describeAnswer(statement: string): string {
  * has no answer yet, and File is drawn by the component (it shows the filed name once the
  * file is made).
  */
-export function answerOf(step: MakeStepId, draft: MakeDraft, names: AnswerNames): string | undefined {
+export function answerOf(
+  step: MakeStepId,
+  draft: MakeDraft,
+  names: AnswerNames,
+): string | undefined {
   switch (step) {
     case "kind":
       return fileKindEntry(draft.fileKind).label;
     case "template":
-      return draft.templateId === "" ? "No template" : names.template(draft.templateId);
+      return draft.templateId === ""
+        ? "No template"
+        : names.template(draft.templateId);
     case "from":
-      return fromState(draft) === "waiting" ? undefined : ingredientsPhrase(draft.ingredients);
+      return fromState(draft) === "waiting"
+        ? undefined
+        : ingredientsPhrase(draft.ingredients);
     case "describe":
-      return describeState(draft) === "waiting" ? undefined : describeAnswer(draft.statement);
+      return describeState(draft) === "waiting"
+        ? undefined
+        : describeAnswer(draft.statement);
     case "name":
       return nameProblem(draft) === undefined ? filedName(draft) : undefined;
     case "folder": {
       if (draft.folderId === "") return "Library";
       const folder = names.folder(draft.folderId);
-      return folder === undefined ? undefined : (folder ?? "Unavailable folder");
+      return folder === undefined
+        ? undefined
+        : (folder ?? "Unavailable folder");
     }
     case "organization":
       if (draft.accountId !== "") return names.account(draft.accountId);
-      return draft.fileKind.kind === "emailTemplate" ? undefined : "No organization";
+      return draft.fileKind.kind === "emailTemplate"
+        ? undefined
+        : "No organization";
     case "file":
       return undefined;
   }
@@ -487,9 +605,15 @@ function cutOnACharacter(bytes: Uint8Array, limit: number): Uint8Array {
  * get here: fileNameProblem refuses them as the name is typed.
  */
 function filedStem(stem: string): string {
-  const clean = stem.replace(/\u007f/g, "").trim().replace(/^\.+|\.+$/g, "");
+  const clean = stem
+    .replace(/\u007f/g, "")
+    .trim()
+    .replace(/^\.+|\.+$/g, "");
   const bytes = new TextEncoder().encode(clean);
-  const kept = bytes.length > MAX_STEM_BYTES ? new TextDecoder().decode(cutOnACharacter(bytes, MAX_STEM_BYTES)).trim() : clean;
+  const kept =
+    bytes.length > MAX_STEM_BYTES
+      ? new TextDecoder().decode(cutOnACharacter(bytes, MAX_STEM_BYTES)).trim()
+      : clean;
   return kept === "" ? "composition" : kept;
 }
 
@@ -512,11 +636,22 @@ const EMAIL_TEMPLATE_SUFFIX = ".email.json";
  */
 export function filedName(draft: MakeDraft): string {
   const format = formatOf(draft.fileKind);
-  const extension = draft.fileKind.kind === "package" ? "zip" : format === "markdown" ? "md" : format;
+  const extension =
+    draft.fileKind.kind === "package"
+      ? "zip"
+      : format === "markdown"
+        ? "md"
+        : format;
   const stem = filedStem(fileNameStem(draft.name, format));
-  const filed = stem.toLowerCase().endsWith(`.${extension}`) ? stem : `${stem}.${extension}`;
+  const filed = stem.toLowerCase().endsWith(`.${extension}`)
+    ? stem
+    : `${stem}.${extension}`;
   if (draft.fileKind.kind !== "emailTemplate") return filed;
-  return (filed.endsWith(JSON_EXTENSION) ? filed.slice(0, -JSON_EXTENSION.length) : filed) + EMAIL_TEMPLATE_SUFFIX;
+  return (
+    (filed.endsWith(JSON_EXTENSION)
+      ? filed.slice(0, -JSON_EXTENSION.length)
+      : filed) + EMAIL_TEMPLATE_SUFFIX
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -525,7 +660,9 @@ export function filedName(draft: MakeDraft): string {
 
 function sourceOf(ingredient: Ingredient): MaterializeSource {
   const { kind, ref, label } = ingredient;
-  return kind === "library_file" ? { kind, ref, label, content: true } : { kind, ref, label };
+  return kind === "library_file"
+    ? { kind, ref, label, content: true }
+    : { kind, ref, label };
 }
 
 /**
@@ -534,15 +671,24 @@ function sourceOf(ingredient: Ingredient): MaterializeSource {
  * kind; the template, the folder (not the top level), the organization, the description and
  * the picked things. The request id is the ask's, not the draft's.
  */
-export function requestOf(draft: MakeDraft): Omit<MaterializeRequest, "requestId"> {
+export function requestOf(
+  draft: MakeDraft,
+): Omit<MaterializeRequest, "requestId"> {
   const kind = draft.fileKind;
   const statement = draft.statement.trim();
-  const request: Omit<MaterializeRequest, "requestId"> = { name: draft.name.trim(), format: formatOf(kind) };
+  const request: Omit<MaterializeRequest, "requestId"> = {
+    name: draft.name.trim(),
+    format: formatOf(kind),
+  };
   if (statement !== "") request.statement = statement;
-  if (draft.ingredients.length > 0) request.sources = draft.ingredients.map(sourceOf);
+  if (draft.ingredients.length > 0)
+    request.sources = draft.ingredients.map(sourceOf);
   if (draft.templateId !== "") request.templateId = draft.templateId;
   if (draft.folderId !== "") request.folderId = draft.folderId;
-  if (kind.kind === "emailTemplate") { request.outputKind = "email_template"; if (draft.layoutId) request.layoutId = draft.layoutId; }
+  if (kind.kind === "emailTemplate") {
+    request.outputKind = "email_template";
+    if (draft.layoutId) request.layoutId = draft.layoutId;
+  }
   if (draft.accountId !== "") request.accountIds = [draft.accountId];
   if (kind.kind === "package") request.deployableKind = kind.deployableKind;
   return request;
@@ -556,8 +702,16 @@ export function requestOf(draft: MakeDraft): Omit<MaterializeRequest, "requestId
  * everything else, written by a model that reads everything picked.
  */
 export function pathOf(draft: MakeDraft, facts: MakeFacts): MakePath {
-  if (!holds(draft.statement) && draft.ingredients.length === 0 && draft.templateId === "" && draft.fileKind.kind === "document") return "blank";
-  return isDescribedMarkdown(requestOf(draft), facts.files) ? "described" : "composed";
+  if (
+    !holds(draft.statement) &&
+    draft.ingredients.length === 0 &&
+    draft.templateId === "" &&
+    draft.fileKind.kind === "document"
+  )
+    return "blank";
+  return isDescribedMarkdown(requestOf(draft), facts.files)
+    ? "described"
+    : "composed";
 }
 
 // ---------------------------------------------------------------------------
@@ -565,8 +719,15 @@ export function pathOf(draft: MakeDraft, facts: MakeFacts): MakePath {
 // ---------------------------------------------------------------------------
 
 // The formats the cluster can file as an empty document (RenderBlank, component/compose/write.go).
-const BLANK_FORMATS: readonly ComposeFormat[] = ["markdown", "txt", "html", "csv", "json"];
-const canStartBlank = (kind: FileKind): boolean => kind.kind === "document" && BLANK_FORMATS.includes(kind.format);
+const BLANK_FORMATS: readonly ComposeFormat[] = [
+  "markdown",
+  "txt",
+  "html",
+  "csv",
+  "json",
+];
+const canStartBlank = (kind: FileKind): boolean =>
+  kind.kind === "document" && BLANK_FORMATS.includes(kind.format);
 
 const NEEDS_SOMETHING = "Describe it or pick what to make it from";
 // What it says of a kind that cannot start blank: the engine's own refusal of one (ErrBlankFormat).
@@ -579,16 +740,34 @@ const BLANK_DETAIL = "A blank file can be Markdown, text, HTML, CSV or JSON.";
  * not block, and neither does a blank file, which needs no model.
  */
 export function blocker(draft: MakeDraft, facts: MakeFacts): Blocker | null {
-  if (nameProblem(draft) !== undefined) return { reason: "name", words: { word: "Name the file" } };
+  if (nameProblem(draft) !== undefined)
+    return { reason: "name", words: { word: "Name the file" } };
   const templated = draft.templateId !== "";
-  if (!holds(draft.statement) && draft.ingredients.length === 0 && (templated || !canStartBlank(draft.fileKind))) {
+  if (
+    !holds(draft.statement) &&
+    draft.ingredients.length === 0 &&
+    (templated || !canStartBlank(draft.fileKind))
+  ) {
     return {
       reason: "blank",
-      words: { word: NEEDS_SOMETHING, detail: templated ? "A template needs something to fill it." : BLANK_DETAIL },
+      words: {
+        word: NEEDS_SOMETHING,
+        detail: templated
+          ? "A template needs something to fill it."
+          : BLANK_DETAIL,
+      },
     };
   }
-  if (draft.fileKind.kind === "emailTemplate" && draft.accountId === "") return { reason: "organization", words: { word: "Choose an organization" } };
-  if (facts.inference === false && pathOf(draft, facts) !== "blank") return { reason: "inference", words: { word: "Making this needs Inference" } };
+  if (draft.fileKind.kind === "emailTemplate" && draft.accountId === "")
+    return {
+      reason: "organization",
+      words: { word: "Choose an organization" },
+    };
+  if (facts.inference === false && pathOf(draft, facts) !== "blank")
+    return {
+      reason: "inference",
+      words: { word: "Making this needs Inference" },
+    };
   return null;
 }
 
@@ -600,7 +779,10 @@ const READY_DETAIL: Record<MakePath, string> = {
 
 /** The floor when nothing is missing: the name the file will be filed under, and what happens next. */
 export function readyWords(draft: MakeDraft, facts: MakeFacts): FloorWords {
-  return { word: `Ready to make ${filedName(draft)}`, detail: READY_DETAIL[pathOf(draft, facts)] };
+  return {
+    word: `Ready to make ${filedName(draft)}`,
+    detail: READY_DETAIL[pathOf(draft, facts)],
+  };
 }
 
 /**
@@ -621,10 +803,13 @@ export function floorActs(args: {
   if (making) return ["stop", "leave"];
   const missing = blocker(draft, facts);
   if (missing === null) return ["cancel", "make"];
-  if (missing.reason === "inference" && canSetUpInference) return ["cancel", "setUpInference"];
+  if (missing.reason === "inference" && canSetUpInference)
+    return ["cancel", "setUpInference"];
   const steps = stepsOf(draft, facts);
   const later = steps.slice(steps.indexOf(open) + 1);
-  return later.some((step) => stepState(step, draft, facts) === "waiting") ? ["cancel", "next"] : ["cancel"];
+  return later.some((step) => stepState(step, draft, facts) === "waiting")
+    ? ["cancel", "next"]
+    : ["cancel"];
 }
 
 // ---------------------------------------------------------------------------
@@ -635,7 +820,20 @@ export function floorActs(args: {
 // request for any other). Which of them a description can take is not decided here: that is
 // the SDK's isDescribedMarkdown.
 const READABLE_EXTENSIONS: ReadonlySet<string> = new Set([
-  ".md", ".markdown", ".txt", ".html", ".htm", ".css", ".json", ".csv", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".zip",
+  ".md",
+  ".markdown",
+  ".txt",
+  ".html",
+  ".htm",
+  ".css",
+  ".json",
+  ".csv",
+  ".svg",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".zip",
 ]);
 
 /**
@@ -646,5 +844,13 @@ const READABLE_EXTENSIONS: ReadonlySet<string> = new Set([
 export function readableReference(name: string): boolean {
   const element = name.slice(name.lastIndexOf("/") + 1);
   const dot = element.lastIndexOf(".");
-  return dot >= 0 && READABLE_EXTENSIONS.has(element.slice(dot).replace(/\u0130/g, "i").toLowerCase());
+  return (
+    dot >= 0 &&
+    READABLE_EXTENSIONS.has(
+      element
+        .slice(dot)
+        .replace(/\u0130/g, "i")
+        .toLowerCase(),
+    )
+  );
 }

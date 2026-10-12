@@ -15,7 +15,11 @@ export function ProvenanceMark({
         className="mz-mark"
         data-mark={thought ? "filled" : "hollow"}
         role="img"
-        aria-label={thought ? `composed by ${modelsPhrase(models)}` : "no model was called"}
+        aria-label={
+          thought
+            ? `composed by ${modelsPhrase(models)}`
+            : "no model was called"
+        }
       />
       <span className="mz-rowmark-text">{sourcesPhrase(sources)}</span>
     </span>

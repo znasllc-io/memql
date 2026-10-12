@@ -20,7 +20,12 @@ export const MATERIALIZER_SECTIONS: OsAppSection[] = [
   { id: "settings", name: "Settings" },
 ];
 
-export const MATERIALIZER_OPENING_SECTIONS = ["materialized", "composer", "templates", "recipes"];
+export const MATERIALIZER_OPENING_SECTIONS = [
+  "materialized",
+  "composer",
+  "templates",
+  "recipes",
+];
 
 export const MATERIALIZER_SECTION_IDS = MATERIALIZER_SECTIONS.map((s) => s.id);
 
@@ -136,13 +141,17 @@ export function sanitizeSettings(raw: unknown): MaterializerSettings {
   if (typeof raw !== "object" || raw === null) return out;
   const doc = raw as Record<string, unknown>;
 
-  const section = typeof doc["defaultSection"] === "string" ? doc["defaultSection"] : "";
-  if (MATERIALIZER_OPENING_SECTIONS.includes(section)) out.defaultSection = section;
+  const section =
+    typeof doc["defaultSection"] === "string" ? doc["defaultSection"] : "";
+  if (MATERIALIZER_OPENING_SECTIONS.includes(section))
+    out.defaultSection = section;
 
-  const format = typeof doc["defaultFormat"] === "string" ? doc["defaultFormat"] : "";
+  const format =
+    typeof doc["defaultFormat"] === "string" ? doc["defaultFormat"] : "";
   if (FORMAT_IDS.includes(format)) out.defaultFormat = format;
 
-  if (typeof doc["showArchived"] === "boolean") out.showArchived = doc["showArchived"];
+  if (typeof doc["showArchived"] === "boolean")
+    out.showArchived = doc["showArchived"];
   if (typeof doc["showUnmarkedConcepts"] === "boolean") {
     out.showUnmarkedConcepts = doc["showUnmarkedConcepts"];
   }

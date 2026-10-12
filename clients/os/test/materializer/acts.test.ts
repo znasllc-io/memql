@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 import { pageActs, pageState } from "../../src/apps/materializer/acts";
 import { compositionFromRow } from "../../src/apps/materializer/rows";
 import { compositionRow } from "./harness";
-const row=(over:Record<string,unknown>={})=>compositionFromRow(compositionRow(over));
+const row=(over:Record<string,unknown>={})=>compositionFromRow(compositionRow({id:"made",...over}));
 const acts=(over:Record<string,unknown>={}, options={recipeCanRun:true,recipeSaved:false,backTo:undefined as string|undefined})=>pageActs(row(over),options);
 const ids=(over:Record<string,unknown>={},backTo?:string)=>acts(over,{recipeCanRun:true,recipeSaved:false,backTo}).map(a=>a.id);
 it("a made file offers housekeeping, recipe and opening in that order",()=>expect(ids()).toEqual(["archive","saveRecipe","openFile"]));

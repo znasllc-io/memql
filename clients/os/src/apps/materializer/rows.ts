@@ -1,4 +1,9 @@
-import { rowBool, rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import {
+  rowBool,
+  rowNumber,
+  rowString,
+  type Row,
+} from "@znasllc-io/memql-sdk-core/client";
 
 // rows.ts -- the row shapes this app reads, and the two things about
 // reading them that go wrong by default.
@@ -55,13 +60,7 @@ export interface CompositionRow {
 }
 
 export type CompositionStatus =
-  | "draft"
-  | "composing"
-  | "rendering"
-  | "ready"
-  | "failed"
-  | "cancelled"
-  | "";
+  "draft" | "composing" | "rendering" | "ready" | "failed" | "cancelled" | "";
 
 export interface TemplateRow {
   id: string;
@@ -134,7 +133,9 @@ export function compositionFromRow(row: Row): CompositionRow {
     outputKind: rowString(row, "outputKind"),
     format: rowString(row, "format"),
     templateId: rowString(row, "templateId"),
-    ...(rowString(row, "layoutId") ? { layoutId: rowString(row, "layoutId") } : {}),
+    ...(rowString(row, "layoutId")
+      ? { layoutId: rowString(row, "layoutId") }
+      : {}),
     outputFileId: rowString(row, "outputFileId"),
     folderId: rowString(row, "folderId"),
     accountIds: stringArray(row, "accountIds"),
@@ -171,7 +172,9 @@ export function recipeFromRow(row: Row): RecipeRow {
     description: rowString(row, "description"),
     sourceSelectors: selectorsOf(row),
     templateId: rowString(row, "templateId"),
-    ...(rowString(row, "layoutId") ? { layoutId: rowString(row, "layoutId") } : {}),
+    ...(rowString(row, "layoutId")
+      ? { layoutId: rowString(row, "layoutId") }
+      : {}),
     format: rowString(row, "format"),
     folderId: rowString(row, "folderId"),
     accountIds: stringArray(row, "accountIds"),
@@ -205,7 +208,9 @@ export function compositionFingerprint(c: CompositionRow): string {
 }
 
 export function templateFingerprint(t: TemplateRow): string {
-  return [t.name, t.description, t.fileId, t.format, String(t.archived)].join("|");
+  return [t.name, t.description, t.fileId, t.format, String(t.archived)].join(
+    "|",
+  );
 }
 
 /**
@@ -218,7 +223,13 @@ export function templateFingerprint(t: TemplateRow): string {
  * news (the heartbeat rule, clients/os/README.md).
  */
 export function recipeFingerprint(r: RecipeRow): string {
-  return [r.name, r.description, r.templateId, r.format, String(r.archived)].join("|");
+  return [
+    r.name,
+    r.description,
+    r.templateId,
+    r.format,
+    String(r.archived),
+  ].join("|");
 }
 
 /** Newest first, by the id's own creation order, stable. */
@@ -285,13 +296,18 @@ function selectorsOf(row: Row): SelectorRow[] {
 function objectArray(row: Row, key: string): Record<string, unknown>[] {
   const raw = (row as Record<string, unknown>)[key];
   if (!Array.isArray(raw)) return [];
-  return raw.filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null);
+  return raw.filter(
+    (item): item is Record<string, unknown> =>
+      typeof item === "object" && item !== null,
+  );
 }
 
 function stringArray(row: Row, key: string): string[] {
   const raw = (row as Record<string, unknown>)[key];
   if (!Array.isArray(raw)) return [];
-  return raw.filter((v): v is string => typeof v === "string" && v.trim() !== "");
+  return raw.filter(
+    (v): v is string => typeof v === "string" && v.trim() !== "",
+  );
 }
 
 function str(v: unknown): string {
@@ -305,6 +321,8 @@ function num(v: unknown): number {
 function referenceFlags(value: Record<string, unknown>) {
   return {
     ...(typeof value.content === "boolean" ? { content: value.content } : {}),
-    ...(typeof value.includeImages === "boolean" ? { includeImages: value.includeImages } : {}),
+    ...(typeof value.includeImages === "boolean"
+      ? { includeImages: value.includeImages }
+      : {}),
   };
 }

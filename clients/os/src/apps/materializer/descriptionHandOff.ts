@@ -63,28 +63,77 @@ export interface DescriptionOutcome {
  * Hands each described file on once its composition is ready and its Files
  * entry exists, and reports what became of each.
  */
-export interface FileEntry { artifactId: string; title: string }
-
-/** One narrow live read shared by description hand-off and automatic opening. */
-export function useFilesEntries(ids: readonly string[]): ReadonlyMap<string, FileEntry> {
-  const fileIds = [...new Set(ids)].filter(Boolean).sort();
-  const entries = useLiveCollection<Row>(fileIds.length === 0 ? null : `materializer:files-entries:${fileIds.join(",")}`, live => ({
-    concept: Concepts.LIBRARY_ARTIFACT,
-    seed: async (_cursor, signal) => {
-      const found = await Promise.all(fileIds.map(fileId => live.query.libraryArtifactForFile({ fileId }, { signal })));
-      return { rows: found.flatMap(result => result.rows()), nextCursor: "" };
-    },
-    inScope: row => fileIds.some(id => sameEntityId(rowString(row, "sourceConceptRef"), id)),
-    reread: async (rowId, signal) => ((await getRowByConceptAndId(live.query, Concepts.LIBRARY_ARTIFACT, rowId, { signal })) as Row) ?? null,
-    paged: false,
-  }));
-  return useMemo(() => new Map(fileIds.flatMap(id => {
-    const row = entries.snapshot.rows.find(row => sameEntityId(rowString(row, "sourceConceptRef"), id));
-    return row ? [[id, { artifactId: rowString(row, "id"), title: rowString(row, "title") }] as const] : [];
-  })), [entries.snapshot, fileIds.join(",")]);
+export interface FileEntry {
+  artifactId: string;
+  title: string;
 }
 
-export function useDescriptionHandOff(described: DescribedFile[], compositions: Row[], stopped: ReadonlySet<string>, entries: ReadonlyMap<string, FileEntry>): DescriptionOutcome[] {
+/** One narrow live read shared by description hand-off and automatic opening. */
+export function useFilesEntries(
+  ids: readonly string[],
+): ReadonlyMap<string, FileEntry> {
+  const fileIds = [...new Set(ids)].filter(Boolean).sort();
+  const entries = useLiveCollection<Row>(
+    fileIds.length === 0
+      ? null
+      : `materializer:files-entries:${fileIds.join(",")}`,
+    (live) => ({
+      concept: Concepts.LIBRARY_ARTIFACT,
+      seed: async (_cursor, signal) => {
+        const found = await Promise.all(
+          fileIds.map((fileId) =>
+            live.query.libraryArtifactForFile({ fileId }, { signal }),
+          ),
+        );
+        return {
+          rows: found.flatMap((result) => result.rows()),
+          nextCursor: "",
+        };
+      },
+      inScope: (row) =>
+        fileIds.some((id) =>
+          sameEntityId(rowString(row, "sourceConceptRef"), id),
+        ),
+      reread: async (rowId, signal) =>
+        ((await getRowByConceptAndId(
+          live.query,
+          Concepts.LIBRARY_ARTIFACT,
+          rowId,
+          { signal },
+        )) as Row) ?? null,
+      paged: false,
+    }),
+  );
+  return useMemo(
+    () =>
+      new Map(
+        fileIds.flatMap((id) => {
+          const row = entries.snapshot.rows.find((row) =>
+            sameEntityId(rowString(row, "sourceConceptRef"), id),
+          );
+          return row
+            ? [
+                [
+                  id,
+                  {
+                    artifactId: rowString(row, "id"),
+                    title: rowString(row, "title"),
+                  },
+                ] as const,
+              ]
+            : [];
+        }),
+      ),
+    [entries.snapshot, fileIds.join(",")],
+  );
+}
+
+export function useDescriptionHandOff(
+  described: DescribedFile[],
+  compositions: Row[],
+  stopped: ReadonlySet<string>,
+  entries: ReadonlyMap<string, FileEntry>,
+): DescriptionOutcome[] {
   const connection = useOsConnection();
   const begun = useRef(new Set<string>());
   const [outcomes, setOutcomes] = useState<DescriptionOutcome[]>([]);
@@ -93,7 +142,9 @@ export function useDescriptionHandOff(described: DescribedFile[], compositions: 
     for (const file of described) {
       if (begun.current.has(file.compositionId)) continue;
       if (stopped.has(file.compositionId)) continue;
-      const row = compositions.find(row => sameEntityId(rowString(row, "id"), file.compositionId));
+      const row = compositions.find((row) =>
+        sameEntityId(rowString(row, "id"), file.compositionId),
+      );
       if (!row || rowString(row, "status") !== "ready") continue;
       // A file's inputs can change between the client's prediction and the
       // server's read. Never ask for a second draft of a file a model wrote.
@@ -101,10 +152,35 @@ export function useDescriptionHandOff(described: DescribedFile[], compositions: 
       const entry = entries.get(rowString(row, "outputFileId"));
       if (!entry?.artifactId) continue;
       begun.current.add(file.compositionId);
-      void handOffDescription(executeOver(connection.query), { artifactId: entry.artifactId, statement: file.statement, sources: file.sources, requestId: file.requestId })
-        .then(result => setOutcomes(previous => [...previous, { compositionId: file.compositionId, failure: result.revisionFailure ?? "", unattached: result.unattached ?? [] }]));
+      void handOffDescription(executeOver(connection.query), {
+        artifactId: entry.artifactId,
+        statement: file.statement,
+        sources: file.sources,
+        requestId: file.requestId,
+      }).then((result) =>
+        setOutcomes((previous) => [
+          ...previous,
+          {
+            compositionId: file.compositionId,
+            failure: result.revisionFailure ?? "",
+            unattached: result.unattached ?? [],
+          },
+        ]),
+      );
     }
   }, [connection, described, compositions, stopped, entries]);
-  return [...outcomes, ...described.filter(file => stopped.has(file.compositionId) && !begun.current.has(file.compositionId))
-    .map(file => ({ compositionId: file.compositionId, failure: "Stopped before the description was sent.", unattached: [] }))];
+  return [
+    ...outcomes,
+    ...described
+      .filter(
+        (file) =>
+          stopped.has(file.compositionId) &&
+          !begun.current.has(file.compositionId),
+      )
+      .map((file) => ({
+        compositionId: file.compositionId,
+        failure: "Stopped before the description was sent.",
+        unattached: [],
+      })),
+  ];
 }

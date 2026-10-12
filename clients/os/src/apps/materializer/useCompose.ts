@@ -1,10 +1,25 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Concepts, getRowByConceptAndId, refusalSentence, rowString, sameEntityId, type Result, type Row } from "@znasllc-io/memql-sdk-core/client";
+import {
+  Concepts,
+  getRowByConceptAndId,
+  refusalSentence,
+  rowString,
+  sameEntityId,
+  type Result,
+  type Row,
+} from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../live/connection";
-import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
+import {
+  useLiveCollection,
+  type LiveCollectionHandle,
+} from "../../live/useLiveCollection";
 import { compositionRunSource, unfinishedCompositionRunIds } from "./runState";
-import { COMPOSITION_CONCEPT, RECIPE_CONCEPT, TEMPLATE_CONCEPT } from "./concepts";
+import {
+  COMPOSITION_CONCEPT,
+  RECIPE_CONCEPT,
+  TEMPLATE_CONCEPT,
+} from "./concepts";
 
 // The Materializer's feeds, and the one read that is deliberately not a
 // feed.
@@ -65,7 +80,10 @@ import { COMPOSITION_CONCEPT, RECIPE_CONCEPT, TEMPLATE_CONCEPT } from "./concept
 // composing.
 
 /** What one read is asked for to get one page: its abort signal, and the cursor once the page before named one. */
-function pageOptions(cursor: string, signal: AbortSignal): { signal: AbortSignal; cursor?: string } {
+function pageOptions(
+  cursor: string,
+  signal: AbortSignal,
+): { signal: AbortSignal; cursor?: string } {
   return cursor === "" ? { signal } : { signal, cursor };
 }
 
@@ -78,51 +96,103 @@ function pageOf(result: Result): { rows: Row[]; nextCursor: string } {
  * Every composition this caller can read, newest first, every page. `runOf` answers the run behind an
  * UNFINISHED composition (a finished one has none read), for the making stage's measure of the wait.
  */
-export function useCompositions(): LiveCollectionHandle<Row> & { runOf(runId: string): Row | undefined } {
-  const compositions = useLiveCollection<Row>("compose:compositions", (connection) => ({
-    concept: COMPOSITION_CONCEPT,
-    seed: async (cursor, signal) => pageOf(await connection.query.compositions({}, pageOptions(cursor, signal))),
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, COMPOSITION_CONCEPT, rowId, { signal });
-      return (row as Row) ?? null;
-    },
-  }));
+export function useCompositions(): LiveCollectionHandle<Row> & {
+  runOf(runId: string): Row | undefined;
+} {
+  const compositions = useLiveCollection<Row>(
+    "compose:compositions",
+    (connection) => ({
+      concept: COMPOSITION_CONCEPT,
+      seed: async (cursor, signal) =>
+        pageOf(
+          await connection.query.compositions({}, pageOptions(cursor, signal)),
+        ),
+      reread: async (rowId, signal) => {
+        const row = await getRowByConceptAndId(
+          connection.query,
+          COMPOSITION_CONCEPT,
+          rowId,
+          { signal },
+        );
+        return (row as Row) ?? null;
+      },
+    }),
+  );
   // Read the exact bound runs, including old ones outside the newest run page.
   // They remain retained while these compositions are unfinished; neither the
   // worker process nor Nexus needs to remain open for an abandonment to arrive.
   const runIds = unfinishedCompositionRunIds(compositions.snapshot.rows);
   const runKey = JSON.stringify(runIds);
-  const runs = useLiveCollection<Row>(runIds.length ? `compose:runs:${runKey}` : null, (connection) => ({
-    concept: Concepts.WORK_RUN,
-    seed: async (_cursor, signal) => {
-      const results = await Promise.all(runIds.map((runId) => connection.query.workRunForOwner({ runId }, { signal })));
-      return { rows: results.flatMap((result) => result.rows()), nextCursor: "" };
-    },
-    inScope: (row) => runIds.includes(rowString(row, "id")),
-    reread: async (runId, signal) => {
-      if (!runIds.includes(runId)) return null;
-      const result = await connection.query.workRunForOwner({ runId }, { signal });
-      return result.rows()[0] ?? null;
-    },
-    paged: false,
-  }));
-  const source = useMemo(() => compositions.source && runs.source
-    ? compositionRunSource(compositions.source, runs.source) : compositions.source,
-  [compositions.source, runs.source]);
+  const runs = useLiveCollection<Row>(
+    runIds.length ? `compose:runs:${runKey}` : null,
+    (connection) => ({
+      concept: Concepts.WORK_RUN,
+      seed: async (_cursor, signal) => {
+        const results = await Promise.all(
+          runIds.map((runId) =>
+            connection.query.workRunForOwner({ runId }, { signal }),
+          ),
+        );
+        return {
+          rows: results.flatMap((result) => result.rows()),
+          nextCursor: "",
+        };
+      },
+      inScope: (row) => runIds.includes(rowString(row, "id")),
+      reread: async (runId, signal) => {
+        if (!runIds.includes(runId)) return null;
+        const result = await connection.query.workRunForOwner(
+          { runId },
+          { signal },
+        );
+        return result.rows()[0] ?? null;
+      },
+      paged: false,
+    }),
+  );
+  const source = useMemo(
+    () =>
+      compositions.source && runs.source
+        ? compositionRunSource(compositions.source, runs.source)
+        : compositions.source,
+    [compositions.source, runs.source],
+  );
   // Ids are compared as the SDK compares them: one side may be canonical and the other bare.
   const runRows = runs.snapshot.rows;
-  const runOf = useCallback((runId: string) => runRows.find((run) => sameEntityId(rowString(run, "id"), runId)), [runRows]);
-  return { source, snapshot: source?.snapshot ?? compositions.snapshot,
-    reseed: () => { compositions.reseed(); runs.reseed(); }, runOf };
+  const runOf = useCallback(
+    (runId: string) =>
+      runRows.find((run) => sameEntityId(rowString(run, "id"), runId)),
+    [runRows],
+  );
+  return {
+    source,
+    snapshot: source?.snapshot ?? compositions.snapshot,
+    reseed: () => {
+      compositions.reseed();
+      runs.reseed();
+    },
+    runOf,
+  };
 }
 
 /** Every template binding this caller owns, every page. */
 export function useTemplates(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("compose:templates", (connection) => ({
     concept: TEMPLATE_CONCEPT,
-    seed: async (cursor, signal) => pageOf(await connection.query.composeTemplates({}, pageOptions(cursor, signal))),
+    seed: async (cursor, signal) =>
+      pageOf(
+        await connection.query.composeTemplates(
+          {},
+          pageOptions(cursor, signal),
+        ),
+      ),
     reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, TEMPLATE_CONCEPT, rowId, { signal });
+      const row = await getRowByConceptAndId(
+        connection.query,
+        TEMPLATE_CONCEPT,
+        rowId,
+        { signal },
+      );
       return (row as Row) ?? null;
     },
   }));
@@ -132,9 +202,17 @@ export function useTemplates(): LiveCollectionHandle<Row> {
 export function useRecipes(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("compose:recipes", (connection) => ({
     concept: RECIPE_CONCEPT,
-    seed: async (cursor, signal) => pageOf(await connection.query.composeRecipes({}, pageOptions(cursor, signal))),
+    seed: async (cursor, signal) =>
+      pageOf(
+        await connection.query.composeRecipes({}, pageOptions(cursor, signal)),
+      ),
     reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, RECIPE_CONCEPT, rowId, { signal });
+      const row = await getRowByConceptAndId(
+        connection.query,
+        RECIPE_CONCEPT,
+        rowId,
+        { signal },
+      );
       return (row as Row) ?? null;
     },
   }));
@@ -150,14 +228,28 @@ export function useRecipes(): LiveCollectionHandle<Row> {
  * here under the Materializer's key so closing a wizard lets it go.
  */
 export function useLibraryFiles(enabled: boolean): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>(enabled ? "compose:library-files" : null, (connection) => ({
-    concept: Concepts.LIBRARY_FILE,
-    seed: async (cursor, signal) => pageOf(await connection.query.libraryFilesForOwner({}, pageOptions(cursor, signal))),
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, Concepts.LIBRARY_FILE, rowId, { signal });
-      return (row as Row) ?? null;
-    },
-  }));
+  return useLiveCollection<Row>(
+    enabled ? "compose:library-files" : null,
+    (connection) => ({
+      concept: Concepts.LIBRARY_FILE,
+      seed: async (cursor, signal) =>
+        pageOf(
+          await connection.query.libraryFilesForOwner(
+            {},
+            pageOptions(cursor, signal),
+          ),
+        ),
+      reread: async (rowId, signal) => {
+        const row = await getRowByConceptAndId(
+          connection.query,
+          Concepts.LIBRARY_FILE,
+          rowId,
+          { signal },
+        );
+        return (row as Row) ?? null;
+      },
+    }),
+  );
 }
 
 /**
@@ -166,14 +258,28 @@ export function useLibraryFiles(enabled: boolean): LiveCollectionHandle<Row> {
  * so an archived folder is not here; the Folder step shows one a setup claimed as "Unavailable folder".
  */
 export function useFolders(enabled: boolean): LiveCollectionHandle<Row> {
-  return useLiveCollection<Row>(enabled ? "compose:folders" : null, (connection) => ({
-    concept: Concepts.LIBRARY_FOLDER,
-    seed: async (cursor, signal) => pageOf(await connection.query.libraryFolders({}, pageOptions(cursor, signal))),
-    reread: async (rowId, signal) => {
-      const row = await getRowByConceptAndId(connection.query, Concepts.LIBRARY_FOLDER, rowId, { signal });
-      return (row as Row) ?? null;
-    },
-  }));
+  return useLiveCollection<Row>(
+    enabled ? "compose:folders" : null,
+    (connection) => ({
+      concept: Concepts.LIBRARY_FOLDER,
+      seed: async (cursor, signal) =>
+        pageOf(
+          await connection.query.libraryFolders(
+            {},
+            pageOptions(cursor, signal),
+          ),
+        ),
+      reread: async (rowId, signal) => {
+        const row = await getRowByConceptAndId(
+          connection.query,
+          Concepts.LIBRARY_FOLDER,
+          rowId,
+          { signal },
+        );
+        return (row as Row) ?? null;
+      },
+    }),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +314,10 @@ export interface ComposablesState {
   reread: () => void;
 }
 
-export function useComposableConcepts(includeUnmarked: boolean, enabled = true): ComposablesState {
+export function useComposableConcepts(
+  includeUnmarked: boolean,
+  enabled = true,
+): ComposablesState {
   const connection = useOsConnection();
   const [concepts, setConcepts] = useState<ComposableConcept[]>([]);
   const [loading, setLoading] = useState(false);
@@ -258,11 +367,15 @@ function conceptsFromReply(reply: Row | null): ComposableConcept[] {
   const raw = (reply as Record<string, unknown>)["concepts"];
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((c): c is Record<string, unknown> => typeof c === "object" && c !== null)
+    .filter(
+      (c): c is Record<string, unknown> => typeof c === "object" && c !== null,
+    )
     .map((c) => ({
       id: typeof c["id"] === "string" ? c["id"] : "",
       as: typeof c["as"] === "string" ? c["as"] : "",
-      fields: Array.isArray(c["fields"]) ? c["fields"].filter((f): f is string => typeof f === "string") : [],
+      fields: Array.isArray(c["fields"])
+        ? c["fields"].filter((f): f is string => typeof f === "string")
+        : [],
       list: typeof c["list"] === "string" ? c["list"] : "",
       description: typeof c["description"] === "string" ? c["description"] : "",
       marked: c["marked"] === true,
@@ -303,7 +416,9 @@ export interface ResolveState {
  * CALL DISCOVERING IT. Every read behind it runs under the caller's own
  * actor on the server, so the count is of rows they can see.
  */
-export function useResolvedSources(sources: { kind: string; ref: string; label: string }[]): ResolveState {
+export function useResolvedSources(
+  sources: { kind: string; ref: string; label: string }[],
+): ResolveState {
   const connection = useOsConnection();
   const [state, setState] = useState<ResolveState>({
     sources: [],
@@ -332,7 +447,10 @@ export function useResolvedSources(sources: { kind: string; ref: string; label: 
         const reply = result.rows()[0] ?? null;
         setState({
           sources: resolvedFromReply(reply),
-          total: typeof reply?.["total"] === "number" ? (reply["total"] as number) : 0,
+          total:
+            typeof reply?.["total"] === "number"
+              ? (reply["total"] as number)
+              : 0,
           loading: false,
           error: "",
         });
@@ -360,7 +478,9 @@ function resolvedFromReply(reply: Row | null): ResolvedSource[] {
   const raw = (reply as Record<string, unknown>)["sources"];
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((s): s is Record<string, unknown> => typeof s === "object" && s !== null)
+    .filter(
+      (s): s is Record<string, unknown> => typeof s === "object" && s !== null,
+    )
     .map((s) => ({
       kind: typeof s["kind"] === "string" ? s["kind"] : "",
       ref: typeof s["ref"] === "string" ? s["ref"] : "",

@@ -168,10 +168,10 @@ describe("the caption under what was asked for", () => {
   });
 
   it("says the description was sent once this window has sent it", () => {
-    expect(caption(describedRow(), true, { failure: "" })).toBe("Your description was sent to be written. Open the file to review and approve the draft.");
+    expect(caption(describedRow(), true, { failure: "" })).toBe("Your description was sent to be written. Open it in the editor to review and approve the draft.");
     // What this window knows wins over what the row shows: it asked for this file by describing it.
-    expect(caption(describedRow({ provenanceEmbedded: undefined }), true, { failure: "" })).toBe("Your description was sent to be written. Open the file to review and approve the draft.");
-    expect(caption(describedRow({ provenanceEmbedded: undefined }))).toBe("The composed text is in the file. Open it to read what was made.");
+    expect(caption(describedRow({ provenanceEmbedded: undefined }), true, { failure: "" })).toBe("Your description was sent to be written. Open it in the editor to review and approve the draft.");
+    expect(caption(describedRow({ provenanceEmbedded: undefined }))).toBe("The composed text is in the file.");
   });
 
   it("leaves a description this window could not send to the notice that says so", () => {
@@ -180,17 +180,17 @@ describe("the caption under what was asked for", () => {
 
   it("says only that the file came from a description when this window does not know what became of it", () => {
     // Opened later from the list: the row alone says it was described (a statement, no model, nothing embedded).
-    expect(caption(describedRow())).toBe("This file was created from a description. Open it to continue.");
+    expect(caption(describedRow())).toBe("This file was created from a description. Open it in the editor to continue.");
     // Library files travel with a description, so they do not make it a composed file.
-    expect(caption(describedRow({ sources: [{ kind: "library_file", ref: "f1", label: "notes.md", capturedAt: "" }] }))).toBe("This file was created from a description. Open it to continue.");
+    expect(caption(describedRow({ sources: [{ kind: "library_file", ref: "f1", label: "notes.md", capturedAt: "" }] }))).toBe("This file was created from a description. Open it in the editor to continue.");
     // This window asked for it and has not heard back yet.
-    expect(caption(describedRow(), true)).toBe("This file was created from a description. Open it to continue.");
+    expect(caption(describedRow(), true)).toBe("This file was created from a description. Open it in the editor to continue.");
   });
 
   it("keeps the composed-file caption for a file a model wrote", () => {
-    expect(caption(compositionRow())).toBe("The composed text is in the file. Open it to read what was made.");
+    expect(caption(compositionRow())).toBe("The composed text is in the file.");
     // A Markdown file written from records by the composer: a model was called and the file carries its provenance.
-    expect(caption(compositionRow({ format: "markdown", provenanceEmbedded: true }))).toBe("The composed text is in the file. Open it to read what was made.");
+    expect(caption(compositionRow({ format: "markdown", provenanceEmbedded: true }))).toBe("The composed text is in the file.");
   });
 
   it("says nothing about a file that does not exist yet, or failed to", () => {

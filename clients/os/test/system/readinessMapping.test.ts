@@ -24,7 +24,7 @@ describe("the readiness mapping (design record section 5.1)", () => {
   });
 
   it("Materializer requires ai and storage", () => {
-    expect(requirementsFor(app("materializer"), "composer").requires).toEqual(["ai", "storage"]);
+    expect(requirementsFor(app("materializer"), "composer")).toEqual({requires:["storage"],wants:["ai"]});
   });
 
   it("Nexus requires ai on goals, runs and approvals, not on automations", () => {
