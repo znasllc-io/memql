@@ -15,8 +15,12 @@
 //      box's prompt or title, or a progress notification's title; the title,
 //      placeholder and written-out items of a quick pick; the messages of the
 //      errors an input raises (a UserInputError is shown as the toast exactly
-//      as it is written); and the sentences userMessage returns (src/problems.ts),
-//      which the toast shows for every other error.
+//      as it is written); the refusal sentences of the email model
+//      (src/emailDocument.ts), which the Design page shows under a field and
+//      which reach it through a function of its own; the sentences userMessage
+//      returns (src/problems.ts), which the toast shows for every other error;
+//      and the operation phrases that finish them ("open the PDF" in "Couldn’t
+//      open the PDF.").
 //   4. The dialogs: a modal one stops the person's work, so each must say why.
 //
 // WHAT FAILS: everything the MemQL extension's lint rules out (an issue
@@ -262,9 +266,57 @@ function quickPicksIn(src: string, file: string): Copy[] {
   return out;
 }
 
-/** Everything the source shows a person in a notification, a prompt or a picker. */
+/**
+ * The refusals the Design page shows under a field. The email model raises them through `refusal(message)`, not
+ * `new UserInputError(...)`, so userErrorsIn does not see them: the values of its SENTENCES table, and the literals
+ * handed to refusal() itself.
+ */
+function refusalsIn(src: string, file: string): Copy[] {
+  if (!file.endsWith("emailDocument.ts")) return [];
+  const out: Copy[] = [];
+  const table = src.indexOf("const SENTENCES = {");
+  if (table >= 0) {
+    for (const entry of callArguments(src, src.indexOf("{", table))) {
+      const m = /^\w+\s*:\s*([\s\S]*)$/.exec(entry);
+      const text = m === null ? undefined : literalText(m[1] ?? "");
+      if (text !== undefined) out.push({ where: `${file}:${lineAt(src, src.indexOf(entry, table))}`, text, line: true });
+    }
+  }
+  for (const m of src.matchAll(/\brefusal\s*\(/g)) {
+    const [arg] = callArguments(src, (m.index ?? 0) + m[0].length - 1);
+    const text = arg === undefined ? undefined : literalText(arg);
+    if (text !== undefined) out.push({ where: `${file}:${lineAt(src, m.index ?? 0)}`, text, line: true });
+  }
+  return out;
+}
+
+/**
+ * The operation phrases that finish "Couldn’t <operation>." in userMessage: the second argument of showProblem and
+ * reportProblem, and the first of userOperation. Each is read as the sentence it ends. A phrase that is a conditional
+ * gives its arms (and any literal it compares with, which is read as a phrase too and harmlessly).
+ */
+function operationsIn(src: string, file: string): Copy[] {
+  const out: Copy[] = [];
+  for (const m of src.matchAll(/(?<!function\s+)\b(showProblem|reportProblem|userOperation)\s*(?:<[^<>()]*>)?\s*\(/g)) {
+    const arg = callArguments(src, (m.index ?? 0) + m[0].length - 1)[m[1] === "userOperation" ? 0 : 1];
+    if (arg === undefined) continue;
+    const where = `${file}:${lineAt(src, m.index ?? 0)}`;
+    const text = literalText(arg);
+    for (const phrase of text === undefined ? literalFragments(arg) : [text]) out.push({ where, text: `Couldn’t ${phrase}.`, line: true });
+  }
+  return out;
+}
+
+/** Everything the source shows a person in a notification, a prompt or a picker, and the phrases and sentences that finish them. */
 function shownCopy(): Copy[] {
-  return [...sourceCopy(SRC, PKG), ...eachSource(userErrorsIn), ...eachSource(userMessagesIn), ...eachSource(quickPicksIn)];
+  return [
+    ...sourceCopy(SRC, PKG),
+    ...eachSource(userErrorsIn),
+    ...eachSource(refusalsIn),
+    ...eachSource(userMessagesIn),
+    ...eachSource(operationsIn),
+    ...eachSource(quickPicksIn),
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -387,8 +439,8 @@ test("the scans read what they exist for", () => {
   }
   assert.ok(!states.some((c) => c.where === "EMAIL_COPY.host.tooMany"), "a string that is not a status line is held to the line length");
 
+  // The controls name strings, never counts: a count falls when the code it counted is deleted, and says nothing about what was read.
   const sources = sourceCopy(SRC, PKG);
-  assert.ok(sources.length > 20, "the scan found the extension's toasts");
   assert.ok(
     sources.some((c) => c.text === "Your edits are unchanged. Save when your review is complete." && c.line === true),
     "the scan reads a toast",
@@ -396,14 +448,51 @@ test("the scans read what they exist for", () => {
   assert.ok(sources.some((c) => c.text === "New Markdown document" && c.line === true), "the scan reads an input box's title");
   assert.ok(sources.some((c) => c.text === "Creating X" && c.line === true), "the scan reads a progress title");
   const errors = eachSource(userErrorsIn);
-  assert.ok(errors.length > 20, "the scan found the errors an input raises");
   assert.ok(errors.some((c) => c.text === "Invalid MemQL file link." && c.line === true), "the scan reads a UserInputError");
-  assert.ok([...new Set(errors.map((c) => c.where.split(":")[0]))].filter((file) => file !== "src/extension.ts").length > 3, "the scan reads every source file, not only the extension's");
+  assert.ok(
+    errors.some((c) => c.text === "Save the document, then attach a supported image or Markdown file." && c.where.startsWith("src/markdownEditor.ts:")),
+    "the scan reads the files under src, not only the extension's",
+  );
   const messages = eachSource(userMessagesIn);
-  assert.ok(messages.length > 10, "the scan found the sentences userMessage returns");
+  assert.ok(messages.some((c) => c.text === "The AI stopped responding. Try again." && c.line === true), "the scan reads a sentence userMessage returns");
   assert.ok(
     messages.some((c) => c.text === "Couldn’t X. Try again. If this continues, choose Show details." && c.line === true),
     "the scan reads a template sentence, its placeholder as X",
+  );
+  const refusals = eachSource(refusalsIn);
+  assert.ok(refusals.some((c) => c.text === "Enter a subject on one line." && c.line === true), "the scan reads the SENTENCES the Design page shows");
+  assert.ok(refusals.some((c) => c.text === "Enter a height between 0 and X pixels."), "the scan reads a template sentence of SENTENCES, its placeholder as X");
+  assert.ok(refusals.some((c) => c.text === "Remove X in Source. Emails don’t have that field."), "the scan reads a literal handed to refusal()");
+  assert.deepEqual(
+    refusalsIn(
+      ['const SENTENCES = {', '  a: "One.",', "  b: `Two ${n}.`,", "  c: other,", '} as const;', "throw refusal(SENTENCES.a);", "throw refusal(`Three ${x}.`);", 'const refusal = (message: string) => new UserInputError(message);'].join("\n"),
+      "src/emailDocument.ts",
+    ).map((c) => c.text),
+    ["One.", "Two X.", "Three X."],
+    "SENTENCES' values and refusal()'s literals are read; a value that is not a literal and a reference to SENTENCES are not",
+  );
+  assert.deepEqual(refusalsIn('const SENTENCES = { a: "One." };', "src/other.ts"), [], "only emailDocument.ts is read for refusals");
+  const operations = eachSource(operationsIn);
+  assert.ok(operations.some((c) => c.text === "Couldn’t open the Markdown view." && c.line === true), "the scan reads the phrase a command gives showProblem");
+  assert.ok(operations.some((c) => c.text === "Couldn’t open the file."), "the scan reads the phrase given to userOperation");
+  assert.ok(operations.some((c) => c.text === "Couldn’t load your notes."), "the scan reads the phrase given to reportProblem");
+  assert.deepEqual(
+    operationsIn(
+      [
+        'void showProblem(error, "open the PDF");',
+        "reportProblem(e, 'load your notes', lease);",
+        'reportProblem(err, ok ? "apply the approved changes" : "prepare changes");',
+        'return userOperation("save the file", () => files.save(doc));',
+        'await userOperation<void>("reload it", async () => {});',
+        "await showProblem(error, `copy ${what}`);",
+        "export async function showProblem(error: unknown, operation: string): Promise<void> {}",
+        'showProblem({ message: "Not an operation." });',
+        "reportProblem(error, operation);",
+      ].join("\n"),
+      "src/x.ts",
+    ).map((c) => c.text),
+    ["Couldn’t open the PDF.", "Couldn’t load your notes.", "Couldn’t apply the approved changes.", "Couldn’t prepare changes.", "Couldn’t save the file.", "Couldn’t reload it.", "Couldn’t copy X."],
+    "the phrase is showProblem's and reportProblem's second argument and userOperation's first; a definition, a call without one and a variable are not read",
   );
   assert.deepEqual(userMessagesIn('return "Not a message.";', "src/other.ts"), [], "only problems.ts is read for returned sentences");
   assert.deepEqual(userMessagesIn("if (x) return `Couldn’t ${what}.`; return error.message;", "src/problems.ts").map((c) => c.text), ["Couldn’t X."]);
