@@ -12,16 +12,21 @@
 //     Ingresses that ask. An Ingress that lost the annotation in a regeneration
 //     builds, reconciles and serves traffic exactly as before, and shows the
 //     bare 503 the first time its Service has no endpoints; and
-//   - the Deployment behind that name has to exist in every overlay, on the
-//     image the overlay pins, listening where the Service and the probes expect,
-//     and needing nothing from the cluster -- it is the one workload that must
-//     still answer when every other one does not.
+//   - the Deployment behind that name has to exist in every overlay whose front
+//     door names it -- cloud and cloud-entry, which compose
+//     deploy/k8s/components/error-pages -- on the image the overlay pins,
+//     listening where the Service and the probes expect, and needing nothing
+//     from the cluster: it is the one workload that must still answer when
+//     every other one does not.
+//
+// AND NOWHERE ELSE. The local overlay renders none of it, and
+// TestTheLocalOverlayRendersNoErrorPages says why.
 //
 // The annotation key and the Service name are written out below as literals,
 // not read from the generator or from integrations/customdomain. They are
-// ingress-nginx's contract and the base manifest's name; a gate that took them
-// from the code under test would pass whatever the code said. The equality with
-// the engine's copy is asserted in cmd/frontdoorhosts.
+// ingress-nginx's contract and the component manifest's name; a gate that took
+// them from the code under test would pass whatever the code said. The equality
+// with the engine's copy is asserted in cmd/frontdoorhosts.
 package overlays
 
 import (
@@ -44,11 +49,12 @@ const (
 	errorPagesName = "error-pages"
 )
 
-// errorPagesOverlays are the overlays that render the error pages. All three
-// instance overlays compose the base, so all three carry the Deployment; only
-// the two nginx ones carry the annotation that points at it (traefik, which
-// the local overlay uses, ignores it).
-var errorPagesOverlays = []string{cloudOverlay, entryOverlay, "local"}
+// errorPagesOverlays are the overlays that render the error pages: the two
+// whose front door is ingress-nginx's, and so carries the annotation that
+// points at them. Each composes deploy/k8s/components/error-pages; base does
+// not carry it, so the local overlay (traefik, which ignores the annotation)
+// renders none of it.
+var errorPagesOverlays = []string{cloudOverlay, entryOverlay}
 
 // errorPagesExcluded are the front-door Ingresses that must NOT name the error
 // pages, and why.
@@ -534,8 +540,9 @@ func assertErrorPagesRender(t *testing.T, overlay string) {
 	// The node PodMonitor (deploy/k8s/monitoring/podmonitor.yaml) scrapes the
 	// `http` port of every pod labelled part-of=memql, at /metrics. This server
 	// answers /metrics with a 503 page, so a pod carrying the label would sit
-	// permanently down in Prometheus. The Deployment object is labelled part-of
-	// by the base's labels transformer; only the PODS are kept out of the scrape.
+	// permanently down in Prometheus. The Deployment object states part-of on its
+	// own metadata, as every base object gets it; only the PODS are kept out of
+	// the scrape.
 	if v, ok := podLabels["app.kubernetes.io/part-of"]; ok {
 		t.Errorf("%s: the error-pages pods carry app.kubernetes.io/part-of=%s, which the node PodMonitor selects "+
 			"and scrapes at /metrics on the http port -- a 503 page, so a target that is down for good", overlay, v)
@@ -687,7 +694,7 @@ func assertErrorPagesRender(t *testing.T, overlay string) {
 	}
 
 	// Two replicas that land on one node are one replica at the first node loss.
-	// Soft, because a one-node cluster (local) must still schedule both.
+	// Soft, because a one-node cluster must still schedule both.
 	if len(spec.TopologySpreadConstraints) != 1 {
 		t.Errorf("%s: error-pages has %d topology spread constraints, want 1", overlay, len(spec.TopologySpreadConstraints))
 	} else if tsc := spec.TopologySpreadConstraints[0]; tsc.TopologyKey != "kubernetes.io/hostname" ||
@@ -703,16 +710,45 @@ func assertErrorPagesRender(t *testing.T, overlay string) {
 	}
 }
 
-// TestEveryInstanceOverlayRendersTheErrorPages: all three overlays compose the
-// base, so all three run the error pages. The nginx ones point at them; local
-// (traefik) ignores the annotation and runs them anyway, so a local cluster is
-// the same shape as the cloud one -- the parity standard -- even though no
-// traefik middleware reproduces the fallback there (the outage was a cloud one,
-// and the middleware is separate work).
-func TestEveryInstanceOverlayRendersTheErrorPages(t *testing.T) {
+// TestTheIngressNginxOverlaysRenderTheErrorPages: cloud and cloud-entry, whose
+// front-door Ingresses name the error pages, each compose
+// deploy/k8s/components/error-pages and render the whole of it.
+func TestTheIngressNginxOverlaysRenderTheErrorPages(t *testing.T) {
 	for _, overlay := range errorPagesOverlays {
 		t.Run(overlay, func(t *testing.T) {
 			assertErrorPagesRender(t, overlay)
 		})
+	}
+}
+
+// TestTheLocalOverlayRendersNoErrorPages is the control for the test above, and
+// a ruling in its own right: the local overlay runs no error pages at all.
+//
+// They used to render there from base, where they bought nothing and cost every
+// release-image install. traefik, local's ingress controller, ignores
+// ingress-nginx's default-backend annotation, so nothing ever sent a local pod a
+// request. And install-cluster-e2e's release-image legs (round-trip, repair)
+// install a commit's local overlay on DEFAULT_STACK_TAG's PUBLISHED images
+// (editors/vscode/src/install/stackPin.ts, imageTagForVersion; the dsl-fetch
+// precedent is memql#5632): no published memql-edge has the error-pages
+// subcommand yet, so both pods crash-looped and the install never went ready.
+func TestTheLocalOverlayRendersNoErrorPages(t *testing.T) {
+	var found []string
+	for _, r := range parse(t, render(t, "local")) {
+		switch r.Kind {
+		case "Deployment", "Service", "PodDisruptionBudget":
+			if r.Metadata.Name == errorPagesName {
+				found = append(found, r.Kind+"/"+r.Metadata.Name)
+			}
+		}
+	}
+	if len(found) > 0 {
+		t.Errorf("the local overlay renders %s. The error pages belong to the ingress-nginx overlays only "+
+			"(deploy/k8s/components/error-pages, composed by cloud and cloud-entry), for two reasons. traefik, "+
+			"local's controller, ignores the %s annotation, so a local pod would never be sent a request. And "+
+			"install-cluster-e2e's release-image legs (round-trip, repair) run a commit's local overlay on "+
+			"DEFAULT_STACK_TAG's published images, whose memql-edge predates the error-pages subcommand: the pods "+
+			"crash-loop and the install never goes ready. Compose the component in an nginx overlay; do not add "+
+			"it to base or to local.", strings.Join(found, ", "), defaultBackendAnnotation)
 	}
 }

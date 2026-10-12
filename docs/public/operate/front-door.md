@@ -814,9 +814,10 @@ is the port-forward-as-architecture anti-pattern
 Every front-door Ingress whose proxy speaks plain HTTP, bar `mcp-front-door`,
 carries `nginx.ingress.kubernetes.io/default-backend: error-pages`. When the
 Service **that Ingress routes to** has no ready endpoints -- and only then --
-ingress-nginx answers with `memql error-pages` (`deploy/k8s/base/error-pages.yaml`)
-instead of its own bare `503`; a Service with a ready pod is untouched. The page
-needs a ready `error-pages` pod of its own: with none, ingress-nginx skips the
+ingress-nginx answers with `memql error-pages` instead of its own bare `503`; a
+Service with a ready pod is untouched. The error pages run in the cloud overlays
+(`cloud` and `cloud-entry` compose `deploy/k8s/components/error-pages`), and the
+page needs a ready `error-pages` pod of its own: with none, ingress-nginx skips the
 fallback and answers its own `503`. It is always a `503` with `Retry-After: 120`:
 the MemQL page on `os.` and `vscode.`, a neutral page with no MemQL name on the
 apex, hosted sites and custom domains, and JSON on `api.<domain>` and for any
@@ -833,11 +834,13 @@ plain HTTP/1.1, so the proxy would answer `502`. Those hosts keep its own `503`.
 `mcp-front-door` does not carry it either, by choice rather than protocol: mcp is
 disabled by default (`cloud-entry` renders it at 0 replicas), so the page's
 "being updated, back in a few minutes" would be permanent and false there, and
-MCP is a machine surface. `mcp.` keeps ingress-nginx's answer. traefik (the local
-overlay) ignores the annotation. The Service is looked up in the Ingress's own
-namespace, so a `MEMQL_CUSTOM_DOMAIN_NAMESPACE` other than `memql` needs an
-`error-pages` Deployment **and** Service there too -- a Service alone selects no
-pods in that namespace -- or the fallback is skipped.
+MCP is a machine surface. `mcp.` keeps ingress-nginx's answer. A local cluster
+(traefik) has neither the pods nor the fallback: traefik ignores the annotation
+and the local overlay renders no `error-pages` objects, so a local Service with
+no ready endpoints gets traefik's own answer. The Service is looked up in the
+Ingress's own namespace, so a `MEMQL_CUSTOM_DOMAIN_NAMESPACE` other than `memql`
+needs an `error-pages` Deployment **and** Service there too -- a Service alone
+selects no pods in that namespace -- or the fallback is skipped.
 
 The engine applies an Ingress only while a binding is issuing, so custom domains
 and doors already live at the upgrade lack the annotation. Add it once, to each
@@ -855,9 +858,6 @@ for sel in app.kubernetes.io/name=custom-domain app.kubernetes.io/name=account-f
         nginx.ingress.kubernetes.io/default-backend=error-pages --overwrite; done
 done
 ```
-
-A local cluster must rebuild the edge image (`make dev`) before it syncs this: an
-older `memql-edge` image has no `error-pages` subcommand and the pods crash-loop.
 
 ## Verifying a front door
 

@@ -26,13 +26,19 @@ import (
 //
 // A Deployment runs one of two things, and the pass records which. Most run a
 // NODE ROLE: MEMQL_NODE_TYPE names it, and the role's runs_on edge points at the
-// Deployment. One runs a SUBCOMMAND of the engine binary instead -- `command:
-// ["/app/memql", "error-pages"]`, the maintenance pages every front door falls
-// back to (deploy/k8s/base/error-pages.yaml) -- which never joins the mesh and
-// so has no role to run: it is recorded as a Deployment carrying a `subcommand`
-// attribute and no runs_on edge. Giving it MEMQL_NODE_TYPE=edge to satisfy the
-// pass would put a second edge in the graph. A Deployment that names neither is
-// still refused: nothing then says what it runs.
+// Deployment. One may run a SUBCOMMAND of the engine binary instead --
+// `command: ["/app/memql", "<subcommand>"]`, the way the error pages run
+// `memql error-pages` on the edge image -- which never joins the mesh and so has
+// no role to run: it is recorded as a Deployment carrying a `subcommand`
+// attribute and no runs_on edge. Giving the error pages MEMQL_NODE_TYPE=edge to
+// satisfy the pass would put a second edge in the graph. A Deployment that
+// names neither is still refused: nothing then says what it runs.
+//
+// The error pages themselves are NOT in the graph. They live in
+// deploy/k8s/components/error-pages, which only the ingress-nginx overlays
+// (cloud, cloud-entry) compose, and this pass reads base and engine-bff alone,
+// the shape every engine overlay shares. The rule above stands for any base
+// Deployment that runs a subcommand.
 //
 // NOT RENDERED BY kustomize, deliberately. The render gates under
 // deploy/k8s/overlays shell out to kustomize or kubectl and SKIP when neither

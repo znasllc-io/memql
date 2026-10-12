@@ -457,18 +457,21 @@ func TestCloudKeepsDrainBeforeStartAtTwoReplicas(t *testing.T) {
 // image digest this overlay pins for the edge.
 //
 // The shape of the three (ports, probes, resources, what it mounts) is held for
-// every overlay in frontdoor_error_pages_test.go. What only this overlay can
-// say is where its image comes from: error-pages is the engine binary's
-// `error-pages` subcommand, so it rides the edge image, and it is the overlay's
-// images block -- by the edge image's NAME -- that retargets it from the base's
-// placeholder tag to the pinned digest. An entry install that kept the
-// placeholder would pull a tag nobody pushed, at the one moment the fallback
-// is needed.
+// both overlays that compose deploy/k8s/components/error-pages in
+// frontdoor_error_pages_test.go. What only this overlay can say is where its
+// image comes from: error-pages is the engine binary's `error-pages`
+// subcommand, so it rides the edge image, and it is the overlay's images block
+// -- by the edge image's NAME -- that retargets the component's Deployment from
+// its placeholder tag to the pinned digest, exactly as it does the edge's. An
+// entry install that kept the placeholder would pull a tag nobody pushed, at
+// the one moment the fallback is needed.
 func TestCloudEntryRendersErrorPages(t *testing.T) {
-	// The shape is TestEveryInstanceOverlayRendersTheErrorPages/cloud-entry's;
-	// this reads the Deployment only for its image.
-	var dep errorPagesDeployment
-	namedDocument(t, render(t, entryOverlay), "Deployment", errorPagesName, &dep)
+	// The shape is TestTheIngressNginxOverlaysRenderTheErrorPages/cloud-entry's;
+	// this reads the two Deployments only for their images.
+	rendered := render(t, entryOverlay)
+	var dep, edge errorPagesDeployment
+	namedDocument(t, rendered, "Deployment", errorPagesName, &dep)
+	namedDocument(t, rendered, "Deployment", "edge", &edge)
 
 	raw, err := os.ReadFile(filepath.Join(entryOverlay, "kustomization.yaml"))
 	if err != nil {
@@ -495,8 +498,14 @@ func TestCloudEntryRendersErrorPages(t *testing.T) {
 			"error-pages to share", edgeImage, digest)
 	}
 
-	if got, want := dep.Spec.Template.Spec.Containers[0].Image, edgeImage+"@"+digest; got != want {
+	// Both, from the one images line: the component's Deployment is retargeted
+	// exactly as the edge is, so neither can be left on the placeholder alone.
+	want := edgeImage + "@" + digest
+	if got := dep.Spec.Template.Spec.Containers[0].Image; got != want {
 		t.Errorf("error-pages runs %q, want %q: the edge image at the digest the overlay pins", got, want)
+	}
+	if got := edge.Spec.Template.Spec.Containers[0].Image; got != want {
+		t.Errorf("edge runs %q, want %q: the digest the overlay pins, which error-pages must share", got, want)
 	}
 }
 

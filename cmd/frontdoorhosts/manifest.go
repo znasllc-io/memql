@@ -36,7 +36,7 @@ const clusterIssuer = "letsencrypt-prod"
 const ingressClass = "nginx"
 
 // defaultBackendAnnotation and errorPagesService point an Ingress at the error
-// pages (deploy/k8s/base/error-pages.yaml, `memql error-pages`): when the
+// pages (deploy/k8s/components/error-pages, `memql error-pages`): when the
 // Service an Ingress routes to has no ready endpoints, ingress-nginx sends the
 // request to this Service instead of answering its own bare "503 Service
 // Temporarily Unavailable", which is what every host on the cluster did on
@@ -179,7 +179,7 @@ func header(overlay, domain string) string {
 		"# THE ERROR PAGES. Every Ingress below whose proxy speaks plain HTTP to its backend, bar\n" +
 		"# mcp-front-door, carries " + defaultBackendAnnotation + ": " + errorPagesService + ",\n" +
 		"# so that when the Service it routes to has no ready endpoints ingress-nginx answers with the\n" +
-		"# maintenance page (`memql error-pages`, deploy/k8s/base/error-pages.yaml) instead of its own\n" +
+		"# maintenance page (`memql error-pages`, deploy/k8s/components/error-pages) instead of its own\n" +
 		"# bare 503, which is what every host on the cluster answered on 2026-10-11. Two Ingresses do\n" +
 		"# NOT, each on its own backend protocol: api-front-door-grpc (GRPC: the proxy would speak h2c\n" +
 		"# to the error pages) and identity-front-door (HTTPS: the proxy would open a TLS connection to\n" +

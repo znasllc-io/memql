@@ -145,7 +145,7 @@ const (
 	// On 2026-10-11 the whole mesh was down and every host the cluster serves,
 	// a client's own domain included, answered ingress-nginx's bare "503
 	// Service Temporarily Unavailable". `memql error-pages`
-	// (deploy/k8s/base/error-pages.yaml) is what answers instead, and a client's
+	// (deploy/k8s/components/error-pages) is what answers instead, and a client's
 	// visitor gets its neutral page: nothing on it names the platform
 	// underneath their site. The cluster's own front door carries the same
 	// annotation, written by cmd/frontdoorhosts, and so do the two bind scripts

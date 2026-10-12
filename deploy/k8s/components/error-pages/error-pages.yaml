@@ -31,11 +31,12 @@
 #
 # THE IMAGE IS THE EDGE'S, NOT A NEW ONE. The server is a subcommand of the
 # engine binary (the same reason dsl-fetch is), so every image the cluster
-# already pulls carries it. The image name is the edge's so that every
-# overlay's `images:` block retargets this Deployment exactly as it does the
-# edge: the same digest, from the same line, with nothing new to pin. The
-# command is /app/memql, the path the runtime image's entrypoint resolves ./memql
-# to from its WORKDIR (the dsl-fetch init container names it the same way).
+# already pulls carries it. The image name is the edge's so that the `images:`
+# block of each overlay that composes this retargets the Deployment exactly as
+# it does the edge: the same digest, from the same line, with nothing new to
+# pin. The command is /app/memql, the path the runtime image's entrypoint
+# resolves ./memql to from its WORKDIR (the dsl-fetch init container names it
+# the same way).
 #
 # IT NEEDS NOTHING BUT A DOMAIN. No database, no mesh, no secret: the one thing
 # that must still answer when all of those are gone cannot depend on any of
@@ -58,12 +59,27 @@
 # Service, so the kubelet reaches it at the pod's address and no visitor can.
 # The probes below are on it.
 #
-# LOCAL (traefik). This Deployment renders into the local overlay too, where it
-# runs and answers its own address, but nothing points a local Ingress at it:
-# the annotation above is ingress-nginx's, and traefik ignores it. A local
-# cluster therefore still shows traefik's own 503 when a node is down. Closing
-# that needs a traefik Middleware, which is deliberately not here -- the outage
-# this answers was the cloud's.
+# A COMPONENT OF THE CLOUD OVERLAYS, NOT BASE. overlays/cloud and
+# overlays/cloud-entry compose it (deploy/k8s/components/error-pages), because
+# their front doors are ingress-nginx's, the only controller that reads the
+# annotation above. The local overlay renders none of it, for two reasons:
+#
+#   - traefik, local's controller, ignores the annotation, so a pod there would
+#     answer its own address and nothing would ever send it a request. A local
+#     cluster gives traefik's own answer when a node is down, pods or no pods;
+#     closing that needs a traefik Middleware, deliberately not here (the
+#     outage this answers was the cloud's).
+#   - install-cluster-e2e's release-image legs (round-trip, repair) install a
+#     commit's local overlay on DEFAULT_STACK_TAG's PUBLISHED images
+#     (editors/vscode/src/install/stackPin.ts, imageTagForVersion; the
+#     dsl-fetch precedent is memql#5632). No published memql-edge has this
+#     subcommand yet, so in base both pods crash-looped and the install never
+#     went ready. A local copy bought nothing and cost every such install.
+#
+# Every object below states `namespace: memql` itself, where base's own
+# `namespace:` field used to put it. The front-door Ingresses state the same,
+# and the overlays' namespace transformer is unsetOnly, so these stay beside
+# them whatever value that transformer is given.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -97,9 +113,9 @@ spec:
       # PodMonitor (deploy/k8s/monitoring/podmonitor.yaml) selects every pod
       # labelled part-of=memql and scrapes the `http` port at /metrics. This
       # server answers /metrics with its 503 page, so a labelled pod would be a
-      # scrape target that is down for good. (The Deployment object carries the
-      # part-of label from the base's labels transformer, which labels metadata
-      # and not pod templates.)
+      # scrape target that is down for good. (The Deployment object does carry
+      # part-of: its own metadata states it, as base's labels transformer gives
+      # it to every base object's metadata and to no pod template.)
       labels:
         app.kubernetes.io/name: error-pages
     spec:
@@ -111,7 +127,7 @@ spec:
       # 10 s shutdown budget. The kubelet must wait longer than both.
       terminationGracePeriodSeconds: 30
       # Two replicas on one node are one replica at the first node loss. Soft,
-      # so a one-node cluster (local k3d) still schedules both.
+      # so a one-node cluster still schedules both.
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname

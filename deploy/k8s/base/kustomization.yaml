@@ -84,11 +84,6 @@ resources:
   # Site edge -- serves every hosted site (the portal is site #1) behind the
   # `*.<domain>` and apex Ingress rules (memql#3700 / memql#3714).
   - edge.yaml
-  # The error pages -- `memql error-pages` on the edge image, what every
-  # front-door Ingress falls back to when its Service has no ready endpoints
-  # instead of ingress-nginx's bare 503 (after the 2026-10-11 outage). Not a
-  # mesh node: it joins no mesh and touches no database.
-  - error-pages.yaml
   # Remote MCP protocol head (engine-built; epic memql#1550). The public
   # HTTPS entry (ingress + cert-manager ClusterIssuer) that fronts this node
   # -- along with the product bff/SPA Services it used to sit beside -- is now
