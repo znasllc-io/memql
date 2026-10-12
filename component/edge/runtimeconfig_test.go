@@ -84,7 +84,6 @@ func TestRuntimeConfigForSite_FullDerivation(t *testing.T) {
 	got := runtimeConfigForSite(context.Background(), site, env, true, nil)
 
 	want := RuntimeConfig{
-		EmailAppEnabled:    true,
 		IdentityURL:        "https://identity.example.com",
 		IdentityAPIBaseURL: "",
 		OAuthClientID:      "shop",
@@ -730,12 +729,17 @@ func TestRuntimeConfigUnboundStorefrontKeepsKindWithoutResolvingSecrets(t *testi
 	}
 }
 
-func TestRuntimeConfigEmailAppAvailability(t *testing.T) {
-	for _, value := range []string{"", "true", "false", " FALSE "} {
-		config := runtimeConfigForSite(context.Background(), nil, fakeEnv(map[string]string{"MEMQL_EMAIL_APP_ENABLED": value}), true, nil)
-		want := strings.ToLower(strings.TrimSpace(value)) != "false"
-		if config.EmailAppEnabled != want {
-			t.Fatalf("%q: enabled=%v", value, config.EmailAppEnabled)
-		}
+func TestRuntimeConfigCarriesNoEmailAppSwitch(t *testing.T) {
+	config := runtimeConfigForSite(context.Background(), nil, fakeEnv(map[string]string{"MEMQL_EMAIL_APP_ENABLED": "false"}), true, nil)
+	raw, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := doc["emailAppEnabled"]; ok {
+		t.Fatalf("runtime config still carries the retired emailAppEnabled key: %s", raw)
 	}
 }
