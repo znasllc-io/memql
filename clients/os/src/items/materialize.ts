@@ -46,7 +46,13 @@
 // nobody and says nothing; test/materializer/intent.test.tsx pins this one
 // against the manifest's own list.
 
-/** The app id. It stays `materializer` while the DSL namespace is `compose`. */
+/**
+ * The app id. It is `materializer` even though the DSL namespace is `compose`,
+ * and that split is deliberate rather than an inconsistency: `materializer`
+ * already named the engine's boot seeder, so the ROWS took a different word
+ * while the app kept the name a person knows -- `v1:work:goal.requestedVia`
+ * was already carrying this string before either epic.
+ */
 export const MATERIALIZER_APP_ID = "materializer";
 
 /** The section that composes a new file (and the one that opens on a composition). */

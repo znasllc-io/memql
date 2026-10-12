@@ -20,7 +20,7 @@ import { useOsConnection } from "../../live/connection";
 import { entriesOf, hasDirectory, walkEntries } from "../../items/folderDrop";
 import { planArchive, runArchiveWalk, subtreeHoldsArtifact } from "./actions/archive";
 
-import { MATERIALIZER_APP, MATERIALIZER_COMPOSER } from "./materializer";
+import { MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION } from "../../items/materialize";
 import { kindGlyph } from "./glyphs";
 import { LocalTabs } from "../../kit/LocalTabs";
 import { AddButton } from "../../kit/AddButton";
@@ -443,13 +443,13 @@ export function BrowseSection({
     // silently does nothing is worse than one that is not there.
     const composition = materialized.get(row.id);
     const openInMaterializer =
-      composition && canOpen(registry, MATERIALIZER_APP)
+      composition && canOpen(registry, MATERIALIZER_APP_ID)
         ? [
             {
               id: "materializer",
               label: "Open in Materializer",
               onSelect: () =>
-                actions.openApp(MATERIALIZER_APP, MATERIALIZER_COMPOSER, {
+                actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, {
                   compositionId: composition.id,
                 }),
             },
