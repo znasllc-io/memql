@@ -1,10 +1,11 @@
 import { AccountPicker } from "../accounts/AccountPicker";
 import { accountIsArchived, type AccountRow } from "../accounts/rows";
 import { ContentSkeleton } from "../../kit/ContentSkeleton";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, Chip, Fact, Facts, Field, FormRow, Head, Input, Notice, RecordList, RecordRow, Select, Subhead } from "../../kit";
 import { ActionBar } from "../../kit/ActionBar";
+import type { ComposeSetup, ComposeSource } from "../../items/materialize";
 import { actsFor, stateLine, type ActId } from "./acts";
 import { ProvenanceChain } from "./Provenance";
 import type { CompositionRow, ModelRow, SourceRow, TemplateRow } from "./rows";
@@ -16,10 +17,13 @@ import {
 } from "./useCompose";
 import {
   DEPLOYABLE_KINDS,
+  DESCRIPTION_NOT_SENT,
+  DESCRIPTION_NOT_SENT_NEXT,
   FORMATS,
   UNOFFERED_FORMATS,
   deployableWord,
   formatWord,
+  notAttachedSentence,
 } from "./words";
 
 // Materializer collects the brief, sources, and output settings. File content
@@ -37,15 +41,42 @@ export interface ComposerSectionProps {
   defaultFormat: string;
   busy: boolean;
   error: string;
+  /**
+   * A starting setup another app opened the composer with. Applied ONCE, when
+   * it arrives, over a fresh form: format, sources, output kind, and the folder
+   * and way back it may name. The composer has no folder control, so the folder
+   * is held with the form and sent as it is -- the cluster refuses one the person
+   * cannot use, and that refusal is shown. The person's own edits after that are
+   * theirs. Applying it is the last thing a setup does: `onApplied` tells the app
+   * it can let go, and nothing of it outlives the form.
+   */
+  initial?: ComposeSetup;
+  onApplied?: (setup: ComposeSetup) => void;
+  /**
+   * The name of the app that sent the person here to make the open file, when
+   * they can go back to it. Absent where there is nowhere to go back to.
+   */
+  backTo?: string;
+  /**
+   * What became of the open file's description, once it has been handed to the
+   * Library. Absent for a file that was not asked for by describing it, and
+   * while the hand-off is still on its way.
+   */
+  description?: { failure: string; unattached: string[] };
   onMaterialize: (facts: {
     accountIds: string[];
     name: string;
     statement: string;
     format: string;
-    sources: { kind: string; ref: string; label: string }[];
+    sources: ComposeSource[];
     templateId: string;
     deployableKind: string;
-  }) => void;
+    outputKind: string;
+    /** From a setup; "" for the Library root. */
+    folderId: string;
+    /** From a setup: where the person goes back to after this file. */
+    returnTo: ReturnTo | null;
+  }) => Promise<boolean>;
   onAct: (act: ActId) => void;
   /** Clears the open composition and returns to a blank form. */
   onNewComposition: () => void;
@@ -55,6 +86,19 @@ interface PickedSource {
   kind: string;
   ref: string;
   label: string;
+}
+
+type ReturnTo = NonNullable<ComposeSetup["returnTo"]>;
+
+/** The sources once each: the same file listed twice is one source, as it is when a person picks it twice. */
+function distinct(sources: ComposeSource[]): ComposeSource[] {
+  const seen = new Set<string>();
+  return sources.filter((source) => {
+    const key = `${source.kind} ${source.ref}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export function ComposerSection({
@@ -68,6 +112,10 @@ export function ComposerSection({
   defaultFormat,
   busy,
   error,
+  initial,
+  onApplied,
+  backTo,
+  description,
   onMaterialize,
   onAct,
   onNewComposition,
@@ -78,7 +126,59 @@ export function ComposerSection({
   const [format, setFormat] = useState(defaultFormat);
   const [templateId, setTemplateId] = useState("");
   const [deployableKind, setDeployableKind] = useState("");
-  const [picked, setPicked] = useState<PickedSource[]>([]);
+  // An email template is the one output kind, and no control sets it: it comes
+  // from a sender's setup, needs the JSON format, and goes if that is changed.
+  const [outputKind, setOutputKind] = useState("");
+  const [picked, setPicked] = useState<ComposeSource[]>([]);
+  // THE FOLDER AND THE WAY BACK ARE FORM STATE like everything else a setup
+  // fills in, with no control of their own. They are sent up with the other
+  // facts, so they live exactly as long as this form: a remount is a form
+  // nobody sent anything to, and the file they were for uses them up.
+  const [folderId, setFolderId] = useState("");
+  const [returnTo, setReturnTo] = useState<ReturnTo | null>(null);
+  // Which setup the form holds. A reply to an ask made under an earlier one must
+  // not use up the folder and the way back of a setup that arrived after it.
+  const generation = useRef(0);
+
+  useEffect(() => {
+    if (initial === undefined) return;
+    generation.current += 1;
+    // A new setup is a new file. What the person typed for the last one is not
+    // part of it; the organization they chose is, as it always is, theirs.
+    setName("");
+    setStatement("");
+    setTemplateId("");
+    setDeployableKind("");
+    setFormat(initial.format ?? (initial.outputKind ? "json" : defaultFormat));
+    setOutputKind(initial.outputKind ?? "");
+    setPicked(distinct(initial.sources ?? []));
+    setFolderId(initial.folderId ?? "");
+    setReturnTo(initial.returnTo ?? null);
+    onApplied?.(initial);
+  }, [initial]);
+
+  function materialize() {
+    const held = generation.current;
+    void onMaterialize({
+      name,
+      statement,
+      accountIds: [accountId],
+      format,
+      sources: picked,
+      templateId,
+      deployableKind,
+      outputKind,
+      folderId,
+      returnTo,
+    }).then((made) => {
+      // The setup's folder and way back were for the file just made. A refusal
+      // keeps them -- the same form asked again is the same ask.
+      if (made && generation.current === held) {
+        setFolderId("");
+        setReturnTo(null);
+      }
+    });
+  }
 
   const composables = useComposableConcepts(showUnmarkedConcepts);
   const resolved = useResolvedSources(picked);
@@ -91,7 +191,7 @@ export function ComposerSection({
     hasOrganization: accounts.some(account => account.id === accountId && !accountIsArchived(account)),
     submitting: busy,
   };
-  const acts = actsFor(open, draftState);
+  const acts = actsFor(open, draftState, backTo);
 
   // The chain reads the OPEN composition once there is one, and the form
   // otherwise -- so the same device says "here is what you are about to
@@ -102,7 +202,7 @@ export function ComposerSection({
   const chainTemplate =
     templates.find((t) => t.id === (open ? open.templateId : templateId))?.name ?? "";
 
-  function addSource(next: PickedSource) {
+  function addSource(next: ComposeSource) {
     setPicked((prev) =>
       prev.some((p) => p.kind === next.kind && p.ref === next.ref) ? prev : [...prev, next],
     );
@@ -165,7 +265,12 @@ export function ComposerSection({
         <TargetColumn
           templates={templates}
           format={open ? open.format : format}
-          onFormat={setFormat}
+          onFormat={(next) => {
+            setFormat(next);
+            // An email template is JSON; a person who chose another kind of
+            // file is not making one.
+            if (next !== "json") setOutputKind("");
+          }}
           templateId={open ? open.templateId : templateId}
           onTemplate={setTemplateId}
           deployableKind={open ? open.deployableKind : deployableKind}
@@ -187,25 +292,33 @@ export function ComposerSection({
       />
 
       {error ? <Notice tone="error" sentence={error} /> : null}
+      {/* WHAT BECAME OF THE DESCRIPTION, in place. The file is there either
+          way, so neither is an error: the first says what to do about it, the
+          second only names what the Library could not take. It arrives a moment
+          after "Ready" without the person having done anything, so it is
+          announced -- in a status region that is ALREADY here, because one that
+          appears together with its text is not reliably announced. It has no box
+          of its own (`display: contents`), so an empty one costs no grid row. */}
+      <div className="os-mz-status" role="status">
+        {open && description?.failure ? (
+          <Notice tone="warn" sentence={DESCRIPTION_NOT_SENT} next={DESCRIPTION_NOT_SENT_NEXT} detail={description.failure} />
+        ) : null}
+        {open && description && description.unattached.length > 0 ? (
+          <Notice tone="info" sentence={notAttachedSentence(description.unattached)} />
+        ) : null}
+      </div>
 
       <ActionBar
         state={stateLine(open, draftState)}
         acts={acts.map((a) => ({
           label: a.label,
           tone: a.tone === "primary" ? "primary" : a.tone === "danger" ? "danger" : "quiet",
+          text: a.text,
           ariaLabel: a.id === "openFile" ? `Open ${open?.name ?? "the file"}` : undefined,
           busy: busy && a.id === "materialize",
           onAct: () => {
             if (a.id === "materialize") {
-              onMaterialize({
-                name,
-                statement,
-                accountIds: [accountId],
-                format,
-                sources: picked,
-                templateId,
-                deployableKind,
-              });
+              materialize();
               return;
             }
             onAct(a.id);
@@ -243,7 +356,7 @@ function SourcesColumn({
   /** True once a composition exists: the sources are a RECORD, not a choice. */
   settled: boolean;
   recordsAvailable: boolean;
-  onAdd: (s: PickedSource) => void;
+  onAdd: (s: ComposeSource) => void;
   onRemove: (ref: string) => void;
 }) {
   const [query, setQuery] = useState("");

@@ -1,8 +1,9 @@
 import { useAccountOptions } from "../accounts/tie";
 import { recipeFacts } from "./actions";
-import { rowNumber, rowString } from "@znasllc-io/memql-sdk-core/client";
+import { rowNumber, rowString, sameEntityId } from "@znasllc-io/memql-sdk-core/client";
 import { useAuthSource } from "../../auth/context";
 import { useOsConnection } from "../../live/connection";
+import { MATERIALIZER_COMPOSE_SECTION, readComposeIntent, type ComposeSetup } from "../../items/materialize";
 import { openCheckedArtifact } from "../../items/openFile";
 import { browserHandoffPorts, VSCODE_NO_ANSWER_MESSAGE, type HandoffPorts } from "../../items/vscode";
 import { downloadArtifact } from "../files/actions/download";
@@ -12,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Caption, Check, Head, Panel, Select, SetupGroup } from "../../kit";
 import { AppLogsSection } from "../../logs/AppLogsSection";
 import { useOsIfPresent } from "../../chrome/state";
-import type { OsAppProps } from "../../system/registry";
+import { appById, canOpen, type OsAppProps } from "../../system/registry";
 import { ComposerSection } from "./ComposerSection";
 import { MaterializedSection } from "./MaterializedSection";
 import { TemplatesSection } from "./TemplatesSection";
@@ -30,6 +31,7 @@ import {
   useRecipeActs,
   useTemplateActs,
 } from "./actions";
+import { useDescriptionHandOff } from "./descriptionHandOff";
 import {
   compositionFromRow,
   modelsOf,
@@ -91,6 +93,9 @@ export function MaterializerApp({
   const accounts = useAccountOptions();
 
   const materialize = useMaterialize();
+  // A Markdown file asked for by describing it is filed empty; once its file is
+  // ready this window hands the description to the Library, as the person.
+  const descriptions = useDescriptionHandOff(materialize.described, compositions.snapshot.rows);
   const compositionActs = useCompositionActs();
   const templateActs = useTemplateActs();
   const recipeActs = useRecipeActs();
@@ -132,6 +137,18 @@ export function MaterializerApp({
 
   const [openCompositionId, setOpenCompositionId] = useState("");
 
+  // THE STARTING SETUP ANOTHER APP OPENED THE COMPOSER WITH, until the composer
+  // has taken it. It waits here only because the composer may not be on screen
+  // yet (the window can be on another section); once the composer has applied it
+  // -- format, sources, folder and way back, together, into the form -- the app
+  // lets go, and the form is where it lives and dies. That is the one rule for a
+  // remount, an abandoned form and the first file alike.
+  const [setup, setSetup] = useState<ComposeSetup | null>(null);
+  // WHERE THE PERSON GOES BACK TO, for the file the form just made. It comes up
+  // with that form's facts, belongs to that composition and no other, and ends
+  // when they start another file.
+  const [returnFor, setReturnFor] = useState<{ compositionId: string; appId: string; sectionId: string } | null>(null);
+
   const compositionRows = useMemo(
     () => compositions.snapshot.rows.filter((r) => compositionFromRow(r).id !== ""),
     [compositions.snapshot],
@@ -156,6 +173,16 @@ export function MaterializerApp({
   const openSources: SourceRow[] = openRaw ? sourcesOf(openRaw) : [];
   const openModels: ModelRow[] = openRaw ? modelsOf(openRaw) : [];
 
+  // THE WAY BACK, only where it goes somewhere: for the file made from that
+  // setup, in a shell that holds the app, which this person can open. `openApp`
+  // does nothing for an app the registry lacks or the person may not open, and
+  // a control that does nothing is worse than one that is not there.
+  const backTo =
+    returnFor !== null && open !== null && sameEntityId(open.id, returnFor.compositionId) && os !== null && canOpen(os.registry, returnFor.appId)
+      ? appById(os.registry, returnFor.appId)?.name
+      : undefined;
+  const description = open !== null ? descriptions.find((outcome) => sameEntityId(outcome.compositionId, open.id)) : undefined;
+
   function openComposition(id: string) {
     if (id.trim() === "") return;
     setOpenCompositionId(id);
@@ -164,16 +191,28 @@ export function MaterializerApp({
   }
 
   // A STANDING OPEN INSTRUCTION, id-matched on consumption so acting on a
-  // stale render can never eat a newer one. The payload names the one
-  // thing this app can open; anything else is left alone rather than
-  // guessed at, which keeps an unrelated opener from moving somebody's
-  // window.
+  // stale render can never eat a newer one. The payload names one of the two
+  // things this app can open -- a composition, or a setup to compose from;
+  // anything else is left alone rather than guessed at, which keeps an
+  // unrelated opener from moving somebody's window.
   const handled = useRef("");
   useEffect(() => {
     if (intent === undefined || intent.id === handled.current) return;
     const raw = intent.payload["compositionId"];
     const compositionId = typeof raw === "string" ? raw : "";
-    if (compositionId === "") return;
+    if (compositionId === "") {
+      const start = readComposeIntent(intent.payload);
+      if (start === null) return;
+      handled.current = intent.id;
+      // A new file, from a form with nothing open on it -- and not the trip
+      // that began with an earlier one.
+      setOpenCompositionId("");
+      setReturnFor(null);
+      setSetup(start);
+      navigate(MATERIALIZER_COMPOSE_SECTION);
+      consumeIntent?.(intent.id);
+      return;
+    }
     handled.current = intent.id;
     setOpenCompositionId(compositionId);
     // The section the opener asked for is respected: a Files row's "open
@@ -200,6 +239,13 @@ export function MaterializerApp({
   useEffect(() => {
     if (applied.current) return;
     applied.current = true;
+    // A WINDOW OPENED FOR AN INSTRUCTION WAS OPENED WHERE ITS SENDER ASKED. The
+    // preference is for a window nobody asked anything of, and by section alone
+    // the two cannot be told apart: Compose is both the shell's default and the
+    // one a sender names. So a pending intent is the sender speaking, and it wins
+    // -- otherwise this runs after the intent's own navigation and moves the
+    // window off the section it was sent to.
+    if (intent !== undefined) return;
     const shellDefault = MATERIALIZER_SECTIONS[0]?.id ?? "";
     if (sectionId !== shellDefault) return;
     if (settings.defaultSection && settings.defaultSection !== sectionId) {
@@ -269,14 +315,26 @@ export function MaterializerApp({
       defaultFormat={settings.defaultFormat}
       busy={materialize.busy || compositionActs.busy}
       error={openError || materialize.error || compositionActs.error}
-      onNewComposition={() => setOpenCompositionId("")}
-      onMaterialize={(facts) => {
-        void materialize
-          .materialize({ ...facts, folderId: "" })
-          .then((id) => {
-            if (id) setOpenCompositionId(id);
-          });
+      initial={setup ?? undefined}
+      // Let go of THAT setup. A newer one may have arrived while the composer was
+      // taking this one, and it is not this one's to clear.
+      onApplied={(applied) => setSetup((now) => (now === applied ? null : now))}
+      backTo={backTo}
+      description={description}
+      onNewComposition={() => {
+        setOpenCompositionId("");
+        setReturnFor(null);
       }}
+      onMaterialize={({ returnTo, ...request }) =>
+        materialize.materialize(request).then((id) => {
+          if (id === "") return false;
+          setOpenCompositionId(id);
+          // The way back the form carried is kept for the file it made, and
+          // for no other.
+          setReturnFor(returnTo ? { compositionId: id, ...returnTo } : null);
+          return true;
+        })
+      }
       onAct={(act) => {
         if (open === null) return;
         switch (act) {
@@ -309,6 +367,10 @@ export function MaterializerApp({
             break;
           case "startOver":
             setOpenCompositionId("");
+            setReturnFor(null);
+            break;
+          case "returnToApp":
+            if (returnFor !== null) os?.actions.openApp(returnFor.appId, returnFor.sectionId);
             break;
           case "saveRecipe":
             void compositionActs.saveRecipe(recipeFacts(open, openSources));

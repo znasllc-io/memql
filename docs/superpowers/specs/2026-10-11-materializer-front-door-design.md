@@ -5,9 +5,10 @@
 - **Branch:** `docs/materializer-front-door-spec`, cut from `origin/main` at `78ed527f3`
 - **Program:** sub-project 1 of 5 in the email, campaigns and materializer rework (see "The program" below)
 
-## Amendments from planning
+## Amendments from planning and implementation
 
-Found while writing the implementation plan; they refine, not change, the design.
+Found while writing the implementation plan and while building it; they refine,
+not change, the design.
 
 1. **A blank file has no provenance block.** The Markdown writer puts YAML front
    matter at the top of every file, and the editor's empty-document page appears
@@ -18,10 +19,11 @@ Found while writing the implementation plan; they refine, not change, the design
    starts from this blank file.
 2. **The revision step waits for the Files entry.** A new file's Library index
    row is written by the `indexFileOnCreate` automation after the file is
-   created, so `composeRequestRevision` polls for it for a bounded time (30
-   attempts, one second apart, configurable) before posting the comment against
-   `expectedVersion 1` / `expectedRevision "file:1"`. If the row never appears,
-   it records `revisionFailure` and the file stays.
+   created, so the hand-off cannot post its comment until the artifact exists.
+   The server no longer owns that step (amendment 5): the SDK's `materialize`
+   already waits for the artifact ("Saved; waiting for its Files entry") before
+   it calls `handOffDescription`, which posts the comment against
+   `expectedVersion 1` / `expectedRevision "file:1"`.
 3. **The OS follows compositions live.** The SDK module exposes
    `startMaterialize` and `followComposition` as well as `materialize`. The OS
    Materializer app starts through `startMaterialize` and keeps following on its
@@ -29,7 +31,31 @@ Found while writing the implementation plan; they refine, not change, the design
    editors use the polling `followComposition`.
 4. **Names are cleaned on the server.** A trailing extension matching the format
    is stripped (`Plan.md` stays `Plan.md`, never `Plan.md.md`) and a name with a
-   slash is refused before anything is written.
+   slash is refused before anything is written. A stem the planner's triage
+   chooses is not a person's typing, and a refusal there would come after the
+   drafting steps had run, so the planner turns path separators in it into
+   hyphens before it calls the Materializer.
+5. **The hand-off to the revision workflow is made by the person's client, not
+   by the run.** The Library refuses a revision request made from inside a work
+   run (`libraryRequestDocumentRevision` answers "a person must prepare the
+   document revision request", `integrations/library/revision.go`; the
+   revision-item changes in `revision_items.go` carry the same guard). That is a
+   deliberate boundary: a running job must not request or approve revisions on a
+   person's behalf. So the server files a described Markdown request blank and
+   keeps its statement on the composition, and the SDK's `handOffDescription`
+   posts the description as the person: a document-level comment with the
+   `library_file` sources as attachments, then `libraryRequestDocumentRevision`,
+   returning `revisionId` or `revisionFailure` to the caller. There is no
+   `composeRequestRevision` step and there are no `revisionId` or
+   `revisionFailure` fields on the composition. The cross-node test (task 3) is
+   dropped: the hand-off is the same client-routed builtin sequence VS Code's
+   "Describe document" already uses, so there is no new cross-node state to
+   prove.
+
+   The same boundary decides which requests are filed blank. Only a request a
+   person's own client makes is: a call made inside a work run (the planner's
+   file delivery, an agent's `composeFile`) says what to write in its statement
+   and has no client to hand the description on, so it keeps the composer.
 
 ## In plain terms
 
@@ -50,8 +76,9 @@ works well:
   anywhere else.
 - **A Markdown request with a description is still written by today's Library
   revision workflow** (intent, research, images, a proposal the person
-  approves). The Materializer creates the file, then hands the description to
-  that workflow, so first drafts are as good as they are today.
+  approves). The Materializer creates the empty file, and the person's client
+  then hands the description to that workflow, so first drafts are as good as
+  they are today.
 - **The Materializer app accepts a starting setup** (format, folder, sources)
   from other apps. "New Markdown file" in Files and "Create new template" in
   the Email wizard use it in later sub-projects.
@@ -134,9 +161,10 @@ record a composition beside the old path (option C, leaves two creation paths).
 
 ## Design
 
-### 1. Server: blank files, idempotency, and handing Markdown to the revision workflow
+### 1. Server: blank files, idempotency, and described Markdown
 
-All changes are in `dsl/compose/` and `integrations/compose/`.
+The Materializer changes are in `dsl/compose/` and `integrations/compose/`; the
+planner's file stems are normalised in `integrations/planner/`.
 
 **Blank requests.** A request with no `statement`, no `draft`, no
 `sectionKeys`, no `sources`, no `templateId`, no recipe and no
@@ -153,37 +181,41 @@ derived from (actor user id, `requestId`) the same way `stableMaterializeID`
 derives it inside a run. A repeat with the same `requestId` returns the existing
 composition's `{compositionId, goalId, runId}` instead of starting a second one.
 
-**Handing Markdown to the revision workflow.** A request with
-`format: "markdown"`, a non-empty `statement`, no `draft`, no `sectionKeys`,
-no `templateId` and no recipe is a *described Markdown* request. For it:
+**Described Markdown, handed to the revision workflow by the client.** A
+request with `format: "markdown"`, a non-empty `statement`, no `draft`, no
+`sectionKeys`, no `templateId`, no recipe, no `outputKind` and no
+`deployableKind` is a *described Markdown* request. Sources may come with it:
+they are references for the revision workflow, passed on by the client. For a
+request a person's client makes:
 
 1. The workflow renders and files an empty Markdown file, exactly as for a
-   blank request, and completes the composition (`status: ready`,
-   `outputFileId` stamped).
-2. A new final step, `composeRequestRevision`, then:
-   - posts the statement as a document-level comment on the new file
-     (`anchor: {kind: "document", quote: "Entire document"}`), with every
-     `library_file` source as a reference attachment;
-   - calls `libraryRequestDocumentRevision` against the file's first revision.
-3. The step stamps `revisionId` on the composition. If either call fails, it
-   stamps `revisionFailure` with the reason and the composition stays `ready`:
-   the file is good and is never removed because a later step failed.
+   blank request (no model call, no front matter, no source package), and
+   completes the composition (`status: ready`, `outputFileId` stamped). The
+   composition keeps the `statement`, so the request is on record even if the
+   client never hands it on, and the file's Library summary reads "Created
+   blank."
+2. The person's client then hands the description to the revision workflow,
+   as the person. The SDK's `handOffDescription` (section 2) posts the
+   statement as a document-level comment on the new file
+   (`anchor: {kind: "document", quote: "Entire document"}`), with every
+   `library_file` source as a reference attachment, and calls
+   `libraryRequestDocumentRevision` against the file's first revision. It
+   returns `revisionId`, or `revisionFailure` with the reason, and never
+   throws: the file is good and is never removed because a later step failed.
 
-`composeRequestRevision` calls `libraryAddDocumentComment` and
-`libraryRequestDocumentRevision` **through the engine as named builtins**, not
-by importing the Library integration's Go code. The Materializer and the
-Library may run on different nodes; the engine's existing routing carries the
-call to the node that owns the Library, and the revision's work goal is the
-Library's own, so no state is held on the composing node.
+The hand-off is the client's because the Library refuses a revision request
+made from inside a work run (amendment 5). That is also why only a request a
+person's client makes is filed blank: the server decides this once, when it
+accepts the request, and saves the decision with the request so every replica
+that executes the run agrees. A call made inside a work run keeps the composer.
 
 Described Markdown with `templateId` or `draft` keeps today's composer path:
 the person asked for a specific template or supplied text, and the revision
 workflow is for writing from a description.
 
-**Concept changes** (`dsl/compose/concepts.memql`, `composition`):
-
-- `revisionId string` — the Library revision opened for a described Markdown request.
-- `revisionFailure string` — why that revision could not be opened, when it could not.
+**Concept changes.** None. The composition already keeps `statement`; the
+outcome of the hand-off (`revisionId` or `revisionFailure`) goes back to the
+caller of `handOffDescription` and is not stored on the row (amendment 5).
 
 The `materializeArgs` struct and the SDK generated builder gain `requestId`.
 Regenerate the SDK (`sdk/ts/src/client/generated_*`) in the same change.
@@ -237,6 +269,12 @@ Behaviour:
    reports "Saved; waiting for its Files entry" and keeps polling.
 5. An aborted `signal` calls `composeCancel` with the reason "Stopped by the
    person" and throws `MaterializeCancelled`.
+6. For a described Markdown request, once the artifact resolves, `materialize`
+   calls `handOffDescription({ artifactId, statement, sources, requestId })` and
+   returns its `revisionId` or `revisionFailure` on the result. It posts the
+   comment and requests the revision as the person (amendment 5) and never
+   throws. `followComposition` alone never hands off: the OS follows on its own
+   live feed and calls `handOffDescription` itself.
 
 `execute` keeps the helper transport-neutral: the OS passes a function over
 `connection.query.executeNamed`; VS Code passes one over
@@ -302,7 +340,7 @@ planted violation before it lands.
 |---|---|---|
 | Request refused (no access, bad format, blank docx/pdf) | The refusal, saying what was refused | Nothing created |
 | Run fails | The composition's failure reason | Composition `failed`, retryable from "Materialized" |
-| File created, revision request fails | The document opens with a notice that the description was not applied, and "Describe document" available | File, composition `ready` with `revisionFailure` |
+| File created, the client's hand-off to the revision workflow fails | The document opens with a notice that the description was not applied, and "Describe document" available | The empty file, and the composition `ready` with its `statement` |
 | Person cancels | Nothing further | Composition `cancelled`; a blank file already filed is kept |
 | Files entry slow to appear | "Saved; waiting for its Files entry" | Polling continues |
 | Same request repeated (double click, retry) | The same result | One composition, one file |
@@ -314,18 +352,20 @@ planted violation before it lands.
   - blank `markdown`, `txt`, `html`, `csv`, `json` each produce a file and a
     `ready` composition with no model call;
   - blank `docx`/`pdf` are refused before a composition is written;
-  - described Markdown produces a file, a document comment carrying the
-    statement and references, and a `revisionId` whose status is readable via
-    `libraryDocumentRevisionStatus`;
-  - a failing revision request leaves the file and records `revisionFailure`;
+  - described Markdown is filed as the empty page with its statement on the
+    composition, no model call and no source package, executed on a node other
+    than the one that accepted it; the same with `library_file` sources;
   - a repeated `requestId` returns the same composition;
-  - described Markdown with `templateId` still uses the composer.
-- **Cross-node:** a `test/clustere2e/` case with the composition on one node
-  and the Library on another. It fails against a direct Go call and passes with
-  the engine-routed builtins.
+  - described Markdown with `templateId` still uses the composer, and so does
+    a described request made inside a work run.
+- **Cross-node:** no separate case. The hand-off is client-routed (amendment 5),
+  and the accept-on-one-node, execute-on-another path is covered by the Go
+  cases above.
 - **SDK** (`sdk/ts` tests, fake `execute`): status sequence, failure reason,
   cancellation calls `composeCancel`, waiting for the Files entry, abort,
-  `followComposition` resume.
+  `followComposition` resume; `handOffDescription` posts the comment (with
+  attachments) and then requests the revision, a failure comes back as
+  `revisionFailure` without throwing, and a retry reuses the same request ids.
 - **VS Code:** `newMarkdown` creates through `materialize`, never
   `createFile`; `templateFromExamples` uses the shared follow; the gallery
   screenshots for the empty document are unchanged.

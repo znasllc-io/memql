@@ -216,3 +216,27 @@ export function failureSentence(c: CompositionRow): string {
   if (reason) return reason;
   return "This composition stopped and recorded no reason. The Logs section holds the lines for this app.";
 }
+
+// ---------------------------------------------------------------------------
+// A Markdown file asked for by describing it
+// ---------------------------------------------------------------------------
+//
+// The file is filed empty and the description is handed to the Library's
+// revision workflow, which writes it. When that hand-off could not be made the
+// file is still there and still good, and the sentence says so FIRST: a person
+// who reads "failed" over a file they can open would go looking for a loss.
+
+/** The description could not be handed on. The cluster's own reason rides beside it, verbatim. */
+export const DESCRIPTION_NOT_SENT = "The file was created, but the description was not sent for writing.";
+
+/** What to do about it: the editor's empty page is where a description is sent from. */
+export const DESCRIPTION_NOT_SENT_NEXT = "Open the file and choose Describe document to send it again.";
+
+/**
+ * The references that went without being attached, by the names the person
+ * gave them. The Library takes Markdown and images as attachments and nothing
+ * else, and saying which kinds is what lets the person decide what to do.
+ */
+export function notAttachedSentence(labels: string[]): string {
+  return `Not attached: ${labels.join(", ")}. Only Markdown and images can be attached.`;
+}

@@ -981,7 +981,7 @@ func ComposeCancelBuild(args ComposeCancelArgs) string {
 type ComposeMaterializeArgs struct {
 	// What to call it, and the filename stem of the output. Sanitised server-side the way an upload's name is.
 	Name string
-	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on.
+	// What you asked for, in your own words. Becomes the goal's statement, so it is what Nexus shows and what the catalog keys on. A Markdown file asked for with only a statement (no draft, sectionKeys, templateId, recipeId, outputKind or deployableKind, and no source that is not a Library file) is created EMPTY when a person's own client asks, and the statement stays on its composition: the client hands it to the Library's revision workflow, which writes the document. That workflow reads Markdown and images and cannot read the graph, so a concept_row or query source keeps the composer, which reads it. Inside a work run the composer still writes the file from the statement.
 	Statement string
 	// markdown, html, txt, csv, json, docx or pdf. Audio and video are named in the brief and deliberately unoffered -- audio wants a compose-then-speak pipeline with a cost ceiling of its own, video a generation provider this cluster has none of.
 	Format string
@@ -995,7 +995,7 @@ type ComposeMaterializeArgs struct {
 	SectionKeys []string
 	// v1:compose:template to render through. Resolved under your own actor, so a template you cannot read is refused rather than rendered through.
 	TemplateId string
-	// v1:library:folder to file the output into. Empty means the Library root.
+	// v1:library:folder to file the output into. Empty means the Library root. A folder you cannot read, or one in the Bin, is refused before anything is written.
 	FolderId string
 	// Optional account tags -- a record of who the work is for, never a visibility scope.
 	AccountIds []string
@@ -1005,6 +1005,8 @@ type ComposeMaterializeArgs struct {
 	RecipeId string
 	// {tokenBudget, costCeiling, wallClockMs, maxRetries, maxModelCalls, maxEvents} for the goal. Omitted fields take the deployment's defaults; a zero is 'unset', never 'nothing allowed'.
 	Ceilings map[string]any
+	// Caller-chosen id for this request. Repeating it returns the same composition instead of starting another, so a double click makes one file.
+	RequestId string
 }
 
 // ComposeMaterialize calls the engine builtin composeMaterialize.
@@ -1099,6 +1101,13 @@ func ComposeMaterializeBuild(args ComposeMaterializeArgs) string {
 		}
 		b.WriteString("ceilings: ")
 		b.WriteString(renderMemQLValue(args.Ceilings))
+	}
+	if args.RequestId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("requestId: ")
+		b.WriteString(quoteMemQL(args.RequestId))
 	}
 	b.WriteString(")")
 	return b.String()

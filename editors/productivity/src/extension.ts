@@ -7,6 +7,7 @@ import { newTemplate } from "./templates.js";
 import { TemplateEditor } from "./templateEditor.js";
 import { TemplatePublisher } from "./templatePublish.js";
 import { TemplateExamples } from "./templateExamples.js";
+import { createMarkdown } from "./newMarkdown.js";
 import { MarkdownEditor } from "./markdownEditor.js";
 import { PDFEditor, PDFDocument } from "./pdfEditor.js";
 import { syncDesktopAppearance } from "./themeSync.js";
@@ -130,8 +131,10 @@ export async function activate(context: vscode.ExtensionContext) {
           validateInput: value => !value.trim() || /[\\/\u0000-\u001f]/.test(value) || value.length > 150 ? "Enter a file name, without a folder path." : undefined });
         if (!name) return;
         const filename = /\.(md|markdown)$/i.test(name) ? name : `${name}.md`;
-        const uri = await files.createFile(lease, filename, "text/markdown", new TextEncoder().encode("\n"));
-        await markdown.show("review", vscode.Uri.parse(uri));
+        // A new request id for each document asked for: the cluster uses it to recognise a repeat of this one ask.
+        const uri = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Creating ${filename}` },
+          () => createMarkdown(connection, lease, filename, globalThis.crypto.randomUUID()));
+        await markdown.show("review", uri);
       } catch (error) { void showProblem(error, "create the Markdown document"); }
     }),
     vscode.commands.registerCommand("memql.productivity.markdown.insertImage", async () => {
