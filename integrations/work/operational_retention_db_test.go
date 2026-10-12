@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -468,11 +469,15 @@ func TestOperationalRetentionWalksDayWindows(t *testing.T) {
 	}
 }
 
-// TestOperationalRetentionStopsAtBudgetAndResumes: the pass spends at most its
-// time budget on candidates and stops cleanly with work left, and the next pass
-// picks up where the oldest remaining version is. The fake clock moves two
-// minutes for each window archived, so the pass retires windows at 2, 4 and 6
-// minutes and stops after the one that crossed the 4-minute budget.
+// TestOperationalRetentionStopsAtBudgetAndResumes: a policy spends at most its
+// share of the pass's time budget on candidates and stops cleanly with work
+// left, and the next pass picks up where the oldest version stored is. The
+// system-run policy is the fifth of eight and the policies before it have nothing
+// to do, so when its turn comes the four minutes are whole and it may spend a
+// quarter of them, a minute. The fake clock moves half a minute for each window
+// archived: windows retire at 0:30, 1:00 and 1:30, and the policy stops at the
+// one that crossed the minute (the comparison is strictly greater, so 1:00 has
+// not).
 func TestOperationalRetentionStopsAtBudgetAndResumes(t *testing.T) {
 	db, i := sweepDB(t)
 	ctx := retentionOwner()
@@ -480,7 +485,7 @@ func TestOperationalRetentionStopsAtBudgetAndResumes(t *testing.T) {
 	i.SetNow(func() time.Time { return clock })
 	t.Setenv(EnvArchiveContainer, "test-retention")
 	t.Setenv(EnvSystemRunRetentionDays, "")
-	i.SetArchiver(&verifyingArchive{afterUpload: func() { clock = clock.Add(2 * time.Minute) }})
+	i.SetArchiver(&verifyingArchive{afterUpload: func() { clock = clock.Add(30 * time.Second) }})
 
 	seedScheduledRuns(t, db, "budget", clock, 50, 40, 39, 38, 37, 36)
 	stored := func() int { return storedVersionsLike(t, db, "v1:work:%:budget-%") }
@@ -494,23 +499,20 @@ func TestOperationalRetentionStopsAtBudgetAndResumes(t *testing.T) {
 	}
 	r := resultFor(t, first, runConcept, EnvSystemRunRetentionDays)
 	if want := 3 * 50 * versionsPerScheduledRun; r.DeletedVersions != want || !r.BudgetExhausted {
-		t.Fatalf("first pass %+v, want three windows (%d versions) retired and the budget reported spent", r, want)
+		t.Fatalf("first pass %+v, want three windows (%d versions) retired and the policy's share reported spent", r, want)
 	}
 	if left := stored(); left != 2*50*versionsPerScheduledRun {
 		t.Fatalf("%d versions remain after the first pass, want the two newest windows' %d", left, 2*50*versionsPerScheduledRun)
 	}
-	// The result still has an entry for every policy. The ones before the policy
-	// that spent the budget finished; it and every one after it say they did not.
+	// The result has an entry for every policy, and only the one that spent its
+	// share says so: the others read what they had to read.
 	if len(first) != len(operationalPolicies) {
 		t.Fatalf("%d results for %d policies", len(first), len(operationalPolicies))
 	}
 	stoppedIn := policyIndex(runConcept, EnvSystemRunRetentionDays)
 	for k, result := range first {
-		if want := k >= stoppedIn; result.BudgetExhausted != want {
+		if want := k == stoppedIn; result.BudgetExhausted != want {
 			t.Errorf("policy %d (%s on %s): BudgetExhausted=%v, want %v", k, result.Concept, result.Env, result.BudgetExhausted, want)
-		}
-		if k > stoppedIn && (result.Candidates != 0 || result.DeletedVersions != 0) {
-			t.Errorf("policy %d (%s on %s) was not reached but reports %+v", k, result.Concept, result.Env, result)
 		}
 	}
 
@@ -520,10 +522,135 @@ func TestOperationalRetentionStopsAtBudgetAndResumes(t *testing.T) {
 	}
 	r = resultFor(t, second, runConcept, EnvSystemRunRetentionDays)
 	if want := 2 * 50 * versionsPerScheduledRun; r.DeletedVersions != want || r.BudgetExhausted {
-		t.Fatalf("second pass %+v, want the remaining %d versions retired inside the budget", r, want)
+		t.Fatalf("second pass %+v, want the remaining %d versions retired inside the share", r, want)
 	}
 	if left := stored(); left != 0 {
 		t.Fatalf("%d versions remain after the second pass", left)
+	}
+}
+
+// TestOperationalRetentionStopsBetweenPagesOfAWindow: the share is checked before
+// every read, not every window, so a window of many pages does not run on once the
+// policy's time is gone -- and the policy says so, since a full page came back and
+// its window may hold more. 230 runs on one day are three pages; the fake clock
+// moves 40 s for each, and the system-run policy's share is a minute, so it reads
+// two pages (200 runs) and stops. The next pass starts again at the oldest version
+// stored, which is the 30 left, and finishes.
+func TestOperationalRetentionStopsBetweenPagesOfAWindow(t *testing.T) {
+	db, i := sweepDB(t)
+	ctx := retentionOwner()
+	clock := time.Now().UTC().Truncate(time.Second)
+	i.SetNow(func() time.Time { return clock })
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	t.Setenv(EnvSystemRunRetentionDays, "")
+	i.SetArchiver(&verifyingArchive{afterUpload: func() { clock = clock.Add(40 * time.Second) }})
+	seedScheduledRuns(t, db, "pages", clock, 230, 40)
+
+	first, err := i.operationalRetention(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := resultFor(t, first, runConcept, EnvSystemRunRetentionDays)
+	if r.Candidates != 200 || r.DeletedVersions != 200*versionsPerScheduledRun || !r.BudgetExhausted {
+		t.Fatalf("first pass %+v, want two pages (200 runs) retired and the policy reported behind", r)
+	}
+	if n := storedVersionsLike(t, db, "v1:work:run:pages-%"); n != 30*2 {
+		t.Fatalf("%d run versions remain, want the 30 runs of the last page", n)
+	}
+
+	second, err := i.operationalRetention(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r = resultFor(t, second, runConcept, EnvSystemRunRetentionDays)
+	if r.Candidates != 30 || r.DeletedVersions != 30*versionsPerScheduledRun || r.BudgetExhausted {
+		t.Fatalf("second pass %+v, want the last 30 runs retired and the policy not behind", r)
+	}
+}
+
+// TestOperationalRetentionSharesItsBudgetAmongThePolicies: a policy that spends
+// its share does not take the later policies' time, and does not stop them. The
+// fake clock moves 55 s for each batch archived, far more than a share, so every
+// policy overruns by the batch it was in the middle of -- the most an overrun can
+// be, since the share is checked before each read.
+//
+// Four minutes, eight policies. The system-run policy (fifth) finds the whole
+// four minutes left and may spend a fourth of them, 60 s: it retires two
+// windows, 55 s apiece, and stops (a share of 30 s, four minutes over all eight
+// from the start, would have stopped it after one; a budget for the pass as a
+// whole would have let it retire all five). The policies after it each get what is
+// left over what is still to run -- 43 s, 37.5 s, 20 s -- run, retire the one
+// window they have, and are not reported spent, because nothing is left for them
+// to read.
+func TestOperationalRetentionSharesItsBudgetAmongThePolicies(t *testing.T) {
+	db, i := sweepDB(t)
+	ctx := retentionOwner()
+	clock := time.Now().UTC().Truncate(time.Second)
+	step := 55 * time.Second
+	i.SetNow(func() time.Time { return clock })
+	t.Setenv(EnvArchiveContainer, "test-retention")
+	t.Setenv(EnvSystemRunRetentionDays, "")
+	t.Setenv(EnvPipelinesRunRetentionDays, "")
+	i.SetArchiver(&verifyingArchive{afterUpload: func() { clock = clock.Add(step) }})
+
+	// Five windows of system runs; and, on the last of those days, thirty finished
+	// pipeline runs with a step each, twenty finished pipelines run rows, and a
+	// goal for ten of the runs -- each a single window of its policy's work.
+	seedScheduledRuns(t, db, "sys", clock, 50, 40, 39, 38, 37, 36)
+	at := clock.AddDate(0, 0, -36).Truncate(24 * time.Hour).Add(12 * time.Hour)
+	for n := 1; n <= 30; n++ {
+		name := fmt.Sprintf("pipe-%02d", n)
+		run := seedPipelineWorkRun(t, db, name, pipelineOwner, "succeeded", at)
+		seedWorkChild(t, db, "v1:work:step", name, run, at, ownedBy(pipelineOwner, "status", "done"))
+		if n <= 10 {
+			seedGoal(t, db, name, at, pipelineGoal(pipelineOwner))
+		}
+	}
+	for n := 1; n <= 20; n++ {
+		seedPipelinesRun(t, db, fmt.Sprintf("pipe-%02d", n), pipelineOwner, "completed", at)
+	}
+
+	first, err := i.operationalRetention(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		concept, env     string
+		candidates, gone int
+		exhausted        bool
+		why              string
+	}{
+		{runConcept, EnvSystemRunRetentionDays, 100, 100 * versionsPerScheduledRun, true, "two windows of a 60 s share, and its share spent"},
+		{runConcept, EnvPipelinesRunRetentionDays, 30, 30 * 4, false, "its one window, inside what was left"},
+		{pipelinesRunConcept, EnvPipelinesRunRetentionDays, 20, 20 * 3, false, "its one window"},
+		{goalConcept, EnvPipelinesRunRetentionDays, 10, 10 * 3, false, "its one window, the last of the time"},
+	} {
+		got := resultFor(t, first, want.concept, want.env)
+		if got.Candidates != want.candidates || got.DeletedVersions != want.gone || got.BudgetExhausted != want.exhausted {
+			t.Errorf("%s on %s: %+v, want %d candidates, %d versions deleted, spent=%v (%s)", want.concept, want.env, got, want.candidates, want.gone, want.exhausted, want.why)
+		}
+	}
+	for k := 0; k < policyIndex(runConcept, EnvSystemRunRetentionDays); k++ {
+		if first[k].BudgetExhausted || first[k].Candidates != 0 {
+			t.Errorf("policy %d (%s) had nothing to do but reports %+v", k, first[k].Concept, first[k])
+		}
+	}
+	if n := storedVersionsLike(t, db, "v1:work:%:sys-%"); n != 3*50*versionsPerScheduledRun {
+		t.Fatalf("%d system-run versions remain, want the three newest windows' %d", n, 3*50*versionsPerScheduledRun)
+	}
+	if n := storedVersionsLike(t, db, "%:pipe-%"); n != 0 {
+		t.Fatalf("%d versions of the pipeline runs, their run rows and their goals were left behind", n)
+	}
+
+	// The next pass, with the clock standing still, retires what the share left.
+	step = 0
+	second, err := i.operationalRetention(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := resultFor(t, second, runConcept, EnvSystemRunRetentionDays)
+	if r.Candidates != 150 || r.DeletedVersions != 150*versionsPerScheduledRun || r.BudgetExhausted {
+		t.Fatalf("second pass %+v, want the remaining 150 runs retired", r)
 	}
 }
 
@@ -787,4 +914,148 @@ func TestRetireVerifiedChildrenProbeBindsRunIDsAsData(t *testing.T) {
 	if n := storedVersionsLike(t, db, "%bystander%"); n != 3 {
 		t.Fatalf("the run beside it has %d of its 3 versions", n)
 	}
+}
+
+// TestOperationalRetentionSkipsAheadOverEmptyStretches: the walk starts at the
+// oldest version stored, retirable or not, so a row no policy retires -- a
+// person's run, an old version of work still live -- anchors it, and one dated in
+// 1970 or in year 1 is days upon days of windows with nothing in them. A window
+// with no stored version of the concept at all is jumped: the next read starts on
+// the day of the next version stored before the cutoff. The clock here moves a
+// second for every candidate read, so a walk that goes through every empty day
+// spends its share on them (the share of the system-run policy is a minute) and
+// retires nothing.
+func TestOperationalRetentionSkipsAheadOverEmptyStretches(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		anchored bool      // there is a version of a person's run, which no policy retires
+		anchor   time.Time // and it is dated so (year 1 is time.Time's zero value, hence the flag)
+		days     []int     // the days that hold eligible scheduled runs
+		maxReads int       // candidate reads, both run policies together
+	}{
+		{"a version dated 1970 that no policy retires", true, time.Unix(0, 0).UTC(), []int{40, 39}, 12},
+		{"a version dated year 1 that no policy retires", true, time.Date(1, 1, 1, 0, 0, 0, 0, time.UTC), []int{40, 39}, 12},
+		{"a gap of days between two stretches of work", false, time.Time{}, []int{45, 36}, 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, i := sweepDB(t)
+			ctx := retentionOwner()
+			start := time.Now().UTC().Truncate(time.Second)
+			recorder := &statementRecorder{}
+			db.AddQueryHook(recorder)
+			i.SetNow(func() time.Time {
+				return start.Add(time.Duration(len(recorder.candidateReads())) * time.Second)
+			})
+			t.Setenv(EnvArchiveContainer, "test-retention")
+			t.Setenv(EnvSystemRunRetentionDays, "")
+			t.Setenv(EnvPipelinesRunRetentionDays, "")
+			i.SetArchiver(&verifyingArchive{})
+
+			if tc.anchored {
+				insertSweepRow(t, db, runConcept+":anchor", runConcept, tc.anchor, map[string]any{
+					"ownerUserId": "v1:identity:user:alice", "goalId": "v1:work:goal:alice", "triggeredBy": "goal", "status": "running"})
+			}
+			seedScheduledRuns(t, db, "skip", start, 50, tc.days...)
+
+			results, err := i.operationalRetention(ctx, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := resultFor(t, results, runConcept, EnvSystemRunRetentionDays)
+			want := 50 * len(tc.days)
+			if r.Candidates != want || r.DeletedVersions != want*versionsPerScheduledRun || r.BudgetExhausted {
+				t.Fatalf("system-run policy %+v, want its %d eligible runs retired and its share not spent", r, want)
+			}
+			if n := storedVersionsLike(t, db, "v1:work:%:skip-%"); n != 0 {
+				t.Fatalf("%d versions of the eligible runs were left behind", n)
+			}
+			if tc.anchored {
+				if n := storedVersionsLike(t, db, "%:anchor"); n != 1 {
+					t.Fatalf("the version no policy retires has %d versions stored, want its 1", n)
+				}
+			}
+			// The two run policies read the same concept: each makes a handful of
+			// reads, and neither goes through the days between.
+			if reads := len(recorder.candidateReads()); reads > tc.maxReads {
+				t.Fatalf("%d candidate reads, want at most %d: the walk went through the empty days", reads, tc.maxReads)
+			}
+		})
+	}
+}
+
+// TestRetentionSweepRunsTheOperationalHalfWhenTheJournalHalfFails: the journal
+// half (model-call and observation detail) failing must not zero the night.
+// Every policy of the operational half still runs, and the error that comes back
+// carries both halves'.
+func TestRetentionSweepRunsTheOperationalHalfWhenTheJournalHalfFails(t *testing.T) {
+	t.Run("a journal failure leaves the operational half to retire its candidates", func(t *testing.T) {
+		db, i := sweepDB(t)
+		ctx := retentionOwner()
+		now := time.Now().UTC().Truncate(time.Second)
+		i.SetNow(func() time.Time { return now })
+		t.Setenv(EnvArchiveContainer, "test-retention")
+		t.Setenv(EnvSystemRunRetentionDays, "")
+		t.Setenv(EnvModelCallRetentionDays, "")
+		archive := &verifyingArchive{}
+		i.SetArchiver(archive)
+		// The journal half folds a run's summary onto the run before it deletes
+		// that run's detail, and the fold is refused.
+		errSummary := errors.New("summary write failed")
+		engine := newRecordingEngine()
+		engine.refuse("updateWorkRun", errSummary)
+		i.engine = engine
+
+		// Sixty eligible runs. And one more, which is eligible but for a model call
+		// of its own, past the model-call window: the journal half cannot fold it,
+		// so the call stays, and the call keeps the run in the operational half's
+		// own read.
+		seedScheduledRuns(t, db, "free", now, 60, 40)
+		held := seedScheduledRuns(t, db, "held", now, 1, 40)[0]
+		insertSweepRow(t, db, modelCallConcept+":held-call", modelCallConcept, now.AddDate(0, 0, -200), map[string]any{"ownerUserId": "", "runId": held})
+
+		result, err := i.RetentionSweep(ctx, false)
+		if err == nil || !errors.Is(err, errSummary) || !strings.Contains(err.Error(), "summary fold failed") {
+			t.Fatalf("the error is %v, want the journal half's failure in it", err)
+		}
+		if len(engine.callsTo("updateWorkRun")) == 0 {
+			t.Fatal("the journal half never tried to fold a summary; it failed some other way")
+		}
+		r := resultFor(t, result.Operational, runConcept, EnvSystemRunRetentionDays)
+		if r.Candidates != 60 || r.DeletedVersions != 60*versionsPerScheduledRun {
+			t.Fatalf("system-run policy %+v, want the sixty free runs retired and the held one not a candidate", r)
+		}
+		if result.RowsDeleted != 60*versionsPerScheduledRun {
+			t.Fatalf("%d versions deleted in all, want the operational half's %d and none of the journal's", result.RowsDeleted, 60*versionsPerScheduledRun)
+		}
+		if n := storedVersionsLike(t, db, "v1:work:%:free-%"); n != 0 {
+			t.Fatalf("%d versions of the free runs remain", n)
+		}
+		// The run, its step and its model call are all still there.
+		if n := storedVersionsLike(t, db, "v1:work:%:held-%"); n != 2+2+1 {
+			t.Fatalf("%d versions of the held run, its step and its model call remain, want 5", n)
+		}
+	})
+
+	t.Run("both halves failing return both errors", func(t *testing.T) {
+		db, i := sweepDB(t)
+		ctx := retentionOwner()
+		now := time.Now().UTC().Truncate(time.Second)
+		i.SetNow(func() time.Time { return now })
+		t.Setenv(EnvArchiveContainer, "test-retention")
+		t.Setenv(EnvSystemRunRetentionDays, "")
+		t.Setenv(EnvModelCallRetentionDays, "")
+		i.engine = newRecordingEngine()
+		i.SetArchiver(&verifyingArchive{sweepDBArchive: sweepDBArchive{fail: true}})
+		seedScheduledRuns(t, db, "both", now, 3, 40)
+		insertSweepRow(t, db, modelCallConcept+":both-call", modelCallConcept, now.AddDate(0, 0, -200), map[string]any{"ownerUserId": "", "runId": runConcept + ":gone"})
+
+		_, err := i.RetentionSweep(ctx, false)
+		joined, ok := err.(interface{ Unwrap() []error })
+		if !ok || len(joined.Unwrap()) != 2 {
+			t.Fatalf("the error is %v, want the two halves' errors joined", err)
+		}
+		if n := storedVersionsLike(t, db, "%:both-%"); n != 3*versionsPerScheduledRun+1 {
+			t.Fatalf("%d versions remain, want all %d: no archive, no delete", n, 3*versionsPerScheduledRun+1)
+		}
+	})
 }

@@ -120,11 +120,26 @@ more than a hundred candidates is read in pages, each starting after the last
 row of the one before, so a batch the guard kept is not read again. The
 predicates, the archive-before-delete rule and the guards are unchanged.
 
-The pass stops, between two reads, once four minutes have passed. The result
-then carries `budgetExhausted: true` for the policy it stopped in and every
-policy after it. Nothing is stored between nights: the next pass finds the oldest
-version still stored and goes on from there, so a backlog is retired over as many
-nights as it takes, oldest first.
+The pass has four minutes, shared out. When a policy's turn comes it may spend
+the time left divided by the policies still to run (itself included), and no
+more, checked before each read; time an earlier policy did not use is the later
+ones', and a policy with a backlog cannot starve the ones after it. A policy
+that runs out of its share with day windows unread carries `budgetExhausted:
+true` in the result; the policies after it still run with their shares. The
+system-run policy is fifth of eight, so with nothing to do before it, it may
+spend a quarter of the four minutes, a minute.
+
+Nothing is stored between nights. The next pass starts again at the oldest
+version still stored, which is not always where the work is: a version no policy
+retires (a person's run, an old version of live work) anchors the start, and the
+windows from there to the work are read again every night and found to hold no
+candidate. A window with no version stored at all is jumped, so a version dated
+1970 costs a few reads and not tens of thousands; a window that holds versions
+no policy retires is read and passed, at about 21 ms at 5,000 runs a day, so
+roughly 10 to 30 s per year of installation age, per policy. A backlog is
+retired over as many nights as it takes, oldest first, and a persisted low-water
+mark or an index on `(concept, "createdAt")` that would end the re-walk is
+deferred to release 2.
 
 Two statements were the ones that timed out. The batch's version load joined the
 parents' lookup to the children's with an OR, which the planner answers by
@@ -140,10 +155,14 @@ little over a minute. The measurements and the plans are in the header comment o
 
 Not bounded by a day: the goal policy's "no run of it remains" compares every run
 version with the goal and no index serves it (0.34 s a read at 600,000 run
-versions, 1.26 s with cold buffers); it runs last, so a failure there costs
-nothing that went before it. An index on the run's `goalId` would bound it. The
-journal sweep's expired-rows read takes the latest version of every id of one
-concept (0.41 s for 400,000 model-call versions) and grows with the concept.
+versions, 1.26 s with cold buffers). That is accepted for this release; it runs
+last, so a failure there costs nothing that went before it, and the partial
+expression index on the run's `goalId` that would bound it is deferred to
+release 2. The journal sweep's expired-rows read takes the latest version of
+every id of one concept (0.41 s for 400,000 model-call versions) and grows with
+the concept; windowing it is deferred to release 2. It no longer decides the
+night: `workRetentionSweep` runs the operational policies even when the journal
+half fails, and returns both errors.
 
 ## Safeguards
 
@@ -156,7 +175,7 @@ concept (0.41 s for 400,000 model-call versions) and grows with the concept.
 - Each batch is at most 100 candidates, 10,000 historical versions and 32 MiB
   uncompressed. A policy reads its candidates a hundred at a time, one UTC day
   at a time (see [Bounded retention statements](#bounded-retention-statements)),
-  and a pass stops after four minutes of that. A batch over budget fails
+  and a pass spends at most four minutes of that, shared among the policies. A batch over budget fails
   visibly; investigate that record before adjusting limits. Model-call/observation
   discovery retains its 50,000-candidate cap.
 - Deletion uses exact archived `(concept,id,createdAt)` keys and keeps a whole
@@ -178,9 +197,9 @@ concept (0.41 s for 400,000 model-call versions) and grows with the concept.
    (`component=work.retention`) and the run result. Check candidates, archived
    versions, deleted versions, object names and errors. A successful no-op with
    zero expired candidates is expected while records are younger than policy.
-   `budgetExhausted` on a policy means the pass spent its four minutes with
-   candidates left (`work: the retention pass spent its time budget` says which
-   policy); the next night goes on from the oldest version stored. It is a
+   `budgetExhausted` on a policy means it spent its share of the four minutes
+   with day windows unread (`work: a retention policy spent its share` says
+   which); the next night starts again at the oldest version stored. It is a
    backlog, not a failure, unless it is still set after several nights.
 4. Watch run ages and failed maintenance counts. Retention does not repair a
    lifecycle bug or make a slow query efficient; investigate those independently.

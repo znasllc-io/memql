@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -567,17 +568,33 @@ func (i *Integration) RetentionSweep(ctx context.Context, dryRun bool) (Retentio
 	if err := requireClusterOwner(ctx); err != nil {
 		return RetentionResult{}, err
 	}
-	result, err := i.journalRetentionSweep(ctx, dryRun)
-	if err != nil {
-		return result, err
+	// THE TWO HALVES DO NOT DEPEND ON EACH OTHER, so one failing does not skip the
+	// other. The journal half's expired-rows read takes the latest version of every
+	// id of one concept and is not windowed (0.41 s per 400,000 model-call
+	// versions, and growing with them): a timeout there used to return before the
+	// operational half ran, and zero the whole night for every policy in it.
+	// Windowing that read is deferred to release 2.
+	//
+	// Running the operational half after a journal failure is safe. A run whose
+	// model calls or observations are still stored is kept by the operational
+	// half's own read (retentionCandidateRead's child test, and retireVerified's
+	// guard), whatever became of the journal half that would have retired them.
+	result, journalErr := i.journalRetentionSweep(ctx, dryRun)
+	if journalErr != nil {
+		i.log().Warn("work: the journal retention sweep failed; the operational retention pass runs regardless",
+			"component", "work.retention", "dryRun", dryRun, "error", journalErr)
 	}
-	result.Operational, err = i.operationalRetention(ctx, dryRun)
+	var operationalErr error
+	result.Operational, operationalErr = i.operationalRetention(ctx, dryRun)
 	for _, p := range result.Operational {
 		result.RowsArchived += p.ArchivedVersions
 		result.RowsDeleted += p.DeletedVersions
 		result.Objects = append(result.Objects, p.Objects...)
 		result.Oversized = append(result.Oversized, p.Oversized...)
 	}
+	// Both failures come back, in one error: a night's operator needs to see that
+	// the journal half failed even when the operational half went through.
+	err := errors.Join(journalErr, operationalErr)
 	i.log().Info("work: operational retention pass complete", "component", "work.retention", "dryRun", dryRun, "policies", result.Operational, "error", err)
 	return result, err
 }
@@ -768,6 +785,13 @@ ORDER BY n."createdAt", n.id
 
 // expiredJournalRowsSQL is the retention read. The boundary is applied to the
 // LATEST version's createdAt, so a row rewritten inside the window is kept.
+//
+// NOT WINDOWED, AND KNOWN TO BE. It takes the latest version of every id of the
+// concept (DISTINCT ON over all its versions), so it costs the concept's history
+// and not a day's: 0.41 s for 400,000 model-call versions, and linear in them. It
+// is not what stopped retention on 2026-10-10 and -11, which was the operational
+// half; and RetentionSweep no longer lets this half's failure stop that one.
+// Windowing it, as the operational policies are, is deferred to release 2.
 //
 // staged-data: MUST-NOT-GATE -- a staged journal row SKIPPED HERE SURVIVES ITS
 // RETENTION WINDOW FOREVER, and unlike a skipped run there is nothing left to

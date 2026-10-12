@@ -57,11 +57,25 @@ const (
 	retentionCandidateLimit = 100
 
 	// retentionRunBudget is how long a pass spends on candidates before it stops
-	// with work left. The pass is a cron-leader job and holds nothing between
-	// nights: the next one finds the oldest version still stored and goes on from
-	// there. See OPERATIONAL RETENTION WALKS DAY WINDOWS, on operationalRetention.
+	// with work left, shared out among the policies (retentionShare). The pass
+	// is a cron-leader job and holds nothing between nights: the next one starts
+	// again at the oldest version stored. See OPERATIONAL RETENTION WALKS DAY
+	// WINDOWS, on operationalRetention.
 	retentionRunBudget = 4 * time.Minute
 )
+
+// retentionShare is what a policy may spend of the pass's budget: the time left
+// divided by the policies still to run, itself included. A policy that uses its
+// share leaves every later one the same; one that uses less leaves them more; and
+// the last takes what is left. So an early policy with a backlog cannot starve the
+// ones after it, which is what one budget for the whole pass let it do. No time
+// left, or no policy to run, is no share.
+func retentionShare(left time.Duration, policies int) time.Duration {
+	if policies < 1 || left <= 0 {
+		return 0
+	}
+	return left / time.Duration(policies)
+}
 
 // Age never outranks a live parent. Check the latest run via its indexed id,
 // so a previous terminal version cannot make current work look disposable.
@@ -113,7 +127,11 @@ var operationalPolicies = []operationalPolicy{
 	{runConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'triggeredBy' LIKE '` + pipelines.WorkTriggerPrefix + `%' AND n.payload->>'status' IN ('succeeded','failed','cancelled')`},
 	{pipelinesRunConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'status' = 'completed'`},
 	// After the work-run policy, always: the "no run remains" term is added in
-	// operationalRetention and checked again in retireVerified's delete.
+	// retentionCandidateRead and checked again in retirementDelete. That term is
+	// the one cost the day window does not bound -- it compares every run version
+	// with the goal, 0.34 s a read warm and 1.26 s cold at 600,000 run versions --
+	// and is ACCEPTED for this release; the partial expression index on the run's
+	// goalId that would bound it is deferred to release 2 (see operationalRetention).
 	{goalConcept, EnvPipelinesRunRetentionDays, DefaultPipelinesRunRetentionDays, `n.payload->>'requestedVia' = 'pipeline' AND n.payload->>'origin' = 'system'`},
 }
 
@@ -139,10 +157,12 @@ type OperationalRetentionResult struct {
 	DeletedVersions  int      `json:"deletedVersions"`
 	Objects          []string `json:"objects,omitempty"`
 	Oversized        []string `json:"oversized,omitempty"`
-	// BudgetExhausted says the pass stopped at retentionRunBudget before this
-	// policy had read every day window up to its cutoff (or never reached it), so
-	// candidates may remain. They are not lost: the next pass starts from the
-	// oldest version stored. A pass that finishes inside the budget leaves it unset.
+	// BudgetExhausted says this policy ran out of its share of retentionRunBudget
+	// (retentionShare) with versions stored in day windows it had not read, so
+	// candidates may remain. They are not lost: the next pass starts again at the
+	// oldest version stored. A policy that read every window up to its cutoff, or
+	// had nothing stored before it, leaves it unset however much of its share it
+	// used.
 	BudgetExhausted bool `json:"budgetExhausted,omitempty"`
 }
 
@@ -181,15 +201,39 @@ const workChildConceptsSQL = `('v1:work:step','v1:work:approval','v1:work:modelC
 // THROUGH (pageEnd), so no candidate is read twice in a pass whatever becomes of
 // it: a batch the guard keeps, an oversized record, a refused row and a dry run
 // all leave the rows where they are, and a window read again from its start would
-// return the same ones until the budget ran out.
+// return the same ones until the policy's time ran out.
 //
-// THE BUDGET. The pass stops, between two reads, once retentionRunBudget has
-// passed on the clock since it began, and reports BudgetExhausted for the policy
-// it stopped in and every one after it. Nothing is stored between nights and
-// nothing needs to be: the next pass's oldest-version probe finds the oldest
-// version still there, which is where the work left off. The comparison is
-// strictly greater, so a pass that has used its budget exactly goes on to the
-// next read.
+// THE WALK SKIPS WHAT IS EMPTY. It starts at the oldest version STORED, to which
+// no predicate has been applied, so rows no policy retires -- a person's run, an
+// old version of live work, a goal that is kept -- anchor it, and a far-past row
+// (1970, year 1) is thousands to hundreds of thousands of windows with nothing in
+// them, every night, for every policy. When a window has no candidate, one cheap
+// look (retentionWindowHasVersions) says whether the concept has any version
+// stored in it; if it has none, one bounded probe (oldestRetentionVersion with a
+// lower bound) finds the next version stored before the cutoff and the walk goes on
+// from its day. A window that holds versions no policy retires is read, and
+// stepped past, the ordinary way.
+//
+// THE BUDGET IS SHARED. When a policy's turn comes it may spend the time left in
+// the pass over the policies still to run, itself included (retentionShare), and
+// no more: time an earlier policy did not use is the later ones', and a policy with
+// a backlog cannot starve the ones after it, as one budget for the whole pass let
+// it (the run policies come fifth and sixth). The share is checked before every
+// read, strictly greater, so a policy overruns by at most the batch it is in the
+// middle of. When it has gone the policy reports BudgetExhausted only if something
+// is left to read -- a full page just came back, or a version is stored from the
+// next window on -- so one that spent its share on its last window is not reported
+// behind. Nothing is stored between nights: the next pass starts again at the
+// oldest version stored.
+//
+// ACCEPTED RESIDUAL COST. The rows a walk starts from and passes over that no
+// policy retires are still walked every night: each window that holds them is read,
+// finds no candidate, and is stepped past. Measured at 5,000 runs a day, that is
+// 21 ms a window (0.8 s for the 40 dense days of the history below), so roughly 10
+// to 30 s per year of installation age, per policy, on top of the work itself. The
+// skip-ahead removes only the windows with nothing stored in them. A persisted
+// low-water mark, or an index on (concept, "createdAt"), would remove the rest;
+// both are deferred to release 2.
 //
 // MEASURED, on a seeded history in the CI database image (PostgreSQL 16.14,
 // TimescaleDB 2.29.0): "MemoryNodes" as a hypertable in 7-day chunks with the
@@ -204,39 +248,51 @@ const workChildConceptsSQL = `('v1:work:step','v1:work:approval','v1:work:modelC
 // older than the cutoff:
 //
 //	                             before                       after
-//	pass                         10 m 50 s, 21,832 runs       1 m 06 s warm, 1 m 01 s cold buffers,
-//	                             (the 20,000 cap, and the     all 43,019 runs, their goals and
-//	                             rest tomorrow)               pipelines:run rows
-//	candidate read               one read of 20,000: 2.3 s    a page: p50 16 ms, p95 56 ms
-//	                             with the rows transferred    (504 reads); worst 0.74 s, and
-//	                                                          1.26 s cold, where the six
-//	                                                          slowest were the goal policy's
-//	oldest-version probe         (none)                       p50 6 ms, max 58 ms (8 calls)
-//	load of a batch of 100 runs  p50 2.2 s, p95 2.9 s,        parents p50 9 ms, max 40 ms;
-//	(700 versions)               max 3.5 s (257 batches);     children p50 9 ms, max 29 ms
+//	pass                         10 m 50 s, 21,832 runs       1 m 04 s to 1 m 08 s, all 43,019
+//	                             (the 20,000 cap, and the     runs, their goals and pipelines:run
+//	                             rest tomorrow)               rows; 47 to 50 s of it the
+//	                                                          system-run policy's, of its 60 s
+//	candidate read               one read of 20,000: 2.3 s    a page: p50 17 ms, p95 35 ms
+//	                             with the rows transferred    (512 reads); worst 0.5 to 1.0 s,
+//	                                                          and 1.26 s on cold buffers, all
+//	                                                          the goal policy's
+//	oldest-version probe         (none)                       p50 6 ms, max 69 ms (8 calls); the
+//	                                                          bounded ones 10 to 23 ms (4 calls)
+//	load of a batch of 100 runs  p50 2.2 s, p95 2.9 s,        parents p50 9 ms, max 33 ms;
+//	(700 versions)               max 3.5 s (257 batches);     children p50 9 ms, max 22 ms
 //	                             over data just written:
 //	                             p50 3.5 s, and one of 64
 //	                             cancelled at 8 s
-//	guarded DELETE of the batch  p50 0.31 s, max 0.48 s;      p50 46 ms, p95 73 ms, max 0.40 s
-//	                             1.4 s and 2.4 s for the
+//	guarded DELETE of the batch  p50 0.31 s, max 0.48 s;      p50 45 to 47 ms, p95 60 to 131 ms,
+//	                             1.4 s and 2.4 s for the      max 0.34 to 0.45 s
 //	                             first two batches over
 //	                             data just written
 //
 // The load and the delete's child guard are the two statements that were slow,
-// and why is in retirementLoads. Nothing else in the pass is near a second.
+// and why is in retirementLoads. Nothing else in the pass is near a second. With
+// a row dated 1970 and another dated year 1 added to that history, the walk before
+// the skip-ahead spent all four minutes on 37,002 windows with nothing in them
+// (p50 6 ms) and retired no run at all; with it the pass is the same 1 m 04 s to
+// 1 m 08 s as without the two rows.
 //
 // WHAT IS NOT BOUNDED BY A DAY, and where it stands at that size:
 //   - the oldest-version probe reads the concept's index entries up to the
-//     cutoff once (58 ms for 600,000 run versions), then never again;
+//     cutoff once (69 ms at most for 600,000 run versions), and a bounded one
+//     reads the entries after the window it jumps from, once for each empty
+//     stretch;
 //   - the goal policy's "no run of it remains", in its candidate read and in the
 //     delete's guard (goalRefSQL), compares every run version's goalId with the
-//     goal's, and no index serves it: 0.34 s a read, 1.26 s the first time with
-//     cold buffers, for 600,000 run versions, whatever the window. It runs last,
-//     so a failure there costs nothing that went before it; an index on the
-//     run's goalId would bound it;
+//     goal's, and no index serves it. MEASURED BOUND: 0.34 s a read warm and 1.26 s
+//     the first time on cold buffers, for 600,000 run versions, whatever the
+//     window; 14 to 15 s for the policy as a whole, 1,828 goals. ACCEPTED for this
+//     release. The policy runs last, so a failure there costs nothing that went
+//     before it, and the partial expression index on the run's goalId that would
+//     bound it is deferred to release 2;
 //   - the journal sweep's expired-rows read (expiredJournalRowsSQL in sweep.go)
 //     is not part of this walk: it takes the latest version of every id of one
 //     concept, 0.41 s for 400,000 model-call versions, and grows with them.
+//     RetentionSweep no longer lets it stop this pass when it fails. Windowing it
+//     is deferred to release 2.
 //
 // staged-data: MUST-NOT-GATE -- retention is physical retirement, including
 // staged historical versions. Every fetched row still passes AdmitSourceRow.
@@ -250,22 +306,17 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 		return nil, err
 	}
 	started := i.clock()
-	spent := false
-	for _, p := range operationalPolicies {
+	for k, p := range operationalPolicies {
 		days := windows[p.env]
-		result := OperationalRetentionResult{Concept: p.concept, Env: p.env, RetentionDays: days}
-		if spent {
-			// The budget ran out in an earlier policy. This one is reported, so
-			// the result keeps an entry for every policy, but not read: it is
-			// first in line for the next pass.
-			result.BudgetExhausted = true
-			results = append(results, result)
-			continue
-		}
 		cutoff := i.clock().UTC().AddDate(0, 0, -days)
+		// Each policy is given what is left of the pass's time over the policies
+		// still to run (retentionShare), measured from when its turn comes. Time an
+		// earlier policy did not use is therefore the later ones', and none can take
+		// more than its share -- bar the batch it is in the middle of.
+		share := retentionShare(retentionRunBudget-i.clock().Sub(started), len(operationalPolicies)-k)
+		result := OperationalRetentionResult{Concept: p.concept, Env: p.env, RetentionDays: days}
 		var tally retirementTally
-		var policyErr error
-		spent, policyErr = i.retirePolicy(ctx, p, cutoff, dry, started, &result, &tally)
+		spent, policyErr := i.retirePolicy(ctx, p, cutoff, dry, i.clock(), share, &result, &tally)
 		result.ArchivedVersions, result.DeletedVersions, result.Objects, result.Oversized = tally.archived, tally.deleted, tally.objects, tally.oversized
 		result.BudgetExhausted = spent
 		results = append(results, result)
@@ -273,8 +324,8 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 			return results, policyErr
 		}
 		if spent {
-			i.log().Info("work: the retention pass spent its time budget with candidates left; the next pass resumes from the oldest version stored",
-				"component", "work.retention", "concept", p.concept, "env", p.env, "budget", retentionRunBudget.String(),
+			i.log().Info("work: a retention policy spent its share of the pass's time budget with day windows unread; the next pass starts again at the oldest version stored",
+				"component", "work.retention", "concept", p.concept, "env", p.env, "share", share.String(), "budget", retentionRunBudget.String(),
 				"candidates", result.Candidates, "deleted", result.DeletedVersions)
 		}
 	}
@@ -282,8 +333,9 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 }
 
 // retirePolicy walks one policy's candidates a day window at a time, oldest
-// first, up to its cutoff, retiring each page it reads as a batch. It returns
-// true when it stopped at the time budget with windows left.
+// first, up to its cutoff, retiring each page it reads as a batch. It stops when
+// the policy's share of the pass's time has gone (started is when its turn came)
+// and returns true if that left day windows unread.
 //
 // A window is read in pages while the pages come back full, each page starting
 // after the last row the one before went through (a refused row included, see
@@ -291,25 +343,50 @@ func (i *Integration) operationalRetention(ctx context.Context, dry bool) ([]Ope
 // same candidates every time a page was kept -- by the guard, by the archive, or
 // because a dry run deleted nothing -- until the budget ran out.
 //
+// THE WALK SKIPS WHAT IS EMPTY. It starts at the oldest version stored, retirable
+// or not, so a row no policy retires (a person's run, an old version of live work)
+// anchors it; one dated 1970, or year 1, would be thousands upon thousands of
+// reads of nothing, every night, for every policy. When a window comes back with
+// no candidate, a cheap look says whether the concept has any version stored in
+// it; if not, one bounded probe finds the next version stored before the cutoff
+// and the walk goes on from its day. A window that holds versions no policy
+// retires is read, and stepped past, the ordinary way.
+//
+// THE SHARE IS CHECKED BEFORE EVERY READ. When it has gone, the policy says it
+// stopped early only if something is left to read: a full page just came back
+// (its window may hold more), or a version is stored from the next window on
+// (the same probe). A policy whose share ran out on its last window has not
+// stopped early.
+//
 // staged-data: MUST-NOT-GATE -- see operationalRetention; the reads below are
 // retentionCandidateRead's, and every row they return passes AdmitSourceRow.
-func (i *Integration) retirePolicy(ctx context.Context, p operationalPolicy, cutoff time.Time, dry bool, started time.Time, result *OperationalRetentionResult, tally *retirementTally) (bool, error) {
-	oldest, found, err := i.oldestRetentionVersion(ctx, p.concept, cutoff)
+func (i *Integration) retirePolicy(ctx context.Context, p operationalPolicy, cutoff time.Time, dry bool, started time.Time, share time.Duration, result *OperationalRetentionResult, tally *retirementTally) (bool, error) {
+	oldest, found, err := i.oldestRetentionVersion(ctx, p.concept, time.Time{}, cutoff)
 	if err != nil || !found {
 		return false, err
 	}
-	for lo := oldest.UTC().Truncate(retentionCandidateWindow); lo.Before(cutoff); lo = lo.Add(retentionCandidateWindow) {
+	// Strictly greater: a policy that has used exactly its share goes on. A share
+	// of nothing reads nothing.
+	outOfTime := func() bool { return share <= 0 || i.clock().Sub(started) > share }
+
+	lo := oldest.UTC().Truncate(retentionCandidateWindow)
+	for lo.Before(cutoff) {
 		hi := lo.Add(retentionCandidateWindow)
 		if hi.After(cutoff) {
 			hi = cutoff
 		}
+		next := lo.Add(retentionCandidateWindow)
 		var after *pageEnd
 		for {
 			// Checked before every read rather than every window: a window of
-			// thousands of candidates is dozens of pages, and the pass must not
-			// run on for all of them once the budget is gone.
-			if i.clock().Sub(started) > retentionRunBudget {
-				return true, nil
+			// thousands of candidates is dozens of pages, and the policy must not
+			// run on for all of them once its share is gone.
+			if outOfTime() {
+				if after != nil {
+					return true, nil
+				}
+				_, left, err := i.oldestRetentionVersion(ctx, p.concept, lo, cutoff)
+				return left, err
 			}
 			query, params := retentionCandidateRead(p, cutoff, lo, hi, after)
 			rows, page, err := i.selectAdmittedPage(ctx, p.concept, query, params...)
@@ -320,36 +397,81 @@ func (i *Integration) retirePolicy(ctx context.Context, p operationalPolicy, cut
 			if err := i.retireInBatches(ctx, p.concept, rows, p.concept == runConcept, cutoff, dry, tally); err != nil {
 				return false, err
 			}
+			if after == nil && page.scanned == 0 {
+				stored, err := i.retentionWindowHasVersions(ctx, p.concept, lo, hi)
+				if err != nil {
+					return false, err
+				}
+				if !stored {
+					if !hi.Before(cutoff) {
+						return false, nil
+					}
+					ahead, more, err := i.oldestRetentionVersion(ctx, p.concept, hi, cutoff)
+					if err != nil || !more {
+						return false, err
+					}
+					next = ahead.UTC().Truncate(retentionCandidateWindow)
+				}
+			}
 			if page.scanned < retentionCandidateLimit {
 				break
 			}
 			after = &page
 		}
+		lo = next
 	}
 	return false, nil
 }
 
-// oldestRetentionVersion is where a policy's walk starts: the createdAt of the
-// concept's oldest version before the cutoff, or found=false when there is none
-// and the policy has nothing to read. It is the one statement of the walk that
-// is not bounded to a day: an index-only scan of the concept's entries up to the
-// cutoff, which are the versions the walk is about to go through, once per pass.
+// oldestRetentionVersion is the createdAt of the concept's oldest version stored
+// in [from, cutoff) -- from the beginning when from is zero -- or found=false when
+// there is none. It is where a policy's walk starts, and where it goes on from
+// after an empty stretch, and what says a policy that ran out of time has left
+// nothing unread. It is the one kind of statement in the walk that is not bounded
+// to a day: an index-only scan of the concept's entries in range, which are the
+// versions the walk is about to go through, once at the start and once more for
+// each empty stretch it jumps.
 //
 // staged-data: MUST-NOT-GATE -- the walk has to start at the oldest version
 // whatever its visibility. Gated, a staged row older than every other would
 // never be reached and would outlive its window; and the read returns a
 // timestamp, no row, so there is nothing to admit. Every candidate it leads to
 // is read through selectAdmittedPage.
-func (i *Integration) oldestRetentionVersion(ctx context.Context, concept string, cutoff time.Time) (time.Time, bool, error) {
+func (i *Integration) oldestRetentionVersion(ctx context.Context, concept string, from, cutoff time.Time) (time.Time, bool, error) {
 	db, err := i.gatedDB()
 	if err != nil {
 		return time.Time{}, false, err
 	}
+	query, args := `SELECT min("createdAt") FROM "MemoryNodes" WHERE concept = ? AND "createdAt" < ?`, []any{concept, cutoff}
+	if !from.IsZero() {
+		query, args = `SELECT min("createdAt") FROM "MemoryNodes" WHERE concept = ? AND "createdAt" >= ? AND "createdAt" < ?`, []any{concept, from, cutoff}
+	}
 	var oldest sql.NullTime
-	if err := db.QueryRowContext(ctx, `SELECT min("createdAt") FROM "MemoryNodes" WHERE concept = ? AND "createdAt" < ?`, concept, cutoff).Scan(&oldest); err != nil {
+	if err := db.QueryRowContext(ctx, query, args...).Scan(&oldest); err != nil {
 		return time.Time{}, false, fmt.Errorf("work: read the oldest %s: %w", concept, err)
 	}
 	return oldest.Time, oldest.Valid, nil
+}
+
+// retentionWindowHasVersions says whether the concept has any version stored
+// created in [lo, hi), retirable or not. It stops at the first it finds, so it
+// costs a few index entries in a window with versions in it and a pass over the
+// concept's entries in the window's chunk only in one with none -- which the
+// walk then jumps.
+//
+// staged-data: MUST-NOT-GATE -- see oldestRetentionVersion: a staged version is
+// a version, and a walk that did not count it would jump a window it must read.
+// The read returns a boolean, no row.
+func (i *Integration) retentionWindowHasVersions(ctx context.Context, concept string, lo, hi time.Time) (bool, error) {
+	db, err := i.gatedDB()
+	if err != nil {
+		return false, err
+	}
+	var stored bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM "MemoryNodes" WHERE concept = ? AND "createdAt" >= ? AND "createdAt" < ?)`, concept, lo, hi).Scan(&stored); err != nil {
+		return false, fmt.Errorf("work: read whether %s has versions in a window: %w", concept, err)
+	}
+	return stored, nil
 }
 
 // retentionCandidateRead is the read of one page of a policy's candidates: the
@@ -400,6 +522,11 @@ func retentionCandidateRead(p operationalPolicy, cutoff, lo, hi time.Time, after
 		// spelling. Before LIMIT for the reason above: goals whose runs are
 		// still kept must not crowd out the ones that could go. The delete
 		// asks again (retireVerified), for a run opened since this read.
+		//
+		// This is the one probe here with no index to go to, so a read costs the
+		// run table, not the window: 0.34 s warm, 1.26 s cold, at 600,000 run
+		// versions. Accepted for this release; the partial expression index on
+		// the run's goalId is deferred to release 2.
 		probes += `NOT EXISTS (SELECT 1 FROM "MemoryNodes" r WHERE r.concept='v1:work:run' AND ` + goalRefSQL(`r.payload->>'goalId'`) + `=` + goalRefSQL(`n.id`) + `) AND `
 	}
 	query := `SELECT n.id,n."createdAt",n.payload FROM (` + inner + `) n WHERE ` + probes +
@@ -654,7 +781,9 @@ func retirementDelete(concept string, withChildren bool, parentIDs []string, raw
 		// candidate read. The pipelines driver opens a new run of an old
 		// goal by writing the goal first -- a newer version, which the
 		// statement's own newer-version check refuses -- and then the run,
-		// refused here; a run written on its own is refused here too.
+		// refused here; a run written on its own is refused here too. Like the
+		// candidate read's, this compares every run version (accepted for this
+		// release; the goalId index is deferred to release 2).
 		guard += ` AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" r WHERE r.concept='v1:work:run' AND ` + goalRefSQL(`r.payload->>'goalId'`) + ` IN (SELECT ` + goalRefSQL(`k.id`) + ` FROM keys k))`
 	}
 	return retirementStatement{

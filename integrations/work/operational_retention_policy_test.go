@@ -250,3 +250,40 @@ func TestEveryPolicysCandidateReadIsBounded(t *testing.T) {
 		}
 	}
 }
+
+// TestRetentionShareIsWhatIsLeftOverWhatIsStillToRun: a policy may spend the time
+// left in the pass divided by the policies still to run, itself included. So
+// policies that each use their share are each given the same; time a policy does
+// not use goes to the ones after it; the last gets everything left; and no time
+// left is no share.
+func TestRetentionShareIsWhatIsLeftOverWhatIsStillToRun(t *testing.T) {
+	n := len(operationalPolicies)
+	equal := retentionRunBudget / time.Duration(n)
+
+	left := retentionRunBudget
+	for k := 0; k < n; k++ {
+		share := retentionShare(left, n-k)
+		if share != equal {
+			t.Fatalf("policy %d of %d, every policy before it having used its share, may spend %s, want %s", k, n, share, equal)
+		}
+		left -= share
+	}
+
+	// The first policy uses nothing, and the second is given its time too.
+	if first, second := retentionShare(retentionRunBudget, n), retentionShare(retentionRunBudget, n-1); second <= first {
+		t.Fatalf("a policy that used nothing left the next %s, no more than its own %s", second, first)
+	}
+	// The last policy takes all that is left.
+	if got := retentionShare(90*time.Second, 1); got != 90*time.Second {
+		t.Fatalf("the last policy may spend %s of 90s", got)
+	}
+	// A pass out of time, or one with no policy to run, leaves nothing.
+	for _, tc := range []struct {
+		left     time.Duration
+		policies int
+	}{{0, 3}, {-time.Second, 3}, {time.Minute, 0}} {
+		if got := retentionShare(tc.left, tc.policies); got != 0 {
+			t.Fatalf("%s left for %d policies gives a share of %s, want none", tc.left, tc.policies, got)
+		}
+	}
+}
