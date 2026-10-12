@@ -287,4 +287,12 @@ func TestEveryLockedPhaseIsFarInsideTheGateSessionsIdleLimit(t *testing.T) {
 		t.Errorf("a signup may spend %s under its locks; the gate session is ended after %s idle, and a phase should use a quarter of it at most",
 			signupLockedPhase, database.DefaultGateIdleInTxTimeout)
 	}
+	w := newTestWorker(t, &fakeEngine{}, &recordingSender{})
+	for _, sendTimeout := range []time.Duration{5 * time.Second, 30 * time.Second, time.Hour} {
+		w.cfg.SendTimeout = sendTimeout
+		if phase := w.welcomeLockedPhase(); phase*2 > database.DefaultGateIdleInTxTimeout {
+			t.Errorf("with a send timeout of %s a welcome may spend %s under its locks; the gate session is ended after %s idle, and a phase should use half of it at most",
+				sendTimeout, phase, database.DefaultGateIdleInTxTimeout)
+		}
+	}
 }

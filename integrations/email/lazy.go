@@ -85,8 +85,31 @@ func NewLazySender(envResolved Sender, resolveVar VariableResolver, resolveSecre
 // Sender this resolves to, and a check here would have to guess which one
 // that will be before it has resolved.
 func (l *LazySender) Send(ctx context.Context, msg Message, as SendAs) error {
+	sender, err := l.senderFor(ctx, as)
+	if err != nil {
+		return err
+	}
+	return sender.Send(ctx, msg, as)
+}
+
+// Reserve reserves on the Sender this wrapper resolves to for the identity, when
+// that Sender reserves (Reserver). One that does not has nothing to hold.
+func (l *LazySender) Reserve(ctx context.Context, msg Message, as SendAs) (context.Context, func(), error) {
+	sender, err := l.senderFor(ctx, as)
+	if err != nil {
+		return nil, nil, err
+	}
+	if reserver, ok := sender.(Reserver); ok {
+		return reserver.Reserve(ctx, msg, as)
+	}
+	return ctx, func() {}, nil
+}
+
+// senderFor is the Sender a message from this identity goes through: the
+// organization's own connection when it has one, else the node's.
+func (l *LazySender) senderFor(ctx context.Context, as SendAs) (Sender, error) {
 	if l == nil {
-		return fmt.Errorf("email: lazy sender not initialized")
+		return nil, fmt.Errorf("email: lazy sender not initialized")
 	}
 	// Explicit capture always wins, including when Azure credentials exist.
 	if _, capture := l.envResolved.(*CaptureSender); !capture && l.organization != nil {
@@ -96,16 +119,16 @@ func (l *LazySender) Send(ctx context.Context, msg Message, as SendAs) error {
 		}
 		sender, err := l.organization(ctx, account)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if sender != nil {
-			return sender.Send(ctx, msg, as)
+			return sender, nil
 		}
 		if account != "self" {
-			return permanentSendRefusal("this organization has no email connection")
+			return nil, permanentSendRefusal("this organization has no email connection")
 		}
 	}
-	return l.Resolve(ctx).Send(ctx, msg, as)
+	return l.Resolve(ctx), nil
 }
 
 // Resolve returns the concrete Sender this wrapper stands for, running the

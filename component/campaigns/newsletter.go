@@ -82,7 +82,7 @@ func (w *Worker) handleConfigureNewsletter(ctx context.Context, args map[string]
 	if !templateIDPattern.MatchString(siteID) || callerUserID(ctx) == "" || w.newsletterGate == nil {
 		return nil, fmt.Errorf("select a deployable while connected to the cluster")
 	}
-	hold, err := w.newsletterGate(ctx, "site:"+siteID)
+	hold, err := w.newsletterGate(ctx, newsletterLock("site", siteID))
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +336,7 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	// 2. The locks, in one transaction on one connection, site then audience: the
 	// same order everywhere, so no two flows can each hold the lock the other wants.
 	// All forms pointing at one audience share the audience lock and one welcome key.
-	hold, err := w.newsletterGate(ctx, "site:"+siteID, "audience:"+audienceID)
+	hold, err := w.newsletterGate(ctx, newsletterLock("site", siteID), newsletterLock("audience", audienceID))
 	if errors.Is(err, memql.ErrWriteGateBusy) {
 		// The cause is the pod's and the person cannot act on it; the sentence is what
 		// they can.
@@ -495,11 +495,21 @@ func (w *Worker) drainNewsletterWelcomes(ctx, systemCtx context.Context) {
 		}
 		if err := campaignPage(ctx, ids, func(ctx context.Context, id string) error {
 			err := w.sendNewsletterWelcome(ctx, systemCtx, selected[id])
+			if memql.IsWriteGateBusy(err) {
+				// Nothing was attempted and the welcome is still pending. The pod is
+				// busy, so the rest of the page would be too: end the pass; the next
+				// one takes it.
+				w.logger.Info("campaigns: a welcome is waiting for a free lock; it stays pending", "id", id)
+				return err
+			}
 			if err != nil {
 				w.logger.Error("campaign row could not advance", "id", id, "error", err)
 			}
 			return err
 		}); err != nil {
+			if memql.IsWriteGateBusy(err) {
+				return
+			}
 			w.logger.Warn("campaign page workflow failed", "error", err)
 			return
 		}
@@ -511,17 +521,55 @@ func (w *Worker) drainNewsletterWelcomes(ctx, systemCtx context.Context) {
 	}
 }
 
+// welcomeLockedPhase is the most a welcome may spend under its locks: the send it
+// makes (SendTimeout) and the reads around it, never more than welcomePhaseCeiling.
+// Far inside the gate session's idle limit, like the signup's.
+func (w *Worker) welcomeLockedPhase() time.Duration {
+	return min(w.cfg.SendTimeout+30*time.Second, welcomePhaseCeiling)
+}
+
+// welcomePhaseCeiling bounds a welcome's time under its locks however long an
+// operator lets a send take (MEMQL_CAMPAIGNS_SEND_TIMEOUT_SECONDS).
+const welcomePhaseCeiling = 2 * time.Minute
+
+// sendNewsletterWelcome sends one pending welcome.
+//
+// THE LOCKS A WELCOME NEEDS are named together and taken in one call, so one
+// transaction on one connection of the gate pool holds all of them, always in this
+// order: the storefront's, the audience's -- the two a signup takes -- and the
+// receipt of this welcome's own send (what sendToRecipientOnce would take, were it
+// not told it is held). Taken one inside another they would be a connection each,
+// and a busy answer from the innermost, after the outer ones were held, used to
+// land in the welcome's verdict. The sender may still take one of its own beyond
+// these (Azure's send receipt, reserved before the attempt is recorded); it is the
+// last, and nothing is waited for beyond it.
+//
+// A BUSY LOCK ANYWHERE IS "NOTHING ATTEMPTED, TRY LATER": the welcome is not blocked,
+// no verdict is written, and the next pass takes it. Only a send that began can end
+// a welcome.
 func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned map[string]any) error {
-	// Site then audience, in one transaction on one connection, as a signup takes them.
-	hold, err := w.newsletterGate(ctx, "site:"+bare(str(scanned, "siteId")), "audience:"+bare(str(scanned, "audienceId")))
+	scannedOwner := bare(str(scanned, "ownerUserId"))
+	requestID := "newsletter-" + bare(str(scanned, "id"))
+	receiptID := singleSendReceiptID(scannedOwner, requestID)
+	hold, err := w.newsletterGate(ctx,
+		newsletterLock("site", bare(str(scanned, "siteId"))),
+		newsletterLock("audience", bare(str(scanned, "audienceId"))),
+		singleSendLock(receiptID))
 	if err != nil {
 		return err
 	}
 	defer hold.Release()
+	ctx, endPhase := context.WithTimeout(ctx, w.welcomeLockedPhase())
+	defer endPhase()
 	systemCtx = memql.ContextWithFreshRead(auth.ContextWithInternalOrigin(systemCtx))
 	row, err := w.newsletterRow(systemCtx, "newsletterSignupById", "signupId", bare(str(scanned, "id")))
 	if err != nil || row == nil || str(row, "status") != "pending" {
 		return err
+	}
+	if bare(str(row, "ownerUserId")) != scannedOwner {
+		// The lock above was named for the owner the scan saw. A row that names
+		// another now is not the welcome that was scanned; the next pass reads it.
+		return nil
 	}
 	owner := memql.ContextWithFreshRead(w.ownerActorContext(ctx, bare(str(row, "ownerUserId"))))
 	status, reason := "blocked", "The newsletter or its deployable is no longer enabled."
@@ -533,11 +581,22 @@ func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned m
 		if json.Unmarshal(encoded, &snapshot) != nil || snapshot.ID == "" {
 			reason = "The reviewed welcome template could not be read."
 		} else {
-			nodes, sendErr := w.sendToRecipientOnce(owner, map[string]any{"requestId": "newsletter-" + bare(str(row, "id")), "templateId": bare(str(row, "templateId")), "recipientId": bare(str(row, "recipientId")), "senderIdentityId": bare(str(row, "senderIdentityId"))}, &snapshot, str(row, "emailDigest"))
+			args := map[string]any{"requestId": requestID, "templateId": bare(str(row, "templateId")), "recipientId": bare(str(row, "recipientId")), "senderIdentityId": bare(str(row, "senderIdentityId"))}
+			receipt, _, receiptErr := singleSendReceiptFor(owner, args, &snapshot, str(row, "emailDigest"))
+			if receiptErr != nil || receipt.id != receiptID {
+				return fmt.Errorf("the welcome's send identity changed after it was scanned; it stays pending: %v", receiptErr)
+			}
+			nodes, sendErr := w.sendToRecipientHeld(owner, args, &snapshot, str(row, "emailDigest"), receipt)
 			// No provider attempt has begun. Leave the unchanged row pending
 			// for the next drain; a rate ceiling must not lose a welcome.
 			if errors.Is(sendErr, errCampaignRateLimited) {
 				return nil
+			}
+			// Nor has one when the sender's own lock was busy (it is reserved before
+			// the attempt is recorded). The welcome is not blocked for the pod being
+			// busy: it stays pending, and the pass ends so the next takes it.
+			if memql.IsWriteGateBusy(sendErr) {
+				return sendErr
 			}
 			if sendErr != nil {
 				reason = sendErr.Error()
@@ -571,7 +630,7 @@ func (w *Worker) handleRetryNewsletterWelcome(ctx context.Context, args map[stri
 	if err = w.requireSendAuthority(ctx, str(row, "accountId")); err != nil {
 		return nil, err
 	}
-	hold, err := w.newsletterGate(ctx, "audience:"+bare(str(row, "audienceId")))
+	hold, err := w.newsletterGate(ctx, newsletterLock("audience", bare(str(row, "audienceId"))))
 	if err != nil {
 		return nil, err
 	}

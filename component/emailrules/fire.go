@@ -62,11 +62,18 @@ const maxFanout = 200
 // cannot prove it is first must not send.
 type FirstFireClaim func(ctx context.Context, ruleID, rowID string) bool
 
+// FirstFireRelease gives back the claim a created rule took for a row, so the row's
+// firing can be made again. It is for a firing that ended with nothing attempted --
+// the cluster's lock was busy -- and only that: a firing that began a send keeps its
+// claim, which is what keeps the row from sending twice.
+type FirstFireRelease func(ctx context.Context, ruleID, rowID string)
+
 // Firer executes one rule against one triggering event.
 type Firer struct {
-	store *Store
-	claim FirstFireClaim
-	gate  FiringGate
+	store   *Store
+	claim   FirstFireClaim
+	release FirstFireRelease
+	gate    FiringGate
 }
 
 func NewFirer(engine Engine) *Firer { return &Firer{store: NewStore(engine)} }
@@ -74,6 +81,14 @@ func NewFirer(engine Engine) *Firer { return &Firer{store: NewStore(engine)} }
 // WithFirstFireClaim returns the Firer with the claim a created rule needs.
 func (f *Firer) WithFirstFireClaim(claim FirstFireClaim) *Firer {
 	f.claim = claim
+	return f
+}
+
+// WithFirstFireRelease returns the Firer with the release that goes with the claim.
+// Without one, a created rule's firing that was held up by a busy lock keeps its
+// claim, and the row can never fire again.
+func (f *Firer) WithFirstFireRelease(release FirstFireRelease) *Firer {
+	f.release = release
 	return f
 }
 
@@ -96,6 +111,11 @@ type FireOutcome struct {
 	// Duplicate is a created rule's second firing for one row -- two writes
 	// raced on a new row -- which sends nothing and is not counted as a firing.
 	Duplicate bool
+	// Busy: a send found the cluster's lock busy and, after a few short pauses,
+	// still busy. Nothing was attempted for that recipient, the rule's fault it is
+	// not, and a created rule's claim for the row was given back so the row can fire
+	// again.
+	Busy bool
 }
 
 // Fire resolves the rule, decides the lane from who receives, and sends.
@@ -151,11 +171,13 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 	// claim is a primary-key insert, so exactly one firing -- on any replica,
 	// with no local state -- wins. The loser is a duplicate of a creation that
 	// already fired: it sends nothing and is not recorded as a firing.
+	claimed := false
 	if !plan.refused && strings.TrimSpace(rule.EventKind) == "created" {
 		if f.claim == nil || !f.claim(ctx, rule.ID, nodeID) {
 			out.Duplicate = true
 			return out, nil
 		}
+		claimed = true
 	}
 
 	switch {
@@ -169,6 +191,13 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 		err = f.fireRowAddress(ctx, rule, nodeID, event, plan, &out)
 	default:
 		err = fmt.Errorf("emailrules: rule %q has recipient mode %q, which this engine does not know", ruleID, rule.RecipientMode)
+	}
+
+	// A send that found the cluster's lock busy attempted nothing. The row's claim
+	// goes back with it: kept, the row's one chance would be spent on a firing that
+	// sent no mail, and nothing could fire for it again.
+	if out.Busy && claimed && f.release != nil {
+		f.release(ctx, rule.ID, nodeID)
 	}
 
 	// The firing is recorded either way. A rule that fired and failed is a
@@ -336,6 +365,10 @@ func (f *Firer) fireAudience(ctx context.Context, rule Rule, nodeID string, even
 			break
 		}
 		f.sendMarketing(ctx, rule, nodeID, str(r, "id"), event, out)
+		if out.Busy {
+			// The cluster is busy, so the rest of the audience would be too.
+			break
+		}
 	}
 	return nil
 }
@@ -462,7 +495,14 @@ func (f *Firer) sendMarketing(ctx context.Context, rule Rule, nodeID, recipientI
 		out.Refusals = append(out.Refusals, err.Error())
 		return
 	}
-	result, err := f.store.SendToRecipient(ctx, rule.TemplateID, recipientID, rule.SenderIdentity, rule.ID, requestID)
+	result, err := f.sendWithPatience(ctx, rule, recipientID, requestID)
+	if memql.IsWriteGateBusy(err) {
+		// Nothing was attempted for this recipient: the cluster's lock was busy
+		// through every pause. Not a refusal of the message, and not the rule's fault.
+		out.Busy = true
+		out.Refusals = append(out.Refusals, "the cluster was too busy to start this send, so nothing was sent to this recipient; the firing can be made again")
+		return
+	}
 	if err != nil {
 		out.Refusals = append(out.Refusals, err.Error())
 		return
@@ -477,6 +517,31 @@ func (f *Firer) sendMarketing(ctx context.Context, rule Rule, nodeID, recipientI
 	default:
 		out.Refusals = append(out.Refusals, "campaign send returned no recognized outcome")
 	}
+}
+
+// busyPauses are the waits between one send and the next when the cluster's lock
+// was busy (a variable only so a test can shorten them). The lock is usually busy
+// for a moment, and a few short pauses inside the firing keep the row from needing a
+// second delivery at all. Only a lock that was busy is tried again: a refusal on
+// the merits is final for the firing, as it always was.
+var busyPauses = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+
+// sendWithPatience makes the send, and makes it again after each pause while the
+// answer is that the cluster's lock was busy.
+func (f *Firer) sendWithPatience(ctx context.Context, rule Rule, recipientID, requestID string) (map[string]any, error) {
+	result, err := f.store.SendToRecipient(ctx, rule.TemplateID, recipientID, rule.SenderIdentity, rule.ID, requestID)
+	for _, pause := range busyPauses {
+		if !memql.IsWriteGateBusy(err) {
+			break
+		}
+		select {
+		case <-time.After(pause):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		result, err = f.store.SendToRecipient(ctx, rule.TemplateID, recipientID, rule.SenderIdentity, rule.ID, requestID)
+	}
+	return result, err
 }
 
 // payloadField reads a dotted path out of the event envelope's payload.

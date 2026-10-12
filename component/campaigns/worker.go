@@ -96,6 +96,24 @@ const (
 // variable only so a test can shorten it.
 var newsletterGateWait time.Duration
 
+// The lock keys of the campaigns domain. Every replica must derive the same text
+// for the same thing, so each prefix is written once, here.
+const (
+	newsletterLockPrefix = "campaign-newsletter:"
+	singleSendLockPrefix = "campaign-single-send:"
+)
+
+// newsletterLock is the key of one of the newsletter's locks: "site" for a
+// storefront, "audience" for the audience its forms feed.
+func newsletterLock(kind, id string) string { return newsletterLockPrefix + kind + ":" + id }
+
+// singleSendLock is the key of one single send's receipt.
+func singleSendLock(receiptID string) string { return singleSendLockPrefix + receiptID }
+
+// gateBusyRetry is how long a job waits, when a send found a lock busy, before the
+// next batch tries again.
+const gateBusyRetry = 15 * time.Second
+
 // gateHold is an open write gate: the transaction holding the newsletter's locks.
 // The holder gives them up when it is done, and can ask whether they are still
 // held (memql.GateHold) before it writes what they exist to protect.
@@ -121,9 +139,10 @@ type Worker struct {
 	templateGate   func(context.Context, string) (func(), error)
 	singleSendGate func(context.Context, string) (func(), error)
 	seriesGate     func(context.Context, string) (func(), error)
-	// newsletterGate takes the newsletter's locks for the keys it is given, in the
-	// order given, in ONE transaction on ONE connection of the gate pool
-	// (memql.AcquireGateHold).
+	// newsletterGate takes the locks for the keys it is given -- full keys, from
+	// newsletterLock and singleSendLock -- in the order given, in ONE transaction on
+	// ONE connection of the gate pool (memql.AcquireGateHold). A flow that needs
+	// several names them together instead of taking them one inside another.
 	newsletterGate func(context.Context, ...string) (gateHold, error)
 	store          *Store
 	claimer        ExecutionClaimer
@@ -214,11 +233,7 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 			if len(gateDB) > 0 && gateDB[0] != nil {
 				db = gateDB[0]()
 			}
-			prefixed := make([]string, len(keys))
-			for i, key := range keys {
-				prefixed[i] = "campaign-newsletter:" + key
-			}
-			hold, err := memql.AcquireGateHold(ctx, db, newsletterGateWait, prefixed...)
+			hold, err := memql.AcquireGateHold(ctx, db, newsletterGateWait, keys...)
 			if err != nil {
 				return nil, err
 			}
@@ -236,7 +251,7 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 			if len(gateDB) > 0 && gateDB[0] != nil {
 				db = gateDB[0]()
 			}
-			return memql.AcquireWriteGate(ctx, db, "campaign-single-send:"+key)
+			return memql.AcquireWriteGate(ctx, db, singleSendLock(key))
 		},
 		templateGate: func(ctx context.Context, key string) (func(), error) {
 			var db *sql.DB
@@ -744,6 +759,15 @@ func (w *Worker) processRecipient(
 	sendCtx, cancel := context.WithTimeout(ctx, w.cfg.SendTimeout)
 	err = w.deliver(sendCtx, msg, identity.SendAs)
 	cancel()
+	// A lock that was busy is nothing attempted: the message was never judged and
+	// no attempt is spent on it. It is handled as the pause a provider asks for --
+	// the delivery stays retryable and the job waits a moment, so the rest of the
+	// batch does not spend the same busy lock one recipient at a time.
+	if err != nil && memql.IsWriteGateBusy(err) {
+		if _, throttled := email.IsThrottled(err); !throttled {
+			err = &email.SendError{Throttled: true, RetryAfter: gateBusyRetry, Detail: err.Error(), Cause: err}
+		}
+	}
 
 	attempts := item.attempts + 1
 	if err == nil {
@@ -808,6 +832,20 @@ func (w *Worker) processRecipient(
 		w.logger.Warn("campaigns worker: could not record a retryable delivery", "error", derr)
 	}
 	return false, nil
+}
+
+// reserveDelivery asks the transport for whatever it must hold before it can begin
+// delivering msg (email.Reserver), and returns the context to deliver with and the
+// function that gives it back. A transport with nothing to reserve, and a test's
+// send hook, reserve nothing.
+func (w *Worker) reserveDelivery(ctx context.Context, msg email.Message, as email.SendAs) (context.Context, func(), error) {
+	if w.sendHook != nil {
+		return ctx, func() {}, nil
+	}
+	if reserver, ok := w.resolveSender().(email.Reserver); ok {
+		return reserver.Reserve(ctx, msg, as)
+	}
+	return ctx, func() {}, nil
 }
 
 // deliver hands one message to the transport as the resolved identity.

@@ -70,12 +70,13 @@ func bound() (ActivationEngine, func() memql.AuthoredRuntimeDeps, bool) {
 
 func init() {
 	memql.RegisterPlugin(IntegrationName, func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		return &Integration{
+		i := &Integration{
 			engine: pluginEngine{pctx.Engine},
 			logger: pctx.Logger,
-			claim:  newFirstFireClaim(pctx.BunDB, pctx.Logger),
 			gate:   newFiringGate(firingGateDB(pctx), pctx.Logger),
-		}, nil
+		}
+		i.claim, i.release = newFirstFireClaims(pctx.BunDB, pctx.Logger)
+		return i, nil
 	})
 }
 
@@ -106,18 +107,24 @@ const firstFireClaimName = "emailrules.firstFire:"
 // once the row exists, no later write is its first version, so the trigger
 // never fires for it again. The claim only has to outlive the race between two
 // writes creating the same row.
-func newFirstFireClaim(db func() *bun.DB, logger *slog.Logger) FirstFireClaim {
+func newFirstFireClaims(db func() *bun.DB, logger *slog.Logger) (FirstFireClaim, FirstFireRelease) {
 	if db == nil {
-		return nil
+		return nil, nil
 	}
 	var guardLogger automations.Logger
 	if logger != nil {
 		guardLogger = logger
 	}
 	claimer := automations.NewClusterExecutionGuard(db, guardLogger).StrictClaimer()
-	return func(ctx context.Context, ruleID, rowID string) bool {
+	claim := func(ctx context.Context, ruleID, rowID string) bool {
 		return claimer.ClaimWithTTL(ctx, firstFireClaimName+ruleID, rowID, 0)
 	}
+	// Given back only for a firing that attempted nothing (the cluster's lock was
+	// busy): the row's claim must outlive every firing that began a send.
+	release := func(ctx context.Context, ruleID, rowID string) {
+		claimer.Release(ctx, firstFireClaimName+ruleID, rowID)
+	}
+	return claim, release
 }
 
 // pluginEngine adapts the plug-in surface to the Execute shape this package
@@ -133,16 +140,17 @@ func (p pluginEngine) Execute(ctx context.Context, query string) (any, error) {
 
 // Integration is the provider the engine registers.
 type Integration struct {
-	engine Engine
-	logger *slog.Logger
-	claim  FirstFireClaim
-	gate   FiringGate
+	engine  Engine
+	logger  *slog.Logger
+	claim   FirstFireClaim
+	release FirstFireRelease
+	gate    FiringGate
 }
 
 // firer is the Firer this node's fire builtin runs: the created rule's
 // once-per-row claim and the firing gate, both wired from the node's database.
 func (i *Integration) firer() *Firer {
-	return NewFirer(i.engine).WithFirstFireClaim(i.claim).WithFiringGate(i.gate)
+	return NewFirer(i.engine).WithFirstFireClaim(i.claim).WithFirstFireRelease(i.release).WithFiringGate(i.gate)
 }
 
 func (i *Integration) IntegrationName() string { return IntegrationName }
@@ -235,7 +243,7 @@ func (i *Integration) handleFire(ctx context.Context, args map[string]any, _ int
 	}
 	if i.logger != nil && len(out.Refusals) > 0 {
 		i.logger.Warn("email rule fired with refusals",
-			"rule", out.RuleID, "lane", out.Lane, "sent", out.Sent, "refusals", out.Refusals)
+			"rule", out.RuleID, "lane", out.Lane, "sent", out.Sent, "busy", out.Busy, "refusals", out.Refusals)
 	}
 	return resultNode("emailRuleFired", map[string]any{
 		"emailRuleId": out.RuleID,
@@ -245,6 +253,7 @@ func (i *Integration) handleFire(ctx context.Context, args map[string]any, _ int
 		"skipped":     out.Skipped,
 		"refusals":    out.Refusals,
 		"duplicate":   out.Duplicate,
+		"busy":        out.Busy,
 	})
 }
 
