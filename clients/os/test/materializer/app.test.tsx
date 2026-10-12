@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
@@ -13,7 +13,7 @@ vi.mock("../../src/live/connection", () => ({
 
 const { MaterializerApp } = await import("../../src/apps/materializer/MaterializerApp");
 const { LocalMaterializerSettingsStore } = await import("../../src/apps/materializer/settings");
-const { compositionRow, fakeConnection, recipeRow, templateRow, withSession } = await import("./harness");
+const { compositionRow, fakeConnection, recipeRow, refused, templateRow, withSession } = await import("./harness");
 
 type Conn = ReturnType<typeof fakeConnection>;
 
@@ -70,6 +70,10 @@ describe("the composer", () => {
     expect(args).toMatchObject({ name: "Inventory", [field]: value, accountIds: ["client-a"] });
     expect(args).not.toHaveProperty("sources");
     expect(args).not.toHaveProperty("draft");
+    // Every ask carries a request id (a repeat of it finds this composition
+    // rather than starting a second); startingSetup.test.tsx pins when it is
+    // reused and when it is renewed.
+    expect(args["requestId"]).toEqual(expect.stringMatching(/^[A-Za-z0-9_-]{8,111}$/));
     expect(screen.queryByLabelText("Draft")).toBeNull();
   });
 
@@ -174,7 +178,8 @@ describe("the composer", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Client A" }));
     fireEvent.click(await screen.findByRole("button", { name: "Materialize" }));
 
-    expect(await screen.findByText(/Give it a name first/)).toBeTruthy();
+    // The rule and the words are the editor's (the SDK's fileNameProblem), shown where the name is typed.
+    expect(await screen.findByText("Enter a file name.")).toBeTruthy();
     expect(conn.query.composeMaterialize).not.toHaveBeenCalled();
   });
 
@@ -277,26 +282,60 @@ describe("the provenance chain", () => {
     );
   }
 
-  it("states the claim the format can actually make", async () => {
+  // THE RECORD'S OWN SENTENCE, WHEN IT HAS ONE. The stamp step writes provenanceNote
+  // knowing which branch it took, and the format alone cannot: a blank Markdown file
+  // carries no front matter because it was filed blank, not because Markdown has
+  // nowhere to put it.
+  it("states the record's own provenance sentence", async () => {
     const conn = fakeConnection({ compositions: [compositionRow({ id: `${COMPOSITION}:c1` })] });
     mountOn(conn, `${COMPOSITION}:c1`);
-    // The chain reads what was made, and the claim is the format's.
-    expect(await screen.findByText("the file carries it")).toBeTruthy();
+    expect(await screen.findByText("Provenance is in this PDF's XMP packet and Info dictionary.")).toBeTruthy();
+    expect(screen.queryByText("the file carries it")).toBeNull();
   });
 
-  it("says the record is the only copy where the format has no channel", async () => {
+  it("falls back to the claim the format can make for a record with no sentence of its own", async () => {
     const conn = fakeConnection({
       compositions: [
-        compositionRow({
-          id: `${COMPOSITION}:c2`,
-          name: "Figures",
-          format: "csv",
-          provenanceEmbedded: false,
-        }),
+        compositionRow({ id: `${COMPOSITION}:c1`, provenanceNote: "" }),
+        compositionRow({ id: `${COMPOSITION}:c2`, name: "Figures", format: "csv", provenanceEmbedded: false, provenanceNote: "" }),
       ],
     });
+    mountOn(conn, `${COMPOSITION}:c1`);
+    expect(await screen.findByText("the file carries it")).toBeTruthy();
+    cleanup();
     mountOn(conn, `${COMPOSITION}:c2`);
     expect(await screen.findByText(/only copy/)).toBeTruthy();
+  });
+
+  it("says a blank file was created blank, and never that its format has nowhere to put provenance", async () => {
+    const note = "Created blank. Its history is kept on its composition, not in the file.";
+    for (const [id, format] of [["c-md", "markdown"], ["c-html", "html"]] as const) {
+      const conn = fakeConnection({
+        compositions: [compositionRow({ id: `${COMPOSITION}:${id}`, name: "Notes", format, statement: "", sources: [], modelsUsed: [], provenanceEmbedded: false, provenanceNote: note })],
+      });
+      mountOn(conn, `${COMPOSITION}:${id}`);
+      expect(await screen.findByText(note)).toBeTruthy();
+      expect(screen.queryByText(/nowhere to put it/)).toBeNull();
+      expect(screen.getByText("This file was created blank.")).toBeTruthy();
+      expect(screen.queryByText(/composed text/)).toBeNull();
+      // A recipe of a blank file would have no brief and no sources, which a recipe run refuses.
+      expect(screen.getByRole("button", { name: "Open Notes" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Save as recipe" })).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("says the composed text is in the file for a file a model wrote", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: `${COMPOSITION}:c1` })] });
+    mountOn(conn, `${COMPOSITION}:c1`);
+    expect(await screen.findByText("The composed text is in the file. Open it to read what was made.")).toBeTruthy();
+  });
+
+  it("claims no file while the composition is still being made", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: `${COMPOSITION}:c1`, status: "composing", outputFileId: "" })] });
+    mountOn(conn, `${COMPOSITION}:c1`);
+    await screen.findByRole("button", { name: "Stop" });
+    expect(screen.queryByText(/composed text|created blank|created from a description/)).toBeNull();
   });
 
   // A list row's job is to ASK for the window to move, which is the
@@ -636,6 +675,46 @@ describe("record list count and action boundaries", () => {
   });
 });
 
+
+// A READ THAT FAILS SAYS THE CLUSTER'S SENTENCE ALONE, as a refused write does. A refusal arrives with
+// the call's name in front and inside the engine's frame (`refused` gives the real wording), and the
+// person reads only the sentence: what the composer can offer, what a source finds, and opening a file.
+describe("a read that fails", () => {
+  const FRAMES = /composableConcepts|composeResolveSources|libraryArtifactForFile|MemQL engine|Details:|compose:|library:/;
+  const line = (text: string) => screen.findByText(text, { selector: ".os-notice-line" });
+
+  it("says why the composer has nothing to offer, in the cluster's words alone", async () => {
+    const conn = fakeConnection();
+    conn.query.composableConcepts.mockRejectedValue(refused("composableConcepts", "compose: the concept registry is not readable on this node"));
+    mount(conn);
+    expect(await line("the concept registry is not readable on this node")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(FRAMES);
+  });
+
+  it("says why a source could not be resolved, in the cluster's words alone", async () => {
+    const conn = fakeConnection({
+      composables: { concepts: [{ id: "v1:x:invoice", as: "invoice", fields: [], list: "openInvoices", marked: true }], registryAvailable: true } as unknown as Row,
+    });
+    conn.query.composeResolveSources.mockRejectedValue(refused("composeResolveSources", "compose: the sources could not be read: query openInvoices is not readable by you"));
+    mount(conn);
+    fireEvent.click(await screen.findByRole("button", { name: /invoice/ }));
+    expect(await line("the sources could not be read: query openInvoices is not readable by you")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(FRAMES);
+  });
+
+  it("says why a file could not be opened, in the cluster's words alone", async () => {
+    const conn = fakeConnection({ compositions: [compositionRow({ id: "c-output", outputFileId: "f-output" })] });
+    conn.query.libraryArtifactForFile.mockRejectedValue(refused("libraryArtifactForFile", "library: the artifact index is not reachable"));
+    h.connection = conn;
+    const tab = { navigate: vi.fn(), close: vi.fn() };
+    render(withSession(<MaterializerApp sectionId="composer" navigate={() => {}} askContext={() => {}}
+      intent={{ id: "open", payload: { compositionId: "c-output" } }} store={memoryStore()}
+      handoffPorts={{ reserve: () => tab, navigate: vi.fn(), schedule: () => () => {} }} />));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Q3 report" }));
+    expect(await line("the artifact index is not reachable")).toBeTruthy();
+    expect(document.body.textContent).not.toMatch(FRAMES);
+  });
+});
 
 describe("organization and reference metadata", () => {
   it("saves an email recipe without dropping its reference bundle or client", async () => {

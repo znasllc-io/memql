@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/work"
 )
 
@@ -95,6 +96,36 @@ func TestReasoningFileDraftRefusesMissingOrUnsupportedOutput(t *testing.T) {
 		fields["requiresFile"] = true
 		if _, err := synthesizeWorkReasoningBundle(compileReq(), "", parseSectionableDecision(fields)); err == nil {
 			t.Fatalf("file goal accepted invalid semantic output: %+v", fields)
+		}
+	}
+}
+
+// Triage chooses the file's stem, and a model reaches for "reports/Q3" as readily
+// as for "Q3". The Materializer refuses a name that carries a folder path --
+// right for a person who typed one, wrong for a stem a model chose, where the
+// refusal would come only after the drafting steps had already run -- so the
+// stem becomes a plain name before the call is written.
+func TestReasoningFileDraftHyphenatesPathSeparatorsInTheChosenFileName(t *testing.T) {
+	for _, tc := range []struct{ chosen, want string }{
+		{"reports/Q3 summary", "reports-Q3 summary"},
+		{`reports\Q3 summary`, "reports-Q3 summary"},
+		{"  2026/10/launch\\brief  ", "2026-10-launch-brief"},
+		{"report", "report"},
+		{"v1.2 notes", "v1.2 notes"},
+	} {
+		for _, sectionable := range []bool{false, true} {
+			decision := parseSectionableDecision(map[string]any{
+				"sectionable": sectionable, "requiresFile": true, "fileName": tc.chosen, "fileFormat": "markdown",
+				"sections": []map[string]any{{"label": "one"}, {"label": "two"}},
+			})
+			bundle, err := synthesizeWorkReasoningBundle(compileReq(), "agent", decision)
+			if err != nil {
+				t.Fatalf("%q (sectionable=%v): %v", tc.chosen, sectionable, err)
+			}
+			source := bundle.Constructs[0].Source
+			if want := "name: " + langparser.QuoteString(tc.want) + ", format:"; !strings.Contains(source, want) {
+				t.Fatalf("%q (sectionable=%v) should be delivered as %q, but the call reads:\n%s", tc.chosen, sectionable, tc.want, source)
+			}
 		}
 	}
 }

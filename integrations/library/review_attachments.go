@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -24,9 +25,22 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
+// What a review comment may carry. The SDK's handOffDescription
+// (sdk/ts/src/client/materialize.ts) mirrors these limits and the image formats
+// below, so a reference the Library would refuse is left off the comment instead
+// of failing it whole, and it retries a comment the Library refuses about an
+// attachment once more without them. TestSDKMirrorsTheReviewAttachmentRules holds
+// the two together, and TestEveryReviewAttachmentRefusalSaysAttach holds the
+// words that retry listens for: every refusal below says "attach".
 const reviewAttachmentCount = 8
 const reviewAttachmentBytes = 16 << 20
 const reviewMarkdownBytes = 32 << 10
+const reviewMarkdownTotalBytes = 64 << 10
+const reviewImageBytes = 8 << 20
+
+// The image formats a review attachment may be. A file's extension names its
+// format (".jpg" is read as ".jpeg") and must agree with what its bytes decode as.
+var reviewImageFormats = []string{"png", "jpeg", "gif", "webp"}
 
 type reviewAttachment struct {
 	ArtifactID string `json:"artifactId"`
@@ -73,7 +87,7 @@ func (i *Integration) reviewAttachments(ctx context.Context, input any) ([]revie
 		if name == "" {
 			name = stringField(doc.backing, "title")
 		}
-		limit := 8 << 20
+		limit := reviewImageBytes
 		if strings.EqualFold(path.Ext(name), ".md") {
 			limit = reviewMarkdownBytes
 		}
@@ -84,12 +98,12 @@ func (i *Integration) reviewAttachments(ctx context.Context, input any) ([]revie
 			}
 			stream, err := i.blobFetcher.DownloadStreamURL(ctx, stringField(doc.backing, "blobUrl"))
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("an attachment could not be read: %w", err)
 			}
 			content, err = io.ReadAll(io.LimitReader(stream, int64(limit+1)))
 			stream.Close()
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, fmt.Errorf("an attachment could not be read: %w", err)
 			}
 		} else {
 			content = []byte(stringField(doc.backing, "body"))
@@ -102,7 +116,7 @@ func (i *Integration) reviewAttachments(ctx context.Context, input any) ([]revie
 		if mime == "text/markdown" {
 			markdownTotal += len(content)
 		}
-		if total > reviewAttachmentBytes || markdownTotal > 64<<10 {
+		if total > reviewAttachmentBytes || markdownTotal > reviewMarkdownTotalBytes {
 			return nil, nil, fmt.Errorf("attachments exceed 16 MiB, or 64 KiB of Markdown")
 		}
 		digest := sha256.Sum256(content)
@@ -123,7 +137,7 @@ func reviewAttachmentMIME(name string, content []byte) (string, error) {
 		}
 		return "text/markdown", nil
 	}
-	if len(content) == 0 || len(content) > 8<<20 {
+	if len(content) == 0 || len(content) > reviewImageBytes {
 		return "", fmt.Errorf("attach an image up to 8 MiB")
 	}
 	config, format, err := image.DecodeConfig(bytes.NewReader(content))
@@ -131,7 +145,7 @@ func reviewAttachmentMIME(name string, content []byte) (string, error) {
 	if ext == ".jpg" {
 		ext = ".jpeg"
 	}
-	if err != nil || ext != "."+format || (format != "png" && format != "jpeg" && format != "gif" && format != "webp") || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 24_000_000 {
+	if err != nil || ext != "."+format || !slices.Contains(reviewImageFormats, format) || config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 24_000_000 {
 		return "", fmt.Errorf("attach a readable PNG, JPEG, GIF or WebP image up to 24 million pixels")
 	}
 	return "image/" + format, nil

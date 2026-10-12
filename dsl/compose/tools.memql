@@ -9,7 +9,7 @@
 @executionTime("slow")
 tool composeFile {
   name       string!   @description("Descriptive filename stem, without a path.")
-  statement  string!   @description("Complete instructions for the requested content.")
+  statement  string!   @description("Complete instructions for the requested content. A call with an empty statement is refused; say what the file should contain.")
   format     string!   @description("markdown, html, txt, csv, json, docx or pdf.")
   draft      string    @description("Optional finished or starting draft to use when composing.")
   sources    array  @description("Optional source references: {kind, ref, label}; kind is concept_row, library_file or query.")

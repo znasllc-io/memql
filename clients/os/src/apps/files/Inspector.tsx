@@ -21,7 +21,7 @@ import { fileHeadFromRow, type VersionEntry } from "./versions";
 import { useOsConnection } from "../../live/connection";
 import { rowNumber, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
 import type { Breadcrumb } from "../../kit/Breadcrumbs";
-import { MATERIALIZER_APP, MATERIALIZER_COMPOSER } from "./materializer";
+import { MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION } from "../../items/materialize";
 import {
   downloadArtifact,
   OVER_LIMIT_SENTENCE,
@@ -321,12 +321,12 @@ export function Inspector({
             <Fact
               label="Made in"
               value={
-                canOpen(registry, MATERIALIZER_APP) ? (
+                canOpen(registry, MATERIALIZER_APP_ID) ? (
                   <button
                     type="button"
                     className="os-link"
                     onClick={() =>
-                      actions.openApp(MATERIALIZER_APP, MATERIALIZER_COMPOSER, {
+                      actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, {
                         compositionId: composition.id,
                       })
                     }

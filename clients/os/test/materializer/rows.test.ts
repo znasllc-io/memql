@@ -13,7 +13,9 @@ import {
   templateFromRow,
 } from "../../src/apps/materializer/rows";
 import {
+  madeCaption,
   modelsPhrase,
+  notSentDetail,
   provenanceClaim,
   sourcesPhrase,
   statusTone,
@@ -138,6 +140,75 @@ describe("the arrival cue's fingerprint", () => {
     expect(after).toBe(before);
     // Reachable positive.
     expect(recipeFingerprint(row({ name: "Yearly" }))).not.toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What the composer says a finished file is
+// ---------------------------------------------------------------------------
+//
+// "The composed text is in the file" is true of a file a model wrote and false of
+// the two the cluster files empty: a blank one (nothing was composed) and a
+// described one (empty until the person approves the Library's draft). The
+// caption follows what is known: the row (a statement, its sources, whether a
+// model was called and whether the file carries its provenance) and, for a file
+// this window asked for by describing it, what became of the hand-off.
+
+const BLANK_NOTE = "Created blank. Its history is kept on its composition, not in the file.";
+const blankRow = (over: Record<string, unknown> = {}) =>
+  compositionRow({ format: "markdown", statement: "", sources: [], modelsUsed: [], provenanceEmbedded: false, provenanceNote: BLANK_NOTE, ...over });
+const describedRow = (over: Record<string, unknown> = {}) => blankRow({ statement: "A one page brief", ...over });
+const caption = (row: Row, here = false, outcome?: { failure: string }) =>
+  madeCaption(compositionFromRow(row), sourcesOf(row), modelsOf(row), here, outcome);
+
+describe("the caption under what was asked for", () => {
+  it("says a blank file was created blank, whatever kind of file it is", () => {
+    for (const format of ["markdown", "txt", "csv", "json", "html"]) {
+      expect(caption(blankRow({ format })), format).toBe("This file was created blank.");
+    }
+  });
+
+  it("says the description was sent once this window has sent it", () => {
+    expect(caption(describedRow(), true, { failure: "" })).toBe("Your description was sent to be written. Open the file to review and approve the draft.");
+    // What this window knows wins over what the row shows: it asked for this file by describing it.
+    expect(caption(describedRow({ provenanceEmbedded: undefined }), true, { failure: "" })).toBe("Your description was sent to be written. Open the file to review and approve the draft.");
+    expect(caption(describedRow({ provenanceEmbedded: undefined }))).toBe("The composed text is in the file. Open it to read what was made.");
+  });
+
+  it("leaves a description this window could not send to the notice that says so", () => {
+    expect(caption(describedRow(), true, { failure: "revision budget exhausted" })).toBe("");
+  });
+
+  it("says only that the file came from a description when this window does not know what became of it", () => {
+    // Opened later from the list: the row alone says it was described (a statement, no model, nothing embedded).
+    expect(caption(describedRow())).toBe("This file was created from a description. Open it to continue.");
+    // Library files travel with a description, so they do not make it a composed file.
+    expect(caption(describedRow({ sources: [{ kind: "library_file", ref: "f1", label: "notes.md", capturedAt: "" }] }))).toBe("This file was created from a description. Open it to continue.");
+    // This window asked for it and has not heard back yet.
+    expect(caption(describedRow(), true)).toBe("This file was created from a description. Open it to continue.");
+  });
+
+  it("keeps the composed-file caption for a file a model wrote", () => {
+    expect(caption(compositionRow())).toBe("The composed text is in the file. Open it to read what was made.");
+    // A Markdown file written from records by the composer: a model was called and the file carries its provenance.
+    expect(caption(compositionRow({ format: "markdown", provenanceEmbedded: true }))).toBe("The composed text is in the file. Open it to read what was made.");
+  });
+
+  it("says nothing about a file that does not exist yet, or failed to", () => {
+    for (const status of ["draft", "composing", "rendering", "failed", "cancelled"]) {
+      expect(caption(compositionRow({ status })), status).toBe("");
+      expect(caption(blankRow({ status })), status).toBe("");
+      expect(caption(describedRow({ status }), true), status).toBe("");
+    }
+  });
+});
+
+describe("a description that was not sent", () => {
+  // The notice's own sentence already says the description was not sent; the SDK's lead-in saying so
+  // again is dropped, and what is left is the cluster's reason.
+  it("shows the cluster's reason without the lead-in", () => {
+    expect(notSentDetail("The description could not be sent for writing: revision budget exhausted")).toBe("revision budget exhausted");
+    expect(notSentDetail("Stopped before the description was sent.")).toBe("Stopped before the description was sent.");
   });
 });
 

@@ -48,8 +48,15 @@ The header’s **Find in document** button and ⌘F/Ctrl+F search rendered docum
 in Read and Review, with highlighted matches, counts and next/previous navigation. Source uses the native
 VS Code text editor, including Find/Replace, selection, Cut/Copy/Paste and undo.
 
-**New Markdown Document** in the command palette creates a blank file in the
-connected cluster and opens Review. An empty document offers **Describe document**
+**New Markdown Document** in the command palette asks for a name and creates a
+blank file in the connected cluster through the Materializer, then opens Review.
+The progress notification says where the creation is ("Saved; waiting for its
+Files entry" while the Library catches up) and can be stopped. Stopping never deletes a file that was
+already made: it stays in Files, and the editor opens it when it is already in
+Files at the moment you stop. A name is a file name, not a path: a name with a
+slash is refused, one that is only an extension (`.md`) is refused as you type,
+and the cluster adds the `.md` itself, so `Plan` and `Plan.md` both make
+`Plan.md`. An empty document offers **Describe document**
 and **Write in Source** instead of the revision and extension circle buttons.
 Describe the content, add it to review, then propose and approve the draft.
 While preparation is running, the empty state opens that existing review;
@@ -183,7 +190,8 @@ The current comment list shows the newest 500 records and reports when more are
 stored. Applying feedback automatically is not enabled by adding a comment.
 
 **Create Email from Examples** asks for an organization, reference files, a name,
-and a brief. Select a PNG, JPEG, GIF, text/HTML/CSS/Markdown/JSON/CSV/SVG file,
+and a brief. The name is checked as you type it with the same rule as New
+Markdown. Select a PNG, JPEG, GIF, text/HTML/CSS/Markdown/JSON/CSV/SVG file,
 or ZIP bundle from the device or recent MemQL Files. The cluster captures the
 permitted source bytes before dispatch, analyzes image references through its
 own model router, and creates an editable `*.email.json` draft. The work appears
