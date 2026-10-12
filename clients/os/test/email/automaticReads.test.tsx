@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -16,9 +16,11 @@ vi.mock("../../src/auth/context", () => ({
 const { EmailApp } = await import("../../src/apps/email/EmailApp");
 const { LocalEmailSettingsStore } = await import("../../src/apps/email/settings");
 const { EMAIL_REFRESH_MS, useReading } = await import("../../src/apps/email/useEmail");
-const { campaignRow, deliveryRow, fakeConnection, withSession } = await import("./harness");
+const { AutoRefresh } = await import("../../src/kit/AutoRefresh");
+const { audienceRow, campaignRow, deliveryRow, fakeConnection, recipientRow, withSession } = await import("./harness");
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); });
+type Conn = ReturnType<typeof fakeConnection>;
 const settle = async () => { await act(async () => {}); };
 const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 
@@ -114,6 +116,85 @@ describe("a reading", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A refresher beside a reading slower than its interval
+// ---------------------------------------------------------------------------
+//
+// The surfaces mount `AutoRefresh onRefresh={reading.reload}`, and `reload`
+// returns a promise that settles when the read it started does, so the
+// refresher counts its next interval from there. A reload that returned at once
+// would tick again while the read was still out, abort it and start another --
+// and a read slower than the interval would never land.
+
+describe("a refresher beside a reading slower than its interval", () => {
+  function Refreshed({ read }: { read: (signal: AbortSignal) => Promise<number> }) {
+    const reading = useReading(0, read, [read]);
+    return (
+      <>
+        <AutoRefresh onRefresh={reading.reload} busy={reading.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
+        <output aria-label="answer">{reading.value}</output>
+      </>
+    );
+  }
+  const answer = () => screen.getByLabelText("answer").textContent;
+
+  it("waits for the read to land instead of aborting it, then keeps time from there", async () => {
+    vi.useFakeTimers();
+    const signals: AbortSignal[] = [];
+    let finish!: (value: number) => void;
+    const read = vi.fn((signal: AbortSignal) => {
+      signals.push(signal);
+      // The first read is quick; the next is out for longer than three intervals.
+      if (signals.length === 1) return Promise.resolve(1);
+      return new Promise<number>((done) => { finish = done; });
+    });
+    render(<Refreshed read={read} />);
+    await settle();
+    expect(answer()).toBe("1");
+
+    await advance(EMAIL_REFRESH_MS);
+    expect(read).toHaveBeenCalledTimes(2);
+    // Three more intervals pass with the read still out: no second read starts
+    // under it, and it is not aborted.
+    await advance(EMAIL_REFRESH_MS * 3);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(signals[1]!.aborted).toBe(false);
+    expect(answer()).toBe("1");
+
+    // It lands, and it is the answer on screen.
+    await act(async () => finish(2));
+    expect(answer()).toBe("2");
+    expect(signals[1]!.aborted).toBe(false);
+
+    // The next interval is counted from the landing, not from the start.
+    await advance(EMAIL_REFRESH_MS - 1);
+    expect(read).toHaveBeenCalledTimes(2);
+    await advance(1);
+    expect(read).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps the last answer while a read is out, and tries again after a read fails", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const read = vi.fn(async (_signal: AbortSignal) => {
+      calls += 1;
+      if (calls === 2) throw new Error("The cluster is busy.");
+      return calls;
+    });
+    render(<Refreshed read={read} />);
+    await settle();
+    expect(answer()).toBe("1");
+
+    await advance(EMAIL_REFRESH_MS);
+    expect(read).toHaveBeenCalledTimes(2);
+    // The refused read keeps what was known; the refresher is not stopped by it.
+    expect(answer()).toBe("1");
+    await advance(EMAIL_REFRESH_MS);
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(answer()).toBe("3");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // The shared refresh: a page refreshes while it is seen, and only then
 // ---------------------------------------------------------------------------
 
@@ -191,5 +272,114 @@ describe("the shared refresh", () => {
     visibility.mockReturnValue("visible");
     await act(async () => document.dispatchEvent(new Event("visibilitychange")));
     expect(reads()).toBe(away + 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Every reading with a refresher: refreshed while it is seen, parked with its pane
+// ---------------------------------------------------------------------------
+//
+// The ledger above is one of SIX readings that keep themselves fresh (and one of
+// them is mounted on two pages), because
+// what they read is shopper- or send-volume data that the mesh does not
+// broadcast: a campaign's ledger, its stats, its test runs, the ledger of one
+// test, an audience's roster, and a signup form's recent welcomes. Each has an
+// `AutoRefresh` mounted beside it, and each of those can be forgotten or left
+// running behind a tab nobody is looking at. So each is held to the same two
+// things: it reads again every EMAIL_REFRESH_MS while its pane is seen, and it
+// reads nothing once the person has gone to another tab.
+
+describe("every reading that keeps itself fresh", () => {
+  const RUN = campaignRow({ id: "run-1", name: "August update · Test", testSourceCampaignId: "c1", audienceId: "a-test", status: "sent", recipientCount: 1, sentCount: 1, startedAt: "2031-10-14T16:00:00Z" });
+  const BINDING = { id: "n1", siteId: "site", audienceId: "a1", templateId: "t1", senderIdentityId: "s1", enabled: true, consentText: "Email me the newsletter.", createdAt: "2026-10-01T12:01:00Z" };
+
+  function openWindow(conn: ReturnType<typeof fakeConnection>) {
+    h.connection = conn;
+    const bag = new Map<string, string>();
+    const store = new LocalEmailSettingsStore({ getItem: (k: string) => bag.get(k) ?? null, setItem: (k: string, v: string) => void bag.set(k, v) });
+    const app = (section: string) =>
+      withSession(<EmailApp sectionId={section} navigate={() => {}} askContext={() => {}} store={store} uploads={{ upload: vi.fn() }} />);
+    const view = render(app("campaigns"));
+    return { view, app, section: (next: string) => view.rerender(app(next)) };
+  }
+
+  /** A campaign's page, with its test run beside it. */
+  async function campaignPage() {
+    const conn = fakeConnection({
+      campaigns: [campaignRow({ id: "c1", recipientCount: 10, sentCount: 10, status: "sent" })],
+      deliveriesForCampaign: [deliveryRow({ id: "d1" })],
+      testRuns: [RUN],
+      campaignStats: [{ sent: 10 }],
+    });
+    const win = openWindow(conn);
+    fireEvent.click(await screen.findByText("August update"));
+    await screen.findByText("dana@acme.com");
+    await waitFor(() => expect(conn.query.campaignStats).toHaveBeenCalled());
+    await waitFor(() => expect(conn.query.campaignTestRuns).toHaveBeenCalled());
+    await settle();
+    return { conn, ...win };
+  }
+
+  /** One test's page, which keeps the campaign's runs and its own ledger fresh. */
+  async function testRunPage() {
+    const page = await campaignPage();
+    const runs = await screen.findByRole("list", { name: "Test runs" });
+    fireEvent.click(within(runs).getAllByRole("button")[0]!);
+    await screen.findByRole("heading", { level: 3, name: /^Test on / });
+    await waitFor(() => expect(page.conn.query.deliveriesForCampaign).toHaveBeenCalledWith({ campaignId: "run-1" }, expect.anything()));
+    await settle();
+    return page;
+  }
+
+  /** An audience's page, with the roster and, when a signup form is connected, its welcomes. */
+  async function audiencePage() {
+    const conn = fakeConnection({
+      audiences: [audienceRow({ id: "a1", name: "Newsletter" })],
+      recipientsForAudience: [recipientRow({ id: "r1", audienceId: "a1", email: "one@acme.com" })],
+      newsletters: [BINDING],
+      welcomes: [{ id: "signup", status: "sent", email: "new@acme.com", requestedAt: "2026-10-01T12:01:00Z", createdAt: "2026-10-01T12:02:00Z" }],
+    });
+    const win = openWindow(conn);
+    win.section("audiences");
+    fireEvent.click(await screen.findByText("Newsletter"));
+    await screen.findByText("one@acme.com");
+    await waitFor(() => expect(conn.query.newsletterWelcomesForAudience).toHaveBeenCalled());
+    await settle();
+    return { conn, ...win };
+  }
+
+  const READINGS = [
+    ["a campaign's ledger", campaignPage, (c: Conn) => c.query.deliveriesForCampaign.mock.calls.filter(([a]) => (a as { campaignId: string }).campaignId === "c1").length],
+    ["a campaign's stats", campaignPage, (c: Conn) => c.query.campaignStats.mock.calls.length],
+    ["a campaign's test runs", campaignPage, (c: Conn) => c.query.campaignTestRuns.mock.calls.length],
+    ["one test's ledger", testRunPage, (c: Conn) => c.query.deliveriesForCampaign.mock.calls.filter(([a]) => (a as { campaignId: string }).campaignId === "run-1").length],
+    // The same reading as the campaign's, kept fresh by the test's own page as well.
+    ["a campaign's test runs, from one test's page", testRunPage, (c: Conn) => c.query.campaignTestRuns.mock.calls.length],
+    ["an audience's roster", audiencePage, (c: Conn) => c.query.recipientsForAudience.mock.calls.length],
+    ["a signup form's welcomes", audiencePage, (c: Conn) => c.query.newsletterWelcomesForAudience.mock.calls.length],
+  ] as const;
+
+  it.each(READINGS)("%s reads every five seconds while it is seen, and nothing once its pane is parked", async (_name, open, count) => {
+    const { conn, section } = await open();
+    const reads = () => count(conn);
+    const first = reads();
+    expect(first).toBeGreaterThan(0);
+
+    // Coming back to the window wakes the page's refreshers, which then keep
+    // time on the clock this test controls.
+    vi.useFakeTimers();
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    const armed = reads();
+    expect(armed).toBe(first + 1);
+    await advance(EMAIL_REFRESH_MS);
+    expect(reads()).toBe(armed + 1);
+    await advance(EMAIL_REFRESH_MS);
+    expect(reads()).toBe(armed + 2);
+
+    // The person goes to another tab. The page stays mounted behind it, and stops reading.
+    section("overview");
+    const left = reads();
+    await advance(EMAIL_REFRESH_MS * 3);
+    expect(reads()).toBe(left);
   });
 });

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { useLayoutEffect } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readTheBar } from "../readTheBar";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -501,6 +501,53 @@ describe("a composed feed", () => {
     expect(conn.query.campaignTestSettings.mock.calls.slice(2).map(([args]) => (args as { accountId: string }).accountId).sort()).toEqual(["acme", "other"]);
   });
 
+  it("reads an id that joined while a read was running, once that read has landed", async () => {
+    // The seed started with {c1}. The set grows to {c1, c2} while it is still
+    // out: the running read cannot be changed, so its answer lands for the set it
+    // started with and a whole read follows for the set that is wanted now.
+    const conn = fakeConnection({ campaignSeries: [series("c1"), series("c2")] });
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    const answer = conn.query.campaignSeriesForCampaign.getMockImplementation()!;
+    conn.query.campaignSeriesForCampaign.mockImplementationOnce(async (args, opts) => { await gate; return answer(args, opts); });
+    h.connection = conn;
+    const { result, rerender } = renderHook(({ ids }) => useSeriesFeed(ids), { initialProps: { ids: ["c1"] } });
+    await waitFor(() => expect(conn.query.campaignSeriesForCampaign).toHaveBeenCalledTimes(1));
+
+    rerender({ ids: ["c1", "c2"] });
+    // Nothing is read for the new id while the first read is out, and nothing is lost.
+    await act(async () => {});
+    expect(conn.query.campaignSeriesForCampaign).toHaveBeenCalledTimes(1);
+    expect(result.current.settled("c2")).toBe(false);
+
+    await act(async () => { release(); });
+    await waitFor(() => expect(sourcesOf(result.current.snapshot.rows)).toEqual(["c1", "c2"]));
+    await waitFor(() => expect(result.current.settled("c2")).toBe(true));
+    const asked = conn.query.campaignSeriesForCampaign.mock.calls.map(([args]) => (args as { campaignId: string }).campaignId);
+    expect(asked.filter((id) => id === "c2")).toEqual(["c2"]);
+    expect(opened(conn, SERIES)).toBe(1);
+    expect(peakSubscriptions(conn).get(SERIES)).toBe(1);
+  });
+
+  it("drops an id that left while a read was running, and does not bring its rows back", async () => {
+    const conn = fakeConnection({ campaignSeries: [series("c1"), series("c2")] });
+    let release!: () => void;
+    const gate = new Promise<void>((done) => { release = done; });
+    const answer = conn.query.campaignSeriesForCampaign.getMockImplementation()!;
+    conn.query.campaignSeriesForCampaign.mockImplementation(async (args, opts) => { await gate; return answer(args, opts); });
+    h.connection = conn;
+    const { result, rerender } = renderHook(({ ids }) => useSeriesFeed(ids), { initialProps: { ids: ["c1", "c2"] } });
+    await waitFor(() => expect(conn.query.campaignSeriesForCampaign).toHaveBeenCalledTimes(2));
+
+    rerender({ ids: ["c1"] });
+    await act(async () => { release(); });
+    await waitFor(() => expect(sourcesOf(result.current.snapshot.rows)).toEqual(["c1"]));
+    // Its row on the stream is not the feed's either.
+    await act(async () => conn.subscriptions.emit(SERIES, { ...series("c2"), status: "paused" }));
+    expect(sourcesOf(result.current.snapshot.rows)).toEqual(["c1"]);
+    expect(result.current.settled("c2")).toBe(false);
+  });
+
   it("reads a crowd of ids a few at a time", async () => {
     const conn = fakeConnection();
     let active = 0;
@@ -519,6 +566,78 @@ describe("a composed feed", () => {
     await waitFor(() => expect(result.current.snapshot.state).toBe("live"));
     expect(most).toBeGreaterThan(1);
     expect(most).toBeLessThanOrEqual(6);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A feed nothing holds any more
+// ---------------------------------------------------------------------------
+//
+// A collection's last release lingers for a few seconds (so a window that comes
+// straight back finds it), and then lets go: its subscription is closed and a
+// read still out is told to stop. Without that the app root's feeds would hold a
+// subscription and a read open for a window that is gone.
+
+describe("a feed once nothing holds it", () => {
+  /** The lingering moment of a released collection (src/live/useLiveCollection.ts). */
+  const LINGER_MS = 5_000;
+  const series = { id: "series-c1", sourceCampaignId: "c1", status: "active", intervalWeeks: 2, timeZone: "UTC", anchorAt: "2028-01-02T16:00:00Z", nextAt: "2028-01-16T16:00:00Z", createdAt: "2027-10-01T12:00:00Z" };
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  it("keeps its subscription for the lingering moment, then lets it go", async () => {
+    const conn = fakeConnection({ campaignSeries: [series] });
+    h.connection = conn;
+    const view = renderHook(() => useSeriesFeed(["c1"]));
+    await waitFor(() => expect(view.result.current.snapshot.state).toBe("live"));
+    expect(liveSubscriptions(conn).get(SERIES)).toBe(1);
+
+    vi.useFakeTimers();
+    view.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(LINGER_MS - 1); });
+    expect(liveSubscriptions(conn).get(SERIES)).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(liveSubscriptions(conn).get(SERIES) ?? 0).toBe(0);
+  });
+
+  it("tells a read that is still out to stop, and reads nothing more", async () => {
+    const conn = fakeConnection({ campaignSeries: [series] });
+    const signals: AbortSignal[] = [];
+    conn.query.campaignSeriesForCampaign.mockImplementation((_args, opts) => {
+      signals.push((opts as { signal: AbortSignal }).signal);
+      return new Promise(() => {});
+    });
+    h.connection = conn;
+    const view = renderHook(() => useSeriesFeed(["c1"]));
+    await waitFor(() => expect(signals).toHaveLength(1));
+    expect(signals[0]!.aborted).toBe(false);
+
+    vi.useFakeTimers();
+    view.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(LINGER_MS - 1); });
+    expect(signals[0]!.aborted).toBe(false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(signals[0]!.aborted).toBe(true);
+    expect(liveSubscriptions(conn).get(SERIES) ?? 0).toBe(0);
+    expect(conn.query.campaignSeriesForCampaign).toHaveBeenCalledTimes(1);
+  });
+
+  it("is retained and released in balance by a double mount, and issues no second read", async () => {
+    // StrictMode mounts, releases and retains again before anything is on screen.
+    // The release lingers, so the second retain finds the same collection: one
+    // subscription, one read per id -- and it is let go once, after the moment.
+    const conn = fakeConnection({ campaignSeries: [series] });
+    h.connection = conn;
+    const view = renderHook(() => useSeriesFeed(["c1"]), { reactStrictMode: true });
+    await waitFor(() => expect(view.result.current.snapshot.state).toBe("live"));
+    expect(opened(conn, SERIES)).toBe(1);
+    expect(peakSubscriptions(conn).get(SERIES)).toBe(1);
+    expect(conn.query.campaignSeriesForCampaign).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    view.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(LINGER_MS); });
+    expect(liveSubscriptions(conn).get(SERIES) ?? 0).toBe(0);
   });
 });
 
