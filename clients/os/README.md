@@ -1739,9 +1739,10 @@ into a file filed quietly at the top, somewhere nobody chose.
 
 ### A starting setup
 
-Other apps open the Materializer already pointed at a file to make. The contract
-is one module, `src/items/materialize.ts`, which a sender imports instead of
-anything under `apps/materializer/`:
+Other apps can open the Materializer already pointed at a file to make; no app in
+the shell sends one today. The contract is one module,
+`src/items/materialize.ts`, which a sender imports instead of anything under
+`apps/materializer/`, and the tests exercise it against the current composer:
 
 ```ts
 actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
@@ -1775,9 +1776,6 @@ actions.openApp(MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent
   moves nobody and says nothing; `test/materializer/intent.test.tsx` pins
   `composer` against the manifest's own list.
 
-The first senders are "New Markdown file" in Files and "Create new template" in
-the Email wizard, which arrive with the later sub-projects of the rework.
-
 ### The seam with Files
 
 Agreed with the Files-places epic (memql#4981) and recorded in both places:
@@ -1801,9 +1799,8 @@ the editor's and the Library's revision workflow's job, not this window's.
 
 **There is no folder control.** A folder arrives with a starting setup, and a
 refusal tells the person to choose another one with nothing here to choose it
-with; the Materializer redesign (sub-project 4) is where the control belongs. A
-recipe whose folder has since been archived is refused by the same rule, and
-nothing in the OS edits a recipe's folder.
+with. A recipe whose folder has since been archived is refused by the same rule,
+and nothing in the OS edits a recipe's folder.
 
 **There is no Retry on a failed composition**, and Start over is offered
 instead. The record holds the sources it RESOLVED rather than the form that

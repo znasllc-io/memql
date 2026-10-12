@@ -63,14 +63,18 @@
 // ("this feedback request was already used with different content"). Changed
 // inputs are a new ask and need a new request id.
 //
-// A STOP DOES NOT TAKE A FILE AWAY. From the moment the composition is ready the
-// file exists, and a stop has nothing left to cancel. So materialize still
-// resolves with the file: it skips the hand-off and, for a described request,
-// says so in `revisionFailure` ("Stopped before the description was sent."), so
-// the caller can open the empty file and offer the description again. The one
-// stop that still throws after the file exists is one that lands while its Files
-// entry is not there yet (see followComposition): without the entry there is no
-// artifact to hand back.
+// A STOP NEVER DELETES A FILE THAT WAS ALREADY MADE: it stays in Files. From the
+// moment the composition is ready the file exists, and a stop has nothing left to
+// cancel. So materialize returns the file when it is already in Files at the
+// moment of the stop: it skips the hand-off and, for a described request, says so
+// in `revisionFailure` ("Stopped before the description was sent."), so the
+// caller can open the empty file and offer the description again. That includes a
+// stop that raced the composition finishing: the cluster cancels nothing that has
+// finished and says so, and the composition is read again before the file is
+// given up. The one stop that still throws after the file exists is one that
+// lands while its Files entry is not there yet (see followComposition): without
+// the entry there is no artifact to hand back, and the file is in Files a moment
+// later.
 import {
   buildComposeCancel,
   buildComposeMaterialize,
@@ -246,11 +250,18 @@ async function deadRunMessage(execute: MaterializeExecute, runId: string): Promi
  * throws MaterializeCancelled when it is not (there is no artifact yet to hand
  * back; the composition stays ready and its file is kept).
  *
+ * The look that saw the composition unfinished can be a whole interval old when
+ * the stop arrives, so the composition may have finished in between. The cluster
+ * cancels nothing that has finished and says so (`cancelled: false`); the
+ * composition is then read again and a ready one is treated exactly like a stop
+ * after the file exists, and one that failed reports why.
+ *
  * Never hands a description to the Library: see the header, and materialize.
  */
 export async function followComposition(ports: MaterializePorts, compositionId: string): Promise<MaterializeResult> {
   const { execute, signal } = ports;
   const interval = ports.intervalMs ?? DEFAULT_INTERVAL_MS;
+  const read = async (): Promise<Row | null> => first(await execute("compositionById", buildCompositionById({ compositionId })));
   // The file, once the composition is ready. A new file's Files entry is written
   // after the file, by an automation, so it may not be there yet.
   let made: { fileId: string; name: string } | null = null;
@@ -259,6 +270,15 @@ export async function followComposition(ports: MaterializePorts, compositionId: 
     const artifactId = rowString(artifact, "id");
     return artifactId ? { compositionId, fileId, artifactId, name: rowString(artifact, "title") || name } : null;
   };
+  // What the composition's row settles: its file once it is ready, nothing while
+  // it is still being made, and an error when it failed, was stopped or cannot be read.
+  const settled = (row: Row | null): { fileId: string; name: string } | null => {
+    if (!row) throw new MaterializeFailed("This composition is no longer readable. Its history remains in Materializer.");
+    const status = rowString(row, "status");
+    if (status === "failed") throw new MaterializeFailed(rowString(row, "failureReason") || "Materializer could not finish this file.");
+    if (status === "cancelled") throw new MaterializeCancelled(STOPPED);
+    return status === "ready" ? { fileId: rowString(row, "outputFileId"), name: rowString(row, "name") } : null;
+  };
   const stop = async (): Promise<MaterializeResult> => {
     if (made) {
       // Nothing to cancel, and the stop may have cut a wait short: look once more.
@@ -266,20 +286,27 @@ export async function followComposition(ports: MaterializePorts, compositionId: 
       if (kept) return kept;
       throw new MaterializeCancelled(STOPPED);
     }
-    await execute("composeCancel", buildComposeCancel({ compositionId, reason: STOP_REASON }));
+    const reply = first(await execute("composeCancel", buildComposeCancel({ compositionId, reason: STOP_REASON })));
+    // A composition that had already finished is not cancelled, and the cluster says so. Its file may
+    // have been made after the look that sent this stop, so read it again before giving it up.
+    if (reply?.["cancelled"] === false) {
+      const finished = settled(await read());
+      if (finished) {
+        made = finished;
+        const kept = await filesEntry(made);
+        if (kept) return kept;
+      }
+    }
     throw new MaterializeCancelled(STOPPED);
   };
   for (;;) {
     if (signal?.aborted) return stop();
-    const row = first(await execute("compositionById", buildCompositionById({ compositionId })));
-    if (!row) throw new MaterializeFailed("This composition is no longer readable. Its history remains in Materializer.");
-    const status = rowString(row, "status");
-    if (status === "failed") throw new MaterializeFailed(rowString(row, "failureReason") || "Materializer could not finish this file.");
-    if (status === "cancelled") throw new MaterializeCancelled(STOPPED);
-    if (status === "ready") {
+    const row = await read();
+    const file = settled(row);
+    if (file) {
       // A ready composition keeps its file whatever its run says, which is why
       // the run is not read here.
-      made = { fileId: rowString(row, "outputFileId"), name: rowString(row, "name") };
+      made = file;
       const entry = await filesEntry(made);
       if (entry) return entry;
       // A stop already in effect saw the look just made: that was the last one.
@@ -289,7 +316,7 @@ export async function followComposition(ports: MaterializePorts, compositionId: 
       const runId = rowString(row, "runId");
       const dead = runId ? await deadRunMessage(execute, runId) : "";
       if (dead) throw new MaterializeFailed(dead);
-      ports.onStatus?.(status);
+      ports.onStatus?.(rowString(row, "status"));
     }
     try {
       await pause(interval, signal);
@@ -482,11 +509,12 @@ export async function handOffDescription(execute: MaterializeExecute, request: H
  * for a described Markdown request, hands the description to the Library's
  * revision workflow, returning its `revisionId` or `revisionFailure` on the
  * result, with the references it could not attach in `unattached`. Resolves once
- * the FILE exists even when the hand-off failed, or was stopped: a stop after the
- * file exists skips the hand-off and comes back as `revisionFailure` ("Stopped
- * before the description was sent."), never as an error that hides the file. A
- * stop before the file exists throws MaterializeCancelled. See the header for
- * the request id rules.
+ * the FILE exists even when the hand-off failed, or was stopped. A stop never
+ * deletes a file that was already made: when the file is already in Files at the
+ * moment of the stop, it is returned, with the hand-off skipped and (for a
+ * described request) `revisionFailure` "Stopped before the description was sent."
+ * A stop before the file exists, or before its Files entry does, throws
+ * MaterializeCancelled. See the header for the request id rules.
  *
  * The hand-off itself is not interruptible: once it has begun it finishes.
  */

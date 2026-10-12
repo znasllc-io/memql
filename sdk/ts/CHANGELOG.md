@@ -18,9 +18,12 @@ the Library accepts attached, then a revision request) and returns `revisionId` 
 `revisionFailure` without throwing, with the references it could not attach in
 `unattached`. `composeMaterialize` gains `requestId`: repeating it returns the
 same composition, so mint a new one for every person action. An aborted signal
-cancels a composition that is still being made and keeps a file that exists
-(`revisionFailure` "Stopped before the description was sent."). A described
-request's id may use letters, digits, `-` and `_`, at most 111 characters.
+cancels a composition that is still being made. Stopping never deletes a file
+that was already made: it stays in Files, and `materialize` returns it when it is
+already in Files at the moment of the stop (a described request then carries
+`revisionFailure` "Stopped before the description was sent."), and throws
+`MaterializeCancelled` when it is not yet. A described request's id may use
+letters, digits, `-` and `_`, at most 111 characters.
 
 **`AiChatOptions.level`** -- how much intelligence a chat call needs: `""`
 (Auto: the cluster's rules decide), `"fast"`, `"strong"` or `"reasoning"`. It

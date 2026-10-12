@@ -95,18 +95,27 @@ not change, the design.
    it does not check the folder first, which would turn the refusal into a file
    filed quietly at the top. A repeat of an accepted request finds its
    composition and is not refused because the folder was archived since.
-9. **A stop after the file exists keeps the file.** Once the composition is ready
-   there is nothing to cancel, so `materialize` still resolves with the file; for
-   a described request it skips the hand-off and returns `revisionFailure`
-   "Stopped before the description was sent.". A stop before the file exists
-   cancels the composition and throws `MaterializeCancelled`, and so does a stop
-   while a ready file's Files entry is still missing (there is no artifact to
-   hand back). VS Code's New Markdown notification is cancellable on this basis.
+9. **A stop never deletes a file that was already made.** It stays in Files, and
+   the client opens it when it is already in Files at the moment of the stop. Once
+   the composition is ready there is nothing to cancel, so `materialize` returns
+   the file; for a described request it skips the hand-off and returns
+   `revisionFailure` "Stopped before the description was sent.". A stop that races
+   the composition finishing is the same: `composeCancel` cancels nothing that has
+   finished and answers `cancelled: false`, and the composition is read again
+   before the file is given up (a composition that failed meanwhile reports why).
+   A stop before the file exists cancels the composition and throws
+   `MaterializeCancelled`, and so does a stop while a ready file's Files entry is
+   still missing: there is no artifact to hand back, and the file is in Files a
+   moment later. VS Code's New Markdown notification is cancellable on this basis.
 10. **The `composeFile` agent tool requires a statement.** The tool reaches the
     Materializer through `composeMaterializeWritten`, a builtin that is not an SDK
-    construct and refuses a statement that is empty or only spaces; otherwise the
-    Materializer's blank-file rule would hand an agent that sent none an empty
-    document it believed it had written.
+    construct and requires one. The engine's call contract already refuses an
+    empty or whitespace-only value for a string field at parse time
+    (`composeMaterialize() statement cannot be empty`), before any handler runs,
+    so an empty statement from the tool is refused either way; the wrapper
+    declares the requirement where the tool is, and its handler refuses with a
+    sentence that names `composeFile`. Its field declarations are copies of
+    `composeMaterialize`'s, and a test holds the copies together.
 
 ## In plain terms
 
@@ -330,7 +339,9 @@ Behaviour:
    failed, cancelled or abandoned ends the follow with the run's message, so an
    abandoned run is not waited on for ever.
 5. An aborted `signal` before the composition is ready calls `composeCancel`
-   with the reason "Stopped by the person" and throws `MaterializeCancelled`.
+   with the reason "Stopped by the person" and throws `MaterializeCancelled`,
+   unless the cluster answers that the composition had already finished
+   (`cancelled: false`), in which case it is read again and handled as below.
    After it is ready nothing is cancelled and the file is kept (amendment 9).
 6. For a described Markdown request, once the artifact resolves, `materialize`
    calls `handOffDescription({ artifactId, statement, sources, requestId })` and
@@ -441,7 +452,7 @@ constructs the rules ban.
 | Run fails | The composition's failure reason | Composition `failed`, retryable from "Materialized" |
 | File created, the client's hand-off to the revision workflow fails | The document opens with a notice that the description was not applied, and "Describe document" available | The empty file, and the composition `ready` with its `statement` |
 | Person cancels before the file exists | Nothing further | Composition `cancelled` |
-| Person cancels after the file exists | The file, with the description marked as not sent | The file is kept; no hand-off is made |
+| Person cancels after the file exists | If the file is already in Files when they stop, the client opens it, with the description marked as not sent; otherwise nothing opens | The file stays in Files either way; no hand-off is made |
 | Files entry slow to appear | "Saved; waiting for its Files entry" | Polling continues |
 | Same request repeated (double click, retry) | The same result | One composition, one file |
 

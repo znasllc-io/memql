@@ -186,6 +186,90 @@ test("a stop already in effect when the Files entry was looked for does not look
   assert.equal(f.named("composeCancel").length, 0);
 });
 
+// ---------------------------------------------------------------------------
+// A stop that races the composition finishing
+// ---------------------------------------------------------------------------
+//
+// The look that saw "composing" can be up to a whole interval old when the stop arrives. If the
+// composition finished in that time the file exists, and composeCancel, which cancels nothing that
+// has finished, says so: integrations/compose/handlers.go answers `cancelled: false` with the
+// composition's own status. The stop must not throw the file away on the strength of a look that
+// is out of date.
+const alreadyFinished = (status: string): Rows => [{ compositionId: "c1", status, cancelled: false, note: "that composition had already finished, so nothing was stopped" }];
+const stoppedAfter = (run: Promise<unknown>, controller: AbortController) => { setTimeout(() => controller.abort(), 12); return run; };
+
+test("a composition that finishes while the stop is on its way keeps its file", async () => {
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1", name: "Brief" }]],
+    composeCancel: [alreadyFinished("ready")],
+    libraryArtifactForFile: [[{ id: "a1", title: "Brief.md" }]],
+  });
+  const result = await stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller);
+  assert.deepEqual(result, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md" });
+  assert.deepEqual(f.calls.map(c => c.name), ["compositionById", "composeCancel", "compositionById", "libraryArtifactForFile"]);
+});
+
+test("a stop that raced a finished composition, whose Files entry is not there yet, ends without a second cancel", async () => {
+  // The same rule as a stop after the file exists: with no entry there is no artifact to hand back,
+  // so this one throws, and the composition stays ready with its file.
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1", name: "Brief" }]],
+    composeCancel: [alreadyFinished("ready")],
+    libraryArtifactForFile: [[]],
+  });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller), MaterializeCancelled);
+  assert.deepEqual(f.calls.map(c => c.name), ["compositionById", "composeCancel", "compositionById", "libraryArtifactForFile"]);
+});
+
+test("a composition that failed while the stop was on its way reports why, as a poll would have", async () => {
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }], [{ status: "failed", failureReason: "No access to notes.md" }]],
+    composeCancel: [alreadyFinished("failed")],
+  });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller),
+    (e: Error) => e instanceof MaterializeFailed && e.message === "No access to notes.md");
+});
+
+test("a composition stopped from elsewhere while the stop was on its way is a stop", async () => {
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }], [{ status: "cancelled" }]],
+    composeCancel: [alreadyFinished("cancelled")],
+  });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller), MaterializeCancelled);
+});
+
+test("a cancel that took effect is not followed by another look at the composition", async () => {
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }]],
+    composeCancel: [[{ compositionId: "c1", status: "cancelled", cancelled: true }]],
+  });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller), MaterializeCancelled);
+  assert.deepEqual(f.calls.map(c => c.name), ["compositionById", "composeCancel"]);
+});
+
+test("a cancel the cluster answers with nothing is a stop, and is not followed by another look", async () => {
+  const controller = new AbortController();
+  const f = fake({ compositionById: [[{ status: "composing" }]], composeCancel: [[]] });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller), MaterializeCancelled);
+  assert.deepEqual(f.calls.map(c => c.name), ["compositionById", "composeCancel"]);
+});
+
+test("a cancel that says it finished a composition that still reads as unfinished is a stop, and does not loop", async () => {
+  const controller = new AbortController();
+  const f = fake({
+    compositionById: [[{ status: "composing" }]],
+    composeCancel: [alreadyFinished("ready")],
+  });
+  await assert.rejects(stoppedAfter(followComposition({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, "c1"), controller), MaterializeCancelled);
+  assert.equal(f.named("composeCancel").length, 1);
+  assert.equal(f.named("compositionById").length, 2);
+});
+
 test("an already stopped signal cancels the composition without reading it", async () => {
   const controller = new AbortController();
   controller.abort();
@@ -894,6 +978,29 @@ test("a stop before the file exists still ends materialize with nothing returned
   await assert.rejects(materialize({ execute: f.execute, signal: controller.signal, intervalMs: 60_000 }, described), MaterializeCancelled);
   assert.equal(f.named("composeCancel").length, 1);
   assert.equal(f.named("libraryAddDocumentComment").length, 0);
+});
+
+test("a described file that was finished while the stop was on its way is returned, and its description is not sent", async () => {
+  const controller = new AbortController();
+  const f = fake(describedScript({
+    compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1", name: "Brief" }]],
+    composeCancel: [alreadyFinished("ready")],
+  }));
+  const result = await stoppedAfter(materialize({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, described), controller);
+  assert.deepEqual(result, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md", revisionFailure: STOPPED_BEFORE_SENT });
+  assert.equal(f.named("libraryAddDocumentComment").length, 0);
+  assert.equal(f.named("libraryRequestDocumentRevision").length, 0);
+  assert.equal(f.named("composeCancel").length, 1);
+});
+
+test("a blank file that was finished while the stop was on its way is returned as it is", async () => {
+  const controller = new AbortController();
+  const f = fake(describedScript({
+    compositionById: [[{ status: "composing" }], [{ status: "ready", outputFileId: "f1", name: "Brief" }]],
+    composeCancel: [alreadyFinished("ready")],
+  }));
+  const result = await stoppedAfter(materialize({ execute: f.execute, signal: controller.signal, intervalMs: 5000 }, { name: "Brief", format: "markdown", requestId: "req-0006" }), controller);
+  assert.deepEqual(result, { compositionId: "c1", fileId: "f1", artifactId: "a1", name: "Brief.md" });
 });
 
 const notDescribed: [string, MaterializeRequest][] = [

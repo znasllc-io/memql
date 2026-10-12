@@ -1521,6 +1521,9 @@ func TestFromARunIsTrueOnlyForAContextThatNamesARun(t *testing.T) {
 // request with nothing to compose from, which is what a person's client asks for
 // on purpose and what an agent never means. So the tool reaches the Materializer
 // through composeMaterializeWritten, which refuses a statement that says nothing.
+// (On the tool's path the engine's call contract refuses a blank string field
+// first, at parse time; this is the handler's own refusal, for a caller that
+// reaches it without that parse.)
 func TestComposeFileRefusesAStatementThatSaysNothing(t *testing.T) {
 	for name, statement := range map[string]any{"empty": "", "spaces": "   ", "line breaks": "\n\t \n", "missing": nil} {
 		i, e, u := materializeFixture(t)
@@ -1559,8 +1562,12 @@ func TestComposeFileWithAStatementIsComposedFromIt(t *testing.T) {
 // The tool, the builtin it calls, the capability that builtin names and the
 // handler registered under that name are four things in three places, and the
 // refusal only protects an agent if every link holds. This walks the chain from
-// the DSL, so a tool pointed back at composeMaterialize (which files a blank
-// document for an empty statement) fails here and not in front of an agent.
+// the DSL, so a tool pointed back at composeMaterialize (which takes a request
+// with no statement at all, and files a blank document for it) fails here and not
+// in front of an agent.
+//
+// It reads the DSL files, which Go's test cache does not notice changing: run it
+// with -count=1 after editing them.
 func TestComposeFileReachesTheStatementEntryThroughTheDeclaredChain(t *testing.T) {
 	tools := readRepoFile(t, filepath.Join("dsl", "compose", "tools.memql"))
 	header := regexp.MustCompile(`(?s)((?:@[^\n]*\n)+)tool composeFile \{`).FindStringSubmatch(tools)
@@ -1572,7 +1579,7 @@ func TestComposeFileReachesTheStatementEntryThroughTheDeclaredChain(t *testing.T
 		t.Fatalf("composeFile has no function handler:\n%s", header[1])
 	}
 	if handler[1] == "composeMaterialize" {
-		t.Fatal("composeFile calls composeMaterialize, which files an empty document for an empty statement: it must call the entry that refuses one")
+		t.Fatal("composeFile calls composeMaterialize, which takes a request with no statement and files an empty document for it: it must call the entry that requires one")
 	}
 	builtins := readRepoFile(t, filepath.Join("dsl", "compose", "builtins.memql"))
 	declaration := regexp.MustCompile(`(?s)((?:@[^\n]*\n)+)builtin ` + handler[1] + ` \{(.*?)\n\}`).FindStringSubmatch(builtins)
@@ -1605,6 +1612,83 @@ func TestComposeFileReachesTheStatementEntryThroughTheDeclaredChain(t *testing.T
 	}
 	if len(e.compositions) != 0 || len(e.files) != 0 || u.calls != 0 {
 		t.Fatal("the refused request wrote something")
+	}
+}
+
+// builtinField is one field line of a builtin, or of the tool, in the DSL.
+type builtinField struct {
+	typ         string
+	required    bool
+	description string
+}
+
+var fieldLine = regexp.MustCompile(`(?m)^[ \t]+(\w+)[ \t]+(\[\]\w+|\w+)(!?)(?:[ \t]+@description\("((?:[^"\\]|\\.)*)"\))?[ \t]*$`)
+
+// dslFields reads the fields of `<kind> <name> { ... }` out of DSL source.
+func dslFields(t *testing.T, src, kind, name string) map[string]builtinField {
+	t.Helper()
+	block := regexp.MustCompile(`(?s)\n` + kind + ` ` + name + ` \{(.*?)\n\}`).FindStringSubmatch(src)
+	if block == nil {
+		t.Fatalf("the DSL declares no `%s %s`; update this test with it", kind, name)
+	}
+	fields := map[string]builtinField{}
+	for _, m := range fieldLine.FindAllStringSubmatch(block[1], -1) {
+		fields[m[1]] = builtinField{typ: m[2], required: m[3] == "!", description: m[4]}
+	}
+	if len(fields) == 0 {
+		t.Fatalf("read no fields from `%s %s`; this test would assert nothing", kind, name)
+	}
+	return fields
+}
+
+// composeMaterializeWritten is composeMaterialize with a required statement, and
+// it declares the fields it forwards a second time: the engine reads a builtin's
+// own field list, so a field the wrapper lacks is refused when the tool passes
+// it. (A logic in between would avoid the copy, but it may lose the run context
+// the Materializer relies on, so the copy stays.) This is the test that makes the
+// copy safe: every field the composeFile tool passes must exist on both builtins
+// with the same type and the same description, `statement` being required on the
+// wrapper and the only difference. A field added to composeMaterialize and
+// forwarded by the tool fails here until the wrapper has it.
+//
+// It reads the DSL files, which Go's test cache does not notice changing: run it
+// with -count=1 after editing them.
+func TestComposeMaterializeWrittenDeclaresWhatTheToolForwardsAsComposeMaterializeDoes(t *testing.T) {
+	builtins := "\n" + readRepoFile(t, filepath.Join("dsl", "compose", "builtins.memql"))
+	tools := "\n" + readRepoFile(t, filepath.Join("dsl", "compose", "tools.memql"))
+	forwarded := dslFields(t, tools, "tool", "composeFile")
+	original := dslFields(t, builtins, "builtin", "composeMaterialize")
+	wrapper := dslFields(t, builtins, "builtin", "composeMaterializeWritten")
+
+	for name := range forwarded {
+		o, inOriginal := original[name]
+		w, inWrapper := wrapper[name]
+		switch {
+		case !inOriginal:
+			t.Errorf("the composeFile tool passes %q and composeMaterialize has no such field", name)
+			continue
+		case !inWrapper:
+			t.Errorf("the composeFile tool passes %q and composeMaterializeWritten does not declare it: add it, copied from composeMaterialize", name)
+			continue
+		}
+		if o.typ != w.typ {
+			t.Errorf("%q is %s on composeMaterialize and %s on composeMaterializeWritten", name, o.typ, w.typ)
+		}
+		if o.description != w.description {
+			t.Errorf("%q is described differently on composeMaterializeWritten and composeMaterialize; the wrapper's copy must match:\n  wrapper: %s\n  original: %s", name, w.description, o.description)
+		}
+		wantRequired := o.required || name == "statement"
+		if w.required != wantRequired {
+			t.Errorf("%q: required = %v on composeMaterializeWritten, want %v (only statement is required there and not on composeMaterialize)", name, w.required, wantRequired)
+		}
+	}
+	if o := original["statement"]; o.required {
+		t.Error("composeMaterialize requires a statement, so a person's client could not ask for a blank file; the wrapper is where it is required")
+	}
+	for name := range wrapper {
+		if _, ok := forwarded[name]; !ok {
+			t.Errorf("composeMaterializeWritten declares %q and the composeFile tool never passes it: nothing can set it", name)
+		}
 	}
 }
 

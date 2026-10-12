@@ -171,7 +171,15 @@ func (i *Integration) handleMaterialize(ctx context.Context, args map[string]any
 // with nothing to compose from -- what a person's client asks for on purpose --
 // and an agent that sent no statement did not ask for that: it expects a file
 // with something in it, and would be told one was made. So an empty statement is
-// refused here, with words it can act on, and everything else is materialize.
+// refused, with a sentence that names composeFile, and everything else is
+// materialize.
+//
+// THE ENGINE REFUSES FIRST ON THE TOOL'S PATH. A builtin's call contract rejects
+// an empty or whitespace-only string for a field typed `string` ("statement
+// cannot be empty": validateBuiltinCallArgs, at parse time), so a tool call with
+// an empty statement is stopped before any handler runs. This is the same rule
+// declared where the tool's requirement lives, and it holds for a caller that
+// reaches the handler without that parse.
 //
 // The refusal comes after the principal check, as materialize's own refusals do,
 // so a caller that is not signed in is told that first.

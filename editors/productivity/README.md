@@ -50,9 +50,11 @@ VS Code text editor, including Find/Replace, selection, Cut/Copy/Paste and undo.
 
 **New Markdown Document** in the command palette asks for a name and creates a
 blank file in the connected cluster through the Materializer, then opens Review.
-The progress notification can be stopped. A name is a file name, not a path: a
-name with a slash is refused, one that is only an extension (`.md`) is refused as
-you type, and the cluster adds the `.md` itself, so `Plan` and `Plan.md` both make
+The progress notification can be stopped. Stopping never deletes a file that was
+already made: it stays in Files, and the editor opens it when it is already in
+Files at the moment you stop. A name is a file name, not a path: a name with a
+slash is refused, one that is only an extension (`.md`) is refused as you type,
+and the cluster adds the `.md` itself, so `Plan` and `Plan.md` both make
 `Plan.md`. An empty document offers **Describe document**
 and **Write in Source** instead of the revision and extension circle buttons.
 Describe the content, add it to review, then propose and approve the draft.

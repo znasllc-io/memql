@@ -39,9 +39,13 @@ const sdkMaterializeSource = "../../sdk/ts/src/client/materialize.ts"
 
 // The rules as the SDK states them.
 type sdkMirror struct {
-	numbers map[string]int // MAX_* constants, shifts evaluated
-	images  []string       // IMAGE_EXTENSIONS
-	refusal *regexp.Regexp // ATTACHMENT_REFUSAL
+	numbers    map[string]int // MAX_* constants, shifts evaluated
+	images     []string       // IMAGE_EXTENSIONS
+	refusal    *regexp.Regexp // ATTACHMENT_REFUSAL
+	handOffID  *regexp.Regexp // HAND_OFF_ID: the request ids a described request may use
+	handOffMin int            // its shortest and longest length, read from its {min,max}
+	handOffMax int
+	suffixes   []string // whatever the hand-off appends to a request id, as written: "-comment", "-revision"
 }
 
 var (
@@ -49,8 +53,14 @@ var (
 	sdkImagesConst = regexp.MustCompile(`(?m)^const IMAGE_EXTENSIONS = new Set\(\[([^\]]*)\]\);`)
 	sdkRefusal     = regexp.MustCompile(`(?m)^const ATTACHMENT_REFUSAL = /([^/\n]+)/([a-z]*);`)
 	sdkQuoted      = regexp.MustCompile(`"([^"]*)"`)
+	sdkHandOffID   = regexp.MustCompile(`(?m)^const HAND_OFF_ID = /([^/\n]+)/;`)
+	sdkBounds      = regexp.MustCompile(`\{(\d+),(\d+)\}\$$`)
+	sdkSuffix      = regexp.MustCompile("\\$\\{requestId\\}([^`$]*)`")
 )
 
+// readSDKMirror reads the SDK's copy of the rules. Go's test cache does not notice
+// the file changing, so a test that calls this passes from the cache after the SDK
+// is edited: run these tests with -count=1.
 func readSDKMirror(t *testing.T) sdkMirror {
 	t.Helper()
 	raw, err := os.ReadFile(sdkMaterializeSource)
@@ -86,9 +96,26 @@ func readSDKMirror(t *testing.T) sdkMirror {
 		pattern = "(?i)" + pattern
 	}
 	mirror.refusal = regexp.MustCompile(pattern)
+	handOff := sdkHandOffID.FindStringSubmatch(src)
+	if handOff == nil {
+		t.Fatal("HAND_OFF_ID is gone from the SDK hand-off, or no longer a one-line regular expression; update this test with it")
+	}
+	bounds := sdkBounds.FindStringSubmatch(handOff[1])
+	if bounds == nil {
+		t.Fatalf("HAND_OFF_ID %q no longer ends in a {min,max} length; update this test with it", handOff[1])
+	}
+	mirror.handOffMin, _ = strconv.Atoi(bounds[1])
+	mirror.handOffMax, _ = strconv.Atoi(bounds[2])
+	mirror.handOffID = regexp.MustCompile(handOff[1])
+	for _, m := range sdkSuffix.FindAllStringSubmatch(src, -1) {
+		if !slices.Contains(mirror.suffixes, m[1]) {
+			mirror.suffixes = append(mirror.suffixes, m[1])
+		}
+	}
 	return mirror
 }
 
+// It reads the SDK's source, which Go's test cache does not notice changing: run it with -count=1 after editing that file.
 func TestSDKMirrorsTheReviewAttachmentRules(t *testing.T) {
 	mirror := readSDKMirror(t)
 
@@ -124,6 +151,73 @@ func TestSDKMirrorsTheReviewAttachmentRules(t *testing.T) {
 	sort.Strings(gotImages)
 	if !slices.Equal(gotImages, wantImages) {
 		t.Errorf("the SDK hand-off takes images with the extensions %v and the Library takes %v (reviewImageFormats, with .jpg read as .jpeg)", gotImages, wantImages)
+	}
+}
+
+// The hand-off sends a described file's description under two ids derived from the
+// request id (`<id>-comment`, `<id>-revision`), and the Library accepts only
+// reviewRequestID in either. The SDK refuses a described request whose id would
+// make one of them too long, before the file is made (HAND_OFF_ID), and that is a
+// copy of this package's rule: the same characters, and a longest id that is the
+// Library's longest less the longest suffix. A copy that drifts is a described
+// request that makes its file and then cannot send its description, or an id
+// refused that the Library would have taken.
+//
+// It reads the SDK's source, which Go's test cache does not notice changing: run it with -count=1 after editing that file.
+func TestSDKHandOffIdsAreIdsTheLibraryAccepts(t *testing.T) {
+	mirror := readSDKMirror(t)
+	bounds := sdkBounds.FindStringSubmatch(reviewRequestID.String())
+	if bounds == nil {
+		t.Fatalf("reviewRequestID %q no longer ends in a {min,max} length; update this test with it", reviewRequestID)
+	}
+	libMin, _ := strconv.Atoi(bounds[1])
+	libMax, _ := strconv.Atoi(bounds[2])
+
+	if len(mirror.suffixes) == 0 {
+		t.Fatal("found no `${requestId}-suffix` in the SDK hand-off, so the ids it derives are not held to anything; update this test with it")
+	}
+	longest, shortest := 0, 1<<30
+	for _, suffix := range mirror.suffixes {
+		longest, shortest = max(longest, len(suffix)), min(shortest, len(suffix))
+	}
+
+	// The same characters. Every printable ASCII character, and a few that are not.
+	chars := []rune{0, '\t', '\n', 0xe9, 0xa0, 0x2013, 0x1f600}
+	for c := rune(0x20); c <= 0x7e; c++ {
+		chars = append(chars, c)
+	}
+	for _, c := range chars {
+		sdk := mirror.handOffID.MatchString("a" + string(c))
+		library := reviewRequestID.MatchString(strings.Repeat("a", libMin-1) + string(c))
+		if sdk != library {
+			t.Errorf("%q: the SDK accepts it in a request id = %v, the Library accepts it in one = %v", c, sdk, library)
+		}
+	}
+
+	// The longest and the shortest.
+	if mirror.handOffMax+longest != libMax {
+		t.Errorf("the SDK allows request ids of up to %d, and the longest id it derives adds %d (%v): that is %d, and the Library's longest is %d. HAND_OFF_ID's maximum is the Library's less the longest suffix", mirror.handOffMax, longest, mirror.suffixes, mirror.handOffMax+longest, libMax)
+	}
+	if mirror.handOffMin+shortest < libMin {
+		t.Errorf("the SDK allows request ids as short as %d, and the shortest id it derives adds %d (%v): that is below the Library's shortest, %d", mirror.handOffMin, shortest, mirror.suffixes, libMin)
+	}
+
+	// And the real expressions agree at the edge: the longest id the SDK allows
+	// derives ids the Library takes, and one more does not pass either.
+	edge := strings.Repeat("a", mirror.handOffMax)
+	if !mirror.handOffID.MatchString(edge) || mirror.handOffID.MatchString(edge+"a") {
+		t.Errorf("HAND_OFF_ID does not stop at %d characters", mirror.handOffMax)
+	}
+	for _, suffix := range mirror.suffixes {
+		if !reviewRequestID.MatchString(edge + suffix) {
+			t.Errorf("the Library refuses %d characters plus %q, which the SDK would send", mirror.handOffMax, suffix)
+		}
+		if suffix == "-revision" && reviewRequestID.MatchString(edge+"a"+suffix) {
+			t.Errorf("the Library takes one character more than the SDK allows: its maximum is wider than HAND_OFF_ID, so the SDK refuses ids that would have worked")
+		}
+		if !reviewRequestID.MatchString(strings.Repeat("a", mirror.handOffMin) + suffix) {
+			t.Errorf("the Library refuses the shortest id the SDK allows with %q", suffix)
+		}
 	}
 }
 
@@ -189,6 +283,8 @@ func TestTheReviewAttachmentLimitsAreTheOnesEnforced(t *testing.T) {
 // reaches (a blob store that is down, a document that changed) is still held;
 // part two runs the refusals that need no engine, so a sentence built at run
 // time is held too.
+//
+// It reads the SDK's source, which Go's test cache does not notice changing: run it with -count=1 after editing that file.
 func TestEveryReviewAttachmentRefusalSaysAttach(t *testing.T) {
 	mirror := readSDKMirror(t)
 	fset := token.NewFileSet()
