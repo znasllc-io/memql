@@ -718,6 +718,7 @@ var BoundConcepts = map[string]string{
 	"recentSendJobs":                                   "v1:campaigns:sendJob",
 	"recentWorkAcknowledgement":                        "v1:memory:workAcknowledgement",
 	"recipientById":                                    "v1:campaigns:recipient",
+	"recipientInAudienceByDigest":                      "v1:campaigns:recipient",
 	"recipientsForAudience":                            "v1:campaigns:recipient",
 	"recordApprovalDecision":                           "v1:commerce:approvalChain",
 	"recordConsentBounce":                              "v1:campaigns:consentEvent",

@@ -334,29 +334,33 @@ func (f *Firer) fireAudience(ctx context.Context, rule Rule, nodeID string, even
 // has no way to opt out, and marketing mail nobody can unsubscribe from is the
 // one thing this engine will not send. The enrolment names the rule's
 // organization, because the send refuses a recipient outside the campaign's.
+//
+// Whether the address is a member already is ONE keyed read by its digest
+// (memql#6022, F9), not a listing of the audience. The member is found in any
+// state, so an address that unsubscribed is not enrolled again as subscribed --
+// the send path decides what a send to them is -- and the read is a fresh one,
+// because it decides whether to write: a cached "nobody" from before another
+// replica's enrolment would enrol the mailbox a second time.
 func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, event map[string]any, out *FireOutcome) error {
 	address := strings.TrimSpace(payloadField(event, rule.RecipientField))
 	if address == "" {
 		out.Refusals = append(out.Refusals, fmt.Sprintf("the triggering row carries no %q, so there is nobody to mail", rule.RecipientField))
 		return nil
 	}
-	if !strings.Contains(address, "@") {
+	// An address with no digest cannot be looked up, deduplicated or suppressed,
+	// and the send would refuse it anyway: say so before anything is written.
+	digest := addressDigest(address)
+	if digest == "" {
 		out.Refusals = append(out.Refusals, fmt.Sprintf("%q is not an address", rule.RecipientField))
 		return nil
 	}
 
-	recipients, err := f.store.RecipientsForAudience(ctx, rule.AudienceID)
+	member, found, err := f.store.RecipientInAudienceByDigest(memql.ContextWithFreshRead(ctx), rule.AudienceID, digest)
 	if err != nil {
 		return err
 	}
-	target := ""
-	for _, r := range recipients {
-		if strings.EqualFold(strings.TrimSpace(str(r, "email")), address) {
-			target = str(r, "id")
-			break
-		}
-	}
-	if target == "" {
+	target := str(member, "id")
+	if !found {
 		// Not in the audience yet. Enrol, then send -- and note that the
 		// enrolment is what an unsubscribe later acts on, so a second firing
 		// for the same address consults the state the first one gave it.

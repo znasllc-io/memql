@@ -70,7 +70,8 @@ mutation audience archiveAudience {
 }
 
 /// Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the
-/// concept's @default, which is never applied on insert.
+/// concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest)
+/// so the membership can be found by it (recipientInAudienceByDigest).
 @actor
 mutation recipient addRecipient {
   args {
@@ -89,6 +90,14 @@ mutation recipient addRecipient {
       ownerUserId: actor.userId
       subscriptionStatus: "subscribed"
       source: args.source ?? "manual"
+      // The mailbox's key: the SHA-256 of the address trimmed and lower-cased,
+      // so an existing membership is found in one read by whoever holds the
+      // address (campaigns.EmailDigest, the email-rules addressDigest and the
+      // backfill migration compute the same thing; the digest tests hold them
+      // together). The stored email stays as it was typed. Text that cannot be a
+      // mailbox is stamped too, with the digest of the text as given, and is
+      // never looked up: EmailDigest has none for it.
+      emailDigest: hash(lower(trim(args.email)))
       // Copied from the parent AUDIENCE by the caller (epic memql#5165,
       // section J), not read here: a mutation body cannot join, and the
       // writer already holds the audience row it is adding to.

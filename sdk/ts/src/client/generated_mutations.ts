@@ -29,7 +29,7 @@ QueryClient.prototype.acknowledgeAttention = function (this: QueryClient, args: 
   return this.executeNamed("acknowledgeAttention", buildAcknowledgeAttention(args), opts);
 };
 
-/** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. */
+/** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest) so the membership can be found by it (recipientInAudienceByDigest). */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.ts).
 export interface AddRecipientArgs {
   recipientId: string;

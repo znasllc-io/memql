@@ -291,6 +291,11 @@ complained-about or suppressed addresses are not silently resubscribed.
 
 Repeated submissions converge on one signup and one intended welcome per
 normalized address and audience, even across deployables and worker replicas.
+An address already in the audience is found by its digest, the SHA-256 of the
+trimmed, lower-cased address that every recipient row carries, in one read
+however large the audience is. Rows written before the digest existed were
+stamped once by migration `20261011000000_recipient_email_digest`, which
+appends one version to each such recipient.
 Consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and
 published welcome content. Editing the template later does not rewrite that

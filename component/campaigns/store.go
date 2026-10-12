@@ -491,7 +491,9 @@ func recipientFromRow(r map[string]any) Recipient {
 // Roster reads the whole audience by walking every page. OWNED tier.
 //
 // Retained for the callers that genuinely want the set rather than a batch:
-// the unsubscribe endpoint resolving one recipient, and tests. THE SEND PATH
+// the recipient import, which de-duplicates a whole file against the whole
+// audience, and tests. A caller that wants ONE member by address does not
+// belong here -- that is RecipientInAudienceByDigest (memql#6022). THE SEND PATH
 // DOES NOT USE IT -- it walks RosterPage, because materializing a
 // hundred-thousand-address audience once per batch is the shape memql#3460
 // removed. maxRows bounds it so "the whole audience" cannot become an
@@ -1209,6 +1211,37 @@ func (s *Store) RecordEngagementEvent(ctx context.Context, e EngagementEvent) er
 // correct answer for both.
 func (s *Store) RecipientByID(ctx context.Context, recipientID string) (Recipient, bool, error) {
 	rows, err := s.rows(ctx, call("query", "recipientById", arg{"recipientId", recipientID}))
+	if err != nil || len(rows) == 0 {
+		return Recipient{}, false, err
+	}
+	return recipientFromRow(rows[0]), true, nil
+}
+
+// RecipientInAudienceByDigest finds the membership for one mailbox in one
+// audience by the digest of its address (EmailDigest, which every recipient row
+// carries as emailDigest). OWNED tier: organization-authorized, like every read
+// of a recipient.
+//
+// It is ONE keyed read however large the audience is. Finding a member by
+// address used to be a walk of the whole roster -- every signup into an audience
+// of a hundred thousand read a hundred thousand rows to learn whether one
+// address was among them (memql#6022, F9).
+//
+// The member comes back in ANY subscription state; whether a signup or a send
+// does anything about an unsubscribed, bounced or complained address is the
+// caller's decision. The OLDEST match wins -- the engine answers oldest first
+// and this takes the first, which is the member the roster walk met first. An
+// import does not deduplicate, so a mailbox can hold more than one row; the
+// others are not looked at.
+//
+// A digest of "" matches NOTHING and is not sent: EmailDigest answers "" for an
+// address that cannot be a mailbox, and as a filter value "" would select every
+// row that has no digest at all.
+func (s *Store) RecipientInAudienceByDigest(ctx context.Context, audienceID, digest string) (Recipient, bool, error) {
+	if digest == "" {
+		return Recipient{}, false, nil
+	}
+	rows, err := s.rows(ctx, call("query", "recipientInAudienceByDigest", arg{"audienceId", audienceID}, arg{"emailDigest", digest}))
 	if err != nil || len(rows) == 0 {
 		return Recipient{}, false, err
 	}

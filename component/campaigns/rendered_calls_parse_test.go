@@ -139,6 +139,10 @@ func TestEveryRenderedCallParses(t *testing.T) {
 		}},
 		{"deliveryLedgerForCampaign", func() error { _, err := store.Ledger(ctx, awkward); return err }},
 		{"recipientById", func() error { _, _, err := store.RecipientByID(ctx, awkward); return err }},
+		{"recipientInAudienceByDigest", func() error {
+			_, _, err := store.RecipientInAudienceByDigest(ctx, awkward, strings.Repeat("a", 64))
+			return err
+		}},
 
 		// identity + accounts (memql#4821, #4822)
 		{"senderIdentityById", func() error { _, _, err := store.SenderIdentityByID(ctx, awkward); return err }},

@@ -7157,6 +7157,34 @@ func RecipientByIdBuild(args RecipientByIdArgs) string {
 	return b.String()
 }
 
+// RecipientInAudienceByDigest -- The membership for one mailbox in one audience, by address digest. Organization-authorized. The digest is the SHA-256 of the address trimmed and lower-cased (recipient.emailDigest), so a signup or a row-address rule finds an existing member in one keyed read instead of walking the roster. Any subscription state is returned: whether a send or a signup does anything about an unsubscribed or bounced address is the caller's decision. Oldest first and a window of five -- an import does not deduplicate, so a mailbox can hold more than one row, and the caller takes the first.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientInAudienceByDigest"] in generated_concepts.go).
+type RecipientInAudienceByDigestArgs struct {
+	AudienceId  string
+	EmailDigest string
+}
+
+// RecipientInAudienceByDigest calls the engine query recipientInAudienceByDigest.
+func (qc *QueryClient) RecipientInAudienceByDigest(ctx context.Context, args RecipientInAudienceByDigestArgs) (*Result, error) {
+	call := RecipientInAudienceByDigestBuild(args)
+	return qc.executeNamed(ctx, "recipientInAudienceByDigest", call)
+}
+
+func RecipientInAudienceByDigestBuild(args RecipientInAudienceByDigestArgs) string {
+	var b strings.Builder
+	b.WriteString("query recipientInAudienceByDigest(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 34 {
+		b.WriteString(", ")
+	}
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RecipientsForAudience -- Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the caller conjunct is doubly load-bearing here.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsForAudience"] in generated_concepts.go).

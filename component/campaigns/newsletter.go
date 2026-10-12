@@ -228,24 +228,27 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	} else if suppressed {
 		return accepted()
 	}
-	roster, err := w.store.Roster(ctx, audienceID)
+	// The member is found by the digest of the address: one keyed read, so a
+	// signup into an audience of any size costs the same (memql#6022, F9). It is
+	// found in any state, and a form never reopens an address that unsubscribed,
+	// bounced or complained.
+	member, found, err := w.store.RecipientInAudienceByDigest(ctx, audienceID, EmailDigest(address))
 	if err != nil {
 		return nil, err
 	}
-	var recipient *Recipient
-	for _, r := range roster {
-		if NormalizeEmail(r.Email) == address {
-			if r.SubscriptionStatus != "" && r.SubscriptionStatus != "subscribed" {
-				return accepted()
-			}
-			if recipient == nil {
-				copy := r
-				recipient = &copy
-			}
-		}
+	if found && member.SubscriptionStatus != "" && member.SubscriptionStatus != "subscribed" {
+		return accepted()
 	}
-	if recipient == nil && len(roster) >= w.cfg.MaxAudience {
-		return nil, fmt.Errorf("this newsletter cannot accept more subscribers right now")
+	if !found {
+		// Only a NEW member can take the audience past its ceiling, and what that
+		// asks is the audience's size: a count, not the length of a read.
+		size, err := w.store.RosterSize(ctx, audienceID)
+		if err != nil {
+			return nil, err
+		}
+		if size >= w.cfg.MaxAudience {
+			return nil, fmt.Errorf("this newsletter cannot accept more subscribers right now")
+		}
 	}
 	snapshot, err := w.newsletterPreflight(ctx, row, true)
 	if err != nil {
@@ -267,12 +270,12 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	} else {
 		requestedAt = templateTime(consent["occurredAt"])
 	}
-	if recipient == nil {
-		recipientID := sha256Hex("newsletter-recipient\x00" + signupID)
+	recipientID := member.ID
+	if !found {
+		recipientID = sha256Hex("newsletter-recipient\x00" + signupID)
 		if err = w.store.AddRecipient(ctx, recipientID, audienceID, address, name, "signup", bare(str(row, "accountId")), nil); err != nil {
 			return nil, err
 		}
-		recipient = &Recipient{ID: recipientID}
 	}
 	encodedSnapshot, err := json.Marshal(snapshot)
 	if err != nil {
@@ -284,7 +287,7 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 	}
 	values := map[string]any{
 		"signupId": signupID, "newsletterId": bare(str(row, "id")), "siteId": siteID, "storeId": bare(str(row, "storeId")),
-		"accountId": bare(str(row, "accountId")), "audienceId": audienceID, "recipientId": bare(recipient.ID),
+		"accountId": bare(str(row, "accountId")), "audienceId": audienceID, "recipientId": bare(recipientID),
 		"emailDigest": EmailDigest(address), "email": address, "displayName": name, "submissionId": argString(args, "submissionId"), "consentText": str(row, "consentText"),
 		"consentRevision": templateTime(row["createdAt"]).Format(time.RFC3339Nano),
 		"requestedAt":     requestedAt.Format(time.RFC3339Nano), "templateId": snapshot.ID, "templateSnapshot": frozen, "senderIdentityId": bare(str(row, "senderIdentityId")),

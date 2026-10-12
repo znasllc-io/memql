@@ -409,6 +409,28 @@ func (s *Store) RecipientsForAudience(ctx context.Context, audienceID string) ([
 		arg{"audienceId", memql.BareShortId(audienceID)}))
 }
 
+// RecipientInAudienceByDigest finds the membership for one mailbox in the rule's
+// audience by the digest of its address (addressDigest): ONE keyed read, in any
+// subscription state, oldest match first. A row-address firing uses it to learn
+// whether the address on the triggering row is a member already, where it used
+// to list the audience's subscribed members and compare addresses -- a read that
+// never saw anyone who had unsubscribed (so they were enrolled again as
+// subscribed) and stopped at the first hundred.
+//
+// A digest of "" matches nothing and is not sent: as a filter value it would
+// select every row that has no digest at all.
+func (s *Store) RecipientInAudienceByDigest(ctx context.Context, audienceID, digest string) (map[string]any, bool, error) {
+	if digest == "" {
+		return nil, false, nil
+	}
+	rows, err := s.rows(ctx, call("query", "recipientInAudienceByDigest",
+		arg{"audienceId", memql.BareShortId(audienceID)}, arg{"emailDigest", digest}))
+	if err != nil || len(rows) == 0 {
+		return nil, false, err
+	}
+	return rows[0], true, nil
+}
+
 // TemplateByID reads the copy both lanes send.
 func (s *Store) TemplateByID(ctx context.Context, templateID string) (map[string]any, bool, error) {
 	rows, err := s.rows(ctx, call("query", "templateById", arg{"templateId", memql.BareShortId(templateID)}))
