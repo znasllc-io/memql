@@ -63,34 +63,56 @@ describe("the template that arrives", () => {
   });
 
   it("ignores other organizations and archived templates", () => {
-    const wait = beginTemplateWait(THERE, "self", false, 0);
-    const later = [
-      ...THERE,
-      template({ id: "t5", name: "Globex autumn", accountId: "globex" }),
-      template({ id: "t6", name: "Put away at once", status: "archived" }),
-    ];
-    expect(arrivedTemplate(wait, later)).toBeNull();
-    // The one that is new, in the right organization, is still found among them.
-    const welcome = template({ id: "t7", name: "Welcome 3" });
-    expect(arrivedTemplate(wait, [...later, welcome])).toEqual({ template: welcome, published: true });
+    // Published ones, so that a wait which needs publication is not what excludes them.
+    for (const requirePublished of [false, true]) {
+      const wait = beginTemplateWait(THERE, "self", requirePublished, 0);
+      const later = [
+        ...THERE,
+        template({ id: "t5", name: "Globex autumn", accountId: "globex" }),
+        template({ id: "t6", name: "Put away at once", status: "archived" }),
+      ];
+      expect(arrivedTemplate(wait, later)).toBeNull();
+      // The one that is new, in the right organization, is still found among them.
+      const welcome = template({ id: "t7", name: "Welcome 3" });
+      expect(arrivedTemplate(wait, [...later, welcome])).toEqual({ template: welcome, published: true });
+    }
   });
 
   it("reports a draft arrival and waits for publication when asked to", () => {
     const wait = beginTemplateWait(THERE, "self", true, 0);
     const draft = template({ id: "t7", name: "Welcome 3", status: "draft" });
-    expect(arrivedTemplate(wait, [...THERE, draft])).toEqual({ template: draft, published: false });
+    // A draft does not end a wait that needs the template published...
+    expect(arrivedTemplate(wait, [...THERE, draft])).toBeNull();
+    // ...but it has arrived, and the same question asked of a wait that takes
+    // whatever arrives says so. That is what the bar names.
+    expect(arrivedTemplate({ ...wait, requirePublished: false }, [...THERE, draft])).toEqual({ template: draft, published: false });
 
     // The same id, a moment later: the published row replaces the draft.
     const published = { ...draft, status: "ready", createdAt: "2026-10-11T09:00:00Z" };
     expect(arrivedTemplate(wait, [...THERE, published])).toEqual({ template: published, published: true });
   });
 
-  it("says what arrived whether or not the wait needs it published", () => {
-    // `published` is a fact about the template. Whether a draft ends the wait is
-    // the wait's own `requirePublished`, which the caller reads.
+  it("takes a draft when the wait does not need the template published", () => {
     const wait = beginTemplateWait(THERE, "self", false, 0);
     const draft = template({ id: "t7", name: "Welcome 3", status: "draft" });
     expect(arrivedTemplate(wait, [...THERE, draft])).toEqual({ template: draft, published: false });
+  });
+
+  // THE FINDER IS THE WHOLE ANSWER: it returns the first new template that ENDS
+  // the wait, so a caller asks one question -- did something arrive -- and a
+  // draft that comes first, one the person never publishes, does not hide a
+  // published template that comes later.
+  it("a draft that comes first does not hide a published template that comes later", () => {
+    const wait = beginTemplateWait(THERE, "self", true, 0);
+    const stuck = template({ id: "t7", name: "Stuck draft", status: "draft" });
+    const later = template({ id: "t8", name: "Welcome 4" });
+
+    // Only the draft has arrived: the wait goes on.
+    expect(arrivedTemplate(wait, [...THERE, stuck])).toBeNull();
+    // The published one arrives behind it: it ends the wait.
+    expect(arrivedTemplate(wait, [...THERE, stuck, later])).toEqual({ template: later, published: true });
+    // A wait that takes whatever arrives takes the first, the draft.
+    expect(arrivedTemplate({ ...wait, requirePublished: false }, [...THERE, stuck, later])).toEqual({ template: stuck, published: false });
   });
 
   it("a republished existing template does not end the wait", () => {
@@ -118,9 +140,12 @@ describe("what the wait says", () => {
     const wait = beginTemplateWait(THERE, "self", true, 0);
     expect(waitWords(wait, null)).toEqual({ word: WORD, detail: "Publish it in the editor to continue." });
 
+    // The draft the editor has saved is what the finder reports for a wait that
+    // takes whatever arrives; the wait that needs it published is still waiting.
     const draft = template({ id: "t7", name: "Welcome 3", status: "draft" });
-    const arrived = arrivedTemplate(wait, [...THERE, draft]);
-    expect(waitWords(wait, arrived)).toEqual({
+    const saved = arrivedTemplate({ ...wait, requirePublished: false }, [...THERE, draft]);
+    expect(arrivedTemplate(wait, [...THERE, draft])).toBeNull();
+    expect(waitWords(wait, saved)).toEqual({
       word: WORD,
       detail: "“Welcome 3” is a draft. Publish it in the editor to continue.",
     });
@@ -129,9 +154,8 @@ describe("what the wait says", () => {
   it("never quotes an empty name", () => {
     const wait = beginTemplateWait(THERE, "self", true, 0);
     const unnamed = template({ id: "t7", name: "  ", status: "draft" });
-    expect(waitWords(wait, arrivedTemplate(wait, [...THERE, unnamed])).detail).toBe(
-      "“Untitled template (t7)” is a draft. Publish it in the editor to continue.",
-    );
+    const saved = arrivedTemplate({ ...wait, requirePublished: false }, [...THERE, unnamed]);
+    expect(waitWords(wait, saved).detail).toBe("“Untitled template (t7)” is a draft. Publish it in the editor to continue.");
   });
 
   it("talks about a draft only when the wait needs the template published", () => {

@@ -19,9 +19,11 @@ import { templateIsArchived, templateName, type TemplateRow } from "../rows";
 //
 // The editor publishes in two writes, a draft and then the published row, so
 // the same template is reported twice: first as a draft, then as published.
-// Whether a draft ends the wait is the wait's `requirePublished`, which the
-// caller reads: the campaign wizard needs a template it can send, the Templates
-// wizard takes whatever arrives.
+// `requirePublished` says which of the two ends the wait: the campaign wizard
+// needs a template it can send, so only the published row does; the Templates
+// wizard takes whatever arrives. The finder applies it, so a caller asks one
+// question, did something arrive, and a draft that comes first (one the person
+// never publishes) does not hide a published template that comes later.
 
 export interface TemplateWait {
   /** The organization the new email is for: the only one whose templates end the wait. */
@@ -30,7 +32,7 @@ export interface TemplateWait {
   known: ReadonlySet<string>;
   /** When the wait began, in milliseconds, for the elapsed time the bar shows. */
   startedAt: number;
-  /** True when a draft is not enough: the campaign wizard must be able to send what it picks. */
+  /** True when only a published template ends the wait (the campaign wizard must be able to send what it picks); false takes whatever arrives. */
   requirePublished: boolean;
 }
 
@@ -50,16 +52,34 @@ export function beginTemplateWait(
   return { accountId, known: new Set(templates.map((template) => template.id)), startedAt: now, requirePublished };
 }
 
-/** The first template in the wait's organization whose id was not known when the wait began. */
+/** `ready` is the engine's word for a template that has been published. */
+const isPublished = (template: TemplateRow): boolean => template.status === "ready";
+
+/**
+ * The first template in the wait's organization that ends the wait: its id was
+ * not known when the wait began, it is not archived and, for a wait that
+ * `requirePublished`, it is published. A caller asks only whether something
+ * arrived: a draft that comes first does not hide a published template that
+ * comes later. `published` is a fact about the template, so it is always true
+ * for a wait that needs publication.
+ *
+ * A draft such a wait is still holding out for is not an arrival, but the bar
+ * names it: ask the same question of a wait that takes whatever arrives,
+ * `arrivedTemplate({ ...wait, requirePublished: false }, templates)`, and hand
+ * the answer to `waitWords`.
+ */
 export function arrivedTemplate(
   wait: TemplateWait,
   templates: readonly TemplateRow[],
 ): { template: TemplateRow; published: boolean } | null {
   const template = templates.find(
-    (candidate) => candidate.accountId === wait.accountId && !wait.known.has(candidate.id) && !templateIsArchived(candidate),
+    (candidate) =>
+      candidate.accountId === wait.accountId &&
+      !wait.known.has(candidate.id) &&
+      !templateIsArchived(candidate) &&
+      (!wait.requirePublished || isPublished(candidate)),
   );
-  // `ready` is the engine's word for a template that has been published.
-  return template ? { template, published: template.status === "ready" } : null;
+  return template ? { template, published: isPublished(template) } : null;
 }
 
 /**
@@ -74,7 +94,10 @@ export function openNewEmail(domain: string, accountId: string, onNoAnswer: () =
 
 const PUBLISH = "Publish it in the editor to continue.";
 
-/** What the bar says while it waits; a draft that has arrived is named, because it is what is being waited on. */
+/**
+ * What the bar says while it waits. A draft that has arrived is named, because it
+ * is what is being waited on; `arrivedTemplate` says how to ask for it.
+ */
 export function waitWords(
   wait: TemplateWait,
   arrived: { template: TemplateRow; published: boolean } | null,
