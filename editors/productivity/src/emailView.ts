@@ -131,8 +131,9 @@ const selectedBlock = () => selectedPlace()?.block;
 // sending, it refuses what the engine's parser would refuse, in its own notice:
 // quietly while typing goes on, out loud on leaving, and it clears itself the
 // moment the value is right. A document update never overwrites a field being
-// typed in, one with typing not yet sent, or one whose sent edit the host has
-// not answered yet.
+// typed in, or one whose sent edit the host has not answered yet. Typing the
+// field refused stays while the person is in the page; a newer document that
+// arrives while they work elsewhere (Source, in Split) replaces it.
 
 interface Field {
   /** The control, or the group of controls, the value lives in. */
@@ -167,7 +168,8 @@ function tell(field: Field, text: string): void {
 }
 
 const timers = new Map<Field, number>();
-const dirty = new Set<string>();
+/** Typing not yet sent, by key: the document version it was typed against. */
+const dirty = new Map<string, number>();
 const sent = new Map<string, { value: string; version: number }>();
 
 /** The model's own refusal of an edit, as the sentence it gives. */
@@ -185,7 +187,7 @@ function refusal(edit: EmailEdit): string | undefined {
 function changed(field: Field): void {
   const key = field.key();
   if (key === undefined) return;
-  dirty.add(key);
+  dirty.set(key, version);
   window.clearTimeout(timers.get(field));
   timers.set(field, window.setTimeout(() => commit(field, false), PAUSE));
 }
@@ -218,7 +220,12 @@ function commit(field: Field, leaving: boolean): void {
 function refresh(field: Field): void {
   const key = field.key();
   if (field.typed && holds(field.control)) return;
-  if (key !== undefined && (dirty.has(key) || sent.has(key))) return;
+  if (key !== undefined && dirty.has(key)) {
+    if (holds(document.body) || version <= dirty.get(key)!) return;
+    dirty.delete(key);
+    tell(field, "");
+  }
+  if (key !== undefined && sent.has(key)) return;
   field.show(field.current());
 }
 
@@ -235,7 +242,7 @@ function listen(field: Field, control: HTMLElement = field.control): void {
 function chose(field: Field): void {
   const key = field.key();
   if (key === undefined) return;
-  dirty.add(key);
+  dirty.set(key, version);
   commit(field, true);
 }
 
@@ -385,7 +392,7 @@ function linkActs(): void {
 linksAdd.addEventListener("click", () => {
   const key = linksField.key();
   if (key === undefined) return;
-  dirty.add(key);
+  dirty.set(key, version);
   const row = linkRow({}, -1);
   linksBox.append(row);
   linkActs();

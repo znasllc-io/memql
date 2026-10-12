@@ -1105,3 +1105,44 @@ test("the lines field sends no trailing empty lines, and sample values are not m
     resolve();
   }, 5));
 });
+
+test("a refused draft gives way to a newer document while the person works in another window", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  const subject = f.el("subject") as HTMLInputElement;
+  subject.focus();
+  f.type(subject, "");
+  // Split view: the person clicks into the Source editor; leaving the field refuses the empty subject.
+  f.away();
+  assert.equal(f.el("subject-notice").textContent, "Enter a subject on one line.");
+  assert.equal(f.edits().length, 0);
+  // The same document again is nothing new: the draft and its notice stay.
+  f.send({ type: "document", version: 1, email: article });
+  assert.equal(subject.value, "");
+  assert.equal(f.el("subject-notice").textContent, "Enter a subject on one line.");
+  // An edit made in Source arrives: it replaces the draft, and the refusal goes with it.
+  f.send({ type: "document", version: 2, email: { ...clone(article), subject: "From Source" } });
+  assert.equal(subject.value, "From Source");
+  assert.equal(f.el("subject-notice").textContent, "");
+  assert.equal(subject.hasAttribute("aria-invalid"), false);
+  // Back in the page, leaving the field sends nothing: the draft is gone.
+  f.back();
+  subject.focus(); subject.blur();
+  assert.equal(f.edits().length, 0);
+  f.dom.window.close();
+});
+
+test("a refused draft and its notice stay while the person is in the page", () => {
+  const f = fixture();
+  f.send({ type: "document", version: 1, email: article });
+  const subject = f.el("subject") as HTMLInputElement;
+  subject.focus();
+  f.type(subject, "");
+  f.el("preheader").focus();
+  assert.equal(f.el("subject-notice").textContent, "Enter a subject on one line.");
+  f.send({ type: "document", version: 2, email: { ...clone(article), subject: "From Source" } });
+  assert.equal(subject.value, "", "the person's draft stays");
+  assert.equal(f.el("subject-notice").textContent, "Enter a subject on one line.");
+  assert.equal(subject.getAttribute("aria-invalid"), "true");
+  f.dom.window.close();
+});
