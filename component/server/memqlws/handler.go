@@ -637,7 +637,11 @@ func (s *session) forwardClientMessage(msg *memqlv1.MemqlClientMessage) error {
 			s.unmarkPending(requestId)
 			s.maybeLogOverload("memql ws overload: pending queue full", "request_id", requestId, "pending_cap", cap(s.pending))
 			// Queue local errors so we don't spam the socket under a request storm.
-			s.queueLocalError(requestId, codes.ResourceExhausted, "too many concurrent MemQL queries")
+			// The refusal names the message it answers (correlateTo): that id is what
+			// the browser SDK finds the request by, and a refusal that carries only
+			// the request id reaches its event listeners while the call it was for
+			// stays pending.
+			s.queueLocalError(requestId, msg.GetMessageId(), codes.ResourceExhausted, "too many concurrent MemQL queries")
 			return nil
 		}
 	case *memqlv1.MemqlClientMessage_CancelRequest:
@@ -737,10 +741,6 @@ func (s *session) releaseRequest(requestId string) bool {
 	delete(s.active, requestId)
 	s.activeMu.Unlock()
 	return existed
-}
-
-func (s *session) sendLocalError(requestId string, code codes.Code, message string) error {
-	return s.sendQueuedLocalError(&queuedLocalError{requestId: requestId, code: code, message: message})
 }
 
 func (s *session) sendQueuedLocalError(item *queuedLocalError) error {
@@ -873,9 +873,10 @@ func (s *session) maybeLogOverload(msg string, args ...any) {
 	s.logDebug(msg, args...)
 }
 
-func (s *session) queueLocalError(requestId string, code codes.Code, message string) {
+func (s *session) queueLocalError(requestId, correlate string, code codes.Code, message string) {
 	s.queueLocalErrorItem(&queuedLocalError{
 		requestId: strings.TrimSpace(requestId),
+		correlate: strings.TrimSpace(correlate),
 		code:      code,
 		message:   message,
 	})

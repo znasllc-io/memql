@@ -1058,7 +1058,7 @@ Frames are JSON encodings of the existing protobuf envelopes. A typical request/
 }
 ```
 
-The bridge enforces a small per-connection window (four concurrent queries). Clients should reuse a single socket and listen for `queryResult.done` or `queryError` payloads.
+The bridge enforces a small per-connection window (four concurrent queries). A request that finds the bridge's queue of waiting requests full is refused at once with a `queryError` (`ResourceExhausted`, "too many concurrent MemQL queries") that carries the request's message id in `correlateTo`, as every reply does, so the client that sent it settles the call with the refusal. Clients should reuse a single socket and listen for `queryResult.done` or `queryError` payloads.
 
 One answer can be as large as 32 MiB, the limit of the gRPC stream in both directions, which the bridge shares so that it can receive anything the server sends. An answer over that is never sent: the request that asked gets a `queryError` with code `ResourceExhausted`, metadata `code` of `RESULT_TOO_LARGE` (with `sizeBytes` and `limitBytes`), and a sentence that names the size and the limit. The socket and every other request carry on. Ask for fewer rows or fewer fields, or read one row by id, and try again.
 

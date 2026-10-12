@@ -334,6 +334,10 @@ type stubMemqlService struct {
 	// answers every query with an empty result, which is what the tests that
 	// are about something else want.
 	answer func(*memqlv1.ExecuteQueryMsg) *memqlv1.Result
+
+	// hold, when set, keeps every answer back until it is closed: the server is
+	// busy, and the requests that reached it stay in flight.
+	hold <-chan struct{}
 }
 
 func (s *stubMemqlService) Stream(stream memqlv1.MemqlService_StreamServer) error {
@@ -352,12 +356,22 @@ func (s *stubMemqlService) Stream(stream memqlv1.MemqlService_StreamServer) erro
 		s.mu.Unlock()
 
 		if exec := msg.GetExecuteQuery(); exec != nil {
+			if s.hold != nil {
+				select {
+				case <-s.hold:
+				case <-stream.Context().Done():
+					return stream.Context().Err()
+				}
+			}
 			result := &memqlv1.Result{}
 			if s.answer != nil {
 				result = s.answer(exec)
 			}
 			resp := &memqlv1.MemqlServerMessage{
 				MessageId: uuid.NewString(),
+				// As the real server answers: by the id of the message it answers,
+				// which is what a client finds its request by.
+				CorrelateTo: msg.GetMessageId(),
 				Payload: &memqlv1.MemqlServerMessage_QueryResult{
 					QueryResult: &memqlv1.QueryResultChunk{
 						RequestId: exec.GetRequestId(),
