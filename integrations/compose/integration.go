@@ -4,6 +4,7 @@
 // dsl/compose/builtins.memql:
 //
 //	integration.compose.materialize         -- compose, render, stamp, file
+//	integration.compose.materializeWritten  -- materialize for the composeFile agent tool: an empty statement is refused
 //	integration.compose.runRecipe           -- resolve a recipe's selectors and materialize
 //	integration.compose.cancel              -- ask a composition to stop
 //	integration.compose.composableConcepts  -- what is worth composing from
