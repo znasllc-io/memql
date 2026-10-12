@@ -40,6 +40,7 @@ import { TestSendPanel } from "./TestAudiencePanel";
 import type { CampaignWrites } from "./actions";
 import { SendBar } from "./SendBar";
 import { RecurrencePanel } from "./RecurrencePanel";
+import { recordNamed, useOpenRequest, type OpenRequest } from "./openRequest";
 import {
   audienceFromRow,
   campaignFingerprint,
@@ -81,6 +82,7 @@ export function CampaignsSection({
   showFiled,
   trackByDefault,
   uploads,
+  openRequest,
 }: {
   uploads: UploadProvider;
   feeds: EmailFeeds;
@@ -88,9 +90,20 @@ export function CampaignsSection({
   writes: CampaignWrites;
   showFiled: boolean;
   trackByDefault: boolean;
+  /** A campaign to open, or the Add flow to start, from search, Ask or another page. */
+  openRequest?: OpenRequest;
 }) {
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
+  useOpenRequest(openRequest, (target) => {
+    if ("add" in target) {
+      setOpenId("");
+      setAdding(true);
+    } else {
+      setAdding(false);
+      setOpenId(target.id);
+    }
+  });
 
   // PROJECT, then narrow, in one pass -- the collection holds RAW wire rows
   // (the fold upserts an event payload with no projection hook), so every
@@ -108,9 +121,13 @@ export function CampaignsSection({
   const templates = useProjected(feeds.templates.snapshot.rows, templateProjection);
   const senders = useProjected(feeds.senders.snapshot.rows, senderProjection);
 
+  // A PAGE OPENS WHICHEVER CAMPAIGN ITS ID NAMES, however the list is filtered
+  // (`recordNamed`): a finished campaign is hidden from the list by default and
+  // search and Ask still reach it. One that has not arrived yet leaves the list
+  // on screen, and the page opens when it does.
   const open = useMemo(
-    () => source?.snapshot.rows.find((c) => c.id === openId) ?? null,
-    [source, source?.snapshot, openId],
+    () => recordNamed(feeds.campaigns.snapshot.rows, campaignFromRow, openId),
+    [feeds.campaigns.snapshot.rows, openId],
   );
 
   if (adding)
@@ -486,7 +503,7 @@ function SendControls({ campaign, writes, template, templateFeed, sending }: {
         <Notice
           tone="warn"
           sentence="Sending setup is incomplete or unconfirmed."
-          next="Review this organization’s email connection in Senders. You can still edit the draft or stop an existing send."
+          next="Review this organization’s email connection in Settings. You can still edit the draft or stop an existing send."
           detail={sending.reason}
         ><Button onClick={sending.reload} busy={sending.state === "loading"}>Check again</Button></Notice>
       ) : null}

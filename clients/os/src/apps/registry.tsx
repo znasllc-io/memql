@@ -539,6 +539,10 @@ const concepts: OsAppManifest = {
 // siblings are: the gear and the manifest must offer the same set, and a
 // second copy of the list is one that can disagree.
 //
+// THREE NOUNS HAVE A PAGE OF THEIR OWN that search and Ask can open: a
+// campaign, an audience and a template. The app opens each by id, whichever tab
+// was showing (`EmailApp` reads these `idField`s from the window's intent).
+//
 // NO manifest role. Every campaigns concept is organization-tier, so every
 // signed-in person has mail of their own to read and the engine decides how
 // far each list reaches. Gating here would be presentation pretending to be
@@ -552,6 +556,11 @@ const email: OsAppManifest = {
   icon: Mail,
   requires: "app:email",
   sections: EMAIL_SECTIONS,
+  records: [
+    { section: "campaigns", idField: "campaignId", query: "campaigns.campaigns", labels: ["name"] },
+    { section: "audiences", idField: "audienceId", query: "campaigns.audiences", labels: ["name", "description"] },
+    { section: "templates", idField: "templateId", query: "campaigns.templates", labels: ["name", "subject"] },
+  ],
   needs: EMAIL_REQUIRES,
   wants: EMAIL_WANTS,
   settingsSection: "settings",

@@ -33,6 +33,7 @@ import {
 } from "../../kit";
 import { useLiveView } from "../../live/liveView";
 import type { CampaignWrites, ImportReport } from "./actions";
+import { recordNamed, useOpenRequest, type OpenRequest } from "./openRequest";
 import {
   audienceFingerprint,
   audienceFromRow,
@@ -58,15 +59,27 @@ export function AudiencesSection({
   writes,
   uploads,
   showFiled,
+  openRequest,
 }: {
   feeds: EmailFeeds;
   recordFeeds: EmailRecordFeeds;
   writes: CampaignWrites;
   uploads: UploadProvider;
   showFiled: boolean;
+  /** An audience to open, or the Add flow to start, from search, Ask or another page. */
+  openRequest?: OpenRequest;
 }) {
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
+  useOpenRequest(openRequest, (target) => {
+    if ("add" in target) {
+      setOpenId("");
+      setAdding(true);
+    } else {
+      setAdding(false);
+      setOpenId(target.id);
+    }
+  });
 
   const source = useLiveView<Row, AudienceRow>(
     feeds.audiences.source,
@@ -77,9 +90,13 @@ export function AudiencesSection({
     },
   );
 
+  // A PAGE OPENS WHICHEVER AUDIENCE ITS ID NAMES, however the list is filtered
+  // (`recordNamed`): an archived one is hidden from the list by default and
+  // search and Ask still reach it. One that has not arrived yet leaves the list
+  // on screen, and the page opens when it does.
   const open = useMemo(
-    () => source?.snapshot.rows.find((a) => a.id === openId) ?? null,
-    [source, source?.snapshot, openId],
+    () => recordNamed(feeds.audiences.snapshot.rows, audienceFromRow, openId),
+    [feeds.audiences.snapshot.rows, openId],
   );
 
   if (adding)

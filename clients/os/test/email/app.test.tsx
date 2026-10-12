@@ -662,11 +662,66 @@ describe("the template editor handoff", () => {
 // ---------------------------------------------------------------------------
 
 describe("sender identities", () => {
+  it("are reached from Settings, which gives way to a mailbox's page and comes back with the list", async () => {
+    // A mailbox has no tab of its own. Its page takes the pane over because the
+    // window draws its one trail row for the FIRST heading on the pane: a page
+    // beneath Settings' own heading would have no way back.
+    const conn = fakeConnection({
+      senderIdentities: [senderRow({ id: "v1:campaigns:senderIdentity:s1" })],
+    });
+    mount(conn, "settings");
+    expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Senders" })).toBeTruthy();
+
+    fireEvent.click(await screen.findByText("news@acme.com"));
+    expect(await screen.findByRole("heading", { level: 3, name: "news@acme.com" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 3, name: "Settings" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 3, name: "Senders" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to Senders" }));
+    expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Senders" })).toBeTruthy();
+    expect(screen.getByText("news@acme.com")).toBeTruthy();
+  });
+
+  it("leave what was chosen in Settings standing while a mailbox's page has the pane", async () => {
+    // The page takes the pane over, but Settings stays mounted behind it, parked
+    // the way a section is: a choice not yet saved survives the visit.
+    const conn = fakeConnection({
+      accounts: [{ id: "org", name: "Client", status: "active" }],
+      audiences: [audienceRow({ id: "reviewers", name: "Reviewers", accountId: "org" })],
+      senderIdentities: [senderRow({ id: "v1:campaigns:senderIdentity:s1", accountId: "org" })],
+    });
+    mount(conn, "settings");
+    openSelect(await screen.findByRole("combobox", { name: "Testing organization" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Client" }));
+    const picker = await screen.findByRole("combobox", { name: "Testing audience" });
+    await waitFor(() => expect(screen.queryByText("Testing settings are not confirmed.")).toBeNull());
+    openSelect(picker);
+    fireEvent.click(screen.getByRole("option", { name: "Reviewers" }));
+
+    fireEvent.click(await screen.findByText("news@acme.com"));
+    await screen.findByRole("heading", { level: 3, name: "news@acme.com" });
+    expect(screen.queryByRole("combobox", { name: "Testing audience" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Senders" }));
+
+    expect((await screen.findByRole("combobox", { name: "Testing audience" })).textContent).toContain("Reviewers");
+    expect(conn.query.campaignConfigureTestAudience).not.toHaveBeenCalled();
+  });
+
+  it("are not a tab", async () => {
+    const conn = fakeConnection({ senderIdentities: [senderRow({ id: "v1:campaigns:senderIdentity:s1" })] });
+    mount(conn, "senders");
+    // A section the app does not declare reads as the campaigns list.
+    expect(await screen.findByRole("heading", { level: 3, name: "Campaigns" })).toBeTruthy();
+    expect(screen.queryByText("news@acme.com")).toBeNull();
+  });
+
   it("retires rather than deletes, and says why", async () => {
     const conn = fakeConnection({
       senderIdentities: [senderRow({ id: "v1:campaigns:senderIdentity:s1" })],
     });
-    mount(conn, "senders");
+    mount(conn, "settings");
     fireEvent.click(await screen.findByText("news@acme.com"));
 
     // The reason is on screen BEFORE anybody reaches for a control: past
@@ -696,7 +751,7 @@ describe("sender identities", () => {
     const conn = fakeConnection({
       senderIdentities: [senderRow({ id: "v1:campaigns:senderIdentity:s1" })],
     });
-    mount(conn, "senders");
+    mount(conn, "settings");
     fireEvent.click(await screen.findByText("news@acme.com"));
     await screen.findByText("Retire this mailbox");
     expect(screen.queryByText(/^Delete/)).toBeNull();
@@ -717,7 +772,7 @@ describe("the rules builder", () => {
         { id: "v1:accounts:account", domain: "accounts", entity: "account" },
       ],
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
 
     expect(await screen.findByText("When a")).toBeTruthy();
@@ -732,7 +787,7 @@ describe("the rules builder", () => {
 
   it("names the recipient choice as WHO, and the lane only as an effect", async () => {
     const conn = fakeConnection({ emailRules: [], templates: [], concepts: [] });
-    mount(conn, "rules");
+    mount(conn, "automations");
     fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
 
     expect(await screen.findByText("People in this cluster")).toBeTruthy();
@@ -747,7 +802,7 @@ describe("the rules builder", () => {
 
   it("says a new rule sends nothing until it is turned on", async () => {
     const conn = fakeConnection({ emailRules: [], templates: [], concepts: [] });
-    mount(conn, "rules");
+    mount(conn, "automations");
     fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
     expect(await screen.findByText(/A name, something to fire on/)).toBeTruthy();
   });
@@ -768,7 +823,7 @@ describe("the rules builder", () => {
       templates: [],
       concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }],
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
     fireEvent.click(screen.getByText("Only sometimes, and other details"));
 
@@ -808,7 +863,7 @@ describe("the rules builder", () => {
       templates: [templateRow({ id: "v1:campaigns:template:t1", name: "Welcome" })],
       concepts: [],
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
 
     const sentence =
       'When a user is created, email Welcome to the cluster owner, but only when row.role == "admin".';
@@ -841,7 +896,7 @@ describe("the rules builder", () => {
       templates: [],
       concepts: [],
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     fireEvent.click(await screen.findByText("Tell the owner about new admins"));
     // Never a paraphrase, never a generic "something went wrong".
     expect(
@@ -863,7 +918,7 @@ describe("the rules builder", () => {
       templates: [],
       concepts: [],
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     fireEvent.click(await screen.findByText("Tell the owner about new admins"));
     expect(await screen.findByText("emailRuleR1OnUserCreated")).toBeTruthy();
   });
@@ -874,7 +929,7 @@ describe("the rules builder", () => {
       templates: [],
       concepts: [],
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     fireEvent.click(await screen.findByText("Tell the owner about new admins"));
     fireEvent.click(await screen.findByText("Turn it on"));
     expect(
@@ -920,7 +975,7 @@ describe("a refused activation", () => {
   }
 
   async function turnOn(conn: Conn) {
-    mount(conn, "rules");
+    mount(conn, "automations");
     fireEvent.click(await screen.findByText("Tell the owner about new admins"));
     fireEvent.click(await screen.findByText("Turn it on"));
     await act(async () => {
@@ -974,7 +1029,7 @@ describe("a refused activation", () => {
     conn.query.createEmailRule.mockImplementation(async () => {
       throw new Error(`createEmailRule: MemQL engine failed to execute query. Details: ${said}`);
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     fireEvent.click(await screen.findByRole("button", { name: "New rule" }));
     fireEvent.change(screen.getByLabelText("Rule name"), { target: { value: "Welcome new users" } });
     chooseOption(screen.getByLabelText("The kind of thing that fires this rule"), "user (identity)");
@@ -1012,7 +1067,7 @@ describe("rules halted across the whole cluster", () => {
       concepts: [],
       clusterSettings: [{ id: "cluster", authoredAutomationsEnabled: false }],
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     expect(
       await screen.findByText(/Rules are switched off across this whole cluster/),
     ).toBeTruthy();
@@ -1033,7 +1088,7 @@ describe("rules halted across the whole cluster", () => {
       concepts: [],
       clusterSettings: [{ id: "cluster", authoredAutomationsEnabled: true }],
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     await screen.findByText("Tell the owner about new admins");
     expect(screen.queryByText(/switched off across this whole cluster/)).toBeNull();
   });
@@ -1048,7 +1103,7 @@ describe("rules halted across the whole cluster", () => {
       concepts: [],
       clusterSettings: [{ id: "cluster" }],
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     await screen.findByText("Tell the owner about new admins");
     expect(screen.queryByText(/switched off across this whole cluster/)).toBeNull();
   });
@@ -1063,7 +1118,7 @@ describe("rules halted across the whole cluster", () => {
       concepts: [],
       clusterSettings: [],
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     await screen.findByText("Tell the owner about new admins");
     expect(screen.queryByText(/switched off across this whole cluster/)).toBeNull();
   });
@@ -1078,7 +1133,7 @@ describe("rules halted across the whole cluster", () => {
       concepts: [],
       clusterSettings: new Error("reading cluster settings is owner only"),
     });
-    mount(conn, "rules");
+    mount(conn, "automations");
     await screen.findByText("Tell the owner about new admins");
     expect(screen.queryByText(/switched off across this whole cluster/)).toBeNull();
     expect(
@@ -1104,7 +1159,7 @@ describe("a rule that stopped itself", () => {
       templates: [],
       concepts: [],
     });
-    mount(conn, "rules", fakeUploads(), { showFiled: true });
+    mount(conn, "automations", fakeUploads(), { showFiled: true });
     fireEvent.click(await screen.findByText("Tell the owner about new admins"));
     expect(await screen.findByText(/Paused, and its last run failed/)).toBeTruthy();
     // The engine's own sentence is what somebody acts on.
@@ -1126,7 +1181,7 @@ describe("a rule that stopped itself", () => {
       templates: [],
       concepts: [],
     });
-    mount(conn, "rules", fakeUploads(), { showFiled: true });
+    mount(conn, "automations", fakeUploads(), { showFiled: true });
     fireEvent.click(await screen.findByText("Tell the owner about new admins"));
     expect(
       await screen.findByText(/what it generated is still there waiting/),
@@ -1161,7 +1216,7 @@ describe("the app's settings", () => {
     mount(conn, "settings");
     const group = await screen.findByRole("combobox", { name: "Opening page" });
     openSelect(group);
-    for (const name of ["Campaigns", "Audiences", "Templates", "Senders", "Rules", "Settings"]) {
+    for (const name of ["Campaigns", "Automations", "Audiences", "Templates", "Settings"]) {
       expect(screen.getByRole("option", { name })).toBeTruthy();
     }
   });
@@ -1245,14 +1300,15 @@ it("keeps test, send and scheduling unavailable until organization setup is conf
 
 describe("record list counts", () => {
   const lists = [
-    { section: "campaigns", query: "campaigns", row: campaignRow({ id: "count-c", name: "Counted campaign" }) },
-    { section: "audiences", query: "audiences", row: audienceRow({ id: "count-a", name: "Counted audience" }) },
-    { section: "templates", query: "templates", row: templateRow({ id: "count-t", name: "Counted template" }) },
-    { section: "senders", query: "senderIdentities", row: senderRow({ id: "count-s", address: "counted@example.com" }) },
-    { section: "rules", query: "emailRules", row: ruleRow({ id: "count-r", name: "Counted rule" }) },
+    { name: "campaigns", section: "campaigns", query: "campaigns", row: campaignRow({ id: "count-c", name: "Counted campaign" }) },
+    { name: "audiences", section: "audiences", query: "audiences", row: audienceRow({ id: "count-a", name: "Counted audience" }) },
+    { name: "templates", section: "templates", query: "templates", row: templateRow({ id: "count-t", name: "Counted template" }) },
+    // Senders are listed beneath Settings until Settings holds them itself.
+    { name: "senders", section: "settings", query: "senderIdentities", row: senderRow({ id: "count-s", address: "counted@example.com" }) },
+    { name: "automations", section: "automations", query: "emailRules", row: ruleRow({ id: "count-r", name: "Counted rule" }) },
   ] as const;
 
-  it.each(lists)("counts $section only after its authorized read settles", async ({ section, query, row }) => {
+  it.each(lists)("counts $name only after its authorized read settles", async ({ section, query, row }) => {
     const conn = fakeConnection({ [query]: [row] });
     const { view } = mount(conn, section);
     expect(view.container.querySelector(".os-head-meta")).toBeNull();
@@ -1260,7 +1316,7 @@ describe("record list counts", () => {
     expect(view.container.querySelectorAll(".os-record-list .os-record-row")).toHaveLength(1);
   });
 
-  it.each(lists)("does not turn a denied $section read into zero", async ({ section, query }) => {
+  it.each(lists)("does not turn a denied $name read into zero", async ({ section, query }) => {
     const conn = fakeConnection();
     conn.query[query].mockRejectedValue(new Error("permission denied"));
     const { view } = mount(conn, section);

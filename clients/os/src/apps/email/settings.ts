@@ -18,14 +18,19 @@ import type { OsAppSection } from "../../system/registry";
  *
  * Overview opens with the current state and setup direction. Resource
  * lists and guided authoring keep their own destinations.
+ *
+ * THE TABS ARE THE APP'S NOUNS (DESIGN.md, "A tab is a different kind of
+ * thing"): campaigns, automations, audiences, templates. A sender is not one
+ * of them -- it is how the app is set up to send, so it lives in Settings --
+ * and a rule is one kind of automation, so it is listed under Automations
+ * rather than beside it.
  */
 export const EMAIL_SECTIONS: OsAppSection[] = [
   { id: "overview", name: "Overview" },
   { id: "campaigns", name: "Campaigns" },
+  { id: "automations", name: "Automations", needs: ["email", "campaigns"] },
   { id: "audiences", name: "Audiences" },
   { id: "templates", name: "Templates" },
-  { id: "senders", name: "Senders" },
-  { id: "rules", name: "Rules", needs: ["email", "campaigns"] },
   // The capture inbox: what a test cluster kept instead of delivering. Owner
   // and developer only, because a captured message can hold a sign-in link
   // for any test recipient -- the same two roles the seeds admit to

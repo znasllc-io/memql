@@ -206,7 +206,7 @@ describe("the core gate, mounted by the real shell", () => {
 });
 
 describe("an unconfigured app gates only once readiness has loaded", () => {
-  it("keeps preparation open and gates Rules once sending readiness has loaded", async () => {
+  it("keeps preparation open and gates Automations once sending readiness has loaded", async () => {
     const { connection, openReadiness } = fakeConnection([
       readinessRow("email", "unconfigured"),
       readinessRow("campaigns", "configured"),
@@ -215,7 +215,7 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
     mountShell();
     await openApp("Email");
     const win = await screen.findByRole("dialog", { name: "Email" });
-    fireEvent.click(within(win).getByRole("button", { name: "Rules" }));
+    fireEvent.click(within(win).getByRole("button", { name: "Automations" }));
 
     // Unknown: nothing gated, nothing drawn. This is the frame the test
     // exists for -- a configured cluster passes through it on every load.
@@ -225,12 +225,12 @@ describe("an unconfigured app gates only once readiness has loaded", () => {
     openReadiness();
 
     // THE SECTION NAMES ITSELF, not the app. Email is the one app whose id is
-    // also the id of one of its modules (`email`), and only the Rules section
-    // asks for it: the headline reads the app's own `needs`, not a substring
-    // of its resource name ("app:email"), or this would say "Email is not set
-    // up yet" over a window whose other tabs work.
+    // also the id of one of its modules (`email`), and only the Automations
+    // section asks for it: the headline reads the app's own `needs`, not a
+    // substring of its resource name ("app:email"), or this would say "Email
+    // is not set up yet" over a window whose other tabs work.
     await waitFor(() => {
-      expect(within(win).getByRole("heading", { name: "Rules is not set up yet" })).toBeTruthy();
+      expect(within(win).getByRole("heading", { name: "Automations is not set up yet" })).toBeTruthy();
     });
     // TWO marks, and both are wanted: the title-bar gear and the rail's own
     // Settings entry. A person looking at the window chrome and a person

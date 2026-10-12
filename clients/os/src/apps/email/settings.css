@@ -20,3 +20,7 @@
 }
 
 .campaigns-settings:has(.os-wizard, .os-action-pane) { height: 100%; }
+
+/* The Senders list is reached from Settings (it has no tab of its own), and sits
+ * under the page it is reached from. */
+.email-pane + .email-senders { margin-top: 14px; }

@@ -21,7 +21,7 @@ const email = () => {
 };
 
 describe("one Email app", () => {
-  it("is one Email app with the Campaigns sections and the inbox", () => {
+  it("is one Email app whose tabs are its nouns, with the inbox and logs gated on their own resources", () => {
     expect(OS_REGISTRY.apps.some((a) => a.id === "campaigns")).toBe(false);
 
     const app = email();
@@ -31,20 +31,40 @@ describe("one Email app", () => {
     expect(app.settingsSection).toBe("settings");
     expect(app.logsSection).toBe("logs");
 
+    // Senders and Rules are not tabs: a sender is set up in Settings, and a
+    // rule is one kind of automation.
     const sections = app.sections ?? [];
     expect(sections.map((s) => s.id)).toEqual([
       "overview",
       "campaigns",
+      "automations",
       "audiences",
       "templates",
-      "senders",
-      "rules",
       "inbox",
       "logs",
       "settings",
     ]);
+    expect(sections.map((s) => s.name)).toEqual([
+      "Overview",
+      "Campaigns",
+      "Automations",
+      "Audiences",
+      "Templates",
+      "Inbox",
+      "Logs",
+      "Settings",
+    ]);
+    expect(sections.find((s) => s.id === "automations")?.needs).toEqual(["email", "campaigns"]);
     expect(sections.find((s) => s.id === "inbox")?.requires).toBe("app:email/inbox");
     expect(sections.find((s) => s.id === "logs")?.requires).toBe("app:email/logs");
+  });
+
+  it("names the records search and Ask can open, one per noun", () => {
+    expect(email().records).toEqual([
+      { section: "campaigns", idField: "campaignId", query: "campaigns.campaigns", labels: ["name"] },
+      { section: "audiences", idField: "audienceId", query: "campaigns.audiences", labels: ["name", "description"] },
+      { section: "templates", idField: "templateId", query: "campaigns.templates", labels: ["name", "subject"] },
+    ]);
   });
 
   it("keeps its preferences under its own key and repairs a section it does not declare", () => {
@@ -61,5 +81,10 @@ describe("one Email app", () => {
     expect(repaired.defaultSection).toBe("overview");
     expect(repaired.showFiled).toBe(true);
     expect(repaired.trackByDefault).toBe(false);
+
+    // A tab this app used to have is a section it no longer declares.
+    for (const retired of ["senders", "rules"]) {
+      expect(sanitizeEmailSettings({ version: 1, defaultSection: retired, showFiled: false, trackByDefault: true }).defaultSection).toBe("overview");
+    }
   });
 });

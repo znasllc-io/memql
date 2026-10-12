@@ -1,7 +1,7 @@
 import { AzureEmailConnections } from "../../modules/connections/AzureEmailConnections";
 import { listCount } from "../../kit/RecordRow";
 import { AddButton } from "../../kit/AddButton";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { AtSign } from "lucide-react";
 
@@ -39,15 +39,26 @@ import type { EmailFeeds } from "./useEmail";
 // Campaign authors select organization-owned, verified sender identities.
 // Cluster Settings owns Azure authorization; domain setup reuses that access.
 // Adding a mailbox row alone never grants permission to send from its address.
+//
+// A MAILBOX HAS NO TAB OF ITS OWN: it is how the app sends, so the list is
+// reached from Settings (memql#6033). `above` is what Settings shows over it.
+// A mailbox's page, its Add and the domain connection each take the pane over,
+// because the window's one trail row is drawn for the FIRST heading on the
+// pane, and a page beneath Settings' own heading would have no way back. What
+// Settings drew stays MOUNTED while a page has the pane, parked the way a
+// section is, so an unsaved choice in it survives a visit to a mailbox.
 
 export function SendersSection({
   feeds,
   writes,
   showFiled,
+  above,
 }: {
   feeds: EmailFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
+  /** Drawn over the list, and parked (mounted, hidden) while a page has the pane. */
+  above?: ReactNode;
 }) {
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
@@ -67,10 +78,13 @@ export function SendersSection({
     [source, source?.snapshot, openId],
   );
 
-  if (connecting) return <AzureEmailConnections manageCluster={false} onBack={() => setConnecting(false)} />;
+  const over = above === undefined ? null : <div className="email-pane" hidden={connecting || adding || open !== null}>{above}</div>;
+  const frame = (page: ReactNode) => <>{over}{page}</>;
+
+  if (connecting) return frame(<AzureEmailConnections manageCluster={false} onBack={() => setConnecting(false)} />);
 
   if (adding)
-    return (
+    return frame(
       <div className="os-app-stack">
         <Head title="Add a mailbox" back={{ label: "Senders", onSelect: () => setAdding(false) }} />
         <SenderForm
@@ -80,10 +94,10 @@ export function SendersSection({
             if (id !== "") setOpenId(id);
           }}
         />
-      </div>
+      </div>,
     );
   if (open)
-    return (
+    return frame(
       <div
         className="os-app-stack"
         data-os-page-context={JSON.stringify({
@@ -97,11 +111,11 @@ export function SendersSection({
           back={{ label: "Senders", onSelect: () => setOpenId("") }}
         />
         <SenderDetail key={open.id} sender={open} writes={writes} />
-      </div>
+      </div>,
     );
 
-  return (
-    <div className="os-app-stack">
+  const list = (
+    <div className="os-app-stack email-senders">
       <Head title="Senders" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="Add a mailbox" />
       </Head>
@@ -140,6 +154,7 @@ export function SendersSection({
       />
     </div>
   );
+  return frame(list);
 }
 
 function SenderLine({

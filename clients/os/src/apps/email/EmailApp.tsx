@@ -19,6 +19,13 @@ import { RulesSection } from "./RulesSection";
 import { SendersSection } from "./SendersSection";
 import { TemplatesSection } from "./TemplatesSection";
 import { useCampaignWrites } from "./actions";
+import {
+  EmailNavigationContext,
+  useEmailRequests,
+  useOpenRecord,
+  type OpenSection,
+  type Requests,
+} from "./openRequest";
 import { emailPreview } from "./preview";
 import {
   EMAIL_SECTIONS,
@@ -27,6 +34,11 @@ import {
   type EmailSettings,
   type EmailSettingsStore } from "./settings";
 import { useEmailFeeds, useEmailRecordFeeds } from "./useEmail";
+
+// What a section outside this directory reaches for to open a record or start
+// an Add flow, and the type of the request a section is handed.
+export { useOpenRecord, useOpenSettings } from "./openRequest";
+export type { OpenRequest } from "./openRequest";
 
 // Email: writing mail, sending it, and knowing what happened (epic memql#4827 /
 // #4828 / #4830), and the capture inbox that shows what a test cluster did
@@ -84,14 +96,38 @@ const EMAIL_LOG_CONCEPTS = [
   Concepts.EMAIL_CAPTURED_MESSAGE,
 ] as const;
 
-export function EmailApp({
+/** The records search and Ask can name, and the tab that holds each. These are
+ *  the `idField`s the manifest declares in `records`; a test pins the two. */
+const RECORD_INTENTS: readonly { idField: string; section: OpenSection }[] = [
+  { idField: "campaignId", section: "campaigns" },
+  { idField: "audienceId", section: "audiences" },
+  { idField: "templateId", section: "templates" },
+];
+
+type EmailAppProps = OsAppProps & { store?: EmailSettingsStore; uploads?: UploadProvider };
+
+// OPENING A RECORD FROM ELSEWHERE is one request per tab, held HERE and handed
+// to the tab by name (`openRequest.ts` carries the why). The window's intent
+// (search, Ask) and the pages inside the app (a link to an audience, an Add
+// that has to leave for another tab) both make one, through the same openers.
+export function EmailApp(props: EmailAppProps) {
+  const { requests, navigation } = useEmailRequests(props.navigate);
+  return (
+    <EmailNavigationContext.Provider value={navigation}>
+      <EmailSections {...props} requests={requests} />
+    </EmailNavigationContext.Provider>
+  );
+}
+
+function EmailSections({
   sectionId,
   navigate,
   intent,
   consumeIntent,
   store,
   uploads,
-}: OsAppProps & { store?: EmailSettingsStore; uploads?: UploadProvider }) {
+  requests,
+}: EmailAppProps & { requests: Requests }) {
   // Injectable for tests, which is the whole reason these parameters exist --
   // nothing in the shell passes either.
   const settingsStore = useMemo(() => store ?? new LocalEmailSettingsStore(), [store]);
@@ -110,6 +146,27 @@ export function EmailApp({
   const feeds = useEmailFeeds();
   const recordFeeds = useEmailRecordFeeds(feeds);
   const writes = useCampaignWrites();
+
+  // THE OPEN INTENT (epic memql#4842, #4845): "show this campaign, this
+  // audience, this template", from search and from Ask. Consumed by id, so
+  // acting on a stale render can never eat a newer instruction, and a payload
+  // naming nothing this app opens is consumed and ignored rather than left
+  // standing to re-fire on every render. Logs' own payload (a subject to
+  // narrow to) is taken by that section first: effects run child-first.
+  const openRecord = useOpenRecord();
+  const handledIntent = useRef("");
+  useEffect(() => {
+    if (!intent || intent.id === handledIntent.current) return;
+    handledIntent.current = intent.id;
+    for (const { idField, section } of RECORD_INTENTS) {
+      const id = intent.payload[idField];
+      if (typeof id === "string" && id !== "") {
+        openRecord(section, { id });
+        break;
+      }
+    }
+    consumeIntent?.(intent.id);
+  }, [intent, consumeIntent, openRecord]);
 
   function updateSettings(patch: Partial<EmailSettings>) {
     const next = { ...settings, ...patch, version: 1 as const };
@@ -131,6 +188,10 @@ export function EmailApp({
     // work.
     const shellDefault = EMAIL_SECTIONS[0]?.id ?? "";
     if (sectionId !== shellDefault) return;
+    // NOR WHEN AN INSTRUCTION OPENED IT: the intent above sends the window to
+    // the tab that holds the record, and a preference navigating after it
+    // would win.
+    if (intent) return;
     if (settings.defaultSection && settings.defaultSection !== sectionId) {
       navigate(settings.defaultSection);
     }
@@ -151,7 +212,17 @@ export function EmailApp({
       case "inbox":
         return <EmailInbox />;
       case "settings":
-        return <CampaignsSettingsSection feeds={feeds} recordFeeds={recordFeeds} settings={settings} update={updateSettings} />;
+        // A MAILBOX IS HOW THE APP SENDS, so it has no tab of its own: the list
+        // is reached from here, beneath the rest of Settings. It takes the
+        // pane over when a mailbox or its Add is open, as every list does.
+        return (
+          <SendersSection
+            feeds={feeds}
+            writes={writes}
+            showFiled={settings.showFiled}
+            above={<CampaignsSettingsSection feeds={feeds} recordFeeds={recordFeeds} settings={settings} update={updateSettings} />}
+          />
+        );
       case "logs":
         return (
           <AppLogsSection
@@ -164,13 +235,11 @@ export function EmailApp({
           />
         );
       case "audiences":
-        return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} uploads={uploadProvider} showFiled={settings.showFiled} />;
+        return <AudiencesSection feeds={feeds} recordFeeds={recordFeeds} writes={writes} uploads={uploadProvider} showFiled={settings.showFiled} openRequest={requests.audiences} />;
       case "templates":
-        return <TemplatesSection feeds={feeds} writes={writes} showFiled={settings.showFiled} />;
-      case "senders":
-        return <SendersSection feeds={feeds} writes={writes} showFiled={settings.showFiled} />;
-      case "rules":
-        return <RulesSection feeds={feeds} writes={writes} showFiled={settings.showFiled} />;
+        return <TemplatesSection feeds={feeds} writes={writes} showFiled={settings.showFiled} openRequest={requests.templates} />;
+      case "automations":
+        return <RulesSection feeds={feeds} writes={writes} showFiled={settings.showFiled} openRequest={requests.automations} />;
       default:
         return (
           <CampaignsSection
@@ -180,6 +249,7 @@ export function EmailApp({
             showFiled={settings.showFiled}
             trackByDefault={settings.trackByDefault}
             uploads={uploadProvider}
+            openRequest={requests.campaigns}
           />
         );
     }

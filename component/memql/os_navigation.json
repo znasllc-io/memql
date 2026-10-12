@@ -67,20 +67,16 @@
         "name": "Campaigns"
       },
       {
+        "id": "automations",
+        "name": "Automations"
+      },
+      {
         "id": "audiences",
         "name": "Audiences"
       },
       {
         "id": "templates",
         "name": "Templates"
-      },
-      {
-        "id": "senders",
-        "name": "Senders"
-      },
-      {
-        "id": "rules",
-        "name": "Rules"
       },
       {
         "id": "inbox",
@@ -97,7 +93,34 @@
         "name": "Settings"
       }
     ],
-    "records": []
+    "records": [
+      {
+        "section": "campaigns",
+        "idField": "campaignId",
+        "query": "campaigns.campaigns",
+        "labels": [
+          "name"
+        ]
+      },
+      {
+        "section": "audiences",
+        "idField": "audienceId",
+        "query": "campaigns.audiences",
+        "labels": [
+          "name",
+          "description"
+        ]
+      },
+      {
+        "section": "templates",
+        "idField": "templateId",
+        "query": "campaigns.templates",
+        "labels": [
+          "name",
+          "subject"
+        ]
+      }
+    ]
   },
   {
     "id": "cluster",

@@ -12,22 +12,42 @@ import { useLiveView } from "../../live/liveView";
 import { editorTemplateURL, readEditorPreference } from "../../items/editorPreference";
 import { browserHandoffPorts, openHandoff, VSCODE_NO_ANSWER_MESSAGE } from "../../items/vscode";
 import type { CampaignWrites } from "./actions";
+import { recordNamed, useOpenRequest, type OpenRequest } from "./openRequest";
 import { templateFingerprint, templateFromRow, templateIsArchived, templateName, type TemplateRow } from "./rows";
 import type { EmailFeeds } from "./useEmail";
 
 // Email organizes reusable templates. File content is edited and previewed
 // by Productivity Tools, using the same revision-checked backend on both hosts.
-export function TemplatesSection({ feeds, writes, showFiled }: { feeds: EmailFeeds; writes: CampaignWrites; showFiled: boolean }) {
+export function TemplatesSection({ feeds, writes, showFiled, openRequest }: {
+  feeds: EmailFeeds;
+  writes: CampaignWrites;
+  showFiled: boolean;
+  /** A template to open, or the Add flow to start, from search, Ask or another page. */
+  openRequest?: OpenRequest;
+}) {
   const { config } = useSession();
   const accounts = useAccountOptions();
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState("");
+  useOpenRequest(openRequest, target => {
+    if ("add" in target) {
+      setOpenId("");
+      setAdding(true);
+    } else {
+      setAdding(false);
+      setOpenId(target.id);
+    }
+  });
   const source = useLiveView<Row, TemplateRow>(feeds.templates.source, `filed:${showFiled}`, rows => {
     const templates = rows.map(templateFromRow).filter(t => t.id !== "");
     return showFiled ? templates : templates.filter(t => !templateIsArchived(t));
   });
-  const open = useMemo(() => source?.snapshot.rows.find(t => t.id === openId), [source, source?.snapshot, openId]);
+  // A PAGE OPENS WHICHEVER TEMPLATE ITS ID NAMES, however the list is filtered
+  // (`recordNamed`): an archived one is hidden from the list by default and
+  // search and Ask still reach it. One that has not arrived yet leaves the list
+  // on screen, and the page opens when it does.
+  const open = useMemo(() => recordNamed(feeds.templates.snapshot.rows, templateFromRow, openId), [feeds.templates.snapshot.rows, openId]);
   const edit = (id: string, name: string) => openHandoff(editorTemplateURL(config.domain, id, name), () => setNotice(VSCODE_NO_ANSWER_MESSAGE));
   if (adding) return <div className="os-app-stack">
     <Head title="New template" back={{ label: "Templates", onSelect: () => setAdding(false) }} />

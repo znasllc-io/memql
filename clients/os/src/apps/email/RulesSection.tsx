@@ -28,6 +28,7 @@ import {
 } from "../../kit";
 import { useLiveView } from "../../live/liveView";
 import type { CampaignWrites, RuleFacts } from "./actions";
+import { recordNamed, useOpenRequest, type OpenRequest } from "./openRequest";
 import {
   audienceProjection,
   nameOfAudience,
@@ -83,13 +84,25 @@ export function RulesSection({
   feeds,
   writes,
   showFiled,
+  openRequest,
 }: {
   feeds: EmailFeeds;
   writes: CampaignWrites;
   showFiled: boolean;
+  /** A rule to open, or the Add flow to start, from another page. */
+  openRequest?: OpenRequest;
 }) {
   const [openId, setOpenId] = useState("");
   const [adding, setAdding] = useState(false);
+  useOpenRequest(openRequest, (target) => {
+    if ("add" in target) {
+      setOpenId("");
+      setAdding(true);
+    } else {
+      setAdding(false);
+      setOpenId(target.id);
+    }
+  });
 
   const source = useLiveView<Row, EmailRuleRow>(
     feeds.rules.source,
@@ -110,15 +123,17 @@ export function RulesSection({
   const concepts = useTriggerConcepts();
   const authored = useAuthoredAutomations();
 
+  // A PAGE OPENS WHICHEVER RULE ITS ID NAMES, however the list is filtered
+  // (`recordNamed`): a paused rule is hidden from the list by default.
   const open = useMemo(
-    () => source?.snapshot.rows.find((r) => r.id === openId) ?? null,
-    [source, source?.snapshot, openId],
+    () => recordNamed(feeds.rules.snapshot.rows, emailRuleFromRow, openId),
+    [feeds.rules.snapshot.rows, openId],
   );
 
   if (adding)
     return (
       <div className="os-app-stack">
-        <Head title="New rule" back={{ label: "Rules", onSelect: () => setAdding(false) }} />
+        <Head title="New rule" back={{ label: "Automations", onSelect: () => setAdding(false) }} />
         <RuleBuilder
           concepts={concepts}
           templates={templates}
@@ -135,7 +150,7 @@ export function RulesSection({
   if (open)
     return (
       <div className="os-app-stack">
-        <Head title={ruleName(open)} back={{ label: "Rules", onSelect: () => setOpenId("") }} />
+        <Head title={ruleName(open)} back={{ label: "Automations", onSelect: () => setOpenId("") }} />
         <AuthoredAutomationsBanner authored={authored} />
         <RuleDetail
           key={open.id}
@@ -151,7 +166,7 @@ export function RulesSection({
 
   return (
     <div className="os-app-stack">
-      <Head title="Rules" meta={listCount(source?.snapshot)}>
+      <Head title="Automations" meta={listCount(source?.snapshot)}>
         <AddButton onClick={() => setAdding((v) => !v)} label="New rule" />
       </Head>
 
