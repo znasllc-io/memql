@@ -334,6 +334,36 @@ func TestBuiltinRenderIssuesAreOnlyPlaceholdersAndLinks(t *testing.T) {
 	}
 }
 
+// A highlight is written one row to a line of the statement, and each line is a
+// span on the highlight colour. A span's background fills the font's whole
+// content area (about 1.15 times its size in the fonts of these layouts, and up
+// to 1.2 in others a reader may have), so a line height under that makes lines
+// that sit close draw over each other. A statement that wraps on a phone does:
+// the Article's highlight had a line height of half its size, and at 375 pixels
+// "before." was written over "decision". A built-in layout's highlight keeps
+// the room its lines need, whether they are rows of their own or the lines of
+// one that wraps.
+func TestBuiltinHighlightsLeaveRoomForTheirLines(t *testing.T) {
+	highlights := 0
+	for _, info := range Layouts() {
+		walkBlocks(info.Document.Blocks, func(b Block) bool {
+			if b.Type != typeHighlight {
+				return true
+			}
+			highlights++
+			size := highlightSize(b)
+			if lineHeight := b.LineHeight; lineHeight < 1.2*size {
+				t.Errorf("%s: highlight %q has a line height of %gpx for text of %gpx, under 1.2 times its size (%.2fpx): its lines draw over each other when they wrap",
+					info.ID, b.ID, lineHeight, size, 1.2*size)
+			}
+			return true
+		})
+	}
+	if highlights == 0 {
+		t.Fatal("no built-in layout has a highlight: the test checks nothing")
+	}
+}
+
 // TestLayoutsGolden renders each built-in layout as it is sent. The goldens are
 // written by -update from the renderer, as the per-block ones are, and the diff
 // is the review.

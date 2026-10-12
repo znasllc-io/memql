@@ -67,7 +67,8 @@
           "role": "content",
           "text": "The fix that works most often:\nmake one decision the night before.",
           "size": 17.3,
-          "lineHeight": 8.65
+          "lineHeight": 24.65,
+          "gap": 0
         },
         {
           "id": "article",
