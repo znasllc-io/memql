@@ -162,3 +162,45 @@ test("every cause is kept, ahead of a long stack, and redacted like the rest", (
   assert.equal(diagnosticText(new Error("alone")).split("\n")[0], "Error: alone");
   assert.doesNotMatch(diagnosticText(new Error("alone")), /Caused by/);
 });
+
+// A refusal reaches a person in the cluster's words (the SDK's refusalSentence takes the call's name, the
+// engine's frame and a Go package name off), never as "Couldn’t <operation>. Try again".
+test("a refusal from the cluster reads in the cluster's words", () => {
+  const refused = (sentence: string, call = "campaignSaveTemplate") => new Error(`${call}: MemQL engine failed to execute query. Details: ${sentence}`);
+  for (const sentence of [
+    "Someone else is saving this template. Try again in a moment.",
+    "This file is already linked to a template you can't open. Save it with a different template.",
+    "Previews are busy right now. Try again in a moment.",
+  ]) assert.equal(userMessage(refused(sentence), "publish the email"), sentence);
+  // A sentence a Go error opens in lower case is shown as a sentence.
+  assert.equal(userMessage(refused("fix these before publishing: Add a link to “Start”. Choose a picture for “Banner”."), "publish the email"),
+    "Fix these before publishing: Add a link to “Start”. Choose a picture for “Banner”.");
+  assert.equal(userMessage(refused("compose: the sources could not be read", "composeMaterialize"), "create the email"), "The sources could not be read");
+  // The frame without a call's name in front of it is the same refusal.
+  assert.equal(userMessage(new Error("MemQL engine failed to execute query. Details: That folder isn't available. Choose another folder."), "save"), "That folder isn't available. Choose another folder.");
+  // A refusal the SDK has already put in words is found through its cause, and keeps them.
+  const worded = new Error("Enter a name without slashes.", { cause: refused("Enter a name without slashes.", "composeMaterialize") });
+  assert.equal(userMessage(worded, "create the Markdown document"), "Enter a name without slashes.");
+  // What an AI run says about itself is still put in plain words first.
+  assert.match(userMessage(refused('function "runAgentTurn" execution failed: idle ceiling', "libraryRequestDocumentRevision"), "prepare changes"), /^The AI stopped responding\./);
+  // Credential material in a refusal never reaches the person.
+  const secret = userMessage(refused("token=abc123 and Bearer xyz789 were refused"), "publish the email");
+  assert.doesNotMatch(secret, /abc123|xyz789/);
+  assert.match(secret, /\[redacted\]/);
+  // A frame with nothing in it, and a message that is not the cluster's refusal, keep the safe message.
+  assert.equal(userMessage(new Error("campaignSaveTemplate: MemQL engine failed to execute query."), "publish the email"), "Couldn’t publish the email. Try again. If this continues, choose Show details.");
+  assert.equal(userMessage(new Error("campaignSaveTemplate: MemQL engine failed to execute query. Details:   "), "publish the email"), "Couldn’t publish the email. Try again. If this continues, choose Show details.");
+  assert.equal(userMessage(new Error("campaignSaveTemplate: invalid query syntax"), "publish the email"), "Couldn’t publish the email. Try again. If this continues, choose Show details.");
+  assert.equal(userMessage(new Error("The MemQL connection changed. Keep your edits, reconnect to the original cluster, and compare with its latest version before saving."), "publish the email"),
+    "The MemQL connection changed. Reconnect to the file’s cluster and compare with its latest version before saving.");
+});
+
+test("a reported refusal keeps a reference, since the cluster's trouble can be its own", () => {
+  const output: string[] = [];
+  const reporter = new ProblemReporter({ current: () => undefined } as unknown as EditorConnectionAPI, line => output.push(line));
+  const problem = reporter.report(new Error("campaignSaveTemplate: MemQL engine failed to execute query. Details: Someone else is saving this template. Try again in a moment."), "publish the email");
+  assert.equal(problem.message, "Someone else is saving this template. Try again in a moment.");
+  assert.match(problem.reference ?? "", /^tools-/);
+  assert.match(output[0] ?? "", /campaignSaveTemplate: MemQL engine failed to execute query\. Details: Someone else/);
+  reporter.dispose();
+});

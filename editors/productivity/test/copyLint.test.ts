@@ -12,8 +12,10 @@
 //      of the New email page's and the email editor's words live) and the
 //      static text the two pages are built with.
 //   3. The string literals a source file hands straight to a toast, an input
-//      box's prompt or title, or a progress notification's title; the title,
-//      placeholder and written-out items of a quick pick; the messages of the
+//      box's prompt, title, placeholder or validation sentence, an open or save
+//      dialog's title, button and file filter names, or a progress
+//      notification's title; the title, placeholder and written-out items of a
+//      quick pick, typed or not; the messages of the
 //      errors an input raises (a UserInputError is shown as the toast exactly
 //      as it is written); the refusal sentences of the email model
 //      (src/emailDocument.ts), which the Design page shows under a field and
@@ -49,6 +51,7 @@ import { newEmailPage } from "../src/newEmailPage.js";
 import {
   callArguments,
   decode,
+  fileCopy,
   literalFragments,
   literalText,
   manifestCopy,
@@ -244,7 +247,8 @@ function userMessagesIn(src: string, file: string): Copy[] {
  */
 function quickPicksIn(src: string, file: string): Copy[] {
   const out: Copy[] = [];
-  for (const m of src.matchAll(/\bshowQuickPick\s*\(/g)) {
+  // A typed call (showQuickPick<Item>(...)) is the same call.
+  for (const m of src.matchAll(/\bshowQuickPick\s*(?:<[^<>()]*>)?\s*\(/g)) {
     const [items, options] = callArguments(src, (m.index ?? 0) + m[0].length - 1);
     const where = `${file}:${lineAt(src, m.index ?? 0)}`;
     if (items?.startsWith("[")) {
@@ -519,6 +523,37 @@ test("the scans read what they exist for", () => {
     ],
     "a quick pick's title, placeholder and written-out items are read; a list built from data is not",
   );
+  assert.deepEqual(
+    quickPicksIn("const chosen = await window.showQuickPick<Picture>(pictures, { title: 'Choose a picture', placeHolder: 'Recent pictures' });", "src/x.ts").map((c) => c.text),
+    ["Choose a picture", "Recent pictures"],
+    "a typed quick pick is read like any other",
+  );
+  // An input box's placeholder and the sentences its validation returns, and an open or save dialog's words, are read.
+  assert.deepEqual(
+    fileCopy(
+      [
+        "await window.showInputBox({ title: 'Name it', prompt: `For ${who}`, placeHolder: 'Autumn welcome', validateInput: v => v.trim() ? undefined : 'Enter a name.' });",
+        "await window.showOpenDialog({ title: 'Choose a picture', openLabel: 'Use picture', canSelectMany: false, filters: { Pictures: ['png'], 'PDF documents': ['pdf'], [COPY.name]: ['gif'] } });",
+        "await window.showSaveDialog({ saveLabel: 'Download ZIP', defaultUri: target });",
+        "await window.showOpenDialog(options);",
+      ].join("\n"),
+      "src/x.ts",
+    ).map((c) => [c.text, c.line === true]),
+    [
+      ["For X", true],
+      ["Name it", true],
+      ["Autumn welcome", true],
+      ["Enter a name.", true],
+      ["Choose a picture", true],
+      ["Use picture", true],
+      ["Pictures", false],
+      ["PDF documents", false],
+      ["Download ZIP", true],
+    ],
+    "the placeholder, the validation sentences, the dialog's title and button and its filters' names are read; a computed name and options kept in a variable are not",
+  );
+  assert.ok(sources.some((c) => c.text === "Insert image" && c.where.startsWith("src/insertImage.ts:")), "the scan reads an open dialog of the tree");
+  assert.ok(sources.some((c) => c.text === "Download ZIP" && c.where.startsWith("src/extension.ts:")), "the scan reads a save dialog of the tree");
   const sample = [
     'void window.showWarningMessage("Couldn\'t reach " + name + ".", "Retry");',
     "window.showInputBox({ title: `Sign in to ${cluster}`, prompt: 'Paste the code', value: x });",

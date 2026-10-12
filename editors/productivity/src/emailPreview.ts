@@ -15,7 +15,7 @@ export const PREVIEW_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-s
 /** The doctype the renderer writes: the limited-quirks mode email clients use. Keeping it keeps the table layout the same in the preview. */
 const XHTML_DOCTYPE = '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">';
 
-// The allowlists are those of safeEmailHTML in templatePreview.ts, which this replaces.
+// The email presentation elements and attributes a preview keeps; everything else goes (previewHTML).
 const TAGS = new Set("a b blockquote br caption center code col colgroup dd div dl dt em font h1 h2 h3 h4 h5 h6 hr i img li ol p pre s small span strong sub sup table tbody td th thead tfoot tr u ul style".split(" "));
 const ATTRIBUTES = new Set("align alt bgcolor border cellpadding cellspacing class color colspan dir face height lang role rowspan size style title valign width".split(" "));
 const DATA_PICTURE = /^data:image\/(png|jpeg|gif);base64,[A-Za-z0-9+/=]+$/;

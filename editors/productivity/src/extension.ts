@@ -3,9 +3,7 @@ import { setProblemOutput, showProblem } from "./problemUI.js";
 import * as vscode from "vscode";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 import { Documents, isZip, NEW_EMAIL_IS_A_PAGE, resourceFrom, type OpenDocument } from "./documents.js";
-import { newTemplate } from "./templates.js";
-import { TemplateEditor } from "./templateEditor.js";
-import { TemplatePublisher } from "./templatePublish.js";
+import { EmailEditor } from "./emailEditor.js";
 import { TemplateExamples } from "./templateExamples.js";
 import { newMarkdown } from "./newMarkdown.js";
 import { MarkdownEditor } from "./markdownEditor.js";
@@ -108,8 +106,7 @@ export async function activate(context: vscode.ExtensionContext) {
     refresh: async uri => { provider.useBase(uri, await provider.latest(uri)); },
     release: uri => { if (!vscode.workspace.textDocuments.some(doc => doc.uri.toString() === uri.toString())) provider.close(uri); },
   });
-  const publisher = new TemplatePublisher(connection, context, uri => provider.load(uri));
-  const templates = new TemplateEditor(context, document => publisher.publish(document));
+  const emails = new EmailEditor(context, connection, files, uri => provider.load(uri));
   const examples = new TemplateExamples(connection, context);
   const comparisons = new Map<string, { snapshot: vscode.Uri; document: OpenDocument }>();
   const snapshots = new Map<string, string>();
@@ -125,9 +122,9 @@ export async function activate(context: vscode.ExtensionContext) {
       if (comparison) { snapshots.delete(comparison.snapshot.toString()); comparisons.delete(key); }
       if (document.uri.scheme === "memql-review") snapshots.delete(key);
     }),
-    vscode.window.registerCustomEditorProvider("memql.productivity.email", { resolveCustomTextEditor: (document, panel) => userOperation("open the email preview", () => templates.resolveCustomTextEditor(document, panel)) }, { supportsMultipleEditorsPerDocument: true }),
-    ...(["source", "preview", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.template.${mode}`, async (uri?: vscode.Uri) => {
-      try { await templates.show(mode, uri); } catch (error) { void showProblem(error, "open the email preview"); }
+    vscode.window.registerCustomEditorProvider("memql.productivity.email", { resolveCustomTextEditor: (document, panel) => userOperation("open the email", () => emails.resolveCustomTextEditor(document, panel)) }, { supportsMultipleEditorsPerDocument: true }),
+    ...(["design", "source", "split"] as const).map(mode => vscode.commands.registerCommand(`memql.productivity.email.${mode}`, async (uri?: vscode.Uri) => {
+      try { await emails.show(mode, uri); } catch (error) { void showProblem(error, "open the email view"); }
     })),
     vscode.commands.registerCommand("memql.productivity.templateFromExamples", async () => {
       try { await examples.start(); } catch (error) { void showProblem(error, "create the email draft"); }
@@ -187,15 +184,6 @@ export async function activate(context: vscode.ExtensionContext) {
       revertCustomDocument: (document) => userOperation("reload the PDF", () => pdf.revertCustomDocument(document)),
       backupCustomDocument: (document, backup) => userOperation("back up the PDF", () => pdf.backupCustomDocument(document, backup)),
     } satisfies vscode.CustomEditorProvider<PDFDocument>, { supportsMultipleEditorsPerDocument: true }),
-    vscode.commands.registerCommand("memql.productivity.newTemplate", async () => {
-      try {
-        const doc = await vscode.workspace.openTextDocument({ language: "json", content: newTemplate() });
-        await vscode.window.showTextDocument(doc);
-      } catch (error) { await showProblem(error, "create an email template"); }
-    }),
-    vscode.commands.registerCommand("memql.productivity.previewTemplate", async () => {
-      try { await templates.show("split"); } catch (error) { void showProblem(error, "preview the email"); }
-    }),
     vscode.commands.registerCommand("memql.productivity.openFile", async () => {
       const uri = await vscode.window.showInputBox({ title: "MemQL file link", placeHolder: "memql-file://cluster.example/artifacts/id/document.md" });
       if (uri) { try { await open(uri); } catch (error) { await showProblem(error, "open the file"); } }
@@ -216,5 +204,5 @@ export async function activate(context: vscode.ExtensionContext) {
     resourceFrom(resource);
     await vscode.commands.executeCommand("vscode.open", vscode.Uri.parse(resource));
   }
-  return { connectionVersion: connection.version, ...(context.extensionMode === vscode.ExtensionMode.Test ? { templateReady: (uri: vscode.Uri, version?: number) => templates.whenRendered(uri, version), pdfReady: (uri: vscode.Uri) => pdf.whenRendered(uri), markdownReady: (uri: vscode.Uri, version?: number) => markdown.whenRendered(uri, version) } : {}) };
+  return { connectionVersion: connection.version, ...(context.extensionMode === vscode.ExtensionMode.Test ? { emailReady: (uri: vscode.Uri, version?: number) => emails.whenShown(uri, version), pdfReady: (uri: vscode.Uri) => pdf.whenRendered(uri), markdownReady: (uri: vscode.Uri, version?: number) => markdown.whenRendered(uri, version) } : {}) };
 }

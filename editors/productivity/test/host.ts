@@ -17,37 +17,41 @@ export async function run(): Promise<void> {
   const tools = await productivity.activate();
   check(tools.connectionVersion === 1, "Productivity must use the core connection API.");
   const commands = await vscode.commands.getCommands(true);
-  for (const command of ["memql.clusters.add", "memql.clusters.signIn", "memql.productivity.newTemplate", "memql.productivity.previewTemplate"]) {
+  for (const command of ["memql.clusters.add", "memql.clusters.signIn", "memql.productivity.email.design", "memql.productivity.email.source", "memql.productivity.email.split"]) {
     check(commands.includes(command), `${command} was not registered.`);
   }
-  await vscode.commands.executeCommand("memql.productivity.newTemplate");
-  const document = vscode.window.activeTextEditor?.document;
-  check(document?.languageId === "json", "New template must open in a JSON editor.");
-  check(JSON.parse(document.getText()).subject === "Thanks for subscribing", "New template lost its subject.");
-  await vscode.commands.executeCommand("memql.productivity.previewTemplate");
-  // Opening the editor does not await its webview. Verify the untitled preview
-  // before navigating away and hiding it during its first load.
-  check(await tools.templateReady(document.uri, document.version) === "Thanks for subscribing", "New template preview did not render the subject.");
   // Actual VS Code file I/O, through a virtual workspace on the browser host.
   const root = vscode.workspace.workspaceFolders?.[0]?.uri;
   check(root, "The host test requires its isolated fixture workspace.");
+  // A local email written in HTML: no cluster is connected here, so the page shows the email's words and says so.
   const emailURI = vscode.Uri.joinPath(root, "host.email.json");
-  await vscode.workspace.fs.writeFile(emailURI, new TextEncoder().encode(document.getText()));
+  const email = { subject: "Thanks for subscribing", textBody: "Thanks for joining us. We’re glad you’re here.", htmlBody: "<h1>Welcome</h1><p>Thanks for joining us. We’re glad you’re here.</p>" };
+  await vscode.workspace.fs.writeFile(emailURI, new TextEncoder().encode(JSON.stringify(email, null, 2) + "\n"));
   await vscode.commands.executeCommand("vscode.openWith", emailURI, "memql.productivity.email");
-  check(await tools.templateReady(emailURI) === "Thanks for subscribing", "Email preview did not render the subject.");
-  await vscode.commands.executeCommand("memql.productivity.template.split", emailURI);
+  // Opening the editor does not await its webview: wait for the page to report what it shows.
+  const opened = await tools.emailReady(emailURI);
+  check(opened.subject === "Thanks for subscribing" && opened.state === "Not connected", `The email editor did not show the local email (${JSON.stringify(opened)}).`);
+  await vscode.commands.executeCommand("memql.productivity.email.split", emailURI);
   const emailDocument = await vscode.workspace.openTextDocument(emailURI);
   check(vscode.window.visibleTextEditors.some(editor => editor.document === emailDocument), "Email split view lost the shared source document.");
-  const template = JSON.parse(emailDocument.getText()); template.subject = "Updated live preview";
+  const edited = JSON.parse(emailDocument.getText()); edited.subject = "Updated live preview";
   const emailEdit = new vscode.WorkspaceEdit();
-  emailEdit.replace(emailURI, new vscode.Range(emailDocument.positionAt(0), emailDocument.positionAt(emailDocument.getText().length)), JSON.stringify(template, null, 2));
+  emailEdit.replace(emailURI, new vscode.Range(emailDocument.positionAt(0), emailDocument.positionAt(emailDocument.getText().length)), JSON.stringify(edited, null, 2) + "\n");
   check(await vscode.workspace.applyEdit(emailEdit), "Email source edit failed.");
-  check(await tools.templateReady(emailURI, emailDocument.version) === "Updated live preview", "Email preview did not follow unsaved source.");
-  await vscode.commands.executeCommand("memql.productivity.template.source", emailURI);
+  check((await tools.emailReady(emailURI, emailDocument.version)).subject === "Updated live preview", "The email editor did not follow unsaved source.");
+  await vscode.commands.executeCommand("memql.productivity.email.source", emailURI);
   check(vscode.window.activeTextEditor?.document === emailDocument && emailDocument.isDirty, "Email source mode discarded unsaved changes.");
   await emailDocument.save();
-  await vscode.commands.executeCommand("memql.productivity.template.preview", emailURI);
-  await tools.templateReady(emailURI);
+  await vscode.commands.executeCommand("memql.productivity.email.design", emailURI);
+  check((await tools.emailReady(emailURI)).subject === "Updated live preview", "Design did not show the saved email again.");
+  // A local email in a layout: the page reads its blocks, here two.
+  const layoutURI = vscode.Uri.joinPath(root, "host-layout.email.json");
+  const layout = { subject: "Layout", theme: { page: "#eef0f3", canvas: "#ffffff", primary: "#1f5f8b", secondary: "#5b8fb9", accent: "#d2322d", tint: "#f6f4ef", text: "#1c1c1c", muted: "#696e77", headingFont: "Georgia", bodyFont: "Arial" },
+    blocks: [{ id: "headline", type: "heading", text: "Hello from Acme" }, { id: "cta", type: "button", label: "Start", href: "https://acme.example/start" }] };
+  await vscode.workspace.fs.writeFile(layoutURI, new TextEncoder().encode(JSON.stringify(layout, null, 2) + "\n"));
+  await vscode.commands.executeCommand("vscode.openWith", layoutURI, "memql.productivity.email");
+  const blocks = (await tools.emailReady(layoutURI)).blocks;
+  check(blocks === 2, `The email editor did not read the layout's blocks (${blocks}).`);
   const markdownURI = vscode.Uri.joinPath(root, "host-review.md");
   await vscode.workspace.fs.writeFile(markdownURI, new TextEncoder().encode("# Markdown review\n\nA **rendered** passage.\n"));
   await vscode.commands.executeCommand("vscode.openWith", markdownURI, "memql.productivity.markdown");
@@ -84,5 +88,5 @@ export async function run(): Promise<void> {
   await vscode.commands.executeCommand("vscode.openWith", uri, "memql.productivity.pdf");
   await tools.pdfReady(uri);
   check((await vscode.workspace.fs.readFile(uri)).length > 100, "The PDF was not saved through the host file system.");
-  console.log(`PASS: both MemQL extensions activate, share the API, and open templates, PDFs, and all three Markdown modes (${vscode.env.uiKind === vscode.UIKind.Web ? "web" : "desktop"}).`);
+  console.log(`PASS: both MemQL extensions activate, share the API, and open emails, PDFs, and all three Markdown modes (${vscode.env.uiKind === vscode.UIKind.Web ? "web" : "desktop"}).`);
 }

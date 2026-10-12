@@ -38,16 +38,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "memql.productivity.newTemplate",
-        "title": "New Email Template",
-        "category": "MemQL"
-      },
-      {
-        "command": "memql.productivity.previewTemplate",
-        "title": "Preview Email Template",
-        "category": "MemQL"
-      },
-      {
         "command": "memql.productivity.openFile",
         "title": "Open File from MemQL",
         "category": "MemQL"
@@ -88,6 +78,24 @@
         "icon": "$(open-preview)"
       },
       {
+        "command": "memql.productivity.email.design",
+        "title": "Email Design",
+        "category": "MemQL",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "memql.productivity.email.source",
+        "title": "Email Source",
+        "category": "MemQL",
+        "icon": "$(code)"
+      },
+      {
+        "command": "memql.productivity.email.split",
+        "title": "Email Split View",
+        "category": "MemQL",
+        "icon": "$(open-preview)"
+      },
+      {
         "command": "memql.productivity.markdown.copy",
         "title": "Copy",
         "category": "MemQL"
@@ -95,21 +103,6 @@
       {
         "command": "memql.productivity.markdown.feedback",
         "title": "Feedback",
-        "category": "MemQL"
-      },
-      {
-        "command": "memql.productivity.template.source",
-        "title": "Email Template Source",
-        "category": "MemQL"
-      },
-      {
-        "command": "memql.productivity.template.preview",
-        "title": "Email Template Preview",
-        "category": "MemQL"
-      },
-      {
-        "command": "memql.productivity.template.split",
-        "title": "Email Template Split View",
         "category": "MemQL"
       },
       {
@@ -241,14 +234,19 @@
           "group": "2_markdown@4"
         },
         {
-          "command": "memql.productivity.template.preview",
-          "when": "resourceFilename =~ /\\.email\\.json$/",
-          "group": "navigation"
+          "command": "memql.productivity.email.design",
+          "when": "resourceFilename =~ /\\.email\\.json$/i",
+          "group": "navigation@1"
         },
         {
-          "command": "memql.productivity.template.split",
-          "when": "resourceFilename =~ /\\.email\\.json$/",
-          "group": "navigation"
+          "command": "memql.productivity.email.source",
+          "when": "resourceFilename =~ /\\.email\\.json$/i",
+          "group": "navigation@2"
+        },
+        {
+          "command": "memql.productivity.email.split",
+          "when": "resourceFilename =~ /\\.email\\.json$/i",
+          "group": "2_email@3"
         },
         {
           "command": "memql.productivity.markdown.insertImage",

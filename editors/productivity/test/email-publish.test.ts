@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { readEmail } from "../src/emailDocument.js";
 import { UserInputError } from "../src/problems.js";
 import {
-  EmailPublisher, chooseOrganization, editorBar, organizations, resolveOrganization, templateFor,
+  EmailPublisher, PublishBlocked, chooseOrganization, editorBar, organizations, resolveOrganization, templateFor,
   type BarInput, type EmailTarget, type Organization, type PublishPorts, type TemplateState,
 } from "../src/emailPublish.js";
 
@@ -473,6 +473,16 @@ test("issues from the save stop the publish", async () => {
     (error: unknown) => error instanceof UserInputError && error.message === "Fix the issues shown in the editor, then publish.");
   assert.deepEqual(names(f.calls), ["templateForSource", "campaignSaveTemplate"]);
   assert.match(f.calls[1]!.call, /action: "save"/);
+  // The refusal carries the issues the save found, for the editor to list: the ones it can read, in order.
+  const odd = [...issues, { code: "unsubscribe_missing", message: "Add an unsubscribe link ({{unsubscribeUrl}}) to the footer." }, "junk", { code: 7, message: "x" }, { code: "c", message: "m", block: 4 }];
+  const g = ports({ templateForSource: () => [], campaignSaveTemplate: () => [saved("r1", "draft", odd)] });
+  const refused = await new EmailPublisher(g.ports).publish(publishing()).then(() => undefined, (error: unknown) => error);
+  assert.ok(refused instanceof PublishBlocked);
+  assert.deepEqual(refused.issues, [issues[0], { code: "unsubscribe_missing", message: "Add an unsubscribe link ({{unsubscribeUrl}}) to the footer." }, { code: "c", message: "m" }]);
+  // Issues the editor cannot read still stop the publish.
+  const h = ports({ templateForSource: () => [], campaignSaveTemplate: () => [saved("r1", "draft", ["junk"])] });
+  await assert.rejects(new EmailPublisher(h.ports).publish(publishing()), (error: unknown) => error instanceof PublishBlocked && error.issues.length === 0);
+  assert.deepEqual(names(h.calls), ["templateForSource", "campaignSaveTemplate"]);
 });
 
 test("a save that does not answer as a save is not a publication", async () => {

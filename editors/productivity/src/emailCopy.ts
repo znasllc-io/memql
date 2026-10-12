@@ -62,6 +62,15 @@ export const EMAIL_COPY = {
     saveBeforePublish: "Save the email before publishing.", changedWhilePublishing: "The email changed while publishing. Publish again.",
     fixIssues: "Fix the issues shown in the editor, then publish.", noLayoutForHtml: "An email written in HTML can’t be a layout.",
     layoutNameInvalid: "Enter a layout name up to 200 characters.", editsNeedValidJson: "Fix the email in Source first.",
+    openEmail: "Open an email first.", saveFirst: "Save the email on this computer first.",
+    pictures: "Pictures", pictureType: "Choose a PNG, JPEG or GIF picture.",
+    unlistedOrganization: "an organization you can’t see",
+    // The phrases that finish "Couldn’t <operation>." when something goes wrong that the person cannot fix.
+    operations: {
+      render: "show the email", organization: "find the email’s organization", published: "check where the email is published", edit: "change the email",
+      picture: "add the picture", publish: "publish the email", layout: "save the layout", copy: "save the email to MemQL", connect: "connect",
+      view: "open the email view",
+    },
   },
 } as const;
 

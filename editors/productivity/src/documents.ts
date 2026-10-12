@@ -5,6 +5,7 @@ import {
   buildTemplateById, buildCampaignSaveTemplate, buildDocumentVersions, buildEditDocument, buildLibraryDocumentReview, buildLibraryAddDocumentComment, buildLibraryRequestDocumentRevision, buildLibraryDocumentRevisionStatus, buildDecideApproval,
 } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
+import { writeEmail } from "./emailDocument.js";
 
 /** A "new-email" resource is a page, not a file: its id is the organization (a bare account id) it opens for and its name is the tab title. */
 export interface Resource { domain: string; kind: "artifacts" | "templates" | "new-email"; id: string; name: string }
@@ -47,12 +48,12 @@ export interface OpenDocument {
   accountIds?: string[];
 }
 const text = (row: Record<string, unknown>, field: string) => typeof row[field] === "string" ? row[field] as string : "";
-/** What a template opens as: its document when it has one, else the custom email its bodies make. */
+/** What a template opens as: its document when it has one, else the custom email its bodies make, written as every email file is. */
 function templateText(row: Record<string, unknown>): string {
   const document = row.document;
-  if (document && typeof document === "object" && !Array.isArray(document)) return JSON.stringify(document, null, 2) + "\n";
+  if (document && typeof document === "object" && !Array.isArray(document)) return writeEmail(document as Record<string, unknown>);
   const preheader = text(row, "preheader");
-  return JSON.stringify({ subject: text(row, "subject"), ...(preheader ? { preheader } : {}), textBody: text(row, "textBody"), htmlBody: text(row, "htmlBody") }, null, 2) + "\n";
+  return writeEmail({ subject: text(row, "subject"), ...(preheader ? { preheader } : {}), textBody: text(row, "textBody"), htmlBody: text(row, "htmlBody") });
 }
 
 export class Documents {

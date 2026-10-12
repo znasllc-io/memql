@@ -3,8 +3,8 @@
 // (docs/internal/design/2026-09-28-vscode-extension-ux.md, "Audience and
 // voice"). This file is what the lints share: the vocabulary RULES, the shape
 // of one piece of copy, how copy is read out of a package.json, a rendered page
-// and the calls that raise a toast, an input box or a progress notification,
-// and the check that holds it all to the rules.
+// and the calls that raise a toast, an input box, an open or save dialog or a
+// progress notification, and the check that holds it all to the rules.
 //
 // Each extension keeps its own lint beside its tests and decides there which
 // pages and sources to read, what to exempt and what else to hold them to:
@@ -240,7 +240,7 @@ export function pageLines(html: string, lineClass: RegExp): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// 3. toasts, input boxes and progress titles, read off the source
+// 3. toasts, input boxes, dialogs and progress titles, read off the source
 // ---------------------------------------------------------------------------
 
 /** Every .ts file under `dir`. */
@@ -353,51 +353,104 @@ export function literalFragments(arg: string): string[] {
   return out.filter((text) => text.trim() !== "");
 }
 
-/** The literal value of `key:` at the top level of an object-literal argument. */
-export function propertyText(arg: string, key: string): string | undefined {
+/** The source of the value of `key:` at the top level of an object-literal argument, as written. */
+export function propertyValue(arg: string, key: string): string | undefined {
   if (!arg.startsWith("{")) return undefined;
   for (const inner of callArguments(arg, 0)) {
     const m = new RegExp(`^${key}\\s*:\\s*([\\s\\S]*)$`).exec(inner);
-    if (m) return literalText(m[1] ?? "");
+    if (m) return m[1] ?? "";
   }
   return undefined;
 }
 
+/** The literal value of `key:` at the top level of an object-literal argument. */
+export function propertyText(arg: string, key: string): string | undefined {
+  const value = propertyValue(arg, key);
+  return value === undefined ? undefined : literalText(value);
+}
+
 /**
- * The copy the .ts files under `srcDir` hand straight to a toast, an input box
- * or a progress notification. A finding names the file as it sits under
- * `pkgRoot`, and the line.
+ * Every string literal in an expression, at any depth, each read as literalText
+ * reads one: the sentences an input box's validateInput returns from inside its
+ * arrow function. A literal it only compares with is read too, harmlessly.
+ */
+export function literalsIn(expression: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < expression.length; i++) {
+    const ch = expression[i];
+    if (ch !== '"' && ch !== "'" && ch !== "`") continue;
+    const end = skipString(expression, i);
+    const text = literalText(expression.slice(i, end + 1));
+    if (text !== undefined && text.trim() !== "") out.push(text);
+    i = end;
+  }
+  return out;
+}
+
+/** The names of an object literal's keys written as words (`Images:` or `"PDF documents":`); a computed key is not one. */
+export function objectKeys(arg: string): string[] {
+  if (!arg.startsWith("{")) return [];
+  const out: string[] = [];
+  for (const inner of callArguments(arg, 0)) {
+    const m = /^(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|([A-Za-z_$][\w$]*))\s*:/.exec(inner);
+    const name = m?.[1] ?? m?.[2] ?? m?.[3];
+    if (name !== undefined) out.push(name.replace(/\\(.)/g, "$1"));
+  }
+  return out;
+}
+
+/**
+ * The copy the .ts files under `srcDir` hand straight to a toast, an input box,
+ * an open or save dialog or a progress notification. A finding names the file as
+ * it sits under `pkgRoot`, and the line.
  */
 export function sourceCopy(srcDir: string, pkgRoot: string): Copy[] {
+  return sourceFiles(srcDir).flatMap((file) => fileCopy(fs.readFileSync(file, "utf8"), path.relative(pkgRoot, file)));
+}
+
+/**
+ * The copy one source file hands straight to a person (see sourceCopy): `rel`
+ * is the file as a finding names it. An input box gives its prompt, title,
+ * placeholder and the sentences its validateInput returns; a dialog gives its
+ * title, its button's label and the names of its file filters.
+ */
+export function fileCopy(src: string, rel: string): Copy[] {
   const out: Copy[] = [];
-  for (const file of sourceFiles(srcDir)) {
-    const src = fs.readFileSync(file, "utf8");
-    const rel = path.relative(pkgRoot, file);
-    const at = (index: number): string => `${rel}:${src.slice(0, index).split("\n").length}`;
-    // offerDetails (src/extension.ts) is the error-toast policy: its third
-    // argument is the toast, and the rest are its buttons.
-    for (const m of src.matchAll(/(?<!function\s+)\b(show(Information|Warning|Error)Message|offerDetails)\s*\(/g)) {
-      const args = callArguments(src, (m.index ?? 0) + m[0].length - 1).slice(m[1] === "offerDetails" ? 2 : 0);
-      args.forEach((arg, n) => {
-        const text = literalText(arg);
-        if (text !== undefined) out.push({ where: at(m.index ?? 0), text, line: n === 0 });
-        else for (const fragment of literalFragments(arg)) out.push({ where: at(m.index ?? 0), text: fragment });
-        const detail = propertyText(arg, "detail");
-        if (detail !== undefined) out.push({ where: at(m.index ?? 0), text: detail, line: true });
-      });
-    }
-    for (const m of src.matchAll(/\bshowInputBox\s*\(/g)) {
-      const [options] = callArguments(src, (m.index ?? 0) + m[0].length - 1);
-      for (const key of ["prompt", "title"]) {
-        const text = options === undefined ? undefined : propertyText(options, key);
-        if (text !== undefined) out.push({ where: at(m.index ?? 0), text, line: true });
-      }
-    }
-    for (const m of src.matchAll(/\bwithProgress\s*\(/g)) {
-      const [options] = callArguments(src, (m.index ?? 0) + m[0].length - 1);
-      const text = options === undefined ? undefined : propertyText(options, "title");
+  const at = (index: number): string => `${rel}:${src.slice(0, index).split("\n").length}`;
+  // offerDetails (src/extension.ts) is the error-toast policy: its third
+  // argument is the toast, and the rest are its buttons.
+  for (const m of src.matchAll(/(?<!function\s+)\b(show(Information|Warning|Error)Message|offerDetails)\s*\(/g)) {
+    const args = callArguments(src, (m.index ?? 0) + m[0].length - 1).slice(m[1] === "offerDetails" ? 2 : 0);
+    args.forEach((arg, n) => {
+      const text = literalText(arg);
+      if (text !== undefined) out.push({ where: at(m.index ?? 0), text, line: n === 0 });
+      else for (const fragment of literalFragments(arg)) out.push({ where: at(m.index ?? 0), text: fragment });
+      const detail = propertyText(arg, "detail");
+      if (detail !== undefined) out.push({ where: at(m.index ?? 0), text: detail, line: true });
+    });
+  }
+  for (const m of src.matchAll(/\bshowInputBox\s*\(/g)) {
+    const [options] = callArguments(src, (m.index ?? 0) + m[0].length - 1);
+    for (const key of ["prompt", "title", "placeHolder"]) {
+      const text = options === undefined ? undefined : propertyText(options, key);
       if (text !== undefined) out.push({ where: at(m.index ?? 0), text, line: true });
     }
+    const validate = options === undefined ? undefined : propertyValue(options, "validateInput");
+    for (const text of validate === undefined ? [] : literalsIn(validate)) out.push({ where: at(m.index ?? 0), text, line: true });
+  }
+  for (const m of src.matchAll(/\bshow(?:Open|Save)Dialog\s*\(/g)) {
+    const [options] = callArguments(src, (m.index ?? 0) + m[0].length - 1);
+    if (options === undefined) continue;
+    for (const key of ["title", "openLabel", "saveLabel"]) {
+      const text = propertyText(options, key);
+      if (text !== undefined) out.push({ where: at(m.index ?? 0), text, line: true });
+    }
+    for (const name of objectKeys(propertyValue(options, "filters") ?? "")) out.push({ where: at(m.index ?? 0), text: name });
+  }
+  for (const m of src.matchAll(/\bwithProgress\s*\(/g)) {
+    const [options] = callArguments(src, (m.index ?? 0) + m[0].length - 1);
+    const text = options === undefined ? undefined : propertyText(options, "title");
+    if (text !== undefined) out.push({ where: at(m.index ?? 0), text, line: true });
   }
   return out;
 }

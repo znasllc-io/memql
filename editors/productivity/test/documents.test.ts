@@ -4,7 +4,7 @@ import { PDFDocument } from "pdf-lib";
 import { changePDF } from "../src/pdf.js";
 import { Documents, isZip, newEmailResource, resourceFrom } from "../src/documents.js";
 import { UserInputError } from "../src/problems.js";
-import { newTemplate, readTemplate } from "../src/templates.js";
+import { readEmail } from "../src/emailDocument.js";
 import type { EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 
 test("creating a file resolves its indexed upload receipt without uploading twice", async () => {
@@ -81,11 +81,6 @@ test("a New email link has no bytes to read or save", async () => {
   assert.equal(opened.content.length, 0);
 });
 
-test("email template files validate independently of a cluster", () => {
-  assert.equal(readTemplate(newTemplate()).subject, "Thanks for subscribing");
-  assert.throws(() => readTemplate('{"subject":"hello\\nworld","textBody":"x","htmlBody":""}'));
-  assert.throws(() => readTemplate('{"subject":"x","textBody":"x","htmlBody":"","accountId":"another-client"}'));
-});
 test("PDF edits produce readable PDFs and leave the source untouched", async () => {
   const pdf = await PDFDocument.create(); pdf.addPage([400, 600]);
   const original = await pdf.save();
@@ -121,14 +116,15 @@ test("campaign template saves use the opened client and exact revision", async (
   const documents = new Documents(api);
   const opened = await documents.read("memql-file://client.example/templates/template/Welcome.email.json");
   assert.equal(opened.template?.accountId,"client-org");
-  await documents.save(opened,new TextEncoder().encode(newTemplate()));
+  const email = JSON.stringify({ subject: "Thanks for subscribing", textBody: "Thanks for joining us.", htmlBody: "<p>Thanks for joining us.</p>" }, null, 2) + "\n";
+  await documents.save(opened,new TextEncoder().encode(email));
   assert.equal(opened.revision,"2026-10-01T12:00:01Z");
   assert.equal(opened.template?.status,"draft");
   assert.match(calls[1].call,/accountId:\s*"client-org"/);
   assert.match(calls[1].call,/expectedRevision:\s*"2026-10-01T12:00:00Z"/);
   fail=true;
-  await assert.rejects(documents.save(opened,new TextEncoder().encode(newTemplate().replace("Thanks for subscribing","Changed"))),/template changed/);
-  assert.equal(readTemplate(new TextDecoder().decode(opened.content)).subject,"Thanks for subscribing");
+  await assert.rejects(documents.save(opened,new TextEncoder().encode(email.replace("Thanks for subscribing","Changed"))),/template changed/);
+  assert.equal(readEmail(new TextDecoder().decode(opened.content)).subject,"Thanks for subscribing");
   assert.equal(opened.revision,"2026-10-01T12:00:01Z");
 });
 
@@ -145,6 +141,11 @@ test("a template row that carries a document opens as that document", async () =
   const text = new TextDecoder().decode(opened.content);
   assert.deepEqual(JSON.parse(text), document);
   assert.equal(text, JSON.stringify(document, null, 2) + "\n");
+  // It is written as the engine writes its files: the two separators JSON.stringify leaves raw are escaped.
+  const separated = { ...document, subject: `One${String.fromCharCode(0x2028)}Two${String.fromCharCode(0x2029)}` };
+  const written = new TextDecoder().decode((await openTemplate({ id: "template", name: "Welcome", accountId: "client-org", status: "draft", createdAt: "2026-10-01T12:00:00Z", document: separated })).content);
+  assert.ok(written.includes('"subject": "One\\u2028Two\\u2029"'), written);
+  assert.deepEqual(JSON.parse(written), separated);
   assert.equal(opened.kind, "campaign_template");
   assert.equal(opened.revision, "2026-10-01T12:00:00Z");
   assert.deepEqual(opened.template, { name: "Welcome", accountId: "client-org", status: "draft" });
@@ -160,6 +161,8 @@ test("a template row without a document opens as a custom email", async () => {
   const row = { id: "template", name: "Welcome", accountId: "client-org", subject: "Hi", textBody: "Hello", htmlBody: "<p>Hello</p>", status: "ready", createdAt: "2026-10-01T12:00:00Z" };
   const plain = new TextDecoder().decode((await openTemplate(row)).content);
   assert.equal(plain, JSON.stringify({ subject: "Hi", textBody: "Hello", htmlBody: "<p>Hello</p>" }, null, 2) + "\n");
+  const separated = new TextDecoder().decode((await openTemplate({ ...row, textBody: `a${String.fromCharCode(0x2028)}b` })).content);
+  assert.ok(separated.includes('"textBody": "a\\u2028b"'), "a template without a document is written by the same writer");
   assert.ok(!plain.includes("preheader"), "an empty preheader is left out");
   const withPreheader = new TextDecoder().decode((await openTemplate({ ...row, preheader: "Soon" })).content);
   assert.equal(withPreheader, JSON.stringify({ subject: "Hi", preheader: "Soon", textBody: "Hello", htmlBody: "<p>Hello</p>" }, null, 2) + "\n");

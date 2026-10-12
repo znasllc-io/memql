@@ -44,6 +44,18 @@ export interface PublishPorts {
 /** A template as the cluster keeps it. `document` is the copy it stores, which sameEmail compares an open email with. */
 export interface TemplateState { templateId: string; status: string; revision: string; document?: Record<string, unknown> }
 
+/** Something that keeps an email from being sent, as the cluster names it (an emailRender issue, or one a save reported). */
+export interface EmailIssue { code: string; block?: string; message: string }
+
+/**
+ * The refusal to publish an email the save found issues in. Its message is the sentence to show; `issues` are the ones the
+ * save reported that the editor can read, in order, for it to list beside the render's: a picture that became unreadable
+ * between the render and the save is found only by the save.
+ */
+export class PublishBlocked extends UserInputError {
+  constructor(readonly issues: readonly EmailIssue[]) { super(H.fixIssues); }
+}
+
 const text = (row: Record<string, unknown> | undefined, key: string): string => {
   const value = row?.[key];
   return typeof value === "string" ? value : "";
@@ -207,12 +219,19 @@ function templateName(fileName: string): string {
   return fileName.replace(FILE_SUFFIX, "").trim() || fileName.trim();
 }
 
-/** What campaignSaveTemplate answered, or an error when it did not say that the email was saved. */
-function savedReceipt(rows: Record<string, unknown>[]): { templateId: string; revision: string; issues: number } {
+/** The issues of a list the cluster answered that are issues: a code and a message, and the block when it names one. */
+export function issuesOf(value: unknown): EmailIssue[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).filter(issue => typeof issue.code === "string" && typeof issue.message === "string")
+    .map(issue => ({ code: issue.code as string, ...(typeof issue.block === "string" ? { block: issue.block } : {}), message: issue.message as string }));
+}
+
+/** What campaignSaveTemplate answered, or an error when it did not say that the email was saved. `issues` counts every entry. */
+function savedReceipt(rows: Record<string, unknown>[]): { templateId: string; revision: string; issues: number; found: EmailIssue[] } {
   const row = rows[0];
   const templateId = text(row, "templateId"), revision = text(row, "revision");
   if (row?.saved !== true || !templateId || !revision) throw new Error(SAVE_UNCONFIRMED);
-  return { templateId, revision, issues: Array.isArray(row.issues) ? row.issues.length : 0 };
+  return { templateId, revision, issues: Array.isArray(row.issues) ? row.issues.length : 0, found: issuesOf(row.issues) };
 }
 
 function publishedReceipt(rows: Record<string, unknown>[]): { templateId: string; revision: string; status: string } {
@@ -275,7 +294,7 @@ export class EmailPublisher {
     const draft = savedReceipt(await this.ports.execute("campaignSaveTemplate", buildCampaignSaveTemplate({
       accountId, name, content, sourceArtifactId: target.artifactId, expectedRevision: known, action: "save",
     })));
-    if (draft.issues > 0) throw new UserInputError(H.fixIssues);
+    if (draft.issues > 0) throw new PublishBlocked(draft.found);
     if (!input.stillCurrent()) throw new UserInputError(H.changedWhilePublishing);
     const live = publishedReceipt(await this.ports.execute("campaignSaveTemplate", buildCampaignSaveTemplate({
       templateId: draft.templateId, accountId, name, content, expectedRevision: draft.revision, action: "publish",

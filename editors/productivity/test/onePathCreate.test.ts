@@ -59,6 +59,7 @@ const UPLOAD = /\b(?:uploadFile|createFile)\s*(?:\?\.\s*)?\(/;
 // text: each sends bytes the person picked.
 const ALLOWED: Record<string, string> = {
   "documents.ts": "uploads of existing bytes (insert image, review attachments)",
+  "emailEditor.ts": "uploads a picture the person picked, or the local email they save to MemQL",
   "insertImage.ts": "uploads a picture the person picked with the open dialog",
   "markdownEditor.ts": "uploads review attachments the person picked",
   "templateExamples.ts": "uploads reference files the person picked",

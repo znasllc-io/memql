@@ -125,6 +125,7 @@ const SPACING_PATTERN = "^-?[0-9]{1,2}(\\.[0-9]{1,3})?em$";
 const PICTURE_PATTERN = "^(?:|artifact:[A-Za-z0-9_-]{1,160}|data:image/(?:png|jpeg|gif);base64,[A-Za-z0-9+/]+={0,2})$";
 const HEX = new RegExp(HEX_PATTERN);
 const FONT = new RegExp(FONT_PATTERN);
+const PICTURE = new RegExp(PICTURE_PATTERN);
 
 // What the engine calls a space (Go's unicode.IsSpace), a control character (unicode.IsControl), and a character that never belongs in a link.
 const SPACES = "\\u0009-\\u000d\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
@@ -161,6 +162,7 @@ const SENTENCES = {
   noField: "This block doesn’t have that field.",
   align: "Choose left, center or right.",
   height: `Enter a height between 0 and ${MAX_HEIGHT} pixels.`,
+  picture: "A picture is artifact:<id> from Files, an embedded PNG, JPEG or GIF, or empty.",
 } as const;
 
 const refusal = (message: string) => new UserInputError(message);
@@ -275,9 +277,17 @@ export function readEmail(text: string): EmailDocument {
   return parsed as unknown as EmailDocument;
 }
 
-/** The text of a document: two-space indentation and one trailing newline. */
-export function writeEmail(doc: EmailDocument): string {
-  return JSON.stringify(doc, null, 2) + "\n";
+/** U+2028 and U+2029, which JSON.stringify writes as they are and Go's encoder always writes as escapes. */
+const SEPARATORS = /[\u2028\u2029]/g;
+
+/**
+ * The text of an email file as the engine writes one (Document.JSON in doc.go): two-space indentation, one trailing
+ * newline, markup and characters outside ASCII as they are, and U+2028 and U+2029 as \u2028 and \u2029. Every
+ * `*.email.json` the editor writes goes through here, the text a template opens as included (documents.ts), so a file the
+ * engine wrote is written again byte for byte (testdata/writer.email.json and the built-in layouts hold the two together).
+ */
+export function writeEmail(doc: EmailDocument | Readonly<Record<string, unknown>>): string {
+  return JSON.stringify(doc, null, 2).replace(SEPARATORS, character => character === "\u2028" ? "\\u2028" : "\\u2029") + "\n";
 }
 
 // -- Walking ------------------------------------------------------------------
@@ -447,6 +457,10 @@ function setField(block: EmailBlock, field: EditableField, given: unknown): void
     case "href":
       if (typeof value !== "string" || !validLink(value)) throw refusal(SENTENCES.link);
       break;
+    case "src":
+      // The engine's pictureProblem refuses every other source, a web address included: an email carries its pictures.
+      if (typeof value !== "string" || !PICTURE.test(value)) throw refusal(SENTENCES.picture);
+      break;
     case "align":
       if (value !== "" && value !== "left" && value !== "center" && value !== "right") throw refusal(SENTENCES.align);
       break;
@@ -608,7 +622,7 @@ const linkSchema = (): Schema => ({
 const pictureSchema = (): Schema => ({
   type: "string",
   pattern: PICTURE_PATTERN,
-  patternErrorMessage: "A picture is artifact:<id> from Files, an embedded PNG, JPEG or GIF, or empty.",
+  patternErrorMessage: SENTENCES.picture,
   description: "A picture from Files (artifact:<id>) or an embedded PNG, JPEG or GIF. Leave it empty for a placeholder.",
 });
 

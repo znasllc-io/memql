@@ -1,4 +1,4 @@
-import { buildLogsRecordClient } from "@znasllc-io/memql-sdk-core/client";
+import { buildLogsRecordClient, refusalSentence } from "@znasllc-io/memql-sdk-core/client";
 import type { ConnectionLease, EditorConnectionAPI } from "../../vscode/src/connection/api.js";
 import { UserInputError } from "./userError.js";
 
@@ -29,11 +29,40 @@ export function userMessage(error: unknown, operation: string): string {
   if (/every_door_shut|speech recognition|transcription is not configured/i.test(detail)) return "No suitable AI model is available for this request. Check the models in Fleet, then try again.";
   if (/microphone.*(denied|permission)|permission.*microphone/i.test(detail) || /transcrib|dictat/i.test(operation) && /NotAllowedError|permission denied/i.test(error instanceof Error ? `${error.name}: ${detail}` : detail)) return "Microphone access is blocked. Allow it in your browser settings, then try dictating again.";
   if (/connection changed|another cluster|different cluster/i.test(detail)) return "The MemQL connection changed. Reconnect to the file’s cluster and compare with its latest version before saving.";
+  // A call the cluster refused says why in its own words: those are the person's, never "Couldn’t <operation>".
+  const refused = clusterSentence(error);
+  if (refused !== undefined) return refused;
   if (/conflict|stale|revision.*changed|changed.*revision|version.*mismatch|expected.*version/i.test(detail)) return "This document changed elsewhere. Compare with the latest revision and review your edits before trying again.";
   if (/unauthenticated|sign.?in|session.*expired|\b401\b/i.test(detail)) return "Your session has ended. Sign in to MemQL, then try again.";
   if (/permission denied|forbidden|not authorized|\b403\b/i.test(detail)) return "You don’t have permission for this action. Ask the file owner for access.";
   if (/disconnected|connection.*closed|network|failed to fetch|ECONN|unavailable|deadline|timed?\s*out/i.test(detail)) return "MemQL couldn’t complete the request. Check your connection and try again.";
   return `Couldn’t ${operation}. Try again. If this continues, choose Show details.`;
+}
+
+/**
+ * How the server frames an engine refusal ("MemQL engine failed to execute query. Details: ", buildEngineErrorMessage in
+ * component/grpc/server.go), with the call's name in front as executeNamed puts it or without, and something inside it.
+ * Builtins and mutations word their refusals for a person ("Someone else is saving this template. Try again in a moment."),
+ * and almost every one arrives in this frame.
+ */
+const ENGINE_REFUSAL = /^(?:[A-Za-z_][A-Za-z0-9_]*: )?MemQL engine failed to execute query\. Details: \S/;
+
+/**
+ * The cluster's sentence for a refused call, found in the error or in what caused it (the SDK puts a refusal in words and keeps
+ * the framed original as the cause), or undefined when neither is one. It is the SDK's refusalSentence: the call's name, the
+ * engine's frame and a Go package name taken off. Credential material is redacted, and a sentence a Go error opens in lower
+ * case starts with a capital.
+ */
+function clusterSentence(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
+    if (ENGINE_REFUSAL.test(current.message.trim())) {
+      const sentence = redact(refusalSentence(current)).trim();
+      return sentence === "" ? undefined : sentence.replace(/^[a-z]/, letter => letter.toUpperCase());
+    }
+    current = current.cause;
+  }
+  return undefined;
 }
 
 // The error with what caused it. The SDK hands a person a refusal as one sentence
@@ -55,14 +84,17 @@ function withCauses(error: unknown): string {
   return lineEnd < 0 ? [stack, ...causes].join("\n") : [stack.slice(0, lineEnd), ...causes, stack.slice(lineEnd + 1)].join("\n");
 }
 
-/** Credential material must not reach either the cluster log or local output. */
-export function diagnosticText(error: unknown): string {
-  const raw = withCauses(error);
-  const redacted = raw.replace(/\bBearer\s+[^\s"']+/gi, "Bearer [redacted]")
+/** `text` with credential material taken out: a bearer token, a MemQL token, a JWT, a secret written as key=value. */
+function redact(text: string): string {
+  return text.replace(/\bBearer\s+[^\s"']+/gi, "Bearer [redacted]")
     .replace(/\bmql_[a-z]{3}_[A-Za-z0-9_-]+/g, "[redacted]")
     .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[redacted]")
     .replace(/((?:token|password|secret|api[_-]?key|authorization)["']?\s*[=:]\s*["']?)[^\s&,;"']+/gi, "$1[redacted]");
-  return new TextDecoder().decode(new TextEncoder().encode(redacted).slice(0, 1800));
+}
+
+/** Credential material must not reach either the cluster log or local output. */
+export function diagnosticText(error: unknown): string {
+  return new TextDecoder().decode(new TextEncoder().encode(redact(withCauses(error))).slice(0, 1800));
 }
 
 /** A bounded, lease-scoped deduplication cache: polling never floods Logs. */

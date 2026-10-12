@@ -937,3 +937,42 @@ test("the schema is built from the field table", () => {
   for (const ref of defined) assert.ok(referenced.has(ref) || ref === "layoutEmail" || ref === "customEmail", `${ref} is used`);
   assert.deepEqual(emailSchema(), emailSchema(), "generating twice gives the same schema");
 });
+
+// ---------------------------------------------------------------------------
+// The writer and the picture source (carried into Task 7, the editor's host).
+// ---------------------------------------------------------------------------
+
+test("the writer writes what the engine writes: the built-in layouts and the writer fixture, byte for byte", () => {
+  const dir = "../../component/compose/emaildoc";
+  // testdata/writer.email.json is Document.JSON's output for the document it holds (TestEditorWriterFixture in
+  // component/compose/emaildoc keeps it so); the built-in layouts are held to Document.JSON by the engine's own test.
+  const fixture = `${dir}/testdata/writer.email.json`;
+  const files = [...readdirSync(`${dir}/layouts`).filter(name => name.endsWith(".email.json")).map(name => `${dir}/layouts/${name}`), fixture];
+  assert.equal(files.length, 5);
+  for (const file of files) {
+    const text = readFileSync(file, "utf8");
+    assert.equal(writeEmail(readEmail(text)), text, `${file} is written again as the engine wrote it`);
+  }
+  const text = readFileSync(fixture, "utf8");
+  assert.ok(text.includes("\\u2028") && text.includes("\\u2029"), "the fixture holds the two separators the engine writes as escapes");
+  assert.ok(/[<&>]/.test(text) && /[^\u0000-\u007f]/.test(text), "and markup and characters outside ASCII, which it writes as they are");
+  // The separators are the one place the engine's encoder and JSON.stringify differ.
+  assert.equal(writeEmail(readEmail('{"subject":"a\u2028b","textBody":"c\\u2029d","htmlBody":"<p>&</p>"}')), '{\n  "subject": "a\\u2028b",\n  "textBody": "c\\u2029d",\n  "htmlBody": "<p>&</p>"\n}\n');
+  assert.equal(readEmail(writeEmail(readEmail('{"subject":"a\u2028b","textBody":"c","htmlBody":""}'))).subject, "a\u2028b", "an escape reads back as the character");
+});
+
+test("a picture's source is a Library file, an embedded picture or nothing", () => {
+  const doc = read([{ id: "logo", type: "image", src: "", alt: "Logo", width: 100 }]);
+  const src = (value: string) => findBlock(editEmail(doc, { kind: "field", block: "logo", field: "src", value }) as LayoutEmail, "logo")?.block.src;
+  assert.equal(src("artifact:logo-1"), "artifact:logo-1");
+  assert.equal(src(`artifact:${"a".repeat(160)}`), `artifact:${"a".repeat(160)}`);
+  assert.equal(src("data:image/png;base64,iVBORw0KGgo="), "data:image/png;base64,iVBORw0KGgo=");
+  assert.equal(src(""), "");
+  // The engine refuses every other source (pictureProblem in parse.go): the edit is refused at once, with the sentence the schema gives.
+  for (const value of ["https://tracker.example/pixel.gif", "artifact:", `artifact:${"a".repeat(161)}`, "artifact:a b", "artifact:a/b", "memql-file://client.example/artifacts/a/b.png",
+    "data:image/svg+xml;base64,PHN2Zz4=", "data:image/png,raw", "javascript:alert(1)", " artifact:logo"]) {
+    refuses(() => src(value), /^A picture is artifact:<id> from Files, an embedded PNG, JPEG or GIF, or empty\.$/);
+  }
+  const schema = JSON.stringify(emailSchema());
+  assert.ok(schema.includes('"patternErrorMessage":"A picture is artifact:<id> from Files, an embedded PNG, JPEG or GIF, or empty."'), "the schema and the edit say the same");
+});
