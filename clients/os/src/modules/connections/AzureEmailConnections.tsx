@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { Mail } from "lucide-react";
 import { useSession } from "../../chrome/access";
 import { AccountPicker } from "../../apps/accounts/AccountPicker";
+import { providerDeliverySentence } from "../../apps/email/rows";
 import { SELF_ACCOUNT_ID } from "../../apps/accounts/rows";
 import { useAccountOptions } from "../../apps/accounts/tie";
 import { useDefaultOrganization } from "../../apps/accounts/organization";
@@ -148,7 +149,11 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
   const [displayName, setDisplayName] = useState(name);
   const [replyTo, setReplyTo] = useState("");
   const [disconnect, setDisconnect] = useState(false);
-  const [operations, setOperations] = useState<AzureEmailReply["operations"]>(undefined);
+  const [sendCheck, setSendCheck] = useState<AzureEmailReply | null>(null);
+  const checkSends = useCallback(async () => {
+    const result = await call("operations");
+    if (result) setSendCheck(result);
+  }, [call]);
   const [records, setRecords] = useState<AzureEmailReply["records"]>(undefined);
   const [provisionChecks, setProvisionChecks] = useState(0);
   const [startedAt, setStartedAt] = useState(Date.now);
@@ -200,10 +205,13 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
     <Head title={state?.plan?.domain || "Sending domain"} back={{ label: backLabel, onSelect: () => setView("list") }}/>
     <div className="os-action-body os-app-stack"><Panel label="Sending domain"><Facts><Fact label="Organization" value={name}/><Fact label="Sender" value={state?.sender || "Not configured"}/><Fact label="Replies to" value={state?.replyTo || "No reply address configured"}/></Facts></Panel>
       {!connected ? <Notice sentence="Cluster Azure setup needs attention."/> : null}
-      <section className="os-app-stack" aria-label="Azure send processing"><Subhead actions={operations === undefined ? <Button busy={busy} onClick={() => { void call("operations").then(result => { if (result) setOperations(result.operations || []); }); }}>Check sends</Button> : <AutoRefresh busy={busy} enabled={!disconnect} onRefresh={async () => { const result = await call("operations"); if (result) setOperations(result.operations || []); }} />}>Send processing</Subhead>
-        <p className="os-caption">Azure processing status does not confirm inbox delivery. Delivery and bounce feedback is not connected yet.</p>
-        {operations?.length === 0 ? <p className="os-caption">No Azure sends recorded for this organization.</p> : null}
-        {operations?.map(operation => <Panel key={operation.operationId} label="Azure send"><Facts><Fact label="Requested" value={new Date(operation.submittedAt).toLocaleString()}/><Fact label="Processing" value={sendOperationLabel(operation.status)}/></Facts>{operation.detail ? <p className="os-caption">{operation.detail}</p> : null}</Panel>)}
+      <section className="os-app-stack" aria-label="Azure send processing"><Subhead actions={sendCheck === null ? <Button busy={busy} onClick={() => { void checkSends(); }}>Check sends</Button> : <AutoRefresh busy={busy} enabled={!disconnect} onRefresh={checkSends} />}>Send processing</Subhead>
+        {sendCheck ? <Facts><Fact label="Delivery reports" value={deliveryFeedbackLabel(sendCheck.deliveryFeedback)}/></Facts> : null}
+        {sendCheck?.operations?.length === 0 ? <p className="os-caption">No Azure sends recorded for this organization.</p> : null}
+        {sendCheck?.operations?.map(operation => {
+          const report = sendDeliveryReport(operation);
+          return <Panel key={operation.operationId} label="Azure send"><Facts><Fact label="Requested" value={new Date(operation.submittedAt).toLocaleString()}/><Fact label="Processing" value={sendOperationLabel(operation.status)}/><Fact label="Delivery" value={report.label}/>{report.at ? <Fact label="Reported" value={new Date(report.at).toLocaleString()}/> : null}</Facts>{operation.detail ? <p className="os-caption">{operation.detail}</p> : null}</Panel>;
+        })}
       </section>
       {disconnect ? <Notice tone="warn" sentence="Disconnect this organization's sending domain?" detail="Its new sends will stop. Other organizations, Azure resources and DNS records remain."/> : null}
       {error ? <Notice tone="error" sentence={error}/> : null}
@@ -240,4 +248,15 @@ function OrganizationEmail({ accountId, name, view, setView, picker, backLabel, 
 
 export function sendOperationLabel(status: string): string {
   return ({ submitting: "Checking acceptance", unknown: "Checking acceptance", accepted: "Accepted by Azure", running: "Processing", succeeded: "Processing completed", failed: "Processing failed", canceled: "Processing canceled", rejected: "Request refused", throttled: "Waiting for Azure", unconfirmed: "Unconfirmed" } as Record<string, string>)[status] || "Unconfirmed";
+}
+
+function deliveryFeedbackLabel(status: AzureEmailReply["deliveryFeedback"]): string {
+  return status === "ready" ? "Connected" : status === "pending" ? "Preparing" : status === "not-configured" ? "Not connected" : "Unavailable";
+}
+
+function sendDeliveryReport(operation: NonNullable<AzureEmailReply["operations"]>[number]): { label: string; at?: string } {
+  // Transport completion alone is not a recipient verdict. A missing or zero
+  // provider timestamp carries no confirmed report, even with a status field.
+  if (!operation.deliveryStatus || !(Date.parse(operation.deliveryAt || "") > 0)) return { label: "Delivery unconfirmed" };
+  return { label: providerDeliverySentence(operation.deliveryStatus), at: operation.deliveryAt };
 }
