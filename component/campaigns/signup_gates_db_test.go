@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -507,5 +508,83 @@ func TestAGatePastItsWaitGivesThePersonTheSentence(t *testing.T) {
 	}
 	if waiting != 0 {
 		t.Errorf("%d advisory-lock waiters are left on the server: the gate's wait must end there, not on the client", waiting)
+	}
+}
+
+// lockWatcher records what a signup asks the engine while it holds its locks. The
+// locks are an idle transaction on the request pool, which PostgreSQL ends at 60 s
+// and the lock with it, and a connection of a pool of four: what runs under them has
+// to be short.
+type lockWatcher struct {
+	Engine
+	held       atomic.Bool
+	mu         sync.Mutex
+	underLocks []string
+}
+
+func (e *lockWatcher) Execute(ctx context.Context, q string) (any, error) {
+	if e.held.Load() {
+		name, _, _ := strings.Cut(q, "(")
+		e.mu.Lock()
+		e.underLocks = append(e.underLocks, name)
+		e.mu.Unlock()
+	}
+	return e.Engine.Execute(ctx, q)
+}
+
+// TestNothingSlowRunsWhileASignupHoldsItsLocks: the signup that has the most to do
+// before it writes -- a new address in an audience with a full page of rows that
+// have no digest, so it falls back to the roster -- does all of that, and the
+// welcome template's checks, before it takes the locks. Under them it asks only the
+// single-row questions and the two that must be exact (the mailbox by digest, the
+// audience's size), and writes.
+func TestNothingSlowRunsWhileASignupHoldsItsLocks(t *testing.T) {
+	n := newEmptyNewsletter(t, "gate-short")
+	for i := 0; i < digestLessWindow; i++ {
+		n.plantRaw(t, fmt.Sprintf("bare-%02d", i), fmt.Sprintf("bare%02d@example.test", i), "subscribed", "")
+	}
+	watcher := &lockWatcher{Engine: n.worker.store.engine}
+	gate := n.worker.newsletterGate
+	n.worker.store.engine = watcher
+	n.worker.newsletterGate = func(ctx context.Context, keys ...string) (func(), error) {
+		release, err := gate(ctx, keys...)
+		if err == nil {
+			watcher.held.Store(true)
+		}
+		return func() {
+			watcher.held.Store(false)
+			release()
+		}, err
+	}
+	defer func() { n.worker.store.engine, n.worker.newsletterGate = watcher.Engine, gate }()
+
+	n.args["email"] = consentMailbox
+	if _, err := n.worker.handleSubscribe(n.owner, n.args, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	watcher.mu.Lock()
+	asked := append([]string(nil), watcher.underLocks...)
+	watcher.mu.Unlock()
+	if len(asked) == 0 {
+		t.Fatal("the test saw nothing asked under the locks; it is not watching them")
+	}
+	slow := []string{"query recipientsWithoutDigestInAudience", "query audienceRosterForSend", "query templateById", "query senderIdentityById", "query clientAccountById"}
+	for _, q := range asked {
+		for _, s := range slow {
+			if q == s {
+				t.Errorf("%s ran while the signup held its locks; under them the part that is slow or about the template belongs before", q)
+			}
+		}
+	}
+	// What is meant to be asked under them is there.
+	for _, want := range []string{"query newsletterForSite", "query newsletterSignupById", "query recipientInAudienceByDigest", "query audienceRosterSize"} {
+		found := false
+		for _, q := range asked {
+			found = found || q == want
+		}
+		if !found {
+			t.Errorf("%s was not asked under the locks; asked: %v", want, asked)
+		}
 	}
 }
