@@ -55,6 +55,10 @@ describe("one Email app", () => {
       "Logs",
       "Settings",
     ]);
+    // Said outright, as well as by the lists above being exact: a tab for either
+    // would be a second place for what Settings and Automations already hold.
+    for (const retired of ["senders", "rules"]) expect(sections.map((s) => s.id)).not.toContain(retired);
+    for (const retired of ["Senders", "Rules"]) expect(sections.map((s) => s.name)).not.toContain(retired);
     expect(sections.find((s) => s.id === "automations")?.needs).toEqual(["email", "campaigns"]);
     expect(sections.find((s) => s.id === "inbox")?.requires).toBe("app:email/inbox");
     expect(sections.find((s) => s.id === "logs")?.requires).toBe("app:email/logs");

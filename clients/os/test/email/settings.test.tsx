@@ -1,7 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { PageNavigationProvider } from "../../src/kit/pageNavigation";
+import { TrailRow } from "../../src/kit/TrailRow";
 import { readTheBar, readTheBarNow } from "../readTheBar";
 import { chooseOption, openSelect } from "../selectControl";
 import { installSeededAccess } from "../seededAccess";
@@ -237,6 +239,9 @@ describe("Email settings", () => {
       "Templates",
       "Inbox",
     ]);
+    // A sender is set up in Settings and a rule is one kind of automation: neither is a tab.
+    expect(within(owner).queryByRole("option", { name: "Senders" })).toBeNull();
+    expect(within(owner).queryByRole("option", { name: "Rules" })).toBeNull();
     cleanup();
 
     installSeededAccess("writer");
@@ -246,6 +251,8 @@ describe("Email settings", () => {
     expect(names).toEqual(["Overview", "Campaigns", "Automations", "Audiences", "Templates"]);
     expect(names).not.toContain("Logs");
     expect(names).not.toContain("Settings");
+    expect(names).not.toContain("Senders");
+    expect(names).not.toContain("Rules");
   });
 
   it("opens a window on the preferred tab, unless the person cannot open that tab", async () => {
@@ -757,6 +764,52 @@ describe("A sender's page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to Settings" }));
     expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
     expect(screen.getByText("news@acme.com")).toBeTruthy();
+  });
+
+  // IN A WINDOW the frame draws the one trail row, Back first, and a page's
+  // heading only publishes where it is (kit/TrailRow). Settings stays mounted,
+  // parked, behind the sender's page; a parked heading must not hold the trail,
+  // or the page's own Back is never drawn and the person is stuck on the page.
+  describe("in a window", () => {
+    function Window() {
+      const root = useRef<HTMLDivElement>(null);
+      return (
+        <div ref={root}>
+          <PageNavigationProvider root={root} trail={[]}>
+            <TrailRow fallback="Email" />
+            <EmailApp sectionId="settings" navigate={() => {}} askContext={() => {}} store={memoryStore()} uploads={{ upload: vi.fn() }} />
+          </PageNavigationProvider>
+        </div>
+      );
+    }
+    const trail = () =>
+      within(screen.getByRole("navigation", { name: "Breadcrumbs" }))
+        .getAllByRole("listitem")
+        .map((item) => item.textContent);
+
+    it("has one trail and one Back on a sender's page, and the Back leads to Settings", async () => {
+      h.connection = fakeConnection({ senderIdentities: [sender] });
+      render(withSession(<Window />));
+
+      // At Settings itself there is nowhere further back to go in this window.
+      fireEvent.click(await screen.findByText("news@acme.com"));
+      expect(await screen.findByRole("heading", { level: 3, name: "news@acme.com" })).toBeTruthy();
+
+      // The window's trail names the page and where it came from, once; the page draws none of its own.
+      await waitFor(() => expect(trail()).toEqual(["Settings", "news@acme.com"]));
+      expect(screen.getAllByRole("navigation", { name: "Breadcrumbs" })).toHaveLength(1);
+      const back = screen.getAllByRole("button", { name: /^Back to/ });
+      expect(back).toHaveLength(1);
+      expect(back[0]?.getAttribute("aria-label")).toBe("Back to Settings");
+
+      fireEvent.click(back[0]!);
+      expect(await screen.findByRole("heading", { level: 3, name: "Settings" })).toBeTruthy();
+      expect(screen.getByText("news@acme.com")).toBeTruthy();
+      expect(screen.queryByRole("heading", { level: 3, name: "news@acme.com" })).toBeNull();
+      // Back on Settings, the trail is Settings alone and its Back has nowhere to go.
+      await waitFor(() => expect(trail()).toEqual(["Settings"]));
+      expect((screen.getByRole("button", { name: "Back" }) as HTMLButtonElement).disabled).toBe(true);
+    });
   });
 });
 
