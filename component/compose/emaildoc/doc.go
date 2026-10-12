@@ -1,12 +1,13 @@
 // Package emaildoc is the email document: the structured `*.email.json` file
-// an email template is written in, and the strict parser that admits it.
+// an email template is written in, the strict parser that admits it, and the
+// renderer that writes it as an email.
 //
 // A document has exactly one of two modes:
 //
 //   - Layout mode: {subject, preheader, layout, theme, blocks}. The email is a
 //     column of typed blocks (images, headings, Markdown text, buttons,
 //     sections, columns, a footer, ...) coloured and set in the type of a
-//     theme. A later step renders it to email HTML.
+//     theme.
 //   - Custom mode: {subject, preheader, textBody, htmlBody}. Pasted or
 //     hand-written HTML with its plain-text alternative, as email templates
 //     were before layouts.
@@ -14,9 +15,10 @@
 // Parse is the only way in. It refuses anything it does not understand (an
 // unknown key, a colour that is not a theme colour, a link that is not a web
 // address, markup outside the allowlist) with a sentence that names the block
-// and the problem, so nothing unchecked ever reaches the renderer. JSON is the
-// only way out: one canonical byte form, so a document that is parsed and
-// written again is byte for byte what it was.
+// and the problem, so nothing unchecked ever reaches the renderer. JSON writes
+// the file back: one canonical byte form, so a document that is parsed and
+// written again is byte for byte what it was. Render writes the email: its HTML
+// and plain-text parts, and the issues that keep it from being sent as it is.
 //
 // This package lives in the component/compose module. It may import only what
 // that module already requires plus the parent package, and the parent must
@@ -145,7 +147,7 @@ type Block struct {
 	Lines          []string    `json:"lines,omitempty"`
 	Separator      *string     `json:"separator,omitempty"`
 	After          float64     `json:"after,omitempty"`
-	HTML           string      `json:"html,omitempty"`
+	HTML           string      `json:"html,omitempty"` // as the author wrote it; Render splices safeMarkup(HTML), never HTML itself
 }
 
 // Document is a parsed email. Parse fills the layout-mode fields (Layout,
