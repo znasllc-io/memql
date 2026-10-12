@@ -261,10 +261,15 @@ Email's Overview: `email-overview` is a month of mail (five measured figures and
 the campaigns by state), `email-overview-empty` is first use (real zeros, one
 sentence and `Add a campaign` -- `&click=Add a campaign` follows it to the
 wizard), `email-overview-reading` has every read still on its way (shapes, no
-warning), `email-overview-refused` has three reads refused (dashes and the
-engine's sentences, never a zero) and `email-overview-unmeasured` has a rate the
-engine could not state exactly (a dash with its reason beneath). Take the 520
-capture too: the five figures fall to three and two.
+warning), `email-overview-refused` has three reads refused with nothing to show
+(dashes and the engine's sentences, never a zero), `email-overview-unmeasured`
+has a rate the engine could not state exactly (a dash with its reason beneath)
+and `email-overview-untracked` has two rates with the same reason (said once,
+under the first). Two scenes catch the page a few seconds after the cluster
+stopped answering, with every figure still the last one: `email-overview-interrupted`
+(the cluster refuses the refreshes: one notice carrying its sentence) and
+`email-overview-reconnecting` (the connection dropped: the same notice, saying it
+is reconnecting). Take the 520 capture too: the five figures fall to three and two.
 
 Newsletter signup fixtures: `campaign-newsletter-empty` and `campaign-newsletter-active`. Open the plus control to review setup; use `width=narrow` for the compact layout.
 

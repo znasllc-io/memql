@@ -994,7 +994,10 @@ const NO_COUNTS: ReadonlyMap<string, Figure> = new Map();
  *     found empty is genuinely zero;
  *   - a refusal or a failure is `absent("failed", <the engine's sentence>)`,
  *     for THAT audience alone -- one list the caller may not count does not
- *     take the others' numbers with it.
+ *     take the others' numbers with it. When the audience has been counted
+ *     before, a refused REFRESH is not that: the count it had stays (the way
+ *     `useReading` keeps its last answer through a failure) and the sentence
+ *     is listed in `refusals`, for the surface to say once beside its figures.
  *
  * Subscribers join and leave through imports and signups that are routing
  * exclusions, so there is no event to follow: the surface that shows the
@@ -1006,7 +1009,12 @@ const NO_COUNTS: ReadonlyMap<string, Figure> = new Map();
  * another tab arrives -- the counts already read stay on screen while the new
  * read runs, rather than every one going back to "not read yet" for it.
  */
-export function useSubscriberCounts(audienceIds: readonly string[]): { counts: ReadonlyMap<string, Figure>; reload: () => Promise<void> } {
+export function useSubscriberCounts(audienceIds: readonly string[]): {
+  counts: ReadonlyMap<string, Figure>;
+  /** audienceId -> the engine's sentence, for each audience whose count was refused at its last read. Its count above is then the last one measured, when there was one. */
+  refusals: ReadonlyMap<string, string>;
+  reload: () => Promise<void>;
+} {
   const connection = useOsConnection();
   const query = connection?.query ?? null;
   // The set, not the array: callers hand a new array every render.
@@ -1034,9 +1042,30 @@ export function useSubscriberCounts(audienceIds: readonly string[]): { counts: R
   const known = useRef<ReadonlyMap<string, Figure>>(NO_COUNTS);
   if (reading.value !== NO_COUNTS) known.current = reading.value;
   const held = known.current;
-  const counts = useMemo(
-    () => new Map(wanted.map((id): [string, Figure] => [id, reading.value.get(id) ?? held.get(id) ?? absent("unread")])),
-    [wanted, reading.value, held],
-  );
-  return { counts, reload: reading.reload };
+  // The last number each audience measured, whatever its next read turns out to say.
+  const measured = useRef(new Map<string, Figure>());
+  const { counts, refusals } = useMemo(() => {
+    const counts = new Map<string, Figure>();
+    const refusals = new Map<string, string>();
+    for (const id of wanted) {
+      // What the latest read said of this audience, or else what the one before it did.
+      const said = reading.value.get(id) ?? held.get(id);
+      if (said === undefined) {
+        counts.set(id, absent("unread"));
+      } else if (said.kind === "measured") {
+        measured.current.set(id, said);
+        counts.set(id, said);
+      } else if (said.reason === "failed") {
+        refusals.set(id, said.detail);
+        counts.set(id, measured.current.get(id) ?? said);
+      } else {
+        counts.set(id, said);
+      }
+    }
+    // An audience that left the set takes its count with it.
+    const asked = new Set(wanted);
+    for (const id of measured.current.keys()) if (!asked.has(id)) measured.current.delete(id);
+    return { counts, refusals };
+  }, [wanted, reading.value, held]);
+  return { counts, refusals, reload: reading.reload };
 }

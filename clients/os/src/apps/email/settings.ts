@@ -16,8 +16,9 @@ import type { OsAppSection } from "../../system/registry";
  * section the manifest does not declare leaves the window on the first
  * section with the nav highlighting nothing.
  *
- * Overview opens with the current state and setup direction. Resource
- * lists and guided authoring keep their own destinations.
+ * Overview opens with the figures: what was sent in the last 30 days, how
+ * many people can be mailed and what runs on its own, and the campaigns by
+ * state. Resource lists and guided authoring keep their own destinations.
  *
  * THE TABS ARE THE APP'S NOUNS (DESIGN.md, "A tab is a different kind of
  * thing"): campaigns, automations, audiences, templates. A sender is not one

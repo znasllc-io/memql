@@ -1,6 +1,6 @@
 import { absent, figureOf, type Figure } from "../../../kit/measure";
 import type { OverviewMetric, OverviewSegment } from "../../../kit/Overview";
-import { formatRate, type CampaignRow, type CampaignStats } from "../rows";
+import { campaignName, formatRate, type CampaignRow, type CampaignStats } from "../rows";
 import type { Reading } from "../useEmail";
 import { WORDS } from "../words";
 
@@ -22,7 +22,9 @@ import { WORDS } from "../words";
 //                       server-side -- never a client's tally of a capped page of
 //                       deliveries): unique openers (clickers) over what was
 //                       SENT, summed across the campaigns that counted them.
-//   Subscribers         the engine's `audienceSubscriberCount` per active audience.
+//   Subscriptions       the engine's `audienceSubscriberCount` per active audience,
+//                       added up: a person on two audiences is two subscriptions,
+//                       so it is not called subscribers.
 //   Active automations  the rules that are On.
 //
 // A RATE IS OF WHAT WAS SENT, over the campaigns that asked to be counted. A
@@ -36,10 +38,28 @@ const DAY_MS = 86_400_000;
 /** Why there is no rate when no campaign in the window counted it. */
 export const NO_TRACKED_CAMPAIGN = `No tracked campaign in the last ${OVERVIEW_WINDOW_DAYS} days.`;
 
-/** The reason for a campaign whose breakdown the engine answered with nothing. */
-const NO_BREAKDOWN = "The cluster returned no breakdown for one of these campaigns.";
+/** Why a rate cannot be stated when the engine had no breakdown for a campaign sent in the window: said of that campaign. */
+const noBreakdown = (campaign: string): string => `No breakdown was returned for “${campaign}”.`;
 
-/** What the Overview is made from. Each read says whether it has answered and, if it was refused, why. */
+/**
+ * A read's refusal: the engine's sentence when it left NOTHING TO SHOW, "" when
+ * what it held still stands.
+ *
+ * A feed that holds rows and could not read them again keeps those rows (the SDK
+ * holds the two together, in the state `degraded`), so its figures are still
+ * true as of the last read and are drawn. Only a read with nothing to fall back
+ * on is a refusal -- a dash, and "this cluster did not return" -- and what a
+ * kept figure's refresh was told is said once, by the page, beside the figures it
+ * kept. The page hands every `error` below through this.
+ */
+export function refusalOf(error: string, held: number): string {
+  return held > 0 ? "" : error;
+}
+
+/**
+ * What the Overview is made from. Each read says whether it has answered and,
+ * when it was refused with nothing to show, why (`refusalOf`).
+ */
 export interface OverviewInputs {
   campaigns: { rows: CampaignRow[]; settled: boolean; error: string };
   /** campaignId -> its breakdown, for the campaigns `statsWanted` names. */
@@ -117,7 +137,7 @@ function rateMetric(label: string, kind: "opens" | "clicks", i: OverviewInputs):
     if (stats === null) {
       if (breakdown === undefined || breakdown.state === "loading" || breakdown.state === "idle") waiting = true;
       else if (breakdown.state === "error") refusal ||= breakdown.error;
-      else reason ||= NO_BREAKDOWN;
+      else reason ||= noBreakdown(campaignName(campaign));
       continue;
     }
     const figure = kind === "opens" ? stats.opensUnique : stats.clicksUnique;
@@ -139,8 +159,8 @@ function rateMetric(label: string, kind: "opens" | "clicks", i: OverviewInputs):
   return { label, figure: figureOf(unique / sent), format: formatRate };
 }
 
-function subscribersMetric(i: OverviewInputs): OverviewMetric {
-  const label = "Subscribers";
+function subscriptionsMetric(i: OverviewInputs): OverviewMetric {
+  const label = "Subscriptions";
   if (i.audiencesError !== undefined && i.audiencesError !== "") return refused(label, i.audiencesError);
   if (!i.audiencesSettled) return reading(label);
   let total = 0;
@@ -165,15 +185,29 @@ function automationsMetric(i: OverviewInputs): OverviewMetric {
   return { label, figure: figureOf(i.activeAutomations.count), format: count };
 }
 
+/**
+ * A reason is said once. Two figures that give the same one (neither rate has a
+ * tracked campaign to be made of) keep their dashes, and the reason stands under
+ * the first; it stays on the second's hover, in the figure itself.
+ */
+function saidOnce(metrics: OverviewMetric[]): OverviewMetric[] {
+  const said = new Set<string>();
+  return metrics.map(({ detail, ...metric }) => {
+    if (detail === undefined || said.has(detail)) return metric;
+    said.add(detail);
+    return { ...metric, detail };
+  });
+}
+
 /** The five figures, labelled exactly as the page reads them. */
 export function overviewMetrics(i: OverviewInputs): OverviewMetric[] {
-  return [
+  return saidOnce([
     sentMetric(i),
     rateMetric("Open rate", "opens", i),
     rateMetric("Click rate", "clicks", i),
-    subscribersMetric(i),
+    subscriptionsMetric(i),
     automationsMetric(i),
-  ];
+  ]);
 }
 
 /**

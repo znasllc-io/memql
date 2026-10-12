@@ -17,9 +17,9 @@ vi.mock("../../../src/auth/context", () => ({
 
 const { EmailApp } = await import("../../../src/apps/email/EmailApp");
 const { EmailNavigationContext } = await import("../../../src/apps/email/openRequest");
-const { OverviewSection } = await import("../../../src/apps/email/overview/OverviewSection");
+const { OVERVIEW_REFRESH_MS, OverviewSection } = await import("../../../src/apps/email/overview/OverviewSection");
 const { LocalEmailSettingsStore } = await import("../../../src/apps/email/settings");
-const { EMAIL_REFRESH_MS, useEmailFeeds } = await import("../../../src/apps/email/useEmail");
+const { useEmailFeeds } = await import("../../../src/apps/email/useEmail");
 const {
   audienceRow,
   campaignRow,
@@ -93,14 +93,37 @@ function pane(id: string): HTMLElement {
 
 /** One figure's cell: its label, its value and what is said beneath. */
 function cell(label: string) {
-  const node = pane("overview").querySelector<HTMLElement>(`[data-overview-metric="${label}"]`);
+  const node = document.querySelector<HTMLElement>(`[data-overview-metric="${label}"]`);
   if (node === null) throw new Error(`no figure named ${label}`);
   return {
     value: node.querySelector("dd")?.textContent ?? "",
     note: node.querySelector("small")?.textContent ?? null,
     shaped: node.querySelector("dd [role='status']") !== null,
+    /** What the dash says on hover. */
+    hover: node.querySelector(".os-figure-absent")?.getAttribute("title") ?? null,
   };
 }
+
+/** The Overview on its own over the root's feeds, with the feeds in hand: what a test needs to make one of them fail. */
+function standalone(conn: Conn) {
+  h.connection = conn;
+  const held: { feeds: EmailFeeds | null } = { feeds: null };
+  const navigation = { openRecord: vi.fn(), openSettings: vi.fn(), openInbox: vi.fn() };
+  function Page() {
+    const feeds = useEmailFeeds();
+    held.feeds = feeds;
+    return (
+      <EmailNavigationContext.Provider value={navigation}>
+        <OverviewSection feeds={feeds} />
+      </EmailNavigationContext.Provider>
+    );
+  }
+  render(<Page />);
+  return held;
+}
+
+/** The notices on the page: how many stories it tells. */
+const notices = () => [...document.querySelectorAll<HTMLElement>(".os-notice")].map((node) => node.textContent ?? "");
 
 /** `campaignStats` answering per campaign, as the engine does. */
 function statsAre(conn: Conn, byCampaign: Record<string, Row>) {
@@ -163,7 +186,7 @@ describe("what the Overview measures", () => {
     await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
     expect(cell("Click rate").value).toBe("5.0%");
     // The archived audience is not counted.
-    await waitFor(() => expect(cell("Subscribers").value).toBe("1,290"));
+    await waitFor(() => expect(cell("Subscriptions").value).toBe("1,290"));
     // Two rules are On, one is paused.
     expect(cell("Active automations").value).toBe("2");
     expect(screen.getByRole("heading", { level: 3, name: "Overview" })).toBeTruthy();
@@ -193,7 +216,7 @@ describe("what the Overview measures", () => {
   it("counts each active audience's subscribers once, and nothing for a cluster with none", async () => {
     const conn = seeded();
     mountWindow(conn);
-    await waitFor(() => expect(cell("Subscribers").value).toBe("1,290"));
+    await waitFor(() => expect(cell("Subscriptions").value).toBe("1,290"));
     const counted = conn.query.audienceSubscriberCount.mock.calls.map(([args]) => (args as { audienceId: string }).audienceId).sort();
     expect(counted).toEqual(["a1", "a2"]);
   });
@@ -233,12 +256,12 @@ describe("a read that has not answered", () => {
 
     // Every figure is the shape of a figure.
     await waitFor(() => expect(cell("Sent, 30 days").shaped).toBe(true));
-    for (const label of ["Sent, 30 days", "Open rate", "Click rate", "Subscribers", "Active automations"]) {
+    for (const label of ["Sent, 30 days", "Open rate", "Click rate", "Subscriptions", "Active automations"]) {
       expect(cell(label).shaped).toBe(true);
       expect(cell(label).value).not.toContain(DASH);
     }
     expect(within(pane("overview")).getAllByRole("status").map((node) => node.textContent)).toEqual(
-      expect.arrayContaining(["Loading sent, 30 days", "Loading open rate", "Loading click rate", "Loading subscribers", "Loading active automations"]),
+      expect.arrayContaining(["Loading sent, 30 days", "Loading open rate", "Loading click rate", "Loading subscriptions", "Loading active automations"]),
     );
     // No warning about nothing being wrong, and no offer to start while the answer is unknown.
     expect(pane("overview").querySelector(".os-notice")).toBeNull();
@@ -282,7 +305,7 @@ describe("a read that was refused", () => {
 
     await waitFor(() => expect(cell("Open rate").value).toBe(DASH));
     expect(cell("Click rate").value).toBe(DASH);
-    expect(cell("Subscribers").value).toBe(DASH);
+    expect(cell("Subscriptions").value).toBe(DASH);
     expect(cell("Active automations").value).toBe(DASH);
     // What did answer is still a number.
     expect(cell("Sent, 30 days").value).toBe("1,500");
@@ -311,6 +334,22 @@ describe("a read that was refused", () => {
     expect(cell("Sent, 30 days").value).not.toBe("0");
   });
 
+  it("a refused audiences list leaves Subscriptions a dash with the sentence, never a zero", async () => {
+    const conn = seeded();
+    conn.query.audiences.mockRejectedValue(new Error("Audiences are not yours to read."));
+    mountWindow(conn);
+
+    await waitFor(() => expect(cell("Subscriptions").value).toBe(DASH));
+    expect(screen.getByText("This cluster did not return your subscriptions.")).toBeTruthy();
+    expect(screen.getByText("Audiences are not yours to read.")).toBeTruthy();
+    expect(cell("Subscriptions").value).not.toBe("0");
+    expect(cell("Subscriptions").hover).toBe("Audiences are not yours to read.");
+    // There is no audience to count when the list could not be read.
+    expect(conn.query.audienceSubscriberCount).not.toHaveBeenCalled();
+    // The rest of the page still answers.
+    expect(cell("Sent, 30 days").value).toBe("1,500");
+  });
+
   it("leaves a rate it cannot state absent, with the reason beneath it", async () => {
     const conn = seeded();
     statsAre(conn, {
@@ -335,8 +374,13 @@ describe("a read that was refused", () => {
 
     await waitFor(() => expect(cell("Sent, 30 days").value).toBe("40"));
     expect(cell("Open rate").value).toBe(DASH);
+    // Said once, under the first of the two it is true of. The second keeps its
+    // dash, and the reason on hover.
     expect(cell("Open rate").note).toBe("No tracked campaign in the last 30 days.");
-    expect(cell("Click rate").note).toBe("No tracked campaign in the last 30 days.");
+    expect(cell("Click rate").value).toBe(DASH);
+    expect(cell("Click rate").note).toBeNull();
+    expect(cell("Click rate").hover).toBe("No tracked campaign in the last 30 days.");
+    expect(pane("overview").textContent?.split("No tracked campaign in the last 30 days.").length).toBe(2);
     expect(conn.query.campaignStats).not.toHaveBeenCalled();
   });
 });
@@ -349,8 +393,11 @@ describe("first use", () => {
     expect(screen.getByText("Add a campaign to send a template to an audience.")).toBeTruthy();
     // Nothing has been sent and nobody is subscribed: real zeros, said by the page's one sentence.
     await waitFor(() => expect(cell("Sent, 30 days").value).toBe("0"));
-    expect(cell("Subscribers").value).toBe("0");
+    expect(cell("Subscriptions").value).toBe("0");
     expect(cell("Active automations").value).toBe("0");
+    // Why there is no rate is said by "Nothing sent yet", not under each dash as well.
+    expect(cell("Open rate").note).toBeNull();
+    expect(cell("Click rate").note).toBeNull();
     expect(screen.queryByRole("region", { name: "Campaigns" })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Add a campaign" }));
@@ -376,23 +423,6 @@ describe("first use", () => {
 
 describe("when updates stop", () => {
   type Stoppable = { markDisconnected: () => void };
-
-  function standalone(conn: Conn) {
-    h.connection = conn;
-    const held: { feeds: EmailFeeds | null } = { feeds: null };
-    const navigation = { openRecord: vi.fn(), openSettings: vi.fn(), openInbox: vi.fn() };
-    function Page() {
-      const feeds = useEmailFeeds();
-      held.feeds = feeds;
-      return (
-        <EmailNavigationContext.Provider value={navigation}>
-          <OverviewSection feeds={feeds} />
-        </EmailNavigationContext.Provider>
-      );
-    }
-    render(<Page />);
-    return held;
-  }
 
   it("keeps the last figures and says updates are interrupted", async () => {
     const held = standalone(seeded());
@@ -423,6 +453,118 @@ describe("when updates stop", () => {
   });
 });
 
+// A REFUSED REFRESH IS NOT A REFUSAL WHEN THE LAST ANSWER IS STILL HELD. A feed
+// that holds rows and could not read them again (the SDK keeps rows and the error
+// together, in the state `degraded`) keeps its figures, and the page tells the one
+// story once: updates are interrupted, these are the last figures, and what the
+// cluster said. It does not dash a figure it can still compute, and it does not
+// say "this cluster did not return" beside a number it is showing.
+describe("a refresh the cluster refused", () => {
+  const SENTENCE = "The cluster did not answer in time.";
+
+  /** The one story: a single notice, with the engine's sentence in it and no claim that anything is reconnecting. */
+  function expectOneStory(sentence: string) {
+    const told = notices();
+    expect(told).toHaveLength(1);
+    expect(told[0]).toContain("Updates are interrupted.");
+    expect(told[0]).toContain("Showing the last figures received.");
+    expect(told[0]).toContain(sentence);
+    expect(told[0]).not.toContain("Reconnecting automatically");
+    expect(screen.queryByText(/^This cluster did not return/)).toBeNull();
+  }
+
+  it.each([
+    ["campaigns", "Sent, 30 days", "1,500"],
+    ["audiences", "Subscriptions", "1,290"],
+    ["rules", "Active automations", "2"],
+  ] as const)("keeps its figures and tells one story when the %s refresh is refused", async (feed, label, value) => {
+    const conn = seeded();
+    const held = standalone(conn);
+    await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
+    await waitFor(() => expect(cell("Subscriptions").value).toBe("1,290"));
+    expect(notices()).toEqual([]);
+
+    const read = feed === "campaigns" ? conn.query.campaigns : feed === "audiences" ? conn.query.audiences : conn.query.emailRules;
+    read.mockRejectedValue(new Error(SENTENCE));
+    await act(async () => { held.feeds![feed].reseed(); });
+
+    expect(await screen.findByText("Updates are interrupted.")).toBeTruthy();
+    // Every figure keeps the value it had: a refused refresh is not a dash, and not a zero.
+    expect(cell(label).value).toBe(value);
+    expect(cell("Sent, 30 days").value).toBe("1,500");
+    expect(cell("Open rate").value).toBe("27%");
+    expect(cell("Click rate").value).toBe("5.0%");
+    expect(cell("Subscriptions").value).toBe("1,290");
+    expect(cell("Active automations").value).toBe("2");
+    expectOneStory(SENTENCE);
+  });
+
+  it("keeps the subscriber count it measured through a refused refresh", async () => {
+    const conn = seeded();
+    standalone(conn);
+    await waitFor(() => expect(cell("Subscriptions").value).toBe("1,290"));
+
+    conn.query.audienceSubscriberCount.mockRejectedValue(new Error("Counting subscribers is not yours to do."));
+    // Coming back to the window reads the counts again, and the cluster refuses.
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+
+    expect(await screen.findByText("Updates are interrupted.")).toBeTruthy();
+    expect(cell("Subscriptions").value).toBe("1,290");
+    expect(cell("Open rate").value).toBe("27%");
+    expectOneStory("Counting subscribers is not yours to do.");
+  });
+
+  it("keeps the rates it measured through a refused refresh of the breakdowns", async () => {
+    const conn = seeded();
+    standalone(conn);
+    await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
+
+    conn.query.campaignStats.mockRejectedValue(new Error("Reading the breakdown is not yours to do."));
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+
+    expect(await screen.findByText("Updates are interrupted.")).toBeTruthy();
+    expect(cell("Open rate").value).toBe("27%");
+    expect(cell("Click rate").value).toBe("5.0%");
+    expectOneStory("Reading the breakdown is not yours to do.");
+  });
+
+  it("says one sentence once when several refreshes are refused for the same reason", async () => {
+    const conn = seeded();
+    const held = standalone(conn);
+    await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
+
+    for (const read of [conn.query.campaigns, conn.query.audiences, conn.query.emailRules, conn.query.campaignStats, conn.query.audienceSubscriberCount]) {
+      read.mockRejectedValue(new Error(SENTENCE));
+    }
+    await act(async () => {
+      held.feeds!.campaigns.reseed();
+      held.feeds!.audiences.reseed();
+      held.feeds!.rules.reseed();
+      window.dispatchEvent(new Event("focus"));
+    });
+
+    expect(await screen.findByText("Updates are interrupted.")).toBeTruthy();
+    expectOneStory(SENTENCE);
+    expect((notices()[0] ?? "").split(SENTENCE).length - 1).toBe(1);
+    // Everything is still the last answer.
+    expect(cell("Sent, 30 days").value).toBe("1,500");
+    expect(cell("Subscriptions").value).toBe("1,290");
+    expect(cell("Active automations").value).toBe("2");
+    expect(cell("Open rate").value).toBe("27%");
+  });
+
+  it("still shows a first refusal as a refusal: with nothing held there is no last figure to keep", async () => {
+    const conn = seeded();
+    conn.query.emailRules.mockRejectedValue(new Error("Reading automations is not yours to do."));
+    standalone(conn);
+
+    await waitFor(() => expect(cell("Active automations").value).toBe(DASH));
+    expect(notices().join("|")).toContain("This cluster did not return your automations.");
+    expect(notices().join("|")).toContain("Reading automations is not yours to do.");
+    expect(notices().join("|")).not.toContain("Updates are interrupted.");
+  });
+});
+
 describe("how the Overview reads", () => {
   it("adds no subscription of its own", async () => {
     const conn = seeded();
@@ -431,7 +573,10 @@ describe("how the Overview reads", () => {
     for (const [concept, peak] of peakSubscriptions(conn)) expect(peak, concept).toBeLessThanOrEqual(1);
   });
 
-  it("reads again every five seconds while it is seen, and stops when another tab is", async () => {
+  it("reads again once a minute while it is seen, and stops when another tab is", async () => {
+    // The default landing tab: its rates move over hours and days, and what has to
+    // be live (what was sent, what is switched on) is live through the feeds.
+    expect(OVERVIEW_REFRESH_MS).toBe(60_000);
     const conn = seeded();
     h.connection = conn;
     const store = memoryStore();
@@ -439,7 +584,7 @@ describe("how the Overview reads", () => {
       withSession(<EmailApp sectionId={section} navigate={() => {}} askContext={() => {}} store={store} uploads={{ upload: vi.fn() }} />);
     const view = render(app("overview"));
     await waitFor(() => expect(cell("Open rate").value).toBe("27%"));
-    await waitFor(() => expect(cell("Subscribers").value).toBe("1,290"));
+    await waitFor(() => expect(cell("Subscriptions").value).toBe("1,290"));
     await act(async () => {});
 
     const reads = () => conn.query.campaignStats.mock.calls.length + conn.query.audienceSubscriberCount.mock.calls.length;
@@ -447,14 +592,34 @@ describe("how the Overview reads", () => {
     // Coming back to the window arms the refresher on the clock this test holds.
     await act(async () => window.dispatchEvent(new Event("focus")));
     const armed = reads();
-    await act(async () => { await vi.advanceTimersByTimeAsync(EMAIL_REFRESH_MS); });
+
+    // Not on the five-second beat the campaign page keeps, nor any time before the minute is up.
+    await act(async () => { await vi.advanceTimersByTimeAsync(OVERVIEW_REFRESH_MS - 1_000); });
+    expect(reads()).toBe(armed);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
     expect(reads()).toBeGreaterThan(armed);
 
     // The person goes to Campaigns. The Overview stays mounted behind it, and stops reading.
     view.rerender(app("campaigns"));
     expect(pane("overview").hidden).toBe(true);
     const left = reads();
-    await act(async () => { await vi.advanceTimersByTimeAsync(EMAIL_REFRESH_MS * 3); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(OVERVIEW_REFRESH_MS * 3); });
     expect(reads()).toBe(left);
+  });
+
+  it("stops reading when the window closes: an unmount aborts the breakdowns it was waiting for", async () => {
+    const conn = seeded();
+    const signals: AbortSignal[] = [];
+    conn.query.campaignStats.mockImplementation(async (_args, opts) => {
+      signals.push((opts as { signal: AbortSignal }).signal);
+      return new Promise<never>(() => {});
+    });
+    const { view } = mountWindow(conn);
+    await waitFor(() => expect(signals.length).toBeGreaterThan(0));
+    expect(signals.every((signal) => !signal.aborted)).toBe(true);
+
+    view.unmount();
+
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
 });

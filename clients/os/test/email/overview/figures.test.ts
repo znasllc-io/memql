@@ -5,6 +5,7 @@ import {
   NO_TRACKED_CAMPAIGN,
   campaignDistribution,
   overviewMetrics,
+  refusalOf,
   startedInWindow,
   statsWanted,
   type OverviewInputs,
@@ -68,7 +69,7 @@ describe("the five figures", () => {
       "Sent, 30 days",
       "Open rate",
       "Click rate",
-      "Subscribers",
+      "Subscriptions",
       "Active automations",
     ]);
   });
@@ -258,7 +259,36 @@ describe("Open rate and Click rate", () => {
     const i = inputs({ campaigns: { rows: [A], settled: true, error: "" }, stats: new Map([["a", empty]]) });
     const opens = metric(i, "Open rate");
     expect(opens.loading).toBeFalsy();
-    expect(opens.figure).toMatchObject({ kind: "absent", reason: "unmeasured" });
+    // Said of the campaign it is about: nothing on this page comes before "one of these".
+    expect(opens.figure).toEqual(absent("unmeasured", "No breakdown was returned for “August update”."));
+    expect(opens.detail).toBe("No breakdown was returned for “August update”.");
+  });
+
+  it("says a reason both rates share once, and leaves the second figure its dash", () => {
+    const untracked = inputs({ campaigns: { rows: [sentCampaign("u", 2, 100, { trackOpens: false, trackClicks: false })], settled: true, error: "" } });
+    const [, opens, clicks] = overviewMetrics(untracked);
+    expect(opens!.detail).toBe(NO_TRACKED_CAMPAIGN);
+    expect(clicks!.detail).toBeUndefined();
+    // Both figures still carry it, for the dash's own hover.
+    expect(clicks!.figure).toEqual(absent("unmeasured", NO_TRACKED_CAMPAIGN));
+
+    // Two different reasons are two sentences: each is said under its own figure.
+    const different = inputs({
+      campaigns: { rows: [sentCampaign("a", 2, 1000, { trackClicks: false })], settled: true, error: "" },
+      stats: new Map([["a", answered({ sent: 1000, opens: { total: 400 } })]]),
+    });
+    const [, opensOnly, clicksNone] = overviewMetrics(different);
+    expect(opensOnly!.detail).toMatch(/^Too many recorded events/);
+    expect(clicksNone!.detail).toBe(NO_TRACKED_CAMPAIGN);
+  });
+});
+
+describe("a read's refusal", () => {
+  it("is the engine's sentence only when the read left nothing to show", () => {
+    expect(refusalOf("Campaigns are not yours to read.", 0)).toBe("Campaigns are not yours to read.");
+    // A feed that holds rows and could not refresh them keeps showing them: it is not a refusal.
+    expect(refusalOf("Campaigns are not yours to read.", 3)).toBe("");
+    expect(refusalOf("", 0)).toBe("");
   });
 });
 
@@ -277,36 +307,38 @@ describe("which breakdowns are read", () => {
   });
 });
 
-describe("Subscribers", () => {
+// A SUBSCRIPTION, NOT A SUBSCRIBER: the figure adds up what each active audience can
+// mail, so a person who is on two audiences is counted twice.
+describe("Subscriptions", () => {
   it("sum active audiences and wait for every count", () => {
     const counted = new Map([["a1", figureOf(1204)], ["a2", figureOf(86)]]);
-    const done = metric(inputs({ subscribers: counted }), "Subscribers");
+    const done = metric(inputs({ subscribers: counted }), "Subscriptions");
     expect(done.figure).toEqual(figureOf(1290));
     expect(done.loading).toBeFalsy();
     expect(done.format?.(1290)).toBe("1,290");
 
     // One audience not counted yet: a partial sum would read as the whole.
     const partial = new Map([["a1", figureOf(1204)], ["a2", absent("unread")]]);
-    const waiting = metric(inputs({ subscribers: partial }), "Subscribers");
+    const waiting = metric(inputs({ subscribers: partial }), "Subscriptions");
     expect(waiting.loading).toBe(true);
 
     // The audiences themselves not read yet.
-    expect(metric(inputs({ audiencesSettled: false }), "Subscribers").loading).toBe(true);
+    expect(metric(inputs({ audiencesSettled: false }), "Subscriptions").loading).toBe(true);
   });
 
   it("are a real zero when there is no active audience to count", () => {
-    expect(metric(inputs({ subscribers: new Map() }), "Subscribers").figure).toEqual(figureOf(0));
+    expect(metric(inputs({ subscribers: new Map() }), "Subscriptions").figure).toEqual(figureOf(0));
   });
 
   it("are absent with the engine's sentence when one count is refused, not a sum of the rest", () => {
     const subscribers = new Map([["a1", figureOf(1204)], ["a2", absent("failed", "Counting subscribers is not yours to do.")], ["a3", absent("unread")]]);
-    const refusedCount = metric(inputs({ subscribers }), "Subscribers");
+    const refusedCount = metric(inputs({ subscribers }), "Subscriptions");
     expect(refusedCount.loading).toBeFalsy();
     expect(refusedCount.figure).toEqual(absent("failed", "Counting subscribers is not yours to do."));
   });
 
   it("are absent when the audiences cannot be read", () => {
-    const refusedAudiences = metric(inputs({ audiencesSettled: true, audiencesError: "Audiences are not yours to read." }), "Subscribers");
+    const refusedAudiences = metric(inputs({ audiencesSettled: true, audiencesError: "Audiences are not yours to read." }), "Subscriptions");
     expect(refusedAudiences.loading).toBeFalsy();
     expect(refusedAudiences.figure).toEqual(absent("failed", "Audiences are not yours to read."));
   });

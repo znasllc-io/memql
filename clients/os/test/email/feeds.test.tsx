@@ -622,6 +622,65 @@ describe("subscriber counts", () => {
     expect([...result.current.counts.keys()]).toEqual(["a1"]);
   });
 
+  // A REFUSED REFRESH IS NOT A REFUSAL when the audience's count is already known:
+  // `useReading` keeps its last answer through a failure, and so does a count.
+  it("keeps the measured count through a refused refresh, and says why", async () => {
+    const conn = fakeConnection({ subscriberCounts: { a1: 7, a2: 3 } });
+    h.connection = conn;
+    const { result } = renderHook(() => useSubscriberCounts(["a1", "a2"]));
+    await waitFor(() => expect(result.current.counts.get("a2")).toEqual(figureOf(3)));
+    expect(result.current.refusals.size).toBe(0);
+
+    conn.query.audienceSubscriberCount.mockImplementation(async (args) => {
+      if ((args as { audienceId: string }).audienceId === "a1") throw new Error("Counting subscribers is not yours to do.");
+      return rowsResult([{ count: 4 }]);
+    });
+    await act(async () => { await result.current.reload(); });
+
+    // a1's refused refresh keeps the count it had; a2's answered one replaces its own.
+    expect(result.current.counts.get("a1")).toEqual(figureOf(7));
+    expect(result.current.counts.get("a2")).toEqual(figureOf(4));
+    expect([...result.current.refusals]).toEqual([["a1", "Counting subscribers is not yours to do."]]);
+
+    // An answer ends it.
+    conn.query.audienceSubscriberCount.mockImplementation(async () => rowsResult([{ count: 9 }]));
+    await act(async () => { await result.current.reload(); });
+    expect(result.current.counts.get("a1")).toEqual(figureOf(9));
+    expect(result.current.refusals.size).toBe(0);
+  });
+
+  it("has no count to keep for an audience whose first read was refused, and lists the refusal", async () => {
+    const conn = fakeConnection({ subscriberCounts: { a1: 7, a2: new Error("Counting subscribers is not yours to do.") } });
+    h.connection = conn;
+    const { result } = renderHook(() => useSubscriberCounts(["a1", "a2"]));
+    await waitFor(() => expect(result.current.counts.get("a2")).toEqual(absent("failed", "Counting subscribers is not yours to do.")));
+    expect([...result.current.refusals]).toEqual([["a2", "Counting subscribers is not yours to do."]]);
+
+    // Once it answers, it is a count -- and the next refusal keeps that one.
+    conn.query.audienceSubscriberCount.mockImplementation(async () => rowsResult([{ count: 5 }]));
+    await act(async () => { await result.current.reload(); });
+    expect(result.current.counts.get("a2")).toEqual(figureOf(5));
+    conn.query.audienceSubscriberCount.mockRejectedValue(new Error("Connection interrupted"));
+    await act(async () => { await result.current.reload(); });
+    expect(result.current.counts.get("a2")).toEqual(figureOf(5));
+    expect(result.current.refusals.get("a2")).toBe("Connection interrupted");
+  });
+
+  it("forgets the count of an audience that left the set, so it is not kept for a refusal if it comes back", async () => {
+    const conn = fakeConnection({ subscriberCounts: { a1: 7, a2: 3 } });
+    h.connection = conn;
+    const { result, rerender } = renderHook(({ ids }) => useSubscriberCounts(ids), { initialProps: { ids: ["a1", "a2"] } });
+    await waitFor(() => expect(result.current.counts.get("a2")).toEqual(figureOf(3)));
+    rerender({ ids: ["a1"] });
+    await waitFor(() => expect([...result.current.counts.keys()]).toEqual(["a1"]));
+
+    conn.query.audienceSubscriberCount.mockRejectedValue(new Error("Counting subscribers is not yours to do."));
+    rerender({ ids: ["a1", "a2"] });
+    await waitFor(() => expect(result.current.counts.get("a2")).toEqual(absent("failed", "Counting subscribers is not yours to do.")));
+    // a1 stays as it was: its refusal is a refusal of a refresh.
+    expect(result.current.counts.get("a1")).toEqual(figureOf(7));
+  });
+
   it("does not turn a missing count into a zero", async () => {
     const conn = fakeConnection();
     conn.query.audienceSubscriberCount.mockImplementation(async () => rowsResult([]));
@@ -769,6 +828,23 @@ describe("campaign breakdowns", () => {
     await waitFor(() => expect(result.current.stats.get("b")?.state).toBe("ready"));
     rerender({ ids: ["b"] });
     expect([...result.current.stats.keys()]).toEqual(["b"]);
+  });
+
+  it("aborts the reads it is waiting for when the window goes", async () => {
+    const conn = fakeConnection();
+    const signals: AbortSignal[] = [];
+    conn.query.campaignStats.mockImplementation(async (_args, opts) => {
+      signals.push((opts as { signal: AbortSignal }).signal);
+      return new Promise<never>(() => {});
+    });
+    h.connection = conn;
+    const { unmount } = renderHook(() => useCampaignStatsFor(["a", "b"]));
+    await waitFor(() => expect(signals).toHaveLength(2));
+    expect(signals.every((signal) => !signal.aborted)).toBe(true);
+
+    unmount();
+
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
 
   it("reads a few at a time, however many there are, and nothing for none", async () => {

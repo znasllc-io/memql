@@ -7,6 +7,8 @@ import { LocalEmailSettingsStore } from "../src/apps/email/settings";
 import { audienceRow as campaignAudience, campaignRow as emailCampaign, deliveryRow as emailDelivery, fakeConnection as campaignConnection, pagedResult as emailPage, rowsResult, ruleRow as emailRule, senderRow as campaignSender, templateRow as emailTemplate, withSession as campaignSession } from "../test/email/harness";
 import { NewsletterPanel } from "../src/apps/email/NewsletterPanel";
 import { useEmailFeeds, useSignupFormFeed } from "../src/apps/email/useEmail";
+import { EmailNavigationContext } from "../src/apps/email/openRequest";
+import { OverviewSection } from "../src/apps/email/overview/OverviewSection";
 import { AccountsApp } from "../src/apps/accounts/AccountsApp";
 import { LocalAccountsSettingsStore } from "../src/apps/accounts/settings";
 import { fakeConnection as accountConnection, accountRow, withSession as accountSession } from "../test/accounts/harness";
@@ -725,6 +727,11 @@ const VIEWS: Record<
   "email-overview-reading": emailOverviewView("reading"),
   "email-overview-refused": emailOverviewView("refused"),
   "email-overview-unmeasured": emailOverviewView("unmeasured"),
+  "email-overview-untracked": emailOverviewView("untracked"),
+  // The page a moment after the cluster stopped answering: the figures it had, and one
+  // notice -- the cluster refusing a refresh, and the connection dropping.
+  "email-overview-interrupted": emailOverviewInterruptedView("refused"),
+  "email-overview-reconnecting": emailOverviewInterruptedView("disconnected"),
   "campaign-newsletter-empty": { connect: () => newsletterQaConnection(false), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
   "campaign-newsletter-active": { connect: () => newsletterQaConnection(true), wrap: el => campaignSession(el), render: () => <NewsletterQa /> },
   // NEXUS (epic memql#5414): what an automation is for. The procedure's page
@@ -1319,7 +1326,7 @@ function EmailPane({ section }: { section: string }) {
   return <WindowBody fallback="Email"><EmailApp sectionId={current} navigate={(id) => setCurrent(id)} askContext={() => {}} store={store}/></WindowBody>;
 }
 
-type OverviewScene = "populated" | "empty" | "reading" | "refused" | "unmeasured";
+type OverviewScene = "populated" | "empty" | "reading" | "refused" | "unmeasured" | "untracked";
 
 /**
  * Email -> Overview as it reads in each of the ways it can. Dates are relative to
@@ -1328,10 +1335,12 @@ type OverviewScene = "populated" | "empty" | "reading" | "refused" | "unmeasured
  */
 function emailOverviewView(scene: OverviewScene) {
   const ago = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+  // Nothing counted opens or clicks: both rates have the same reason, said once.
+  const tracking = scene === "untracked" ? { trackOpens: false, trackClicks: false } : {};
   const campaigns = scene === "empty" ? [] : [
-    emailCampaign({ id: "qa-c-sending", name: "August update", audienceId: "qa-newsletter", status: "sending", recipientCount: 1250, sentCount: 1204, startedAt: ago(0) }),
-    emailCampaign({ id: "qa-c-sent", name: "July update", audienceId: "qa-newsletter", status: "sent", recipientCount: 1204, sentCount: 1176, skippedCount: 24, failedCount: 4, startedAt: ago(3), completedAt: ago(3) }),
-    emailCampaign({ id: "qa-c-digest", name: "Weekly digest", audienceId: "qa-signups", status: "sent", recipientCount: 2980, sentCount: 2980, startedAt: ago(12), completedAt: ago(12) }),
+    emailCampaign({ id: "qa-c-sending", name: "August update", audienceId: "qa-newsletter", status: "sending", recipientCount: 1250, sentCount: 1204, startedAt: ago(0), ...tracking }),
+    emailCampaign({ id: "qa-c-sent", name: "July update", audienceId: "qa-newsletter", status: "sent", recipientCount: 1204, sentCount: 1176, skippedCount: 24, failedCount: 4, startedAt: ago(3), completedAt: ago(3), ...tracking }),
+    emailCampaign({ id: "qa-c-digest", name: "Weekly digest", audienceId: "qa-signups", status: "sent", recipientCount: 2980, sentCount: 2980, startedAt: ago(12), completedAt: ago(12), ...tracking }),
     emailCampaign({ id: "qa-c-old", name: "Summer sale", audienceId: "qa-newsletter", status: "sent", recipientCount: 3100, sentCount: 3100, startedAt: ago(61), completedAt: ago(61) }),
     emailCampaign({ id: "qa-c-scheduled", name: "Launch day", audienceId: "qa-newsletter", status: "scheduled", scheduledAt: "2031-10-14T16:00:00Z" }),
     emailCampaign({ id: "qa-c-draft", name: "Autumn sale", audienceId: "qa-newsletter" }),
@@ -1384,6 +1393,62 @@ function emailOverviewView(scene: OverviewScene) {
     wrap: (el: JSX.Element, role: string) => campaignSession(el, { role }),
     render: () => <EmailPane section="overview" />,
   };
+}
+
+/**
+ * The Overview a few seconds after the cluster stopped answering. The page opens
+ * on a month of mail, and 2.5 s in either the cluster refuses a re-read of the
+ * campaigns and the refresh of the breakdowns and counts ("refused"), or the
+ * connection drops ("disconnected"). What is judged is what stays on screen and
+ * what the one notice says.
+ */
+function emailOverviewInterruptedView(how: "refused" | "disconnected") {
+  const scene = emailOverviewView("populated");
+  let held: ReturnType<typeof campaignConnection> | null = null;
+  return {
+    connect: () => {
+      held = scene.connect();
+      return held;
+    },
+    wrap: scene.wrap,
+    render: () => (
+      <EmailOverviewInterruptedPane
+        how={how}
+        refuse={() => {
+          const sentence = "The cluster did not answer in time.";
+          const refuse = async () => { throw new Error(sentence); };
+          if (held !== null) Object.assign(held.query, { campaigns: refuse, campaignStats: refuse, audienceSubscriberCount: refuse });
+        }}
+      />
+    ),
+  };
+}
+
+function EmailOverviewInterruptedPane({ how, refuse }: { how: "refused" | "disconnected"; refuse: () => void }) {
+  const feeds = useEmailFeeds();
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (how === "disconnected") {
+        (feeds.campaigns.source as unknown as { markDisconnected: () => void } | null)?.markDisconnected();
+        return;
+      }
+      refuse();
+      feeds.campaigns.reseed();
+      // Coming back to the window reads the breakdowns and counts again.
+      window.dispatchEvent(new Event("focus"));
+    }, 2500);
+    return () => window.clearTimeout(timer);
+    // Once, a few seconds in.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const navigation = useMemo(() => ({ openRecord: () => {}, openSettings: () => {}, openInbox: () => {} }), []);
+  return (
+    <WindowBody fallback="Email">
+      <EmailNavigationContext.Provider value={navigation}>
+        <OverviewSection feeds={feeds} />
+      </EmailNavigationContext.Provider>
+    </WindowBody>
+  );
 }
 
 function AccountsPane() {
