@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 
@@ -18,8 +19,9 @@ import (
 // ways without the lock: the pool cancels the waiting statement
 // (statement_timeout, 57014), a lock timeout runs out (55P03), the caller's
 // deadline passes, or the caller gives up. Those are "somebody else holds this";
-// a missing database, a transaction that cannot begin, or a lost connection are
-// not, and are returned as they were.
+// a missing database, a transaction that cannot begin, a lost connection or a
+// network timeout that is not the wait's own deadline are not, and are returned
+// as they were.
 func TestAcquireWriteGateNamesAWaitThatEndedWithoutTheLock(t *testing.T) {
 	open := func(t *testing.T, params map[string]any, more ...pgdriver.Option) *sql.DB {
 		t.Helper()
@@ -85,11 +87,6 @@ func TestAcquireWriteGateNamesAWaitThatEndedWithoutTheLock(t *testing.T) {
 				return ctx, cancel
 			},
 			func(error) bool { return true }},
-		{"the driver's read times out first", nil, []pgdriver.Option{pgdriver.WithReadTimeout(300 * time.Millisecond)},
-			func() (context.Context, context.CancelFunc) {
-				return context.WithTimeout(context.Background(), 20*time.Second)
-			},
-			func(error) bool { return true }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			ctx, cancel := c.ctx()
@@ -129,6 +126,27 @@ func TestAcquireWriteGateNamesAWaitThatEndedWithoutTheLock(t *testing.T) {
 			if errors.Is(err, ErrWriteGateBusy) {
 				t.Errorf("%s: %v is not somebody else holding the gate", name, err)
 			}
+		}
+	})
+
+	t.Run("a network timeout that is not the wait's own deadline is returned as it was", func(t *testing.T) {
+		// The driver's read times out while the gate is waited for, and neither the
+		// caller's context nor a SQLSTATE says the wait ended: it is a network
+		// failure, not somebody else holding the gate, and trying again in a moment
+		// would not be the advice for it.
+		pool := open(t, nil, pgdriver.WithReadTimeout(300*time.Millisecond))
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_, err := AcquireWriteGate(ctx, pool, key)
+		if err == nil {
+			t.Fatal("took a gate somebody holds")
+		}
+		var netErr net.Error
+		if !errors.As(err, &netErr) || !netErr.Timeout() {
+			t.Fatalf("the case under test is a network timeout, and this is %v", err)
+		}
+		if errors.Is(err, ErrWriteGateBusy) {
+			t.Errorf("a network timeout %v was called somebody else holding the gate", err)
 		}
 	})
 

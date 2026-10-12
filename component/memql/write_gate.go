@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/uptrace/bun/driver/pgdriver"
@@ -14,12 +13,13 @@ import (
 // ErrWriteGateBusy is what an error from AcquireWriteGate matches (errors.Is)
 // when the gate could not be had because the wait for it ended without the lock:
 // the pool cancelled the statement that was waiting (statement_timeout, SQLSTATE
-// 57014), a lock timeout ran out (55P03), the driver's own read timed out, or the
-// caller's deadline or cancellation came first. The error keeps its own text and
-// its cause (errors.As finds the driver's error under it). Every other failure
-// (no database, a transaction that cannot begin, a lost connection) is returned
-// as it was: it is not "somebody else holds this", and a caller that said so
-// would send a person to retry something that cannot work.
+// 57014), a lock timeout ran out (55P03), or the caller's deadline or
+// cancellation came first. The error keeps its own text and its cause (errors.As
+// finds the driver's error under it). Every other failure (no database, a
+// transaction that cannot begin, a lost connection, a network timeout that is not
+// the wait's own deadline) is returned as it was: it is not "somebody else holds
+// this", and a caller that said so would send a person to retry something that
+// cannot work.
 var ErrWriteGateBusy = errors.New("another caller holds this write gate")
 
 // writeGateBusyError is an error from a wait that ended, tagged so that it
@@ -61,11 +61,14 @@ func AcquireWriteGate(ctx context.Context, db *sql.DB, key string) (func(), erro
 	return func() { _ = tx.Rollback() }, nil
 }
 
-// lockWaitEnded says whether the lock statement failed because its wait ended.
-// The driver reports a context deadline as an i/o timeout of its read, not as the
-// context's error, and does not watch a cancellation at all, so the contexts are
-// asked directly (and the deadline against the clock, since the read can time out
-// a moment before the context's own timer fires).
+// lockWaitEnded says whether the lock statement failed because its wait ended: a
+// SQLSTATE that says the statement was cancelled (57014) or that a lock timeout
+// ran out (55P03), or the wait's own context done. The driver reports a context
+// deadline as an i/o timeout of its read, not as the context's error, and does not
+// watch a cancellation at all, so the context is asked directly (and its deadline
+// against the clock, since the read can time out a moment before the context's own
+// timer fires). An i/o timeout with neither is not a wait that ended: it is a
+// network failure, and is not called one.
 func lockWaitEnded(wait context.Context, err error) bool {
 	if wait.Err() != nil {
 		return true
@@ -74,10 +77,6 @@ func lockWaitEnded(wait context.Context, err error) bool {
 		return true
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-		return true
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
 		return true
 	}
 	var pgErr pgdriver.Error

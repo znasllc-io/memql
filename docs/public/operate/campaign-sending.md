@@ -267,9 +267,9 @@ short: read the template as it is now, compare, check the revision, write. When
 another save of the same template is in progress and the lock cannot be taken in
 time, the answer is "Someone else is saving this template. Try again in a
 moment." and repeating the same call is safe. A lock that fails for any other
-reason (no database to coordinate through, a connection that was lost) is
-reported as the engine reported it, since trying again in a moment would not
-help. The organization and the permission are checked once more under the locks,
+reason (no database to coordinate through, a connection that was lost or timed
+out) is reported as the engine reported it, since trying again in a moment would
+not help. The organization and the permission are checked once more under the locks,
 so a save whose render outlasted a change to either is refused.
 
 Raw template writes and the underlying create/update mutations are internal.
