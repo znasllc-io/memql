@@ -263,3 +263,148 @@ func TestVerifyRoleListsRefusesADisagreeingList(t *testing.T) {
 		t.Error("an arch.yaml role whose mesh column disagrees was accepted")
 	}
 }
+
+// deployFixture writes a deploy tree the deploy pass accepts: one Deployment
+// and Service per role (the bff in the engine-bff component, the rest in the
+// base, as in the real tree), plus whatever extra the caller adds to the base.
+func deployFixture(t *testing.T, extra string) string {
+	t.Helper()
+	root := t.TempDir()
+	workload := func(name string) string {
+		return fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata: {name: %[1]s}
+spec:
+  selector: {matchLabels: {app: %[1]s}}
+  template:
+    metadata: {labels: {app: %[1]s}}
+    spec:
+      containers:
+        - name: %[1]s
+          ports: [{name: http, containerPort: 8085}]
+          env:
+            - {name: MEMQL_NODE_TYPE, value: %[1]s}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: %[1]s}
+spec:
+  selector: {app: %[1]s}
+  ports: [{name: http, port: 8085}]
+`, name)
+	}
+	var base strings.Builder
+	for _, r := range node.Roles() {
+		if r.Type == node.NodeTypeBFF {
+			writeFile(t, filepath.Join(root, deployEngineBFF, "kustomization.yaml"), "resources:\n  - bff.yaml\n")
+			writeFile(t, filepath.Join(root, deployEngineBFF, "bff.yaml"), workload("bff"))
+			continue
+		}
+		base.WriteString(workload(string(r.Type)))
+		base.WriteString("---\n")
+	}
+	base.WriteString(extra)
+	writeFile(t, filepath.Join(root, deployBase, "kustomization.yaml"), "resources:\n  - all.yaml\n")
+	writeFile(t, filepath.Join(root, deployBase, "all.yaml"), base.String())
+	return root
+}
+
+// A Deployment that runs a SUBCOMMAND of the engine binary rather than a node
+// role -- the error pages are `memql error-pages` on the edge image -- is
+// recorded as a Deployment with its Service selecting it, and as running no
+// role: there is no runs_on edge to invent for something that never joins the
+// mesh, and putting MEMQL_NODE_TYPE=edge on it to satisfy the pass would have
+// the graph claim a second edge. One that states neither is still refused.
+func TestDeployPassRecordsADeploymentThatRunsASubcommand(t *testing.T) {
+	root := deployFixture(t, `---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: error-pages}
+spec:
+  selector: {matchLabels: {app: error-pages}}
+  template:
+    metadata: {labels: {app: error-pages}}
+    spec:
+      containers:
+        - name: error-pages
+          command: ["/app/memql", "error-pages"]
+          ports: [{name: http, containerPort: 8080}, {name: health, containerPort: 8081}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: error-pages}
+spec:
+  selector: {app: error-pages}
+  ports: [{name: http, port: 80}]
+`)
+	b := newBuilder()
+	for _, r := range node.Roles() {
+		b.node(model.ServiceID(string(r.Type)), model.PlatformRole, string(r.Type), nil)
+	}
+	if err := deployPass(b, root); err != nil {
+		t.Fatalf("a Deployment that runs a subcommand was refused: %v", err)
+	}
+	g, err := b.graph()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dep, ok := b.nodes[model.DeploymentID("error-pages")]
+	if !ok {
+		t.Fatal("the subcommand Deployment is not in the graph")
+	}
+	if dep.Attrs["subcommand"] != "error-pages" || dep.Attrs["nodeType"] != "" || dep.Attrs["ports"] != "health:8081,http:8080" {
+		t.Errorf("the error-pages Deployment node carries %v, want subcommand=error-pages, no nodeType, ports health:8081,http:8080", dep.Attrs)
+	}
+	if _, ok := b.nodes[model.K8sServiceID("error-pages")]; !ok {
+		t.Error("the error-pages Service is not in the graph")
+	}
+
+	var selected bool
+	for _, e := range g.Edges {
+		if e.To == model.DeploymentID("error-pages") && e.Kind == model.PlatformRunsOn {
+			t.Errorf("%s -runs_on-> error-pages: a subcommand is not a node role", e.From)
+		}
+		if e.From == model.K8sServiceID("error-pages") && e.To == model.DeploymentID("error-pages") && e.Kind == model.PlatformSelects {
+			selected = true
+		}
+	}
+	if !selected {
+		t.Error("the error-pages Service does not select its Deployment")
+	}
+	// Every real role still runs on its own Deployment: the new shape did not
+	// loosen the rule for the old one.
+	for _, r := range node.Roles() {
+		var runs bool
+		for _, e := range g.Edges {
+			if e.From == model.ServiceID(string(r.Type)) && e.To == model.DeploymentID(string(r.Type)) && e.Kind == model.PlatformRunsOn {
+				runs = true
+			}
+		}
+		if !runs {
+			t.Errorf("role %s lost its runs_on edge", r.Type)
+		}
+	}
+
+	// Neither a role nor a subcommand: still a defect worth failing on.
+	mystery := deployFixture(t, `---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: mystery}
+spec:
+  selector: {matchLabels: {app: mystery}}
+  template:
+    metadata: {labels: {app: mystery}}
+    spec:
+      containers:
+        - name: mystery
+          ports: [{name: http, containerPort: 9090}]
+`)
+	mb := newBuilder()
+	for _, r := range node.Roles() {
+		mb.node(model.ServiceID(string(r.Type)), model.PlatformRole, string(r.Type), nil)
+	}
+	if err := deployPass(mb, mystery); err == nil {
+		t.Fatal("a Deployment that names neither a role nor a subcommand was accepted")
+	}
+}

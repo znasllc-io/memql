@@ -1,0 +1,214 @@
+# The error pages -- what a visitor sees when the host they asked for has nothing
+# ready behind it (storage-growth stability, after 2026-10-11).
+#
+# On 2026-10-11 the database filled, every pod lost readiness, and every host the
+# cluster serves -- the platform's own and every customer's -- answered
+# ingress-nginx's bare "503 Service Temporarily Unavailable". Nothing on it said
+# whose site it was, whose fault it was or whether to wait. `memql error-pages`
+# is the replacement: a MemQL page for the platform's own hosts, a neutral page
+# with no MemQL name on it for everyone else's (a customer's visitor has never
+# heard of the platform under their shopfront), and JSON for an API client, all
+# of them a 503 with Retry-After (component/errorpages).
+#
+# HOW A REQUEST GETS HERE. Every front-door Ingress whose proxy speaks plain HTTP
+# carries `nginx.ingress.kubernetes.io/default-backend: error-pages`
+# (cmd/frontdoorhosts writes them; integrations/customdomain writes the same one
+# on the Ingresses it creates for a client's domain). When the Service such an
+# Ingress routes to has no ready endpoints, ingress-nginx sends the request
+# here instead of answering its own 503. ingress-nginx looks the Service up in
+# the Ingress's OWN namespace, which is why this lives beside the mesh, and it
+# sends a custom default backend to the Service's FIRST port -- the Service
+# below lists exactly one, on purpose.
+#
+# The Ingresses whose proxy speaks gRPC or HTTPS to their backend (the api
+# host's gRPC half, the identity host, and an account door's id. host) do NOT
+# name it. ingress-nginx keeps an Ingress's backend protocol when it swaps in
+# the default backend, and this server is plain HTTP/1.1, so behind either the
+# proxy would answer 502 instead of its own 503. Those hosts keep ingress-nginx's
+# 503 until this can answer TLS (cmd/frontdoorhosts/manifest.go has the detail).
+#
+# THE IMAGE IS THE EDGE'S, NOT A NEW ONE. The server is a subcommand of the
+# engine binary (the same reason dsl-fetch is), so every image the cluster
+# already pulls carries it. The image name is the edge's so that every
+# overlay's `images:` block retargets this Deployment exactly as it does the
+# edge: the same digest, from the same line, with nothing new to pin. The
+# command is /app/memql, the path the runtime image's entrypoint resolves ./memql
+# to from its WORKDIR (the dsl-fetch init container names it the same way).
+#
+# IT NEEDS NOTHING BUT A DOMAIN. No database, no mesh, no secret: the one thing
+# that must still answer when all of those are gone cannot depend on any of
+# them. So it mounts ONLY the memql-domain ConfigMap -- MEMQL_DOMAIN is how it
+# tells the platform's hosts from everyone else's, wired the way every engine
+# node gets it -- and NOT memql-secrets or memql-db-pool. The instance's
+# connection-budget check refuses a workload that holds memql-secrets without a
+# pool size, and holding memql-db-pool would mark this a database client; it is
+# neither. Nor does it run as the engine's ServiceAccount, which carries the
+# custom-domain Role (it can write Ingresses and Certificates) and the vendor
+# identities: a page server has no use for either, so it mounts no token at all.
+#
+# TWO LISTENERS, ONE PROCESS. The public one (8080, `http`) is what the Service
+# lists, so the only one a request that came through an ingress can reach, and
+# it answers EVERY path with the 503 page, /healthz included: this is the
+# default backend of every front door, so `https://api.<domain>/healthz` lands
+# here whenever the real node cannot answer, and a 200 there would read an
+# outage as healthy to the post-roll gate and to any uptime monitor. The probe
+# listener (8081, `health`) answers GET /healthz with 200 and is NOT in the
+# Service, so the kubelet reaches it at the pod's address and no visitor can.
+# The probes below are on it.
+#
+# LOCAL (traefik). This Deployment renders into the local overlay too, where it
+# runs and answers its own address, but nothing points a local Ingress at it:
+# the annotation above is ingress-nginx's, and traefik ignores it. A local
+# cluster therefore still shows traefik's own 503 when a node is down. Closing
+# that needs a traefik Middleware, which is deliberately not here -- the outage
+# this answers was the cloud's.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: error-pages
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: error-pages
+    app.kubernetes.io/part-of: memql
+spec:
+  # Two, with a budget below and a soft spread across nodes: the fallback is the
+  # one workload that must be there when the others are not, and it costs 10m of
+  # CPU. Not patched per overlay -- one replica of it is a fallback that goes
+  # away with the first node drain.
+  replicas: 2
+  revisionHistoryLimit: 1   # keep active + 1 previous (rollback); auto-GC older RS
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Surge first, never drain first. The mesh nodes drain before they start
+      # (maxUnavailable 1 / maxSurge 0) so a roll cannot double their Postgres
+      # pools; this holds no connection to double, so nothing is gained by
+      # dipping below two ready pods and the fallback is never the missing one.
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: error-pages
+  template:
+    metadata:
+      # The NAME label alone, and not part-of=memql, deliberately. The node
+      # PodMonitor (deploy/k8s/monitoring/podmonitor.yaml) selects every pod
+      # labelled part-of=memql and scrapes the `http` port at /metrics. This
+      # server answers /metrics with its 503 page, so a labelled pod would be a
+      # scrape target that is down for good. (The Deployment object carries the
+      # part-of label from the base's labels transformer, which labels metadata
+      # and not pod templates.)
+      labels:
+        app.kubernetes.io/name: error-pages
+    spec:
+      # No ServiceAccount token: the process calls no API. See the header for
+      # why it also does not run as the engine's account.
+      automountServiceAccountToken: false
+      # The subcommand keeps serving for app.DefaultShutdownDrainDelay (5 s)
+      # after SIGTERM so the endpoint removal can reach the ingress, then has a
+      # 10 s shutdown budget. The kubelet must wait longer than both.
+      terminationGracePeriodSeconds: 30
+      # Two replicas on one node are one replica at the first node loss. Soft,
+      # so a one-node cluster (local k3d) still schedules both.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: error-pages
+      # It serves two static pages from a binary that writes no file, on ports
+      # above 1024, so it is given nothing. 65532 is the runtime image's
+      # `nonroot` user. (The subcommand was run under exactly these settings on
+      # the runtime image's distroless base before this was written.)
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: error-pages
+          image: acrmemql.azurecr.io/memql-edge:0.9.9
+          command: ["/app/memql", "error-pages"]
+          ports:
+            # `http` is what the Service targets; `health` is what the probes
+            # target and the Service does not list.
+            - { name: http, containerPort: 8080 }
+            - { name: health, containerPort: 8081 }
+          envFrom:
+            # MEMQL_DOMAIN, from the same ConfigMap every engine node reads it
+            # from (it is seeded out of band, per install). Required, as it is
+            # for them: a cluster that has not seeded its domain has bigger
+            # problems than this page.
+            - configMapRef:
+                name: memql-domain
+          env:
+            # The listeners, stated rather than left to the subcommand's
+            # defaults so the container ports, the Service's targetPort and the
+            # probes are one decision in one file. They must stay on different
+            # ports: the server refuses to start otherwise.
+            - { name: MEMQL_ERROR_PAGES_ADDR, value: ":8080" }
+            - { name: MEMQL_ERROR_PAGES_HEALTH_ADDR, value: ":8081" }
+            # Under the 128Mi limit, so the collector works before the kernel
+            # does. RSS of the memql binary serving these pages is 53-55 MiB.
+            - { name: GOMEMLIMIT, value: "100MiB" }
+          readinessProbe:
+            httpGet: { path: /healthz, port: health }
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: health }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            # Measured, not guessed: 53-55 MiB RSS, so 64Mi is the honest
+            # reservation and 128Mi leaves headroom for a burst of visitors
+            # during the very outage this exists for. No CPU limit -- a limit
+            # throttles rather than fails.
+            requests: { cpu: 10m, memory: 64Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+# What every front door's default-backend annotation names. ONE port, and it is
+# the first: ingress-nginx sends a custom default backend to Spec.Ports[0]. It
+# targets the NAMED public port, so the probe listener (`health`) is never
+# reachable through the Service and /healthz stays a 503 for anything that came
+# through an ingress.
+apiVersion: v1
+kind: Service
+metadata:
+  name: error-pages
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: error-pages
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: error-pages
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+# Keep >=1 error-pages pod serving through voluntary disruptions (node drain,
+# upgrade, rollout): the fallback is the last thing that should be taken away.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: error-pages
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: error-pages
+    app.kubernetes.io/part-of: memql
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: error-pages

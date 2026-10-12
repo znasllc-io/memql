@@ -24,6 +24,16 @@ import (
 // its own). Values an overlay changes -- replicas, images, domains -- are not
 // the shape and are not recorded.
 //
+// A Deployment runs one of two things, and the pass records which. Most run a
+// NODE ROLE: MEMQL_NODE_TYPE names it, and the role's runs_on edge points at the
+// Deployment. One runs a SUBCOMMAND of the engine binary instead -- `command:
+// ["/app/memql", "error-pages"]`, the maintenance pages every front door falls
+// back to (deploy/k8s/base/error-pages.yaml) -- which never joins the mesh and
+// so has no role to run: it is recorded as a Deployment carrying a `subcommand`
+// attribute and no runs_on edge. Giving it MEMQL_NODE_TYPE=edge to satisfy the
+// pass would put a second edge in the graph. A Deployment that names neither is
+// still refused: nothing then says what it runs.
+//
 // NOT RENDERED BY kustomize, deliberately. The render gates under
 // deploy/k8s/overlays shell out to kustomize or kubectl and SKIP when neither
 // is installed; a generator whose output decided a drift gate cannot skip, and
@@ -69,8 +79,9 @@ func readKustomization(root, dir string) (*kustomization, error) {
 }
 
 type container struct {
-	Name  string `yaml:"name"`
-	Ports []struct {
+	Name    string   `yaml:"name"`
+	Command []string `yaml:"command"`
+	Ports   []struct {
 		Name          string `yaml:"name"`
 		ContainerPort int    `yaml:"containerPort"`
 	} `yaml:"ports"`
@@ -171,10 +182,13 @@ var addressRe = regexp.MustCompile(`(?:^|[=,/\s])([a-z0-9]([-a-z0-9]*[a-z0-9])?)
 type deployment struct {
 	name     string
 	nodeType string
-	labels   map[string]string
-	ports    []string
-	dials    map[string]map[string]string // k8sService name -> {env, port}
-	database bool
+	// subcommand is the engine-binary subcommand a Deployment with no node role
+	// runs (`memql error-pages`); empty for a Deployment that runs a role.
+	subcommand string
+	labels     map[string]string
+	ports      []string
+	dials      map[string]map[string]string // k8sService name -> {env, port}
+	database   bool
 }
 
 type k8sService struct {
@@ -209,6 +223,9 @@ func deployPass(b *builder, root string) error {
 					if e.Name == "MEMQL_NODE_TYPE" {
 						dep.nodeType = e.Value
 					}
+				}
+				if sub, ok := engineSubcommand(c.Command); ok {
+					dep.subcommand = sub
 				}
 				for _, ef := range c.EnvFrom {
 					if ef.ConfigMapRef != nil && ef.ConfigMapRef.Name == dbPoolConfigMap {
@@ -275,16 +292,19 @@ func deployPass(b *builder, root string) error {
 	for _, dep := range deps {
 		sort.Strings(dep.ports)
 		b.node(model.DeploymentID(dep.name), model.PlatformDeployment, dep.name, map[string]string{
-			"ports":    strings.Join(dep.ports, ","),
-			"nodeType": dep.nodeType,
+			"ports":      strings.Join(dep.ports, ","),
+			"nodeType":   dep.nodeType,
+			"subcommand": dep.subcommand,
 		})
-		if dep.nodeType == "" {
-			return fmt.Errorf("Deployment %s sets no MEMQL_NODE_TYPE, so nothing says which role it runs", dep.name)
+		if dep.nodeType == "" && dep.subcommand == "" {
+			return fmt.Errorf("Deployment %s sets no MEMQL_NODE_TYPE and runs no engine subcommand, so nothing says what it runs", dep.name)
 		}
-		if _, ok := node.RoleFor(node.NodeType(dep.nodeType)); !ok {
-			return fmt.Errorf("Deployment %s runs MEMQL_NODE_TYPE=%q, which is not a role in component/node/roles.go", dep.name, dep.nodeType)
+		if dep.nodeType != "" {
+			if _, ok := node.RoleFor(node.NodeType(dep.nodeType)); !ok {
+				return fmt.Errorf("Deployment %s runs MEMQL_NODE_TYPE=%q, which is not a role in component/node/roles.go", dep.name, dep.nodeType)
+			}
+			b.edge(model.ServiceID(dep.nodeType), model.DeploymentID(dep.name), model.PlatformRunsOn, nil)
 		}
-		b.edge(model.ServiceID(dep.nodeType), model.DeploymentID(dep.name), model.PlatformRunsOn, nil)
 		if dep.database {
 			b.edge(model.DeploymentID(dep.name), model.DatabaseID("primary"), model.PlatformConnectsTo, map[string]string{"via": "configMapRef " + dbPoolConfigMap})
 		}
@@ -315,6 +335,18 @@ func deployPass(b *builder, root string) error {
 		}
 	}
 	return nil
+}
+
+// engineSubcommand reports the subcommand of the engine binary a container
+// runs when its command is `<path>/memql <subcommand> ...`, which is how a
+// Deployment states that it runs a subcommand rather than the node role the
+// image's entrypoint would start. A container with no command, or a command
+// that is some other program, runs no engine subcommand.
+func engineSubcommand(command []string) (string, bool) {
+	if len(command) < 2 || filepath.Base(command[0]) != "memql" || command[1] == "" || strings.HasPrefix(command[1], "-") {
+		return "", false
+	}
+	return command[1], true
 }
 
 func labelsMatch(selector, labels map[string]string) bool {

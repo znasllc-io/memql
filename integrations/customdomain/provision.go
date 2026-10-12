@@ -134,6 +134,68 @@ func objectName(domainID string) string {
 const fieldManager = "memql-custom-domain"
 
 // ---------------------------------------------------------------------------
+// The error pages
+// ---------------------------------------------------------------------------
+
+const (
+	// ErrorPagesBackendAnnotation is the ingress-nginx annotation that names the
+	// Service an Ingress falls back to when the Service it routes to has no
+	// ready endpoints.
+	//
+	// On 2026-10-11 the whole mesh was down and every host the cluster serves,
+	// a client's own domain included, answered ingress-nginx's bare "503
+	// Service Temporarily Unavailable". `memql error-pages`
+	// (deploy/k8s/base/error-pages.yaml) is what answers instead, and a client's
+	// visitor gets its neutral page: nothing on it names the platform
+	// underneath their site. The cluster's own front door carries the same
+	// annotation, written by cmd/frontdoorhosts; its copy of these two names is
+	// held equal to these by that package's test.
+	ErrorPagesBackendAnnotation = "nginx.ingress.kubernetes.io/default-backend"
+	// ErrorPagesServiceName is the Service that annotation names.
+	ErrorPagesServiceName = "error-pages"
+
+	// backendProtocolAnnotation is how an Ingress says what its proxy speaks to
+	// its backends; absent means plain HTTP.
+	backendProtocolAnnotation = "nginx.ingress.kubernetes.io/backend-protocol"
+)
+
+// withErrorPagesBackend adds ErrorPagesBackendAnnotation to an Ingress's
+// annotations when the error pages can stand behind it, and leaves them alone
+// when they cannot.
+//
+// THE NAMESPACE. ingress-nginx resolves the annotation's Service in the
+// Ingress's OWN namespace. These Ingresses are created in the namespace
+// MEMQL_CUSTOM_DOMAIN_NAMESPACE names (Config.Namespace), which defaults to the
+// engine's, where error-pages runs. An installation that moves custom domains
+// into another namespace needs an `error-pages` Service there as well, which
+// this release does not add. Until it has one ingress-nginx cannot read the
+// Service and skips the annotation (annotations.Extractor.Extract continues past
+// a parse error that is not a validation or a denial, saying nothing at the
+// default log level): the Ingress behaves exactly as it did before, so the cost
+// of the gap is the missing page and nothing worse. The annotation is likewise
+// ignored while the Service has no ready endpoint of its own.
+//
+// THE PROTOCOL. Only a plain-HTTP backend qualifies. ingress-nginx builds the
+// custom default backend as a copy of the Ingress's own upstream and keeps the
+// location's backend protocol (buildProxyPass reads it from the Ingress; only
+// ingress-nginx's built-in default backend is forced back to plain http, in
+// v1.15.1). So behind `backend-protocol: GRPC` the error pages would be sent
+// h2c, and behind HTTPS a TLS handshake. `memql error-pages` is a plain HTTP/1.1
+// server: both would answer 502, which is worse than the bare 503 they replace.
+// The rule reads the protocol off the annotations themselves rather than from a
+// list of the callers that happen to set one, so a backend added tomorrow is
+// classified by what it speaks.
+//
+// It never sets `custom-http-errors`, which would make ingress-nginx replace
+// the application's own 4xx and 5xx responses with the maintenance page.
+func withErrorPagesBackend(annotations map[string]any) {
+	if protocol, _ := annotations[backendProtocolAnnotation].(string); protocol != "" && !strings.EqualFold(protocol, "HTTP") {
+		return
+	}
+	annotations[ErrorPagesBackendAnnotation] = ErrorPagesServiceName
+}
+
+// ---------------------------------------------------------------------------
 // The objects
 // ---------------------------------------------------------------------------
 
@@ -145,12 +207,18 @@ const fieldManager = "memql-custom-domain"
 // every custom domain needs a rule of its own, and ingress-nginx builds a
 // certificate-bearing server block per RULE host rather than per tls host, so
 // the rule and the tls entry both have to name it.
+//
+// IT FALLS BACK TO THE ERROR PAGES (withErrorPagesBackend): the edge speaks
+// plain HTTP, so when it has no ready pod the visitor gets the neutral
+// maintenance page instead of ingress-nginx's bare 503. The Service is looked
+// up in req.Namespace; see withErrorPagesBackend for what that means.
 func IngressObject(req BindRequest) map[string]any {
 	name := objectName(req.DomainID)
 	// The explicit Certificate owns issuance and renewal. An issuer annotation
 	// would make ingress-shim create a second Certificate named after the TLS
 	// Secret, competing with the one this reconciler checks for readiness.
 	annotations := map[string]any{}
+	withErrorPagesBackend(annotations)
 	obj := map[string]any{
 		"apiVersion": "networking.k8s.io/v1",
 		"kind":       "Ingress",

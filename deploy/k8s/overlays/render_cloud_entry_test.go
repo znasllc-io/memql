@@ -448,6 +448,56 @@ func TestCloudKeepsDrainBeforeStartAtTwoReplicas(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// The error pages (the 2026-10-11 outage)
+// ---------------------------------------------------------------------------
+
+// TestCloudEntryRendersErrorPages is the entry install's statement of the
+// fallback every front door names: a Deployment, a Service and a
+// PodDisruptionBudget called error-pages in the mesh's namespace, on the SAME
+// image digest this overlay pins for the edge.
+//
+// The shape of the three (ports, probes, resources, what it mounts) is held for
+// every overlay in frontdoor_error_pages_test.go. What only this overlay can
+// say is where its image comes from: error-pages is the engine binary's
+// `error-pages` subcommand, so it rides the edge image, and it is the overlay's
+// images block -- by the edge image's NAME -- that retargets it from the base's
+// placeholder tag to the pinned digest. An entry install that kept the
+// placeholder would pull a tag nobody pushed, at the one moment the fallback
+// is needed.
+func TestCloudEntryRendersErrorPages(t *testing.T) {
+	dep := assertErrorPagesRender(t, entryOverlay)
+
+	raw, err := os.ReadFile(filepath.Join(entryOverlay, "kustomization.yaml"))
+	if err != nil {
+		t.Fatalf("reading the cloud-entry kustomization: %v", err)
+	}
+	var k struct {
+		Images []struct {
+			Name   string `yaml:"name"`
+			Digest string `yaml:"digest"`
+		} `yaml:"images"`
+	}
+	if err := yaml.Unmarshal(raw, &k); err != nil {
+		t.Fatalf("parsing the cloud-entry kustomization: %v", err)
+	}
+	const edgeImage = "acrmemql.azurecr.io/memql-edge"
+	var digest string
+	for _, img := range k.Images {
+		if img.Name == edgeImage {
+			digest = img.Digest
+		}
+	}
+	if !strings.HasPrefix(digest, "sha256:") {
+		t.Fatalf("the cloud-entry images block pins %s to %q, want a sha256 digest -- without it there is nothing for "+
+			"error-pages to share", edgeImage, digest)
+	}
+
+	if got, want := dep.Spec.Template.Spec.Containers[0].Image, edgeImage+"@"+digest; got != want {
+		t.Errorf("error-pages runs %q, want %q: the edge image at the digest the overlay pins", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // memql#4634 -- every user-facing node keeps a PodDisruptionBudget
 // ---------------------------------------------------------------------------
 
