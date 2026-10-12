@@ -29,12 +29,22 @@ func (j *workJournal) duringStep(ctx context.Context, runId string) func() {
 				return
 			case <-ticker.C:
 				pulseCtx, stop := context.WithTimeout(ctx, 5*time.Second)
-				j.call(pulseCtx, "updateWorkRun", map[string]any{"runId": runId, "heartbeatAt": rfc3339(time.Now())})
+				j.pulse(pulseCtx, runId)
 				stop()
 			}
 		}
 	}()
 	return func() { cancel(); <-done }
+}
+
+// pulse renews a run's heartbeat while one of its steps runs. A late run
+// (heldUntilWrite) that is still held has no row to renew, so its pulses are
+// dropped rather than kept to be replayed once it opens (heldWrites.dropsPulses).
+func (j *workJournal) pulse(ctx context.Context, runId string) {
+	if j.hold.dropsPulses() {
+		return
+	}
+	j.call(ctx, "updateWorkRun", map[string]any{"runId": runId, "heartbeatAt": rfc3339(time.Now())})
 }
 
 func (e *Executor) executeJournaledStep(ctx context.Context, journal *workJournal, step *Step, stepCtx *StepContext) (*StepResult, error) {

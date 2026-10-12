@@ -49,6 +49,17 @@ package automations
 // and a boundary that waits for a write is not one). Every other trigger is
 // journaled at open, as it always was.
 //
+// A LATE RUN OPENS LIVE. The work sweep judges a running run by its newest
+// heartbeat, heartbeatAt else startedAt, and hands one that has been silent for
+// a minute to another replica, which resumes it from the step in flight while
+// this one is still executing it. A held run's startedAt is the firing's own,
+// possibly minutes old, and the beats it held were stamped when they were
+// made, so replaying them as they were would leave the row looking abandoned
+// from the moment it existed. The row is therefore created carrying a heartbeat
+// of the moment it is written (createWorkRun takes one for this), the pulses
+// made while the run was held are dropped, and the heartbeat on a held step
+// receipt is stamped when it is replayed (heldUntilWrite).
+//
 // THE TRADE-OFF, ACCEPTED: only a write through the engine's mutation path
 // reaches the observer. A builtin that writes through raw SQL -- the retention
 // sweeps and purges, workJournalRetentionSweep and logsRetentionSweep among
@@ -68,6 +79,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"regexp"
 	"sort"
@@ -203,11 +215,27 @@ func holdsScheduledJournal(a *Automation, triggeredBy string, adopt *RunAdoption
 // it may land after the firing's context is cancelled (a `restart` mode run
 // that a newer fire superseded, a shutdown), and the rows held behind it hang
 // from this one.
+//
+// IT OPENS LIVE, AND REPLAYS NOTHING THAT IS NOT. The work sweep judges a
+// running run by its newest heartbeat, heartbeatAt else startedAt
+// (integrations/work sweep.go lastHeartbeat), and hands one silent for a minute
+// to another replica, which resumes it from the step in flight while this
+// executor is still running it. A late run's startedAt is the firing's own,
+// possibly minutes old, and the heartbeats it held back were each stamped when
+// they were made: born with the start alone and fed those, the row would read
+// as silent from the moment it existed until the last of them landed. So the
+// row is created carrying a heartbeat of the moment it is written (the
+// mutation takes one for this), the pulses duringStep makes while the run is
+// held are dropped (heldWrites.dropsPulses), and the heartbeat on a held step
+// receipt is stamped when it is replayed, not when it was made
+// (heldWrites.beating). reopenRun beats for the same reason.
 func (j *workJournal) heldUntilWrite(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, parent events.Cause) (context.Context, *workJournal) {
 	h := *j
 	openCtx := context.WithoutCancel(ctx)
-	h.hold = &heldWrites{open: func() {
-		h.write(openCtx, "createWorkRun", h.openRunArgs(automation, exec, triggeringEvent, parent))
+	h.hold = &heldWrites{opensLive: true, open: func() {
+		args := h.openRunArgs(automation, exec, triggeringEvent, parent)
+		args["heartbeatAt"] = rfc3339(time.Now())
+		h.write(openCtx, "createWorkRun", args)
 	}}
 	return common.ContextWithWriteObserver(ctx, func(string, string) { h.release() }), &h
 }
@@ -395,8 +423,14 @@ type heldWrites struct {
 	mu       sync.Mutex
 	released bool
 	// open writes the run row when the run opens, ahead of every held write.
-	open   func()
-	writes []heldWrite
+	open func()
+	// opensLive marks the hold of a run that opens LATE, after its firing began
+	// (heldUntilWrite). Its run is judged by its heartbeat the moment it exists,
+	// so none of the beats held for it may be replayed as they were made: see
+	// dropsPulses and beating. A directly called logic's hold leaves it false
+	// and replays what it held, as it always has.
+	opensLive bool
+	writes    []heldWrite
 }
 
 type heldWrite struct {
@@ -443,9 +477,42 @@ func (j *workJournal) release() {
 		h.open()
 	}
 	for _, w := range h.writes {
-		j.write(w.ctx, w.name, w.args)
+		j.write(w.ctx, w.name, h.beating(w))
 	}
 	h.writes = nil
+}
+
+// dropsPulses reports whether a heartbeat pulse made now has nothing to renew:
+// the hold is a late run's (opensLive) and the run is not open yet, so there is
+// no row to keep alive and none for the sweep to judge. Kept, a pulse would be
+// replayed once the run opened as one more write that says nothing the open has
+// not said, and a step that runs for minutes would pile up one every fifteen
+// seconds in the meantime. It takes the hold's lock, so a pulse made while the
+// run is being opened waits for it and then goes straight through.
+func (h *heldWrites) dropsPulses() bool {
+	if h == nil || !h.opensLive {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return !h.released
+}
+
+// beating is what a held write is written as. A late run (opensLive) is judged
+// by its newest heartbeat, so a run update that carries one -- a step receipt's
+// -- is written with the moment it is written and not the moment it was made,
+// which for a run that opened late is minutes earlier. Everything else is
+// written as it was held. release calls it with the hold's lock taken.
+func (h *heldWrites) beating(w heldWrite) map[string]any {
+	if !h.opensLive || w.name != "updateWorkRun" {
+		return w.args
+	}
+	if _, beats := w.args["heartbeatAt"]; !beats {
+		return w.args
+	}
+	args := maps.Clone(w.args)
+	args["heartbeatAt"] = rfc3339(time.Now())
+	return args
 }
 
 // runJournalKey carries, beside the run on a context, the journal that run

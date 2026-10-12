@@ -23,7 +23,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // holdDBProbe is dbLogicProbe (logic_journal_db_test.go) with one more verb: a
@@ -37,6 +39,35 @@ func (p holdDBProbe) Execute(ctx context.Context, step *Step, stepCtx *StepConte
 		return &StepResult{StepId: step.ID, Status: "failed", Error: errBoom.Error(), StartedAt: now, CompletedAt: now}, errBoom
 	}
 	return p.dbLogicProbe.Execute(ctx, step, stepCtx)
+}
+
+// lateWriteProbe adds the verb "lateWrite" to holdDBProbe: it takes its time,
+// makes a real engine write, and reads the run back the moment that write
+// returns. By then the write observer has opened the run and replayed what it
+// held, so what the read finds is what the work sweep would find of the run.
+type lateWriteProbe struct {
+	holdDBProbe
+	delay      time.Duration
+	releasedAt time.Time
+	seen       *RunJournal
+	seenErr    error
+}
+
+func (p *lateWriteProbe) Execute(ctx context.Context, step *Step, stepCtx *StepContext) (*StepResult, error) {
+	if step.Function == nil || step.Function.Name != "lateWrite" {
+		return p.holdDBProbe.Execute(ctx, step, stepCtx)
+	}
+	time.Sleep(p.delay)
+	write := *step
+	fn := *step.Function
+	fn.Name = "write"
+	write.Function = &fn
+	p.releasedAt = time.Now()
+	res, err := p.holdDBProbe.Execute(ctx, &write, stepCtx)
+	if run, ok := common.RunFromContext(ctx); ok {
+		p.seen, p.seenErr = LoadRunJournal(context.Background(), p.engine, run.RunId)
+	}
+	return res, err
 }
 
 // dbScheduledTick is a cron-shaped automation whose steps s0, s1, ... call the
@@ -137,6 +168,55 @@ func TestScheduledJournal_DB(t *testing.T) {
 		statuses := stepStatuses(t, engine, exec.ID)
 		if statuses["s0"] != "done" || statuses["s1"] != "failed" {
 			t.Errorf("step rows %v, want s0 done and s1 failed", statuses)
+		}
+	})
+
+	// The sweep judges a running run by its newest heartbeat and hands one it finds
+	// silent for a minute to another replica. This run's first step finished long
+	// before its write opened it, so its held receipt carries a beat that old;
+	// replayed as it was made, the row would read as silent from the moment it
+	// existed. Read back the instant the opening write returns -- which is what the
+	// sweep would read -- the run must be live.
+	t.Run("ALateRunIsLiveTheMomentItOpens", func(t *testing.T) {
+		probe := &lateWriteProbe{holdDBProbe: holdDBProbe{&dbLogicProbe{engine: engine}}, delay: 300 * time.Millisecond}
+		e := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: probe})
+		t.Cleanup(e.Close)
+		exec, err := e.Execute(context.Background(), dbScheduledTick("lateScheduledTick", "readA", "lateWrite"), "schedule")
+		if err != nil || exec.Status != "completed" {
+			t.Fatalf("status %q, err %v", exec.Status, err)
+		}
+		if probe.seenErr != nil || probe.seen == nil {
+			t.Fatalf("the run was not on file when its opening write returned: %v", probe.seenErr)
+		}
+		// The engine may store the stamp at a coarser precision than the clock reads
+		// it; the beat that must not survive is the first step's, a full delay older.
+		if probe.seen.HeartbeatAt.Before(probe.releasedAt.Add(-probe.delay / 3)) {
+			t.Fatalf("the run opened with heartbeatAt %s, %s before it opened: the sweep would read it as silent and hand it to a second replica",
+				probe.seen.HeartbeatAt.Format(time.RFC3339Nano), probe.releasedAt.Sub(probe.seen.HeartbeatAt))
+		}
+	})
+
+	// The first version of a late run carries its heartbeat, which needs the
+	// mutation to take one: createWorkRun is the only writer that can put it on
+	// the version the sweep may read before any update lands.
+	t.Run("CreateWorkRunStoresTheHeartbeatItIsGiven", func(t *testing.T) {
+		auto := &Automation{Name: "heartbeatOnCreate", Steps: scheduledSteps("a")}
+		exec := NewExecution(auto.Name, "schedule")
+		exec.ID = fmt.Sprintf("heartbeatOnCreate%d", time.Now().UnixNano())
+		beat := time.Date(2026, 10, 11, 12, 30, 15, 0, time.UTC)
+
+		j := newWorkJournal(engine, nil)
+		args := j.openRunArgs(auto, exec, nil, events.Cause{})
+		args["heartbeatAt"] = rfc3339(beat)
+		if err := j.write(context.Background(), "createWorkRun", args); err != nil {
+			t.Fatalf("createWorkRun refused a heartbeatAt: %v", err)
+		}
+		journal, err := LoadRunJournal(context.Background(), engine, exec.ID)
+		if err != nil {
+			t.Fatalf("the created run: %v", err)
+		}
+		if !journal.HeartbeatAt.Equal(beat) {
+			t.Fatalf("the run was created with heartbeatAt %s, want the %s it was given", journal.HeartbeatAt.Format(time.RFC3339Nano), beat.Format(time.RFC3339Nano))
 		}
 	})
 }

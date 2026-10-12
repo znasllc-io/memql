@@ -18,10 +18,12 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -352,5 +354,154 @@ func TestHoldsScheduledJournalDecision(t *testing.T) {
 		if got := holdsScheduledJournal(tc.automation, tc.triggeredBy, tc.adopt); got != tc.want {
 			t.Errorf("%s: holdsScheduledJournal = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// lockedRecorder is recordingJournalExecutor for a journal that beats from a
+// second goroutine (duringStep's heartbeat), which that recorder is not safe
+// against.
+type lockedRecorder struct {
+	mu    sync.Mutex
+	calls []string
+}
+
+func (r *lockedRecorder) Execute(_ context.Context, query string) (*memql.ExecuteResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, query)
+	return &memql.ExecuteResult{}, nil
+}
+
+func (r *lockedRecorder) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.calls)
+}
+
+// slowWriter is a registry whose steps take their time -- the slow read of a
+// maintenance sweep -- and one of which then writes. releasedAt is taken the
+// instant before that write is reported, which is the instant the run opens.
+type slowWriter struct {
+	sleeps     map[string]time.Duration
+	writeAt    string
+	releasedAt time.Time
+	// backlog names what the run's hold was keeping when the write was reported.
+	backlog []string
+}
+
+func (p *slowWriter) Execute(ctx context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+	time.Sleep(p.sleeps[step.ID])
+	if step.ID == p.writeAt {
+		p.backlog = heldBacklog(ctx)
+		p.releasedAt = time.Now()
+		common.NotifyWrite(ctx, "v1:probe:thing", "thing-1")
+	}
+	now := time.Now()
+	return &StepResult{StepId: step.ID, Status: "completed", Result: map[string]any{"ok": true}, StartedAt: now, CompletedAt: now}, nil
+}
+
+// heldBacklog names, in order, the writes the hold of ctx's run is keeping. It
+// reads the hold directly because what it is after -- that a pulse nobody could
+// observe is not kept at all -- leaves no trace in what is eventually written:
+// kept and restamped, a pulse is indistinguishable there from a live one.
+func heldBacklog(ctx context.Context) []string {
+	j, ok := runJournalFrom(ctx)
+	if !ok || j == nil || j.hold == nil {
+		return nil
+	}
+	j.hold.mu.Lock()
+	defer j.hold.mu.Unlock()
+	names := make([]string, len(j.hold.writes))
+	for i, w := range j.hold.writes {
+		names[i] = w.name
+	}
+	return names
+}
+
+// A run that opens late must open LIVE. The work sweep judges a running run by
+// its newest heartbeat -- heartbeatAt, else startedAt (integrations/work
+// sweep.go lastHeartbeat) -- and hands a run it finds silent for a minute to
+// another replica, which resumes it from the step in flight while this one is
+// still executing it. A row born with the firing's start time and then fed the
+// heartbeats it held back, each stamped when it was MADE, would read as
+// minutes silent until the last of them landed.
+//
+// So the row is created carrying a heartbeat of the moment it opens; the beats
+// a step's duringStep kept while the run was held are dropped (there was no row
+// to keep alive, and nobody could judge it); and the receipt-time heartbeats
+// that ride the held step updates are restamped to the moment they are written.
+// The steps below are slower than the heartbeat interval on purpose: held, the
+// old behavior replayed about twenty stale beats ahead of these.
+func TestScheduledJournalOpensLiveAndNeverReplaysStaleHeartbeats(t *testing.T) {
+	rec := &lockedRecorder{}
+	probe := &slowWriter{
+		sleeps:  map[string]time.Duration{"a": 60 * time.Millisecond, "b": 30 * time.Millisecond},
+		writeAt: "b",
+	}
+	e := NewExecutor(ExecutorOptions{StepRegistry: probe})
+	e.journal = newWorkJournal(rec, nil)
+	e.journal.heartbeatEvery = 5 * time.Millisecond
+	auto := &Automation{Name: "slowTick", Schedule: "0 */10 * * * *", Steps: scheduledSteps("a", "b")}
+
+	exec, err := e.Execute(context.Background(), auto, "schedule")
+	if err != nil || exec.Status != "completed" {
+		t.Fatalf("status %q, err %v", exec.Status, err)
+	}
+	opened := probe.releasedAt
+	if opened.IsZero() {
+		t.Fatal("the probe never reported its write")
+	}
+
+	var names []string
+	var runWrites []map[string]any
+	for _, call := range rec.snapshot() {
+		if strings.HasPrefix(call, "query ") {
+			continue
+		}
+		name, args := argsOf(t, call)
+		// A heartbeat on a run version, whatever write carries it, may not predate
+		// the moment the run opened: that is liveness moving backwards.
+		if raw, beats := args["heartbeatAt"]; beats && (name == "createWorkRun" || name == "updateWorkRun") {
+			at, perr := time.Parse(time.RFC3339Nano, raw.(string))
+			if perr != nil {
+				t.Fatalf("%s heartbeatAt %v does not parse: %v", name, raw, perr)
+			}
+			if at.Before(opened) {
+				t.Errorf("%s carries heartbeatAt %s, %s before the run opened: a late-opened run must never replay a stale beat",
+					name, at.Format(time.RFC3339Nano), opened.Sub(at))
+			}
+		}
+		if name == "createWorkRun" || name == "updateWorkRun" {
+			runWrites = append(runWrites, args)
+		}
+		// A beat on its own (runId and heartbeatAt, nothing else) is the heartbeat
+		// goroutine's; one may tick live after the run is open, so those are checked
+		// above for time and left out of the sequence below.
+		if len(args) == 2 && args["runId"] != nil && args["heartbeatAt"] != nil {
+			continue
+		}
+		names = append(names, name)
+	}
+
+	want := []string{
+		"createWorkRun",
+		"createWorkStep", "updateWorkStep", "updateWorkRun", // a: held, then flushed
+		"createWorkStep", "updateWorkStep", "updateWorkRun", // b
+		"updateWorkRun", // close
+	}
+	if !slices.Equal(names, want) {
+		t.Fatalf("journal writes (heartbeat-only beats left out) = %v, want %v", names, want)
+	}
+	// The hold kept a's intent, receipt and receipt heartbeat and b's intent, and
+	// nothing else: about twenty pulses ticked while a and b slept, and none of
+	// them was kept.
+	if wantBacklog := []string{"createWorkStep", "updateWorkStep", "updateWorkRun", "createWorkStep"}; !slices.Equal(probe.backlog, wantBacklog) {
+		t.Errorf("the hold was keeping %v when the run opened, want %v: a pulse made while the run is held has no row to renew and is dropped, not kept to be replayed",
+			probe.backlog, wantBacklog)
+	}
+	// The FIRST version of the run is live: the sweep may read the row the moment
+	// it exists, before any held write has replayed.
+	if len(runWrites) == 0 || runWrites[0]["heartbeatAt"] == nil {
+		t.Fatalf("the run was created without a heartbeat (%v); until a later write lands it would be judged by its start time alone", runWrites)
 	}
 }
