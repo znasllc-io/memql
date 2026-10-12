@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Concepts, getRowByConceptAndId, refusalSentence, rowString, type Row } from "@znasllc-io/memql-sdk-core/client";
+import { Concepts, getRowByConceptAndId, refusalSentence, rowString, sameEntityId, type Result, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useOsConnection } from "../../live/connection";
 import { useLiveCollection, type LiveCollectionHandle } from "../../live/useLiveCollection";
@@ -25,6 +25,25 @@ import { COMPOSITION_CONCEPT, RECIPE_CONCEPT, TEMPLATE_CONCEPT } from "./concept
 // of one thing.
 //
 // ===========================================================================
+// EVERY FEED WALKS EVERY PAGE
+// ===========================================================================
+// The reads page (`paginate 50` in dsl/compose and dsl/library), and a feed
+// that read one page of them said "50" to a person with 53 files. Each seed
+// is handed the cursor the previous page named and returns the next one's;
+// the collection keeps asking until a page names none (`pageOf`).
+//
+// ===========================================================================
+// THE LIBRARY'S FILES AND FOLDERS ARE FEEDS TOO, BUT ONLY WHILE ASKED FOR
+// ===========================================================================
+// The Make a file wizard and a made file's page need the person's Library
+// file rows (the tray, the routing) and folders (the Folder step, "Filed in");
+// the list of what was made needs neither, and opening it must not read the
+// person's whole Library. `useLibraryFiles(enabled)` and `useFolders(enabled)`
+// pass a NULL key while `enabled` is false, which makes no read and opens no
+// subscription, and are retained at the app root while a wizard or page that
+// needs them is open, for the reason the per-concept rule above gives.
+//
+// ===========================================================================
 // THE SEED CARRIES NO ARCHIVE FILTER, AND THAT IS THE POINT
 // ===========================================================================
 // `compositions` deliberately declares no `archived != true` conjunct
@@ -45,19 +64,28 @@ import { COMPOSITION_CONCEPT, RECIPE_CONCEPT, TEMPLATE_CONCEPT } from "./concept
 // changes when a DSL bundle is redeployed, not while somebody is
 // composing.
 
-/** Every composition this caller can read, newest first. */
-export function useCompositions(): LiveCollectionHandle<Row> {
+/** What one read is asked for to get one page: its abort signal, and the cursor once the page before named one. */
+function pageOptions(cursor: string, signal: AbortSignal): { signal: AbortSignal; cursor?: string } {
+  return cursor === "" ? { signal } : { signal, cursor };
+}
+
+/** What a seed hands the collection for one page of a read: its rows, and the cursor of the next page ("" after the last). */
+function pageOf(result: Result): { rows: Row[]; nextCursor: string } {
+  return { rows: result.rows(), nextCursor: result.meta()?.cursor ?? "" };
+}
+
+/**
+ * Every composition this caller can read, newest first, every page. `runOf` answers the run behind an
+ * UNFINISHED composition (a finished one has none read), for the making stage's measure of the wait.
+ */
+export function useCompositions(): LiveCollectionHandle<Row> & { runOf(runId: string): Row | undefined } {
   const compositions = useLiveCollection<Row>("compose:compositions", (connection) => ({
     concept: COMPOSITION_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.compositions({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
-    },
+    seed: async (cursor, signal) => pageOf(await connection.query.compositions({}, pageOptions(cursor, signal))),
     reread: async (rowId, signal) => {
       const row = await getRowByConceptAndId(connection.query, COMPOSITION_CONCEPT, rowId, { signal });
       return (row as Row) ?? null;
     },
-    paged: false,
   }));
   // Read the exact bound runs, including old ones outside the newest run page.
   // They remain retained while these compositions are unfinished; neither the
@@ -81,23 +109,22 @@ export function useCompositions(): LiveCollectionHandle<Row> {
   const source = useMemo(() => compositions.source && runs.source
     ? compositionRunSource(compositions.source, runs.source) : compositions.source,
   [compositions.source, runs.source]);
+  // Ids are compared as the SDK compares them: one side may be canonical and the other bare.
+  const runRows = runs.snapshot.rows;
+  const runOf = useCallback((runId: string) => runRows.find((run) => sameEntityId(rowString(run, "id"), runId)), [runRows]);
   return { source, snapshot: source?.snapshot ?? compositions.snapshot,
-    reseed: () => { compositions.reseed(); runs.reseed(); } };
+    reseed: () => { compositions.reseed(); runs.reseed(); }, runOf };
 }
 
-/** Every template binding this caller owns. */
+/** Every template binding this caller owns, every page. */
 export function useTemplates(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("compose:templates", (connection) => ({
     concept: TEMPLATE_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.composeTemplates({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
-    },
+    seed: async (cursor, signal) => pageOf(await connection.query.composeTemplates({}, pageOptions(cursor, signal))),
     reread: async (rowId, signal) => {
       const row = await getRowByConceptAndId(connection.query, TEMPLATE_CONCEPT, rowId, { signal });
       return (row as Row) ?? null;
     },
-    paged: false,
   }));
 }
 
@@ -115,19 +142,51 @@ export function useTemplateFiles(): LiveCollectionHandle<Row> {
   }));
 }
 
-/** Every recipe this caller owns. */
+/** Every recipe this caller owns, every page. */
 export function useRecipes(): LiveCollectionHandle<Row> {
   return useLiveCollection<Row>("compose:recipes", (connection) => ({
     concept: RECIPE_CONCEPT,
-    seed: async (_cursor, signal) => {
-      const result = await connection.query.composeRecipes({}, { signal });
-      return { rows: result.rows(), nextCursor: "" };
-    },
+    seed: async (cursor, signal) => pageOf(await connection.query.composeRecipes({}, pageOptions(cursor, signal))),
     reread: async (rowId, signal) => {
       const row = await getRowByConceptAndId(connection.query, RECIPE_CONCEPT, rowId, { signal });
       return (row as Row) ?? null;
     },
-    paged: false,
+  }));
+}
+
+/**
+ * The person's Library file rows (`libraryFilesForOwner`, every page): name, size, archived and the
+ * file's own id, which the From tray offers and the routing reads. No read while `enabled` is false.
+ *
+ * The file rows, not the artifact index, because the routing judges a picked file by its name and
+ * size and the file's own id is the bare id a `library_file` source names (spec D32); the index
+ * carries neither. It is Files' own `files:files` feed over again (apps/files/useLibrary.ts), kept
+ * here under the Materializer's key so closing a wizard lets it go.
+ */
+export function useLibraryFiles(enabled: boolean): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "compose:library-files" : null, (connection) => ({
+    concept: Concepts.LIBRARY_FILE,
+    seed: async (cursor, signal) => pageOf(await connection.query.libraryFilesForOwner({}, pageOptions(cursor, signal))),
+    reread: async (rowId, signal) => {
+      const row = await getRowByConceptAndId(connection.query, Concepts.LIBRARY_FILE, rowId, { signal });
+      return (row as Row) ?? null;
+    },
+  }));
+}
+
+/**
+ * The person's live folders (`libraryFolders`, every page), for the Folder step and a made file's
+ * "Filed in". No read while `enabled` is false. The read carries `archived != true` and not-deleted,
+ * so an archived folder is not here; the Folder step shows one a setup claimed as "Unavailable folder".
+ */
+export function useFolders(enabled: boolean): LiveCollectionHandle<Row> {
+  return useLiveCollection<Row>(enabled ? "compose:folders" : null, (connection) => ({
+    concept: Concepts.LIBRARY_FOLDER,
+    seed: async (cursor, signal) => pageOf(await connection.query.libraryFolders({}, pageOptions(cursor, signal))),
+    reread: async (rowId, signal) => {
+      const row = await getRowByConceptAndId(connection.query, Concepts.LIBRARY_FOLDER, rowId, { signal });
+      return (row as Row) ?? null;
+    },
   }));
 }
 
