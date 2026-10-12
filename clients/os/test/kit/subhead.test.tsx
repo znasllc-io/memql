@@ -1,4 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { Subhead } from "../../src/kit";
@@ -56,5 +58,43 @@ describe("Subhead", () => {
     rerender(<Subhead actions={<AddButton label="Add sending domain" onClick={() => {}} />}>Sending domain</Subhead>);
     expect(screen.getByRole("heading", { level: 4, name: "Sending domain" }).parentElement?.classList.contains("os-head")).toBe(true);
     expect(container.querySelector(".os-head-actions")).not.toBeNull();
+  });
+});
+
+// NO PAGE WRITES THE ROW BY HAND. A subject's heading with its act is
+// `<Subhead actions={...}>`; the hand-rolled row (an `.os-head` around a
+// Subhead and an `.os-head-actions`) is what the prop replaced, and every
+// place that wrote it out was whatever its author remembered. A heading that
+// carries a quiet fact beside it (`.os-head-meta`) is a different row and is
+// not caught.
+const SRC = join(__dirname, "..", "..", "src");
+
+function sources(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? sources(path) : /\.tsx$/.test(name) ? [path] : [];
+  });
+}
+
+/** A Subhead written inside an `.os-head` that goes on to draw `.os-head-actions` itself. */
+const HAND_ROLLED = /className="os-head">\s*<Subhead[^]{0,400}?className="os-head-actions"/;
+
+describe("a subject heading's row", () => {
+  it("is never written by hand: the Subhead draws it from `actions`", () => {
+    const offenders = sources(SRC)
+      .filter((path) => HAND_ROLLED.test(readFileSync(path, "utf8")))
+      .map((path) => relative(SRC, path));
+    expect(offenders).toEqual([]);
+  });
+
+  it("can fail: the guard sees a row written the old way, and not one written with `actions`", () => {
+    const oldWay = `<div className="os-head"><Subhead>Senders</Subhead><div className="os-head-actions"><AddButton /></div></div>`;
+    const multiline = `<div className="os-head">\n  <Subhead meta={3}>Senders</Subhead>\n  <div className="os-head-actions">\n    <Button />\n  </div>\n</div>`;
+    const withActions = `<Subhead actions={<AddButton />}>Senders</Subhead>`;
+    const quietFact = `<div className="os-head"><Subhead>Delegation</Subhead><span className="os-head-meta">read</span></div>`;
+    expect(HAND_ROLLED.test(oldWay)).toBe(true);
+    expect(HAND_ROLLED.test(multiline)).toBe(true);
+    expect(HAND_ROLLED.test(withActions)).toBe(false);
+    expect(HAND_ROLLED.test(quietFact)).toBe(false);
   });
 });

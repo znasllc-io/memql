@@ -39,17 +39,16 @@ export function LogDetail({ row, onClose }: { row: LogRow; onClose: () => void }
 
   return (
     <Panel label="Log line">
-      <div className="os-head">
-        <Subhead>
-          {levelWord(row.level)}
-          {row.component !== "" ? ` · ${row.component}` : ""}
-        </Subhead>
-        <div className="os-head-actions">
+      <Subhead
+        actions={
           <Button onClick={onClose} ariaLabel="Close the line">
             Close
           </Button>
-        </div>
-      </div>
+        }
+      >
+        {levelWord(row.level)}
+        {row.component !== "" ? ` · ${row.component}` : ""}
+      </Subhead>
       <p className="os-logs-detail-message os-mono">{row.message}</p>
       <Facts>
         <Fact
