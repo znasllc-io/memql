@@ -299,6 +299,9 @@ func deployPass(b *builder, root string) error {
 		if dep.nodeType == "" && dep.subcommand == "" {
 			return fmt.Errorf("Deployment %s sets no MEMQL_NODE_TYPE and runs no engine subcommand, so nothing says what it runs", dep.name)
 		}
+		if dep.nodeType != "" && dep.subcommand != "" {
+			return fmt.Errorf("Deployment %s sets MEMQL_NODE_TYPE=%q and runs `memql %s`: the command runs the subcommand and the role is never started, so a runs_on edge from %s would be false; set one or the other", dep.name, dep.nodeType, dep.subcommand, dep.nodeType)
+		}
 		if dep.nodeType != "" {
 			if _, ok := node.RoleFor(node.NodeType(dep.nodeType)); !ok {
 				return fmt.Errorf("Deployment %s runs MEMQL_NODE_TYPE=%q, which is not a role in component/node/roles.go", dep.name, dep.nodeType)
@@ -341,7 +344,9 @@ func deployPass(b *builder, root string) error {
 // runs when its command is `<path>/memql <subcommand> ...`, which is how a
 // Deployment states that it runs a subcommand rather than the node role the
 // image's entrypoint would start. A container with no command, or a command
-// that is some other program, runs no engine subcommand.
+// that is some other program, runs no engine subcommand. A Deployment that
+// runs one and also sets MEMQL_NODE_TYPE is refused (deployPass): the command
+// wins, so the role it names would be recorded as running where it does not.
 func engineSubcommand(command []string) (string, bool) {
 	if len(command) < 2 || filepath.Base(command[0]) != "memql" || command[1] == "" || strings.HasPrefix(command[1], "-") {
 		return "", false

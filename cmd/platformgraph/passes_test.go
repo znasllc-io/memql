@@ -408,3 +408,40 @@ spec:
 		t.Fatal("a Deployment that names neither a role nor a subcommand was accepted")
 	}
 }
+
+// A Deployment that sets a valid MEMQL_NODE_TYPE AND runs `memql <subcommand>`
+// runs the subcommand: the command decides, and the role the env names is never
+// started. Recorded, it would carry a runs_on edge from that role -- the graph
+// saying the role runs where it does not -- so the pass refuses it, and the
+// refusal names both halves.
+func TestDeployPassRefusesADeploymentThatSetsARoleAndRunsASubcommand(t *testing.T) {
+	root := deployFixture(t, `---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: error-pages}
+spec:
+  selector: {matchLabels: {app: error-pages}}
+  template:
+    metadata: {labels: {app: error-pages}}
+    spec:
+      containers:
+        - name: error-pages
+          command: ["/app/memql", "error-pages"]
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - {name: MEMQL_NODE_TYPE, value: edge}
+`)
+	b := newBuilder()
+	for _, r := range node.Roles() {
+		b.node(model.ServiceID(string(r.Type)), model.PlatformRole, string(r.Type), nil)
+	}
+	err := deployPass(b, root)
+	if err == nil {
+		t.Fatal("a Deployment that sets MEMQL_NODE_TYPE=edge and runs `memql error-pages` was accepted; it would be recorded as running the edge role")
+	}
+	for _, want := range []string{"error-pages", "MEMQL_NODE_TYPE", "edge"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal %q does not name %q", err, want)
+		}
+	}
+}
