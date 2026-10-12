@@ -22,6 +22,14 @@
           },
           {
             "kind": "builtin",
+            "name": "campaignRetryDeferredSends"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignDrainJourneys"
+          },
+          {
+            "kind": "builtin",
             "name": "campaignPromoteSchedules"
           },
           {
@@ -58,6 +66,14 @@
           {
             "kind": "builtin",
             "name": "campaignDrainWelcomes"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignRetryDeferredSends"
+          },
+          {
+            "kind": "builtin",
+            "name": "campaignDrainJourneys"
           },
           {
             "kind": "builtin",
