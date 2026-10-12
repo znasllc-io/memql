@@ -1533,3 +1533,23 @@ mutation recipient restartRecipientMembership {
  }
  update { accept { subscriptionStatus, joinedAt, confirmedAt } stamp { id: args.recipientId, ownerUserId: actor.userId } }
 }
+
+/// Terminal verdict on an existing deferred request; no send or attribution change.
+/// actor.userId cannot finish a request after its owner loses authority. The worker reads it fresh under its receipt lock, checks pending status and verifies the lock before this internal write.
+@actor
+@serverOnly
+mutation delivery settleDeferredSingleSend {
+ args {
+ deliveryId string!
+ status enum("sent", "failed", "skipped")!
+ lastError string!
+ skipReason string!
+ attempts int!
+ sentAt datetime
+ versionTime datetime!
+ }
+ update {
+ accept { status, lastError, skipReason, attempts, sentAt }
+ stamp { id: args.deliveryId, createdAt: args.versionTime }
+ }
+}

@@ -174,6 +174,8 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 	}
 	want := map[serverOnlyKey]bool{
 		// Durable email automation coordination; public callers use gated capabilities.
+		{Path: "campaigns/queries.memql", Name: "deferredSingleSendById"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "settleDeferredSingleSend"}:     true,
 		{Path: "campaigns/queries.memql", Name: "deferredSingleSends"}:            true,
 		{Path: "campaigns/queries.memql", Name: "activeJourneys"}:                 true,
 		{Path: "campaigns/queries.memql", Name: "journeysToRetire"}:               true,
