@@ -175,3 +175,70 @@ func TestAnswersMarkupReadsBackAsItWasWritten(t *testing.T) {
 		}
 	})
 }
+
+// A payload that holds a raw U+2028 or U+2029 reads back whole.
+//
+// json.Marshal writes both separators as six-byte escapes whenever it escapes
+// markup, and compacts a json.RawMessage with the same rule. Marshalling for a
+// reader that is not a page turns that rule off for the whole answer, so a
+// builtin's bytes go through as they were written: the two separators are
+// legal inside a JSON string, and json.Unmarshal reads them as the characters
+// they are. The payload is written by hand, since json.Marshal would escape the
+// separators itself and the bytes under test would never hold one. It also
+// carries the text of an escape typed out (a backslash, then "u2028"), so that
+// an answer is not "unescaped" by looking for escapes in its text: that would
+// read this as the separator it spells and not as the six characters it is.
+func TestAnswersLineSeparatorsReadBackAsTheyWereWritten(t *testing.T) {
+	const want = "one two three, and the characters \\u003c and \\u2028 typed out"
+	payload := json.RawMessage("{\"text\":\"one two three, and the characters \\\\u003c and \\\\u2028 typed out\"}")
+	if !strings.Contains(string(payload), " ") || !strings.Contains(string(payload), " ") {
+		t.Fatal("the payload under test holds no raw separator")
+	}
+	nodes := map[string]memorynodes.MemoryNode{"answer": {
+		ID: "answer", Concept: "integration:test:answer", Type: memorynodes.NodeTypeObject,
+		Payload: payload, Schema: json.RawMessage(`{}`), Provenance: json.RawMessage(`{}`),
+	}}
+
+	t.Run("marshalPlainJSON writes valid JSON", func(t *testing.T) {
+		out, err := marshalPlainJSON(nodes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var back map[string]struct {
+			Payload struct {
+				Text string `json:"text"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(out, &back); err != nil {
+			t.Fatalf("the output is not JSON: %v\n%s", err, out)
+		}
+		if got := back["answer"].Payload.Text; got != want {
+			t.Errorf("the text read back is %q, want %q", got, want)
+		}
+	})
+
+	t.Run("ToAPIResult", func(t *testing.T) {
+		_, data, err := NewResultWithOutput(nodes).ToAPIResult()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) != 1 {
+			t.Fatalf("ToAPIResult returned %d values, want 1", len(data))
+		}
+		node := data[0].GetStructValue().GetFields()["answer"].GetStructValue()
+		got := node.GetFields()["payload"].GetStructValue().GetFields()["text"].GetStringValue()
+		if got != want {
+			t.Errorf("the text read back is %q, want %q", got, want)
+		}
+	})
+
+	t.Run("MaterializeRows", func(t *testing.T) {
+		rows := MaterializeRows(nodes)
+		if len(rows) != 1 {
+			t.Fatalf("MaterializeRows read %d rows, want 1", len(rows))
+		}
+		if rows[0]["text"] != want {
+			t.Errorf("the text read back is %q, want %q", rows[0]["text"], want)
+		}
+	})
+}
