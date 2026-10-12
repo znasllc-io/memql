@@ -18,9 +18,10 @@ import { join, relative } from "node:path";
 // module of its own (insertImage.ts) so that the file registering it, extension.ts, is scanned
 // like any other.
 //
-// Outside the invariant on purpose: libraryForkDocumentVersion (documents.ts) branches a new
-// version of a document that already exists. That is an edit, and edits stay on the Library
-// revision workflow.
+// Outside the invariant on purpose: libraryForkDocumentVersion (documents.ts) creates an
+// independent document branch from a snapshot of a document that already exists, history
+// preserved. It copies what the person already has rather than making a file from nothing, and
+// edits stay on the Library revision workflow.
 //
 // REACHABLE POSITIVES: an empty offender list says something about the tree only if the scan
 // reaches the tree and the patterns match real code. So the allowlisted modules must themselves

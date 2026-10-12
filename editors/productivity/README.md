@@ -48,8 +48,12 @@ The header’s **Find in document** button and ⌘F/Ctrl+F search rendered docum
 in Read and Review, with highlighted matches, counts and next/previous navigation. Source uses the native
 VS Code text editor, including Find/Replace, selection, Cut/Copy/Paste and undo.
 
-**New Markdown Document** in the command palette creates a blank file in the
-connected cluster and opens Review. An empty document offers **Describe document**
+**New Markdown Document** in the command palette asks for a name and creates a
+blank file in the connected cluster through the Materializer, then opens Review.
+The progress notification can be stopped. A name is a file name, not a path: a
+name with a slash is refused, one that is only an extension (`.md`) is refused as
+you type, and the cluster adds the `.md` itself, so `Plan` and `Plan.md` both make
+`Plan.md`. An empty document offers **Describe document**
 and **Write in Source** instead of the revision and extension circle buttons.
 Describe the content, add it to review, then propose and approve the draft.
 While preparation is running, the empty state opens that existing review;

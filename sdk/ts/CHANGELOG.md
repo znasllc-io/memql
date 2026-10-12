@@ -6,6 +6,22 @@ Notable changes to the client-agnostic runtime core. Entries are newest first.
 
 ### Added
 
+**`materialize` and its parts -- the one way a client creates a file**
+(`@znasllc-io/memql-sdk-core/client`, memql#6023). `materialize(ports, request)`
+starts a composition, follows it until the file has its Files entry, and returns
+`{ compositionId, fileId, artifactId, name }`. `startMaterialize` and
+`followComposition` are its two halves, for a client that follows its own live
+feed or polls; `isDescribedMarkdown` says which requests the cluster files empty;
+`handOffDescription` gives such a file's description to the Library's revision
+workflow as the person (a document-level comment with the `library_file` sources
+the Library accepts attached, then a revision request) and returns `revisionId` or
+`revisionFailure` without throwing, with the references it could not attach in
+`unattached`. `composeMaterialize` gains `requestId`: repeating it returns the
+same composition, so mint a new one for every person action. An aborted signal
+cancels a composition that is still being made and keeps a file that exists
+(`revisionFailure` "Stopped before the description was sent."). A described
+request's id may use letters, digits, `-` and `_`, at most 111 characters.
+
 **`AiChatOptions.level`** -- how much intelligence a chat call needs: `""`
 (Auto: the cluster's rules decide), `"fast"`, `"strong"` or `"reasoning"`. It
 rides `AiChatMsg.level` beside `provider` on both `aiChat` and `aiChatStream`,

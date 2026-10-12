@@ -14,9 +14,10 @@ import { describe, expect, it } from "vitest";
 //   3. No file outside ALLOWED uploads.
 // Every rule reads every file whole, and no part of a file is exempt.
 //
-// Outside the invariant on purpose: a new version or a branch of a document that already exists
-// (appendDocumentVersion, libraryForkDocumentVersion) is an edit, and edits stay on the Library
-// revision workflow.
+// Outside the invariant on purpose: appendDocumentVersion adds a version to a document that
+// already exists, and libraryForkDocumentVersion creates an independent document branch from a
+// snapshot of one. Neither makes a file from nothing, and edits stay on the Library revision
+// workflow.
 //
 // REACHABLE POSITIVES, as in test/files/onePath.test.ts: an empty offender list says something
 // about the tree only if the scan reaches the tree and the patterns match real code. So the
