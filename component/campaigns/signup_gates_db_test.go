@@ -19,6 +19,21 @@ import (
 // the locks stalls every other signup of the storefront, and two signups that each
 // hold a connection and wait for another are a deadlock the pool cannot get out of.
 
+// newStorefronts is n tenants on ONE engine, one pool and one worker -- a pod
+// serving n storefronts -- each with a newsletter bound to its own audience.
+func newStorefronts(t *testing.T, name string, n int) (*Worker, []*digestNewsletter) {
+	t.Helper()
+	eng, db := digestDBEngine(t)
+	sender := &recordingSender{}
+	worker := newGatedWorker(t, eng, db, sender)
+	stores := make([]*digestNewsletter, 0, n)
+	for i := 0; i < n; i++ {
+		d := newDigestTenantOn(t, eng, db, fmt.Sprintf("%s-%d", name, i))
+		stores = append(stores, setUpStorefront(t, d, worker, sender))
+	}
+	return worker, stores
+}
+
 // formFor is the form this storefront's visitor posts for an address.
 func (n *digestNewsletter) formFor(address string) map[string]any {
 	form := make(map[string]any, len(n.args))
@@ -108,6 +123,51 @@ func TestASlowMailboxReadDoesNotBlockASecondSignupOnTheSameStorefront(t *testing
 		if !n.signedUp(t, address) {
 			t.Errorf("no signup was recorded for %s", address)
 		}
+	}
+}
+
+// TestFourSignupsOnFourStorefrontsCompleteOnAFourConnectionPool: the deployed pool
+// is four connections. Each signup holds the connection of its lock transaction for
+// as long as it works, and what it does meanwhile needs a connection of its own, so
+// signups that all hold a lock at once leave none for each other's work. Four
+// storefronts is the whole pool.
+func TestFourSignupsOnFourStorefrontsCompleteOnAFourConnectionPool(t *testing.T) {
+	worker, stores := newStorefronts(t, "gate-four", 4)
+	stores[0].db.DB.SetMaxOpenConns(4)
+
+	errs := make([]error, len(stores))
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i, s := range stores {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(s.owner, 25*time.Second)
+			defer cancel()
+			<-start
+			_, errs[i] = worker.handleSubscribe(ctx, s.formFor(fmt.Sprintf("visitor%d@example.test", i)), 0)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("storefront %d: %v", i, err)
+		}
+	}
+	for i, s := range stores {
+		if errs[i] == nil && !s.signedUp(t, fmt.Sprintf("visitor%d@example.test", i)) {
+			t.Errorf("storefront %d recorded no signup", i)
+		}
+	}
+	// Every connection is back in the pool: a gate that was not released would keep one.
+	deadline := time.Now().Add(5 * time.Second)
+	for stores[0].db.DB.Stats().InUse != 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if inUse := stores[0].db.DB.Stats().InUse; inUse != 0 {
+		t.Errorf("%d connections are still in use after every signup finished: a gate was not released", inUse)
 	}
 }
 
@@ -399,4 +459,53 @@ func TestAMailboxThatOptedOutMeanwhileIsNotWelcomed(t *testing.T) {
 	}
 	n.worker.store.engine = actual
 	n.assertTheFormDidNothing(t, 1)
+}
+
+// holdsLock holds the newsletter's advisory lock for a key from another connection,
+// the way another replica's signup would, until the test releases it.
+func holdsLock(t *testing.T, n *digestNewsletter, key string) (release func()) {
+	t.Helper()
+	tx, err := n.db.DB.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec("SELECT pg_advisory_xact_lock(1296387409, hashtext($1))", "campaign-newsletter:"+key); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	return func() { _ = tx.Rollback() }
+}
+
+// TestAGatePastItsWaitGivesThePersonTheSentence: another holder has the storefront's
+// lock for longer than a signup will wait. The person is told, in words, to try again
+// -- not shown the driver's "i/o timeout" or the server's "canceling statement due to
+// statement timeout" -- nothing is written, and the server is not left with a waiter
+// that would take the lock later in a transaction nobody finishes.
+func TestAGatePastItsWaitGivesThePersonTheSentence(t *testing.T) {
+	n := newEmptyNewsletter(t, "gate-busy")
+	release := holdsLock(t, n, "site:"+bare(argString(n.args, "siteId")))
+	defer release()
+	wait := newsletterGateWait
+	newsletterGateWait = 300 * time.Millisecond
+	defer func() { newsletterGateWait = wait }()
+
+	n.args["email"] = consentMailbox
+	started := time.Now()
+	_, err := n.worker.handleSubscribe(n.owner, n.args, 0)
+	elapsed := time.Since(started)
+
+	if err == nil || err.Error() != "Too many signups at once. Try again in a moment." {
+		t.Fatalf("the person was told %v, want the sentence", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("the answer took %s for a wait of 300ms", elapsed)
+	}
+	n.assertTheFormDidNothing(t, 0)
+	var waiting int
+	if err := n.db.DB.QueryRow(`SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`).Scan(&waiting); err != nil {
+		t.Fatal(err)
+	}
+	if waiting != 0 {
+		t.Errorf("%d advisory-lock waiters are left on the server: the gate's wait must end there, not on the client", waiting)
+	}
 }

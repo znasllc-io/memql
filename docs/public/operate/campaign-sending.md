@@ -330,6 +330,23 @@ in its refusals. The sweep logs "put the address digest on recipients written
 without one" with a count when it stamps anything; a pass over recipients that
 all carry a digest writes nothing.
 
+**What a signup holds.** A signup serialises its writes with two advisory locks,
+the storefront's and then the audience's, taken together in one transaction on
+one connection of the pod's pool, which is four connections in the deployed
+configuration. Everything slow is read before the locks (the form, the mailbox
+and the audience's size above, the welcome template), so a slow read delays only
+that visitor. Under the locks the signup checks again only what must be exact
+when it writes: the storefront's binding, the signup row, the suppression list
+and, for a mailbox it is about to add, the audience's room and the mailbox by
+digest, so signups that ran side by side cannot together pass the audience's
+ceiling or add the same person twice. At most one connection fewer than the pool
+holds can be held by locks at once, so the work done under them can always reach
+the database. A signup that cannot take its locks within six seconds answers "Too
+many signups at once. Try again in a moment." and writes nothing. The locks are an
+idle transaction, which PostgreSQL ends after 60 seconds
+(`idle_in_transaction_session_timeout`) and the lock with it, so the part under
+them is a few single-row reads and writes and never a roster walk.
+
 Consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and
 published welcome content. Editing the template later does not rewrite that

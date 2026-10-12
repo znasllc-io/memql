@@ -91,6 +91,11 @@ const (
 	backoffCap    = time.Hour
 )
 
+// newsletterGateWait is how long the newsletter's gate waits for its locks, in
+// total; zero is memql's default (6 s, under the pool's 8 s statement_timeout and
+// pgdriver's 10 s read deadline). A variable only so a test can shorten it.
+var newsletterGateWait time.Duration
+
 // ExecutionClaimer is the cross-replica claim gate (the automations
 // ClusterExecutionGuard satisfies it). Nil leaves a single-replica
 // deployment correct -- the poll is the only driver -- but MUST be wired
@@ -108,7 +113,9 @@ type Worker struct {
 	templateGate   func(context.Context, string) (func(), error)
 	singleSendGate func(context.Context, string) (func(), error)
 	seriesGate     func(context.Context, string) (func(), error)
-	newsletterGate func(context.Context, string) (func(), error)
+	// newsletterGate takes the newsletter's locks for the keys it is given, in the
+	// order given, in ONE transaction on ONE connection (memql.AcquireWriteGates).
+	newsletterGate func(context.Context, ...string) (func(), error)
 	store          *Store
 	claimer        ExecutionClaimer
 	resolve        func() email.Sender
@@ -189,12 +196,16 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 			}
 			return memql.AcquireWriteGate(ctx, db, "campaign-test:"+key)
 		},
-		newsletterGate: func(ctx context.Context, key string) (func(), error) {
+		newsletterGate: func(ctx context.Context, keys ...string) (func(), error) {
 			var db *sql.DB
 			if len(database) > 0 && database[0] != nil {
 				db = database[0]()
 			}
-			return memql.AcquireWriteGate(ctx, db, "campaign-newsletter:"+key)
+			prefixed := make([]string, len(keys))
+			for i, key := range keys {
+				prefixed[i] = "campaign-newsletter:" + key
+			}
+			return memql.AcquireWriteGatesWithin(ctx, db, newsletterGateWait, prefixed...)
 		},
 		seriesGate: func(ctx context.Context, key string) (func(), error) {
 			var db *sql.DB

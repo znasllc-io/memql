@@ -33,6 +33,20 @@ func init() {
 }
 
 func newsletterID(site string) string { return sha256Hex("newsletter-site\x00" + bare(site)) }
+
+// visitorMessage is an error whose text is written for the person at the form.
+// It is a type rather than an errors.New because the sentence is capitalised and
+// ends with a full stop, which is right for a person and what staticcheck forbids in
+// an error string (ST1005).
+type visitorMessage string
+
+func (m visitorMessage) Error() string { return string(m) }
+
+// signupsBusy is what a person gets when the pod could not take the storefront's
+// locks in time (memql.ErrWriteGateBusy): nothing was written, and asking again is
+// the right thing to do.
+const signupsBusy = visitorMessage("Too many signups at once. Try again in a moment.")
+
 func newsletterSignupID(audience, address string) string {
 	return sha256Hex("newsletter-signup\x00" + bare(audience) + "\x00" + NormalizeEmail(address))
 }
@@ -305,18 +319,21 @@ func (w *Worker) handleSubscribe(ctx context.Context, args map[string]any, _ int
 		return nil, err
 	}
 
-	// 2. The locks. All forms pointing at one audience share the audience lock and
-	// one welcome key.
-	releaseSite, err := w.newsletterGate(ctx, "site:"+siteID)
+	// 2. The locks, in one transaction on one connection, site then audience: the
+	// same order everywhere, so no two flows can each hold the lock the other wants.
+	// All forms pointing at one audience share the audience lock and one welcome key.
+	release, err := w.newsletterGate(ctx, "site:"+siteID, "audience:"+audienceID)
+	if errors.Is(err, memql.ErrWriteGateBusy) {
+		// The cause is the pod's and the person cannot act on it; the sentence is what
+		// they can.
+		w.logger.Warn("campaigns: a signup could not take the storefront's locks in time, so it was not taken",
+			"site", siteID, "audience", audienceID)
+		return nil, signupsBusy
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer releaseSite()
-	releaseAudience, err := w.newsletterGate(ctx, "audience:"+audienceID)
-	if err != nil {
-		return nil, err
-	}
-	defer releaseAudience()
+	defer release()
 
 	// 3. Under the locks.
 	row, err = w.subscribeBinding(ctx, args, siteID)
@@ -444,12 +461,8 @@ func (w *Worker) drainNewsletterWelcomes(ctx, systemCtx context.Context) {
 }
 
 func (w *Worker) sendNewsletterWelcome(ctx, systemCtx context.Context, scanned map[string]any) error {
-	releaseSite, err := w.newsletterGate(ctx, "site:"+bare(str(scanned, "siteId")))
-	if err != nil {
-		return err
-	}
-	defer releaseSite()
-	release, err := w.newsletterGate(ctx, "audience:"+bare(str(scanned, "audienceId")))
+	// Site then audience, in one transaction on one connection, as a signup takes them.
+	release, err := w.newsletterGate(ctx, "site:"+bare(str(scanned, "siteId")), "audience:"+bare(str(scanned, "audienceId")))
 	if err != nil {
 		return err
 	}
