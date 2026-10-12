@@ -90,32 +90,68 @@ import (
 // statement_timeout (the direct handle the reconciler uses takes the same
 // session parameters) and pgdriver's 10 s read deadline. A client that gives up
 // at the read deadline sends no cancel (memql#5604), so a statement that
-// outlived its caller would run on until the server's own timeout ended it; the
-// batch is sized so that is never the usual case. The candidate scan and the
-// newer-version check both read the latest-row index (concept, id, "createdAt"
-// DESC) that 20260913000000_memory_nodes_concept_id_created_at_idx.go ensures,
-// and the delete joins back on the primary key (id, "createdAt").
+// outlived its caller would run on until the server's own timeout ended it; and
+// a statement that is cancelled rolls back whole, so a batch that cannot finish
+// inside the deadline removes nothing on every attempt. A purge whose batches
+// cost more as the backlog grows would stall on exactly the installations that
+// need it. A batch therefore has to cost what it deletes and not what the table
+// holds.
 //
-// Measured on TimescaleDB 2.29.0 over the incident's shape -- 738,621 versions of
-// 13 ids in two chunks, about 0.6 KB of payload per row (a production row is
-// wider: it carries its concept schema), autovacuum at its defaults, on a
-// development laptop: draining the whole backlog took 1,472 batches and six
-// minutes of statement time, each batch 0.2 s at the median, 0.6 s at the 95th
-// percentile and 1.0 s at the worst, against the 7 s deadline. The planner
-// answers "is there a newer version" by hashing the concept's rows rather than
-// probing per candidate, so a batch costs the size of the concept and not of the
-// batch: the backlog is the expensive case, and once it is gone a concept holds a
-// few thousand versions and a batch takes milliseconds. Should a backlog ever
-// push a batch toward the deadline, a LATERAL probe per candidate in place of the
-// EXISTS plans as a nested loop instead (24 ms for the first batch on the same
-// data, three and a half minutes for the whole drain).
+// That is why "has a newer version" is a LATERAL probe with LIMIT 1 and not an
+// EXISTS. A subquery with a LIMIT cannot be pulled up into a join, so the
+// planner runs it once per candidate as a probe of the latest-row index
+// (concept, id, "createdAt" DESC) that
+// 20260913000000_memory_nodes_concept_id_created_at_idx.go ensures. The natural
+// form, an EXISTS, is planned as a semi join, and on the incident's shape (13
+// ids, 56k versions each) it hashed every version of the concept for every
+// batch: 738,621 rows hashed and 16.8 million rejected by the join filter to
+// delete 500. The delete then joins back on the primary key (id, "createdAt").
 //
-// A sweep asks a concept again for as long as a batch comes back full, and moves
-// on once a batch comes back short, so the steady state is one cheap statement
-// per concept. A backlog drains over several intervals: the sweep stops after
-// the call that crosses statusHistoryRunBudget rather than holding the leader's
-// tick for as long as the backlog lasts, since the tick is also what retires
-// dead nodes.
+// Measured on TimescaleDB 2.29.0 with autovacuum at its defaults, over the
+// incident's shape -- 738,621 versions of 13 ids in two chunks, about 0.6 KB of
+// payload per row (a production row is wider: it carries its concept schema) --
+// drained back to back, which is harsher than one batch per 3 s tick. The
+// machine was a shared 16-core laptop that was never idle, so each form ran
+// twice: as the machine was (load average 11 to 37 from other work), and with 16
+// busy loops added (load average 50 to 70 by the end). Time to drain the whole
+// backlog in 1,472 batches, then a batch at the median, the 95th percentile and
+// the worst, against the 7 s deadline:
+//
+//                 as the machine was                      plus 16 busy loops
+//                 drain       median  p95     worst       drain        median  p95     worst
+//   LATERAL probe 40 s        16 ms   66 ms   0.18 s      1 min 26 s   46 ms   0.14 s  0.31 s
+//   EXISTS        5 min 48 s  0.15 s  0.61 s  1.9 s       13 min 9 s   0.39 s  1.8 s   4.5 s
+//
+// The first LATERAL batch took 20 ms (86 ms with the busy loops). In steady state
+// a concept holds a few thousand versions and either form takes milliseconds; the
+// difference is the backlog an upgrade finds, which is the one time it matters.
+//
+// # One statement per tick
+//
+// The sweep rides the leader's tick, the goroutine that also runs reconcile, so
+// whatever it does to the tick it does to the reconcile cadence. That matters
+// because reconcile retires a node on liveness only after it has found it absent
+// for the liveness grace (defaultReconcileGrace, 20 s): it remembers the first
+// pass that found the node missing, forgets it at any pass that finds the node
+// present, and retires it at the first pass at least a grace after the first.
+// A tick held for longer than the grace leaves a gap no pass looks into, so a
+// node that went absent, came back and went absent again reads as continuously
+// absent and is retired while it is serving. A sweep that looped for a time
+// budget on the tick could do exactly that.
+//
+// So a tick carries at most ONE statement, which statusHistoryStatementTimeout
+// holds well under the grace, and a round of the purge is spread over as many
+// ticks as it takes. The concepts take turns, one statement each. A concept
+// whose latest batch came back full (statusHistoryBatch deleted, so there may be
+// more) is asked again on its next turn; one whose batch came back short is done
+// for the round, and so is one whose batch failed. When every concept is done the
+// round ends and the sweep rests until statusHistoryPurgeInterval has passed
+// since the round began. The cutoff is fixed for the round.
+//
+// In steady state that is three or four statements in as many consecutive ticks,
+// every ten minutes. A backlog drains one batch per tick -- the incident's in
+// about an hour and a quarter at the default 3 s tick -- and no concept waits
+// behind another's backlog.
 //
 // Run only by the reconciler's leader (one cluster-wide advisory lock), so a
 // batch costs one statement for the cluster rather than one per replica. Deletes
@@ -138,22 +174,20 @@ const (
 	// go. See "What is deleted" above.
 	statusHistoryGrace = time.Hour
 
-	// statusHistoryPurgeInterval is how often a sweep runs. Ten minutes keeps
-	// the work in the chunk that took the beats (see "Why it runs
-	// continuously"), and it keeps a sweep small: in steady state it removes
-	// what the last ten minutes of beats superseded, 40 versions per connected
-	// machine and 10 per node, which is a batch or two.
+	// statusHistoryPurgeInterval is how long the sweep rests between rounds,
+	// counted from when the last round began. Ten minutes keeps the work in the
+	// chunk that took the beats (see "Why it runs continuously"), and it keeps a
+	// round small: in steady state it removes what the last ten minutes of beats
+	// superseded, 40 versions per connected machine and 10 per node, which is a
+	// batch or two.
 	statusHistoryPurgeInterval = 10 * time.Minute
 
 	// statusHistoryBatch is the most versions one statement deletes.
 	statusHistoryBatch = 500
 
-	// statusHistoryRunBudget is how long one sweep keeps going. It is checked
-	// after each call, so a sweep can overshoot it by the call in flight, at most
-	// statusHistoryStatementTimeout.
-	statusHistoryRunBudget = 25 * time.Second
-
-	// statusHistoryStatementTimeout is the deadline of each call.
+	// statusHistoryStatementTimeout is the deadline of each call, and so the most
+	// one statement can hold the leader's tick. It is held below the reconciler's
+	// liveness grace (see "One statement per tick").
 	statusHistoryStatementTimeout = 7 * time.Second
 )
 
@@ -179,7 +213,7 @@ type sqlStatusHistoryPurger struct {
 // -- the DSL has no delete mutation -- so a version the gate hides is one nothing
 // removes again, and the growth this file exists to stop resumes silently while
 // the counter reports work being done. It has a second failure the readiness
-// per-node purge does not: the EXISTS sub-select is what decides a version is
+// per-node purge does not: the lateral probe is what decides a version is
 // SUPERSEDED. Gated, a hidden newer version leaves the older ones standing as if
 // they were current, and the sweep reports a clean pass over a table that is not.
 func (p sqlStatusHistoryPurger) purgeSuperseded(ctx context.Context, concept string, olderThan time.Time, limit int) (int64, error) {
@@ -201,15 +235,22 @@ func (p sqlStatusHistoryPurger) purgeSuperseded(ctx context.Context, concept str
 	// concept is repeated on the outer table although (id, "createdAt") already
 	// names one row: whatever the sub-select returned, this statement can never
 	// delete a version of another concept.
+	//
+	// "Has a newer version" is a LATERAL probe with LIMIT 1 and not an EXISTS,
+	// on purpose. A subquery with a LIMIT cannot be pulled up into a join, so the
+	// planner has to run it once per candidate as an index probe; an EXISTS is
+	// planned as a semi join, and on the incident's shape (13 ids, 56k versions
+	// each) it hashed every version of the concept for each batch. See "How every
+	// statement stays bounded".
 	res, err := p.db.ExecContext(ctx,
 		`DELETE FROM "MemoryNodes" m
 		  USING (
 		    SELECT n.id, n."createdAt"
 		      FROM "MemoryNodes" n
+		      CROSS JOIN LATERAL (SELECT 1 AS found FROM "MemoryNodes" newer
+		                           WHERE newer.concept = n.concept AND newer.id = n.id
+		                             AND newer."createdAt" > n."createdAt" LIMIT 1) x
 		     WHERE n.concept = ? AND n."createdAt" < ?
-		       AND EXISTS (SELECT 1 FROM "MemoryNodes" newer
-		                    WHERE newer.concept = n.concept AND newer.id = n.id
-		                      AND newer."createdAt" > n."createdAt")
 		     LIMIT ?
 		  ) d
 		 WHERE m.concept = ? AND m.id = d.id AND m."createdAt" = d."createdAt"`,
@@ -237,65 +278,120 @@ func (r *TopologyReconciler) historyPurger() statusHistoryPurger {
 	return sqlStatusHistoryPurger{db: db}
 }
 
-// sweepStatusHistory runs the continuous purge, at most once per
-// statusHistoryPurgeInterval. Called from the leader's tick.
+// statusHistoryRound is one round of the purge, spread over as many leader ticks
+// as it takes: every concept is asked once, and a concept whose batch came back
+// full is asked again, one statement per tick, the concepts taking turns.
+type statusHistoryRound struct {
+	active bool
+	// startedAt is when the round began, and paces the next one.
+	startedAt time.Time
+	// olderThan is the cutoff, fixed for the whole round: a version that crosses
+	// it while the round runs is simply the next round's.
+	olderThan time.Time
+	// pending says, by position in statusHistoryConcepts, which concepts still
+	// have work: not asked yet this round, or latest batch came back full.
+	pending []bool
+	// next is where the search for the next concept starts, one past the concept
+	// just asked, so that the concepts with work take turns.
+	next int
+	// purged is how many versions went this round, by concept, and statements
+	// how many statements it took.
+	purged     []int64
+	statements int
+}
+
+func newStatusHistoryRound(now time.Time) statusHistoryRound {
+	pending := make([]bool, len(statusHistoryConcepts))
+	for i := range pending {
+		pending[i] = true
+	}
+	return statusHistoryRound{
+		active:    true,
+		startedAt: now,
+		olderThan: now.Add(-statusHistoryGrace),
+		pending:   pending,
+		purged:    make([]int64, len(statusHistoryConcepts)),
+	}
+}
+
+// take answers which concept to ask next: the first one at or after the cursor
+// that still has work. False when none has, which is the end of the round.
+func (s *statusHistoryRound) take() (int, bool) {
+	for k := range s.pending {
+		i := (s.next + k) % len(s.pending)
+		if s.pending[i] {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// record notes what the statement for concept i came back with. A full batch
+// leaves the concept pending, because there may be more; a short one, or a
+// failure, ends it for the round. Either way the cursor moves past it, which is
+// what makes two concepts with backlogs alternate.
+func (s *statusHistoryRound) record(i int, versions int64, err error) {
+	s.statements++
+	s.next = (i + 1) % len(s.pending)
+	s.purged[i] += versions
+	s.pending[i] = err == nil && versions >= statusHistoryBatch
+}
+
+// sweepStatusHistory runs the continuous purge. Called from the leader's tick,
+// and it issues at most one statement per call, of one concept (see "One
+// statement per tick"). Between rounds it returns at once.
 func (r *TopologyReconciler) sweepStatusHistory(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	now := r.now()
-	if !r.lastStatusHistoryPurge.IsZero() && now.Sub(r.lastStatusHistoryPurge) < statusHistoryPurgeInterval {
+	round := &r.statusRound
+	if !round.active && !r.lastStatusHistoryPurge.IsZero() && now.Sub(r.lastStatusHistoryPurge) < statusHistoryPurgeInterval {
 		return
 	}
 	p := r.historyPurger()
 	if p == nil {
 		return
 	}
-	// Stamped before the work, as the readiness sweep does: a sweep that fails
-	// or runs out of budget is retried at the next interval, not on the next
-	// tick three seconds later.
-	r.lastStatusHistoryPurge = now
-
-	// One cutoff for the whole sweep. A version that crosses it while the sweep
-	// runs is simply the next sweep's.
-	olderThan := now.Add(-statusHistoryGrace)
-
-	var total int64
-	var perConcept []any
-	for _, concept := range statusHistoryConcepts {
-		versions, more := r.purgeStatusConcept(ctx, p, concept, olderThan, now)
-		if versions > 0 {
-			total += versions
-			perConcept = append(perConcept, concept, versions)
-		}
-		if !more {
-			break
-		}
+	if !round.active {
+		// Stamped when the round begins, as the readiness sweep stamps its
+		// own: a round that fails is retried at the next interval, not on the
+		// next tick three seconds later.
+		r.lastStatusHistoryPurge = now
+		*round = newStatusHistoryRound(now)
 	}
-	if total > 0 {
-		elapsed := r.now().Sub(now)
-		attrs := []any{"versions", total, "elapsed", elapsed.Round(time.Millisecond).String(), "budget_spent", elapsed >= statusHistoryRunBudget}
-		r.info("topology reconciler purged superseded status history", append(attrs, perConcept...)...)
+
+	i, ok := round.take()
+	if !ok {
+		round.active = false
+		return
+	}
+	n, err := r.purgeStatusBatch(ctx, p, statusHistoryConcepts[i], round.olderThan)
+	round.record(i, n, err)
+	if _, more := round.take(); !more {
+		r.finishStatusHistoryRound()
 	}
 }
 
-// purgeStatusConcept runs one concept's batches for as long as they come back
-// full, and answers how many versions went and whether the sweep may go on to
-// the next concept. It may not once the run budget is spent -- checked after
-// every call, a failing one included, so the call that crosses it is the last --
-// or the context is done.
-//
-// A batch that fails ends only this concept: the others are independent, and the
-// sweep is the only thing keeping the table from growing again.
-func (r *TopologyReconciler) purgeStatusConcept(ctx context.Context, p statusHistoryPurger, concept string, olderThan, started time.Time) (versions int64, more bool) {
-	for ctx.Err() == nil {
-		n, err := r.purgeStatusBatch(ctx, p, concept, olderThan)
-		versions += n
-		if r.now().Sub(started) >= statusHistoryRunBudget {
-			return versions, false
-		}
-		if err != nil || n < statusHistoryBatch {
-			return versions, true
+// finishStatusHistoryRound ends the round and, when it removed anything, says so
+// once: the versions removed in all and per concept, and what it took.
+func (r *TopologyReconciler) finishStatusHistoryRound() {
+	round := &r.statusRound
+	round.active = false
+	var total int64
+	var perConcept []any
+	for i, versions := range round.purged {
+		if versions > 0 {
+			total += versions
+			perConcept = append(perConcept, statusHistoryConcepts[i], versions)
 		}
 	}
-	return versions, false
+	if total == 0 {
+		return
+	}
+	elapsed := r.now().Sub(round.startedAt)
+	attrs := []any{"versions", total, "statements", round.statements, "elapsed", elapsed.Round(time.Millisecond).String()}
+	r.info("topology reconciler purged superseded status history", append(attrs, perConcept...)...)
 }
 
 // purgeStatusBatch makes one call. A failure is logged and dropped; a success

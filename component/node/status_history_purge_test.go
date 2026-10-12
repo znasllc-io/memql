@@ -17,8 +17,9 @@ import (
 )
 
 // What the DELETE does is status_history_purge_db_test.go's job, against a
-// real database. These pin the SWEEP around it: when it runs, how long it keeps
-// going, and what one concept's failure does to the others.
+// real database. These pin the SWEEP around it: when a round starts, how many
+// statements a tick may carry, which concept gets each one, and what one
+// concept's failure does to the others.
 
 // statusHistoryCall is one purgeSuperseded request, as the fake saw it.
 type statusHistoryCall struct {
@@ -77,6 +78,14 @@ func (f *fakeStatusHistoryPurger) concepts() []string {
 		out = append(out, c.concept)
 	}
 	return out
+}
+
+// tick calls the sweep once, the way the leader's tick does, and answers how
+// many statements that issued.
+func (f *fakeStatusHistoryPurger) tick(r *TopologyReconciler) int {
+	before := len(f.calls)
+	r.sweepStatusHistory(context.Background())
+	return len(f.calls) - before
 }
 
 // statusHistoryLog keeps every record with its level and attributes, so a case
@@ -139,10 +148,11 @@ func (leaderLeaseConn) Prepare(string) (driver.Stmt, error) { return nil, errors
 func (leaderLeaseConn) Close() error                        { return nil }
 func (leaderLeaseConn) Begin() (driver.Tx, error)           { return nil, errors.New("not used") }
 
-// The sweep is only a feature if the leader's tick calls it: every test above
+// The sweep is only a feature if the leader's tick calls it: every test below
 // drives sweepStatusHistory directly, so a tick that stopped calling it would
 // leave them all green and the table growing again. This one holds the lease
-// the way the loop does and lets a real tick run.
+// the way the loop does and lets a real tick run -- twice, because what a tick
+// carries is ONE statement and the second tick is the next concept's.
 func TestTheLeaderTickRunsTheStatusHistorySweep(t *testing.T) {
 	clock := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
 	r := newTestReconciler(&fakeReconcileEngine{}, fakeMesh{}, &clock)
@@ -161,44 +171,70 @@ func TestTheLeaderTickRunsTheStatusHistorySweep(t *testing.T) {
 	r.conn, r.leader = conn, true
 
 	r.tick(ctx)
-
-	if readiness.sweeps != 1 {
-		t.Fatalf("the tick must still run the readiness sweep it ran before, got %d", readiness.sweeps)
-	}
-	if want := statusHistoryConcepts; !slices.Equal(history.concepts(), want) {
-		t.Fatalf("a leader's tick must run the status history sweep: calls = %v, want one per concept %v",
+	if want := statusHistoryConcepts[:1]; !slices.Equal(history.concepts(), want) {
+		t.Fatalf("a leader's tick must carry exactly one status history statement: calls = %v, want %v",
 			history.concepts(), want)
+	}
+	r.tick(ctx)
+	if want := statusHistoryConcepts[:2]; !slices.Equal(history.concepts(), want) {
+		t.Fatalf("the next tick must carry the next concept's statement: calls = %v, want %v",
+			history.concepts(), want)
+	}
+	if readiness.sweeps != 1 {
+		t.Fatalf("the ticks must still run the readiness sweep they ran before, once per its interval, got %d", readiness.sweeps)
 	}
 }
 
 func TestStatusHistorySweepRunsAtMostOncePerInterval(t *testing.T) {
 	clock := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	started := clock
 	r := newTestReconciler(&fakeReconcileEngine{}, fakeMesh{}, &clock)
 	purger := &fakeStatusHistoryPurger{}
 	r.statusPurger = purger
-	ctx := context.Background()
 
-	// The fake answers 0, a short batch, so one round is exactly one call per
-	// concept. The reconciler ticks every 3 s: a sweep on every tick would be
-	// 200 passes over three concepts per interval for the few hundred versions
-	// the heartbeats add in ten minutes.
-	round := len(statusHistoryConcepts)
-
-	r.sweepStatusHistory(ctx)
-	if len(purger.calls) != round {
-		t.Fatalf("the first sweep must make one round of purges (%d calls), got %d", round, len(purger.calls))
+	// The fake answers 0, a short batch, so a round is exactly one statement per
+	// concept, one per tick.
+	for i := range statusHistoryConcepts {
+		if got := purger.tick(r); got != 1 {
+			t.Fatalf("tick %d of the first round must carry one statement, got %d", i+1, got)
+		}
+		clock = clock.Add(defaultReconcileInterval)
+	}
+	if !slices.Equal(purger.concepts(), statusHistoryConcepts) {
+		t.Fatalf("the first round must ask each concept once, in order: calls = %v, want %v",
+			purger.concepts(), statusHistoryConcepts)
 	}
 
-	clock = clock.Add(5 * time.Minute)
-	r.sweepStatusHistory(ctx)
-	if len(purger.calls) != round {
-		t.Fatalf("a sweep 5 minutes after the last must be skipped, got %d calls", len(purger.calls))
+	// Every concept came back short, so the sweep rests. The reconciler ticks
+	// every 3 s: a statement on each of those ticks would be 200 passes over
+	// three concepts per interval for the few hundred versions the heartbeats
+	// add in ten minutes.
+	for ; clock.Sub(started) < 5*time.Minute; clock = clock.Add(defaultReconcileInterval) {
+		if got := purger.tick(r); got != 0 {
+			t.Fatalf("%v into the interval the sweep must rest, got %d statements", clock.Sub(started), got)
+		}
+	}
+	clock = started.Add(statusHistoryPurgeInterval - time.Second)
+	if got := purger.tick(r); got != 0 {
+		t.Fatalf("a second short of the interval the sweep must still rest, got %d statements", got)
 	}
 
-	clock = clock.Add(6 * time.Minute) // 11 minutes after the first
-	r.sweepStatusHistory(ctx)
-	if len(purger.calls) != 2*round {
-		t.Fatalf("a sweep 11 minutes after the last must run a second round (%d calls), got %d", 2*round, len(purger.calls))
+	// The interval is counted from when the round BEGAN, not from when it ended
+	// six seconds later, and once it has passed the next round starts with the
+	// first concept again.
+	clock = started.Add(statusHistoryPurgeInterval)
+	if got := purger.tick(r); got != 1 || purger.calls[len(statusHistoryConcepts)].concept != statusHistoryConcepts[0] {
+		t.Fatalf("an interval after the first round began, a second must begin with %s, got %d statements: %v",
+			statusHistoryConcepts[0], got, purger.concepts())
+	}
+	for i := 1; i < len(statusHistoryConcepts); i++ {
+		purger.tick(r)
+	}
+	if len(purger.calls) != 2*len(statusHistoryConcepts) {
+		t.Fatalf("the second round must be one statement per concept too, got %v", purger.concepts())
+	}
+	if got := purger.tick(r); got != 0 {
+		t.Fatalf("after the second round the sweep rests again, got %d statements", got)
 	}
 }
 
@@ -206,6 +242,8 @@ func TestStatusHistorySweepLoopsUntilABatchComesBackShort(t *testing.T) {
 	clock := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
 	started := clock
 	r := newTestReconciler(&fakeReconcileEngine{}, fakeMesh{}, &clock)
+	logs := &statusHistoryLog{}
+	r.logger = slog.New(logs)
 	first := statusHistoryConcepts[0]
 	purger := &fakeStatusHistoryPurger{answer: func(concept string, nth int) (int64, error) {
 		if concept != first || nth > 3 {
@@ -216,16 +254,25 @@ func TestStatusHistorySweepLoopsUntilABatchComesBackShort(t *testing.T) {
 	r.statusPurger = purger
 	before := metrics.StatusHistoryVersionsPurgedValue(first)
 
-	r.sweepStatusHistory(context.Background())
+	for range 5 {
+		if got := purger.tick(r); got != 1 {
+			t.Fatalf("every tick of a round carries exactly one statement, got %d", got)
+		}
+	}
 
-	// A full batch means there may be more, so the same concept is asked again;
-	// the 12 is short, so it is finished and the next concept is asked once.
-	want := []string{first, first, first, statusHistoryConcepts[1], statusHistoryConcepts[2]}
+	// The first concept's full batch means there may be more, so it is asked
+	// again on its next turn -- after the others have had theirs. The 12 is
+	// short, so it is finished and the round with it.
+	want := []string{first, statusHistoryConcepts[1], statusHistoryConcepts[2], first, first}
 	if got := purger.concepts(); !slices.Equal(got, want) {
 		t.Fatalf("calls in order = %v, want %v", got, want)
 	}
+	if got := purger.tick(r); got != 0 {
+		t.Fatalf("with every concept short the round is over and the sweep rests, got %d statements", got)
+	}
+
 	// Every statement is bounded by the batch size, by one cutoff for the whole
-	// sweep (the grace before the sweep began), and by its own deadline.
+	// round (the grace before the round began), and by its own deadline.
 	for i, c := range purger.calls {
 		if c.limit != statusHistoryBatch {
 			t.Errorf("call %d limit = %d, want %d", i, c.limit, statusHistoryBatch)
@@ -241,45 +288,135 @@ func TestStatusHistorySweepLoopsUntilABatchComesBackShort(t *testing.T) {
 	if got := metrics.StatusHistoryVersionsPurgedValue(first) - before; got != 1012 {
 		t.Errorf("metric for %s: want 1012 versions counted, got %v", first, got)
 	}
+
+	// One Info line for the whole round, when it ends, with what it took.
+	infos := logs.atLevel(slog.LevelInfo)
+	if len(infos) != 1 {
+		t.Fatalf("want one Info line for the round, got %d: %+v", len(infos), infos)
+	}
+	if got := infos[0].attrs[first]; got != int64(1012) {
+		t.Errorf("Info total for %s = %v, want 1012", first, got)
+	}
+	if got := infos[0].attrs["versions"]; got != int64(1012) {
+		t.Errorf("Info versions = %v, want 1012", got)
+	}
+	if got := infos[0].attrs["statements"]; got != int64(5) {
+		t.Errorf("Info statements = %v, want 5", got)
+	}
 }
 
-func TestStatusHistorySweepStopsAtTheRunBudget(t *testing.T) {
+// The property that keeps the sweep from starving the reconciler: a tick never
+// carries more than one statement, however large the backlog and however slow
+// the statement. A sweep that looped on the tick for as long as batches came
+// back full would hold it for the length of the backlog.
+func TestStatusHistoryTickIssuesAtMostOneStatement(t *testing.T) {
 	clock := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
-	started := clock
 	r := newTestReconciler(&fakeReconcileEngine{}, fakeMesh{}, &clock)
-	first := statusHistoryConcepts[0]
 	purger := &fakeStatusHistoryPurger{
-		// Always a full batch, and every statement takes 10 s: a backlog that
-		// would keep the leader's tick busy for as long as it lasted.
+		// Every concept has a backlog that never ends, and every statement takes
+		// 10 s on the clock.
 		answer: func(string, int) (int64, error) { return statusHistoryBatch, nil },
 		after:  func() { clock = clock.Add(10 * time.Second) },
 	}
 	r.statusPurger = purger
-	ctx := context.Background()
 
-	r.sweepStatusHistory(ctx)
-
-	// 10 s, 20 s, 30 s: the third call is the one that crosses 25 s, and the
-	// sweep ends there rather than starting a fourth.
-	if want := []string{first, first, first}; !slices.Equal(purger.concepts(), want) {
-		t.Fatalf("calls = %v, want %v: the sweep stops after the call that crosses the %v budget",
-			purger.concepts(), want, statusHistoryRunBudget)
+	for i := range 30 {
+		if got := purger.tick(r); got != 1 {
+			t.Fatalf("tick %d carried %d statements, want exactly 1: %v", i+1, got, purger.concepts())
+		}
 	}
+	if len(purger.calls) != 30 {
+		t.Fatalf("30 ticks must be 30 statements, got %d", len(purger.calls))
+	}
+}
 
-	// The clock moved 30 s during the sweep and the cutoff did not: it is one
-	// figure for the whole sweep, taken when the sweep began.
-	for i, c := range purger.calls {
-		if want := started.Add(-statusHistoryGrace); !c.olderThan.Equal(want) {
-			t.Errorf("call %d olderThan = %v, want the sweep's own cutoff %v", i, c.olderThan, want)
+// Two concepts with backlogs are served in turn, neither waiting behind the
+// other, and a concept that has nothing left drops out of the rotation.
+func TestStatusHistoryConceptsTakeTurnsWhileTwoHaveBacklogs(t *testing.T) {
+	clock := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	r := newTestReconciler(&fakeReconcileEngine{}, fakeMesh{}, &clock)
+	logs := &statusHistoryLog{}
+	r.logger = slog.New(logs)
+	c0, c1, c2 := statusHistoryConcepts[0], statusHistoryConcepts[1], statusHistoryConcepts[2]
+	purger := &fakeStatusHistoryPurger{answer: func(concept string, nth int) (int64, error) {
+		switch concept {
+		case c0: // three full batches, then 7
+			if nth <= 3 {
+				return statusHistoryBatch, nil
+			}
+			return 7, nil
+		case c1: // two full batches, then nothing
+			if nth <= 2 {
+				return statusHistoryBatch, nil
+			}
+			return 0, nil
+		}
+		return 0, nil // c2 has nothing at all
+	}}
+	r.statusPurger = purger
+
+	for range 8 {
+		if got := purger.tick(r); got != 1 {
+			t.Fatalf("every tick of the round carries one statement, got %d", got)
 		}
 	}
 
-	// What is left is left for the next interval, not dropped: a sweep an
-	// interval later runs again, from the start.
-	clock = clock.Add(statusHistoryPurgeInterval)
-	r.sweepStatusHistory(ctx)
-	if len(purger.calls) != 6 || purger.calls[3].concept != first {
-		t.Fatalf("the next interval must start another budgeted sweep, got calls %v", purger.concepts())
+	// Round one visits each concept; c2 is short and drops out; c0 and c1 then
+	// alternate until c1 runs dry, and c0 finishes alone.
+	want := []string{c0, c1, c2, c0, c1, c0, c1, c0}
+	if got := purger.concepts(); !slices.Equal(got, want) {
+		t.Fatalf("calls in order = %v, want %v", got, want)
+	}
+	if got := purger.tick(r); got != 0 {
+		t.Fatalf("the round is over once every concept's latest batch was short, got %d statements", got)
+	}
+
+	infos := logs.atLevel(slog.LevelInfo)
+	if len(infos) != 1 {
+		t.Fatalf("want one Info line for the round, got %d: %+v", len(infos), infos)
+	}
+	if got := infos[0].attrs[c0]; got != int64(1507) {
+		t.Errorf("Info total for %s = %v, want 1507", c0, got)
+	}
+	if got := infos[0].attrs[c1]; got != int64(1000) {
+		t.Errorf("Info total for %s = %v, want 1000", c1, got)
+	}
+	if _, listed := infos[0].attrs[c2]; listed {
+		t.Errorf("the Info line must not list %s, which purged nothing: %+v", c2, infos[0].attrs)
+	}
+}
+
+// The cutoff belongs to the round, not to the tick: a round that spans minutes
+// of backlog must not chase the clock, and the next round starts afresh.
+func TestStatusHistoryRoundKeepsOneCutoff(t *testing.T) {
+	clock := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	started := clock
+	r := newTestReconciler(&fakeReconcileEngine{}, fakeMesh{}, &clock)
+	purger := &fakeStatusHistoryPurger{}
+	r.statusPurger = purger
+
+	for range statusHistoryConcepts {
+		purger.tick(r)
+		clock = clock.Add(defaultReconcileInterval)
+	}
+	second := started.Add(11 * time.Minute)
+	clock = second
+	for range statusHistoryConcepts {
+		purger.tick(r)
+		clock = clock.Add(defaultReconcileInterval)
+	}
+
+	if len(purger.calls) != 2*len(statusHistoryConcepts) {
+		t.Fatalf("two rounds of one statement per concept, got %v", purger.concepts())
+	}
+	for i, c := range purger.calls {
+		want := started.Add(-statusHistoryGrace)
+		if i >= len(statusHistoryConcepts) {
+			want = second.Add(-statusHistoryGrace)
+		}
+		if !c.olderThan.Equal(want) {
+			t.Errorf("call %d olderThan = %v, want its round's cutoff %v", i, c.olderThan, want)
+		}
 	}
 }
 
@@ -300,13 +437,18 @@ func TestStatusHistorySweepLogsAndContinuesOnError(t *testing.T) {
 	beforeFailing := metrics.StatusHistoryVersionsPurgedValue(failing)
 	beforeOther := metrics.StatusHistoryVersionsPurgedValue(statusHistoryConcepts[2])
 
-	r.sweepStatusHistory(context.Background())
+	for range statusHistoryConcepts {
+		purger.tick(r)
+	}
 
 	// One concept's failure is that concept's problem. The sweep is the only
 	// thing keeping the table from growing again, so it does not give up on
 	// the others, and it does not retry the failing one inside the same round.
 	if want := statusHistoryConcepts; !slices.Equal(purger.concepts(), want) {
 		t.Fatalf("calls = %v, want one per concept %v", purger.concepts(), want)
+	}
+	if got := purger.tick(r); got != 0 {
+		t.Fatalf("a failed concept is done for the round, not asked again: got %d statements", got)
 	}
 
 	warns := logs.atLevel(slog.LevelWarn)
@@ -323,7 +465,7 @@ func TestStatusHistorySweepLogsAndContinuesOnError(t *testing.T) {
 	// The concepts that worked are reported and counted; the failing one is not.
 	infos := logs.atLevel(slog.LevelInfo)
 	if len(infos) != 1 {
-		t.Fatalf("want one Info line for the sweep, got %d: %+v", len(infos), infos)
+		t.Fatalf("want one Info line for the round, got %d: %+v", len(infos), infos)
 	}
 	if got := infos[0].attrs[statusHistoryConcepts[0]]; got != int64(7) {
 		t.Errorf("Info total for %s = %v, want 7", statusHistoryConcepts[0], got)
@@ -346,7 +488,7 @@ func TestStatusHistorySweepKeepsEarlierBatchesWhenALaterOneFails(t *testing.T) {
 	// The first batch deletes 500 and the second times out. The 500 are gone
 	// from the table whatever happens next, so the counter has to say so: a
 	// counter that dropped them on the failure would under-report exactly the
-	// sweeps that were working hardest.
+	// rounds that were working hardest.
 	purger := &fakeStatusHistoryPurger{answer: func(concept string, nth int) (int64, error) {
 		if concept != first {
 			return 0, nil
@@ -359,10 +501,16 @@ func TestStatusHistorySweepKeepsEarlierBatchesWhenALaterOneFails(t *testing.T) {
 	r.statusPurger = purger
 	before := metrics.StatusHistoryVersionsPurgedValue(first)
 
-	r.sweepStatusHistory(context.Background())
+	// first, second, third, then first's second turn, which fails.
+	for range 4 {
+		purger.tick(r)
+	}
 
 	if got := purger.callsFor(first); got != 2 {
-		t.Fatalf("a failed batch ends that concept's loop: want 2 calls for %s, got %d", first, got)
+		t.Fatalf("a failed batch ends that concept's round: want 2 calls for %s, got %d", first, got)
+	}
+	if got := purger.tick(r); got != 0 {
+		t.Fatalf("with every concept done the sweep rests, got %d statements", got)
 	}
 	if got := metrics.StatusHistoryVersionsPurgedValue(first) - before; got != 500 {
 		t.Errorf("the batch that landed before the failure must be counted: want 500, got %v", got)
@@ -381,7 +529,7 @@ func TestStatusHistorySweepStopsWhenTheContextIsCancelled(t *testing.T) {
 
 	r.sweepStatusHistory(ctx)
 
-	// A shutdown must not turn into one "context canceled" Warn per concept.
+	// A shutdown must not turn into a "context canceled" Warn per concept.
 	if len(purger.calls) != 0 || len(logs.atLevel(slog.LevelWarn)) != 0 {
 		t.Fatalf("a cancelled context must end the sweep quietly, got %d calls and %d warnings",
 			len(purger.calls), len(logs.atLevel(slog.LevelWarn)))
@@ -407,16 +555,13 @@ func TestStatusHistoryConceptsAreTheClosedList(t *testing.T) {
 }
 
 // The numbers are the release's decisions (the design record's decision 1), and
-// the relations between them are what keeps a sweep safe to run on the leader's
-// tick: a statement inside the serving timeouts, a sweep that has ended before
-// the next is due.
+// the relations between them are what keep a statement safe on the leader's
+// tick: inside the serving timeouts, and inside the liveness grace.
 func TestStatusHistoryBoundsAreInsideTheServingTimeouts(t *testing.T) {
 	if statusHistoryGrace != time.Hour || statusHistoryPurgeInterval != 10*time.Minute ||
-		statusHistoryBatch != 500 || statusHistoryRunBudget != 25*time.Second ||
-		statusHistoryStatementTimeout != 7*time.Second {
-		t.Fatalf("the decided values changed: grace %v, interval %v, batch %d, budget %v, statement %v",
-			statusHistoryGrace, statusHistoryPurgeInterval, statusHistoryBatch,
-			statusHistoryRunBudget, statusHistoryStatementTimeout)
+		statusHistoryBatch != 500 || statusHistoryStatementTimeout != 7*time.Second {
+		t.Fatalf("the decided values changed: grace %v, interval %v, batch %d, statement %v",
+			statusHistoryGrace, statusHistoryPurgeInterval, statusHistoryBatch, statusHistoryStatementTimeout)
 	}
 	// 8 s is the request pool's statement_timeout (defaultStatementTimeoutMs in
 	// component/database); the direct handle the reconciler uses carries the
@@ -424,12 +569,15 @@ func TestStatusHistoryBoundsAreInsideTheServingTimeouts(t *testing.T) {
 	if statusHistoryStatementTimeout >= 8*time.Second {
 		t.Errorf("a call's deadline %v must end before the server's 8 s statement_timeout", statusHistoryStatementTimeout)
 	}
-	// The budget is checked after each call, so a sweep can overshoot it by the
-	// call in flight. Even then it must be over before the next one is due, or
-	// sweeps would queue up behind each other on the leader's tick.
-	if statusHistoryRunBudget+statusHistoryStatementTimeout >= statusHistoryPurgeInterval {
-		t.Errorf("a sweep (%v budget + %v call) must end inside the %v interval",
-			statusHistoryRunBudget, statusHistoryStatementTimeout, statusHistoryPurgeInterval)
+	// The relation that matters on the tick. The sweep shares the leader's tick
+	// with reconcile, which retires a node it has found absent on two passes a
+	// liveness grace apart. A tick held for the grace or longer leaves a gap
+	// between passes in which a node can go absent, come back and go absent
+	// again unseen, and be retired while it is serving. One statement is the
+	// most a tick carries, so its deadline is the most a tick can be held.
+	if statusHistoryStatementTimeout >= defaultReconcileGrace {
+		t.Errorf("a statement (%v) holds the leader's tick, so it must be shorter than the reconciler's %v liveness grace",
+			statusHistoryStatementTimeout, defaultReconcileGrace)
 	}
 }
 
@@ -442,8 +590,8 @@ func TestStatusHistorySweepWithNoDatabaseDoesNothingAndDoesNotPanic(t *testing.T
 		t.Fatalf("a reconciler with no db must have no status-history purger, got %#v", p)
 	}
 	r.sweepStatusHistory(context.Background())
-	if !r.lastStatusHistoryPurge.IsZero() {
-		t.Fatal("a sweep that had nothing to run must not start the interval clock")
+	if !r.lastStatusHistoryPurge.IsZero() || r.statusRound.active {
+		t.Fatal("a sweep that had nothing to run must not start a round or the interval clock")
 	}
 }
 
