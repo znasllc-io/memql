@@ -483,6 +483,17 @@ function compareInstant(a: string | undefined, b: string | undefined): number {
   return pa.fraction < pb.fraction ? -1 : pa.fraction > pb.fraction ? 1 : 0;
 }
 
+// versionOrder orders two VERSION TIMES -- an engine row's `createdAt` -- by
+// the instant they name, at every digit the wire carries (compareInstant), or
+// answers null when either is no time to order by: absent, not a string, or
+// unparseable. Internal, not exported through the package barrel: it is
+// LiveCollection's default ordering (memql#6033).
+export function versionOrder(a: unknown, b: unknown): number | null {
+  if (typeof a !== "string" || typeof b !== "string") return null;
+  if (instantParts(a) === null || instantParts(b) === null) return null;
+  return compareInstant(a, b);
+}
+
 function instantParts(stamp: string | undefined): { seconds: number; fraction: string } | null {
   if (typeof stamp !== "string" || stamp === "") return null;
   const ms = Date.parse(stamp);

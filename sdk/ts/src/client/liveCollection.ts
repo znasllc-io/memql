@@ -16,6 +16,14 @@
 // while it reads and replays it onto its answer (see runSeed). The reverse
 // order can miss a row forever, and no amount of client care recovers it.
 //
+// AN ENGINE ROW CARRIES ITS VERSION, AND THAT IS THE ORDER (memql#6033). The
+// store is append-only: every write lands a new version stamped `createdAt`,
+// the latest version is the one with the greatest, and every read, re-read and
+// graph event carries that field at the top level. Arrival order is not that
+// order -- the engine delivers each event on its own goroutine, and a read can
+// answer after an event it is newer than -- so by default a collection keeps
+// the newer version of a row whichever arrives last (see `supersedes`).
+//
 // CONTINUITY IS A STREAM PROPERTY, NOT A COLLECTION PROPERTY. `seq` numbers
 // every notification on the socket and `gap_before` lands on whichever
 // delivery comes first after a drop, so no single collection can read either
@@ -28,7 +36,7 @@
 
 import type { SubscriptionManager } from "./subscriptions.js";
 import type { ConnectionStatusEvent } from "./connection.js";
-import type { Event, GraphAction, Row } from "./types.js";
+import { versionOrder, type Event, type GraphAction, type Row } from "./types.js";
 
 // LiveState is what a UI MUST be able to render. `degraded` is the one that
 // did not exist before and matters most: rows on screen that are known to be
@@ -102,20 +110,29 @@ export interface LiveCollectionSpec<T = Row> {
   rereadEveryEvent?: boolean;
   // Decide whether an arriving copy REPLACES the one held.
   //
-  // The default is last-write-wins, which is correct when arrivals are
-  // ordered. They are not always: two re-reads issued a moment apart can
-  // settle in either order, and for a concept that carries its own version
-  // watermark that means an older copy can roll a newer one backwards --
-  // silently, and only under load.
+  // Arrivals are not ordered: the engine delivers each event on its own
+  // goroutine, two re-reads issued a moment apart can settle in either order,
+  // and a read can answer after an event it is newer than. Taking the last
+  // arrival lets an older copy roll a newer one backwards -- silently, only
+  // under load, and for good when the change after it sends nothing this
+  // collection folds.
+  //
+  // THE DEFAULT ORDERS ENGINE ROWS BY THEIR VERSION (memql#6033): the
+  // `createdAt` each row and event carries at the top level, compared at every
+  // digit the wire carries. An arrival older than the row held is refused; the
+  // same version or a newer one replaces it. Where either side has no version
+  // time to compare -- a shape that does not project `row.createdAt`, a row
+  // mapped without it -- the arrival wins, as any later arrival would. Pass
+  // your own to order by something else (a concept's own watermark), or to
+  // take every arrival.
   //
   // Return false to keep what is held. Called with `held === undefined` for a
   // row the collection has not seen, where returning false would mean the row
-  // can never arrive at all.
+  // can never arrive at all. A removal is not weighed: it always lands.
   //
   // It is also the judge when a seed replays what arrived while it read: the
   // row the read returned is what is held, so an arrival older than it is
-  // refused rather than rolling it back. Without it the arrival wins -- it
-  // came in after the page that read the row may already have been answered.
+  // refused rather than rolling it back.
   supersedes?: (incoming: T, held: T | undefined) => boolean;
   // CDC verbs. Defaults to all three.
   actions?: GraphAction[];
@@ -152,18 +169,28 @@ function eventRowId(event: Event): string {
   return defaultRowId(payload);
 }
 
+// newerOrSame is the default `supersedes`: the arrival replaces the held row
+// unless both carry a version time and the arrival's is older.
+function newerOrSame(incoming: unknown, held: unknown): boolean {
+  if (held === undefined) return true;
+  const order = versionOrder(versionTimeOf(incoming), versionTimeOf(held));
+  return order === null || order >= 0;
+}
+
+// versionTimeOf reads an engine row's version time: `createdAt`, at the top
+// level in every shape a row arrives in -- a shaped read that projects
+// `row.createdAt`, a flattened or raw node, and a graph event's payload.
+function versionTimeOf(row: unknown): unknown {
+  if (!row || typeof row !== "object") return undefined;
+  return (row as Record<string, unknown>)["createdAt"];
+}
+
 // DELETED is matched on the decoded event KIND, never by sniffing a string
 // out of the payload. The kinds come from the proto enum; a substring test
 // over a topic is what one of the replaced implementations did, and it is one
 // renamed topic away from silently folding deletes as updates.
 function isDeleteKind(kind: string): boolean {
   return kind === "NODE_DELETED";
-}
-
-// One change the stream delivered: a row, or its removal (null).
-interface Arrival<T> {
-  id: string;
-  row: T | null;
 }
 
 export class LiveCollection<T = Row> {
@@ -176,9 +203,11 @@ export class LiveCollection<T = Row> {
   private cachedSnapshot: LiveSnapshot<T> | null = null;
 
   private unsubscribe: (() => void) | null = null;
-  // What arrived while the running seed read, in arrival order, for it to
-  // replay onto its answer. Null while no seed is reading.
-  private arrivals: Array<Arrival<T>> | null = null;
+  // What arrived while the running seed read, for it to replay onto its
+  // answer: the last word per row -- its newest copy, or its removal (null) --
+  // so it is bounded by the rows that changed, not by the events. Null while
+  // no seed is reading.
+  private arrivals: Map<string, T | null> | null = null;
   private seedAbort: AbortController | null = null;
   private seedPending = false;
   private seedRunning = false;
@@ -318,9 +347,10 @@ export class LiveCollection<T = Row> {
     // lands between page 1 and page 2 would be overwritten by page 1's
     // `sending` until the next reseed, an insert that sorts onto a page already
     // read would never be seen, and a delete would come back. So each seed
-    // keeps its own list, from before its first page is asked for until its
-    // answer is installed, and replays it in order onto that answer.
-    const arrivals: Array<Arrival<T>> = [];
+    // keeps its own record, from before its first page is asked for until its
+    // answer is installed -- the last word per row (see keep) -- and replays
+    // it onto that answer.
+    const arrivals = new Map<string, T | null>();
     this.arrivals = arrivals;
 
     const collected = new Map<string, T>();
@@ -349,15 +379,14 @@ export class LiveCollection<T = Row> {
       // would keep it on screen forever.
       this.rowsById = collected;
       this.order = seenOrder;
-      // ...THEN REPLAY what arrived while it read, in order, through the same
-      // rules a fold follows: a removal removes, a row out of the read's scope
-      // leaves, and `supersedes` judges an arrival against the row the read
-      // returned -- an arrival older than it does not roll it back. Without a
-      // watermark the arrival wins, as any later arrival would.
+      // ...THEN REPLAY what arrived while it read, through the same rules a
+      // fold follows: a removal removes, a row out of the read's scope leaves,
+      // and the ordering judges an arrival against the row the read returned
+      // -- an older version does not roll it back (see `supersedes`).
       this.arrivals = null;
-      for (const arrival of arrivals) {
-        if (arrival.row === null) this.drop(arrival.id);
-        else this.place(arrival.id, arrival.row);
+      for (const [id, row] of arrivals) {
+        if (row === null) this.drop(id);
+        else this.place(id, row);
       }
       this.errorText = "";
       this.bump();
@@ -420,24 +449,42 @@ export class LiveCollection<T = Row> {
   // arrive folds one change onto the rows on screen and, while a seed reads,
   // keeps it for that seed to replay onto its answer (see runSeed).
   private arrive(id: string, row: T | null): void {
-    this.arrivals?.push({ id, row });
+    if (this.arrivals !== null) this.keep(this.arrivals, id, row);
     if (row === null ? this.drop(id) : this.place(id, row)) this.bump();
+  }
+
+  // keep records one arrival for the running seed as the last word on its
+  // row: a removal replaces whatever was kept, and a row replaces a kept
+  // removal or a kept row it supersedes -- judged as a fold judges, so an
+  // older version arriving late does not displace a newer one already kept.
+  private keep(arrivals: Map<string, T | null>, id: string, row: T | null): void {
+    const kept = arrivals.get(id);
+    if (row !== null && kept !== undefined && kept !== null && !this.supersedes(row, kept)) return;
+    arrivals.set(id, row);
   }
 
   // place puts `row` under `id` as the fold rules allow, and reports whether
   // the rows changed. It does not notify: a seed replays many at once.
   private place(id: string, row: T): boolean {
+    const held = this.rowsById.get(id);
+    // FIRST, WHETHER THIS COPY SAYS ANYTHING: one older than the row held says
+    // nothing about it -- neither what it holds nor whether it belongs -- so it
+    // is refused before its scope is read.
+    if (!this.supersedes(row, held)) return false;
     if (this.spec.inScope && !this.spec.inScope(row)) {
       // In scope for the SUBSCRIPTION, out of scope for the READ. Removing
       // rather than ignoring matters for the update case: a row that has just
       // left the list's scope must leave the list.
       return this.drop(id);
     }
-    const held = this.rowsById.get(id);
-    if (this.spec.supersedes && !this.spec.supersedes(row, held)) return false;
     if (held === undefined) this.order.push(id);
     this.rowsById.set(id, row);
     return true;
+  }
+
+  // supersedes is the feed's own judge, or the default: by version.
+  private supersedes(incoming: T, held: T | undefined): boolean {
+    return (this.spec.supersedes ?? newerOrSame)(incoming, held);
   }
 
   // drop removes `id`, and reports whether it was there.

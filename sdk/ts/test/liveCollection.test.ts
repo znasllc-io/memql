@@ -289,6 +289,214 @@ test("a reseed keeps folding arrivals onto the rows on screen, and keeps them wh
   store.dispose();
 });
 
+test("a seed keeps one arrival per row, however many events arrive while it reads", async () => {
+  // What a seed keeps is bounded by the rows that changed, not by the events:
+  // a busy row announcing every write while a slow walk reads must not grow
+  // the list it replays without limit. The last word per row is all a replay
+  // needs -- the newest version, or the removal.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const walk = gatedWalk([{ id: "a", n: 0 }], [{ id: "b", n: 0 }]);
+  const handle = store.collection<Row>("k", { concept: "c", seed: walk.seed });
+  await settle();
+
+  for (let n = 1; n <= 500; n++) {
+    subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", n } }));
+    subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "b", n } }));
+  }
+  const kept = (handle.value as unknown as { arrivals: { size: number } | null }).arrivals;
+  assert.equal(kept?.size, 2, "one kept arrival per row, not a thousand");
+
+  walk.release();
+  await settle();
+  const rows = byId(handle.value.snapshot.rows);
+  assert.equal(rows["a"]?.["n"], 500);
+  assert.equal(rows["b"]?.["n"], 500, "the page read before them does not roll the last one back");
+  store.dispose();
+});
+
+// ---------------------------------------------------------------------
+// the version each engine row carries (memql#6033)
+// ---------------------------------------------------------------------
+//
+// An engine row's version time is its `createdAt`: every write lands a new
+// version stamped with it, and every read, re-read and graph event carries it
+// at the top level. The bus delivers events in no particular order and a read
+// can answer after an event it is newer than, so with no `supersedes` of its
+// own a collection orders rows by it.
+
+// One microsecond apart -- the precision a row keeps its version time at.
+const T1 = "2026-10-12T14:47:19.325157Z";
+const T2 = "2026-10-12T14:47:19.325158Z";
+
+test("a seed keeps the row the read returned when an OLDER version lands while it reads", async () => {
+  // The probe: the read returns `sent`; the `sending` written before it lands
+  // while the walk is still reading, and used to replace the read's row --
+  // until the next event, and for good when the change after it sends none
+  // this list folds. No OS feed passes `supersedes`; none needs to.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const walk = gatedWalk([{ id: "a", status: "sent", createdAt: T2 }], [{ id: "b", status: "draft", createdAt: T1 }]);
+  const handle = store.collection<Row>("k", { concept: "c", seed: walk.seed });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sending", createdAt: T1 } }));
+  walk.release();
+  await settle();
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sent");
+  store.dispose();
+});
+
+test("a NEWER version that lands while a seed reads wins over the read", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const walk = gatedWalk([{ id: "a", status: "sending", createdAt: T1 }], [{ id: "b", status: "draft", createdAt: T1 }]);
+  const handle = store.collection<Row>("k", { concept: "c", seed: walk.seed });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sent", createdAt: T2 } }));
+  walk.release();
+  await settle();
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sent");
+  store.dispose();
+});
+
+test("two versions that land out of order while a seed reads leave the newer one", async () => {
+  // What a seed keeps for a row is judged as a fold judges: the late `sending`
+  // does not displace the `sent` kept before it, and the replay installs `sent`
+  // over the older row the read returned.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const walk = gatedWalk([{ id: "a", status: "scheduled", createdAt: "2026-10-12T14:47:18Z" }], [{ id: "b", status: "draft", createdAt: T1 }]);
+  const handle = store.collection<Row>("k", { concept: "c", seed: walk.seed });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sent", createdAt: T2 } }));
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "a", status: "sending", createdAt: T1 } }));
+  walk.release();
+  await settle();
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sent");
+  store.dispose();
+});
+
+test("an older version delivered after a newer one is refused, outside a seed too", async () => {
+  // The bus delivers each event in its own goroutine: `sending` and `sent`
+  // can reach the client in either order.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", status: "scheduled", createdAt: "2026-10-12T14:47:18Z" }], nextCursor: "" }),
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sent", createdAt: T2 } }));
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "a", status: "sending", createdAt: T1 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sent");
+
+  // The same version announced twice -- .created and .updated of one write --
+  // is not older than itself.
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "a", status: "sent", note: "again", createdAt: T2 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["note"], "again");
+  store.dispose();
+});
+
+test("versions compare at every digit the wire carries, not as strings", async () => {
+  // Go trims trailing zeros, so the LATER of these is the longer string that
+  // sorts first: ".3251Z" > ".325101Z" as text, and earlier as an instant.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", v: "held", createdAt: "2026-10-12T14:47:19.3251Z" }], nextCursor: "" }),
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "older", createdAt: "2026-10-12T14:47:19.325099Z" } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["v"], "held");
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "newer", createdAt: "2026-10-12T14:47:19.325101Z" } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["v"], "newer");
+  store.dispose();
+});
+
+test("a row whose version is unknown is taken as it arrives", async () => {
+  // Nothing to compare is not a reason to refuse: an arrival with no version
+  // time, or one onto a row read without one, wins as any later arrival would.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", v: "read", createdAt: T2 }, { id: "b", v: "read" }], nextCursor: "" }),
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "no version" } }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "b", v: "versioned", createdAt: T1 } }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "not a time", createdAt: "yesterday" } }));
+  const rows = byId(handle.value.snapshot.rows);
+  assert.equal(rows["a"]?.["v"], "not a time");
+  assert.equal(rows["b"]?.["v"], "versioned");
+  store.dispose();
+});
+
+test("a delete removes the row whatever version the read returned", async () => {
+  // A removal is not a version to weigh: it lands, during a read and after.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const walk = gatedWalk(
+    [{ id: "a", status: "sent", createdAt: T2 }, { id: "b", status: "draft", createdAt: T2 }],
+    [{ id: "c", status: "draft", createdAt: T1 }],
+  );
+  const handle = store.collection<Row>("k", { concept: "c", seed: walk.seed });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T1 } }));
+  walk.release();
+  await settle();
+  assert.deepEqual(Object.keys(byId(handle.value.snapshot.rows)).sort(), ["b", "c"], "deleted during the read, and stays deleted");
+
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "b" } }));
+  assert.deepEqual(handle.value.snapshot.rows.map((row) => row["id"]), ["c"], "and after it");
+  store.dispose();
+});
+
+test("an older copy out of the read's scope does not take a newer row out of the list", async () => {
+  // A copy the collection refuses as older says nothing about the row --
+  // neither what it holds nor whether it belongs. Judging its scope first
+  // would let a late `archived` from before a restore remove the restored row.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", status: "sent", createdAt: T2 }], nextCursor: "" }),
+    inScope: (row) => row["status"] !== "archived",
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "archived", createdAt: T1 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sent", "the older archived copy is refused");
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "archived", createdAt: "2026-10-12T14:47:20Z" } }));
+  assert.deepEqual(handle.value.snapshot.rows, [], "a newer one leaves the scope, and the list");
+  store.dispose();
+});
+
+test("a feed's own supersedes still decides, over the version", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", status: "sent", createdAt: T2 }], nextCursor: "" }),
+    // A feed whose rows carry their own watermark -- or that wants every
+    // arrival, whatever its time -- says so.
+    supersedes: () => true,
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sending", createdAt: T1 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sending");
+  store.dispose();
+});
+
 // ---------------------------------------------------------------------
 // the fold matrix
 // ---------------------------------------------------------------------

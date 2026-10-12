@@ -13,6 +13,43 @@ and like `provider` it is omitted from the wire when empty. MemQL OS's Ask
 route picker sends a conversation's chosen source as `provider` and its Effort
 as `level`.
 
+**`Result.count()` and `CountAnswer`** (memql#6033) -- read the aggregate a
+`count` query answers as `{ count, atLeast }`, or `null` when the result is
+not a count. The engine reads a count up to its window
+(`MEMQL_MEMORY_ENGINE_MAX_WINDOW`, 5,000 by default) and one row past it; a
+larger set now answers the window with `atLeast: true`, read as "this many or
+more". The window is configurable, so read `atLeast` rather than comparing the
+figure with a number you assume. `countConcept` still answers the number
+alone.
+
+### Changed
+
+**A `LiveCollection` seed keeps what arrives while it reads** (memql#6033).
+A seed replaces the rows on screen with the read's answer, and the pages it
+read were answered before anything that arrived during the walk -- so an update
+that landed between two pages was overwritten by the older page until the next
+reseed, an insert that sorted onto a page already read never appeared, and a
+delete came back. Each seed now keeps the last arrival per row from before its
+first page until its answer is installed, and replays it onto that answer
+through the fold's own rules (a removal removes; a row is judged by the
+ordering below, then by `inScope`). Arrivals still fold onto the rows on screen
+as they come.
+
+**A `LiveCollection` orders engine rows by their version by default**
+(memql#6033). The engine delivers each graph event on its own goroutine and a
+read can answer after an event it is newer than, so the last arrival is not
+always the newest copy. With no `supersedes` of its own, a collection now
+compares the `createdAt` each row and event carries at the top level -- the
+time of the row's version, at every digit the wire carries -- and refuses an
+arrival older than the row it holds; the same version or a newer one replaces
+it, and where either side has no version time the arrival wins as before. A
+copy refused as older is refused before `inScope` reads it, so it cannot take a
+newer row out of the list either, and a removal always lands. Pass
+`supersedes` to order by something else, or to take every arrival. The
+engine's `graph.node.created` and `graph.node.updated` events carry that
+`createdAt` to the microsecond the row keeps (`.created` carried it to the
+second, `.updated` not at all).
+
 ### Changed -- BREAKING for anyone importing the rotation helpers directly
 
 **Bearer auto-rotation is scheduled from the token's own lifetime, with a
