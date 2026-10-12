@@ -218,3 +218,8 @@ test("refusalSentence -- leaves alone what is not one of its frames", () => {
   // Something that is not an Error is read as text.
   assert.equal(refusalSentence(ENGINE + "compose: refused"), "refused");
 });
+
+
+test("refusalSentence -- an empty named frame carries no sentence", () => {
+  assert.equal(refusalSentence("campaignSaveJourney:", "campaignSaveJourney"), "");
+});

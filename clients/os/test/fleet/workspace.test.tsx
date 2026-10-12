@@ -7,6 +7,7 @@ const {FleetApp}=await import('../../src/apps/fleet/FleetApp');
 const {MachinesProvider,WORKER_REGISTRATION_CONCEPT}=await import('../../src/live/machines');
 const {ActivityTarget,SemanticActivityProvider}=await import('../../src/kit/SemanticActivity');
 const {installSeededAccess}=await import('../seededAccess');
+const {readTheBar}=await import('../readTheBar');
 afterEach(cleanup);
 beforeEach(()=>{installSeededAccess('owner');h.connection=fakeConnection();});
 // A machine is opened from the LIST: the section no longer selects the first one
@@ -36,6 +37,7 @@ it.each([false,true])('returns to Machines after confirmed removal, with another
  await openMachine('Alpha');
  fireEvent.click(await screen.findByRole('button',{name:/Machine details/}));
  fireEvent.click(screen.getByRole('button',{name:'Remove this machine'}));
+ await readTheBar();
  fireEvent.click(screen.getByRole('button',{name:'Remove Alpha'}));
  if(other){expect(await screen.findByRole('button',{name:/^Open Beta/})).toBeTruthy();expect(screen.queryByRole('navigation',{name:'Machine views'})).toBeNull();}
  else expect(await screen.findByRole('button',{name:'Connect your first machine'})).toBeTruthy();
@@ -50,6 +52,7 @@ it('keeps a refused removal on its machine details',async()=>{
  await openMachine('Alpha');
  fireEvent.click(await screen.findByRole('button',{name:/Machine details/}));
  fireEvent.click(screen.getByRole('button',{name:'Remove this machine'}));
+ await readTheBar();
  fireEvent.click(screen.getByRole('button',{name:'Remove Alpha'}));
  expect(await screen.findByText('Removal refused')).toBeTruthy();
  expect(screen.getByLabelText('Name for Alpha')).toBeTruthy();

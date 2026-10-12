@@ -1,6 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
+
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
 vi.mock("../../src/live/connection", () => ({
@@ -317,6 +319,7 @@ describe("archiving (D8)", () => {
     // match both and pass or fail for the wrong reason.
     const confirmButton = screen.getByRole("button", { name: "Archive" });
     expect((confirmButton as HTMLButtonElement).disabled).toBe(true);
+    await readTheBar();
     fireEvent.click(screen.getByLabelText("I want to file this client away", { selector: "input" }));
     fireEvent.click(confirmButton);
 
@@ -335,6 +338,53 @@ describe("archiving (D8)", () => {
     fireEvent.click(await screen.findByText("Acme Consulting"));
     await screen.findByLabelText("What belongs to Acme Consulting");
     expect(screen.queryByText("Archive this client")).toBeNull();
+  });
+});
+
+// The question opens where "Archive this client" stood, outside any bar
+// (memql#6033): the second click of a double-click on that button used to land
+// in it -- on the acknowledgement, which is what arms the confirmation.
+describe("archiving, one double-click later", () => {
+  useFakeDate();
+
+  async function ask() {
+    const conn = fakeConnection({
+      clientAccountsAll: [accountRow({ id: "v1:accounts:account:a1" })],
+    });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Acme Consulting"));
+    fireEvent.click(await screen.findByText("Archive this client"));
+    await screen.findByText("Archive Acme Consulting?");
+    return conn;
+  }
+  const acknowledgement = () =>
+    screen.getByLabelText("I want to file this client away", { selector: "input" }) as HTMLInputElement;
+
+  it("does not arm the confirmation on the second click of the click that asked, and does once it is read", async () => {
+    const conn = await ask();
+    betweenTheClicks();
+    fireEvent.click(acknowledgement());
+    expect(acknowledgement().checked).toBe(false);
+    expect((screen.getByRole("button", { name: "Archive" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await readTheBar();
+    fireEvent.click(acknowledgement());
+    expect(acknowledgement().checked).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() =>
+      expect(conn.query.archiveClientAccount).toHaveBeenCalledWith({ accountId: "v1:accounts:account:a1" }),
+    );
+  });
+
+  it("does not withdraw the question on that click either", async () => {
+    const conn = await ask();
+    betweenTheClicks();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByText("Archive Acme Consulting?")).toBeTruthy();
+    await readTheBar();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Archive Acme Consulting?")).toBeNull();
+    expect(conn.query.archiveClientAccount).not.toHaveBeenCalled();
   });
 });
 

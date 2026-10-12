@@ -272,8 +272,9 @@ func (*DepthExpr) expressionNode() {}
 
 // CountExpr aggregates its target expression to a numeric row count
 // instead of materializing the matching rows. The query returns a
-// self-describing {count: N} envelope. Like the other directive
-// wrappers it must be the outermost node around a query expression.
+// self-describing {count: N, atLeast: B} envelope. Like the other
+// directive wrappers it must be the outermost node around a query
+// expression.
 type CountExpr struct {
 	Target ExpressionNode
 }

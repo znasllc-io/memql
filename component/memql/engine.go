@@ -1401,7 +1401,8 @@ func planIsUnbound(plan *QueryPlan) bool {
 // matching set rather than the rows. We fetch up to MaxWindow
 // candidates so the count is not silently capped at the smaller
 // default page size (MaxResults) the row path uses. A true SQL-pushdown
-// COUNT(*) is a future optimization tracked separately -- it cannot be
+// COUNT(*) is a future optimization; a source that reaches its window
+// is reported as atLeast even when later filtering makes the result short. It cannot be
 // a naive COUNT because the versioned hypertable stores multiple rows
 // per id and the latest-version re-filter happens in Go.
 func (e *MemQLEngine) executeCountPlan(ctx context.Context, plan *QueryPlan, timestamp *time.Time, sorter *compiledSort, startTime time.Time) (*ExecuteResult, error) {
@@ -1409,14 +1410,35 @@ func (e *MemQLEngine) executeCountPlan(ctx context.Context, plan *QueryPlan, tim
 		return nil, ErrEmptyQuery
 	}
 
-	set, err := e.evaluateExpressionSet(ctx, plan.Root, timestamp, e.config.MaxWindow, sorter)
+	completeness := &countCompleteness{}
+	ctx = context.WithValue(ctx, countCompletenessKey{}, completeness)
+	window := e.config.MaxWindow
+	if window <= 0 {
+		window = e.config.MaxResults
+	}
+	// Probe one extra candidate to distinguish an exactly full window from
+	// an incomplete scan. Keep source completeness as well: authorization or
+	// latest-version filtering may shorten an otherwise truncated source.
+	target := window
+	if target > 0 && target < int(^uint(0)>>1) {
+		target++
+	}
+	set, err := e.evaluateExpressionSet(ctx, plan.Root, timestamp, target, sorter)
 	if err != nil {
 		return nil, err
 	}
 
 	count := int64(len(set))
+	if window > 0 && len(set) > window {
+		count = int64(window)
+		completeness.truncated.Store(true)
+	}
 	result := newExecuteResult(nil)
-	result.setOutput(map[string]any{"count": count})
+	output := map[string]any{"count": count}
+	if completeness.truncated.Load() {
+		output["atLeast"] = true
+	}
+	result.setOutput(output)
 	result.setIncludeBundle(false)
 	result.SetCount(count)
 

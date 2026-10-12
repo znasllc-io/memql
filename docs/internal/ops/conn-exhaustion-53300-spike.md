@@ -20,8 +20,9 @@ owner: platform
 > The scarcity this spike is about was Tiger's — a per-tier `max_connections`
 > ceiling of ~59 usable slots, and a managed control-plane pool that leaked
 > `application_name='deployer'` connections. Self-hosting removed both:
-> `max_connections` is ours to set (200 local, 400 staging/prod, in
-> `deploy/k8s/components/cnpg-db`), and there is no Tiger control plane to leak
+> `max_connections` is ours to set (200 for the entry preset, 400 for the local
+> overlay and the mid and top presets, in `deploy/k8s/components/cnpg-db`), and
+> there is no Tiger control plane to leak
 > a pool.
 >
 > `scripts/deploy/deployer-pool-reap.sh` and `conn-surge-watch.sh`, referenced

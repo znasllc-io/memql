@@ -61,7 +61,7 @@ and **Write in Source** instead of the revision and extension circle buttons.
 Describe the content, add it to review, then propose and approve the draft.
 While preparation is running, the empty state opens that existing review;
 it does not start another generation. Read keeps creation behind **Start in Review**.
-**Markdown: Insert Image** in Source uploads a PNG, JPEG, GIF, or WebP (up to
+**Insert Image into Markdown** in Source uploads a PNG, JPEG, GIF, or WebP (up to
 8 MiB and 24 million pixels) to the same cluster and inserts its Markdown link with an accessible
 description. Save the document to retain that link in its version history.
 Images stay in Files if you later remove their link; removing text never deletes
@@ -189,55 +189,44 @@ a lost response returns its receipt, even if the document has since changed.
 The current comment list shows the newest 500 records and reports when more are
 stored. Applying feedback automatically is not enabled by adding a comment.
 
-**Create Email from Examples** asks for an organization, reference files, a name,
-and a brief. The name is checked as you type it with the same rule as New
-Markdown. Select a PNG, JPEG, GIF, text/HTML/CSS/Markdown/JSON/CSV/SVG file,
-or ZIP bundle from the device or recent MemQL Files. The cluster captures the
-permitted source bytes before dispatch, analyzes image references through its
-own model router, and creates an editable `*.email.json` draft. The work appears
-in Materializer and Nexus. Choose **Save as recipe and create draft** to reuse
-the brief and references; **Open Last Email Composition** resumes viewing after
-an editor reload. Cancelling the progress notification requests cancellation
-through MemQL. Uploaded references remain in Files even if a later step is cancelled.
+**New Email** opens a page for the organization. Choose Confirmation, Letter,
+Article, Spotlight, or one of the organization’s saved layouts, and name the
+email. **Start from the layout** makes an editable copy. To have MemQL write it,
+describe the email, add references, choose which pictures to use, and select
+**Write it**. The subject, preheader and content blocks are written into the
+layout; brand blocks such as the logo, signature and footer stay intact.
+Closing the page keeps the writing running. Open New Email for the same
+organization to resume it; **Cancel** stops it and keeps your draft.
 
-References are bounded to 64 files, eight images, 16 MiB expanded content, and
-256 KiB of text per composition; each image must be at most 24 million pixels.
-ZIP processing rejects unsafe paths, symlinks, nested archives, and unsupported
-files. PDF and Word reference extraction are not offered by this flow yet.
-Images are references by default. **Images to include** separately selects logos,
-photos, or the images within a ZIP for the actual email. Included images must be
-PNG, JPEG, or GIF, with up to eight images totaling 1 MiB. Large layout examples
-can stay reference-only. The backend checks this limit before invoking a model.
-The editable draft carries selected image bytes; SMTP/Graph sends encode them as
-inline MIME attachments; ACS uses its CID attachment field. Live Azure setup and
-recipient-client rendering verification remain separate checks. No public image hosting or private Library URL is required. The local Email app can display these
-embedded assets while continuing to block remote tracking images. Each template
-file remains limited to 2 MiB, including its image content. Generated drafts use
-inline CSS and selected `img` assets; external CSS, alternate image sources and
-conditional markup are refused instead of bypassing the inclusion choices.
+References can come from this computer or MemQL Files: PNG, JPEG, GIF, text,
+Markdown, HTML, CSS, JSON, CSV, SVG or ZIP, up to 64 files and 16 MiB in total
+(including expanded ZIP content). Pictures used in the email are selected
+separately from visual references: up to eight, totaling 1 MiB. Each picture
+must be at most 24 million pixels. An email document is limited to 2 MiB.
+Uploaded references remain in Files when a later step is cancelled.
 
-Email **Source**, **Preview**, and **Split** use the same document, including
-unsaved changes. Preview preserves presentation HTML, blocks active content and
-external loads, and shows the plain-text alternative. Expand **Sample values**
-to preview personalization fields used by the source; these values never change
-the stored template or enroll a recipient. AI creation is connected;
-ordinary template source editing and preview work offline. Creating the draft
-does not publish it to Campaigns or send mail.
+The email editor’s **Design**, **Source** and **Split** views share one buffer,
+including unsaved changes. Design shows the cluster’s rendered email at desktop
+or mobile width, or as plain text. Select a block in the preview or outline to
+edit it; move, add and remove blocks from the outline. Choose pictures from
+Files or upload them. **Theme** changes the email’s colours and fonts;
+**Preview with** supplies sample personalization without changing the email.
+Design requires a connected cluster; Source works offline. Emails written in
+HTML retain their rendered preview and editable source.
 
-**Use in Campaigns** saves the current email as a draft or publishes the exact
-reviewed revision for the selected client organization. Publishing makes the
-template selectable; it never sends a message. Reopening a template from
-Campaigns gives a `memql-file:` document whose saves retain its organization and
-check the loaded revision. A content edit returns the template to draft. Compare
-with the latest revision to reconcile another person's changes before saving.
-Plain-text templates remain supported with an empty `htmlBody`.
+**Publish** saves the file and makes it a template in the Email app for its
+organization. Publishing the same file again updates that template. Resolve
+any issues shown before publishing. **Save as layout** keeps the finished
+layout for the organization’s future emails. Local files use **Save to MemQL**
+first, preserving the bytes and organization choice and opening the saved copy.
+Publishing never sends a message. Editing a published template returns it to
+draft; concurrent edits require comparing with the latest revision.
+Plain-text emails remain supported with an empty `htmlBody`.
 
-Campaigns keeps names, organization selection, lifecycle, schedules, and results.
-Its embedded email-body editor is removed. Browser VS Code remains the default;
-the Files editor preference can select installed VS Code or Cursor. A queued send
-captures the ready template content it reviewed, so later copy edits do not
-change an in-progress campaign. Existing jobs without a captured snapshot retain
-the older live-template behavior; pause and recreate those jobs to capture a copy.
+The Email app keeps templates, campaigns, automations, audiences and delivery
+results. Browser VS Code is the default; the Files editor preference can select
+installed VS Code or Cursor. Queued sends keep a copy of the reviewed template,
+so later edits do not change an in-progress campaign.
 
 In **Review**, select a passage and choose **Feedback**, use the feedback icon
 beside a heading, or press Ctrl/Cmd+Alt+M. Describe what you want; the DSL-driven
@@ -293,13 +282,15 @@ revision currently supports Markdown; email composition uses separate controls.
 
 
 Unexpected errors throughout Productivity Tools use a short message and a
-**Details** action containing a troubleshooting reference. Search that reference
+troubleshooting reference. **Show details** reveals it: in a notification it
+opens the **MemQL Productivity Tools** Output channel, which holds the reference;
+in a panel it shows the reference beside **Copy reference**. Search that reference
 in **MemQL OS → Logs** to find the technical error and related backend events.
 Logs access keeps its existing permissions. File-save errors include the
 reference in the native VS Code notification. When offline or when cluster
-logging is unavailable, the **MemQL Productivity Tools** Output channel retains
-the same reference locally. Diagnostic messages redact credentials; polling
-errors are deduplicated and logging never retries the failed user action.
+logging is unavailable, the Output channel retains the same reference locally.
+Diagnostic messages redact credentials; polling errors are deduplicated and
+logging never retries the failed user action.
 
 Review distinguishes an automatic retry from a paused preparation. Details stay
 expanded across status updates and disappear when the request recovers. The

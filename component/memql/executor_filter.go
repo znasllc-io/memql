@@ -632,6 +632,7 @@ func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr Expre
 		}
 
 		if len(result) >= fetchTarget || len(nodes) < window || window >= maxWindow {
+			noteCountWindow(ctx, len(nodes), window)
 			break
 		}
 		next := window * 4
@@ -3046,6 +3047,8 @@ func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExp
 	if err := query.Scan(ctx); err != nil {
 		return nil, err
 	}
+
+	noteCountWindow(ctx, len(nodes), fetchTarget)
 
 	// The same post-filter the combined path runs, through the same helper:
 	// resolve each scanned candidate to its TRUE latest version and keep the

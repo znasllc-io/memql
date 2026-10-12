@@ -126,7 +126,7 @@ button.fleet-rule-line[draggable="true"] { cursor: grab; }
 .fleet-rule-described { margin: -6px 0 0; max-width: 80ch; font-size: var(--os-text-sm); color: var(--os-muted); }
 .fleet-rule-when-step { display: grid; gap: 12px; max-width: 34rem; }
 .fleet-rule-review { display: grid; gap: 14px; max-width: 34rem; }
-.fleet-rule-page .os-rule-textarea { max-width: 80ch; }
+.fleet-rule-page .os-textarea { max-width: 80ch; }
 .fleet-rule-page .os-form { max-width: 34rem; }
 
 /* ---- the Settings side's one quiet link ---- */

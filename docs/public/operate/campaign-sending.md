@@ -57,8 +57,7 @@ shows this delivery mode before sending and when confirming a test. A captured
 test verifies rendering and local persistence, not Azure delivery.
 
 Review the campaign's template and mark it `ready` before **Send now** or
-scheduling. Open the template in the editor and choose **Use in Campaigns →
-Publish template for campaigns** after reviewing the preview. Saving keeps it
+scheduling. Open the template in the editor and choose **Publish** after reviewing the preview. Saving keeps it
 as a draft. The campaign's **Review template** action opens that editor; send
 and schedule actions appear when its publication arrives through the live
 collection. **Send a test** queues a separate run using a published template and the
@@ -74,7 +73,7 @@ manage several organizations are asked to choose; MemQL never silently assigns
 new work to the installation owner's organization. A member with access to just
 one organization sees that organization selected.
 
-A send requires access to the Campaigns app and permission to update data in
+A send requires access to the Email app and permission to update data in
 its organization. Reading a shared campaign or recipient list does not grant
 permission to send. Campaigns, audiences, templates and sending identities
 must belong to the same organization. The worker checks the campaign owner's
@@ -94,25 +93,35 @@ Rule-triggered deliveries name their email rule; they do not invent a campaign
 relationship. Historical records are attributed only when an existing parent
 proves which organization owns them.
 
-## Templates in Productivity Tools
+## Templates in the editor
 
-Create a named template in **Campaigns → Templates**, choose its organization,
-then open it in the editor. File content lives in MemQL Productivity Tools:
-**Source**, **Preview**, and **Split** use the same editable document. The OS
+Choose **Create new template** from the Email app to write a template in the editor. The editor keeps the file content:
+**Design**, **Source**, and **Split** use the same editable document. The OS
 keeps the template list, organization, status, and archive controls. Files
 settings select browser VS Code (the default), desktop VS Code, or Cursor.
 
-**Create from examples** starts a Materializer draft from an image, individual
-files, or an explicitly selected ZIP of resources plus your brief. MemQL reads
-the authorized bytes and produces editable HTML, plain text, and a subject in
-an `.email.json` file. A resource ZIP is inspected only for that explicit
-composition; opening a ZIP in Files still downloads it intact. Choose which images are visual inspiration and which should appear in the
-email. Included PNG, JPEG and GIF bytes stay with the editable template and
-are sent as inline attachments; the flow does not publish private file URLs.
-Review the generated layout and links before publishing.
+**New Email** asks for the organization, layout and name. Start from the layout
+or describe it with an image, individual files or a selected ZIP of resources. MemQL reads
+the authorized bytes and writes the email into a layout: the Article unless
+another is chosen (`composeMaterialize.layoutId`, one of the built-in layouts
+or one your organization saved). It writes the subject, the preheader and the
+layout's content blocks; the brand blocks (logo, signature, footer) stay as the
+layout has them. A draft aimed at a brand block, at a link tag such as
+`{{confirmUrl}}`, or at a picture you did not include is refused, and nothing
+is filed. With no brief and no files, the new `.email.json` is the layout
+itself, made without a model call. A resource ZIP is inspected only for that
+explicit composition; opening a ZIP in Files still downloads it intact. Choose
+which images are visual inspiration and which should appear in the email. An
+included picture that is one of your own Library files stays a reference to
+that file; one from a ZIP, or a file you cannot reference, is embedded as a
+copy of the bytes you selected. Pictures are sent as inline attachments; the
+flow does not publish private file URLs. Review the words, pictures and links
+before publishing.
 
-Use **Use in Campaigns** to save a draft or publish the reviewed template for
-its organization. Publishing makes it available to send; it does not send
+Use **Publish** to save and publish the reviewed email for its organization.
+Publishing the same file updates that template. Resolve displayed issues first.
+**Save as layout** keeps its design for future emails. Local files use
+**Save to MemQL** first. Publishing makes it available to send; it does not send
 mail. Editing a published template returns it to draft. Concurrent edits fail
 with a comparison prompt, and publishing requires the exact saved revision.
 An existing template cannot be moved to another organization by editing its
@@ -124,10 +133,174 @@ still rechecks the caller's authority and the source template's readability.
 Jobs queued before this change have no captured copy and retain their previous
 behavior; pause and recreate those jobs before editing their shared template.
 
-The client write surface is `campaignSaveTemplate`, with `templateId`,
-`accountId`, `name`, `content`, `expectedRevision`, and `action` (`save`,
-`publish`, or `archive`). Its receipt includes the saved revision and status.
+### The email document
+
+A template is an email document, the `*.email.json` file the editor opens. It
+has one of two modes, and exactly one:
+
+- **Layout mode** is `{subject, preheader, layout, theme, blocks}`. The email is
+  a column of blocks (pictures, headings, Markdown text, buttons, dividers,
+  sections, columns, social links, a footer, and an HTML block for the rare case
+  nothing else covers), drawn in the colours and fonts of a theme. MemQL writes
+  the HTML and the plain-text part from the blocks, in the table layout that
+  holds up in mail clients and on phones, with the rules of a 600 pixel email.
+  `layout` records which layout the email started from and changes nothing.
+- **Custom mode** is `{subject, preheader, textBody, htmlBody}`: HTML you pasted
+  or wrote, with its plain-text alternative. Its HTML is kept as written. MemQL
+  only embeds the Library pictures it names and puts the preheader after the
+  body tag.
+
+Templates saved before documents existed are custom templates. They keep
+working as they are, and a saved draft of one can be published without saving
+it again.
+
+Colours in a block are the theme's own (`page`, `canvas`, `primary`,
+`secondary`, `accent`, `tint`, `text`, `muted` and `white`), never a value of
+their own. A link is empty, a web, email or phone address, or exactly one of
+the four link tags `{{unsubscribeUrl}}`, `{{preferencesUrl}}`, `{{viewUrl}}`
+and `{{confirmUrl}}`, which sending replaces for each recipient. A recipient
+link must stand alone, never inside another address or a link label; saves
+and previews refuse it there too. Sentence punctuation around a bare link is
+allowed. No other merge
+tag can stand in for an address, so a recipient's own value can never become a
+link. A picture is `artifact:<id>`, a PNG, JPEG or GIF in the Library, or a
+`data:` image. An email carries at most eight pictures and 1 MiB of picture
+data in all, and a file is at most 2 MiB.
+
+Pictures are read as the person who previews or saves. A picture they cannot
+read, such as another member's private file, is not embedded and is reported as
+unreadable; having its artifact id is not a way to read it. The saved document
+keeps the `artifact:` reference, and the saved HTML has the picture embedded
+(sent as an inline attachment, as before).
+
+### Layouts and previews
+
+Four built-in layouts start an email: **Confirmation**, **Letter**, **Article**
+and **Spotlight**. They come with MemQL, in a neutral example brand, with
+pictures and links left to choose. An organization can also keep a finished
+email as a layout of its own, which keeps its logo, footer and signature for
+the next email in the series.
+
+- `emailLayouts({accountId, includeArchived?})` lists what the organization can
+  start from: the four built-in layouts, then its own. Each row is
+  `{id, kind, name, description, document, status}`, and an organization's own
+  also carry `layoutId`, `revision` and `sourceArtifactId`. The `id`
+  (`builtin:<name>` or `org:<layoutId>`) is opaque: a client passes it on and
+  never builds or splits one. Documents are included up to an 8 MiB answer
+  budget. A later row may have `documentOmitted: true` with no `document`;
+  read `emailLayoutById` with its `layoutId` before opening or previewing it.
+  Every layout remains listed, with its metadata and order intact.
+- `campaignSaveLayout({layoutId, accountId, name, description, document,
+  sourceArtifactId, expectedRevision, action})` saves an organization's layout
+  with the same exact-revision rule as a template. It takes a layout-mode
+  document only. Archiving and restoring need only the revision, and an
+  archived layout is restored before it is edited. `layoutId` is the bare id of
+  the row, not the opaque id of a picker row.
+- `emailRender({document, accountId, sample?})` previews a document: it answers
+  `{subject, html, text, issues}` with the pictures the caller can read
+  embedded, `sample` values (`displayName`, `email`, `accountName`,
+  `campaignName` and `fields`) filled in, the four link tags left as written,
+  and each block marked so an editor can select it. `{{accountName}}` is the
+  organization's name unless the sample says another. It saves and sends
+  nothing, needs read access to the organization's data, and a node renders only
+  a few previews at once; one asked for while it is busy is told to try again.
+
+### Saving, issues and publishing
+
+Saving renders the document the way it will be sent and stores the subject, the
+plain-text part and the HTML part (what a send uses) together with the document
+itself, its layout and its preheader. The render finds what keeps the email from
+being sent as it is, and the receipt lists it as `issues`, each
+`{code, block?, message}` with a sentence that says what to do:
+
+| Code | The email has |
+|------|---------------|
+| `image_missing` | a picture block with no picture chosen |
+| `image_unavailable` | a picture that cannot be read: not found, not readable by the person saving, not a PNG, JPEG or GIF, or over 1 MiB |
+| `images_limit` | more than eight pictures, or more than 1 MiB of picture data |
+| `link_missing` | a button, social link or footer link with no address |
+| `unsubscribe_missing` | a layout email with no `{{unsubscribeUrl}}` link (every built-in layout has one) |
+| `email_too_large` | more than 2 MiB of HTML once its pictures are embedded |
+
+**Saving works with issues**, and returns the template to draft: a draft is a
+draft. **Publishing is refused while any issue remains**, with their sentences
+(`fix these before publishing: Choose a picture for "Hero picture".`), so a
+template that is ready is one that can go out. A document the format refuses, or
+an email too large to write out at all (more than 8 MiB of HTML), cannot be
+saved, and the answer says why.
+
+An email that is saved with `email_too_large` is kept without its HTML part. It
+could never be sent, so there is nothing worth storing: the document and the
+issue are kept, and `emailRender` writes the email out whenever an editor asks
+for a preview. Saving it again after it has been made smaller stores the HTML.
+For the same reason a test send of such a draft is refused with that sentence;
+it would otherwise go out as plain text and look like a test of the email.
+
+### One template per organization and file
+
+An editor opens a Library file, so the file says which template it is. Give
+`sourceArtifactId` (the file's artifact id) and the template already published
+from that file in the organization is the one saved, whatever `templateId` says;
+the first save creates it, so `templateId` may then be left empty. The template
+of a file is read with `templateForSource({accountId, sourceArtifactId})`, which
+gives its id and revision (`createdAt`) before a save. The same file in another
+organization is another template, and a person outside the organization does not
+find the template by the file.
+
+The id a file gets is worked out from the organization and the file, and a
+template id is a name its caller chooses, so a person in another organization
+can save a template under that id first. The file's owner cannot see it, and
+their first save of the file is refused with a sentence that says what happened:
+"This file is already linked to a template you can't open. Save it with a
+different template." Any other refusal of a first save keeps its own words.
+
+### The write surface
+
+The client write surface is `campaignSaveTemplate`, with `templateId` (optional
+when `sourceArtifactId` is given), `accountId`, `name`, `content` (the email
+document, in either mode), `sourceArtifactId`, `expectedRevision`, and `action`
+(`save`, `publish`, `archive` or `restore`). Its receipt is
+`{templateId, revision, status, saved, issues}`: the id of the template written,
+which for a file is the template the file already had, the revision to name in
+the next call, the status (`draft`, `ready` or `archived`), and the issues of the
+email, an empty list when there are none.
+
+- `save` renders the document and writes it as a draft. An unchanged email
+  answers with the receipt it already has instead of writing another version, so
+  a retry after a lost response, and an autosave of unchanged bytes, are safe.
+- `publish` needs the exact saved revision **and** the exact saved content, and
+  is refused while the email has issues.
+- `archive` and `restore` need only the exact revision. The content in the call
+  is ignored (a client that holds only the template's card may send an empty
+  object), the stored content is written back as it is, and one that is already
+  done answers with its receipt. `restore` returns an archived template to
+  draft; it publishes nothing.
+
+A save renders the document before it takes any lock, so a render that is slow
+(a picture to read, a busy node) never holds one. What runs under the locks is
+short: read the template as it is now, compare, check the revision, write. When
+another save of the same template is in progress and the lock cannot be taken in
+time, the answer is "Someone else is saving this template. Try again in a
+moment." and repeating the same call is safe. A lock that fails for any other
+reason (no database to coordinate through, a connection that was lost or timed
+out) is reported as the engine reported it, since trying again in a moment would
+not help. The organization and the permission are checked once more under the locks,
+so a save whose render outlasted a change to either is refused.
+
 Raw template writes and the underlying create/update mutations are internal.
+
+### Reading templates
+
+A list never carries an email's content. `templates({status?})` answers one
+light row per template, `{id, ownerUserId, name, subject, status, accountId,
+layoutId, preheader, sourceArtifactId, createdAt}`, and `templateForSource`
+answers only the template's `id` and its revision (`createdAt`). The email
+document and its HTML and plain-text parts are read by id with
+`templateById({templateId})`. An email can weigh megabytes, and a list is up to
+fifty of them in one answer, so a client that needs a template's content asks
+for that one template. A list row is enough to archive or restore a template,
+which need only its revision (`createdAt`), but not to edit or publish it: those
+send the content, so the client reads it by id first.
 
 ## Configure Azure once for the cluster
 
@@ -135,7 +308,7 @@ An owner or developer configures **Settings → Connections → Email** once for
 this installation. There is one Azure configuration, shared by every client
 organization in the cluster. Clients do not need Azure accounts or separate
 Microsoft sign-ins when the operator runs their email on its own subscription.
-Campaigns manages client domains and senders; it links to Settings when the
+Email manages client domains and senders; it links to Settings when the
 cluster needs configuration.
 
 1. **Sign in with Microsoft.** Enter the displayed code on Microsoft's page.
@@ -171,7 +344,7 @@ policy. Already submitted messages cannot be recalled.
 
 ### Add each client's domain and sender
 
-In **Campaigns → Settings**, **Campaigns → Senders → Connect email domain**, or
+In **Email → Settings**, **Email → Settings → Sending domain**, or
 **Settings → Connections → Email**, select the client organization. An owner or
 developer also needs write access to that organization. Other campaign authors
 use its saved sending identities.
@@ -204,7 +377,7 @@ use its saved sending identities.
 4. **Save sender.** Sender `news` on `client.com` sends as `news@client.com`.
    Set the client's display name and an existing reply mailbox such as
    `help@client.com`. ACS sends outbound mail; it does not create receiving
-   mailboxes. `no-reply` is optional. The verified sender appears in Campaigns.
+   mailboxes. `no-reply` is optional. The verified sender appears in Email.
 
 A client send requires that organization's ready transport and verified sender.
 It never falls back to the operator's Graph/SMTP mailbox. ACS sets the display
@@ -238,7 +411,7 @@ endpoint or per-installation redirect URL. Local capture works without Azure;
 connecting Microsoft does not switch test emails to external delivery.
 
 **Initial installation integration remains planned.** The intended onboarding
-is to configure cluster email during installation and leave Campaigns ready to
+is to configure cluster email during installation and leave Email ready to
 manage client domains. Azure deployment authorization should be reused where
 possible, with a durable cluster identity and narrowly scoped access; deployment
 CLI credentials must not be copied into the cluster. The current implementation
@@ -261,9 +434,10 @@ Protocol references: [device authorization flow](https://learn.microsoft.com/en-
 
 ## Storefront newsletter signups
 
-In **Campaigns → Audiences**, open the client's audience and choose **Storefront
-signups → Connect a signup form**. Select its deployable, a published welcome
-template, and the client's sender. Write the sentence the visitor will agree to,
+In **Email → Audiences**, open the client's audience and choose **Signup forms → Connect a signup form**. Select its deployable.
+A published welcome template is optional for an audience that does not require
+confirmation; leave it empty when an automation sends the welcome. Select the
+client's sender when a welcome template is chosen. Write the sentence the visitor will agree to,
 then enable the connection. All resources must belong to the same organization.
 An audience is a marketing list, not a group granting access to MemQL.
 
@@ -284,10 +458,20 @@ remain selected while turning an existing connection off.
 
 The server derives the organization, audience, sender and live store binding.
 Form fields cannot override them. Storefront previews with a different store
-binding are refused. The current implementation uses **single opt-in**: checking
-the box records consent and enrolls the address; it does not prove control of
-the mailbox with a confirmation link. Previously unsubscribed, bounced,
-complained-about or suppressed addresses are not silently resubscribed.
+binding are refused. An audience chooses **No confirmation** or **Require
+confirmation**. With no confirmation, an affirmative signup records consent
+and enrolls a subscribed recipient. With confirmation required, the recipient
+is `pending`: no consent grant or welcome is sent until the person confirms.
+Connect an active joined automation whose first step asks for confirmation;
+the connection has no separate welcome template. Imports and row-address rules
+also respect the audience's confirmation setting. Ordinary campaign sends and
+email rules never mail a pending member.
+
+Unsubscribed, bounced, complained-about or suppressed addresses are not
+silently resubscribed. After a confirmation run has expired, a new affirmative
+form submission can start a fresh pending membership and confirmation. A retry
+of the original submission cannot do so. Renewed membership changes `joinedAt`;
+its automation enrollment and send receipts are distinct from the earlier run.
 
 Repeated submissions converge on one signup and one intended welcome per
 normalized address and audience, even across deployables and worker replicas.
@@ -371,14 +555,19 @@ same moment. A signup that gets its locks but is under them for more than thirty
 seconds starts no further write and gives the same answer; a write already under
 way when its time runs out, or when the visitor leaves, is waited for (up to ten
 seconds, past the database's own eight-second limit on a statement) and commits
-while the locks are still held, never after them. Consent is written first and
-keyed by the signup, so asking again is safe at every step. If PostgreSQL ends the
+while the locks are still held. Ten seconds is a wait, not a cancel: the database
+driver sends the server no cancellation, so a write still running when the wait
+ends (it takes more than one statement, or a stalled network, to outlast the
+database's own limit) is given up on, the locks are given back, and the server may
+still commit it afterwards, beside whichever signup has taken the locks since.
+Consent is written first and keyed by the signup, so asking again is safe at
+every step. If PostgreSQL ends the
 gate's session (an administrator, a failover) the signup finds out before its next
 write and makes none. A pod whose gate connections are all held (four signups,
 welcomes or other gates at the same moment) makes the next signup wait for one, up
 to the same six seconds, and then give the same answer.
 
-Consent is stored before a new recipient becomes sendable. The accepted record
+For audiences without confirmation, consent is stored before a new recipient becomes sendable. The accepted record
 captures the storefront, original mailbox, consent wording and revision, and
 published welcome content. Editing the template later does not rewrite that
 welcome. Changing the recipient's mailbox blocks the queued welcome instead of
@@ -386,19 +575,28 @@ redirecting it to an address that did not consent. Current authority, sender
 availability and suppression are checked again before sending.
 
 A welcome takes the storefront's lock, the audience's and its own send receipt's
-together, in that order, in one transaction on one connection, and spends at most
-the send's timeout plus thirty seconds under them. A lock that is busy at any point
+together, in that order, in one transaction on one connection. It holds them for
+at most the send's timeout plus thirty seconds for its reads (two minutes at most),
+and a send that began can hold them past that for up to twenty seconds: an attempt
+receipt begun at the phase boundary can take ten seconds, followed by up to ten
+seconds to write the welcome's outcome. The receipt that says an attempt began and the outcome are
+written only if the locks are still held, and a write begun is waited for rather
+than cut; the one exception is the ten-second wait described under signups, which a
+write can outlast without the server ending it. A lock that is busy at any point
 before the send begins, including the email provider's own (Azure's send receipt),
 is "nothing attempted, try later": the welcome stays pending, nothing is marked
 blocked, and the next worker pass sends it. So is a welcome whose time under its
-locks runs out, or whose worker stops, before its send begins, and one whose
-storefront could not be read: only a send that began ends a welcome, and its
-outcome is recorded even when the send outlasts the welcome's time. A welcome is
-marked blocked only for a reason of its own (the newsletter or its storefront was
-turned off, the reviewed template cannot be read, the send was refused).
+locks runs out, or whose worker stops, before its send begins, one whose storefront
+could not be read, and one whose send hit a database error before it began, reading
+the template, the recipient, the sender or the do-not-mail list, or recording that
+an attempt began: only a send that began ends a welcome, and its outcome is
+recorded even when the send outlasts the welcome's time. A welcome is marked
+blocked only for a reason of its own (the newsletter or its storefront was turned
+off, the saved copy of the reviewed template cannot be read, the send was refused,
+for instance because the recipient's address changed or the sender was retired).
 
 **Recent welcomes** shows the latest 50 outcomes, read when the audience opens
-or **Refresh** is selected. A rate limit or a busy lock leaves mail pending for a
+and updates on its own. A rate limit or a busy lock leaves mail pending for a
 later worker pass. A blocked welcome shows its reason; after resolving it, **Check again**
 rechecks that exact saved outcome. An attempt with a lost provider response is
 `uncertain` and is never automatically submitted again. `sent` means the
@@ -417,6 +615,60 @@ rechecking uses `campaignRetryNewsletterWelcome`, both with saved revisions.
 Use the same audience in multiple campaigns, with independent templates and
 schedules. The automatic welcome is separate from those campaigns.
 
+## Email automations
+
+An automation starts when someone joins an audience or confirms their membership.
+Build a sequence of **Send email**, **Wait** and **Ask for confirmation** steps.
+It holds 1–20 steps and at least one email. A wait lasts one hour to 365 days.
+Confirmation waits 1–30 days (seven by default), uses a published template
+containing `{{confirmUrl}}`, and may appear once. A joined automation for an
+audience requiring confirmation starts with that step; a confirmed trigger
+does not ask for confirmation again. Every audience, template and sender must
+belong to the automation's organization.
+
+Save a draft and resolve its card-level issues before turning it on. Changes
+require the saved revision; an active automation is paused before editing.
+**Describe** turns a short description into an editable draft using the
+organization's existing catalog. Missing resources remain explicit issues.
+Describing saves nothing and turns nothing on.
+
+The campaign drain enrolls members joining or confirming after activation, then
+advances due steps. It borrows the recorded owner's current authority, uses
+fresh reads and coordinates across replicas with shared locks. Each membership
+is identified by its recipient and `joinedAt`; each email step has a stable
+receipt, so another replica cannot submit it again. A changed address, renewed
+membership, opt-out or suppression exits an old enrollment. Three conclusive
+preflight failures mark it failed and expose the reason. Busy locks, rate limits
+and uncertain reads wait without consuming those attempts.
+
+Pausing stops advancement and keeps progress. Archiving retires open enrollments.
+A confirmation timeout exits with “not confirmed.” A valid late confirmation
+reopens that same enrollment after its confirmation step while the automation
+is active. A separate renewed opt-in creates a new membership instead.
+
+## Email links
+
+The recipient pages are token-authenticated HTTP exceptions approved on
+2026-10-11. They need no MemQL sign-in and use the configured public API origin:
+
+| Page | Behavior |
+|---|---|
+| `/email/confirm` | GET displays the choice; POST records confirmation and consent, then wakes the matching journey. |
+| `/email/preferences` | GET displays current choices; POST changes the subscription. Unsubscribing applies organization-wide suppression. Resubscribing may lift only an unsubscribe suppression; bounce and complaint suppression remain. |
+| `/email/view` | GET renders the exact sent template revision without tracking. If it is unavailable, the page says so. |
+
+Opening a confirmation or preferences link never changes a subscription.
+Confirm links expire after 30 days; expired links record nothing. Preferences
+and view links have no time expiry, but still validate current organization and
+recipient identity. Tokens are purpose-bound and encrypted with AES-256-GCM,
+using the unsubscribe signing key and its previous-key ring. Key rotation keeps
+links valid while their key remains in that ring. Forwarding a link gives its
+holder that link's authority, so treat recipient links as private.
+
+The one-click unsubscribe endpoint retains its existing RFC 8058 behavior.
+Confirmation, preferences and unsubscribe share mailbox coordination so
+concurrent choices cannot clear an opt-out in another audience accidentally.
+
 ## Repeating campaigns
 
 Open a campaign and choose **Repeat → Set up repeating sends**. Select the first
@@ -432,7 +684,7 @@ freezes that copy in a separate campaign/send job. Later edits cannot change an
 already queued occurrence. The audience is resolved when that occurrence runs,
 and consent and suppression are checked before delivery.
 
-Each occurrence appears in Campaigns with its scheduled date in the name and its
+Each occurrence appears in Email with its scheduled date in the name and its
 own delivery history. The original draft can still be sent as a one-off; that is
 an additional campaign, independent of its repeating schedule.
 
@@ -456,8 +708,22 @@ occurrence's job and delivery records are never reset.
 ## Retrying event emails
 
 Email rules supply a stable identifier automatically for each event and recipient.
-Their firing reports count suppressed and replayed sends as skipped, and show
-uncertain outcomes as refusals.
+Their firing reports count suppressed and replayed sends as skipped, rate-limited
+sends as deferred, and uncertain outcomes as refusals. Audience rules follow
+every recipient page up to the 200-recipient firing limit. A missing or repeated
+continuation is an error, never a claim that the audience ended.
+
+A rate-limited single send with a request identifier records a pending delivery
+and becomes due after one minute. The campaign drain retries it with the same
+owner and receipt, rechecking authority, subscription, suppression, template
+publication and sender readiness. A busy gate or undecidable read leaves it
+pending. A conclusive pre-send refusal records a failure; a provider outcome
+that is uncertain is never submitted again.
+
+Rules aimed at cluster roles use the operational outbox. They require a
+published template and render its HTML and plain text for the current cluster
+recipient. This lane carries no marketing footer, tracking or recipient links;
+it does not permit an arbitrary external address.
 
 An email rule fires once, on the replica where its triggering write happened, and
 the limits its runs draw on (10 concurrent runs and the automation execution
@@ -481,11 +747,26 @@ and delivery records before deciding whether another message is warranted.
 This prevents duplicate submissions; it does not guarantee mailbox delivery.
 Requests that omit `requestId` retain the existing per-invocation behavior.
 
+**Each request has its own delivery row.** A send made with a `requestId` is
+recorded on a delivery row keyed by that request and the recipient, and the row
+names the request, the template and the sender (`requestId`, `templateId`,
+`senderIdentityId`) beside the outcome. A welcome, a journey step and a rule's
+send to the same person are three independently inspectable rows.
+A retry of the same request writes a new version of its own row. A send made
+without a `requestId` keeps the row it always had, one per rule and recipient (or
+per recipient when no rule is behind it), and still overwrites its earlier record.
+A campaign's deliveries are unchanged: one row per campaign and recipient.
+
 Suppression and preflight refusals make no external send attempt and remain
 retryable, and so does a send whose coordination lock was busy: the attempt is
 recorded only after every lock the send needs has been taken, including the email
 provider's, so a busy lock leaves no record that an attempt began and the same
-request, made again, goes out. An email rule that finds the lock busy tries again
+request, made again, goes out. It is recorded only while the send still holds its
+own lock: if PostgreSQL ended the session that holds it, the send records nothing,
+contacts nothing and answers that its lock was lost, and the same request, made
+again, goes out. A database error while a send reads what it needs, or while it
+records the attempt, leaves it undecided in the same way: nothing was attempted, and
+a welcome stays pending instead of being marked blocked. An email rule that finds the lock busy tries again
 within its firing after one, two and four seconds. If it is still busy it reports a
 refusal ("nothing was sent to this recipient; the firing can be made again"),
 stops an audience rule at that recipient, and for a rule that fires when a row is
@@ -503,7 +784,7 @@ generated by sign-in, invitations, campaigns and email rules. Messages are store
 in the installation's shared storage, encrypted with its existing master key;
 capturing on one node and reading on another works without a separate mail server.
 
-The inbox shows the latest 100 messages from the past seven days. Refresh it after
+The inbox shows the latest 100 messages from the past seven days and updates on its own after
 triggering mail, or return focus to the app. Open a message to inspect its sender,
 recipient and body, and follow its verification link. Previews remove scripts,
 remote images and styles, so opening test mail does not load tracking pixels.
@@ -709,10 +990,11 @@ something you have to do in three places to avoid silent truncation.
 ### Idempotency is the ledger, not a retry flag
 
 `v1:campaigns:delivery` has one row per (campaign, recipient), at a
-deterministically derived id. The worker's batch is *"roster members with no
-delivery row, plus rows still `pending` whose retry is due"*. A recipient that
-reached `sent`, `skipped` or terminal `failed` is simply not in the next
-batch.
+deterministically derived id. (A single send outside a campaign has one per
+(request, recipient); see [Retrying event emails](#retrying-event-emails).)
+The worker's batch is *"roster members with no delivery row, plus rows still
+`pending` whose retry is due"*. A recipient that reached `sent`, `skipped` or
+terminal `failed` is simply not in the next batch.
 
 So a resumed send, a restarted process, a paused-and-resumed campaign and a
 claim lost to a dead replica all converge on the same behaviour, and none of
@@ -774,6 +1056,40 @@ compliance failure dressed as hygiene.
 The endpoint is HTTP, which is a documented exception to the gRPC-first rule
 for the same reason `POST /inbound/{source}` is: the caller is the recipient's
 mail client, and there is no gRPC version of that conversation.
+
+### Confirmation, preferences, and viewing an email
+
+Email templates can use `{{confirmUrl}}`, `{{preferencesUrl}}`, and `{{viewUrl}}`.
+The confirmation link is present only in a confirmation message. Each opens a
+small recipient page on the same origin as the unsubscribe link. These three
+HTTP exceptions were owner-approved on 2026-10-11: a recipient's browser follows
+an ordinary email link and cannot speak the MemQL stream protocol.
+
+| Page | What it does |
+| --- | --- |
+| `GET /email/confirm` | Shows whether confirmation is still needed. |
+| `POST /email/confirm` | Records consent, confirms a pending subscription, and wakes waiting automations. |
+| `GET /email/preferences` | Shows the subscription and its available choices. |
+| `POST /email/preferences` | Unsubscribes, confirms a pending subscription, or subscribes again after an organization opt-out. |
+| `GET /email/view` | Renders the exact saved template revision used for the message, without tracking. |
+
+GET never changes consent, so email scanners cannot confirm or unsubscribe
+someone. Forms use POST. A bounce, complaint, or cluster-wide suppression cannot
+be undone from preferences. Subscribing again lifts only that organization's
+opt-out; a later unsubscribe blocks mail again. Confirmation, preference changes,
+and one-click opt-outs serialize across replicas and shared mailbox memberships.
+
+Each page's token is encrypted and authenticated for that page alone. A view
+token cannot confirm a subscription. The recipient's current organization and
+mailbox must still match the token. A confirmation received after an automation's
+confirmation timeout resumes after that step only while the automation is active.
+It keeps the same enrollment and cannot revive an earlier audience membership.
+Subscribing again from preferences records a new membership for future enrollments.
+Retrying a confirmation is safe if the subscription was saved before its automation
+could resume. Confirmation links expire after 30 days;
+preferences and view links do not expire. A missing saved message returns an
+unavailable page. A failed write returns `503` with `Retry-After: 30`, so the
+person can safely retry the same link.
 
 ### Rotating the unsubscribe signing key
 
@@ -1098,6 +1414,10 @@ campaign body and there is not going to be:
 | `{{campaignName}}` | the campaign's name |
 | `{{accountName}}` | the tied account's name; **empty when untied**, which is the ordinary case |
 | `{{fields.<key>}}` | one key of the recipient's `fields` map, as imported |
+| `{{unsubscribeUrl}}` | the recipient's one-click unsubscribe URL |
+| `{{preferencesUrl}}` | the recipient's subscription choices |
+| `{{confirmUrl}}` | the recipient's confirmation page |
+| `{{viewInBrowserUrl}}` | the sent template revision in a browser |
 
 **The HTML and text parts escape differently, on purpose.** Every substituted
 value is HTML-escaped on the HTML path and not on the text path, because the
@@ -1105,6 +1425,15 @@ text part is not markup and escaping it would show `&amp;` to a reader.
 `displayName` and every `fields.*` value are recipient-supplied — an imported
 CSV is untrusted input — so that split is a security property, not a
 formatting one.
+
+Recipient link tags belong in a complete link destination or as a standalone
+visible URL. They cannot be embedded in an address, a subject, an HTML attribute
+fragment, a hidden field or a link label. Formatting cannot bypass this boundary.
+A template with a usable `{{unsubscribeUrl}}` link in its HTML gets no second
+HTML footer; its text part needs its own standalone URL to omit the text footer.
+The default footer names the sender's display name, then the organization name,
+then “this mailing list.” It includes subscription choices and a browser view
+when available. The List-Unsubscribe headers remain present.
 
 **An unknown tag stays literal in the body.** It is not an error and it is not
 blanked, because blanking it would delete the evidence of the typo. The way to
@@ -1116,7 +1445,7 @@ tag it could not resolve.
 ## Testing a campaign with an audience
 
 Create a separate audience containing your reviewers’ email addresses and merge
-fields. In **Campaigns → Settings → Testing audience**, choose the organization,
+fields. In **Email → Settings → Testing**, choose the organization,
 select that audience and save. This is shared cluster configuration, not a browser
 preference. Each organization has its own selection; an active audience from a
 different organization is refused. Choose **None selected** and save to disconnect.
@@ -1167,7 +1496,7 @@ A deliberate new test uses a new request id. The reply identifies `testRunId`; u
 ### Existing single-address preview API
 
 The existing `campaignTestSend` DSL builtin below remains a render-only preview
-for existing callers. It is not used by the Campaigns app’s **Send test** action
+for existing callers. It is not used by the Email app’s **Send test** action
 and does not verify the normal queue or delivery ledger. Use the audience-based
 operation above for execution testing.
 
@@ -1202,7 +1531,7 @@ remember.
 builtin campaignStats(campaignId: "<id>")
 ```
 
-Every bucket that can be an exact count is one, at any audience size:
+The server returns these counts and preserves their completeness:
 
 | Group | Buckets |
 |---|---|
@@ -1215,14 +1544,16 @@ Every bucket that can be an exact count is one, at any audience size:
 
 They are computed server-side from the delivery ledger (status plus
 `skipReason`), the campaign's own consent events, and its engagement events.
-This replaces counting a page of rows in a browser, which under-reported every
-campaign past the page bound and did so silently.
+If a count reaches the engine's source window, the response carries
+`atLeast: {"sent": true}` (or the corresponding dotted field, such as
+`"opens.total"`). That number is a lower bound, displayed with ≥. A missing
+marker means the scan proved exhaustion. Small counts retain their exact path.
+Do not calculate an exact delivered figure or percentage from bounded inputs;
+`skipped.other` is omitted when subtracting bounded counts could invent a total.
+The send preflight walks the full roster when its capacity count is bounded,
+so the frozen `recipientCount` remains exact.
 
-`skippedCount` also now lands on the campaign row itself, where it always
-should have been: the worker has computed it per job since the sending engine
-shipped and had nowhere on the campaign to put it, so the number an operator
-most needs — the gap between the audience and what actually left — was visible
-only on a row a browser cannot read.
+`skippedCount` is also stored on the campaign row.
 `recipientCount - sentCount - skippedCount - failedCount` is what is still
 outstanding.
 
@@ -1232,8 +1563,8 @@ outstanding.
 bounded read of the engagement rows, and a read that comes back *at* its bound
 is a truncation. Reporting the folded number anyway would print a unique count
 that is quietly a floor, on the one campaign large enough that the figure
-mattered. So at the bound the answer is `unmeasured`, and the totals — which
-are exact counts — are still there.
+mattered. At the bound the answer is `unmeasured`; totals remain available
+with their own `atLeast` markers when bounded.
 
 **There is no soft-bounce figure per campaign at all.** Not a zero: the field
 is absent. Soft bounces are recorded and deliberately do not suppress, but
@@ -1291,8 +1622,8 @@ transport says accepted and a bounce arrives later.
 
 ## Running a send
 
-1. Author the audience, template and campaign in the Campaigns app
-   (Integrations → Campaigns).
+1. Author the audience, template and campaign in the Email app
+   in Email.
 2. Mark the template **ready**. A draft is refused: half-written copy
    delivered to an audience is unrecallable, and this is the cheapest guard
    against it.
@@ -1640,7 +1971,7 @@ Still perfectly reasonable, and unchanged:
 | Import reports `invalid` for every row | The header is missing or does not carry an `email` column. There is no positional import: the column mapping IS the header. |
 | Import refused and nothing was written | The resulting roster would exceed `MEMQL_CAMPAIGNS_MAX_AUDIENCE`. It refuses whole rather than truncating; split the file or raise the ceiling if you mean it. |
 | A merge tag appears literally in the delivered mail | It is not in the closed set, or `{{fields.<key>}}` names a column the import did not create. Run `campaignTestSend` — it returns every tag it could not resolve. |
-| `campaignStats` says opens are `unmeasured` | The bounded engagement read came back at its bound, so a unique count would be a floor presented as a total. The `total` figures beside it are still exact counts. |
+| `campaignStats` says opens are `unmeasured` | The bounded engagement read came back at its bound, so a unique count would be a floor presented as a total. The `total` figures beside it carry `atLeast` when bounded. |
 | Opens and clicks are all zero | `trackOpens` / `trackClicks` are off on that campaign, or the message went out as text only. Tracking is the HTML part only, by design. Also check `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is externally reachable — it is the origin the pixel and redirects are built from. |
 | Everything `skipped` | The cluster suppression list matched. Browse `v1:campaigns:suppression` as the cluster owner. |
 | Recipient says the unsubscribe link does not work | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is not externally reachable, or the key that signed it has been retired by two rotations. Check the node log for `refused an unsubscribe link signed by a key this node no longer holds`; if the retired value can still be recovered, putting it back in `_PREVIOUS` revives those links. See [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
@@ -1671,3 +2002,29 @@ resource does not move old operations: they belong to the original resource.
 No message body, mailbox address, or access key appears in the receipt status
 response. Disconnecting email stops new sends and pauses reconciliation until
 the original resource is connected again.
+
+
+## The Email app
+
+Email brings Campaigns, Automations, Audiences and Templates into one app.
+Overview shows recent sends and activity. Inbox captures messages for owners
+and developers when the cluster uses capture mode; Logs follows the reader's
+access. Settings holds the sending domain, senders, testing audience and
+package configuration for each organization.
+
+Use **Add a campaign** to choose an audience, template, sender and schedule.
+**Create new template** opens the editor and keeps the campaign's answers while
+you work. Templates and layouts have their own pages, formatted and plain-text
+previews, and publication or archive actions.
+
+Automations send a sequence when someone joins an audience or confirms a
+subscription, or send one email when a MemQL event occurs. Build the sequence
+as steps, or describe it to produce an unsaved proposal. **Save draft** keeps
+that proposal; **Turn on** asks for confirmation before it starts sending.
+Each live sequence shows its enrolled, waiting and finished counts. Pause stops
+new sending; retirement keeps the automation's history.
+
+Audiences distinguish subscribers from the whole list, including people waiting
+to confirm. Add people by hand or import a CSV file; the import report stays on
+screen until you finish reviewing it. Connect a signup form from the audience's
+page. A confirming audience uses an automation to ask for confirmation.

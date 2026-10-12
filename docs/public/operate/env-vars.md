@@ -630,13 +630,13 @@ site, still carries runtime settings and still records traffic. Full context:
 
 All in `component/server/memqlws/env.go`:
 
-| Variable                              | Default            |
-|---------------------------------------|--------------------|
-| `MEMQL_WS_DIAL_TIMEOUT_MS`            | `5000`             |
-| `MEMQL_WS_WRITE_TIMEOUT_MS`           | `10000`            |
-| `MEMQL_WS_MAX_CONCURRENT_REQUESTS`    | `4`                |
-| `MEMQL_WS_MAX_MESSAGE_BYTES`          | `5242880` (5 MB)   |
-| `MEMQL_WS_PING_INTERVAL_MS`           | `30000`            |
+| Variable                              | Default             |
+|---------------------------------------|---------------------|
+| `MEMQL_WS_DIAL_TIMEOUT_MS`            | `5000`              |
+| `MEMQL_WS_WRITE_TIMEOUT_MS`           | `10000`             |
+| `MEMQL_WS_MAX_CONCURRENT_REQUESTS`    | `4`                 |
+| `MEMQL_WS_MAX_MESSAGE_BYTES`          | `33554432` (32 MiB); a session that has not signed in is held to 5 MiB at most |
+| `MEMQL_WS_PING_INTERVAL_MS`           | `15000`             |
 
 ---
 

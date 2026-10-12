@@ -1,3 +1,4 @@
+import { versionOrder } from "@znasllc-io/memql-sdk-core/client";
 import type { ObservationRow, ValidationSummary } from "./rows";
 import { axesPhrase, type Verdict } from "./words";
 
@@ -149,7 +150,7 @@ function sameTarget(a: FeedbackTarget, b: FeedbackTarget): boolean {
 function newest<T extends { createdAt: string }>(entries: readonly T[]): T | null {
   let best: T | null = null;
   for (const entry of entries) {
-    if (best === null || entry.createdAt >= best.createdAt) best = entry;
+    if (best === null || (versionOrder(entry.createdAt, best.createdAt) ?? 0) >= 0) best = entry;
   }
   return best;
 }

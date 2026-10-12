@@ -46,12 +46,7 @@ export function GitHubAccountsSettings({ accounts, packages, feed, connectResult
   return <section className="os-settings os-settings-wide deployable-settings" aria-label="Connection settings">
     {header ?? <Head title="Settings" />}
     <section className="os-field-group" aria-label="GitHub accounts settings">
-      <div className="os-head">
-        <Subhead>GitHub Accounts</Subhead>
-        <div className="os-head-actions">
-          {app.status?.configured !== false ? <AddButton label="Add GitHub account" disabled={connect.busy} aria-busy={connect.busy} onClick={() => { revoke.clear(); void connect.connect(returnPath); }} /> : null}
-        </div>
-      </div>
+      <Subhead actions={app.status?.configured !== false ? <AddButton label="Add GitHub account" disabled={connect.busy} aria-busy={connect.busy} onClick={() => { revoke.clear(); void connect.connect(returnPath); }} /> : null}>GitHub Accounts</Subhead>
       <ConnectReturnNotice result={connectResult} />
       {connect.refusal ? <ProblemNotice problem={connect.refusal} tone="error" /> : null}
       {revoke.remoteRevoked === false ? <Notice tone="warn" sentence="Disconnected here, but GitHub did not confirm the authorization ended." next="Remove the authorization under Applications in your GitHub settings." /> : null}

@@ -76,7 +76,7 @@ export function GitHubAccountDetails({ account, sourceNames, onBack, busy, refus
       {page.kind === "account" ? <>
         <Panel label="Connection"><Subhead>Connection</Subhead><Facts><Fact label="Host" value={account.host} /></Facts></Panel>
         <Panel label="Organizations">
-          <div className="os-head"><Subhead>Organizations</Subhead><div className="os-head-actions"><AddButton label="Add organization" onClick={() => open({ kind: "add" })} /></div></div>
+          <Subhead actions={<AddButton label="Add organization" onClick={() => open({ kind: "add" })} />}>Organizations</Subhead>
           <div className="os-record-slot">
             {loading ? <RecordListSkeleton label="Loading organizations" /> : <RecordList as="ul" label="Organizations">{linked.map(connection => {
               const installation = access.installations.find(row => row.id === connection.installationId);
@@ -94,7 +94,7 @@ export function GitHubAccountDetails({ account, sourceNames, onBack, busy, refus
           {access.refusal ? <><ProblemNotice problem={access.refusal} tone="error" /><Button onClick={() => void access.read()}>Try again</Button></> : null}
         </Panel>
       </> : <Panel label="Available organizations">
-        <div className="os-head"><Subhead>Organizations</Subhead><div className="os-head-actions"><InstallLink compact installUrl={app.status?.installUrl ?? ""} onFollow={() => { followedInstall.current = true; }} /></div></div>
+        <Subhead actions={<InstallLink compact installUrl={app.status?.installUrl ?? ""} onFollow={() => { followedInstall.current = true; }} />}>Organizations</Subhead>
         <div className="os-record-slot">
           {loading ? <RecordListSkeleton label="Loading organizations" /> : <RecordList as="ul" label="Available organizations">{available.map(installation => <RecordRow key={installation.id}
             icon={<Building2 size={18} aria-hidden />} name={installation.login} state={installation.suspended ? "Suspended" : "Available"}

@@ -2271,7 +2271,7 @@ A query is list-returning when its `shape` projects a row set
   comparison applies only when the arg is present, so the query can
   still return the full set when it is omitted.
 - **Aggregate — EXEMPT.** The query carries a `count` clause. It returns
-  a `{count: N}` number, not rows.
+  a `{count: N, atLeast: B}` number, not rows.
 - **Bounded list — COMPLIANT.** The query declares `paginate` (an
   explicit window) or `sort` (an explicit ordering — "give me the
   latest N").

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { CallHistory } from "../routing/CallHistory";
 import { Button, EmptyState, Caption, Chip, Chips, CopyField, Fact, Facts, Notice, Panel, Subhead, Switch, RecordList, RecordRow } from "../../../kit";
 import { formatFreshness, formatMoment } from "../../../kit/format";
+import { InPlaceAsk } from "../../../kit/pressHold";
 import { uninstallCommand, workerClusterUrl, type InstallPlatform } from "../addMachine/install";
 import { roundTripFigure } from "../addMachine/flow";
 import { isWorkerOnline } from "../online";
@@ -463,7 +464,7 @@ function RemoveControl({
     // puts the page in. Two controls answering to one accessible name is a
     // screen reader saying "Remove Studio mini, group" and then "Remove Studio
     // mini, button", which is the same phrase twice for two different things.
-    <div className="os-fleet-confirm" role="group" aria-label={`Removing ${label}`}>
+    <InPlaceAsk className="os-fleet-confirm" role="group" aria-label={`Removing ${label}`}>
       {/* WHAT THIS SENTENCE SAYS IS NOW TRUE. It has always claimed the token
           stops working immediately; until epic memql#5327 the shell made one
           call, which revoked the registration and left the credential active,
@@ -511,6 +512,6 @@ function RemoveControl({
           Keep it
         </Button>
       </div>
-    </div>
+    </InPlaceAsk>
   );
 }

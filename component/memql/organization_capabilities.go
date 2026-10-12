@@ -37,7 +37,7 @@ func (e *MemQLEngine) ResolveOrganizationCapabilities(ctx context.Context, known
 		accounts[BareShortId(account)] = true
 	}
 	pairs := map[auth.VerbResource]bool{
-		{Verb: auth.VerbRead, Resource: "app:campaigns"}:     true,
+		{Verb: auth.VerbRead, Resource: "app:email"}:         true,
 		{Verb: auth.VerbRead, Resource: "app:deployables"}:   true,
 		{Verb: auth.VerbRead, Resource: auth.ResourceData}:   true,
 		{Verb: auth.VerbCreate, Resource: auth.ResourceData}: true,

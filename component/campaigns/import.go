@@ -91,9 +91,15 @@ const (
 
 // blobReader is the read half of object storage. Its own narrow interface
 // rather than a dependency on component/edge's BlobClient, because this
-// package needs exactly one method and a test substitutes an in-memory map.
+// package needs two methods and a test substitutes an in-memory map.
+//
+// DownloadWithLimit is for a reader that knows the most it can use (a picture
+// in an email is at most a megabyte): an object over the limit is an error and
+// is never read into memory, which Download's own ceiling is too high to
+// promise.
 type blobReader interface {
 	Download(ctx context.Context, container, objectName string) ([]byte, error)
+	DownloadWithLimit(ctx context.Context, container, objectName string, maxBytes int64) ([]byte, error)
 }
 
 // importResult is the reply. Counts plus a bounded sample, so the operator's
@@ -141,7 +147,11 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 		return nil, errors.New("campaigns.importRecipients: no caller identity; an import is always run by somebody")
 	}
 
-	// The bytes, under the CALLER's actor from the first read to the last.
+	// The artifact and the file row it names are read under the CALLER's actor,
+	// so a file the caller cannot see is not found. The bytes are then fetched with
+	// the node's own storage credential (it has no notion of a caller) at the
+	// blobUrl that row records: that trusts a row the caller owns, as the
+	// Library's download route does.
 	ref, refusal, err := w.store.LibraryFileForArtifact(ctx, artifactID)
 	if err != nil {
 		return nil, fmt.Errorf("campaigns.importRecipients: %w", err)
@@ -217,12 +227,23 @@ func (w *Worker) handleImportRecipients(ctx context.Context, args map[string]any
 	// same for all of them and reading it per row would be one query per
 	// address. Empty is the ordinary answer and stamps nothing.
 	accountID := w.store.AudienceAccountID(ctx, audienceID)
+	audience, _, err := w.store.AudienceByID(ctx, audienceID)
+	if err != nil {
+		return nil, err
+	}
+	subscription := "subscribed"
+	if audience.Confirmation == "required" {
+		subscription = "pending"
+	}
 	for _, row := range pending {
 		recipientID := id.NewShortId()
-		if err := w.store.AddRecipient(ctx, recipientID, audienceID, row.normalized, row.displayName, importSourceValue, accountID, row.fields); err != nil {
+		if err := w.store.AddRecipient(ctx, recipientID, audienceID, row.normalized, row.displayName, importSourceValue, accountID, subscription, row.fields); err != nil {
 			return nil, fmt.Errorf("campaigns.importRecipients: adding %s: %w", redactAddress(row.normalized), err)
 		}
 		result.Added++
+		if subscription == "pending" {
+			continue
+		}
 		// A consent GRANT per added recipient, source "import". The stream is
 		// what an export answers "when did this person opt in, and how" from,
 		// and an import that added rows without one leaves every imported
@@ -491,22 +512,44 @@ func plausibleAddress(normalized string) bool {
 // blob storage at all. Unconfigured storage is therefore a per-call refusal,
 // not a boot failure.
 func (w *Worker) readBlob(ctx context.Context, blobURL, owner string) ([]byte, error) {
-	key := blobStorageKey(blobURL)
-	if key == "" {
-		return nil, errors.New("the file row records no storage location")
-	}
-	// The row is the caller's; the KEY must be its owner's too. This reads the
-	// key with the node's credential, so a row naming somebody else's object
-	// (one a client wrote before createLibraryFile was @serverOnly) would turn
-	// their list into the caller's audience. Judged as the exact key read.
-	if err := librarykey.CheckKey(key, owner); err != nil {
-		return nil, errors.New("the file is not stored in its owner's Library")
-	}
-	reader, container, err := w.objectStore(ctx)
+	reader, container, key, err := w.blobTarget(ctx, blobURL, owner)
 	if err != nil {
 		return nil, err
 	}
 	return reader.Download(ctx, container, key)
+}
+
+// readBlobUpTo is readBlob for a reader with a ceiling: a file of more than
+// maxBytes is an error, and no more than maxBytes (and one byte) is ever held.
+func (w *Worker) readBlobUpTo(ctx context.Context, blobURL, owner string, maxBytes int64) ([]byte, error) {
+	reader, container, key, err := w.blobTarget(ctx, blobURL, owner)
+	if err != nil {
+		return nil, err
+	}
+	return reader.DownloadWithLimit(ctx, container, key, maxBytes)
+}
+
+// blobTarget is where a file row's bytes are: the storage, its container and
+// the container-relative key, once the key is known to be under the row
+// owner's own Library prefix.
+func (w *Worker) blobTarget(ctx context.Context, blobURL, owner string) (blobReader, string, string, error) {
+	key := blobStorageKey(blobURL)
+	if key == "" {
+		return nil, "", "", errors.New("the file row records no storage location")
+	}
+	// The row is the caller's; the KEY must be its owner's too. This reads the
+	// key with the node's credential, so a row naming somebody else's object
+	// (one a client wrote before createLibraryFile was @serverOnly) would turn
+	// their file into the caller's audience or picture. Judged as the exact key
+	// read.
+	if err := librarykey.CheckKey(key, owner); err != nil {
+		return nil, "", "", errors.New("the file is not stored in its owner's Library")
+	}
+	reader, container, err := w.objectStore(ctx)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return reader, container, key, nil
 }
 
 func (w *Worker) objectStore(ctx context.Context) (blobReader, string, error) {

@@ -31,8 +31,11 @@ func trackingConfig() Config {
 func renderTracked(t *testing.T, c Campaign, tmpl Template) (text string, html string) {
 	t.Helper()
 	r := Recipient{ID: "r-1", Email: "someone@example.test", DisplayName: "Ada"}
-	opts := RenderOptions{Tracking: trackingConfig().trackingRenderFor(c, deliveryRowID(c.ID, r.ID))}
-	msg, err := renderMessage(c, tmpl, r, "https://api.example.test/unsubscribe?token=u2.abc", opts)
+	opts := RenderOptions{
+		Links:    MessageLinks{Unsubscribe: "https://api.example.test/unsubscribe?token=u2.abc"},
+		Tracking: trackingConfig().trackingRenderFor(c, deliveryRowID(c.ID, r.ID)),
+	}
+	msg, err := renderMessage(c, tmpl, r, opts)
 	if err != nil {
 		t.Fatalf("renderMessage: %v", err)
 	}
@@ -161,7 +164,7 @@ func TestAZeroTrackingRenderTracksNothing(t *testing.T) {
 		HTMLBody: `<a href="https://acme.test/spring">Shop</a>`,
 	}
 	r := Recipient{ID: "r-1", Email: "a@example.test", DisplayName: "Ada"}
-	msg, err := renderMessage(trackingCampaign(true, true), tmpl, r, "https://api.example.test/unsubscribe?token=x", RenderOptions{})
+	msg, err := renderMessage(trackingCampaign(true, true), tmpl, r, RenderOptions{Links: MessageLinks{Unsubscribe: "https://api.example.test/unsubscribe?token=x"}})
 	if err != nil {
 		t.Fatalf("renderMessage: %v", err)
 	}
@@ -171,6 +174,86 @@ func TestAZeroTrackingRenderTracksNothing(t *testing.T) {
 	}
 	if !strings.Contains(msg.HTMLBody, `href="https://acme.test/spring"`) {
 		t.Errorf("the authored link did not survive.\ngot: %s", msg.HTMLBody)
+	}
+}
+
+// TestLinkTagURLsAreNeverTracked: a message that links to its own unsubscribe,
+// preferences, view or confirm page does so directly. Substituting the tags
+// puts those URLs in the body before click tracking runs, so without the
+// exemption a body unsubscribe link would be wrapped in a tracked redirect: an
+// extra hop in the one link that has to work, and a click that is not
+// engagement counted as one.
+func TestLinkTagURLsAreNeverTracked(t *testing.T) {
+	links := messageTestLinks()
+	tmpl := Template{
+		ID: "t-1", Subject: "s", TextBody: "t",
+		HTMLBody: `<p><a href="{{unsubscribeUrl}}">Leave</a> <a href='{{preferencesUrl}}'>Manage</a> ` +
+			`<a href="{{viewUrl}}">View</a> <a href="{{confirmUrl}}">Confirm</a> ` +
+			`<a href="https://acme.test/shop">Shop</a></p>`,
+	}
+	c := trackingCampaign(false, true)
+	r := Recipient{ID: "r-1", Email: "someone@example.test", DisplayName: "Ada"}
+	opts := RenderOptions{Links: links, Tracking: trackingConfig().trackingRenderFor(c, deliveryRowID(c.ID, r.ID))}
+
+	msg, err := renderMessage(c, tmpl, r, opts)
+	if err != nil {
+		t.Fatalf("renderMessage: %v", err)
+	}
+
+	hrefs := anchorHrefs(t, msg.HTMLBody)
+	if len(hrefs) != 5 {
+		t.Fatalf("want the five links the template wrote and no footer, got %v", hrefs)
+	}
+	for i, want := range []string{links.Unsubscribe, links.Preferences, links.View, links.Confirm} {
+		if hrefs[i] != want {
+			t.Errorf("link %d = %q, want the direct URL %q", i, hrefs[i], want)
+		}
+	}
+	if !strings.HasPrefix(hrefs[4], "https://api.example.test"+TrackingClickPath) {
+		t.Errorf("the shop link = %q, want it tracked", hrefs[4])
+	}
+}
+
+// TestRewriteLinksLeavesKeptHrefsExactlyAsWritten: the exemption compares the
+// href's value as a browser reads it, so an href spelled with entities is
+// still recognised, and an exempt href is not re-quoted or re-escaped.
+func TestRewriteLinksLeavesKeptHrefsExactlyAsWritten(t *testing.T) {
+	tr := trackingConfig().trackingRenderFor(trackingCampaign(false, true), "delivery-1")
+	const kept = "https://api.example.test/email/view?token=a&b=2"
+	keep := map[string]bool{kept: true}
+
+	for _, body := range []string{
+		`<a href="https://api.example.test/email/view?token=a&amp;b=2">v</a>`,
+		`<a href='https://api.example.test/email/view?token=a&amp;b=2'>v</a>`,
+		`<a HREF = "https://api.example.test/email/view?token=a&b=2">v</a>`,
+		`<a href=" https://api.example.test/email/view?token=a&amp;b=2 ">v</a>`,
+	} {
+		got, err := tr.rewriteLinks(body, keep)
+		if err != nil {
+			t.Fatalf("rewriteLinks: %v", err)
+		}
+		if got != body {
+			t.Errorf("a kept href was changed.\n  in:  %s\n  out: %s", body, got)
+		}
+	}
+
+	// Not on the list: tracked as ever, and so is a near miss.
+	for _, body := range []string{
+		`<a href="https://acme.test/shop">s</a>`,
+		`<a href="https://api.example.test/email/view?token=a&amp;b=3">v</a>`,
+	} {
+		got, err := tr.rewriteLinks(body, keep)
+		if err != nil {
+			t.Fatalf("rewriteLinks: %v", err)
+		}
+		if got == body || !strings.Contains(got, TrackingClickPath) {
+			t.Errorf("an href that is not exempt was left alone: %s -> %s", body, got)
+		}
+	}
+
+	// A nil list exempts nothing.
+	if got, _ := tr.rewriteLinks(`<a href="https://acme.test/shop">s</a>`, nil); !strings.Contains(got, TrackingClickPath) {
+		t.Errorf("a nil exemption list stopped tracking: %s", got)
 	}
 }
 

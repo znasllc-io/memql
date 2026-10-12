@@ -16,6 +16,7 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -93,6 +94,20 @@ func promoteFile(t *testing.T, store *EngineLibraryStore, ctx context.Context, o
 	return artifactId
 }
 
+// libraryGatePool opens the write-gate pool of one replica, shaped as its database
+// opens its own (database.NewGatePool, memql#6022): the file-version gate holds its
+// lock there, never on the request pool, whose sessions PostgreSQL ends after a
+// minute idle in a transaction -- the lock with them -- and which a gate refuses.
+func libraryGatePool(t *testing.T) func() *sql.DB {
+	t.Helper()
+	gates, err := database.NewGatePool(dbtest.DSN(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gates.Close() })
+	return func() *sql.DB { return gates }
+}
+
 func getArtifactContent(h *ArtifactHandler, ctx context.Context, artifactId string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodGet, "/artifacts/"+artifactId+"/content", nil).WithContext(ctx)
 	rec := httptest.NewRecorder()
@@ -109,8 +124,8 @@ func getArtifactContent(h *ArtifactHandler, ctx context.Context, artifactId stri
 // The write must be refused because blobUrl is not a value a client may
 // author at all, not because the key was hard to guess.
 func TestAClientCannotPointAFileRowAtAnotherUsersBlob(t *testing.T) {
-	eng, db := libraryDBEngine(t)
-	store := NewEngineLibraryStore(replicaFileExecutor{eng}, func() *sql.DB { return db.DB })
+	eng, _ := libraryDBEngine(t)
+	store := NewEngineLibraryStore(replicaFileExecutor{eng}, libraryGatePool(t))
 	blob := newFakeBlob()
 	h := NewArtifactHandler(ArtifactHandlerOptions{
 		Logger: quietLogger(), Bucket: "memql-library", Uploader: blob, Downloader: blob,
@@ -177,8 +192,8 @@ func TestAClientCannotPointAFileRowAtAnotherUsersBlob(t *testing.T) {
 // while the owner's own upload, whose stored ownerUserId is canonical and whose
 // path carries the bare id, still is.
 func TestTheContentRouteRefusesAForgedRowAlreadyInTheGraph(t *testing.T) {
-	eng, db := libraryDBEngine(t)
-	store := NewEngineLibraryStore(replicaFileExecutor{eng}, func() *sql.DB { return db.DB })
+	eng, _ := libraryDBEngine(t)
+	store := NewEngineLibraryStore(replicaFileExecutor{eng}, libraryGatePool(t))
 	blob := newFakeBlob()
 	h := NewArtifactHandler(ArtifactHandlerOptions{
 		Logger: quietLogger(), Bucket: "memql-library", Uploader: blob, Downloader: blob,

@@ -39,6 +39,7 @@
 @actor
 mutation audience createAudience {
   args {
+    confirmation enum("none", "required")
     audienceId   string!
     name         string!
     description  string
@@ -50,6 +51,7 @@ mutation audience createAudience {
       id: args.audienceId
       ownerUserId: actor.userId
       status: "active"
+      confirmation: args.confirmation ?? "none"
     }
   }
 }
@@ -69,12 +71,29 @@ mutation audience archiveAudience {
   }
 }
 
+/// Restore an archived audience: it returns to the campaign and automation pickers. Authorized
+/// organization peers may restore it; the engine preserves its original owner and records the
+/// current writer on the new version.
+@actor
+mutation audience restoreAudience {
+  args {
+    audienceId  string!
+  }
+  update {
+    id: args.audienceId
+    ownerUserId: actor.userId
+    status: "active"
+  }
+}
+
 /// Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the
 /// concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest)
 /// so the membership can be found by it (recipientInAudienceByDigest).
 @actor
+@createOnly("joinedAt")
 mutation recipient addRecipient {
   args {
+    subscriptionStatus enum("subscribed", "pending")
     recipientId  string!
     audienceId   string!
     email        string!
@@ -88,7 +107,8 @@ mutation recipient addRecipient {
     stamp {
       id: args.recipientId
       ownerUserId: actor.userId
-      subscriptionStatus: "subscribed"
+      subscriptionStatus: args.subscriptionStatus ?? "subscribed"
+      joinedAt: now
       source: args.source ?? "manual"
       // The mailbox's key: the SHA-256 of the address trimmed and lower-cased,
       // so the rows a mailbox holds are found by whoever holds the address
@@ -141,11 +161,15 @@ mutation template createTemplate {
     subject string!
     textBody string!
     htmlBody string
+    preheader string
+    layoutId string
+    sourceArtifactId string
+    document object
     accountId string!
     versionTime datetime!
   }
   insert {
-    accept { name, subject, textBody, htmlBody, accountId }
+    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, accountId }
     stamp {
       id: args.templateId
       createdAt: args.versionTime
@@ -167,11 +191,15 @@ mutation template updateTemplate {
     subject string!
     textBody string!
     htmlBody string
+    preheader string
+    layoutId string
+    sourceArtifactId string
+    document object
     status string!
     versionTime datetime!
   }
   update {
-    accept { name, subject, textBody, htmlBody, status }
+    accept { name, subject, textBody, htmlBody, preheader, layoutId, sourceArtifactId, document, status }
     stamp {
       id: args.templateId
       createdAt: args.versionTime
@@ -179,6 +207,64 @@ mutation template updateTemplate {
     }
   }
 }
+
+/// Internal layout creation after organization and revision checks in campaignSaveLayout.
+/// actor.userId still stamps the first writer as the owner, but caller scoping alone cannot
+/// serialize a creation retry or enforce the server-assigned revision; the capability owns those.
+@actor
+@serverOnly
+mutation emailLayout createEmailLayout {
+  args {
+    layoutId         string!
+    name             string!
+    description      string
+    document         object!
+    sourceArtifactId string
+    accountId        string!
+    versionTime      datetime!
+  }
+  insert {
+    accept { name, description, document, sourceArtifactId, accountId }
+    stamp {
+      id: args.layoutId
+      createdAt: args.versionTime
+      ownerUserId: actor.userId
+      status: "active"
+    }
+  }
+}
+
+/// Internal layout update, for an edit, an archive or a restore. The capability locks and checks
+/// the read revision first. Content arguments are optional so archiving and restoring change the
+/// status and nothing else; the engine keeps every omitted field as it was stored.
+/// actor.userId scoping cannot prevent an authorized editor overwriting a concurrent edit;
+/// campaignSaveLayout checks that.
+@actor
+@serverOnly
+mutation emailLayout updateEmailLayout {
+  args {
+    layoutId         string!
+    name             string
+    description      string
+    document         object
+    sourceArtifactId string
+    status           string!
+    versionTime      datetime!
+  }
+  update {
+    accept { name, description, document, sourceArtifactId, status }
+    stamp {
+      id: args.layoutId
+      createdAt: args.versionTime
+      ownerUserId: actor.userId
+    }
+  }
+}
+// The name is at most 200 characters and a fromName at most 100, because the view-in-browser link of
+// every message carries them. They are declared that way on the concept, and the engine's write guard
+// (component/memql/campaign_name_guard.go) is what states the refusal, in a sentence. They are not
+// @maxLength on the arguments here on purpose: the argument check would answer first, in its own words.
+// (This is a plain comment, not documentation: the /// text goes into the generated SDK docs.)
 
 /// Create a campaign: one audience, one template, an optional intended time. Lands as a draft with
 /// its counters zeroed. Owned.
@@ -212,6 +298,8 @@ mutation campaign createCampaign {
     }
   }
 }
+
+// The name and fromName caps are createCampaign's, and so is the note about where they are stated.
 
 /// Edit a draft campaign's authoring fields. Deliberately does NOT accept status or any send-state
 /// field: lifecycle moves through scheduleCampaign / cancelCampaign, and the counters belong to the
@@ -405,6 +493,15 @@ mutation campaign updateCampaignProgress {
 /// recipient from the next batch. Each part is hashed before concatenation (authoring rule 20), so no
 /// separator in a caller-supplied id can make two different pairs collide onto one timeline.
 ///
+/// A SINGLE SEND UNDER A REQUEST (memql#6022, F7) has no campaign, and the row it is keyed by is the
+/// REQUEST's: `requestId` stands in the first part, so a welcome, a journey step and a rule's send to
+/// one person are three rows, not three versions of one. A request id never contains a colon
+/// (component/campaigns singleSendRequestID) and a canonical campaign id always does, so the two cannot
+/// alias. A campaign delivery passes no requestId, and a blank one is no request (`??` skips it): its
+/// id is exactly what it was. component/campaigns/delivery_id.go re-derives this in Go
+/// (deliveryRowID, singleDeliveryRowID) and delivery_id_test.go evaluates THIS expression to hold the
+/// two together.
+///
 /// Owned: ownerUserId is stamped from actor.userId. The worker runs this under the CAMPAIGN OWNER'S
 /// actor, so the value is the campaign's owner and no caller can name a different one.
 /// SCOPING TO actor.userId IS NOT THE FIX HERE, which is why this is @serverOnly.
@@ -430,13 +527,18 @@ mutation delivery recordCampaignDelivery {
     outboundRequestId  string
     emailRuleId        string
     accountId          string
+    requestId          string @pattern("^[A-Za-z0-9_-]{8,160}$")
+    templateId         string
+    senderIdentityId   string
   }
   insert {
-    accept { campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId, emailRuleId }
+    accept { campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId, emailRuleId, requestId, templateId, senderIdentityId }
     stamp {
-      // Keep the existing per-rule ledger identity without inventing a campaign reference.
+      // A single send is keyed by its request; a campaign delivery and a send with no request
+      // keep the existing identity, per rule when there is one, without inventing a campaign
+      // reference.
       id: hash(
-        hash(canonicalId(args.campaignId ?? args.emailRuleId ?? "", "campaign")) +
+        hash(args.requestId ?? canonicalId(args.campaignId ?? args.emailRuleId ?? "", "campaign")) +
         hash(canonicalId(args.recipientId, "recipient"))
       )
       ownerUserId: actor.userId
@@ -564,6 +666,7 @@ mutation suppression recordOrganizationSuppression {
     stamp {
       id: args.suppressionId
       suppressedAt: now
+      liftedAt: ""
     }
   }
 }
@@ -777,6 +880,10 @@ mutation consentEvent recordConsentSuppress {
 // ---------------------------------------------------------------------------
 // Sending identities (memql#4821)
 // ---------------------------------------------------------------------------
+
+// The fromName is at most 100 characters (it is shown in every footer and carried in every view link);
+// the engine's write guard (component/memql/campaign_name_guard.go) states the refusal, as for a
+// campaign's name, and the argument carries no @maxLength for the same reason.
 
 /// Declare a mailbox this deployment may send campaign mail as. Owned: ownerUserId is stamped from
 /// actor.userId, so a caller can only ever declare their own.
@@ -1067,6 +1174,8 @@ mutation singleSendReceipt recordCampaignSingleSend {
 
 /// Scoping to actor.userId cannot attest that the captured configuration passed preflight.
 /// Only campaignConfigureSeries writes this under a shared lock with a revision check.
+/// `lastError` is carried only by a save that keeps a stopped series stopped (memql#6033): it
+/// keeps saying why it stopped until it is resumed. Every other write clears it.
 @actor
 @serverOnly
 mutation campaignSeries configureCampaignSeries {
@@ -1083,11 +1192,12 @@ mutation campaignSeries configureCampaignSeries {
     status enum("active", "paused", "blocked")!
     lastCampaignId string
     lastOccurrenceAt datetime
+    lastError string
     versionTime datetime!
   }
   insert {
     accept { accountId, sourceCampaignId, name, definition, intervalWeeks, timeZone, anchorAt, nextAt, status, lastCampaignId, lastOccurrenceAt }
-    stamp { id: args.seriesId, ownerUserId: actor.userId, authorizedByUserId: actor.userId, createdAt: args.versionTime, lastError: "" }
+    stamp { id: args.seriesId, ownerUserId: actor.userId, authorizedByUserId: actor.userId, createdAt: args.versionTime, lastError: args.lastError ?? "" }
   }
 }
 
@@ -1123,8 +1233,8 @@ mutation newsletterBinding configureNewsletter {
     siteId string!
     storeId string!
     audienceId string!
-    templateId string!
-    senderIdentityId string!
+    templateId string
+    senderIdentityId string
     consentText string!
     enabled bool!
     versionTime datetime!
@@ -1141,6 +1251,7 @@ mutation newsletterBinding configureNewsletter {
 @serverOnly
 mutation newsletterSignup recordNewsletterSignup {
   args {
+    status enum("pending", "none")
     signupId string!
     accountId string!
     newsletterId string!
@@ -1155,13 +1266,13 @@ mutation newsletterSignup recordNewsletterSignup {
     consentText string!
     consentRevision datetime!
     requestedAt datetime!
-    templateId string!
-    templateSnapshot object!
-    senderIdentityId string!
+    templateId string
+    templateSnapshot object
+    senderIdentityId string
   }
   insert {
     accept { accountId, newsletterId, siteId, storeId, audienceId, recipientId, email, displayName, emailDigest, submissionId, consentText, consentRevision, requestedAt, templateId, templateSnapshot, senderIdentityId }
-    stamp { id: args.signupId, ownerUserId: actor.userId, status: "pending", lastError: "" }
+    stamp { id: args.signupId, ownerUserId: actor.userId, status: args.status ?? "pending", lastError: "" }
   }
 }
 
@@ -1235,4 +1346,212 @@ mutation campaign createCampaignTestRun {
       skippedCount: 0
     }
   }
+}
+
+/// Recipient-authorized preferences action. The handler permits only organization opt-outs.
+/// actor.userId scoping cannot prove possession of the mailed preferences token or renewed consent.
+/// The handler verifies both under shared locks and derives the organization/digest; global safety suppressions remain unchanged.
+@serverOnly
+mutation suppression liftOrganizationSuppression {
+ args {
+  suppressionId string!
+  accountId string!
+  liftedAt datetime!
+  versionTime datetime!
+ }
+ update {
+  accept { accountId, liftedAt }
+  stamp { id: args.suppressionId, createdAt: args.versionTime }
+ }
+}
+
+/// Choose whether new newsletter members must confirm their address.
+@actor
+mutation audience setAudienceConfirmation {
+ args {
+ audienceId string!
+ confirmation enum("none", "required")!
+ }
+ update { accept { confirmation } stamp { id: args.audienceId, ownerUserId: actor.userId } }
+}
+
+/// Confirmation is written only by the token-authenticated email page.
+/// actor.userId scoping cannot prove possession of a mailed token; the handler verifies it before borrowing the recorded owner.
+@actor
+@serverOnly
+mutation recipient confirmRecipientSubscription {
+ args {
+ recipientId string!
+ confirmedAt datetime!
+ }
+ update { accept { confirmedAt } stamp { id: args.recipientId, ownerUserId: actor.userId, subscriptionStatus: "subscribed" } }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
+@actor
+@serverOnly
+mutation journey createJourney {
+ args {
+ journeyId string!
+ accountId string!
+ name string!
+ description string
+ trigger object!
+ steps []object!
+ versionTime datetime!
+ }
+ insert {
+ accept { accountId, name, description, trigger, steps }
+ stamp { id: args.journeyId, ownerUserId: actor.userId, status: "draft", createdAt: args.versionTime }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
+@actor
+@serverOnly
+mutation journey updateJourney {
+ args {
+ journeyId string!
+ name string!
+ description string
+ trigger object!
+ steps []object!
+ versionTime datetime!
+ }
+ update {
+ accept { name, description, trigger, steps }
+ stamp { id: args.journeyId, createdAt: args.versionTime }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
+@actor
+@serverOnly
+mutation journey setJourneyStatus {
+ args {
+ journeyId string!
+ status enum("draft", "active", "paused", "archived")!
+ activatedAt datetime
+ lastError string
+ versionTime datetime!
+ }
+ update {
+ accept { status, activatedAt, lastError }
+ stamp { id: args.journeyId, createdAt: args.versionTime }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
+@actor
+@serverOnly
+mutation journey recordJourneyDrain {
+ args {
+ journeyId string!
+ lastError string
+ retiredAt datetime
+ versionTime datetime!
+ }
+ update {
+ accept { lastError, retiredAt }
+ stamp { id: args.journeyId, createdAt: args.versionTime }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
+@actor
+@serverOnly
+@createOnly("ownerUserId", "accountId", "journeyId", "recipientId", "emailDigest", "stepId", "stepIndex", "nextAt", "status", "exitReason", "enrolledAt", "triggeredAt", "completedAt", "lastError", "attempts")
+mutation journeyEnrollment enrollJourneyRecipient {
+ args {
+ enrollmentId string!
+ accountId string!
+ journeyId string!
+ recipientId string!
+ emailDigest string!
+ stepId string!
+ enrolledAt datetime!
+ triggeredAt datetime!
+ }
+ insert {
+ accept { accountId, journeyId, recipientId, emailDigest, stepId, enrolledAt, triggeredAt }
+ stamp { id: args.enrollmentId, ownerUserId: actor.userId, stepIndex: 0, nextAt: args.enrolledAt, status: "active", attempts: 0, exitReason: "", lastError: "", completedAt: "" }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
+@actor
+@serverOnly
+mutation journeyEnrollment advanceJourneyEnrollment {
+ args {
+ enrollmentId string!
+ stepId string
+ stepIndex int!
+ nextAt datetime
+ status enum("active", "waiting", "completed", "exited", "failed")!
+ exitReason string
+ completedAt datetime
+ lastError string
+ attempts int
+ versionTime datetime!
+ }
+ update {
+ accept { stepId, stepIndex, nextAt, status, exitReason, completedAt, lastError, attempts }
+ stamp { id: args.enrollmentId, createdAt: args.versionTime }
+ }
+}
+
+/// Server-owned automation state; public callers use the revision-checked campaign capabilities.
+/// actor.userId scoping cannot enforce the revision, receipt and shared-lock invariants; the server capability checks current organization authority before writing.
+@actor
+@serverOnly
+mutation journeyEnrollment nudgeJourneyEnrollment {
+ args {
+ enrollmentId string!
+ nextAt datetime!
+ versionTime datetime!
+ }
+ update {
+ accept { nextAt }
+ stamp { id: args.enrollmentId, createdAt: args.versionTime }
+ }
+}
+
+/// Renewed opt-in starts a new membership; it never reuses an old journey receipt.
+/// actor.userId cannot prove the renewed opt-in or mailbox lock; the server verifies both before borrowing the recorded owner.
+@actor
+@serverOnly
+mutation recipient restartRecipientMembership {
+ args {
+ recipientId string!
+ subscriptionStatus enum("pending", "subscribed")!
+ joinedAt datetime!
+ confirmedAt string
+ }
+ update { accept { subscriptionStatus, joinedAt, confirmedAt } stamp { id: args.recipientId, ownerUserId: actor.userId } }
+}
+
+/// Terminal verdict on an existing deferred request; no send or attribution change.
+/// actor.userId cannot finish a request after its owner loses authority. The worker reads it fresh under its receipt lock, checks pending status and verifies the lock before this internal write.
+@actor
+@serverOnly
+mutation delivery settleDeferredSingleSend {
+ args {
+ deliveryId string!
+ status enum("sent", "failed", "skipped")!
+ lastError string!
+ skipReason string!
+ attempts int!
+ sentAt datetime
+ versionTime datetime!
+ }
+ update {
+ accept { status, lastError, skipReason, attempts, sentAt }
+ stamp { id: args.deliveryId, createdAt: args.versionTime }
+ }
 }

@@ -4,6 +4,7 @@ import { Link2Off } from "lucide-react";
 
 import { Button, Caption, Chip, Chips, Fact, Facts } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
+import { InPlaceAsk } from "../../../kit/pressHold";
 import type { Refusal } from "../packages/actions";
 import { toneFor } from "../packages/refusals";
 import { ProblemNotice } from "../packages/ReportView";
@@ -275,14 +276,14 @@ export function DisconnectGitHub({
               ? ` ${sourceNames.length} source${sourceNames.length === 1 ? " will" : "s will"} need this account reconnected to fetch updates.`
               : ""}
           </Caption>
-          <div className={`os-confirm-row${inline ? " os-panel-actions" : ""}`}>
+          <InPlaceAsk className={`os-confirm-row${inline ? " os-panel-actions" : ""}`}>
             <Button tone="quiet" disabled={busy} onClick={() => setArmed(false)}>
               Cancel
             </Button>
             <Button tone="danger" busy={busy} onClick={onDisconnect}>
               Disconnect
             </Button>
-          </div>
+          </InPlaceAsk>
         </>
       ) : (
         <>

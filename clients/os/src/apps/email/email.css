@@ -1,0 +1,249 @@
+/* The Email app's own CSS (memql#6033).
+ *
+ * Everything the app draws is the kit's vocabulary -- rows, panels, notices,
+ * facts, fields, the wizard and the action bar. What lives here is only what the
+ * kit has no word for, and it grows only when a surface needs it. */
+
+/* ---- Email -> Settings ---------------------------------------------------- */
+
+/* A FIELD KEEPS A FIELD'S WIDTH (DESIGN.md rule 9). The page takes the window,
+ * but a picker stretched across a monitor is a text box nobody can read. */
+.email-field {
+  width: 100%;
+  max-width: 24rem;
+}
+.email-field .os-select-wrap {
+  width: 100%;
+}
+
+/* A switch and the one sentence that says what it does to something else stay
+ * together as one preference. */
+.email-preference {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.email-preference > .os-caption {
+  margin: 0;
+}
+
+/* The page's own spacing is the stack's gap; a group's bottom margin would double it. */
+.email-settings .os-field-group {
+  margin: 0;
+}
+
+/* A sender's page, the Add a sender wizard and the sending domain's page or
+ * wizard take the pane. They fill the window's height so their bar stands on
+ * its bottom edge, which means the page that holds them must have a height to
+ * fill. */
+.email-settings:has(.os-action-pane, .os-wizard) {
+  height: 100%;
+  min-height: 0;
+}
+
+/* ---- A campaign's page ---------------------------------------------------- */
+
+/* "Show more" under who got it: the panel's own gap spaces it from the rows, so
+ * the paragraph adds none of its own. */
+.email-more {
+  margin: 0;
+}
+
+/* ---- An email, as it is sent (templates/Preview.tsx) ---------------------- */
+
+/* THE EMAIL'S OWN WIDTH, ON ITS OWN BACKGROUND. The frame takes the pane and the
+ * email lays itself out inside it: a 600px canvas centres on its page colour,
+ * and below 600px its own mobile rule takes over. White is what a mail client
+ * shows behind an email that paints no background of its own. The frame cannot
+ * be measured from outside (it has no origin of its own), so it is a window onto
+ * the email with its own scroll. */
+.email-preview-frame {
+  display: block;
+  width: 100%;
+  height: min(72vh, 900px);
+  min-height: 360px;
+  border: 1px solid var(--os-line);
+  border-radius: var(--os-radius-xs);
+  background: #ffffff;
+}
+
+/* The text part a send carries, line for line. */
+.email-preview-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--os-font-mono);
+  font-size: var(--os-text-sm);
+}
+
+/* The engine's issues, one to a line, inside the notice that names them. */
+.email-issues {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+.email-issues > li + li {
+  margin-top: 2px;
+}
+
+/* The automation is a sequence. The spine carries order; selection has the
+   accent outline, while keyboard focus keeps the kit's own visible ring. */
+.email-flow { display: grid; gap: 24px; min-width: 0; }
+.email-flow[data-wide] { grid-template-columns: minmax(0, 1.2fr) minmax(240px, 1fr); align-items: start; }
+.email-flow-spine { position: relative; min-width: 0; padding-left: 26px; }
+.email-flow-spine::before { content: ""; position: absolute; left: 10px; top: 16px; bottom: 20px; border-left: 2px solid var(--os-line); }
+.email-flow[data-proposal] .email-flow-spine::before { border-left-style: dashed; }
+.email-flow-node { position: relative; margin: 8px 0; min-width: 0; }
+.email-flow-node::before { content: ""; position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--os-accent); left: -19px; top: 18px; }
+.email-flow-end::before { border-radius: 0; background: var(--os-muted); }
+.email-flow-trigger, .email-flow-card { width: 100%; text-align: left; color: inherit; font: inherit; cursor: pointer; }
+.email-flow-trigger { display: grid; gap: 6px; border: 0; background: transparent; padding: 10px 0; }
+.email-flow-card { display: flex; align-items: start; gap: 12px; padding: 14px; background: var(--os-plate); border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); }
+.email-flow-card > span { display: grid; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.email-flow-card strong, .email-flow-trigger strong { font-family: var(--os-font-display); font-weight: 500; }
+.email-flow-card[data-selected] { outline: 2px solid var(--os-accent); outline-offset: 2px; }
+.email-flow-node[data-kind="wait"] .email-flow-card { width: auto; border-radius: 24px; padding: 8px 14px; }
+.email-flow-insert { position: relative; margin-left: -30px; min-height: 30px; }
+.email-flow-add, .email-flow-tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 0; }
+.email-flow-add { margin-left: 30px; }
+.email-flow-tools { justify-content: flex-end; }
+.email-flow-inspector { display: grid; gap: 16px; padding: 16px 0; min-width: 0; }
+.email-flow-issue { color: var(--os-warn); font-size: var(--os-text-sm); margin: 8px 0; max-width: 70ch; }
+.email-describe-input .os-input { flex: 0 0 auto; min-height: calc(var(--os-control-h) * 2); width: 100%; }
+
+/* Email keeps every section it has opened mounted, so a wizard's answers and an
+ * edit's unsaved changes survive a tab switch. The wrapper takes no box of its
+ * own -- a page lays out as it did when it was the window's only child -- and
+ * a parked one is `display: none`, which also takes it out of the tab order
+ * and the accessibility tree (and is what stops its `AutoRefresh`). */
+.email-pane { display: contents; }
+.email-pane[hidden] { display: none; }
+
+/* ---- the send bar ---------------------------------------------------------
+ *
+ * The band, its legend, and the engagement pair beneath. Colours come from the
+ * shell's own status vocabulary and nothing new is introduced: accent is what
+ * worked (the same hue as a live dot), amber is warn, red is error, and the
+ * rail tint is what has not happened yet.
+ */
+
+.os-send {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+
+.os-send-bar {
+  display: flex;
+  width: 100%;
+  height: 14px;
+  border-radius: var(--os-radius-xs);
+  overflow: hidden;
+  /* The ground shows through where no segment is drawn, which only happens on
+   * an empty bar -- the four slices otherwise sum to the whole by
+   * construction, so the band can never show a gap that reads as a fault. */
+  background: var(--os-rail);
+  border: 1px solid var(--os-line);
+}
+
+.os-send-bar[data-empty] {
+  background: transparent;
+}
+
+.os-send-seg {
+  display: block;
+  min-width: 2px;
+  flex-basis: 0;
+  /* The fill is a TRANSITION, so a segment that grows mid-send slides rather
+   * than jumping. It is the medium duration rather than the cue duration: this
+   * is a value changing, not news arriving. */
+  transition: flex-grow var(--os-duration-med) var(--os-ease);
+}
+
+.os-send-seg[data-outcome="sent"],
+.os-send-swatch[data-outcome="sent"] {
+  background: var(--os-accent);
+}
+.os-send-seg[data-outcome="skipped"],
+.os-send-swatch[data-outcome="skipped"] {
+  background: var(--os-warn);
+}
+.os-send-seg[data-outcome="failed"],
+.os-send-swatch[data-outcome="failed"] {
+  background: var(--os-error);
+}
+.os-send-seg[data-outcome="pending"],
+.os-send-swatch[data-outcome="pending"] {
+  background: var(--os-rail-hover);
+}
+
+.os-send-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.os-send-legend-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--os-text-sm);
+}
+
+.os-send-swatch {
+  /* A baseline-aligned run of text needs the swatch nudged onto it -- an
+   * inline-block sits on the baseline by its bottom edge, which puts a square
+   * a couple of pixels low beside 12px text. */
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  transform: translateY(1px);
+}
+
+.os-send-legend-label {
+  color: var(--os-muted);
+}
+
+.os-send-legend-count {
+  font-family: var(--os-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.os-send-engagement {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--os-line);
+}
+
+.os-send-engagement-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* Deliberately SMALLER than the bar's own figures: engagement is a different
+ * question, about the sent slice only, and typography is what says so without
+ * a second heading. */
+.os-send-engagement-rate {
+  font-size: var(--os-text-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.os-send-engagement-label {
+  font-size: var(--os-text-xs);
+  color: var(--os-muted);
+  text-transform: lowercase;
+}
+
+.os-send-engagement-note {
+  max-width: 40ch;
+}
+

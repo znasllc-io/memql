@@ -187,7 +187,9 @@ func looseNodeSetRows(nodes map[string]any) []map[string]any {
 func nodeSetRows(nodes map[string]memorynodes.MemoryNode) []map[string]any {
 	out := make([]map[string]any, 0, len(nodes))
 	for _, id := range slices.Sorted(maps.Keys(nodes)) {
-		raw, err := json.Marshal(nodes[id])
+		// Plain JSON: the payload is a builtin's own bytes and is read again on
+		// the next line, so escaping its markup would only cost memory.
+		raw, err := marshalPlainJSON(nodes[id])
 		if err != nil {
 			continue
 		}

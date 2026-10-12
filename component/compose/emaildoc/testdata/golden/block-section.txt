@@ -1,0 +1,7 @@
+Thanks for joining
+
+Hello {{displayName}},
+
+we are glad you are here.
+
+Read more: https://example.com/more

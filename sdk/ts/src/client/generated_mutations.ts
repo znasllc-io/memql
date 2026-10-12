@@ -32,6 +32,8 @@ QueryClient.prototype.acknowledgeAttention = function (this: QueryClient, args: 
 /** Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the concept's @default, which is never applied on insert. Stamps the address's digest (emailDigest) so the membership can be found by it (recipientInAudienceByDigest). */
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["addRecipient"] in generated_concepts.ts).
 export interface AddRecipientArgs {
+  // Enum: subscribed | pending
+  subscriptionStatus?: string;
   recipientId: string;
   audienceId: string;
   email: string;
@@ -43,6 +45,7 @@ export interface AddRecipientArgs {
 
 export function buildAddRecipient(args: AddRecipientArgs): string {
   const parts: string[] = [];
+  if (args.subscriptionStatus !== undefined) parts.push("subscriptionStatus: " + renderMemQLValue(args.subscriptionStatus));
   parts.push("recipientId: " + renderMemQLValue(args.recipientId));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("email: " + renderMemQLValue(args.email));
@@ -1284,6 +1287,8 @@ QueryClient.prototype.createAskConversation = function (this: QueryClient, args:
 /** Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a caller can only ever create their own audiences. */
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["createAudience"] in generated_concepts.ts).
 export interface CreateAudienceArgs {
+  // Enum: none | required
+  confirmation?: string;
   audienceId: string;
   name: string;
   description?: string;
@@ -1292,6 +1297,7 @@ export interface CreateAudienceArgs {
 
 export function buildCreateAudience(args: CreateAudienceArgs): string {
   const parts: string[] = [];
+  if (args.confirmation !== undefined) parts.push("confirmation: " + renderMemQLValue(args.confirmation));
   parts.push("audienceId: " + renderMemQLValue(args.audienceId));
   parts.push("name: " + renderMemQLValue(args.name));
   if (args.description !== undefined) parts.push("description: " + renderMemQLValue(args.description));
@@ -1750,6 +1756,7 @@ export interface CreateComposeRecipeArgs {
   templateId?: string;
   format: string;
   outputKind?: string;
+  layoutId?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -1763,6 +1770,7 @@ export function buildCreateComposeRecipe(args: CreateComposeRecipeArgs): string 
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation createComposeRecipe(" + parts.join(", ") + ")";
@@ -5586,6 +5594,28 @@ QueryClient.prototype.restoreArtifact = function (this: QueryClient, args: Resto
   return this.executeNamed("restoreArtifact", buildRestoreArtifact(args), opts);
 };
 
+/** Restore an archived audience: it returns to the campaign and automation pickers. Authorized organization peers may restore it; the engine preserves its original owner and records the current writer on the new version. */
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["restoreAudience"] in generated_concepts.ts).
+export interface RestoreAudienceArgs {
+  audienceId: string;
+}
+
+export function buildRestoreAudience(args: RestoreAudienceArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  return "mutation restoreAudience(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    restoreAudience(args: RestoreAudienceArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.restoreAudience = function (this: QueryClient, args: RestoreAudienceArgs = {} as RestoreAudienceArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("restoreAudience", buildRestoreAudience(args), opts);
+};
+
 /** Restore an archived recipe. Owned. */
 // Bound concept: v1:compose:recipe (machine-readable: BoundConcepts["restoreComposeRecipe"] in generated_concepts.ts).
 export interface RestoreComposeRecipeArgs {
@@ -6209,6 +6239,31 @@ declare module "./query.js" {
 
 QueryClient.prototype.setArtifactAccounts = function (this: QueryClient, args: SetArtifactAccountsArgs = {} as SetArtifactAccountsArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("setArtifactAccounts", buildSetArtifactAccounts(args), opts);
+};
+
+/** Choose whether new newsletter members must confirm their address. */
+// Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["setAudienceConfirmation"] in generated_concepts.ts).
+export interface SetAudienceConfirmationArgs {
+  audienceId: string;
+  // Enum: none | required
+  confirmation: string;
+}
+
+export function buildSetAudienceConfirmation(args: SetAudienceConfirmationArgs): string {
+  const parts: string[] = [];
+  parts.push("audienceId: " + renderMemQLValue(args.audienceId));
+  parts.push("confirmation: " + renderMemQLValue(args.confirmation));
+  return "mutation setAudienceConfirmation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    setAudienceConfirmation(args: SetAudienceConfirmationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.setAudienceConfirmation = function (this: QueryClient, args: SetAudienceConfirmationArgs = {} as SetAudienceConfirmationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("setAudienceConfirmation", buildSetAudienceConfirmation(args), opts);
 };
 
 /** Flip the cluster-wide GLOBAL KILL SWITCH for planner-authored automations (epic memql#954, issue #961). Partial-update of the singleton cluster-settings row (id='cluster'): sets authoredAutomationsEnabled true (resume) or false (halt). false halts EVERY authored automation across the whole cluster -- the governance hard stop -- independent of any bundle status or per-user kill switch. Operator-only in practice (the admin settings surface calls it); the authored scheduler reads the flag through clusterSettingsCurrent on its global gate. */
@@ -7602,6 +7657,7 @@ export interface UpdateComposeRecipeArgs {
   templateId?: string;
   format?: string;
   outputKind?: string;
+  layoutId?: string;
   folderId?: string;
   accountIds?: string[];
 }
@@ -7615,6 +7671,7 @@ export function buildUpdateComposeRecipe(args: UpdateComposeRecipeArgs): string 
   if (args.templateId !== undefined) parts.push("templateId: " + renderMemQLValue(args.templateId));
   if (args.format !== undefined) parts.push("format: " + renderMemQLValue(args.format));
   if (args.outputKind !== undefined) parts.push("outputKind: " + renderMemQLValue(args.outputKind));
+  if (args.layoutId !== undefined) parts.push("layoutId: " + renderMemQLValue(args.layoutId));
   if (args.folderId !== undefined) parts.push("folderId: " + renderMemQLValue(args.folderId));
   if (args.accountIds !== undefined) parts.push("accountIds: " + renderMemQLValue(args.accountIds));
   return "mutation updateComposeRecipe(" + parts.join(", ") + ")";

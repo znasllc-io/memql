@@ -1,6 +1,8 @@
 import { act, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
+
 const h = vi.hoisted(() => ({ connection: null as unknown }));
 
 vi.mock("../../src/live/connection", () => ({
@@ -177,6 +179,77 @@ describe("the data-origins table", () => {
       { target: "shopify" },
       expect.anything(),
     );
+  });
+});
+
+// A DEAD LETTER'S RETRY AND DISCARD ASK IN THE ROW (memql#6033). The question
+// takes the place of the two buttons, and its confirmation stands where the
+// act that asked it stood -- outside any bar, so nothing held the second click
+// of the double-click, and it answered a question nobody had read. Discard is
+// the one that cannot be undone.
+describe("a dead letter's Retry and Discard", () => {
+  useFakeDate();
+
+  const ENTRY = {
+    id: "dl-1",
+    conceptId: "v1:shopify:product",
+    rowRef: "p-1",
+    action: "upsert",
+    target: "shopify",
+    attempts: 5,
+    lastError: "429 from the vendor",
+    createdAt: "2026-10-12T09:00:00Z",
+  };
+
+  async function openBand() {
+    const connection = fakeConnection({ dataOrigins: [NEVER_RUN], outboxDeadLetters: [ENTRY] });
+    mount(connection);
+    await screen.findByText("v1:shopify:product");
+    await click(screen.getByRole("button", { name: "Check shopify" }));
+    await screen.findByText("429 from the vendor");
+    return { connection, band: screen.getByRole("list", { name: "shopify dead letters" }) };
+  }
+
+  it("does not discard on the second click of the double-click that asked, and does once it is read", async () => {
+    const { connection, band } = await openBand();
+    await click(within(band).getByRole("button", { name: "Discard" }));
+    expect(within(band).getByText(/Discard it\? The change it carried is lost/)).toBeTruthy();
+
+    betweenTheClicks();
+    await click(within(band).getByRole("button", { name: "Discard" }));
+    expect(connection.query.datasyncDiscardOutboxEntry).not.toHaveBeenCalled();
+    // Still asking: the press that came too soon neither answered nor withdrew the question.
+    expect(within(band).getByText(/Discard it\? The change it carried is lost/)).toBeTruthy();
+
+    await readTheBar();
+    await click(within(band).getByRole("button", { name: "Discard" }));
+    expect(connection.query.datasyncDiscardOutboxEntry).toHaveBeenCalledTimes(1);
+    expect(connection.query.datasyncDiscardOutboxEntry).toHaveBeenCalledWith(expect.objectContaining({ entryId: "dl-1" }));
+  });
+
+  it("does not retry on the second click of the double-click that asked, and does once it is read", async () => {
+    const { connection, band } = await openBand();
+    await click(within(band).getByRole("button", { name: "Retry" }));
+    expect(within(band).getByText("Send this entry to the drain again?")).toBeTruthy();
+
+    betweenTheClicks();
+    await click(within(band).getByRole("button", { name: "Retry" }));
+    expect(connection.query.datasyncRetryOutboxEntry).not.toHaveBeenCalled();
+
+    await readTheBar();
+    await click(within(band).getByRole("button", { name: "Retry" }));
+    expect(connection.query.datasyncRetryOutboxEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the way out of the question as well", async () => {
+    const { band } = await openBand();
+    await click(within(band).getByRole("button", { name: "Discard" }));
+    betweenTheClicks();
+    await click(within(band).getByRole("button", { name: "Cancel" }));
+    expect(within(band).getByText(/Discard it\?/)).toBeTruthy();
+    await readTheBar();
+    await click(within(band).getByRole("button", { name: "Cancel" }));
+    expect(within(band).queryByText(/Discard it\?/)).toBeNull();
   });
 });
 

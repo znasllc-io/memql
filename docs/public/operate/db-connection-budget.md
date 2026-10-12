@@ -72,19 +72,29 @@ REQUIRE:  peak_connections  ≤  max_connections − reserved_connections
   install configures one: the local secrets seed copies the main DSN when no
   direct one is given). Any additional independent database pool must be counted
   too.
-- **The shipped base fits the smallest preset.** Six DB-connecting Deployments
-  of two replicas, at thirteen per process, are 6 × 2 × 13 = 156 connections
-  against the local/entry preset's `max_connections` of 200 less ten reserved,
-  190 usable: 34 to spare, above the gate's 80% soft line (152), so it warns and
-  passes. `scripts/deploy/conn-headroom-check.sh` prints that arithmetic per
-  Deployment (`main + direct + migration + gate`), reads the main pool from the
-  `memql-db-pool` ConfigMap and the gate pool from `MEMQL_DB_GATE_POOL_SIZE`, and
-  takes `--direct-pool=0` for an install with no direct DSN. The local overlay
-  raises the main pool to eight (seventeen per process): its seven Deployments
-  at one replica each fit (119 steady, 153 at a bff roll), and at two replicas
-  each they do not (238 steady, 289 at a bff roll; with the main pool back at
-  four, still 221 at a roll). Raise the local `max_connections` -- the staging
-  and production presets' 400 fits -- before scaling a local cluster to two.
+- **What the shipped base fits.** Six DB-connecting Deployments of two replicas,
+  at thirteen per process, are 6 × 2 × 13 = 156 connections at steady state. The
+  entry preset's `max_connections` is 200 less ten reserved, 190 usable: 34 to
+  spare, above the gate's 80% soft line (152), so it warns and passes. A roll is
+  not steady state. The rule above (two processes per replica, plus surge) gives
+  6 × (2 × 2 + 0) × 13 = 312 for the base, which only the 400 presets hold (390
+  usable). The base rolls with `maxSurge: 0` and `maxUnavailable: 1`, so what
+  overlaps is one terminating process per Deployment while it rolls, thirteen
+  more connections each: two Deployments rolling together reach 182 and fit the
+  entry preset, three reach 195 and do not, all six at once reach 234. On the
+  entry preset, roll at most two Deployments at a time; the 400 presets carry
+  any roll. `scripts/deploy/conn-headroom-check.sh` prints the steady arithmetic
+  per Deployment (`main + direct + migration + gate`), reads the main pool from
+  the `memql-db-pool` ConfigMap and the gate pool from `MEMQL_DB_GATE_POOL_SIZE`,
+  and takes `--direct-pool=0` for an install with no direct DSN. It adds only
+  `maxSurge` for a roll, which is zero in the base, so it reports 156 for the base
+  at a roll as well: it does not see terminating pods, and the rule above is
+  where they are counted. The local overlay raises the main pool to eight
+  (seventeen per process) and its Postgres to `max_connections` 400 (390 usable):
+  its seven Deployments fit at one replica each (119 steady, 153 at a bff roll)
+  and at two (238 steady, 289 at a bff roll), the case `make scale N=2` makes;
+  `deploy/k8s/overlays/local/render_connections_test.go` runs the gate on the
+  rendered overlay at two replicas to hold the number to that.
 - **The write-gate pool** (`MEMQL_DB_GATE_POOL_SIZE`, default four) holds the
   transactions of write gates -- the advisory locks that serialise a signup, a
   welcome, a library file version, an approval decision -- and nothing else. A

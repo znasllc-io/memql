@@ -171,6 +171,10 @@ func HandlerAuthorizedPaths() []string {
 	// URL is inside the signed payload rather than in a query parameter, so
 	// there is no unsigned input for an open redirect to aim.
 	paths = append(paths, TrackingPaths()...)
+	// Recipient email pages verify a page-specific sealed capability before any
+	// read or write. The token supplies identity; unsigned callers reach no rows.
+	// GET is read-only and only a deliberate POST can change subscription state.
+	paths = append(paths, EmailLinkPaths()...)
 	// POST /sites/{id}/bundles -- the atomic bundle-publish endpoint
 	// (memql#3713). Appended rather than written inline for the same
 	// reason as the two entries above: the prefix has to agree with what
@@ -266,6 +270,10 @@ func SelfAuthenticatedPaths() []string {
 	// carrying a slash.
 	paths := append(InboundWebhookPaths(), UnsubscribePaths()...)
 	paths = append(paths, TrackingPaths()...)
+	// Recipient email pages verify a page-specific sealed capability before any
+	// read or write. The token supplies identity; unsigned callers reach no rows.
+	// GET is read-only and only a deliberate POST can change subscription state.
+	paths = append(paths, EmailLinkPaths()...)
 	return append(paths, ShopperSelfAuthenticatedPaths()...)
 }
 

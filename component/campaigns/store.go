@@ -206,6 +206,7 @@ func (s SenderIdentity) Disabled() bool { return s.Status == "disabled" }
 
 // Template is the authored content.
 type Template struct {
+	Name      string `json:"name"`
 	AccountID string `json:"accountId"`
 	ID        string `json:"id"`
 	Subject   string `json:"subject"`
@@ -213,12 +214,22 @@ type Template struct {
 	HTMLBody  string `json:"htmlBody"`
 	Status    string `json:"status"`
 	Revision  string `json:"revision"`
+
+	// ExpectsHTML says the template was written to have an HTML part: it is a
+	// layout email, or custom HTML. Its HTMLBody is then empty only when it was
+	// too large to send, which a draft stores without HTML. A template saved
+	// before documents, and a text email written as a document, expect none and
+	// are plain text by design. It is read from the stored row and never
+	// written into a send job's copy of the template.
+	ExpectsHTML bool `json:"-"`
 }
 
 // Recipient is one address in the audience roster.
 type Recipient struct {
-	AccountID string
-	ID        string
+	JoinedAt, ConfirmedAt time.Time
+	AudienceID            string
+	AccountID             string
+	ID                    string
 	// CanonicalID is the stored `v1:campaigns:recipient:<short>` form. Kept
 	// alongside the bare id because the ledger page read compares a LIST of
 	// recipient ids, and the engine's relationship-canonicalizing pre-walk
@@ -439,13 +450,38 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 	r := rows[0]
 	return Template{
 		Revision:  templateTime(r["createdAt"]).Format(time.RFC3339Nano),
+		Name:      str(r, "name"),
 		AccountID: bare(str(r, "accountId")),
 		ID:        bare(str(r, "id")),
 		Subject:   str(r, "subject"),
 		TextBody:  str(r, "textBody"),
 		HTMLBody:  str(r, "htmlBody"),
 		Status:    str(r, "status"),
+
+		ExpectsHTML: templateExpectsHTML(r),
 	}, true, nil
+}
+
+// lacksItsHTML says that the template was written to have an HTML part and has
+// none: a draft too large to send. Nothing that builds a message from it should
+// go on as if it were plain text.
+func (t Template) lacksItsHTML() bool {
+	return t.ExpectsHTML && strings.TrimSpace(t.HTMLBody) == ""
+}
+
+// templateExpectsHTML says whether a stored template was written to have an
+// HTML part: a layout is named, or its document is a layout email (it has
+// blocks) or custom HTML (it carries some). A template with neither is plain
+// text, however it was saved.
+func templateExpectsHTML(row map[string]any) bool {
+	if str(row, "layoutId") != "" {
+		return true
+	}
+	document, _ := row["document"].(map[string]any)
+	if _, layout := document["blocks"]; layout {
+		return true
+	}
+	return strings.TrimSpace(str(document, "htmlBody")) != ""
 }
 
 // RosterPage reads ONE PAGE of the audience, suppressed members included --
@@ -478,7 +514,9 @@ func (s *Store) RosterPage(ctx context.Context, audienceID, cursor string) ([]Re
 func recipientFromRow(r map[string]any) Recipient {
 	canonical := str(r, "id")
 	return Recipient{
-		AccountID:          bare(str(r, "accountId")),
+		AccountID:  bare(str(r, "accountId")),
+		AudienceID: bare(str(r, "audienceId")),
+		JoinedAt:   templateTime(r["joinedAt"]), ConfirmedAt: templateTime(r["confirmedAt"]),
 		ID:                 bare(canonical),
 		CanonicalID:        canonical,
 		Email:              str(r, "email"),
@@ -527,28 +565,62 @@ const rosterWalkCap = 100000
 // the memql#3460 lesson in one line: measuring a bounded page and calling it
 // a total is how the 5000 ceiling came to be load-bearing.
 func (s *Store) RosterSize(ctx context.Context, audienceID string) (int, error) {
-	return s.count(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+	n, bounded, err := s.countValue(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+	if err != nil || !bounded {
+		return n, err
+	}
+	// A bounded count cannot authorize a whole-audience send or capacity write.
+	// Walk fresh cursor pages to an exact cardinality rather than materializing it.
+	total, cursor := 0, ""
+	seen := map[string]bool{}
+	for {
+		page, next, err := s.RosterPage(memql.ContextWithFreshRead(ctx), audienceID, cursor)
+		if err != nil {
+			return 0, err
+		}
+		total += len(page)
+		if next == "" {
+			return total, nil
+		}
+		if seen[next] {
+			return 0, fmt.Errorf("audience count pagination repeated a cursor")
+		}
+		seen[next] = true
+		cursor = next
+	}
+
 }
 
 // count issues a `count` query and lifts the aggregate off the result.
 //
-// Every stats bucket that CAN go through here does, and the reason is the
-// memql#3460 lesson generalized: a count is exact at any audience size, while
-// the length of a bounded read is a truncation wearing a number's clothes.
+// Every stats bucket that CAN go through here does. The engine marks a count
+// as atLeast when its source reaches the read window; callers retain that
+// completeness signal rather than treating a bounded result as exact.
 // The portal counted a capped page of delivery rows client-side and
 // under-reported every campaign past the bound, silently, which is what
 // campaignStats replaces.
+type countObservationKey struct{}
+type countObservation struct{ bounded map[string]bool }
+
 func (s *Store) count(ctx context.Context, q string) (int, error) {
+	n, _, err := s.countValue(ctx, q)
+	return n, err
+}
+func (s *Store) countValue(ctx context.Context, q string) (int, bool, error) {
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
-		return 0, fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
+		return 0, false, fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
 	for _, row := range memql.MaterializeRows(res) {
 		if _, ok := row["count"]; ok {
-			return integer(row, "count"), nil
+			bounded, _ := row["atLeast"].(bool)
+			if observation, ok := ctx.Value(countObservationKey{}).(*countObservation); ok {
+				observation.bounded[q] = bounded
+			}
+			return integer(row, "count"), bounded, nil
 		}
 	}
-	return 0, nil
+	return 0, false, fmt.Errorf("campaigns: %s returned no count", firstWords(q))
 }
 
 // DeliveryCountByStatus is the exact number of this campaign's deliveries in
@@ -827,6 +899,18 @@ type Delivery struct {
 	// until the concept gained the field -- meant the answer existed for the
 	// length of one HTTP response.
 	EmailRuleID string
+
+	// RequestID, TemplateID and SenderIdentityID describe a SINGLE send (memql#6022,
+	// F7), and are EMPTY on a campaign delivery, whose template and sender are its
+	// campaign's. RequestID is the stable request the message was sent under, and it
+	// is the ledger key of a send with no campaign: the row's id derives from
+	// (RequestID, RecipientID), so each message to a person has a row of its own
+	// (singleDeliveryRowID). TemplateID and SenderIdentityID say what the message
+	// was and who it went out as, which the rule or journey that sent it may no
+	// longer say once it has been edited. Each is rendered only when set.
+	RequestID        string
+	TemplateID       string
+	SenderIdentityID string
 }
 
 // RecordDelivery writes the ledger row. OWNED tier: issue under the
@@ -848,6 +932,15 @@ func (s *Store) RecordDelivery(ctx context.Context, d Delivery) error {
 	}
 	if d.EmailRuleID != "" {
 		args = append(args, arg{"emailRuleId", d.EmailRuleID})
+	}
+	if d.RequestID != "" {
+		args = append(args, arg{"requestId", d.RequestID})
+	}
+	if d.TemplateID != "" {
+		args = append(args, arg{"templateId", d.TemplateID})
+	}
+	if d.SenderIdentityID != "" {
+		args = append(args, arg{"senderIdentityId", d.SenderIdentityID})
 	}
 	if d.LastError != "" {
 		args = append(args, arg{"lastError", truncateError(d.LastError)})
@@ -959,11 +1052,12 @@ func (s *Store) SetRecipientSubscription(ctx context.Context, recipientID, statu
 // more often than it is an identifier -- and a bare key there is a parse
 // error at call time, which is the failure mode a fake-engine test suite
 // cannot see (memql#3035's shape).
-func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, source, accountID string, fields map[string]string) error {
+func (s *Store) AddRecipient(ctx context.Context, recipientID, audienceID, email, displayName, source, accountID, status string, fields map[string]string) error {
 	args := []arg{
 		{"recipientId", recipientID},
 		{"audienceId", audienceID},
 		{"email", email},
+		{"subscriptionStatus", status},
 	}
 	if displayName != "" {
 		args = append(args, arg{"displayName", displayName})
@@ -1392,40 +1486,13 @@ func (s *Store) rows(ctx context.Context, q string) ([]map[string]any, error) {
 // it and there should not be -- a cursor spelled into a query string would be
 // a caller-supplied scan position on an owned-tier read.
 func (s *Store) rowsPage(ctx context.Context, cursor, q string) ([]map[string]any, string, error) {
-	if cursor != "" {
-		ctx = memql.ContextWithCursor(ctx, cursor)
-	}
+	ctx = memql.ContextWithCursor(ctx, cursor)
 	res, err := s.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, "", fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
-	return memql.MaterializeRows(res), cursorFromResult(res), nil
-}
-
-// cursorFromResult lifts the continuation token off whatever the engine seam
-// handed back. Two shapes, and both are real: the in-process engine returns
-// an *ExecuteResult carrying ResultMeta, and the package's tests fake flat row
-// envelopes (the seam is `Execute(ctx, string) (any, error)` precisely so they
-// can). A result with neither is an exhausted page, which is the safe reading
-// -- it ends the walk rather than continuing from a position nobody supplied.
-func cursorFromResult(res any) string {
-	type metaCarrier interface{ GetMeta() *memql.ResultMeta }
-	if carrier, ok := res.(metaCarrier); ok {
-		if meta := carrier.GetMeta(); meta != nil {
-			return strings.TrimSpace(meta.Cursor)
-		}
-	}
-	if envelope, ok := res.(map[string]any); ok {
-		if raw, ok := envelope["cursor"].(string); ok {
-			return strings.TrimSpace(raw)
-		}
-		if meta, ok := envelope["meta"].(map[string]any); ok {
-			if raw, ok := meta["cursor"].(string); ok {
-				return strings.TrimSpace(raw)
-			}
-		}
-	}
-	return ""
+	next, err := memql.ResultPageCursor(res)
+	return memql.MaterializeRows(res), next, err
 }
 
 func (s *Store) exec(ctx context.Context, q string) error {
@@ -1780,4 +1847,31 @@ func templateSnapshot(value any) *Template {
 		return &Template{}
 	}
 	return &snapshot
+}
+
+type Audience struct{ ID, AccountID, Name, Status, Confirmation string }
+
+func (s *Store) AudienceByID(ctx context.Context, id string) (Audience, bool, error) {
+	rows, err := s.rows(ctx, call("query", "audienceById", arg{"audienceId", bare(id)}))
+	if err != nil || len(rows) == 0 {
+		return Audience{}, false, err
+	}
+	r := rows[0]
+	return Audience{ID: bare(str(r, "id")), AccountID: bare(str(r, "accountId")), Name: str(r, "name"), Status: str(r, "status"), Confirmation: str(r, "confirmation")}, true, nil
+}
+func (s *Store) ConfirmRecipient(ctx context.Context, id string, at time.Time) error {
+	return s.execServerOnly(ctx, call("mutation", "confirmRecipientSubscription", arg{"recipientId", bare(id)}, arg{"confirmedAt", at.UTC().Format(time.RFC3339Nano)}))
+}
+
+// RejoinRecipient starts a new membership after an explicit renewed opt-in.
+// Its caller holds the shared recipient and mailbox gates and has checked consent.
+func (s *Store) RejoinRecipient(ctx context.Context, id, status string, at time.Time) error {
+	if status != "pending" && status != "subscribed" {
+		return fmt.Errorf("invalid renewed subscription status")
+	}
+	confirmed := ""
+	if status == "subscribed" {
+		confirmed = at.UTC().Format(time.RFC3339Nano)
+	}
+	return s.execServerOnly(ctx, call("mutation", "restartRecipientMembership", arg{"recipientId", bare(id)}, arg{"subscriptionStatus", status}, arg{"joinedAt", at.UTC().Format(time.RFC3339Nano)}, arg{"confirmedAt", confirmed}))
 }

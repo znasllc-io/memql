@@ -22,7 +22,7 @@ func RenderRecipeBytes(r RenderRecipe) (Result, error) {
 		return RenderBlank(r.Format, r.Name)
 	}
 	if r.OutputKind == "email_template" {
-		return RenderEmailTemplate(r.Draft.Body)
+		return RenderEmailFile(r.Draft.Body)
 	}
 	if r.DeployableKind != "" {
 		kind, err := ParseDeployableKind(r.DeployableKind)

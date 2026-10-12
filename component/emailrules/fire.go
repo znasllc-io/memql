@@ -106,6 +106,7 @@ type FireOutcome struct {
 	Lane       string
 	Recipients int
 	Sent       int
+	Deferred   int
 	Skipped    int
 	Refusals   []string
 	// Duplicate is a created rule's second firing for one row -- two writes
@@ -288,13 +289,14 @@ func (f *Firer) fireOperational(ctx context.Context, rule Rule, nodeID string, e
 	if !ok {
 		return fmt.Errorf("emailrules: rule %q names template %q, which is not readable", rule.ID, rule.TemplateID)
 	}
+	if str(tmpl, "status") != "ready" {
+		return fmt.Errorf("publish the rule's template before it can send")
+	}
 	users, err := f.store.UsersInRoles(auth.ContextWithInternalOrigin(ctx))
 	if err != nil {
 		return err
 	}
 	wanted := NormalizedRoles(rule.RecipientRoles)
-	subject := str(tmpl, "subject")
-	body := str(tmpl, "textBody")
 
 	for _, u := range users {
 		role := strings.ToLower(str(u, "role"))
@@ -327,7 +329,7 @@ func (f *Firer) fireOperational(ctx context.Context, rule Rule, nodeID string, e
 			stamp, _ := event["timestamp"].(string)
 			key = dedupeKey(rule.ID, nodeID, stamp, email)
 		}
-		if err := f.store.StageOutbound(ctx, "obr"+key, email, subject, body, key, rule.OwnerUserID); err != nil {
+		if err := f.store.StageOperationalEmail(ctx, "obr"+key, rule.TemplateID, email, str(u, "displayName"), key, rule.ID); err != nil {
 			out.Refusals = append(out.Refusals, err.Error())
 			continue
 		}
@@ -354,23 +356,15 @@ func roleWanted(role string, wanted []string) bool {
 
 // fireAudience mails an existing audience through the campaign machinery.
 func (f *Firer) fireAudience(ctx context.Context, rule Rule, nodeID string, event map[string]any, out *FireOutcome) error {
-	recipients, err := f.store.RecipientsForAudience(ctx, rule.AudienceID)
-	if err != nil {
-		return err
-	}
-	for _, r := range recipients {
+	return f.store.EachSendableRecipient(ctx, rule.AudienceID, func(r map[string]any) bool {
+		if out.Recipients >= maxFanout {
+			out.Refusals = append(out.Refusals, fmt.Sprintf("stopped at %d recipients; an audience this size is a campaign", maxFanout))
+			return false
+		}
 		out.Recipients++
-		if out.Recipients > maxFanout {
-			out.Refusals = append(out.Refusals, fmt.Sprintf("stopped at %d recipients; an audience this size is a campaign, and a campaign has the pacing, the ledger and the warm-up a rule does not", maxFanout))
-			break
-		}
 		f.sendMarketing(ctx, rule, nodeID, str(r, "id"), event, out)
-		if out.Busy {
-			// The cluster is busy, so the rest of the audience would be too.
-			break
-		}
-	}
-	return nil
+		return !out.Busy
+	})
 }
 
 // rowAddressPlan is what a row-address firing settles before it claims anything:
@@ -442,7 +436,15 @@ func (f *Firer) fireRowAddress(ctx context.Context, rule Rule, nodeID string, ev
 		// enrolment is what an unsubscribe later acts on, so a second firing
 		// for the same address consults the state the first one gave it.
 		target = "rcp" + dedupeKey(rule.AudienceID, plan.address, "")
-		if err := f.store.AddRecipient(ctx, target, rule.AudienceID, plan.address, payloadField(event, "displayName"), memql.BareShortId(rule.AccountID)); err != nil {
+		confirmation, err := f.store.AudienceConfirmation(ctx, rule.AudienceID)
+		if err != nil {
+			return err
+		}
+		status := "subscribed"
+		if confirmation == "required" {
+			status = "pending"
+		}
+		if err := f.store.AddRecipient(ctx, target, rule.AudienceID, plan.address, payloadField(event, "displayName"), memql.BareShortId(rule.AccountID), status); err != nil {
 			return err
 		}
 	}
@@ -508,6 +510,8 @@ func (f *Firer) sendMarketing(ctx context.Context, rule Rule, nodeID, recipientI
 		return
 	}
 	switch {
+	case result["deferred"] == true:
+		out.Deferred++
 	case result["uncertain"] == true:
 		out.Refusals = append(out.Refusals, "a previous send has an uncertain provider outcome; it was not submitted again")
 	case result["skipped"] == true || (result["sent"] == true && result["replayed"] == true):

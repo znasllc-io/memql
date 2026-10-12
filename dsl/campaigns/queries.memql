@@ -1,4 +1,4 @@
-use common.traits.{ statusIsActive, statusIsPending }
+use common.traits.{ statusIsActive, statusIsPending, statusIsArchived }
 
 // campaigns domain -- caller-scoped reads.
 //
@@ -63,8 +63,9 @@ query audience audienceById {
   shape   audienceFull
 }
 
-/// The caller's templates, newest first. Backs the template list and the campaign editor's template
-/// picker. Owned.
+/// The caller's templates, newest first, as summaries: no body and no document. Backs the template
+/// list and the campaign editor's template picker; a template's content is read with templateById.
+/// Owned.
 @actor
 query template templates {
   args {
@@ -74,7 +75,7 @@ query template templates {
                 && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  50
-  shape     templateFull
+  shape     templateSummary
 }
 
 /// One template by id, gated to its owner. Backs the template editor and the campaign editor's
@@ -86,6 +87,53 @@ query template templateById {
   }
   filter  row => row.id == args.templateId
   shape   templateFull
+}
+
+/// The template an organization published from one Library file, for campaignSaveTemplate and the
+/// editors that open a file: publishing a file again updates this template, so there is one per
+/// organization and file. It answers the template's id and its revision (createdAt) and nothing of
+/// its content, which templateById reads. Newest first and one row, so a stray duplicate can never
+/// make a save ambiguous. The concept's account tier answers a template outside the caller's
+/// organizations as not found, so the file id is not a way into somebody else's templates. Owned.
+@actor
+query template templateForSource {
+  args {
+    accountId         string!
+    sourceArtifactId  string!
+  }
+  filter    row => row.accountId == args.accountId
+                && row.sourceArtifactId == args.sourceArtifactId
+  sort      "row.createdAt", "desc"
+  paginate  1
+  shape     templateRef
+}
+
+/// One email layout by id, for the organization's members. Backs the revision check
+/// campaignSaveLayout makes and the editors that open a saved layout. The id is not a capability:
+/// the concept's account tier answers a layout outside the caller's organizations as not found.
+@actor
+query emailLayout emailLayoutById {
+  args {
+    layoutId  string!
+  }
+  filter  row => row.id == args.layoutId
+  shape   emailLayoutFull
+}
+
+/// An organization's email layouts, newest first. Backs the layout picker (through the emailLayouts
+/// builtin) and the Email app's Templates section. status narrows to active or archived layouts;
+/// omit it to see both.
+@actor
+query emailLayout emailLayoutsForAccount {
+  args {
+    accountId  string!
+    status     string
+  }
+  filter    row => row.accountId == args.accountId
+                && (args.status == nil || row.status == args.status)
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     emailLayoutFull
 }
 
 /// Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which
@@ -262,11 +310,12 @@ query recipient audienceRosterForSend {
   shape     recipientFull
 }
 
-/// ENGINE (owner-scoped): how many recipients an audience holds, as a {count: N} aggregate
-/// (memql#3460). Computed server-side, so it is the one question about a large audience that needs
-/// no window at all -- which is exactly why the preflight and the frozen `recipientCount` use it
-/// rather than measuring the length of a bounded read. Measuring a page and calling it a total is
-/// how the 5000 ceiling came to be load-bearing in the first place. Owned.
+/// ENGINE (owner-scoped): how many recipients an audience holds, as a {count, atLeast} aggregate
+/// (memql#3460). Computed server-side rather than by measuring the length of a bounded read, which
+/// is why the preflight and the frozen `recipientCount` use it: measuring a page and calling it a
+/// total is how the 5000 ceiling came to be load-bearing in the first place. The count still reads
+/// up to the engine's window: past it, `count` is the window and `atLeast` is true (memql#6033).
+/// Owned.
 @actor
 query recipient audienceRosterSize {
   args {
@@ -274,6 +323,21 @@ query recipient audienceRosterSize {
   }
   filter  row => true
               && row.audienceId == args.audienceId
+  count
+}
+
+/// How many people in one audience can be mailed now, as a {count, atLeast} aggregate. Pending and
+/// unsubscribed members are on the list but are not counted. The Email app's audience rows, the
+/// campaign wizard and the send confirmation name this number. Past the engine's window, `count` is
+/// the window and `atLeast` is true, which the Email app says as "5,000 or more" (memql#6033).
+@actor
+query recipient audienceSubscriberCount {
+  args {
+    audienceId  string!
+  }
+  filter  row => true
+              && row.audienceId == args.audienceId
+              && isSendableRecipient(row)
   count
 }
 
@@ -452,8 +516,14 @@ query recipient recipientsWithoutDigestInAudience {
 }
 
 /// Every sending identity the caller may use, newest first. Backs the identity picker on the
-/// campaign editor and the Senders section of the OS app. Composite tier, so a cluster owner sees
-/// every operator's -- which is what makes "who is this cluster mailing as" answerable at all.
+/// campaign editor and the Senders list in the OS app's Settings. Composite tier, so a cluster
+/// owner sees every operator's -- which is what makes "who is this cluster mailing as"
+/// answerable at all.
+///
+/// SORTED BY WHEN IT WAS ADDED, NOT BY ADDRESS, because the sort is also the page cursor. A
+/// payload field is not keyset-eligible, so a list ordered by `address` could not continue past
+/// its first page: a caller walking it past 200 identities got the first 200 and a list that
+/// ended without saying so.
 @actor
 query senderIdentity senderIdentities {
   args {
@@ -461,7 +531,7 @@ query senderIdentity senderIdentities {
   }
   filter    row => true
                 && (args.status == nil || row.status == args.status)
-  sort      "address", "asc"
+  sort      "row.createdAt", "desc"
   paginate  200
   shape     senderIdentityFull
 }
@@ -479,9 +549,9 @@ query senderIdentity senderIdentityById {
   shape   senderIdentityFull
 }
 
-/// The sending identities filed under one account. The tie is a RECORD, not a scope: this is the
-/// same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct is carried
-/// verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
+/// The sending identities filed under one account, newest first. The tie is a RECORD, not a scope:
+/// this is the same read `senderIdentities` makes, narrowed by the tie field, and the tier conjunct
+/// is carried verbatim rather than dropped -- copying `sitesForAccount`'s form exactly (accounts D1).
 @actor
 query senderIdentity senderIdentitiesForAccount {
   args {
@@ -490,7 +560,7 @@ query senderIdentity senderIdentitiesForAccount {
   filter  row => row.accountId == args.accountId
 
   shape   senderIdentityFull
-  sort    "address", "asc"
+  sort    "row.createdAt", "desc"
 }
 
 // ---------------------------------------------------------------------------
@@ -713,4 +783,194 @@ query campaign campaignTestRuns {
   sort "row.createdAt", "desc"
   paginate 50
   shape campaignFull
+}
+
+/// The stored message revision named by an authenticated view-in-browser token.
+@actor
+query template templateAtRevision {
+ args {
+  templateId string!
+  revision datetime!
+ }
+ asOf args.revision ?? latest
+ filter row => row.id == args.templateId
+ shape templateFull
+}
+
+/// Internal scan of due single-recipient deliveries deferred by the rate limiter.
+/// actor.userId scoping would omit other owners' work; internal origin and clusterOwner restrict the sweep.
+@actor
+@serverOnly
+query delivery deferredSingleSends {
+ args { dueAt datetime! }
+ filter row => actor.isClusterOwner == true && statusIsPending(row) && row.requestId != nil && row.requestId != "" && row.nextAttemptAt <= args.dueAt
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape deferredSendRef
+}
+
+/// Organization-authorized email automation read.
+@actor
+query journey journeys {
+ args {
+ status string
+ }
+ filter row => ((args.status == nil || row.status == args.status))
+ sort "row.createdAt", "asc"
+ paginate 50
+ shape journeyFull
+}
+
+/// Organization-authorized email automation read.
+@actor
+query journey journeyById {
+ args {
+ journeyId string!
+ }
+ filter row => (row.id == args.journeyId)
+ shape journeyFull
+}
+
+/// Organization-authorized email automation read.
+@actor
+query journeyEnrollment journeyEnrollmentCounts {
+ args {
+ journeyId string!
+ status string
+ stepId string
+ }
+ filter row => (row.journeyId == args.journeyId && (args.status == nil || row.status == args.status) && (args.stepId == nil || row.stepId == args.stepId))
+ count
+}
+
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
+@actor
+@serverOnly
+query journey activeJourneys {
+ filter row => actor.isClusterOwner == true && (statusIsActive(row))
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyFull
+}
+
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
+@actor
+@serverOnly
+query journey journeysToRetire {
+ filter row => actor.isClusterOwner == true && (statusIsArchived(row) && (row.retiredAt == nil || row.retiredAt == ""))
+ sort "row.createdAt", "asc"
+ paginate 50
+ shape journeyFull
+}
+
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
+@actor
+@serverOnly
+query journeyEnrollment dueEnrollmentsForJourney {
+ args {
+ journeyId string!
+ dueAt datetime!
+ }
+ filter row => actor.isClusterOwner == true && (row.journeyId == args.journeyId && (statusIsActive(row) || row.status == "waiting") && row.nextAt <= args.dueAt)
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
+@actor
+@serverOnly
+query journeyEnrollment openEnrollmentsForJourney {
+ args {
+ journeyId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.journeyId == args.journeyId && (statusIsActive(row) || row.status == "waiting"))
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
+@actor
+@serverOnly
+query journeyEnrollment newestJourneyEnrollment {
+ args {
+ journeyId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.journeyId == args.journeyId)
+ sort "triggeredAt", "desc"
+ paginate 1
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
+@actor
+@serverOnly
+query journeyEnrollment journeyEnrollmentById {
+ args {
+ enrollmentId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.id == args.enrollmentId)
+ shape journeyEnrollmentFull
+}
+
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
+@actor
+@serverOnly
+query recipient audienceJoinersSince {
+ args {
+ audienceId string!
+ since datetime!
+ }
+ filter row => actor.isClusterOwner == true && (row.audienceId == args.audienceId && row.joinedAt >= args.since && (isSendableRecipient(row) || row.subscriptionStatus == "pending"))
+ sort "row.createdAt", "asc"
+ paginate 200
+ shape recipientEnrollmentRef
+}
+
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
+@actor
+@serverOnly
+query recipient audienceConfirmationsSince {
+ args {
+ audienceId string!
+ since datetime!
+ }
+ filter row => actor.isClusterOwner == true && (row.audienceId == args.audienceId && row.confirmedAt >= args.since && isSendableRecipient(row))
+ sort "row.createdAt", "asc"
+ paginate 200
+ shape recipientEnrollmentRef
+}
+
+/// Internal automation state read across all owners. actor.userId scoping would miss other owners' due work; the clusterOwner predicate and internal origin are both mandatory.
+@actor
+@serverOnly
+query journeyEnrollment waitingEnrollmentsForRecipient {
+ args {
+ recipientId string!
+ }
+ filter row => actor.isClusterOwner == true && (row.recipientId == args.recipientId && (row.status == "waiting" || (row.status == "exited" && row.exitReason == "not confirmed")))
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}
+
+/// Internal membership lifecycle check. actor.userId cannot read other owners' worker enrollments; both internal origin and clusterOwner are required.
+@actor
+@serverOnly
+query journeyEnrollment recipientJourneyEnrollments {
+ args { recipientId string! }
+ filter row => actor.isClusterOwner == true && row.recipientId == args.recipientId
+ sort "row.createdAt", "asc"
+ paginate 100
+ shape journeyEnrollmentFull
+}
+
+/// Internal retry verdict read under the existing request's receipt lock. actor.userId scoping would hide work after authority is revoked; clusterOwner plus internal origin is mandatory.
+@actor
+@serverOnly
+query delivery deferredSingleSendById {
+ args { deliveryId string! }
+ filter row => actor.isClusterOwner == true && row.id == args.deliveryId
+ shape deferredSendRef
 }

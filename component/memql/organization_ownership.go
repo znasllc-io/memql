@@ -5,6 +5,7 @@ package memql
 // not become ownership merely because they mention an account.
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/uptrace/bun"
 	"strings"
@@ -15,7 +16,8 @@ import (
 
 func organizationOwnedConcept(concept string) bool {
 	switch concept {
-	case "v1:campaigns:testSettings", "v1:campaigns:newsletterBinding", "v1:campaigns:newsletterSignup", "v1:campaigns:campaignSeries", "v1:campaigns:audience", "v1:campaigns:recipient", "v1:campaigns:template", "v1:campaigns:senderIdentity", "v1:campaigns:campaign", "v1:campaigns:delivery", "v1:campaigns:engagementEvent", "v1:campaigns:consentEvent", "v1:campaigns:emailRule", "v1:platform:site", "v1:platform:package", "v1:platform:packageDeployment", "v1:identity:group", "v1:identity:groupMembership":
+	case "v1:campaigns:journey", "v1:campaigns:journeyEnrollment", "v1:campaigns:testSettings", "v1:campaigns:newsletterBinding", "v1:campaigns:newsletterSignup", "v1:campaigns:campaignSeries", "v1:campaigns:audience", "v1:campaigns:recipient", "v1:campaigns:template", "v1:campaigns:emailLayout", "v1:campaigns:senderIdentity", "v1:campaigns:campaign", "v1:campaigns:delivery", "v1:campaigns:engagementEvent", "v1:campaigns:consentEvent", "v1:campaigns:emailRule", "v1:platform:site", "v1:platform:package", "v1:platform:packageDeployment", "v1:identity:group", "v1:identity:groupMembership":
+
 		return true
 	}
 	return false
@@ -124,6 +126,8 @@ func organizationReferences(concept string) map[string]string {
 		return map[string]string{"audienceId": "v1:campaigns:audience", "templateId": "v1:campaigns:template", "senderIdentityId": "v1:campaigns:senderIdentity"}
 	case "v1:campaigns:testSettings":
 		return map[string]string{"audienceId": "v1:campaigns:audience"}
+	case "v1:campaigns:journeyEnrollment":
+		return map[string]string{"journeyId": "v1:campaigns:journey", "recipientId": "v1:campaigns:recipient"}
 	case "v1:campaigns:newsletterBinding":
 		return map[string]string{"siteId": "v1:platform:site", "audienceId": "v1:campaigns:audience", "templateId": "v1:campaigns:template", "senderIdentityId": "v1:campaigns:senderIdentity"}
 	case "v1:campaigns:newsletterSignup":
@@ -133,7 +137,7 @@ func organizationReferences(concept string) map[string]string {
 	case "v1:campaigns:recipient":
 		return map[string]string{"audienceId": "v1:campaigns:audience"}
 	case "v1:campaigns:delivery":
-		return map[string]string{"campaignId": "v1:campaigns:campaign", "emailRuleId": "v1:campaigns:emailRule", "recipientId": "v1:campaigns:recipient"}
+		return map[string]string{"campaignId": "v1:campaigns:campaign", "emailRuleId": "v1:campaigns:emailRule", "recipientId": "v1:campaigns:recipient", "templateId": "v1:campaigns:template", "senderIdentityId": "v1:campaigns:senderIdentity"}
 	case "v1:campaigns:engagementEvent":
 		return map[string]string{"campaignId": "v1:campaigns:campaign"}
 	case "v1:campaigns:consentEvent":
@@ -178,7 +182,7 @@ func organizationAccountsAgree(account, parent string) bool {
 
 func organizationApp(concept string) string {
 	if strings.HasPrefix(concept, "v1:campaigns:") {
-		return "app:campaigns"
+		return "app:email"
 	}
 	if strings.HasPrefix(concept, "v1:platform:") {
 		return "app:deployables"
@@ -299,6 +303,14 @@ func (e *MemQLEngine) organizationUserRole(ctx context.Context, userID string) (
 	return auth.Role(role), true
 }
 
+// ErrOrganizationRowForbidden is the refusal of a write to a row that exists in
+// an organization the caller may not change. It is an exported value so that a
+// caller can recognise it with errors.Is and say it in words of its own, which
+// the text of an error is not a contract for. A create under an id that a row in
+// another organization already holds meets it too: the write is judged as the
+// update of the existing row it would be.
+var ErrOrganizationRowForbidden = errors.New("organization_forbidden: you cannot change data in the existing organization")
+
 // A record with dependent organization work cannot be retagged behind that
 // work's back. Unchanged attribution skips the dependent-row scan. A caller
 // authorized in both organizations can move an unused draft; moving history
@@ -317,7 +329,7 @@ func (e *MemQLEngine) validateOrganizationTransfer(ctx context.Context, concept,
 	// Otherwise membership in both accounts plus a target-only grant could
 	// take a row out of an organization the caller may only read.
 	if !e.OrganizationCapable(ctx, old, auth.VerbUpdate, auth.ResourceData) {
-		return fmt.Errorf("organization_forbidden: you cannot change data in the existing organization")
+		return ErrOrganizationRowForbidden
 	}
 	next, present := delta["accountId"].(string)
 	if !present || BareShortId(next) == BareShortId(old) {
@@ -363,13 +375,13 @@ func (e *MemQLEngine) organizationAuthorizationFingerprint(ctx context.Context) 
 	decisions := map[string]struct{}{fmt.Sprintf("global/read/%t", e.GlobalDataCapable(ctx, auth.VerbRead)): {}}
 	if scope != nil {
 		if scope.everyAccount {
-			for _, resource := range []string{auth.ResourceData, "app:campaigns", "app:deployables"} {
+			for _, resource := range []string{auth.ResourceData, "app:email", "app:deployables"} {
 				decisions[fmt.Sprintf("every/%s/%t", resource, e.organizationAppAllows(ctx, "", resource))] = struct{}{}
 			}
 		}
 		for account := range scope.accounts {
 			bare := BareShortId(account)
-			for _, resource := range []string{auth.ResourceData, "app:campaigns", "app:deployables"} {
+			for _, resource := range []string{auth.ResourceData, "app:email", "app:deployables"} {
 				decisions[fmt.Sprintf("%s/%s/%t", bare, resource, e.organizationAppAllows(ctx, bare, resource))] = struct{}{}
 			}
 		}

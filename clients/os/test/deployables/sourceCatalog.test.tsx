@@ -10,6 +10,7 @@ import { sourceConnectionFromRow } from "../../src/modules/connections/connectio
 import { sourceRecord } from "../../src/apps/deployables/sources/sourceRecord";
 import { RemoveSource } from "../../src/apps/deployables/sources/RemoveSource";
 import { builtinReply, click, emit, fakeConnection, githubGrantRow, sourceConnectionRow, withSession, type FakeSeed } from "./harness";
+import { betweenTheClicks, readTheBar, useFakeDate } from "../readTheBar";
 
 const ALICE = githubGrantRow({ id: "alice", login: "alice" });
 const BOB = githubGrantRow({ id: "bob", login: "bob" });
@@ -57,6 +58,7 @@ describe("configured Sources catalog", () => {
     await click(remove);
     const dialog = screen.getByRole("dialog", { name: "Remove Website?" });
     expect(within(dialog).getByText(/Existing deployables and automatic updates keep running/)).toBeTruthy();
+    await readTheBar();
     await click(within(dialog).getByRole("button", { name: "Remove source" }));
     await waitFor(() => expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(1));
     expect(connection.callsNamed("setPackageSourceRemoved")[0]).toContain('packageId: "pkg-a"');
@@ -90,10 +92,47 @@ describe("configured Sources catalog", () => {
     const onRemoved = vi.fn();
     const view = render(withSession(<RemoveSource pkg={packageFromRow(A)} onRemoved={onRemoved} />));
     await click(screen.getByRole("button", { name: "Remove source Website" }));
+    await readTheBar();
     await click(screen.getByRole("button", { name: "Remove source" }));
     await waitFor(() => expect(resolve).toBeTruthy());
     view.unmount();
     await act(async () => resolve(builtinReply("setPackageSourceRemoved", [])));
     expect(onRemoved).not.toHaveBeenCalled();
+  });
+});
+
+// The removal asks in a dialog that opens over the icon that asked it (memql#6033):
+// the second click of a double-click on that icon must not remove the source.
+describe("removing a source, one double-click later", () => {
+  useFakeDate();
+
+  async function ask() {
+    const { connection } = mount({ packages: [A] });
+    await click(await screen.findByRole("button", { name: /Open Website, @alice/ }));
+    await click(await screen.findByRole("button", { name: "Remove source Website" }));
+    return { connection, dialog: screen.getByRole("dialog", { name: "Remove Website?" }) };
+  }
+
+  it("does not remove on the second click of the click that asked, and does once it is read", async () => {
+    const { connection, dialog } = await ask();
+    betweenTheClicks();
+    await click(within(dialog).getByRole("button", { name: "Remove source" }));
+    expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(0);
+    expect(screen.getByRole("dialog", { name: "Remove Website?" })).toBeTruthy();
+
+    await readTheBar();
+    await click(within(dialog).getByRole("button", { name: "Remove source" }));
+    await waitFor(() => expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(1));
+  });
+
+  it("does not cancel on that click either", async () => {
+    const { connection, dialog } = await ask();
+    betweenTheClicks();
+    await click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("dialog", { name: "Remove Website?" })).toBeTruthy();
+    await readTheBar();
+    await click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Remove Website?" })).toBeNull();
+    expect(connection.callsNamed("setPackageSourceRemoved")).toHaveLength(0);
   });
 });

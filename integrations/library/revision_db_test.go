@@ -68,6 +68,8 @@ type revisionAI struct {
 	researchDocument      string
 	researchPassages      string
 	editDocument          string
+	editSchemas           []any
+	editBlankDestinations []bool
 	appStarted            chan struct{}
 	headlessStarted       chan struct{}
 	expectedReference     string
@@ -256,6 +258,8 @@ func (a *revisionAI) Capabilities() []memql.IntegrationCapability {
 				return reviewResult(map[string]any{"reply": reply})
 			}
 			a.editDocument = asString(data["document"])
+			a.editSchemas = append(a.editSchemas, args["responseSchema"])
+			a.editBlankDestinations = append(a.editBlankDestinations, data["blankDestination"] == true)
 			passages, valid := data["passages"].(string)
 			expectedEvidence := "Editorial change:"
 			if a.needsResearch {
@@ -504,6 +508,7 @@ func TestDocumentRevisionWorkflow(t *testing.T) {
 			{"PersonalDocumentNotesNeverEnterAIRevision", testPersonalDocumentNotesNeverEnterAIRevision},
 			{"ArtifactForFileResolvesBareReceiptAcrossEngines", testArtifactForFileResolvesBareReceiptAcrossEngines},
 			{"ReviewAttachmentsAcrossReplicas", testReviewAttachmentsAcrossReplicas},
+			{"BlankDestinationWithReference", testBlankDestinationWithReference},
 			{"AppliedFeedbackCannotBeDeletedAcrossReplicas", testAppliedFeedbackCannotBeDeletedAcrossReplicas},
 			{"DeleteDocumentAnnotationsAcrossReplicas", testDeleteDocumentAnnotationsAcrossReplicas},
 			{"DeleteProposedFeedbackInvalidatesStaleReview", testDeleteProposedFeedbackInvalidatesStaleReview},

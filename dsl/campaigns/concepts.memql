@@ -9,28 +9,35 @@
 // per-row machinery as the rest of the graph. A campaign editor is then a
 // layout over queries and mutations, not a new subsystem.
 //
-// THIRTEEN CONCEPTS. Six answer the five questions a send has to answer --
-// who, what, from whom, when, and what happened -- four are the sending
-// engine's own state (memql#3348), and three are the compliance, engagement
-// and automation surfaces layered on top:
+// NINETEEN CONCEPTS. Seven answer the five questions a send has to answer --
+// who, what, from whom, when, and what happened. The rest are the sending
+// engine's own state (memql#3348) and the compliance, engagement, automation,
+// recurrence, newsletter and testing surfaces layered on top:
 //
-//   audience         WHO        a named set of addresses
-//   recipient        WHO        one address in an audience, with its subscription state
-//   template         WHAT       the subject + bodies, authored once and reused
-//   senderIdentity   FROM       a mailbox this deployment may send as (memql#4821)
-//   campaign         WHEN       audience x template x schedule, plus the send state
-//   delivery         OUTCOME    one row per recipient per campaign
-//   sendJob          ENGINE     the per-campaign send run the worker drains
-//   suppression      ENGINE     the cluster-wide do-not-mail list, digest-keyed
-//   reputationWindow ENGINE     per (identity, domain, day) deliverability counters
-//   warmupState      ENGINE     the evidence-driven ramp's own decision record
-//   consentEvent     EXPORT     append-only grant/withdraw/bounce/complaint/suppress
-//   engagementEvent  EXPORT     append-only open/click, one row per tracked hit (memql#4823)
-//   emailRule        AUTOMATION "when X happens on concept Y, send template Z" (memql#4829)
+//   audience           WHO         a named set of addresses
+//   recipient          WHO         one address in an audience, with its subscription state
+//   template           WHAT        the subject + bodies, authored once and reused
+//   emailLayout        WHAT        an organization's saved email, kept as the starting point for the next one
+//   senderIdentity     FROM        a mailbox this deployment may send as (memql#4821)
+//   campaign           WHEN        audience x template x schedule, plus the send state
+//   delivery           OUTCOME     one row per recipient per campaign
+//   sendJob            ENGINE      the per-campaign send run the worker drains
+//   suppression        ENGINE      the cluster-wide do-not-mail list, digest-keyed
+//   reputationWindow   ENGINE      per (identity, domain, day) deliverability counters
+//   warmupState        ENGINE      the evidence-driven ramp's own decision record
+//   singleSendReceipt  ENGINE      a private receipt for one intended event email, so a retry finds it
+//   consentEvent       EXPORT      append-only grant/withdraw/bounce/complaint/suppress
+//   engagementEvent    EXPORT      append-only open/click, one row per tracked hit (memql#4823)
+//   emailRule          AUTOMATION  "when X happens on concept Y, send template Z" (memql#4829)
+//   campaignSeries     RECURRENCE  a repeating instruction; each occurrence is its own campaign
+//   newsletterBinding  NEWSLETTER  a deployable's sign-up form bound to an audience and a welcome
+//   newsletterSignup   NEWSLETTER  one opt-in and its welcome, from consent to outcome
+//   testSettings       TESTING     an organization's shared testing audience
 //
 // The census used to say EIGHT and list nine, having been written before the
-// reputation and warmup rows landed. A count in a header is a claim the file
-// makes about itself; keep it true when you add to this file.
+// reputation and warmup rows landed, and later said THIRTEEN over eighteen
+// declarations. A count in a header is a claim the file makes about itself;
+// keep it true when you add to this file.
 //
 // ORGANIZATION OWNERSHIP on the operator-facing resources. Creation stamps
 // the authenticated person as ownerUserId and persists the selected accountId.
@@ -81,6 +88,7 @@ use platform.concepts.{ outboundRequest, site }
 @displayCard(primary="name", secondary="description", tertiary="ownerUserId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept audience {
+  confirmation enum("none", "required") @description("Required signups remain pending until the person confirms their subscription.")
   ownerUserId  string!  @description("v1:identity:user.id that owns this audience. Stamped from actor.userId at create time and re-stamped on every update, so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")
   name         string!  @description("Short operator-facing name for the audience, e.g. 'Beta waitlist'. The primary display field; not required to be unique.")
   description  string   @description("What this audience is and how someone lands in it. Free text, shown under the name in the portal's audience list.")
@@ -99,12 +107,14 @@ concept audience {
 @displayCard(primary="email", secondary="displayName", tertiary="audienceId", status="subscriptionStatus")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept recipient {
+  joinedAt datetime @description("When this membership was first created; edits never move it.")
+  confirmedAt datetime @description("When the person confirmed their subscription.")
   ownerUserId         string!  @description("v1:identity:user.id that owns this recipient row -- the owner of the parent audience, stamped from actor.userId. The per-row authz key.")
   accountId    string   @description("The v1:accounts:account this recipient is for, COPIED from its audience at write (epic memql#5165, section J). Denormalized rather than joined for the reason ownerUserId above is: the account grant is a filter conjunct the engine ANDs into every read, and a conjunct that needs a join is one that cannot be pushed down. Missing current attribution is repaired only when its parent already names an organization; explicit attribution and historical versions are preserved.")
   audienceId          string!  @description("v1:campaigns:audience.id this address belongs to. A person in two audiences is two rows, so a per-audience unsubscribe is expressible and a global one is a sweep.")
   email               string!  @pii  @description("The recipient's email address -- the delivery target and the identity of the row. Marked @pii: it is scrubbed by the deletion path and every query projecting it must constrain its caller.")
   displayName         string   @pii  @description("Optional human name used to personalize the greeting. Marked @pii for the same reason as email.")
-  subscriptionStatus  enum("subscribed", "unsubscribed", "bounced", "complained")  @description("Whether this address may be mailed. 'subscribed' is the only sendable state. 'unsubscribed' is the recipient's own choice and is permanent until they opt back in; 'bounced' and 'complained' are the provider's verdict and exist as distinct states because they mean different things to a deliverability review -- a bounce is a bad address, a complaint is a reputational event.")
+  subscriptionStatus  enum("subscribed", "pending", "unsubscribed", "bounced", "complained")  @description("Whether this address may be mailed. 'subscribed' is the only sendable state. 'unsubscribed' is the recipient's own choice and is permanent until they opt back in; 'bounced' and 'complained' are the provider's verdict and exist as distinct states because they mean different things to a deliverability review -- a bounce is a bad address, a complaint is a reputational event.")
   unsubscribedAt      datetime  @description("When the address left the subscribed state. Empty while subscribed. Recorded rather than inferred from row history so a suppression check is one field read.")
   source              enum("manual", "import", "signup")  @description("How the address got here. 'manual' = typed into the portal, 'import' = bulk upload, 'signup' = a product flow added it. Provenance a deliverability review asks for first when complaint rates rise.")
   fields              object  @pii  @description("Per-recipient merge data -- every column a CSV import carried that was not `email` or `displayName`, verbatim, as a flat string map (memql#4822). Reachable from a template as {{fields.<key>}} against the CLOSED merge-tag set; the renderer builds a strings.NewReplacer over the enumerable keys rather than evaluating a template language, so a value here is substituted and never executed. Marked @pii: an import's spare columns routinely carry names, companies and account numbers, and the deletion path must reach them.")
@@ -126,10 +136,31 @@ concept template {
   name         string!  @description("Operator-facing name for the template, e.g. 'August product update'. Distinct from the subject line, which is what the recipient sees.")
   subject      string!  @description("The email subject line. Rendered verbatim; the engine's email sender rejects control characters in it (header-injection barrier in integrations/email).")
   textBody     string!  @description("The plain-text body. Required, not optional: a text alternative is what keeps a message out of the spam bucket and readable in a client that refuses HTML.")
-  htmlBody     string   @description("Optional HTML alternative. When present the message goes out as multipart/alternative with text first.")
+  htmlBody     string   @description("Optional HTML alternative. When present the message goes out as multipart/alternative with text first. A draft too large to send (more than 2 MiB once its pictures are embedded, the email_too_large issue) stores none: its document keeps the email and an editor renders it on demand. A draft that has a document and no htmlBody is therefore not a plain-text email, and is not sent.")
   status       enum("draft", "ready", "archived")  @description("Authoring lifecycle. 'draft' is being written; 'ready' means an operator has decided it may be attached to a campaign; 'archived' keeps it readable for the campaigns that referenced it without offering it in the picker.")
   accountId    string   @description("The owning v1:accounts:account organization. New work requires an authorized organization selected explicitly or resolved from the caller. Legacy untied rows retain their existing attribution until an operator assigns one.")
+  document          object  @description("The email document (emaildoc, a *.email.json file) this template was rendered from, in layout or custom mode, exactly as campaignSaveTemplate validated it. The subject and the two bodies above are its rendering and are what a send uses. Absent on templates saved before documents existed: their subject and bodies are the whole template.")
+  layoutId          string  @description("The layout the document was made from: 'builtin:<name>' or 'org:<layoutId>'. Provenance only; an opaque id the server issues. Empty for custom HTML.")
+  preheader         string  @description("The hidden line an inbox shows after the subject, from the document. It is already written into htmlBody; kept here so an editor can show it.")
+  sourceArtifactId  string  @description("The Library file the template was published from. There is one template per organization and file: publishing the same file again updates this template (templateForSource). Empty for templates not made from a file.")
 
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+}
+
+/// An organization's saved email layout: a finished email kept as the starting point for the next
+/// one. Brand blocks keep their content; content blocks keep theirs as the example the Materializer
+/// writes against. Only campaignSaveLayout writes it.
+@displayCard(primary="name", secondary="description", tertiary="accountId", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept emailLayout {
+  ownerUserId       string!  @description("The person who first saved it. Preserved across edits by organization members.")
+  accountId         string!  @description("The owning organization. A layout cannot move between organizations.")
+  name              string!  @description("Name shown on the layout card.")
+  description       string   @description("One line about when to use it.")
+  document          object!  @description("The layout-mode email document (emaildoc), validated on every save.")
+  sourceArtifactId  string   @description("The Library file the layout was saved from, when it was.")
+  status            enum("active", "archived")!  @description("Archived layouts stay readable for emails made from them and leave the layout picker.")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }
@@ -165,7 +196,7 @@ concept template {
 concept senderIdentity {
   ownerUserId  string!  @description("v1:identity:user.id that owns this identity. Stamped from actor.userId on every write. The per-row authz key.")
   address      string!  @description("The mailbox UPN the Graph application may send as, e.g. news@acme-client.com. Becomes the From ADDRESS and the /users/{address}/sendMail path segment, so it is validated for RFC 5322 shape AND header safety on the write path -- a CR or LF here would be header injection into every message this identity sends. Normalized lowercase; it is also the reputation and warmup key, so two spellings of one mailbox would split its ramp in half.")
-  fromName     string!  @description("The display name on the From header for campaigns sent as this identity, e.g. 'Acme News'. Overridden per campaign by campaign.fromName when that is set. Required, because a From with no phrase shows the raw mailbox to every recipient, which is the deliverability equivalent of not having thought about it.")
+  fromName     string!  @maxLength(100)  @description("The display name on the From header for campaigns sent as this identity, e.g. 'Acme News'. Overridden per campaign by campaign.fromName when that is set. Required, because a From with no phrase shows the raw mailbox to every recipient, which is the deliverability equivalent of not having thought about it. At most 100 characters: the footer names it and the view-in-browser link of every message carries it.")
   replyTo      string   @description("Default Reply-To for campaigns using this identity that set none of their own. Empty means replies go to the sending address itself. A campaign's own replyTo always wins.")
   accountId    string   @description("The owning v1:accounts:account organization. A campaign may use only a sender identity belonging to its own organization. An entered sender address is not proof of mailbox ownership.")
   status       enum("active", "disabled")  @description("Whether this identity may be used. 'disabled' is how an operator retires a mailbox WITHOUT deleting the row -- past campaigns name it, and the reputation history is keyed on its address. Preflight refuses a campaign naming a disabled identity rather than falling back to the default, because a silent fallback mails a client's list from the wrong mailbox and nothing says so.")
@@ -194,10 +225,10 @@ concept senderIdentity {
 concept campaign {
   testSourceCampaignId string @description("Original campaign for a test run. Engine-stamped; a test has its own audience, job and delivery ledger and never advances the original campaign or its series.")
   ownerUserId     string!  @description("v1:identity:user.id that owns this campaign. Stamped from actor.userId. The per-row authz key.")
-  name            string!  @description("Operator-facing campaign name. The primary display field.")
+  name            string!  @maxLength(200)  @description("Operator-facing campaign name. The primary display field. At most 200 characters: {{campaignName}} shows it and the view-in-browser link of every message carries it.")
   audienceId      string!  @description("v1:campaigns:audience.id this campaign is addressed to. Resolved to recipient rows at send time, not at authoring time, so an audience that grows between scheduling and sending is mailed as it stands when the send runs.")
   templateId      string!  @description("v1:campaigns:template.id supplying the subject and bodies.")
-  fromName        string   @description("Per-campaign display name on the From header, e.g. 'The MemQL team'. A non-secret presentation setting: it overrides the integration-wide default (MEMQL_EMAIL_FROM_NAME) for this campaign only. The From ADDRESS is deliberately not settable here -- it is bound to the configured mailbox credential and changing it is a deliverability decision, not a campaign one.")
+  fromName        string   @maxLength(100)  @description("Per-campaign display name on the From header, e.g. 'The MemQL team'. A non-secret presentation setting: it overrides the integration-wide default (MEMQL_EMAIL_FROM_NAME) for this campaign only. The From ADDRESS is deliberately not settable here -- it is bound to the configured mailbox credential and changing it is a deliverability decision, not a campaign one. At most 100 characters, like the identity's, because it is the name the footer shows and the view-in-browser link carries.")
   replyTo         string   @description("Optional Reply-To address for this campaign. Non-secret; empty means replies go to the configured sender address.")
   scheduledAt     datetime  @description("When the send should begin. Empty means the campaign is not scheduled -- it is a draft an operator will start by hand. THE AUTHORITY on when a scheduled send fires (memql#3459): the drain worker re-reads this field rather than trusting the copy on the send job, so moving the date here moves the send.")
   status          enum("draft", "scheduled", "sending", "paused", "sent", "cancelled", "failed")  @description("Campaign lifecycle. 'draft' is being authored; 'scheduled' is committed to a time and WILL fire on its own (memql#3459 -- the worker promotes the campaign's scheduled send job once scheduledAt has passed); 'sending' / 'paused' / 'sent' / 'failed' are send-engine states; 'cancelled' is an operator stopping it before or during a send.")
@@ -230,6 +261,14 @@ concept campaign {
 /// audience with no delivery row, plus rows still `pending` whose nextAttemptAt has passed", so a
 /// recipient that already reached `sent` or `skipped` is simply not in the next batch. There is no
 /// "already sent?" flag to forget to check: the absence of the row IS the work queue.
+///
+/// A SINGLE SEND IS KEYED BY ITS REQUEST (memql#6022, F7). A message sent outside a campaign -- an
+/// automation's, a welcome, a journey step -- has no campaign to key its row by. Keying it by
+/// (rule, recipient), or by the recipient alone when no rule was behind it, made every message to a
+/// person write a new VERSION of one row, each replacing the last, so "which message did this person
+/// get" had no answer. A send made under a stable `requestId` is keyed by (requestId, recipientId)
+/// instead: each message has a row of its own, naming the request, the template and the sender.
+/// Campaign deliveries pass no requestId, so their ids are what they always were.
 ///
 /// Written by component/campaigns' drain worker through `recordCampaignDelivery`, which runs under
 /// the CAMPAIGN OWNER'S actor -- so `ownerUserId` is stamped from `actor.userId` like every other
@@ -264,12 +303,17 @@ concept delivery {
   attempts           int  @description("Delivery attempts made for this recipient. Incremented on each transport failure and bounded by MEMQL_CAMPAIGNS_MAX_ATTEMPTS, past which the row goes terminal 'failed'. Zero on a 'skipped' row, which never reaches the transport.")
   emailRuleId        string   @description("v1:campaigns:emailRule.id of the event rule that produced this send, when one did (memql#4829). Empty on every ordinary campaign delivery, which is the overwhelming majority. It exists because an event rule mails one person at a time in response to something that happened, and 'which rule mailed this person, and why' is the FIRST question anybody asks about automated mail -- a question the campaign id alone cannot answer, because a rule's sends carry no campaign at all.")
   nextAttemptAt      datetime  @description("When a retryable 'pending' row becomes eligible again -- bounded exponential backoff with jitter, or the provider's own Retry-After when it supplied one. Compared Go-side by the drain worker, which is why it is a stored instant rather than a computed one.")
+  requestId          string   @description("The single-send request this row records (memql#6022, F7): the stable requestId an automation, a welcome or a journey step supplied for ONE intended message. It is the LEDGER KEY of a send that has no campaign -- the row id derives from (requestId, recipientId), so each message to a person has a row of its own. A request id never contains a colon, which is what keeps it from aliasing a canonical campaign id in that derivation. Empty on every campaign delivery and on a send made without a requestId, which keeps the (rule, recipient) row it always had.")
+  templateId         string   @description("v1:campaigns:template.id of the message a single send carried (memql#6022, F7), so a row answers 'what was this person sent' after the rule or journey that sent it has been edited. Empty on a campaign delivery, whose template is its campaign's.")
+  senderIdentityId   string   @description("v1:campaigns:senderIdentity.id a single send went out as (memql#6022, F7). Empty when the send named no identity -- it went out as the configured default -- and on a campaign delivery, whose sender is its campaign's.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")
   @relationship(type="references", field="recipientId", target=recipient, direction="outgoing")
   @relationship(type="references", field="outboundRequestId", target=outboundRequest, direction="outgoing")
   @relationship(type="references", as="sentByRule", field="emailRuleId", target=emailRule, direction="outgoing")
+  @relationship(type="references", field="templateId", target=template, direction="outgoing")
+  @relationship(type="references", as="sentAs", field="senderIdentityId", target=senderIdentity, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }
 
@@ -378,6 +422,7 @@ concept sendJob {
 @displayCard(primary="domain", secondary="reason", tertiary="suppressedAt", status="reason")
 @rowAuthz(clusterOwner)
 concept suppression {
+  liftedAt datetime @description("When the recipient subscribed again from preferences; a lifted organization opt-out no longer blocks sends.")
   accountId         string  @description("Organization whose mail is blocked. Absent on existing cluster-wide safety suppressions.")
   emailDigest       string  @description("SHA-256 of the normalized mailbox for organization-scoped rows. No plaintext address is stored.")
   reason            enum("unsubscribed", "hard_bounce", "complaint", "manual")!  @description("Why this address may never be mailed again. 'unsubscribed' is the recipient's own choice, via the RFC 8058 one-click header or the link in the body. 'hard_bounce' and 'complaint' are the provider's verdict and are kept apart because they mean different things to a review -- a bounce is a dead address, a complaint is a reputational event. 'manual' is an operator adding one by hand.")
@@ -471,7 +516,7 @@ concept consentEvent {
   accountId    string   @description("The v1:accounts:account this consent event is for, COPIED from its recipient at write (epic memql#5165, section J). Denormalized rather than joined for the reason ownerUserId above is: the account grant is a filter conjunct the engine ANDs into every read, and a conjunct that needs a join is one that cannot be pushed down. Missing current attribution is repaired only when its parent already names an organization; explicit attribution and historical versions are preserved.")
   emailDigest  string!  @description("SHA-256 hex digest of the normalized (lowercased, trimmed) address. The subscriber key. The mailbox is never stored here -- a caller can ask about an address only when it already holds it.")
   kind         enum("grant", "withdraw", "bounce", "complaint", "suppress")!  @description("The event. grant = opted in; withdraw = opted out; bounce / complaint = provider verdict; suppress = operator or policy suppression. There is no mutable status field -- current status is the latest kind.")
-  source       enum("signup", "one_click", "import", "provider", "operator", "rfc8058")!  @description("Where the event came from. Data, not DSL source.")
+  source       enum("signup", "one_click", "import", "provider", "operator", "rfc8058", "double_opt_in", "preferences")!  @description("Where the event came from. Data, not DSL source.")
   occurredAt   datetime!  @description("When the event happened. Stamped from the engine clock unless the writer records an earlier verified event (e.g. a provider timestamp).")
   reason       string   @description("Why, when kind is suppress. Required on the suppress write path. Empty for grant/withdraw/bounce/complaint.")
   recipientId  string   @description("Optional v1:campaigns:recipient.id when the event is about a specific audience membership. The digest is the subscriber identity; this is the membership the operator was looking at.")
@@ -597,8 +642,8 @@ concept newsletterBinding {
   siteId string! @description("The deployable whose form accepts signups. One binding per site.")
   storeId string! @description("The live Shopify store captured from the deployable, or empty for an ordinary site. Preview bindings cannot enroll a live audience.")
   audienceId string! @description("The organization's audience receiving subscribers.")
-  templateId string! @description("Published welcome template, captured as immutable bytes at signup.")
-  senderIdentityId string! @description("The organization's sending identity. No default mailbox fallback.")
+  templateId string @description("Published welcome template, captured as immutable bytes at signup.")
+  senderIdentityId string @description("The organization's sending identity. No default mailbox fallback.")
   consentText string! @description("The consent sentence displayed by the form and recorded for each signup.")
   enabled bool! @description("Whether this site accepts new opt-ins and dispatches pending welcomes.")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
@@ -628,10 +673,10 @@ concept newsletterSignup {
   consentText string! @description("Exact configured consent sentence at acceptance.")
   consentRevision datetime! @description("The saved newsletter configuration revision agreed to by the visitor.")
   requestedAt datetime! @description("When the affirmative opt-in was first recorded.")
-  templateId string! @description("The readable template from which the welcome was captured.")
-  templateSnapshot object! @description("Immutable published template bytes and revision captured at acceptance.")
-  senderIdentityId string! @description("Client sending identity captured at acceptance.")
-  status enum("pending", "sent", "suppressed", "uncertain", "blocked")! @description("Welcome submission outcome. Uncertain attempts are never resubmitted. Blocked is rechecked only by an authorized operator.")
+  templateId string @description("The readable template from which the welcome was captured.")
+  templateSnapshot object @description("Immutable published template bytes and revision captured at acceptance.")
+  senderIdentityId string @description("Client sending identity captured at acceptance.")
+  status enum("pending", "none", "sent", "suppressed", "uncertain", "blocked")! @description("Welcome submission outcome. Uncertain attempts are never resubmitted. Blocked is rechecked only by an authorized operator.")
   lastError string @description("Reason for a refusal or uncertain outcome, without the recipient address.")
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
@@ -652,4 +697,46 @@ concept testSettings {
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
   @relationship(type="references", field="audienceId", target=audience, direction="outgoing")
+}
+
+/// An email automation owned by its organization.
+@displayCard(primary="name", secondary="description", tertiary="accountId", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept journey {
+  ownerUserId  string!   // creator; the drain sends under this person's current authority
+  accountId    string!   // immutable
+  name         string!
+  description  string
+  trigger      object!   // {kind: "joined"|"confirmed", audienceId}
+  steps        []object! // [{id, kind: "send"|"confirm"|"wait", templateId?, senderIdentityId?, days?, hours?, timeoutDays?}]
+  status       enum("draft", "active", "paused", "archived")!
+  activatedAt  datetime  // first activation; enrollment starts from here
+  retiredAt    datetime  // archive finished exiting every open enrollment
+  lastError    string
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
+}
+
+@displayCard(primary="recipientId", secondary="stepId", tertiary="journeyId", status="status")
+@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
+concept journeyEnrollment {
+  ownerUserId  string!   // the journey's owner, stamped by the drain
+  accountId    string!
+  journeyId    string!
+  recipientId  string!
+  emailDigest  string!   // the address that joined; a changed address exits
+  stepId       string    // the next step to run
+  stepIndex    int!
+  nextAt       datetime
+  status       enum("active", "waiting", "completed", "exited", "failed")!
+  exitReason   string    // Ruling 9 codes
+  enrolledAt   datetime!
+  triggeredAt  datetime! // the member's joinedAt or confirmedAt
+  completedAt  datetime
+  lastError    string
+  attempts     int
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="journeyId", target=journey, direction="outgoing")
+  @relationship(type="references", field="recipientId", target=recipient, direction="outgoing")
+  @relationship(type="references", as="forAccount", field="accountId", target=account, direction="outgoing")
 }

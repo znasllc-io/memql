@@ -4,11 +4,13 @@ package campaigns
 // (memql#4141). Current status is derived from the latest kind -- there
 // is no mutable status column.
 const (
-	ConsentGrant     = "grant"
-	ConsentWithdraw  = "withdraw"
-	ConsentBounce    = "bounce"
-	ConsentComplaint = "complaint"
-	ConsentSuppress  = "suppress"
+	ConsentSourceDoubleOptIn = "double_opt_in"
+	ConsentSourcePreferences = "preferences"
+	ConsentGrant             = "grant"
+	ConsentWithdraw          = "withdraw"
+	ConsentBounce            = "bounce"
+	ConsentComplaint         = "complaint"
+	ConsentSuppress          = "suppress"
 )
 
 // ConsentEvent is one row of the export stream. Date is OccurredAt,

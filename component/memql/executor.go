@@ -290,7 +290,12 @@ func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr Expression
 	return e.filterStagedSet(ctx, filterRowAuthzSet(ctx, set)), nil
 }
 
-func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr ExpressionNode, timestamp *time.Time, target int, sorter *compiledSort, conceptContext string) (map[string]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr ExpressionNode, timestamp *time.Time, target int, sorter *compiledSort, conceptContext string) (result map[string]memorynodes.MemoryNode, resultErr error) {
+	defer func() {
+		if resultErr == nil {
+			noteCountWindow(ctx, len(result), target)
+		}
+	}()
 	// RANK LOWERING (epic memql#4832, D2), and the POSITION is the design.
 	//
 	// A rank term is symbolic in the plan -- it names the rule, not the

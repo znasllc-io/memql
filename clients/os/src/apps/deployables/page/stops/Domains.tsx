@@ -192,7 +192,6 @@ function BoundDomains({ site, onOpenDomain }: { site: SiteRow; onOpenDomain: (do
       key={`domains:${site.id}`}
       source={view}
       label={`Domains bound to ${site.hostname || site.id}`}
-      emptyText=""
       rowId={(d) => d.id}
       fingerprint={domainFingerprint}
       renderRow={(d, tick) => <DomainListRow key={d.id} domain={d} site={site} changed={tick !== null} onOpen={() => onOpenDomain(d.id)} />}

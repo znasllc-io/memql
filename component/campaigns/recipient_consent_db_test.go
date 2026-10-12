@@ -43,7 +43,7 @@ const consentMailbox = "subscriber@example.test"
 func (n *digestNewsletter) addStamped(t *testing.T, short, email, status string) string {
 	t.Helper()
 	id := n.suffix + "-" + short
-	if err := n.store.AddRecipient(n.owner, id, n.audience, email, "", "manual", n.org, nil); err != nil {
+	if err := n.store.AddRecipient(n.owner, id, n.audience, email, "", "manual", n.org, "subscribed", nil); err != nil {
 		t.Fatal(err)
 	}
 	if status != "" && status != "subscribed" {

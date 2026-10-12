@@ -173,6 +173,30 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 			"attribute name changed, which would silently exempt nothing and gate nothing.")
 	}
 	want := map[serverOnlyKey]bool{
+		// Durable email automation coordination; public callers use gated capabilities.
+		{Path: "campaigns/queries.memql", Name: "deferredSingleSendById"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "settleDeferredSingleSend"}:     true,
+		{Path: "campaigns/queries.memql", Name: "deferredSingleSends"}:            true,
+		{Path: "campaigns/queries.memql", Name: "activeJourneys"}:                 true,
+		{Path: "campaigns/queries.memql", Name: "journeysToRetire"}:               true,
+		{Path: "campaigns/queries.memql", Name: "dueEnrollmentsForJourney"}:       true,
+		{Path: "campaigns/queries.memql", Name: "openEnrollmentsForJourney"}:      true,
+		{Path: "campaigns/queries.memql", Name: "newestJourneyEnrollment"}:        true,
+		{Path: "campaigns/queries.memql", Name: "journeyEnrollmentById"}:          true,
+		{Path: "campaigns/queries.memql", Name: "audienceJoinersSince"}:           true,
+		{Path: "campaigns/queries.memql", Name: "audienceConfirmationsSince"}:     true,
+		{Path: "campaigns/queries.memql", Name: "waitingEnrollmentsForRecipient"}: true,
+		{Path: "campaigns/queries.memql", Name: "recipientJourneyEnrollments"}:    true,
+		{Path: "campaigns/mutations.memql", Name: "confirmRecipientSubscription"}: true,
+		{Path: "campaigns/mutations.memql", Name: "restartRecipientMembership"}:   true,
+		{Path: "campaigns/mutations.memql", Name: "createJourney"}:                true,
+		{Path: "campaigns/mutations.memql", Name: "updateJourney"}:                true,
+		{Path: "campaigns/mutations.memql", Name: "setJourneyStatus"}:             true,
+		{Path: "campaigns/mutations.memql", Name: "recordJourneyDrain"}:           true,
+		{Path: "campaigns/mutations.memql", Name: "enrollJourneyRecipient"}:       true,
+		{Path: "campaigns/mutations.memql", Name: "advanceJourneyEnrollment"}:     true,
+		{Path: "campaigns/mutations.memql", Name: "nudgeJourneyEnrollment"}:       true,
+
 		// Webhook resolution has no signed-in user. The connector's internal
 		// cluster-owner actor walks the installation directory at one snapshot;
 		// per-user scoping would silently discard other configured stores.
@@ -433,8 +457,12 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Caller scoping admits authorized writers but cannot enforce that gate;
 		// direct writes could overwrite a concurrent edit or publish stale copy.
 		// campaignSaveTemplate retains the actor and checks organization rights.
-		{Path: "campaigns/mutations.memql", Name: "createTemplate"}:         true,
-		{Path: "campaigns/mutations.memql", Name: "updateTemplate"}:         true,
+		{Path: "campaigns/mutations.memql", Name: "createTemplate"}: true,
+		{Path: "campaigns/mutations.memql", Name: "updateTemplate"}: true,
+		// Layout content shares the template revision gate; campaignSaveLayout
+		// retains the actor and checks organization rights.
+		{Path: "campaigns/mutations.memql", Name: "createEmailLayout"}:      true,
+		{Path: "campaigns/mutations.memql", Name: "updateEmailLayout"}:      true,
 		{Path: "campaigns/mutations.memql", Name: "startCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "pauseCampaign"}:          true,
 		{Path: "campaigns/mutations.memql", Name: "resumeCampaign"}:         true,
@@ -452,6 +480,11 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Only its handler derives organization/digest and writes engine state;
 		// actor scoping would either exclude mail clients or admit forged claims.
 		{Path: "campaigns/mutations.memql", Name: "recordOrganizationSuppression"}: true,
+		// Rejoining also comes from a mailed token, without an actor.userId
+		// session. Caller ownership cannot prove renewed consent. The verified
+		// preferences handler records that consent under shared locks before
+		// lifting only the token's organization opt-out, never a safety block.
+		{Path: "campaigns/mutations.memql", Name: "liftOrganizationSuppression"}: true,
 		// An actor may request a send, but only the provider adapter can attest
 		// that an attempt began. The receipt and its replay read are private.
 		// Ownership cannot attest locked scheduling or a committed occurrence.

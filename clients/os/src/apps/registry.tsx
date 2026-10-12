@@ -6,10 +6,10 @@ import {
   Files as FilesIcon,
   GraduationCap,
   Layers,
+  Mail,
   MonitorSmartphone,
   Rocket,
   ScrollText,
-  Send,
   Settings as SettingsIcon,
   Shapes,
   Trash2,
@@ -25,13 +25,12 @@ import { AccountsApp } from "./accounts/AccountsApp";
 import { ACCOUNTS_SECTIONS } from "./accounts/settings";
 import { BinApp } from "./bin/BinApp";
 import { BIN_APP_ID, BIN_SECTIONS } from "./bin/concepts";
-import { CampaignsApp } from "./campaigns/CampaignsApp";
 import { EmailApp } from "./email/EmailApp";
 import { ClusterApp } from "./cluster/ClusterApp";
 import { CLUSTER_SECTIONS } from "./cluster/settings";
 import { ConceptsApp } from "./concepts/ConceptsApp";
 import { CONCEPTS_SECTIONS } from "./concepts/settings";
-import { CAMPAIGNS_SECTIONS, CAMPAIGNS_REQUIRES, CAMPAIGNS_WANTS } from "./campaigns/settings";
+import { EMAIL_SECTIONS, EMAIL_REQUIRES, EMAIL_WANTS } from "./email/settings";
 import { DeployablesApp } from "./deployables/DeployablesApp";
 import { DEPLOYABLES_SECTIONS, DEPLOYABLES_REQUIRES, DEPLOYABLES_WANTS } from "./deployables/settings";
 import { FilesApp } from "./files/FilesApp";
@@ -530,41 +529,41 @@ const concepts: OsAppManifest = {
   component: ConceptsApp,
 };
 
-// Campaigns, in full (epic memql#4827 / #4828 / #4830). Writing mail, sending
-// it, and knowing what happened. Campaigns is first and is therefore the
-// section a window opens on: a campaign is what this app is for, and the other
-// four are the things a campaign is made of.
+// Email, in full (epic memql#4827 / #4828 / #4830; one app since memql#6033).
+// Mail end to end: campaigns, automations, audiences, templates and, for
+// owners and developers, the capture inbox. Overview is first and is therefore
+// the section a window opens on; the others are the things a campaign is made
+// of, and what a test cluster kept of it.
 //
-// The section list is CAMPAIGNS_SECTIONS rather than a literal, for the reason
-// its six siblings are: the gear and the manifest must offer the same set, and
-// a second copy of the list is one that can disagree.
+// The section list is EMAIL_SECTIONS rather than a literal, for the reason its
+// siblings are: the gear and the manifest must offer the same set, and a
+// second copy of the list is one that can disagree.
 //
-// NO manifest role. Every operator-facing campaigns concept declares the
-// composite tier (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every
-// signed-in person has campaigns of their own to read and the engine decides
-// how far each list reaches. Gating here would be presentation pretending to
-// be authorization -- and the writes that DO carry a gate carry it in the
-// engine: the send builtins authorize by reading the campaign under the
-// caller's own actor before any preflight runs.
-const campaigns: OsAppManifest = {
-  id: "campaigns",
-  name: "Campaigns",
-  icon: Send,
-  requires: "app:campaigns",
-  sections: CAMPAIGNS_SECTIONS,
-  needs: CAMPAIGNS_REQUIRES,
-  wants: CAMPAIGNS_WANTS,
-  settingsSection: "settings",
-  logsSection: "logs",
-  component: CampaignsApp,
-};
-
+// THREE NOUNS HAVE A PAGE OF THEIR OWN that search and Ask can open: a
+// campaign, an audience and a template. The app opens each by id, whichever tab
+// was showing (`EmailApp` reads these `idField`s from the window's intent).
+//
+// NO manifest role. Every campaigns concept is organization-tier, so every
+// signed-in person has mail of their own to read and the engine decides how
+// far each list reaches. Gating here would be presentation pretending to be
+// authorization -- and the writes that DO carry a gate carry it in the engine:
+// the send builtins authorize by reading the campaign under the caller's own
+// actor before any preflight runs. Inbox and Logs are the two sections gated
+// above the app's door, and those gates sit on the sections, not here.
 const email: OsAppManifest = {
   id: "email",
   name: "Email",
-  icon: Send,
+  icon: Mail,
   requires: "app:email",
-  sections: [{ id: "inbox", name: "Inbox", requires: "app:email/inbox" }, { id: "logs", name: "Logs", requires: "app:email/logs" }, { id: "settings", name: "Settings" }],
+  sections: EMAIL_SECTIONS,
+  records: [
+    { section: "campaigns", idField: "campaignId", query: "campaigns.campaigns", labels: ["name"] },
+    { section: "audiences", idField: "audienceId", query: "campaigns.audiences", labels: ["name", "description"] },
+    { section: "templates", idField: "templateId", query: "campaigns.templates", labels: ["name", "subject"] },
+    { section: "automations", idField: "journeyId", query: "campaigns.journeys", labels: ["name", "description"] },
+  ],
+  needs: EMAIL_REQUIRES,
+  wants: EMAIL_WANTS,
   settingsSection: "settings",
   logsSection: "logs",
   component: EmailApp,
@@ -627,7 +626,7 @@ const bin: OsAppManifest = {
 // (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person
 // has goals of their own to read and the engine decides how far each list
 // reaches. Gating here would be presentation pretending to be authorization --
-// the same reading Files, Deployables and Campaigns record. The writes carry
+// the same reading Files, Deployables and Email record. The writes carry
 // their gate in the engine: each `integration.work.*` builtin repeats its own,
 // because a builtin's annotation set carries no `@requiresRank`. The one floor
 // in the app is on its Logs section, and that one IS a mirror: every read on
@@ -654,7 +653,7 @@ const nexus: OsAppManifest = {
 // (`@rowAuthz(owner="ownerUserId", clusterOwner)`), so every signed-in person
 // has compositions of their own and the engine decides how far each list
 // reaches. Gating here would be presentation pretending to be authorization --
-// the reading Files, Deployables, Campaigns and Work all record. The writes
+// the reading Files, Deployables, Email and Work all record. The writes
 // carry their gate in the engine: each `integration.compose.*` builtin repeats
 // its own, because a builtin's annotation set carries no `@requiresRank`.
 //
@@ -742,7 +741,6 @@ export const OS_REGISTRY: OsRegistry = {
   apps: [
     identity,
     accounts,
-    campaigns,
     email,
     cluster,
     concepts,

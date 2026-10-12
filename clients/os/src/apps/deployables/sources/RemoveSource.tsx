@@ -3,6 +3,7 @@ import { useSession } from "../../../chrome/access";
 import { Trash2 } from "lucide-react";
 import { Button, Caption } from "../../../kit";
 import { IconButton } from "../../../kit/IconButton";
+import { InPlaceAsk } from "../../../kit/pressHold";
 import { DetailDialog } from "../page/DetailDialog";
 import { sourceName } from "../list";
 import { useWrite } from "../packages/actions";
@@ -28,7 +29,7 @@ export function RemoveSource({ pkg, onRemoved }: { pkg: PackageRow; onRemoved?: 
       <div className="os-app-stack">
       <Caption>Remove this source from the list and saved choices? Existing deployables and automatic updates keep running. Other sources and GitHub connections are unchanged. You can restore it through Add deployable.</Caption>
       {write.refusal ? <ProblemNotice problem={write.refusal} tone="error" /> : null}
-      <div className="os-confirm-row">
+      <InPlaceAsk className="os-confirm-row">
         <Button disabled={write.busy} onClick={() => setArmed(false)}>Cancel</Button>
         <Button tone="danger" busy={write.busy} onClick={() => {
           if (pending.current) return;
@@ -39,7 +40,7 @@ export function RemoveSource({ pkg, onRemoved }: { pkg: PackageRow; onRemoved?: 
             if (ok && mounted.current && currentBoundary.current === startedFor) { setArmed(false); onRemoved?.(); }
           });
         }}>Remove source</Button>
-      </div>
+      </InPlaceAsk>
       </div>
     </DetailDialog> : null}
   </>;

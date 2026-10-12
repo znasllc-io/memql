@@ -226,7 +226,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 150 -> 156: Spine execution, tool fallback and localized recovery recipes.
 // 156 -> 157: Bounded document planning and coverage review recipe.
 // 157 -> 158: DSL-owned evidence limits for replanning completed work.
-const shippedAutomationCount = 158
+// 158 -> 161: campaign journey proposal, drain and step workflows.
+const shippedAutomationCount = 161
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

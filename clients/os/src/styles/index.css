@@ -2189,6 +2189,18 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   font-family: var(--os-font-mono);
   font-variant-ligatures: none;
 }
+/* Prose (kit `TextArea`): still the field -- colour, border, radius and text
+ * size come from `.os-input` above -- but not a one-line field. It starts two
+ * control lines tall and can be pulled taller. This rule has to FOLLOW the
+ * `.os-input` one: both are a single class, so the later `height` wins. */
+.os-textarea {
+  height: auto;
+  min-height: calc(var(--os-control-h) * 2);
+  padding: 8px 10px;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: inherit;
+}
 .os-select-label {
   display: inline-flex;
 }
@@ -6575,552 +6587,6 @@ a.os-button {
   }
 }
 
-/* ---- campaigns: the app's own surfaces (epic memql#4827) ----
- *
- * Two things live here that the kit does not have, and everything else the app
- * renders is the shared vocabulary -- rows, panels, notices, chips, facts,
- * form fields -- which is the measure Deployables set and every app since has
- * kept.
- *
- * THE SEND BAR IS THE ONE OWNED VISUAL IDEA. Four numbers in four boxes is the
- * templated answer and it makes a person add them up to learn how far through
- * a send is. One band divided proportionally IS that answer, and it makes the
- * SKIPPED slice visible -- the compliance-relevant figure nobody goes looking
- * for. Plain flex, no chart library: this is four proportions in a row.
- *
- * THE SENTENCE BUILDER IS THE OTHER. A rule's six fields are six clauses of
- * one English sentence, and laying them out as six labelled boxes would make
- * somebody assemble the meaning themselves every time.
- */
-
-.os-campaign-journey > .os-deploy-scroll > * {
-  /* Keep the step trail readable when the setup instructions need to scroll. */
-  flex-shrink: 0;
-}
-
-.os-campaign-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 10px;
-}
-
-.os-campaign-detail-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.os-campaign-form {
-  display: grid;
-  /* Two columns where there is room, one where there is not. `auto-fit` with a
-   * min track rather than a media query: this form renders inside a WINDOW,
-   * and a window's width is not the viewport's. */
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 8px 12px;
-  margin: 8px 0;
-}
-
-.os-campaign-actions,
-.os-campaign-filters,
-.os-campaign-tracking {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.os-campaign-tracking {
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 4px;
-  margin: 8px 0;
-}
-.os-campaign-schedule {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--os-line);
-}
-
-.os-campaign-confirm {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
-  background: var(--os-plate);
-}
-
-.os-campaign-confirm-line {
-  margin: 0;
-  font-size: var(--os-text-md);
-}
-
-/* ---- the send bar ---------------------------------------------------------
- *
- * The band, its legend, and the engagement pair beneath. Colours come from the
- * shell's own status vocabulary and nothing new is introduced: accent is what
- * worked (the same hue as a live dot), amber is warn, red is error, and the
- * rail tint is what has not happened yet.
- */
-
-.os-send {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 6px 0 10px;
-}
-
-.os-send-bar {
-  display: flex;
-  width: 100%;
-  height: 14px;
-  border-radius: var(--os-radius-xs);
-  overflow: hidden;
-  /* The ground shows through where no segment is drawn, which only happens on
-   * an empty bar -- the four slices otherwise sum to the whole by
-   * construction, so the band can never show a gap that reads as a fault. */
-  background: var(--os-rail);
-  border: 1px solid var(--os-line);
-}
-
-.os-send-bar[data-empty] {
-  background: transparent;
-}
-
-.os-send-seg {
-  display: block;
-  min-width: 2px;
-  flex-basis: 0;
-  /* The fill is a TRANSITION, so a segment that grows mid-send slides rather
-   * than jumping. It is the medium duration rather than the cue duration: this
-   * is a value changing, not news arriving. */
-  transition: flex-grow var(--os-duration-med) var(--os-ease);
-}
-
-.os-send-seg[data-outcome="sent"],
-.os-send-swatch[data-outcome="sent"] {
-  background: var(--os-accent);
-}
-.os-send-seg[data-outcome="skipped"],
-.os-send-swatch[data-outcome="skipped"] {
-  background: var(--os-warn);
-}
-.os-send-seg[data-outcome="failed"],
-.os-send-swatch[data-outcome="failed"] {
-  background: var(--os-error);
-}
-.os-send-seg[data-outcome="pending"],
-.os-send-swatch[data-outcome="pending"] {
-  background: var(--os-rail-hover);
-}
-
-.os-send-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.os-send-legend-item {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: var(--os-text-sm);
-}
-
-.os-send-swatch {
-  /* A baseline-aligned run of text needs the swatch nudged onto it -- an
-   * inline-block sits on the baseline by its bottom edge, which puts a square
-   * a couple of pixels low beside 12px text. */
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  transform: translateY(1px);
-}
-
-.os-send-legend-label {
-  color: var(--os-muted);
-}
-
-.os-send-legend-count {
-  font-family: var(--os-font-mono);
-  font-variant-numeric: tabular-nums;
-}
-
-.os-send-engagement {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid var(--os-line);
-}
-
-.os-send-engagement-item {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-/* Deliberately SMALLER than the bar's own figures: engagement is a different
- * question, about the sent slice only, and typography is what says so without
- * a second heading. */
-.os-send-engagement-rate {
-  font-size: var(--os-text-md);
-  font-variant-numeric: tabular-nums;
-}
-
-.os-send-engagement-label {
-  font-size: var(--os-text-xs);
-  color: var(--os-muted);
-  text-transform: lowercase;
-}
-
-.os-send-engagement-note {
-  max-width: 40ch;
-}
-
-/* ---- the ledger and the roster ---- */
-
-.os-campaign-ledger,
-.os-campaign-roster {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-  background: var(--os-line);
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
-  overflow: hidden;
-}
-
-.os-campaign-ledger-row,
-.os-campaign-roster-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 6px 10px;
-  background: var(--os-plate);
-  font-size: var(--os-text-sm);
-}
-
-.os-campaign-ledger-address,
-.os-campaign-roster-address {
-  flex: 1 1 16ch;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.os-campaign-ledger-outcome {
-  color: var(--os-muted);
-}
-.os-campaign-ledger-row[data-outcome="failed"] .os-campaign-ledger-outcome {
-  color: var(--os-error);
-}
-.os-campaign-ledger-row[data-outcome="skipped"] .os-campaign-ledger-outcome {
-  color: var(--os-warn);
-}
-
-/* An address that cannot be mailed keeps its facts and loses its ink -- the
- * same `current` / `dim` split the shared row uses.
- *
- * The rule is drawn in the MUTED ink rather than the hairline: `--os-line` is
- * a border colour and over text it is close to invisible, which makes the
- * strikethrough decorative rather than legible. Colour is not the only channel
- * either -- the state control on the same row says "Unsubscribed" in words,
- * which is what a reader who cannot see the difference gets. */
-.os-campaign-roster-row:not([data-sendable]) .os-campaign-roster-address {
-  color: var(--os-muted);
-  text-decoration: line-through;
-  text-decoration-color: var(--os-muted);
-}
-
-.os-campaign-roster-name {
-  color: var(--os-muted);
-}
-
-/* The state control sits at the TRAILING EDGE and takes its own width. The
- * shared `.os-select` is `flex: 1 1 12ch`, which is right in a form where a
- * select IS the field -- and wrong in a list row, where it stretched to half
- * the width and made "can be mailed" look like the row's headline instead of
- * the address. Found by looking at it in a browser; jsdom has no CSS engine
- * and every test passed either way. */
-.os-campaign-roster-row .os-select-wrap {
-  /* The kit Select gained a wrapper (rule 5's drawn chevron); the wrapper is
-   * the flex item now, so the constraint moves onto it or the row regresses
-   * to the stretched shape this rule was written against. */
-  flex: 0 0 auto;
-  min-width: 15ch;
-}
-.os-campaign-roster-row .os-select {
-  flex: 0 0 auto;
-  min-width: 15ch;
-}
-
-/* ---- the import report ----
- *
- * A PANEL, NOT A TOAST. The operator's next action is fixing the file, so the
- * evidence stays on screen until they say they are done with it.
- */
-
-.os-campaign-import-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 6px 0;
-  padding: 0;
-  list-style: none;
-  max-height: 220px;
-  /* Its own scroll region, so twenty bad lines cannot push the dismiss control
-   * off the bottom of a window. */
-  overflow-y: auto;
-}
-
-.os-campaign-import-lines li {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  font-size: var(--os-text-xs);
-  min-width: 0;
-}
-
-/* THE THREE PARTS OF A BAD LINE STAY TOGETHER. The offending text does NOT
- * grow: letting it fill the row pushed the reason to the far right edge, so a
- * reader had to track across the panel to pair "no @" with the line it
- * describes -- which is exactly the pairing this panel exists to show. It
- * still truncates, because a CSV line can be any length. */
-.os-campaign-import-lines li > .os-mono {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.os-campaign-import-line {
-  flex: 0 0 auto;
-  color: var(--os-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ---- the template editor and its merge tags ---- */
-
-.os-campaign-editor {
-  display: grid;
-  /* The tag panel wants a fixed-ish column and the body wants the rest; below
-   * a window width that cannot hold both, they stack with the body first. */
-  grid-template-columns: minmax(0, 1fr) minmax(200px, 260px);
-  gap: 12px;
-  margin: 8px 0;
-}
-
-@media (max-width: 720px) {
-  .os-campaign-editor {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.os-campaign-editor-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.os-campaign-textarea {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-xs);
-  background: var(--os-plate);
-  color: var(--os-ink);
-  font-family: var(--os-font-mono);
-  font-size: var(--os-text-sm);
-  line-height: 1.5;
-  resize: vertical;
-}
-
-.os-campaign-tagpanel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
-  background: var(--os-raised);
-  min-width: 0;
-}
-
-.os-campaign-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.os-campaign-tag {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  max-width: 100%;
-  padding: 2px 8px;
-  border: 1px solid var(--os-line);
-  border-radius: 999px;
-  background: var(--os-plate);
-  color: var(--os-ink);
-  font-size: var(--os-text-xs);
-  cursor: pointer;
-  text-align: left;
-}
-
-.os-campaign-tag:hover {
-  border-color: var(--os-accent);
-}
-
-/* A tag that exists only because an import carried the column. The accent
- * border is what makes `fields.*` DISCOVERABLE -- it is the half of the set
- * nothing else in the product could tell somebody about. */
-.os-campaign-tag[data-from-import] {
-  border-color: var(--os-accent-soft);
-  background: var(--os-accent-soft);
-}
-
-/* A tag the test send could not resolve. Warn rather than error: the message
- * went out, and the tag will render as its own text. */
-.os-campaign-tag[data-unresolved] {
-  border-color: var(--os-warn);
-  cursor: default;
-}
-
-.os-campaign-tag-arrow {
-  color: var(--os-muted);
-}
-
-.os-campaign-tag-preview {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--os-muted);
-}
-
-.os-campaign-test-empty {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid var(--os-line);
-}
-
-/* ---- the rules sentence ----
- *
- * The controls sit INLINE in a line of prose, so the rule is assembled by
- * reading rather than by the reader. `align-items: baseline` is what keeps a
- * select sitting on the same line as the words around it; without it the text
- * rides above the control and the sentence stops reading as one.
- */
-
-.os-campaign-sentence {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
-  margin: 10px 0;
-  padding: 10px 12px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
-  background: var(--os-raised);
-  font-size: var(--os-text-md);
-  line-height: 2;
-}
-
-.os-campaign-sentence-word {
-  color: var(--os-muted);
-}
-
-.os-campaign-sentence .os-select-wrap {
-  /* Constrained at the WRAPPER (the kit Select's flex item since rule 5);
-   * constraining only the inner select would leave the wrapper stretching
-   * and the drawn chevron floating past the control. */
-  flex: 0 1 auto;
-  max-width: 22ch;
-}
-.os-campaign-sentence .os-select {
-  /* Wide enough to read, never so wide it breaks the line into a form. */
-  max-width: 22ch;
-}
-
-.os-campaign-who {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 8px 0;
-}
-
-/* THE CHOICE NAMES HERE ARE PROSE, NOT ENUM MEMBERS. The kit's ChoiceStack
- * renders its option name in the mono face, and that is right where it was
- * born -- a routing strategy is `leastLoaded`, a value somebody types
- * elsewhere, and the mono face says so. "People in this cluster" is an answer
- * to a question, and setting it in mono makes it read as a code identifier the
- * reader is expected to recognise. The one place in this app that overrides a
- * kit appearance, and it does so because the CONTENT is a different kind of
- * thing, not because the look was disliked. */
-.os-campaign-who .os-choice-card-name.os-mono {
-  font-family: var(--os-font);
-}
-
-.os-campaign-roles {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-/* The rule's condition: a full-width field with its reference right under it
- * (see RuleBuilder). The caption keeps a reading measure while the field
- * takes the width a real condition needs. */
-.os-campaign-condition {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 8px 0;
-}
-.os-campaign-condition > .os-caption {
-  max-width: 72ch;
-}
-
-.os-campaign-more {
-  margin: 8px 0;
-}
-
-.os-campaign-more > summary {
-  cursor: pointer;
-  color: var(--os-muted);
-  font-size: var(--os-text-sm);
-}
-
-.os-campaign-rule-sentence {
-  flex: 1 1 24ch;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.os-campaign-rule-headline {
-  margin: 6px 0;
-  font-size: var(--os-text-md);
-}
 /* ==================================================================== * The Bin (memql#4784)
  * ==================================================================== *
  * THE BIN IS NOT DRAWN AS A DANGEROUS THING, because it does not do one.
@@ -9167,6 +8633,12 @@ a.os-button {
   cursor: default;
   opacity: 0.6;
 }
+/* A TEXT ACT THAT CANNOT BE UNDONE ("Cancel campaign") keeps the danger colour
+   at rest, pointed at and focused alike: muted, it would read as the way out,
+   which is the opposite of what it does. */
+.os-actbar-text[data-tone="danger"] {
+  color: var(--os-error);
+}
 /* A MEASURE, NOT MORE OF THE SENTENCE. Set off by a hairline so "checked 40s
    ago" is read as a figure beside the state rather than as its last clause. */
 .os-actbar-meta {
@@ -11141,408 +10613,6 @@ a.os-button {
   }
 }
 
-/* --- materializer (epic memql#4977) -----------------------------------
- *
- * ONE CONTIGUOUS BLOCK, under one comment, so a conflict with a sibling
- * epic touching this file is a clean take-both.
- *
- * EVERY COLOUR HERE IS A TOKEN. A theme pack carries colour and wallpaper
- * values, so a literal in this block would be a surface a pack cannot
- * restyle -- and the accent, warn and error hues carry fixed meanings in
- * this shell (live/primary/yes-here, warn, error) that this app has no
- * business adding a fourth to. The one axis this app introduces is INK
- * WEIGHT, which survives greyscale and every pack.
- */
-
-.os-mz {
-  display: grid;
-  grid-template-rows: auto 1fr auto auto;
-  gap: 12px;
-  min-height: 0;
-  height: 100%;
-}
-
-/* THE COLUMNS ARE THE COMPOSITION'S OWN STRUCTURE: what goes in, what it
- * is, what comes out. The middle is fluid because it holds prose; the
- * outer two are fixed-measure because they hold controls. */
-.os-mz-columns {
-  display: grid;
-  grid-template-columns: 15rem minmax(0, 1fr) 15rem;
-  gap: 16px;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.os-mz-col {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-/* A composition is a brief and its output settings. File content belongs
- * in the editor, so these columns remain sized to their controls. */
-.os-mz-columns {
-  align-content: start;
-  overflow-y: auto;
-}
-
-.os-mz-columns[data-settled="true"] .os-mz-col {
-  overflow-y: visible;
-}
-
-.os-mz-col-brief {
-  min-width: 0;
-}
-
-/* What is wrong with the name as it is typed, directly under the field. The
- * error hue is the shell's for a refusal beside the control that caused it,
- * which is what this is: the same refusal, before the round trip. */
-.os-mz-name-problem {
-  margin: 0;
-  font-size: var(--os-text-sm);
-  color: var(--os-error);
-}
-
-.os-mz-statement {
-  margin: 0;
-  font-size: var(--os-text-md);
-  line-height: 1.6;
-  color: var(--os-ink);
-  /* Under 80 characters, so a statement reads as a sentence rather than
-   * as a banner. */
-  max-width: 60ch;
-}
-
-/* ---- the sources picker ---- */
-
-.os-mz-concepts,
-.os-mz-picked,
-.os-mz-rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.os-mz-concept {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  min-height: var(--os-control-h);
-  padding: 4px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--os-radius-xs);
-  background: none;
-  color: var(--os-ink);
-  font-family: inherit;
-  font-size: var(--os-text-base);
-  text-align: left;
-  cursor: pointer;
-}
-
-.os-mz-concept:hover:not(:disabled) {
-  background: var(--os-wash);
-  border-color: var(--os-line);
-}
-
-.os-mz-concept:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-
-.os-mz-concept:disabled {
-  color: var(--os-muted);
-  cursor: default;
-}
-
-.os-mz-concept-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* An unmarked concept is offered AFTER the marked ones and says which it
- * is. The mark is a ranking and a hint, never a gate. */
-.os-mz-concept-tag {
-  flex: 0 0 auto;
-  color: var(--os-muted);
-  font-size: var(--os-text-xs);
-}
-
-.os-mz-picked-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: baseline;
-  gap: 6px;
-  padding: 4px 8px;
-  border-radius: var(--os-radius-xs);
-  background: var(--os-wash);
-  font-size: var(--os-text-base);
-}
-
-.os-mz-picked-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.os-mz-picked-count {
-  color: var(--os-muted);
-  font-size: var(--os-text-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.os-mz-picked-remove {
-  border: none;
-  background: none;
-  padding: 0;
-  color: var(--os-muted);
-  font-family: inherit;
-  font-size: var(--os-text-xs);
-  cursor: pointer;
-}
-
-.os-mz-picked-remove:hover {
-  color: var(--os-ink);
-}
-
-.os-mz-picked-remove:focus-visible {
-  outline: 2px solid var(--os-accent);
-  outline-offset: 1px;
-}
-
-.os-mz-picked-problem {
-  grid-column: 1 / -1;
-  color: var(--os-warn);
-  font-size: var(--os-text-xs);
-  overflow-wrap: anywhere;
-}
-
-/* ---- the target's absent options ---- */
-
-/* IT SITS WITH THE CONTROL IT IS ABOUT, not at the bottom of the column.
- * `margin-top: auto` put it 400px below the format select whose options it
- * explains, where it read as detached chrome rather than as the rest of
- * that control's answer. */
-.os-mz-unoffered {
-  margin-top: 4px;
-  padding-top: 10px;
-  border-top: 1px solid var(--os-line);
-  color: var(--os-muted);
-  font-size: var(--os-text-xs);
-}
-
-.os-mz-unoffered ul {
-  list-style: none;
-  margin: 6px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.os-mz-refine-format {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--os-text-base);
-}
-
-/* ============================================================== * THE PROVENANCE CHAIN -- this app's one device
- * ============================================================== * The chain is drawn as a chain because the DIRECTION is a rule: sources
- * feed the template, which produces the file. The Files app's backup wire
- * draws a direction for exactly that reason.
- *
- * It is one line, and it is live: as somebody changes the target the last
- * link and the claim change under them, which is how a person learns the
- * "some formats cannot carry provenance" rule by using the app rather
- * than by reading a docs page.
- */
-
-.os-mz-chain {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 14px;
-  padding: 8px 12px;
-  border: 1px solid var(--os-line);
-  border-radius: var(--os-radius-sm);
-  background: var(--os-plate);
-}
-
-/* A PENDING CHAIN IS QUIETER, not a different thing. It is the same
- * sentence about a file that does not exist yet, so it recedes rather
- * than changing colour. */
-.os-mz-chain[data-pending="true"] {
-  background: none;
-  border-style: dashed;
-}
-
-.os-mz-chain-links {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 10px;
-  margin: 0;
-  padding: 0;
-  min-width: 0;
-}
-
-.os-mz-link {
-  display: flex;
-  align-items: baseline;
-  gap: 5px;
-  min-width: 0;
-  font-size: var(--os-text-base);
-  color: var(--os-ink);
-}
-
-/* The direction between links. It is a pseudo-element rather than text so
- * a screen reader hears the LABELS ("from", "through", "by", "as"), which
- * carry the same meaning in words -- an arrow that is only a glyph is a
- * link somebody cannot hear. */
-.os-mz-link + .os-mz-link::before {
-  content: "\2192";
-  margin-right: 4px;
-  color: var(--os-muted);
-}
-
-.os-mz-link-label {
-  color: var(--os-muted);
-  font-size: var(--os-text-xs);
-}
-
-.os-mz-link-value {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 5px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.os-mz-link[data-strong="true"] .os-mz-link-value {
-  font-weight: 600;
-}
-
-.os-mz-link[data-muted="true"] .os-mz-link-value {
-  color: var(--os-muted);
-}
-
-/* WEIGHT, NOT HUE -- the Work app's own ink axis, reused deliberately.
- * A hollow mark is a composition that reached no model; a filled one is
- * one that did. Amber is warn and red is error in this shell, so a
- * colour-per-state legend here would put status hues on a partition that
- * has nothing to do with status. Ink survives greyscale and every pack. */
-.os-mz-mark {
-  flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  border: 1.5px solid var(--os-ink);
-  align-self: center;
-}
-
-.os-mz-mark[data-mark="filled"] {
-  background: var(--os-ink);
-}
-
-.os-mz-mark[data-mark="hollow"] {
-  background: none;
-  border-color: var(--os-muted);
-}
-
-.os-mz-chain-claim {
-  margin: 0;
-  color: var(--os-muted);
-  font-size: var(--os-text-xs);
-  overflow-wrap: anywhere;
-}
-
-.os-mz-rowmark {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  color: var(--os-muted);
-  font-size: var(--os-text-xs);
-}
-
-.os-mz-rowmark-text {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* ---- the list and the templates section ---- */
-
-.os-mz-list-section,
-.os-mz-templates {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 0;
-  height: 100%;
-}
-
-.os-mz-template-desc {
-  color: var(--os-muted);
-  font-size: var(--os-text-xs);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.os-mz-template-acts {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* THE COLUMNS STACK WHERE THERE IS NOT ROOM FOR THREE, in the order they
- * are read: what goes in, what it is, what comes out. */
-@media (max-width: 60rem) {
-  .os-mz-columns {
-    grid-template-columns: minmax(0, 1fr);
-    overflow-y: auto;
-  }
-
-  .os-mz-col,
-  .os-mz-columns[data-settled="true"] .os-mz-col {
-    overflow-y: visible;
-  }
-
-  .os-mz-unoffered {
-    margin-top: 10px;
-  }
-
-  /* THE MARK SURVIVES AND ITS TEXT DOES NOT. Narrow, the row's name wraps
-   * to two lines -- which is the right priority, the identifier outliving
-   * the context, and the inverse of the Work app's own defect -- but the
-   * count then truncated to "2…", which says nothing at all. The mark
-   * carries the whole sentence in its accessible name, so dropping the
-   * text loses a sighted reader a figure and loses a screen reader
-   * nothing, while an ellipsis loses both. */
-  .os-mz-rowmark-text {
-    display: none;
-  }
-}
-
 /* ---------------------------------------------------------------------------
  * BENCHMARKS (epic memql#4993) -- Settings -> Benchmarks.
  *
@@ -11738,6 +10808,13 @@ a.os-button {
   margin-left: 3px;
   color: var(--os-muted);
   font-size: var(--os-text-xs);
+}
+/* A floor: the count stopped at a window and found more ("5,000 or more",
+ * memql#6033). Drawn like the unit, and never split from the number. */
+.os-figure-floor {
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  white-space: nowrap;
 }
 .os-figure-absent {
   color: var(--os-muted);
@@ -12170,9 +11247,10 @@ a.os-button {
   padding: 18px 20px;
 }
 
-/* The confirm, in place: the sentence and the two acts on one line. It
- * replaces the acts in the bar rather than sitting beside them, so there is
- * never a moment where the thing being confirmed can also just be pressed. */
+/* A dead letter's confirm, in its row (Origins): the sentence and its two
+ * buttons on one line, in place of the row's Retry and Discard rather than
+ * beside them, so the entry being confirmed cannot also just be pressed. A
+ * bar's confirm is the bar's own acts, with `.os-actbar-confirm` beside them. */
 .os-cluster-confirm {
   display: inline-flex;
   align-items: center;
@@ -14023,15 +13101,6 @@ button.os-cluster-mesh-peer:focus-visible {
   flex-wrap: wrap;
 }
 
-.os-rule-textarea {
-  height: auto;
-  min-height: calc(var(--os-control-h) * 2);
-  padding: 8px 10px;
-  line-height: 1.5;
-  resize: vertical;
-  font-family: inherit;
-}
-
 .os-rule-simulation-said {
   margin: 0;
   font-size: var(--os-text-base);
@@ -15554,15 +14623,13 @@ button.os-cluster-mesh-peer:focus-visible {
 /* Full-height app panes own their body spacing and scrolling. The window
  * supplies a definite, unpadded rectangle; no negative height compensation.
  * Retained hidden panes must not change the active page's layout. */
-.os-window-content:has(:is(.os-deploy-pane, .os-cluster-pane, .os-action-pane, .os-mz, .os-nexus-goals, .os-nexus-list, .os-nexus-approvals, .os-nexus-run, .os-nexus-goalview, .os-nexus-automations):not([hidden] *)) {
+.os-window-content:has(:is(.os-deploy-pane, .os-cluster-pane, .os-action-pane, .os-nexus-goals, .os-nexus-list, .os-nexus-approvals, .os-nexus-run, .os-nexus-goalview, .os-nexus-automations):not([hidden] *)) {
   padding: 0;
   overflow: hidden;
 }
 .os-action-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
 .os-action-body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; padding: 18px 20px; }
 .os-action-body > * { flex-shrink: 0; }
-.os-mz { padding: 18px 20px 0; }
-.os-mz > .os-actbar { margin-inline: -20px; }
 .os-actbar-acts:empty { display: none; }
 .os-actbar-acts .os-button { max-width: 100%; height: auto; min-height: var(--os-control-h); white-space: normal; overflow-wrap: anywhere; }
 @container os-window (max-width: 420px) {
@@ -15595,6 +14662,12 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-overview-breakdown li[data-tone="unknown"] > span { background: transparent; box-shadow: inset 0 0 0 1px var(--os-muted); }
 .os-overview-breakdown strong { color: var(--os-ink); font-variant-numeric: tabular-nums; }
 @container overview (max-width: 420px) { .os-overview-metrics { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; } }
+/* Five figures (Email's Overview) stand in one row while each label has room to
+ * stay on one line, then in three and two. Four columns left the fifth on a row
+ * of its own, where it read as a different kind of figure. */
+.os-overview-metrics:has(> :nth-child(5):last-child) { grid-template-columns: repeat(5,minmax(0,1fr)); }
+@container overview (max-width: 760px) { .os-overview-metrics:has(> :nth-child(5):last-child) { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+@container overview (max-width: 420px) { .os-overview-metrics:has(> :nth-child(5):last-child) { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 .fleet-map-connection { fill: none; stroke: var(--os-line); stroke-width: 2; stroke-dasharray: 5 5; }
 .fleet-map-connection[data-online] { stroke: var(--os-accent); stroke-dasharray: none; }
 .fleet-map-node rect { fill: var(--os-plate); stroke: var(--os-line); }
@@ -15609,24 +14682,6 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-map-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .os-map-heading h4 { margin: 0; font-size: var(--os-text-base); font-weight: 600; }
 .os-map-heading .os-info-detail { position: static; }
-
-/* Shared wizard trail: content determines step count; narrow windows scroll. */
-.os-journey-trail { list-style: none; padding: 0; margin: 24px 0 28px; display: flex; overflow-x: auto; gap: 12px; }
-.os-journey-trail li { min-width: 0; flex: 1 0 auto; }
-.os-journey-trail button, .os-journey-trail .os-step-pending { display: flex; gap: 9px; align-items: center; text-align: left; border: 0; background: transparent; color: var(--os-muted); padding: 8px 0; font: inherit; }
-.os-journey-trail button { cursor: pointer; color: var(--os-ink); }
-.os-step-number { width: 26px; height: 26px; border: 1px solid var(--os-line); border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; font-size: var(--os-text-sm); }
-.os-journey-trail [aria-current="step"] .os-step-number { color: var(--os-accent-fg); background: var(--os-accent); border-color: var(--os-accent); }
-.os-journey-trail button:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
-
-
-@container (max-width: 600px) {
-  .os-journey-trail { gap: 12px; padding-bottom: 6px; margin-block: 16px; }
-  .os-journey-trail li { flex: 0 0 auto; }
-  .os-journey-trail button, .os-journey-trail .os-step-pending { white-space: nowrap; font-size: var(--os-text-sm); }
-  .os-step-number { width: 22px; height: 22px; }
-}
-@media (pointer: coarse) { .os-journey-trail button { min-height: 44px; } }
 
 .deployable-mode-fieldset { border: 0; padding: 0; margin: 0; }
 .os-window-nav-item { position: relative; }
