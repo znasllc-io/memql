@@ -41,6 +41,20 @@ function describe(err: unknown): string {
 }
 
 /**
+ * Whether a write's answer was LOST rather than refused (memql#6033): the
+ * request went out and the stream closed before anything came back, so the
+ * cluster may well have done it. A refusal is the engine's own sentence about
+ * a write it did not do; a request that never left ("send failed") did nothing.
+ * Saying "it wasn't sent" over a send that may have started is the one thing
+ * a page must not do.
+ */
+export function answerLost(err: unknown): boolean {
+  const reason = typeof err === "object" && err !== null ? (err as { reason?: unknown }).reason : undefined;
+  if (reason !== "transport" && reason !== "closed") return false;
+  return !(err instanceof Error && err.message.startsWith("send failed"));
+}
+
+/**
  * Blank strings are OMITTED rather than sent.
  *
  * Every update mutation here read-merges, so an omitted field inherits its
@@ -60,6 +74,12 @@ export interface WriteState {
   reset: () => void;
 }
 
+/** A write whose answer can be lost on the way back, and which says when it was. */
+export interface MayBeLost {
+  /** True when the last call's answer never came back (`answerLost`): it may have been done. Read once the call has returned. */
+  lost: () => boolean;
+}
+
 /**
  * The busy/error/reset triple, once.
  *
@@ -76,14 +96,17 @@ export interface WriteState {
 function useWrite<A extends unknown[], R>(
   run: (query: Connection["query"], ...args: A) => Promise<R>,
   onDisconnected: R,
-): { busy: boolean; error: string; reset: () => void; call: (...args: A) => Promise<R> } {
+): { busy: boolean; error: string; lost: () => boolean; reset: () => void; call: (...args: A) => Promise<R> } {
   const connection = useOsConnection();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // A ref, not state: it is read in the same handler that awaited the call.
+  const lostAnswer = useRef(false);
 
   const call = useCallback(
     async (...args: A): Promise<R> => {
       const query = connection?.query ?? null;
+      lostAnswer.current = false;
       if (query === null) {
         setError("Not connected to the cluster, so nothing was written.");
         return onDisconnected;
@@ -93,6 +116,7 @@ function useWrite<A extends unknown[], R>(
       try {
         return await run(query, ...args);
       } catch (err: unknown) {
+        lostAnswer.current = answerLost(err);
         setError(describe(err));
         return onDisconnected;
       } finally {
@@ -105,8 +129,9 @@ function useWrite<A extends unknown[], R>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [connection],
   );
+  const lost = useCallback(() => lostAnswer.current, []);
 
-  return { busy, error, reset: () => setError(""), call };
+  return { busy, error, lost, reset: () => setError(""), call };
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +218,7 @@ export function useUpdateCampaign(): UpdateCampaignState {
   return { busy, error, reset, update: call };
 }
 
-export interface SendControlState extends WriteState {
+export interface SendControlState extends WriteState, MayBeLost {
   start: (campaignId: string) => Promise<boolean>;
   schedule: (campaignId: string, scheduledAt: string) => Promise<boolean>;
   pause: (campaignId: string) => Promise<boolean>;
@@ -208,9 +233,18 @@ export interface SendControlState extends WriteState {
  * current one -- a Send now refused an hour ago masking the Cancel refused
  * now, or reading as the reason a later act that worked did not.
  */
-function useLastPressed(parts: readonly { error: string }[]): { error: string; press: (index: number) => void } {
+function useLastPressed(parts: readonly { error: string; lost: () => boolean }[]): { error: string; lost: () => boolean; press: (index: number) => void } {
   const [last, setLast] = useState(-1);
-  return { error: last >= 0 ? (parts[last]?.error ?? "") : "", press: setLast };
+  // Read in the handler that pressed, before the state above has rendered.
+  const pressed = useRef(-1);
+  return {
+    error: last >= 0 ? (parts[last]?.error ?? "") : "",
+    lost: () => (pressed.current >= 0 ? (parts[pressed.current]?.lost() ?? false) : false),
+    press: (index) => {
+      pressed.current = index;
+      setLast(index);
+    },
+  };
 }
 
 /**
@@ -253,6 +287,7 @@ export function useSendControls(): SendControlState {
   return {
     busy: parts.some((p) => p.busy),
     error: last.error,
+    lost: last.lost,
     reset: () => parts.forEach((p) => p.reset()),
     start: (campaignId) => { last.press(0); return start.call(campaignId); },
     schedule: (campaignId, scheduledAt) => { last.press(1); return schedule.call(campaignId, scheduledAt); },
@@ -273,7 +308,7 @@ export interface SeriesSave {
   expectedRevision?: string;
 }
 
-export interface SeriesControlState extends WriteState {
+export interface SeriesControlState extends WriteState, MayBeLost {
   save: (series: SeriesSave) => Promise<boolean>;
   pause: (campaignId: string, expectedRevision: string) => Promise<boolean>;
   resume: (campaignId: string, expectedRevision: string) => Promise<boolean>;
@@ -309,6 +344,7 @@ export function useSeriesControls(): SeriesControlState {
   return {
     busy: parts.some((p) => p.busy),
     error: last.error,
+    lost: last.lost,
     reset: () => parts.forEach((p) => p.reset()),
     save: (series) => { last.press(0); return save.call(series); },
     pause: (campaignId, revision) => { last.press(1); return pause.call(campaignId, revision); },
@@ -316,7 +352,7 @@ export function useSeriesControls(): SeriesControlState {
   };
 }
 
-export interface DuplicateCampaignState extends WriteState {
+export interface DuplicateCampaignState extends WriteState, MayBeLost {
   /**
    * A new draft with the same audience, template, sender, reply-to and
    * tracking, named "<name> (copy)" and scheduled for nothing. `copyId` is the
@@ -327,7 +363,7 @@ export interface DuplicateCampaignState extends WriteState {
 }
 
 export function useDuplicateCampaign(): DuplicateCampaignState {
-  const { busy, error, reset, call } = useWrite(async (query, campaign: CampaignRow, copyId: string) => {
+  const { busy, error, lost, reset, call } = useWrite(async (query, campaign: CampaignRow, copyId: string) => {
     await query.createCampaign({
       campaignId: copyId,
       name: `${campaignName(campaign)} (copy)`,
@@ -342,7 +378,7 @@ export function useDuplicateCampaign(): DuplicateCampaignState {
     });
     return true;
   }, false);
-  return { busy, error, reset, duplicate: call };
+  return { busy, error, lost, reset, duplicate: call };
 }
 
 /** What the Edit page changed. A field left out did not change, and is not sent. */
@@ -379,7 +415,7 @@ export function seriesSaveNeeded(changes: CampaignChanges, cadenceChanged: boole
   return cadenceChanged || owed || SERIES_CAPTURES.some((key) => changes[key] !== undefined);
 }
 
-export interface EditCampaignState extends WriteState {
+export interface EditCampaignState extends WriteState, MayBeLost {
   save: (campaign: CampaignRow, changes: CampaignChanges) => Promise<boolean>;
 }
 
@@ -399,7 +435,7 @@ export interface EditCampaignState extends WriteState {
  * blanks: those are fields it never sets.)
  */
 export function useEditCampaign(): EditCampaignState {
-  const { busy, error, reset, call } = useWrite(async (query, campaign: CampaignRow, changes: CampaignChanges) => {
+  const { busy, error, lost, reset, call } = useWrite(async (query, campaign: CampaignRow, changes: CampaignChanges) => {
     const args: Parameters<Connection["query"]["updateCampaign"]>[0] = {
       campaignId: campaign.id,
       name: (changes.name ?? campaign.name).trim(),
@@ -413,10 +449,10 @@ export function useEditCampaign(): EditCampaignState {
     await query.updateCampaign(args);
     return true;
   }, false);
-  return { busy, error, reset, save: call };
+  return { busy, error, lost, reset, save: call };
 }
 
-export interface TestSendState extends WriteState {
+export interface TestSendState extends WriteState, MayBeLost {
   runId: string;
   /** The merge tags the last test to an address could not resolve, as the engine wrote them. */
   unresolved: string[];
@@ -442,30 +478,31 @@ export function useTestSend(): TestSendState {
   // ONE TEST AT A TIME, whichever way it goes: a second press while the first is
   // on its way is the same press.
   const pending = useRef(false);
+  const lostAnswer = useRef(false);
   const send = useCallback(async (campaignId: string, audienceId: string) => {
     if (pending.current) return false;
     if (!connection || !audienceId) { setError("Choose a testing audience in Settings."); return false; }
     const scope = `${campaignId}:${audienceId}`;
     if (request.current?.scope !== scope) request.current = { scope, id: crypto.randomUUID() };
-    pending.current = true; setBusy(true); setError(""); setUnresolved([]);
+    pending.current = true; lostAnswer.current = false; setBusy(true); setError(""); setUnresolved([]);
     try {
       const result = await connection.query.campaignTestAudienceSend({ campaignId, audienceId, requestId: request.current.id });
       const row = flatten(result.rows()[0] ?? {});
       if (typeof row.testRunId !== "string" || !row.testRunId) throw new Error("The cluster did not confirm the test run. Try again to recover its result.");
       setRunId(row.testRunId); request.current = null;
       return true;
-    } catch (err) { setError(describe(err)); return false; }
+    } catch (err) { lostAnswer.current = answerLost(err); setError(describe(err)); return false; }
     finally { pending.current = false; setBusy(false); }
   }, [connection]);
   const sendToMe = useCallback(async (campaignId: string, to: string) => {
     if (pending.current) return false;
     if (!connection) { setError("Not connected to the cluster, so nothing was sent."); return false; }
-    pending.current = true; setBusy(true); setError(""); setRunId(""); setUnresolved([]);
+    pending.current = true; lostAnswer.current = false; setBusy(true); setError(""); setRunId(""); setUnresolved([]);
     try {
       const result = await connection.query.campaignTestSend({ campaignId, to });
       setUnresolved(unresolvedTagsFrom(result.rows()[0] ?? null));
       return true;
-    } catch (err) { setError(describe(err)); return false; }
+    } catch (err) { lostAnswer.current = answerLost(err); setError(describe(err)); return false; }
     finally { pending.current = false; setBusy(false); }
   }, [connection]);
   return {
@@ -475,6 +512,7 @@ export function useTestSend(): TestSendState {
     unresolved,
     send,
     sendToMe,
+    lost: useCallback(() => lostAnswer.current, []),
     reset: () => { setError(""); setRunId(""); setUnresolved([]); request.current = null; },
   };
 }

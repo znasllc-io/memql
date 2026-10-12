@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -76,6 +76,11 @@ const barWord = () => bar().querySelector(".os-actbar-word")?.textContent ?? "";
 const barDetail = () => bar().querySelector(".os-actbar-detail")?.textContent ?? "";
 const barActs = () => within(bar()).queryAllByRole("button").map((button) => button.textContent);
 const press = (name: string) => fireEvent.click(within(bar()).getByRole("button", { name }));
+/** The bar's acts that can be pressed now: not disabled. */
+const pressable = () => within(bar()).queryAllByRole("button").filter((button) => !(button as HTMLButtonElement).disabled).map((button) => button.textContent);
+
+const CAMPAIGN = "v1:campaigns:campaign";
+const SERIES = "v1:campaigns:campaignSeries";
 const optionNames = (label: string) => within(openSelect(screen.getByLabelText(label))).getAllByRole("option").map((option) => option.textContent);
 
 async function openEdit(name = "August update") {
@@ -163,7 +168,27 @@ describe("editing a campaign", () => {
     await readTheQuestion();
     press("Cancel campaign");
     await waitFor(() => expect(conn.query.cancelCampaign).toHaveBeenCalledWith({ campaignId: "c1" }));
+    // Taken, not yet arrived: the act stays busy and nothing else can be pressed.
+    await waitFor(() => expect(barWord()).toBe("Cancelling"));
+    expect(barActs()).toEqual(["Cancel campaign"]);
+    expect(pressable()).toEqual([]);
+    act(() => conn.subscriptions.emit(CAMPAIGN, campaignRow({ id: "c1", audienceId: "a1", templateId: "t1", senderIdentityId: "s1", status: "cancelled" })));
     expect(await screen.findByRole("heading", { level: 3, name: "August update" })).toBeTruthy();
+    await waitFor(() => expect(barWord()).toBe("Cancelled"));
+  });
+
+  it("a cancel whose answer never came back says so, and reads the campaign again", async () => {
+    const conn = seed();
+    conn.query.cancelCampaign.mockRejectedValueOnce(Object.assign(new Error("stream closed"), { reason: "transport" }));
+    mountWindow(conn);
+    await openEdit();
+    const reads = conn.query.campaigns.mock.calls.length;
+    press("Cancel campaign");
+    await readTheQuestion();
+    press("Cancel campaign");
+    expect(await screen.findByText("Couldn't confirm that it was cancelled.")).toBeTruthy();
+    expect(screen.queryByText("The campaign wasn't cancelled.")).toBeNull();
+    await waitFor(() => expect(conn.query.campaigns.mock.calls.length).toBeGreaterThan(reads));
   });
 
   it("a double-click on Cancel campaign beside unsaved changes does not cancel", async () => {
@@ -282,7 +307,27 @@ describe("editing a campaign", () => {
     expect(conn.query.campaignConfigureSeries.mock.calls[0]![0]).not.toHaveProperty("expectedRevision");
     // Nothing on the campaign itself changed.
     expect(conn.query.updateCampaign).not.toHaveBeenCalled();
+    // Taken, not yet arrived: the page stays, holding the act, until the series does.
+    await waitFor(() => expect(barWord()).toBe("Starting"));
+    expect(barActs()).toEqual(["Start repeating"]);
+    expect(pressable()).toEqual([]);
+    act(() =>
+      conn.subscriptions.emit(SERIES, {
+        id: "series",
+        sourceCampaignId: "c1",
+        accountId: "self",
+        name: "August update",
+        status: "active",
+        intervalWeeks: 2,
+        timeZone: ZONE,
+        anchorAt: "2031-10-14T16:00:00Z",
+        nextAt: "2031-10-14T16:00:00Z",
+        createdAt: "2027-10-01T12:00:00Z",
+        lastError: "",
+      }),
+    );
     expect(await screen.findByRole("heading", { level: 3, name: "August update" })).toBeTruthy();
+    await waitFor(() => expect(barWord()).toBe("Repeating"));
   });
 
   it("says in the engine's words when a save is refused, and keeps what was typed", async () => {

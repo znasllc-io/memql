@@ -49,6 +49,7 @@ import { browserZone, momentWords, shortMoment } from "../when";
 import { WORDS } from "../words";
 import { CampaignEditPage } from "./CampaignEditPage";
 import { campaignActs, campaignReading, confirmSentence, type CampaignFacts } from "./campaignActs";
+import { useLanding } from "./landing";
 import { Breakdown, Results, WhoGotIt } from "./Results";
 import { SendBar } from "./SendBar";
 import { TestRunPage } from "./TestRunPage";
@@ -153,8 +154,13 @@ function ledgerTotal(campaign: CampaignRow, stats: CampaignStats | null): number
   return counted > 0 ? counted : null;
 }
 
-/** The write that was refused last, which says what its notice reads. */
-type Refused = "send" | "schedule" | "pause" | "resume" | "cancel" | "series-pause" | "series-resume" | "duplicate" | "test";
+/** A write that changes what the campaign -- or the series it repeats from -- is. */
+type Lifecycle = "send" | "schedule" | "pause" | "resume" | "cancel" | "series-pause" | "series-resume";
+
+/** A write that did not go as asked, which says what its notice reads. */
+type Refused = Lifecycle | "duplicate" | "test";
+
+const onSeries = (act: Refused): boolean => act === "series-pause" || act === "series-resume";
 
 const REFUSED: Record<Exclude<Refused, "test">, string> = {
   send: "The campaign wasn't sent.",
@@ -165,6 +171,18 @@ const REFUSED: Record<Exclude<Refused, "test">, string> = {
   "series-pause": "Repeating wasn't paused.",
   "series-resume": "Repeating wasn't resumed.",
   duplicate: "The campaign wasn't duplicated.",
+};
+
+/** A write whose answer never came back: it may have been done, and the page cannot say it was not. */
+const LOST: Record<Exclude<Refused, "test">, string> = {
+  send: "Couldn't confirm the send.",
+  schedule: "Couldn't confirm the schedule.",
+  pause: "Couldn't confirm the pause.",
+  resume: "Couldn't confirm the resume.",
+  cancel: "Couldn't confirm that it was cancelled.",
+  "series-pause": "Couldn't confirm that repeating paused.",
+  "series-resume": "Couldn't confirm that repeating resumed.",
+  duplicate: "Couldn't confirm the copy.",
 };
 
 /** The acts an ask turns the bar into, and the act each confirms. */
@@ -267,7 +285,6 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
   const [copyId, setCopyId] = useState(newShortId);
   const [asking, setAsking] = useState<"" | "send" | "schedule" | "cancel">("");
   const [busyId, setBusyId] = useState("");
-  const [refused, setRefused] = useState<Refused | null>(null);
   const [tested, setTested] = useState<TestTarget | null>(null);
   /** Where the last test was going, so a refusal says what it means for that kind of test. */
   const [testedTo, setTestedTo] = useState<TestTarget["kind"]>("me");
@@ -281,12 +298,36 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
     if (asking !== "" && askingNow === "") setAsking("");
   }, [asking, askingNow]);
 
+  // ---- what a write moves --------------------------------------------------
+  /** What a write moves, as it stands now: the series' revision, or the campaign's status. */
+  const markerOf = (act: Refused): string => (onSeries(act) ? (series?.createdAt ?? "") : campaign.status);
+  /** Read again what a write moves: that one series, or the campaigns. */
+  const reread = (act: Refused) => (onSeries(act) ? recordFeeds.series.refresh(campaign.id) : feeds.campaigns.reseed());
+  // A CHANGE ON ITS WAY HOLDS THE BAR until it lands (`useLanding`).
+  const flight = useLanding<Lifecycle>({ marker: markerOf, reread });
+  const landing = flight.landing;
+
+  /**
+   * The last write that did not go as asked: refused, in the engine's words, or
+   * with its answer lost. It is about the state it was pressed in, so once that
+   * moves -- the send started after all, somebody else cancelled it -- it says
+   * nothing true any more and is not drawn.
+   */
+  const [outcome, setOutcome] = useState<{ act: Refused; lost: boolean; from: string } | null>(null);
+  const missed = outcome !== null && markerOf(outcome.act) === outcome.from ? outcome : null;
+
+  /** A write that did not go as asked; one whose answer was lost has its subject read again. */
+  function note(act: Refused, from: string, lost: boolean) {
+    setOutcome({ act, lost, from });
+    if (lost && act !== "test" && act !== "duplicate") reread(act);
+  }
+
   /** One write at a time: a second press while the first is on its way is the same press. */
   async function once(id: string, work: () => Promise<void>) {
     if (working.current) return;
     working.current = true;
     setBusyId(id);
-    setRefused(null);
+    setOutcome(null);
     try {
       await work();
     } finally {
@@ -295,22 +336,24 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
     }
   }
 
-  /** A send-control write; its refusal is noted against the act that made it. */
-  const control = (id: string, act: Refused, write: () => Promise<boolean>) =>
-    once(id, async () => {
+  /**
+   * A write that changes what the campaign or its series is. The act pressed
+   * stays busy, alone in the bar, until what it moves has moved; a refusal or
+   * a lost answer lets go at once and says which.
+   */
+  const lifecycle = (spec: ActSpec, act: Lifecycle, write: () => Promise<boolean>, lost: () => boolean) =>
+    once(spec.id, async () => {
       setAsking("");
-      if (!(await write())) setRefused(act);
-    });
-
-  /** A series write under the revision it was read at, then that one series read again. */
-  const seriesWrite = (id: string, act: Refused, write: (revision: string) => Promise<boolean>) =>
-    once(id, async () => {
-      if (series === null) return;
-      if (!(await write(series.createdAt))) {
-        setRefused(act);
+      const from = markerOf(act);
+      flight.begin(act, spec);
+      if (await write()) {
+        flight.taken();
+        // A series change is one series' row: read that one again, not every id.
+        if (onSeries(act)) recordFeeds.series.refresh(campaign.id);
         return;
       }
-      recordFeeds.series.refresh(campaign.id);
+      flight.drop();
+      note(act, from, lost());
     });
 
   const sendTest = () =>
@@ -318,9 +361,10 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
       if (target === null) return;
       setTested(null);
       setTestedTo(target.kind);
+      const from = markerOf("test");
       const sent = target.kind === "audience" ? await testSend.send(campaign.id, target.audience.id) : await testSend.sendToMe(campaign.id, target.address);
       if (!sent) {
-        setRefused("test");
+        note("test", from, testSend.lost());
         return;
       }
       setTested(target);
@@ -329,13 +373,17 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
 
   const duplicate = () =>
     once("duplicate", async () => {
+      const from = markerOf("duplicate");
       if (!(await copy.duplicate(campaign, copyId))) {
-        setRefused("duplicate");
+        note("duplicate", from, copy.lost());
         return;
       }
       onOpenCampaign(copyId);
       setCopyId(newShortId());
     });
+
+  /** The act a bar press named, as the bar drew it. */
+  const specOf = (id: string): ActSpec => barSpecs.find((spec) => spec.id === id) ?? { id, label: id };
 
   function run(id: string) {
     switch (id) {
@@ -348,7 +396,7 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
       case "send":
       case "schedule":
       case "cancel":
-        setRefused(null);
+        setOutcome(null);
         setAsking(id);
         return;
       case "not-yet":
@@ -356,22 +404,29 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
         setAsking("");
         return;
       case "send-confirmed":
-        void control(id, "send", () => controls.start(campaign.id));
+        void lifecycle(specOf(id), "send", () => controls.start(campaign.id), controls.lost);
         return;
       case "schedule-confirmed":
-        void control(id, "schedule", () => controls.schedule(campaign.id, campaign.scheduledAt));
+        void lifecycle(specOf(id), "schedule", () => controls.schedule(campaign.id, campaign.scheduledAt), controls.lost);
         return;
       case "cancel-confirmed":
-        void control(id, "cancel", () => controls.cancel(campaign.id));
+        void lifecycle(specOf(id), "cancel", () => controls.cancel(campaign.id), controls.lost);
         return;
-      // A send in flight pauses and resumes itself; anything else that offers them is a series.
+      // A send in flight pauses and resumes itself; anything else that offers
+      // them is a series, changed under the revision it was read at.
       case "pause":
-        if (campaign.status === "sending") void control(id, "pause", () => controls.pause(campaign.id));
-        else void seriesWrite(id, "series-pause", (revision) => repeats.pause(campaign.id, revision));
+        if (campaign.status === "sending") void lifecycle(specOf(id), "pause", () => controls.pause(campaign.id), controls.lost);
+        else if (series !== null) {
+          const revision = series.createdAt;
+          void lifecycle(specOf(id), "series-pause", () => repeats.pause(campaign.id, revision), repeats.lost);
+        }
         return;
       case "resume":
-        if (campaign.status === "paused") void control(id, "resume", () => controls.resume(campaign.id));
-        else void seriesWrite(id, "series-resume", (revision) => repeats.resume(campaign.id, revision));
+        if (campaign.status === "paused") void lifecycle(specOf(id), "resume", () => controls.resume(campaign.id), controls.lost);
+        else if (series !== null) {
+          const revision = series.createdAt;
+          void lifecycle(specOf(id), "series-resume", () => repeats.resume(campaign.id, revision), repeats.lost);
+        }
         return;
       case "duplicate":
         void duplicate();
@@ -379,10 +434,15 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
     }
   }
 
-  const barSpecs = askingNow === "" ? specs : ASKING[askingNow];
-  const question = askingNow === "" ? null : confirmSentence(askingNow, facts, subscribers);
+  // A change on its way holds the bar: the act it was, busy, and nothing else.
+  const barSpecs = landing !== null ? [landing.spec] : askingNow === "" ? specs : ASKING[askingNow];
+  const question = landing !== null || askingNow === "" ? null : confirmSentence(askingNow, facts, subscribers);
   // Before anything goes out on a cluster that keeps mail rather than delivering it, the question says so.
   const detail = (askingNow === "send" || askingNow === "schedule") && sending.capture ? "This cluster keeps email in Inbox instead of delivering it." : reading.detail;
+  const barState =
+    landing === null
+      ? { word: reading.word, detail, tone: reading.tone }
+      : { word: WORDS.changing[landing.act === "series-pause" ? "pause" : landing.act === "series-resume" ? "resume" : landing.act], detail: "", tone: "busy" as const };
 
   // ---- what each part of the page says ---------------------------------------
   const mayConfigure = canConfigure(access?.role ?? "");
@@ -390,8 +450,8 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
   // series, a schedule, a paused send.
   const sendingMatters = (campaign.status === "draft" && series === null) || campaign.status === "scheduled" || campaign.status === "paused";
 
-  function refusalNotice(): ReactNode {
-    if (refused === null || refused === "test") return null;
+  function outcomeNotice(): ReactNode {
+    if (missed === null || missed.act === "test") return null;
     const detailOf: Record<Exclude<Refused, "test">, string> = {
       send: controls.error,
       schedule: controls.error,
@@ -402,7 +462,12 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
       "series-resume": repeats.error,
       duplicate: copy.error,
     };
-    return <Notice tone="error" sentence={REFUSED[refused]} detail={detailOf[refused]} />;
+    if (missed.lost) {
+      // Not a refusal: it may have been done. The page reads it again and shows what it finds.
+      const next = missed.act === "duplicate" ? "Try again: it makes the same copy, never a second one." : "Its status will update here.";
+      return <Notice tone="warn" sentence={LOST[missed.act]} next={next} detail={detailOf[missed.act]} />;
+    }
+    return <Notice tone="error" sentence={REFUSED[missed.act]} detail={detailOf[missed.act]} />;
   }
 
   function pageNotices(): ReactNode {
@@ -488,7 +553,7 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
             set up somewhere else changes what can be sent. */}
         <AutoRefresh onRefresh={sending.reload} busy={sending.state === "loading"} intervalMs={EMAIL_REFRESH_MS} />
         {counting ? <AutoRefresh onRefresh={recount} intervalMs={EMAIL_REFRESH_MS} /> : null}
-        {refusalNotice()}
+        {outcomeNotice()}
         {pageNotices()}
 
         <Panel label="Campaign details">
@@ -522,7 +587,8 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
           runRows={runRows}
           audiences={audiences}
           tested={tested}
-          refusedTest={refused === "test" ? testedTo : null}
+          refusedTest={missed?.act === "test" ? testedTo : null}
+          testLost={missed?.act === "test" && missed.lost}
           testError={testSend.error}
           unresolved={testSend.unresolved}
           capture={sending.capture}
@@ -537,7 +603,14 @@ function CampaignView({ campaign, feeds, recordFeeds, runs, runRows, onBack, onE
         />
       </div>
 
-      <ActionBar state={reading.word} detail={detail} tone={reading.tone} live acts={toKitActs(barSpecs, run, busyId)} asking={askingNow !== ""}>
+      <ActionBar
+        state={barState.word}
+        detail={barState.detail}
+        tone={barState.tone}
+        live
+        acts={toKitActs(barSpecs, run, landing !== null ? landing.spec.id : busyId)}
+        asking={question !== null}
+      >
         {question === null ? null : <span className="os-actbar-confirm">{question}</span>}
       </ActionBar>
     </div>
@@ -555,6 +628,7 @@ function Tests({
   audiences,
   tested,
   refusedTest,
+  testLost,
   testError,
   unresolved,
   capture,
@@ -573,6 +647,8 @@ function Tests({
   tested: TestTarget | null;
   /** Where the refused test was going, when the last one was refused. */
   refusedTest: TestTarget["kind"] | null;
+  /** The last test's answer never came back: it may have gone. */
+  testLost: boolean;
   testError: string;
   unresolved: string[];
   capture: boolean;
@@ -591,6 +667,9 @@ function Tests({
     notices.push(
       refusedTest === "audience" ? (
         <Notice key="refused" tone="error" sentence="The test wasn't confirmed." next="Send it again to pick up the same test. It won't go out twice." detail={testError} />
+      ) : testLost ? (
+        // A copy to an address has no request id to recover by: it may have gone, and trying again sends another.
+        <Notice key="refused" tone="warn" sentence="Couldn't confirm the test was sent." detail={testError} />
       ) : (
         <Notice key="refused" tone="error" sentence="The test wasn't sent." detail={testError} />
       ),

@@ -46,6 +46,19 @@ export const WORDS = {
     blocked: "Repeating stopped",
   } as Readonly<Record<string, string>>,
 
+  /**
+   * A change on its way, from the press that confirmed it until the campaign's
+   * row says it happened: the bar reads this while the act stays busy.
+   */
+  changing: {
+    send: "Starting",
+    schedule: "Scheduling",
+    cancel: "Cancelling",
+    pause: "Pausing",
+    resume: "Resuming",
+    repeat: "Starting",
+  } as const,
+
   /** What happened to one recipient of a send, by the delivery's status. */
   delivery: {
     sent: "Sent",

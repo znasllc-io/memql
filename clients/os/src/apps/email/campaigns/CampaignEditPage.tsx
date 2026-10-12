@@ -30,6 +30,7 @@ import type { EmailFeeds, EmailRecordFeeds } from "../useEmail";
 import { browserZone, instantToLocal, localToInstant } from "../when";
 import { WORDS } from "../words";
 import { confirmSentence, repeatSentence } from "./campaignActs";
+import { useLanding } from "./landing";
 import type { When } from "./wizardModel";
 
 // A CAMPAIGN'S EDIT PAGE (memql#6033, Ruling 7): a draft's fields, or the fields
@@ -98,8 +99,11 @@ function savedWhen(campaign: CampaignRow, series: SeriesRow | null): When {
   return campaign.scheduledAt !== "" ? { kind: "schedule", at: localOf(campaign.scheduledAt) } : { kind: "now" };
 }
 
-/** The last write on the page that was refused, which says what its notice reads. */
+/** The last write on the page that did not go as asked, which says what its notice reads. */
 type Refused = "update" | "series" | "repeat" | "cancel";
+
+/** The confirmed acts that change what the campaign is, and hold the bar until that lands. */
+type Lifecycle = "repeat" | "cancel";
 
 export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack, onBackToList }: {
   campaign: CampaignRow;
@@ -161,21 +165,21 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
 
   // ---- what changed ----------------------------------------------------------
   const repeat = when.kind === "repeat" ? when : null;
-  const changes: CampaignChanges = {};
-  if (draft.name.trim() !== campaign.name.trim()) changes.name = draft.name.trim();
-  if (draft.audienceId !== campaign.audienceId) changes.audienceId = draft.audienceId;
-  if (draft.templateId !== campaign.templateId) changes.templateId = draft.templateId;
-  if (accountId !== campaign.accountId) changes.accountId = accountId;
-  if (draft.senderIdentityId !== campaign.senderIdentityId) changes.senderIdentityId = draft.senderIdentityId;
-  if (draft.replyTo.trim() !== campaign.replyTo.trim()) changes.replyTo = draft.replyTo.trim();
-  if (draft.trackOpens !== campaign.trackOpens) changes.trackOpens = draft.trackOpens;
-  if (draft.trackClicks !== campaign.trackClicks) changes.trackClicks = draft.trackClicks;
+  const edits: CampaignChanges = {};
+  if (draft.name.trim() !== campaign.name.trim()) edits.name = draft.name.trim();
+  if (draft.audienceId !== campaign.audienceId) edits.audienceId = draft.audienceId;
+  if (draft.templateId !== campaign.templateId) edits.templateId = draft.templateId;
+  if (accountId !== campaign.accountId) edits.accountId = accountId;
+  if (draft.senderIdentityId !== campaign.senderIdentityId) edits.senderIdentityId = draft.senderIdentityId;
+  if (draft.replyTo.trim() !== campaign.replyTo.trim()) edits.replyTo = draft.replyTo.trim();
+  if (draft.trackOpens !== campaign.trackOpens) edits.trackOpens = draft.trackOpens;
+  if (draft.trackClicks !== campaign.trackClicks) edits.trackClicks = draft.trackClicks;
   // The time a draft is saved for. A repeat is the series', never the campaign's.
   if (series === null && repeat === null) {
     const at = when.kind === "schedule" ? (localToInstant(when.at) ?? "") : "";
-    if (!sameInstant(at, campaign.scheduledAt)) changes.scheduledAt = at;
+    if (!sameInstant(at, campaign.scheduledAt)) edits.scheduledAt = at;
   }
-  const campaignChanged = Object.keys(changes).length > 0;
+  const campaignChanged = Object.keys(edits).length > 0;
   const timeMoved = repeat !== null && (series === null || repeat.at !== anchorAsSaved);
   const seriesChanged = series !== null && repeat !== null && (repeat.weeks !== series.intervalWeeks || timeMoved);
   const startsRepeating = series === null && repeat !== null;
@@ -207,8 +211,24 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
   const controls = useSendControls();
   const [asking, setAsking] = useState<"" | "cancel" | "repeat">("");
   const [busyId, setBusyId] = useState("");
-  const [refused, setRefused] = useState<{ write: Refused; campaignSaved: boolean } | null>(null);
+  /** The last write that did not go as asked: refused, or with its answer lost (it may have been done). */
+  const [refused, setRefused] = useState<{ write: Refused; campaignSaved: boolean; lost: boolean } | null>(null);
   const working = useRef(false);
+
+  // A CHANGE ON ITS WAY HOLDS THE BAR (`useLanding`): Start repeating until the
+  // series arrives, Cancel campaign until the campaign is cancelled -- then the
+  // campaign's page, which a cancel reaches on its own (only a draft is edited).
+  const markerOf = (act: Lifecycle): string => (act === "repeat" ? (series?.createdAt ?? "") : campaign.status);
+  /** Read again what a write moves, or may have moved. */
+  const reread = (write: Refused | Lifecycle) => (write === "series" || write === "repeat" ? recordFeeds.series.refresh(campaign.id) : feeds.campaigns.reseed());
+  const flight = useLanding<Lifecycle>({ marker: markerOf, reread, onLanded: () => onBack() });
+  const landing = flight.landing;
+
+  /** A write that did not go as asked; one whose answer was lost has its subject read again. */
+  function failed(write: Refused, campaignSaved: boolean, lost: boolean) {
+    setRefused({ write, campaignSaved, lost });
+    if (lost) reread(write);
+  }
 
   /** One write at a time: a second press while the first is on its way is the same press. */
   async function once(id: string, work: () => Promise<void>) {
@@ -239,8 +259,8 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
   /** The campaign's own changes, if there are any. False, with the refusal noted, when they were not taken. */
   async function saveCampaign(): Promise<boolean> {
     if (!campaignChanged) return true;
-    if (await edit.save(campaign, changes)) return true;
-    setRefused({ write: "update", campaignSaved: false });
+    if (await edit.save(campaign, edits)) return true;
+    failed("update", false, edit.lost());
     return false;
   }
 
@@ -249,10 +269,10 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
       if (!(await saveCampaign())) return;
       // The series only when something it repeats changed -- and saving it never
       // restarts it: a paused or stopped series stays so until Resume.
-      if (series !== null && seriesSaveNeeded(changes, seriesChanged, seriesOwed)) {
+      if (series !== null && seriesSaveNeeded(edits, seriesChanged, seriesOwed)) {
         if (!(await repeats.save(seriesSave(series.createdAt)))) {
           setSeriesOwed(true);
-          setRefused({ write: "series", campaignSaved: campaignChanged || seriesOwed });
+          failed("series", campaignChanged || seriesOwed, repeats.lost());
           return;
         }
         setSeriesOwed(false);
@@ -261,27 +281,37 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
       onBack();
     });
 
-  const startRepeating = () =>
+  const startRepeating = (spec: ActSpec) =>
     once("repeat-confirmed", async () => {
       setAsking("");
-      if (!(await saveCampaign())) return;
-      if (!(await repeats.save(seriesSave()))) {
-        setRefused({ write: "repeat", campaignSaved: campaignChanged });
+      flight.begin("repeat", spec);
+      if (!(await saveCampaign())) {
+        flight.drop();
         return;
       }
+      if (!(await repeats.save(seriesSave()))) {
+        flight.drop();
+        failed("repeat", campaignChanged, repeats.lost());
+        return;
+      }
+      flight.taken();
       recordFeeds.series.refresh(campaign.id);
-      onBack();
     });
 
-  const cancelCampaign = () =>
+  const cancelCampaign = (spec: ActSpec) =>
     once("cancel-confirmed", async () => {
       setAsking("");
+      flight.begin("cancel", spec);
       if (!(await controls.cancel(campaign.id))) {
-        setRefused({ write: "cancel", campaignSaved: false });
+        flight.drop();
+        failed("cancel", false, controls.lost());
         return;
       }
-      onBack();
+      flight.taken();
     });
+
+  /** The act a bar press named, as the bar drew it. */
+  const specOf = (id: string): ActSpec => barSpecs.find((spec) => spec.id === id) ?? { id, label: id };
 
   function run(id: string) {
     switch (id) {
@@ -296,10 +326,10 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
         setAsking("");
         return;
       case "cancel-confirmed":
-        void cancelCampaign();
+        void cancelCampaign(specOf(id));
         return;
       case "repeat-confirmed":
-        void startRepeating();
+        void startRepeating(specOf(id));
         return;
       case "discard":
         onBack();
@@ -331,9 +361,13 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
             ...(dirty ? [{ id: "discard", label: "Discard changes", text: true }] : []),
             ...(forward === null ? [] : [forward]),
           ];
+  // A change on its way holds the bar: the act it was, busy, and nothing else.
+  const barSpecs = landing !== null ? [landing.spec] : specs;
   const name = draft.name.trim() || campaignName(campaign);
   const question =
-    askingNow === "cancel"
+    landing !== null
+      ? null
+      : askingNow === "cancel"
       ? confirmSentence("cancel-draft", { campaign, series, sendingReady: false, sendingReason: "", canTest: false, organizationName: organization, now }, absent("unread"))
       : askingNow === "repeat" && repeat !== null
         ? repeatSentence(name, audience ? audienceName(audience) : "", repeat, zone)
@@ -365,6 +399,20 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
 
   function outcome(): ReactNode {
     if (refused === null) return null;
+    // AN ANSWER THAT NEVER CAME BACK IS NOT A REFUSAL: the write may have been
+    // done. What it moves is being read again, and the page will show it.
+    if (refused.lost) {
+      switch (refused.write) {
+        case "update":
+          return <Notice tone="warn" sentence="Couldn't confirm that your changes were saved." next="What you changed is still here." detail={edit.error} />;
+        case "series":
+          return <Notice tone="warn" sentence="Couldn't confirm that its repeating schedule was saved." next="What you changed is still here." detail={repeats.error} />;
+        case "repeat":
+          return <Notice tone="warn" sentence="Couldn't confirm that repeating started." next="Its status will update here." detail={repeats.error} />;
+        case "cancel":
+          return <Notice tone="warn" sentence="Couldn't confirm that it was cancelled." next="Its status will update here." detail={controls.error} />;
+      }
+    }
     switch (refused.write) {
       case "update":
         return <Notice tone="error" sentence="Your changes weren't saved." next="What you changed is still here." detail={edit.error} />;
@@ -528,7 +576,13 @@ export function CampaignEditPage({ campaign, series, feeds, recordFeeds, onBack,
         </Panel>
       </div>
 
-      <ActionBar state="Editing" detail={askingNow === "" ? blocked : undefined} acts={toKitActs(specs, run, busyId)} asking={askingNow !== ""}>
+      <ActionBar
+        state={landing === null ? "Editing" : WORDS.changing[landing.act]}
+        detail={landing === null && askingNow === "" ? blocked : undefined}
+        tone={landing === null ? "none" : "busy"}
+        acts={toKitActs(barSpecs, run, landing !== null ? landing.spec.id : busyId)}
+        asking={question !== null}
+      >
         {question === null ? null : <span className="os-actbar-confirm">{question}</span>}
       </ActionBar>
     </div>

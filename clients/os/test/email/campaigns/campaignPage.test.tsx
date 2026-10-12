@@ -20,7 +20,7 @@ vi.mock("../../../src/auth/context", () => ({
 
 const { EmailApp } = await import("../../../src/apps/email/EmailApp");
 const { LocalEmailSettingsStore } = await import("../../../src/apps/email/settings");
-const { useSendControls } = await import("../../../src/apps/email/actions");
+const { answerLost, useSendControls } = await import("../../../src/apps/email/actions");
 const { audienceRow, campaignRow, deliveryRow, fakeConnection, pagedResult, rowsResult, senderRow, templateRow, withSession } = await import("../harness");
 
 // ONE CAMPAIGN'S PAGE (memql#6033, Ruling 7): its facts, what happened when it
@@ -355,6 +355,18 @@ describe("acting on a campaign", () => {
     expect(second).toBe(first);
   });
 
+  it("a duplicate whose answer never came back says it could not be confirmed, and that trying again makes the same copy", async () => {
+    const conn = seed({ campaigns: [draft({ id: "c1", status: "sent", recipientCount: 10, sentCount: 10 })] });
+    conn.query.createCampaign.mockRejectedValueOnce(lostAnswer());
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barActs()).toContain("Duplicate"));
+    press("Duplicate");
+    expect(await screen.findByText("Couldn't confirm the copy.")).toBeTruthy();
+    expect(screen.getByText("Try again: it makes the same copy, never a second one.")).toBeTruthy();
+    expect(screen.queryByText("The campaign wasn't duplicated.")).toBeNull();
+  });
+
   it("says in the engine's own words why an act was refused", async () => {
     const conn = seed({ campaigns: [draft()] });
     conn.query.campaignStartSend.mockRejectedValueOnce(new Error("no email sender is registered on this node"));
@@ -403,6 +415,146 @@ describe("acting on a campaign", () => {
 // ---------------------------------------------------------------------------
 // What decides whether it can be sent
 // ---------------------------------------------------------------------------
+
+/** An answer that never came back: the stream closed after the write went out, so it may have been done. */
+function lostAnswer(): Error {
+  return Object.assign(new Error("stream closed"), { reason: "transport" });
+}
+
+/** The bar's acts that can be pressed now: not disabled. */
+const pressable = () => within(bar()).queryAllByRole("button").filter((button) => !(button as HTMLButtonElement).disabled).map((button) => button.textContent);
+
+describe("a change on its way", () => {
+  // AFTER A CONFIRMED PRESS THE ACT STAYS BUSY UNTIL THE CHANGE LANDS. The write
+  // returning is not the campaign changing: until its row arrives the bar would
+  // read Draft and offer Send now again, and a second press would be refused
+  // over a send that started. So the bar says what is happening, holds the act
+  // pressed, and offers nothing, until the row's status moves.
+  const confirmed: { act: string; confirm?: string; campaign: ReturnType<typeof draft>; word: string; write: "campaignStartSend" | "campaignScheduleSend" | "cancelCampaign"; arrives: string; after: string }[] = [
+    { act: "Send now", campaign: draft(), word: "Starting", write: "campaignStartSend", arrives: "sending", after: "Sending" },
+    { act: "Schedule", campaign: draft({ id: "c1", scheduledAt: OCT_14 }), word: "Scheduling", write: "campaignScheduleSend", arrives: "scheduled", after: "Scheduled" },
+    { act: "Cancel", confirm: "Cancel campaign", campaign: draft({ id: "c1", status: "scheduled", scheduledAt: OCT_14 }), word: "Cancelling", write: "cancelCampaign", arrives: "cancelled", after: "Cancelled" },
+  ];
+  it.each(confirmed)("$act stays busy until the campaign is $arrives, and offers nothing meanwhile", async ({ act: asked, confirm: answer, campaign, word, write, arrives, after }) => {
+    const confirm = answer ?? asked;
+    const conn = seed({ campaigns: [campaign] });
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barActs()).toContain(asked));
+    press(asked);
+    await readTheQuestion();
+    press(confirm);
+    await waitFor(() => expect(conn.query[write]).toHaveBeenCalledOnce());
+
+    // The cluster took it; the row has not arrived. The act it was is held.
+    await waitFor(() => expect(barWord()).toBe(word));
+    expect(barActs()).toEqual([confirm]);
+    expect(pressable()).toEqual([]);
+    expect(within(bar()).getByRole("button", { name: confirm }).getAttribute("aria-busy")).toBe("true");
+
+    act(() => conn.subscriptions.emit(CAMPAIGN, { ...campaign, status: arrives }));
+    await waitFor(() => expect(barWord()).toBe(after));
+    expect(pressable().length).toBeGreaterThan(0);
+    expect(conn.query[write]).toHaveBeenCalledOnce();
+  });
+
+  it("holds until the write itself has answered, even when the row arrives first", async () => {
+    const campaign = draft();
+    const conn = seed({ campaigns: [campaign] });
+    let answer: () => void = () => {};
+    conn.query.campaignStartSend.mockImplementationOnce(() => new Promise((resolve) => (answer = () => resolve(rowsResult([])))));
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barActs()).toContain("Send now"));
+    press("Send now");
+    await readTheQuestion();
+    press("Send now");
+    await waitFor(() => expect(barWord()).toBe("Starting"));
+    act(() => conn.subscriptions.emit(CAMPAIGN, { ...campaign, status: "sending" }));
+    // The row moved, but the write has not answered: what it says is still to come.
+    expect(barWord()).toBe("Starting");
+    expect(pressable()).toEqual([]);
+    await act(async () => answer());
+    await waitFor(() => expect(barWord()).toBe("Sending"));
+  });
+
+  it("a pause stays busy until the send is paused", async () => {
+    const sending = draft({ id: "c1", status: "sending", recipientCount: 100, sentCount: 40 });
+    const conn = seed({ campaigns: [sending] });
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barActs()).toEqual(["Send a test", "Pause"]));
+    press("Pause");
+    await waitFor(() => expect(barWord()).toBe("Pausing"));
+    expect(barActs()).toEqual(["Pause"]);
+    expect(pressable()).toEqual([]);
+    act(() => conn.subscriptions.emit(CAMPAIGN, { ...sending, status: "paused" }));
+    await waitFor(() => expect(barActs()).toEqual(["Cancel", "Send a test", "Resume"]));
+  });
+
+  it("a change that was taken but never arrives is read again after ten seconds, and the bar lets go", async () => {
+    const conn = seed({ campaigns: [draft()] });
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barActs()).toEqual(["Edit", "Send a test", "Send now"]));
+    press("Send now");
+    await readTheQuestion();
+    vi.useFakeTimers();
+    press("Send now");
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(conn.query.campaignStartSend).toHaveBeenCalledOnce();
+    expect(barWord()).toBe("Starting");
+    const reads = conn.query.campaigns.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(9_000); });
+    expect(barWord()).toBe("Starting");
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    // The page reads the campaign again itself, and stops holding the bar.
+    expect(conn.query.campaigns.mock.calls.length).toBeGreaterThan(reads);
+    expect(barWord()).toBe("Draft");
+    expect(pressable()).toEqual(["Edit", "Send a test", "Send now"]);
+  });
+
+  it("an answer that never came back is not a refusal: it says so, reads the campaign again, and clears when the status moves", async () => {
+    const campaign = draft();
+    const conn = seed({ campaigns: [campaign] });
+    conn.query.campaignStartSend.mockRejectedValueOnce(lostAnswer());
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barActs()).toContain("Send now"));
+    const reads = conn.query.campaigns.mock.calls.length;
+    press("Send now");
+    await readTheQuestion();
+    press("Send now");
+
+    expect(await screen.findByText("Couldn't confirm the send.")).toBeTruthy();
+    expect(screen.getByText("Its status will update here.")).toBeTruthy();
+    expect(screen.queryByText("The campaign wasn't sent.")).toBeNull();
+    await waitFor(() => expect(conn.query.campaigns.mock.calls.length).toBeGreaterThan(reads));
+
+    // It went: the row arrives, and what could not be confirmed no longer needs saying.
+    act(() => conn.subscriptions.emit(CAMPAIGN, { ...campaign, status: "sending" }));
+    await waitFor(() => expect(barWord()).toBe("Sending"));
+    expect(screen.queryByText("Couldn't confirm the send.")).toBeNull();
+  });
+
+  it("a refusal says why in the engine's words, and clears once the status moves", async () => {
+    const campaign = draft();
+    const conn = seed({ campaigns: [campaign] });
+    conn.query.campaignStartSend.mockRejectedValueOnce(new Error("campaign is already sending"));
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barActs()).toContain("Send now"));
+    press("Send now");
+    await readTheQuestion();
+    press("Send now");
+    expect(await screen.findByText("The campaign wasn't sent.")).toBeTruthy();
+    expect(screen.getByText("campaign is already sending")).toBeTruthy();
+
+    act(() => conn.subscriptions.emit(CAMPAIGN, { ...campaign, status: "sending" }));
+    await waitFor(() => expect(barWord()).toBe("Sending"));
+    expect(screen.queryByText("The campaign wasn't sent.")).toBeNull();
+  });
+});
 
 describe("what decides whether it can be sent", () => {
   it("a draft template blocks sending until it is published", async () => {
@@ -726,6 +878,17 @@ describe("testing a campaign", () => {
     expect(conn.query.campaignTestAudienceSend).not.toHaveBeenCalled();
   });
 
+  it("a test to my own address whose answer never came back may have gone, and says so", async () => {
+    const conn = seed({ campaigns: [draft()] });
+    conn.query.campaignTestSend.mockRejectedValueOnce(lostAnswer());
+    mountWindow(conn);
+    await openCampaign();
+    await waitFor(() => expect(barActs()).toContain("Send a test"));
+    press("Send a test");
+    expect(await screen.findByText("Couldn't confirm the test was sent.")).toBeTruthy();
+    expect(screen.queryByText("The test wasn't sent.")).toBeNull();
+  });
+
   it.each(["sending", "paused", "sent", "scheduled"])("tests a %s campaign at its testing audience and recovers an uncertain response", async (status) => {
     const conn = seed({
       campaigns: [draft({ id: "c1", status, scheduledAt: status === "scheduled" ? OCT_14 : "", recipientCount: 10, sentCount: 4 })],
@@ -848,5 +1011,16 @@ describe("the send controls", () => {
     // A later act that worked leaves nothing to say, whatever an earlier one said.
     await act(async () => { await result.current.pause("c1"); });
     expect(result.current.error).toBe("");
+  });
+
+  it("tells an answer that never came back from a refusal, and from a request that never left", () => {
+    // Out, and no answer: it may have been done.
+    expect(answerLost(Object.assign(new Error("stream closed"), { reason: "transport" }))).toBe(true);
+    expect(answerLost(Object.assign(new Error("dispatcher stopped"), { reason: "closed" }))).toBe(true);
+    // Never out: nothing was done.
+    expect(answerLost(Object.assign(new Error("send failed: socket not open (readyState=3)"), { reason: "transport" }))).toBe(false);
+    // The engine's own sentence: it was not done.
+    expect(answerLost(new Error("campaign is already sending"))).toBe(false);
+    expect(answerLost("not an error")).toBe(false);
   });
 });
