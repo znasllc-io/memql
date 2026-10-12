@@ -2,35 +2,120 @@ package campaigns
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// NudgeWaitingEnrollments makes every waiting automation re-check this recipient.
-// Collect before writing: the query sorts by version time, which each nudge moves.
-func (s *Store) NudgeWaitingEnrollments(ctx context.Context, recipientID string, at time.Time) error {
+// NudgeWaitingEnrollments re-checks waiting confirmations and recovers a late
+// confirmation after its timeout. The page releases its choice gate first;
+// recovery takes journey -> recipient -> enrollment, the drain's lock order.
+func (s *Store) NudgeWaitingEnrollments(ctx context.Context, recipientID string, at time.Time, coordinate emailEnrollmentGate) error {
 	ctx = auth.ContextWithInternalOrigin(memql.ContextWithFreshRead(ctx))
-	var waiting []map[string]any
+	var candidates []map[string]any
 	cursor := ""
 	for {
 		rows, next, err := s.rowsPage(ctx, cursor, call("query", "waitingEnrollmentsForRecipient", arg{"recipientId", bare(recipientID)}))
 		if err != nil {
 			return err
 		}
-		waiting = append(waiting, rows...)
+		candidates = append(candidates, rows...)
 		if next == "" {
 			break
 		}
+		if next == cursor {
+			return fmt.Errorf("confirmation enrollment scan repeated its cursor")
+		}
 		cursor = next
 	}
-	for _, row := range waiting {
-		if err := s.execServerOnly(ctx, call("mutation", "nudgeJourneyEnrollment", arg{"enrollmentId", bare(str(row, "id"))}, arg{"nextAt", at.UTC().Format(time.RFC3339Nano)}, arg{"versionTime", memql.VersionTimeAfter(templateTime(row["createdAt"]), at).Format(time.RFC3339Nano)})); err != nil {
+	for _, candidate := range candidates {
+		if err := s.nudgeEnrollment(ctx, recipientID, at, candidate, coordinate); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+func (s *Store) nudgeEnrollment(ctx context.Context, recipientID string, at time.Time, candidate map[string]any, coordinate emailEnrollmentGate) error {
+	journeyID, enrollmentID := bare(str(candidate, "journeyId")), bare(str(candidate, "id"))
+	hold, err := coordinate(context.WithoutCancel(ctx), journeyID, bare(recipientID), enrollmentID)
+	if err != nil {
+		return err
+	}
+	defer hold.Release()
+	phase, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	read := func(name, key, id string) (map[string]any, error) {
+		rows, err := s.rows(phase, call("query", name, arg{key, id}))
+		if err != nil || len(rows) == 0 {
+			return nil, err
+		}
+		return rows[0], nil
+	}
+	row, err := read("journeyEnrollmentById", "enrollmentId", enrollmentID)
+	if err != nil || row == nil {
+		return err
+	}
+	waiting := str(row, "status") == "waiting"
+	if !waiting && !(str(row, "status") == "exited" && str(row, "exitReason") == "not confirmed") {
+		return nil
+	}
+	source, err := read("journeyById", "journeyId", journeyID)
+	if err != nil || source == nil {
+		return err
+	}
+	journey, err := journeyFromRow(source)
+	if err != nil {
+		return err
+	}
+	if journey.Status == "archived" || (!waiting && journey.Status != "active") {
+		return nil
+	}
+	recipient, found, err := s.RecipientByID(ownerActorContext(phase, journey.OwnerUserID), recipientID)
+	if err != nil {
+		return err
+	}
+	if !found || recipient.SubscriptionStatus != "subscribed" || recipient.JoinedAt.IsZero() ||
+		bare(str(row, "recipientId")) != bare(recipientID) || bare(str(row, "journeyId")) != journey.ID ||
+		bare(str(row, "ownerUserId")) != journey.OwnerUserID || !sameOrganization(str(row, "accountId"), journey.AccountID) ||
+		!sameOrganization(recipient.AccountID, journey.AccountID) || EmailDigest(recipient.Email) != str(row, "emailDigest") ||
+		journeyEnrollmentID(journey.ID, recipientID, recipient.JoinedAt) != enrollmentID {
+		return nil
+	}
+	if _, blocked, err := s.SuppressionForSend(phase, journey.AccountID, EmailDigest(recipient.Email)); err != nil || blocked {
+		return err
+	}
+	version := memql.VersionTimeAfter(templateTime(row["createdAt"]), at).Format(time.RFC3339Nano)
+	mutation := "nudgeJourneyEnrollment"
+	args := []arg{{"enrollmentId", enrollmentID}, {"nextAt", at.UTC().Format(time.RFC3339Nano)}, {"versionTime", version}}
+	if !waiting {
+		// A stable Confirm step id advances to its following step. If editing
+		// removed it, its former index names the next surviving step instead.
+		index := max(0, min(integer(row, "stepIndex"), len(journey.Steps)))
+		for i, step := range journey.Steps {
+			if step.ID == str(row, "stepId") {
+				if step.Kind != "confirm" {
+					return nil
+				}
+				index = i + 1
+				break
+			}
+		}
+		nextID, status, completed := "", "active", ""
+		if index < len(journey.Steps) {
+			nextID = journey.Steps[index].ID
+		} else {
+			status = "completed"
+			completed = at.UTC().Format(time.RFC3339Nano)
+		}
+		mutation = "advanceJourneyEnrollment"
+		args = append(args, arg{"stepId", nextID}, arg{"stepIndex", index}, arg{"status", status}, arg{"exitReason", ""}, arg{"completedAt", completed}, arg{"attempts", 0}, arg{"lastError", ""})
+	}
+	if err := hold.Verify(phase); err != nil {
+		return err
+	}
+	return s.execServerOnly(phase, call("mutation", mutation, args...))
 }
 
 func (s *Store) consentExists(ctx context.Context, eventID string) (bool, error) {

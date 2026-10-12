@@ -878,7 +878,7 @@ query journeyEnrollment waitingEnrollmentsForRecipient {
  args {
  recipientId string!
  }
- filter row => actor.isClusterOwner == true && (row.recipientId == args.recipientId && row.status == "waiting")
+ filter row => actor.isClusterOwner == true && (row.recipientId == args.recipientId && (row.status == "waiting" || (row.status == "exited" && row.exitReason == "not confirmed")))
  sort "row.createdAt", "asc"
  paginate 100
  shape journeyEnrollmentFull

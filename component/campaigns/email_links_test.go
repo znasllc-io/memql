@@ -106,6 +106,7 @@ type emailPageEngine struct {
 	waiting    []map[string]any
 	grants     map[string]bool
 	historical map[string]any
+	journey    map[string]any
 	fail       string
 }
 
@@ -118,6 +119,18 @@ func (e *emailPageEngine) Execute(ctx context.Context, q string) (any, error) {
 		return nil, errors.New("storage unavailable")
 	}
 	switch {
+	case strings.HasPrefix(q, "query journeyById"):
+		if e.journey != nil {
+			return rowsEnvelope([]map[string]any{e.journey}), nil
+		}
+		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query journeyEnrollmentById"):
+		for _, r := range e.waiting {
+			if bare(str(r, "id")) == argOf(q, "enrollmentId") {
+				return rowsEnvelope([]map[string]any{r}), nil
+			}
+		}
+		return rowsEnvelope(nil), nil
 	case strings.HasPrefix(q, "query waitingEnrollmentsForRecipient"):
 		return rowsEnvelope(e.waiting), nil
 	case strings.HasPrefix(q, "query newsletterConsentById"):
@@ -137,6 +150,9 @@ func (e *emailPageEngine) Execute(ctx context.Context, q string) (any, error) {
 		e.grants[argOf(q, "eventId")] = true
 	case strings.HasPrefix(q, "mutation confirmRecipientSubscription"):
 		e.roster[0]["subscriptionStatus"] = "subscribed"
+	case strings.HasPrefix(q, "mutation restartRecipientMembership"):
+		e.roster[0]["subscriptionStatus"] = argOf(q, "subscriptionStatus")
+		e.roster[0]["joinedAt"] = argOf(q, "joinedAt")
 	case strings.HasPrefix(q, "mutation setRecipientSubscription"):
 		e.roster[0]["subscriptionStatus"] = argOf(q, "subscriptionStatus")
 	case strings.HasPrefix(q, "mutation liftOrganizationSuppression"):
@@ -154,11 +170,14 @@ func newEmailPageEngine(status string) (*emailPageEngine, *EmailLinkHandler) {
 	e.roster[0]["subscriptionStatus"] = status
 	h := NewEmailLinkHandler(e, Config{UnsubscribeSecret: testSecret, UnsubscribeBaseURL: "https://example.test"}, quietLogger(), nil)
 	h.gate = unitEmailGate
+	h.enrollments = unitEmailGate
 	return e, h
 }
 func TestConfirmPostConfirmsAndNudges(t *testing.T) {
 	e, h := newEmailPageEngine("pending")
-	e.waiting = []map[string]any{{"id": "waiting", "createdAt": "2026-10-01T00:00:00Z"}}
+	e.roster[0]["joinedAt"] = "2026-10-01T00:00:00Z"
+	e.journey = map[string]any{"id": "journey", "ownerUserId": testOwner, "accountId": "org-1", "status": "active", "trigger": map[string]any{"kind": "joined", "audienceId": testAudience}, "steps": []map[string]any{{"id": "confirm", "kind": "confirm", "timeoutDays": 7}, {"id": "welcome", "kind": "send"}}}
+	e.waiting = []map[string]any{{"id": journeyEnrollmentID("journey", "r-1", parseTime("2026-10-01T00:00:00Z")), "journeyId": "journey", "ownerUserId": testOwner, "accountId": "org-1", "recipientId": "r-1", "emailDigest": emailPagePayload().EmailDigest, "status": "waiting", "stepId": "confirm", "stepIndex": 0, "createdAt": "2026-10-01T00:00:00Z"}}
 	token := emailPageToken(t, LinkConfirm, emailPagePayload())
 	for i := 0; i < 2; i++ {
 		rr := pageRequest(h, "POST", ConfirmPath, token, "")
@@ -309,7 +328,7 @@ func TestPreferencesRetryAfterLiftRetainsConsentAndFinishes(t *testing.T) {
 	e, h := newEmailPageEngine("unsubscribed")
 	digest := emailPagePayload().EmailDigest
 	e.suppression = map[string]map[string]any{organizationSuppressionID("org-1", digest): {"accountId": "org-1", "reason": "unsubscribed", "suppressedAt": "2026-10-01T00:00:00Z"}}
-	e.fail = "mutation setRecipientSubscription"
+	e.fail = "mutation restartRecipientMembership"
 	token := emailPageToken(t, LinkPreferences, emailPagePayload())
 	rr := pageRequest(h, "POST", PreferencesPath, token, "subscribe")
 	if rr.Code != 503 {
@@ -345,5 +364,20 @@ func TestEmailChoiceRequiresItsDedicatedGatePool(t *testing.T) {
 	rr := pageRequest(h, "POST", ConfirmPath, emailPageToken(t, LinkConfirm, emailPagePayload()), "")
 	if rr.Code != 503 || len(e.calls) != 0 {
 		t.Fatal(rr.Code, e.calls)
+	}
+}
+
+func TestLateConfirmationNeverReopensAnOldMembership(t *testing.T) {
+	e, h := newEmailPageEngine("subscribed")
+	oldJoin := parseTime("2026-10-01T00:00:00Z")
+	e.roster[0]["joinedAt"] = oldJoin.Add(time.Hour).Format(time.RFC3339Nano)
+	e.journey = map[string]any{"id": "journey", "ownerUserId": testOwner, "accountId": "org-1", "status": "active", "trigger": map[string]any{"kind": "joined", "audienceId": testAudience}, "steps": []map[string]any{{"id": "confirm", "kind": "confirm", "timeoutDays": 7}, {"id": "welcome", "kind": "send"}}}
+	e.waiting = []map[string]any{{"id": journeyEnrollmentID("journey", "r-1", oldJoin), "journeyId": "journey", "ownerUserId": testOwner, "accountId": "org-1", "recipientId": "r-1", "emailDigest": emailPagePayload().EmailDigest, "status": "exited", "exitReason": "not confirmed", "stepId": "confirm", "stepIndex": 0, "createdAt": "2026-10-01T00:00:00Z"}}
+	rr := pageRequest(h, "POST", ConfirmPath, emailPageToken(t, LinkConfirm, emailPagePayload()), "")
+	if rr.Code != 200 {
+		t.Fatal(rr.Code)
+	}
+	if len(e.mutations("advanceJourneyEnrollment")) != 0 || len(e.mutations("nudgeJourneyEnrollment")) != 0 {
+		t.Fatal("old joinedAt enrollment reopened", e.calls)
 	}
 }

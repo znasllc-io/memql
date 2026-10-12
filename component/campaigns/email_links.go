@@ -17,12 +17,14 @@ import (
 // EmailLinkHandler serves token-authorized recipient pages. GET only reads;
 // POST changes consent under the same cross-replica recipient gate as sending.
 type EmailLinkHandler struct {
-	store  *Store
-	cfg    Config
-	logger *slog.Logger
-	system func(context.Context) context.Context
-	now    func() time.Time
-	gate   emailChoiceGate
+	store        *Store
+	cfg          Config
+	logger       *slog.Logger
+	system       func(context.Context) context.Context
+	now          func() time.Time
+	gate         emailChoiceGate
+	enrollments  emailEnrollmentGate
+	finishChoice func()
 }
 
 // NewEmailLinkHandler requires the dedicated write-gate pool, never the request
@@ -31,7 +33,7 @@ func NewEmailLinkHandler(engine Engine, cfg Config, logger *slog.Logger, databas
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &EmailLinkHandler{store: NewStore(engine), cfg: cfg, logger: logger.With("component", "campaigns.emailLinks"), system: (&Worker{}).systemActorContext, now: time.Now, gate: newEmailChoiceGate(database)}
+	return &EmailLinkHandler{store: NewStore(engine), cfg: cfg, logger: logger.With("component", "campaigns.emailLinks"), system: (&Worker{}).systemActorContext, now: time.Now, gate: newEmailChoiceGate(database), enrollments: newEmailEnrollmentGate(database)}
 }
 
 func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
@@ -72,6 +74,9 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 			org, _ := h.store.AccountName(ownerActorContext(r.Context(), p.OwnerUserID), p.AccountID)
 			writeEmailPage(rw, 410, "Link expired", `<h1>This link has expired.</h1><p>Your subscription wasn't confirmed, so you won't get `+emailsFrom(org)+`.</p>`)
 		} else {
+			if errors.Is(err, errNoLinkClock) {
+				h.logger.Error("email confirmation verifier has no clock", "error", err)
+			}
 			if errors.Is(err, errUnknownLinkKey) {
 				h.logger.Warn("email link signed by a key this node no longer holds; preserve the previous signing secret during rotation", "keyId", linkKeyIDOf(token))
 			}
@@ -88,7 +93,8 @@ func (handler *EmailLinkHandler) ServeHTTP(rw http.ResponseWriter, r *http.Reque
 			h.retry(rw, err)
 			return
 		}
-		defer hold.Release()
+		h.finishChoice = func() { hold.Release(); h.store = handler.store }
+		defer h.finishChoice()
 		h.store = NewStore(emailPageGateEngine{Engine: h.store.engine, hold: hold})
 	}
 	owner := memql.ContextWithFreshRead(ownerActorContext(r.Context(), p.OwnerUserID))
@@ -168,7 +174,11 @@ func (h *EmailLinkHandler) grant(owner context.Context, p LinkPayload, eventID, 
 	return h.store.RecordConsent(owner, ConsentGrant, ConsentRecord{EventID: eventID, EmailDigest: p.EmailDigest, Source: source, RecipientID: p.RecipientID, CampaignID: p.CampaignID, AccountID: p.AccountID, OccurredAt: h.now().UTC()})
 }
 func (h *EmailLinkHandler) nudge(ctx context.Context, p LinkPayload) {
-	if err := h.store.NudgeWaitingEnrollments(h.system(ctx), p.RecipientID, h.now().UTC()); err != nil {
+	if h.finishChoice != nil {
+		h.finishChoice()
+		h.finishChoice = nil
+	}
+	if err := h.store.NudgeWaitingEnrollments(h.system(ctx), p.RecipientID, h.now().UTC(), h.enrollments); err != nil {
 		h.logger.Warn("subscription saved; waiting automations will re-check at their deadline", "error", err)
 	}
 }
@@ -216,7 +226,7 @@ func (h *EmailLinkHandler) preferences(rw http.ResponseWriter, r *http.Request, 
 					h.retry(rw, err)
 					return
 				}
-				if err := h.store.SetRecipientSubscription(owner, p.RecipientID, "subscribed", time.Time{}); err != nil {
+				if err := h.store.RejoinRecipient(owner, p.RecipientID, "subscribed", h.now().UTC()); err != nil {
 					h.retry(rw, err)
 					return
 				}
@@ -340,5 +350,17 @@ func newEmailChoiceGate(database func() *sql.DB) emailChoiceGate {
 			keys = append(keys, "campaign-email-mailbox:"+organizationSuppressionID(accountID, digest))
 		}
 		return memql.AcquireGateHold(ctx, db, 0, keys...)
+	}
+}
+
+type emailEnrollmentGate func(context.Context, string, string, string) (gateHold, error)
+
+func newEmailEnrollmentGate(database func() *sql.DB) emailEnrollmentGate {
+	return func(ctx context.Context, journeyID, recipientID, enrollmentID string) (gateHold, error) {
+		db, err := memql.ResolveWriteGatePool(database, "email confirmation recovery", "pass database.Database.GateDB to campaigns.NewEmailLinkHandler")
+		if err != nil {
+			return nil, err
+		}
+		return memql.AcquireGateHold(ctx, db, 0, "campaign-journey:journey:"+bare(journeyID), "campaign-journey:recipient:"+bare(recipientID), "campaign-journey:enrollment:"+bare(enrollmentID))
 	}
 }
