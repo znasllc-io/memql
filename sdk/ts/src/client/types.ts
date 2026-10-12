@@ -489,9 +489,13 @@ function compareInstant(a: string | undefined, b: string | undefined): number {
 // unparseable. Internal, not exported through the package barrel: it is
 // LiveCollection's default ordering (memql#6033).
 export function versionOrder(a: unknown, b: unknown): number | null {
-  if (typeof a !== "string" || typeof b !== "string") return null;
-  if (instantParts(a) === null || instantParts(b) === null) return null;
+  if (!isVersionTime(a) || !isVersionTime(b)) return null;
   return compareInstant(a, b);
+}
+
+// isVersionTime: a time versionOrder can order by. Internal, like versionOrder.
+export function isVersionTime(value: unknown): value is string {
+  return typeof value === "string" && instantParts(value) !== null;
 }
 
 function instantParts(stamp: string | undefined): { seconds: number; fraction: string } | null {

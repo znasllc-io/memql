@@ -44,11 +44,15 @@ time of the row's version, at every digit the wire carries -- and refuses an
 arrival older than the row it holds; the same version or a newer one replaces
 it, and where either side has no version time the arrival wins as before. A
 copy refused as older is refused before `inScope` reads it, so it cannot take a
-newer row out of the list either, and a removal always lands. Pass
-`supersedes` to order by something else, or to take every arrival. The
-engine's `graph.node.created` and `graph.node.updated` events carry that
-`createdAt` to the microsecond the row keeps (`.created` carried it to the
-second, `.updated` not at all).
+newer row out of the list either, and a removal always lands. Once a row is
+out -- removed by an event that carried a version time, or taken out of the
+read's scope by a newer copy -- the collection keeps that time (up to 1,024
+rows, oldest forgotten first, cleared when a seed starts), so a late OLDER copy
+does not bring it back. Pass `supersedes` to order by something else, or to take
+every arrival; such a feed keeps no tombstones. The engine's
+`graph.node.created` and `graph.node.updated` events carry that `createdAt` to
+the microsecond the row keeps (`.created` carried it to the second, `.updated`
+not at all).
 
 ### Changed -- BREAKING for anyone importing the rotation helpers directly
 

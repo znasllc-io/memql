@@ -36,7 +36,7 @@
 
 import type { SubscriptionManager } from "./subscriptions.js";
 import type { ConnectionStatusEvent } from "./connection.js";
-import { versionOrder, type Event, type GraphAction, type Row } from "./types.js";
+import { isVersionTime, versionOrder, type Event, type GraphAction, type Row } from "./types.js";
 
 // LiveState is what a UI MUST be able to render. `degraded` is the one that
 // did not exist before and matters most: rows on screen that are known to be
@@ -146,6 +146,9 @@ export interface LiveCollectionSpec<T = Row> {
 
 const DEFAULT_MAX_PAGES = 50;
 
+// How many removed rows a collection remembers the version of (see `gone`).
+const MAX_TOMBSTONES = 1_024;
+
 // defaultRowId reads the two shapes a graph row arrives in: flattened (a
 // browse result, a CDC payload) and nested under `payload` (an authorized
 // single-row read).
@@ -208,6 +211,15 @@ export class LiveCollection<T = Row> {
   // so it is bounded by the rows that changed, not by the events. Null while
   // no seed is reading.
   private arrivals: Map<string, T | null> | null = null;
+  // WHAT TOOK A ROW OUT KEEPS IT OUT (memql#6033): id -> the version time of
+  // the copy that took the row out of this list -- a removal that carried one,
+  // or a copy outside the read's scope. Once a row is out nothing is held to
+  // compare a late copy with, and the bus delivers events in no particular
+  // order, so without this a late OLDER copy brings back a deleted or archived
+  // row. Kept under the default ordering only (a feed's own `supersedes` owns
+  // its rows' history), cleared when a seed starts (its read decides
+  // membership again), and bounded: the oldest is forgotten first.
+  private gone = new Map<string, string>();
   private seedAbort: AbortController | null = null;
   private seedPending = false;
   private seedRunning = false;
@@ -333,6 +345,7 @@ export class LiveCollection<T = Row> {
   }
 
   private async runSeed(): Promise<void> {
+    this.gone.clear();
     this.seedRunning = true;
     this.seedPending = false;
     this.seedAbort?.abort();
@@ -415,7 +428,9 @@ export class LiveCollection<T = Row> {
     if (id === "") return;
 
     if (isDeleteKind(event.kind)) {
-      this.arrive(id, null);
+      // The removal's own time, when it carries one, is what keeps an older
+      // copy from bringing the row back (see `gone`).
+      this.arrive(id, null, versionTimeOf(event.payload));
       return;
     }
 
@@ -447,8 +462,10 @@ export class LiveCollection<T = Row> {
   }
 
   // arrive folds one change onto the rows on screen and, while a seed reads,
-  // keeps it for that seed to replay onto its answer (see runSeed).
-  private arrive(id: string, row: T | null): void {
+  // keeps it for that seed to replay onto its answer (see runSeed). A removal
+  // passes the version time it carried, if any (see `gone`).
+  private arrive(id: string, row: T | null, removedAt?: unknown): void {
+    if (row === null) this.entomb(id, removedAt);
     if (this.arrivals !== null) this.keep(this.arrivals, id, row);
     if (row === null ? this.drop(id) : this.place(id, row)) this.bump();
   }
@@ -456,8 +473,10 @@ export class LiveCollection<T = Row> {
   // keep records one arrival for the running seed as the last word on its
   // row: a removal replaces whatever was kept, and a row replaces a kept
   // removal or a kept row it supersedes -- judged as a fold judges, so an
-  // older version arriving late does not displace a newer one already kept.
+  // older version arriving late does not displace a newer one already kept,
+  // nor a removal it is older than (the replay would bring the row back).
   private keep(arrivals: Map<string, T | null>, id: string, row: T | null): void {
+    if (row !== null && this.entombed(id, row)) return;
     const kept = arrivals.get(id);
     if (row !== null && kept !== undefined && kept !== null && !this.supersedes(row, kept)) return;
     arrivals.set(id, row);
@@ -469,17 +488,49 @@ export class LiveCollection<T = Row> {
     const held = this.rowsById.get(id);
     // FIRST, WHETHER THIS COPY SAYS ANYTHING: one older than the row held says
     // nothing about it -- neither what it holds nor whether it belongs -- so it
-    // is refused before its scope is read.
+    // is refused before its scope is read. With nothing held, the same goes
+    // for a copy older than the one that took the row out.
     if (!this.supersedes(row, held)) return false;
+    if (held === undefined && this.entombed(id, row)) return false;
     if (this.spec.inScope && !this.spec.inScope(row)) {
       // In scope for the SUBSCRIPTION, out of scope for the READ. Removing
       // rather than ignoring matters for the update case: a row that has just
-      // left the list's scope must leave the list.
+      // left the list's scope must leave the list -- and stay out of it for
+      // any copy older than this one.
+      this.entomb(id, versionTimeOf(row));
       return this.drop(id);
     }
     if (held === undefined) this.order.push(id);
     this.rowsById.set(id, row);
+    this.gone.delete(id);
     return true;
+  }
+
+  // entomb remembers the version time that took `id` out of the list, keeping
+  // the newer where one is already kept. A removal with no time records
+  // nothing: there is nothing to compare a later copy with.
+  private entomb(id: string, at: unknown): void {
+    if (this.spec.supersedes || !isVersionTime(at)) return;
+    const had = this.gone.get(id);
+    if (had !== undefined) {
+      if ((versionOrder(at, had) ?? 0) < 0) return;
+      // Re-inserted, so it is forgotten last: it is the newest word on the row.
+      this.gone.delete(id);
+    }
+    this.gone.set(id, at);
+    if (this.gone.size > MAX_TOMBSTONES) {
+      const oldest = this.gone.keys().next().value;
+      if (oldest !== undefined) this.gone.delete(oldest);
+    }
+  }
+
+  // entombed: this copy is older than the one that took the row out.
+  private entombed(id: string, row: T): boolean {
+    if (this.spec.supersedes) return false;
+    const at = this.gone.get(id);
+    if (at === undefined) return false;
+    const order = versionOrder(versionTimeOf(row), at);
+    return order !== null && order < 0;
   }
 
   // supersedes is the feed's own judge, or the default: by version.

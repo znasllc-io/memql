@@ -498,6 +498,139 @@ test("a feed's own supersedes still decides, over the version", async () => {
 });
 
 // ---------------------------------------------------------------------
+// what took a row out keeps it out (memql#6033)
+// ---------------------------------------------------------------------
+//
+// Once a row is out of the list nothing is held to compare a late copy with,
+// so the version that took it out is kept instead: an OLDER copy arriving
+// after it does not bring the row back.
+
+const T3 = "2026-10-12T14:47:19.325159Z";
+const T4 = "2026-10-12T14:47:19.32516Z";
+
+test("a row a newer copy took out of the read's scope is not brought back by a late older one", async () => {
+  // `archived` (T3) lands before the `sent` written ahead of it (T2): the
+  // archived campaign must not come back as sent.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", status: "sending", createdAt: T1 }], nextCursor: "" }),
+    inScope: (row) => row["status"] !== "archived",
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "archived", createdAt: T3 } }));
+  assert.deepEqual(handle.value.snapshot.rows, [], "out of scope, out of the list");
+  subs.deliver(event({ kind: "NODE_CREATED", payload: { id: "a", status: "sent", createdAt: T2 } }));
+  assert.deepEqual(handle.value.snapshot.rows, [], "the older copy does not bring it back");
+  store.dispose();
+});
+
+test("a deleted row is not brought back by a late older copy; a removal with no time keeps nothing", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", v: "read", createdAt: T1 }, { id: "b", v: "read", createdAt: T1 }], nextCursor: "" }),
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T3 } }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "late", createdAt: T2 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"], undefined, "the copy older than the removal stays out");
+  // A stale removal arriving after it does not lower the bar: the newer time is kept.
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T1 } }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "late", createdAt: T2 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"], undefined);
+
+  // A removal that says nothing of when leaves nothing to compare with: what
+  // arrives next is taken, as it always was.
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "b" } }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "b", v: "back", createdAt: T1 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["b"]?.["v"], "back");
+  store.dispose();
+});
+
+test("a copy newer than the one that took a row out brings it back", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", status: "sending", createdAt: T1 }], nextCursor: "" }),
+    inScope: (row) => row["status"] !== "archived",
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "archived", createdAt: T2 } }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sent", createdAt: T3 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sent", "restored, and back in the list");
+  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+  assert.equal(gone.has("a"), false, "and nothing is kept for a row the list holds");
+  // Back in the list, the row it holds is the judge again.
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sending", createdAt: T1 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sent");
+  store.dispose();
+});
+
+test("a seed's replay does not bring back a row removed while it read", async () => {
+  // The read returned `a` (T1); while it read, `a` was deleted (T3) and an
+  // older copy of it (T2) arrived late. What the seed keeps for `a` is the
+  // removal, not the copy that came after it.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const walk = gatedWalk([{ id: "a", v: "read", createdAt: T1 }], [{ id: "b", v: "read", createdAt: T1 }]);
+  const handle = store.collection<Row>("k", { concept: "c", seed: walk.seed });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T3 } }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "late", createdAt: T2 } }));
+  walk.release();
+  await settle();
+  assert.deepEqual(Object.keys(byId(handle.value.snapshot.rows)), ["b"]);
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", v: "newer", createdAt: T4 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["v"], "newer", "a newer copy still lands");
+  store.dispose();
+});
+
+test("a feed's own supersedes keeps no tombstones", async () => {
+  // It owns its rows' history: what it accepts is accepted, removal or not.
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", {
+    concept: "c",
+    seed: async () => ({ rows: [{ id: "a", status: "sending", createdAt: T1 }], nextCursor: "" }),
+    inScope: (row) => row["status"] !== "archived",
+    supersedes: () => true,
+  });
+  await settle();
+
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "archived", createdAt: T3 } }));
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sent", createdAt: T2 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sent");
+  subs.deliver(event({ kind: "NODE_DELETED", payload: { id: "a", createdAt: T4 } }));
+  assert.equal((handle.value as unknown as { gone: Map<string, string> }).gone.size, 0, "nothing is kept for the removal");
+  subs.deliver(event({ kind: "NODE_UPDATED", payload: { id: "a", status: "sending", createdAt: T1 } }));
+  assert.equal(byId(handle.value.snapshot.rows)["a"]?.["status"], "sending");
+  store.dispose();
+});
+
+test("the tombstones are bounded: the oldest is forgotten first", async () => {
+  const subs = new FakeSubscriptions();
+  const store = new LiveStore(hostWith(subs).host);
+  const handle = store.collection<Row>("k", { concept: "c", seed: async () => ({ rows: [], nextCursor: "" }) });
+  await settle();
+
+  for (let n = 0; n < 1_100; n++) subs.deliver(event({ kind: "NODE_DELETED", payload: { id: `r${n}`, createdAt: T3 } }));
+  const gone = (handle.value as unknown as { gone: Map<string, string> }).gone;
+  assert.equal(gone.size, 1_024);
+  assert.equal(gone.has("r0"), false, "the first removed is the first forgotten");
+  assert.equal(gone.has("r1099"), true);
+  store.dispose();
+});
+
+// ---------------------------------------------------------------------
 // the fold matrix
 // ---------------------------------------------------------------------
 
