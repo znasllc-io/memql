@@ -5,6 +5,7 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
+source "${SCRIPT_DIR}/../lib/azure-email-installation.sh"
 cap_init "deploy.configureAzureEmail" "Authorize this cluster's email setup in its own Azure resource group."
 for field in subscriptionId resourceGroup clusterName emailResourceGroup emailIdentityName emailService communicationService emailLocation emailDataLocation; do
     cap_spec_param_required "$field" "Installation choice: $field"
@@ -52,19 +53,14 @@ function validate_arguments() {
 }
 function require_tools() {
     local tool
-    for tool in az kubectl jq; do command -v "$tool" >/dev/null || cap_fail 4 "$tool is required"; done
+    for tool in az kubectl jq openssl; do command -v "$tool" >/dev/null || cap_fail 4 "$tool is required"; done
 }
 function inspect_cluster() {
-    TENANT="$(az account show --subscription "$SUB" --query tenantId -o tsv --only-show-errors)" || cap_fail 4 "sign in to the operator's Azure account first"
-    [[ "$TENANT" =~ $UUID_RE ]] || cap_fail 5 "Azure returned an invalid tenant identifier"
-    local cluster
-    cluster="$(az aks show --subscription "$SUB" --resource-group "$CLUSTER_RG" --name "$CLUSTER" -o json --only-show-errors)" || cap_fail 4 "the selected AKS cluster is unavailable"
-    CLUSTER_ID="$(jq -r '.id // empty' <<<"$cluster")"
-    ISSUER="$(jq -r '.oidcIssuerProfile.issuerUrl // empty' <<<"$cluster")"
-    [[ "$CLUSTER_ID" == "/subscriptions/$SUB/resourceGroups/$CLUSTER_RG/providers/Microsoft.ContainerService/managedClusters/$CLUSTER" && "$ISSUER" == https://* ]] || cap_fail 3 "the selected cluster must have its own OIDC issuer enabled"
-    # Tags are limited to 256 characters. The issuer binds authorization to the
-    # physical installation, including a cluster recreated under the same name.
-    [[ ${#ISSUER} -le 256 ]] || cap_fail 3 "the cluster issuer cannot be represented safely"
+    EXPECTED_CLUSTER_ID="/subscriptions/$SUB/resourceGroups/$CLUSTER_RG/providers/Microsoft.ContainerService/managedClusters/$CLUSTER"
+    email_inspect_cluster
+    # Enforce physical isolation before any write. Azure group create is an
+    # upsert, so check-absent/tag checks alone cannot fence simultaneous installs.
+    [[ "$GROUP" == *"-$ISSUER_HASH" ]] || cap_fail 3 "emailResourceGroup must end with this cluster's issuer fingerprint; use the installation's inspected choices"
 }
 function ensure_group() {
     local exists group provider registration

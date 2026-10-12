@@ -296,6 +296,41 @@ QueryClient.prototype.deploymentRollbackAllowed = function (this: QueryClient, a
   return this.executeNamed("deploymentRollbackAllowed", buildDeploymentRollbackAllowed(args), opts);
 };
 
+/** Choose installation email resources from the physical cluster's public facts. Preserve installed choices on repeat runs. The full issuer fingerprint fences resource-group authority across simultaneous or recreated installations. */
+export interface EmailInstallationChoicesArgs {
+  facts: Record<string, unknown>;
+  emailResourceGroup?: string;
+  emailIdentityName?: string;
+  emailService?: string;
+  communicationService?: string;
+  emailLocation?: string;
+  emailDataLocation?: string;
+  emailReplyTo?: string;
+}
+
+export function buildEmailInstallationChoices(args: EmailInstallationChoicesArgs): string {
+  const parts: string[] = [];
+  parts.push("facts: " + renderMemQLValue(args.facts));
+  if (args.emailResourceGroup !== undefined) parts.push("emailResourceGroup: " + renderMemQLValue(args.emailResourceGroup));
+  if (args.emailIdentityName !== undefined) parts.push("emailIdentityName: " + renderMemQLValue(args.emailIdentityName));
+  if (args.emailService !== undefined) parts.push("emailService: " + renderMemQLValue(args.emailService));
+  if (args.communicationService !== undefined) parts.push("communicationService: " + renderMemQLValue(args.communicationService));
+  if (args.emailLocation !== undefined) parts.push("emailLocation: " + renderMemQLValue(args.emailLocation));
+  if (args.emailDataLocation !== undefined) parts.push("emailDataLocation: " + renderMemQLValue(args.emailDataLocation));
+  if (args.emailReplyTo !== undefined) parts.push("emailReplyTo: " + renderMemQLValue(args.emailReplyTo));
+  return "logic emailInstallationChoices(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    emailInstallationChoices(args: EmailInstallationChoicesArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.emailInstallationChoices = function (this: QueryClient, args: EmailInstallationChoicesArgs = {} as EmailInstallationChoicesArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("emailInstallationChoices", buildEmailInstallationChoices(args), opts);
+};
+
 /** Canonical ENGINE node-type list the deploy bundle builds + places: identity, bff, agent, planner, workbench, mcp, edge. No product-carrier nodes (carrier/product layer, shipped by their own repos). */
 export interface EngineNodeTypesArgs {
 }

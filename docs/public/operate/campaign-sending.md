@@ -410,26 +410,35 @@ The device code flow uses the existing MemQL stream. It adds no OAuth callback
 endpoint or per-installation redirect URL. Local capture works without Azure;
 connecting Microsoft does not switch test emails to external delivery.
 
-**Azure installation can prepare email before first sign-in.** Supply
-`emailResourceGroup`, `emailIdentityName`, `emailService`,
-`communicationService`, `emailLocation` and `emailDataLocation` to
-`installInstance` or `bringUpInstance`. `emailReplyTo` is optional. The install
-runs `configureAzureEmail` after its operators and secrets are ready and before
-ArgoCD starts the engine. An install that omits these choices keeps its existing
-email configuration. The same bounded step can be run directly:
+**Azure installation prepares email before first sign-in.** Both
+`installInstance` and `bringUpInstance` inspect the selected AKS cluster and
+establish email authorization before ArgoCD starts the engine. No additional
+email options are required for an ordinary first install. The resource group
+includes the full fingerprint of the cluster's physical OIDC issuer; recreated
+or concurrently installed clusters therefore cannot acquire the same email
+group through a name collision. Service names are deterministic and bounded.
+
+The email resource group's region defaults to the cluster's region. Email data
+residency defaults to Azure's reported cluster geography, with US mapped to
+United States. An unsupported geography requires an explicit
+`emailDataLocation`; the installer never silently chooses a different geography.
+The optional `emailResourceGroup` is a prefix (at most 25 characters), to which
+the physical issuer fingerprint is appended. `emailIdentityName`, `emailService`,
+`communicationService`, `emailLocation`, `emailDataLocation` and `emailReplyTo`
+can override the first-install choices. Repeat installs preserve saved choices;
+a conflicting explicit choice is refused for review. Existing sender connections
+remain unchanged by this authorization step.
+
+Inspection is read-only and can also be run directly:
 
 ```bash
-scripts/deploy/configure-azure-email.sh \
+scripts/deploy/inspect-azure-email.sh \
   --subscriptionId=00000000-0000-0000-0000-000000000000 \
-  --resourceGroup=example-cluster --clusterName=example \
-  --emailResourceGroup=example-email --emailIdentityName=example-email \
-  --emailService=example-email --communicationService=example-delivery \
-  --emailLocation=westus2 '--emailDataLocation=United States' \
-  --namespace=memql --dryRun=true
+  --resourceGroup=example-cluster --clusterName=example --namespace=memql
 ```
 
-Remove `--dryRun=true` to apply the choices using the operator's signed-in
-Azure account. That account must be able to create the dedicated email resource
+The install's authorization step uses the operator's signed-in Azure account.
+That account must be able to create the dedicated email resource
 group and managed identity, register Microsoft.Communication and
 Microsoft.EventGrid, and assign a role on the new group. The cluster itself
 receives **Contributor on that email group only**, through its own managed

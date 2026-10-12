@@ -484,3 +484,14 @@ action configureAzureEmail {
   }
   capability script(script: "deploy.configureAzureEmail", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, clusterName: args.clusterName, emailResourceGroup: args.emailResourceGroup, emailIdentityName: args.emailIdentityName, emailService: args.emailService, communicationService: args.communicationService, emailLocation: args.emailLocation, emailDataLocation: args.emailDataLocation, namespace: args.namespace, replyTo: args.replyTo, dryRun: args.dryRun)
 }
+
+// Read-only facts for the install recipe; public identifiers only.
+action inspectAzureEmail {
+  args {
+    subscriptionId string!
+    resourceGroup string!
+    clusterName string!
+    namespace string
+  }
+  capability script(script: "deploy.inspectAzureEmail", subscriptionId: args.subscriptionId, resourceGroup: args.resourceGroup, clusterName: args.clusterName, namespace: args.namespace)
+}

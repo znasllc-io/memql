@@ -2,16 +2,23 @@ package deploy
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
 func emailInstallArgs() []string {
-	return []string{"--subscriptionId=12345678-1234-1234-1234-123456789012", "--resourceGroup=cluster-rg", "--clusterName=example", "--emailResourceGroup=email-rg", "--emailIdentityName=email-identity", "--emailService=example-email", "--communicationService=example-delivery", "--emailLocation=westus2", "--emailDataLocation=United States"}
+	return []string{"--subscriptionId=12345678-1234-1234-1234-123456789012", "--resourceGroup=cluster-rg", "--clusterName=example", "--emailResourceGroup=" + emailTestGroup("https://issuer.example/cluster-one/"), "--emailIdentityName=email-identity", "--emailService=example-email", "--communicationService=example-delivery", "--emailLocation=westus2", "--emailDataLocation=United States"}
+}
+
+func emailTestGroup(issuer string) string {
+	return fmt.Sprintf("memql-email-%x", sha256.Sum256([]byte(issuer)))
 }
 
 // Fake both external CLIs. Every effect is a temporary JSON fixture; no test
@@ -39,10 +46,11 @@ if tool=='kubectl':
  sys.exit()
 key=' '.join(args[:2])
 if key=='account show':out('11111111-1111-1111-1111-111111111111')
-elif key=='aks show':out({'id':'/subscriptions/'+opt('--subscription')+'/resourceGroups/'+opt('--resource-group')+'/providers/Microsoft.ContainerService/managedClusters/'+opt('--name'),'oidcIssuerProfile':{'issuerUrl':issuer}})
+elif key=='account list-locations':out('US')
+elif key=='aks show':out({'location':'westus2','id':'/subscriptions/'+opt('--subscription')+'/resourceGroups/'+opt('--resource-group')+'/providers/Microsoft.ContainerService/managedClusters/'+opt('--name'),'oidcIssuerProfile':{'issuerUrl':issuer}})
 elif key=='aks get-credentials':Path(opt('--file')).write_text('apiVersion: v1\n')
 elif key=='group exists':out('true' if load('group') else 'false')
-elif key=='group show':out(load('group'))
+elif key=='group show':out(load('group')['location'] if opt('--query')=='location' else load('group'))
 elif key=='group create':save('group',{'location':opt('--location'),'tags':{'memql-email-issuer':issuer}})
 elif key=='provider show':
  if os.environ.get('EMAIL_TEST_PROVIDER_ERROR'):fail()
@@ -123,7 +131,7 @@ func TestConfigureAzureEmailInstallation(t *testing.T) {
 			t.Fatalf("missing federation for %s", sa)
 		}
 	}
-	if !strings.Contains(calls, "/subscriptions/12345678-1234-1234-1234-123456789012/resourceGroups/email-rg") {
+	if !strings.Contains(calls, "/subscriptions/12345678-1234-1234-1234-123456789012/resourceGroups/"+emailTestGroup("https://issuer.example/cluster-one/")) {
 		t.Fatal("missing group-scoped role")
 	}
 	config, _ := os.ReadFile(filepath.Join(fixture, "config"))
@@ -147,5 +155,109 @@ func TestConfigureAzureEmailInstallation(t *testing.T) {
 	_, code, _ = run(nil)
 	if code != 3 {
 		t.Fatalf("extra federation accepted: exit %d", code)
+	}
+}
+
+// Both runs start with no group. A common human prefix cannot turn into shared
+// authority: physical issuers select disjoint RGs, and spoofing the peer's exact
+// RG is refused before any group/identity/role write.
+func TestAzureEmailConcurrentInstallationsStayIsolated(t *testing.T) {
+	for _, tool := range []string{"python3", "jq", "openssl"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip(tool + " required")
+		}
+	}
+	var wg sync.WaitGroup
+	for _, issuer := range []string{"https://issuer.example/first/", "https://issuer.example/recreated/"} {
+		fixture := t.TempDir()
+		for _, tool := range []string{"az", "kubectl"} {
+			if err := os.WriteFile(filepath.Join(fixture, tool), []byte(emailInstallFake), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			args := append([]string{aksScript(t, "configure-azure-email.sh")}, emailInstallArgs()...)
+			args = append(args, "--emailResourceGroup="+emailTestGroup(issuer))
+			cmd := exec.Command("bash", args...)
+			cmd.Env = append(os.Environ(), "PATH="+fixture+":"+os.Getenv("PATH"), "EMAIL_TEST_STATE="+fixture, "EMAIL_TEST_ISSUER="+issuer)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Errorf("isolated install: %v %s", err, out)
+				return
+			}
+			calls, _ := os.ReadFile(filepath.Join(fixture, "calls"))
+			if !strings.Contains(string(calls), emailTestGroup(issuer)) {
+				t.Error("missing own RG")
+			}
+			if strings.Contains(string(calls), emailTestGroup("https://issuer.example/cluster-one/")) {
+				t.Error("used sibling RG")
+			}
+			// The previously dangerous upsert must never even be attempted.
+			_ = os.Remove(filepath.Join(fixture, "calls"))
+			args = append(args, "--emailResourceGroup="+emailTestGroup("https://issuer.example/sibling/"))
+			cmd = exec.Command("bash", args...)
+			cmd.Env = append(os.Environ(), "PATH="+fixture+":"+os.Getenv("PATH"), "EMAIL_TEST_STATE="+fixture, "EMAIL_TEST_ISSUER="+issuer)
+			if err := cmd.Run(); err == nil || cmd.ProcessState.ExitCode() != 3 {
+				t.Error("accepted another issuer's RG")
+			}
+			calls, _ = os.ReadFile(filepath.Join(fixture, "calls"))
+			if strings.Contains(string(calls), `"group",`) || strings.Contains(string(calls), `"identity",`) || strings.Contains(string(calls), `"role",`) {
+				t.Error("foreign RG refusal made authorization calls")
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func TestInspectAzureEmailReadsPublicInstalledChoices(t *testing.T) {
+	for _, tool := range []string{"python3", "jq", "openssl"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip(tool + " required")
+		}
+	}
+	fixture := t.TempDir()
+	for _, tool := range []string{"az", "kubectl"} {
+		if err := os.WriteFile(filepath.Join(fixture, tool), []byte(emailInstallFake), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	env := append(os.Environ(), "PATH="+fixture+":"+os.Getenv("PATH"), "EMAIL_TEST_STATE="+fixture)
+	inspect := func() map[string]any {
+		t.Helper()
+		cmd := exec.Command("bash", aksScript(t, "inspect-azure-email.sh"), "--subscriptionId=12345678-1234-1234-1234-123456789012", "--resourceGroup=cluster-rg", "--clusterName=example")
+		cmd.Env = env
+		raw, err := cmd.Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope struct {
+			Changed bool           `json:"changed"`
+			Result  map[string]any `json:"result"`
+		}
+		if err = json.Unmarshal(raw, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.Changed {
+			t.Fatal("inspection changed cluster state")
+		}
+		return envelope.Result
+	}
+	fresh := inspect()
+	if fresh["location"] != "westus2" || fresh["geography"] != "US" || "memql-email-"+fresh["issuerHash"].(string) != emailTestGroup("https://issuer.example/cluster-one/") {
+		t.Fatalf("wrong cluster facts: %v", fresh)
+	}
+	calls, _ := os.ReadFile(filepath.Join(fixture, "calls"))
+	if strings.Contains(string(calls), `"create"`) || strings.Contains(string(calls), `"register"`) {
+		t.Fatal("read-only inspection wrote Azure or Kubernetes")
+	}
+	cmd := exec.Command("bash", append([]string{aksScript(t, "configure-azure-email.sh")}, emailInstallArgs()...)...)
+	cmd.Env = env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("install: %v %s", err, out)
+	}
+	saved := inspect()["installed"].(map[string]any)
+	if saved["identityName"] != "email-identity" || saved["location"] != "westus2" || saved["resourceGroup"] != emailTestGroup("https://issuer.example/cluster-one/") {
+		t.Fatalf("lost choices: %v", saved)
 	}
 }

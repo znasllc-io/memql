@@ -106,12 +106,22 @@
           {
             "args": {
               "clusterName": "s-clusterName",
+              "namespace": "s-namespace",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "inspectAzureEmail"
+          },
+          {
+            "args": {
+              "clusterName": "s-clusterName",
               "communicationService": "s-communicationService",
               "dryRun": true,
               "emailDataLocation": "s-emailDataLocation",
               "emailIdentityName": "s-emailIdentityName",
               "emailLocation": "s-emailLocation",
-              "emailResourceGroup": "s-emailResourceGroup",
+              "emailResourceGroup": "s-emailResourceGroup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "emailService": "s-emailService",
               "namespace": "s-namespace",
               "replyTo": "s-emailReplyTo",
@@ -269,12 +279,22 @@
           {
             "args": {
               "clusterName": "s-clusterName",
+              "namespace": "s-namespace",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "inspectAzureEmail"
+          },
+          {
+            "args": {
+              "clusterName": "s-clusterName",
               "communicationService": "s-communicationService",
               "dryRun": true,
               "emailDataLocation": "s-emailDataLocation",
               "emailIdentityName": "s-emailIdentityName",
               "emailLocation": "s-emailLocation",
-              "emailResourceGroup": "s-emailResourceGroup",
+              "emailResourceGroup": "s-emailResourceGroup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "emailService": "s-emailService",
               "namespace": "s-namespace",
               "replyTo": "s-emailReplyTo",
@@ -432,12 +452,22 @@
           {
             "args": {
               "clusterName": "s-clusterName",
+              "namespace": "s-namespace",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "inspectAzureEmail"
+          },
+          {
+            "args": {
+              "clusterName": "s-clusterName",
               "communicationService": "s-communicationService",
               "dryRun": true,
               "emailDataLocation": "s-emailDataLocation",
               "emailIdentityName": "s-emailIdentityName",
               "emailLocation": "s-emailLocation",
-              "emailResourceGroup": "s-emailResourceGroup",
+              "emailResourceGroup": "s-emailResourceGroup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "emailService": "s-emailService",
               "namespace": "s-namespace",
               "replyTo": "s-emailReplyTo",
@@ -595,12 +625,22 @@
           {
             "args": {
               "clusterName": "s-clusterName",
+              "namespace": "s-namespace",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "inspectAzureEmail"
+          },
+          {
+            "args": {
+              "clusterName": "s-clusterName",
               "communicationService": "s-communicationService",
               "dryRun": true,
               "emailDataLocation": "s-emailDataLocation",
               "emailIdentityName": "s-emailIdentityName",
               "emailLocation": "s-emailLocation",
-              "emailResourceGroup": "s-emailResourceGroup",
+              "emailResourceGroup": "s-emailResourceGroup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "emailService": "s-emailService",
               "namespace": "s-namespace",
               "replyTo": "s-emailReplyTo",

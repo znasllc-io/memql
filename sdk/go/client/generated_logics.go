@@ -283,6 +283,82 @@ func DeploymentRollbackAllowedBuild(args DeploymentRollbackAllowedArgs) string {
 	return "logic deploymentRollbackAllowed()"
 }
 
+// EmailInstallationChoices -- Choose installation email resources from the physical cluster's public facts. Preserve installed choices on repeat runs. The full issuer fingerprint fences resource-group authority across simultaneous or recreated installations.
+type EmailInstallationChoicesArgs struct {
+	Facts                map[string]any
+	EmailResourceGroup   string
+	EmailIdentityName    string
+	EmailService         string
+	CommunicationService string
+	EmailLocation        string
+	EmailDataLocation    string
+	EmailReplyTo         string
+}
+
+// EmailInstallationChoices calls the engine logic emailInstallationChoices.
+func (qc *QueryClient) EmailInstallationChoices(ctx context.Context, args EmailInstallationChoicesArgs) (*Result, error) {
+	call := EmailInstallationChoicesBuild(args)
+	return qc.executeNamed(ctx, "emailInstallationChoices", call)
+}
+
+func EmailInstallationChoicesBuild(args EmailInstallationChoicesArgs) string {
+	var b strings.Builder
+	b.WriteString("logic emailInstallationChoices(")
+	b.WriteString("facts: ")
+	b.WriteString(renderMemQLValue(args.Facts))
+	if args.EmailResourceGroup != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("emailResourceGroup: ")
+		b.WriteString(quoteMemQL(args.EmailResourceGroup))
+	}
+	if args.EmailIdentityName != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("emailIdentityName: ")
+		b.WriteString(quoteMemQL(args.EmailIdentityName))
+	}
+	if args.EmailService != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("emailService: ")
+		b.WriteString(quoteMemQL(args.EmailService))
+	}
+	if args.CommunicationService != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("communicationService: ")
+		b.WriteString(quoteMemQL(args.CommunicationService))
+	}
+	if args.EmailLocation != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("emailLocation: ")
+		b.WriteString(quoteMemQL(args.EmailLocation))
+	}
+	if args.EmailDataLocation != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("emailDataLocation: ")
+		b.WriteString(quoteMemQL(args.EmailDataLocation))
+	}
+	if args.EmailReplyTo != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("emailReplyTo: ")
+		b.WriteString(quoteMemQL(args.EmailReplyTo))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // EngineNodeTypes -- Canonical ENGINE node-type list the deploy bundle builds + places: identity, bff, agent, planner, workbench, mcp, edge. No product-carrier nodes (carrier/product layer, shipped by their own repos).
 type EngineNodeTypesArgs struct {
 }
