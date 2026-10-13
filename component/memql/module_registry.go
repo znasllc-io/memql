@@ -555,7 +555,7 @@ type clusterConceptRow struct {
 // concepts. Missing relation reads as empty (a cluster that has never
 // registered a node simply has no node-type rows).
 //
-// staged-data: MUST-NOT-GATE -- the module inventory reports the cluster's
+// The module inventory reports the cluster's
 // operating state to owner/admin callers; withholding a topology row would
 // report a node type as absent while the mesh runs it. The v1:cluster:*
 // concepts this reads are system-written bookkeeping, never authored
