@@ -267,7 +267,20 @@ vector reads prevent concurrent replicas or an explicit capability installation
 from duplicating completed embedding work. Failed provider/storage calls remain
 retryable and may require another embedding; this is not an exactly-once billing
 guarantee after an uncertain external outcome. Missing configuration or an
-unavailable embedder is reported as deferred indexing. Reviewable content alone
+unavailable embedder is reported as deferred indexing. Ownerless scheduled work
+does not manufacture a user or a forwarding assertion to reach private fleet
+models; those bindings await an authorized owned turn.
+
+Before an owned turn retrieves manuals and optional lessons, its Training recipe
+rechecks the current run and goal and indexes at most eight missing release
+vectors in one two-minute pass. Only exact, validated, non-superseded manifest
+chunks qualify. Inference retains the caller’s identity, accepted forwarding
+authority, run budget and cancellation across the serving-node hop. Publication
+remains a separate server operation; a binding grants no new machine access.
+Missing binding or unavailable selection defers indexing, while cancellation,
+ceilings, storage errors and failed model calls remain failures. The same source
+locks prevent overlapping first-use, scheduled and explicit-install passes from
+duplicating completed work. Reviewable content alone
 does not mean a lesson is indexed or has been retrieved.
 
 Unchanged revisions reuse rows and vectors. New revisions retain old audit rows,

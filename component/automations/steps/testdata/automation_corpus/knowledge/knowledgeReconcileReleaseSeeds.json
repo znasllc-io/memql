@@ -9,7 +9,8 @@
             "chunkIds": [
               "a"
             ],
-            "index": true
+            "index": true,
+            "publish": true
           },
           "topic": "automation.invocation.knowledgeReconcileReleaseSeeds"
         },
@@ -46,7 +47,8 @@
             "chunkIds": [
               "a"
             ],
-            "index": true
+            "index": true,
+            "publish": true
           },
           "topic": "automation.invocation.knowledgeReconcileReleaseSeeds"
         },

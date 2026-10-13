@@ -197,3 +197,7 @@ builtin knowledgePublishReleaseChunk { chunkId string! }
 @executor("integration.knowledge.knowledgeIndexReleaseChunk")
 @args(profile="object")
 builtin knowledgeIndexReleaseChunk { chunkId string! }
+
+/// Bounded indexing of exact reviewed release seeds under a freshly verified owned run. Never publishes caller content.
+@executor("integration.knowledge.indexReleaseForWork")
+builtin knowledgeIndexReleaseForWork { }

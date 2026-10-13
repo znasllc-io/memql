@@ -136,10 +136,10 @@ return { act: "ask", question: "A stricter authored policy requires a person bef
 					})
 					var wi *work.Integration
 					for _, plugin := range memql.RegisteredPlugins() {
-						if plugin.Name != "work" && plugin.Name != "library" {
+						if plugin.Name != "work" && plugin.Name != "library" && plugin.Name != "knowledge" {
 							continue
 						}
-						provider, err := plugin.Factory(memql.PluginContext{Engine: e, Logger: e.Logger, BunDB: func() *bun.DB { return db }, GateDB: func() *sql.DB { return gates }, ConceptDataIsStaged: e.ConceptDataIsStaged, AdmitSourceRow: memql.AdmitSourceRow, ResolveEmbeddingProvider: func(context.Context, string) (memql.EmbeddingAIProvider, error) {
+						provider, err := plugin.Factory(memql.PluginContext{ResolvePartitionFromContext: func(context.Context) string { return "default" }, Engine: e, Logger: e.Logger, BunDB: func() *bun.DB { return db }, GateDB: func() *sql.DB { return gates }, ConceptDataIsStaged: e.ConceptDataIsStaged, AdmitSourceRow: memql.AdmitSourceRow, ResolveEmbeddingProvider: func(context.Context, string) (memql.EmbeddingAIProvider, error) {
 							return nil, fmt.Errorf("synthetic work has no owned Training lessons to embed")
 						}})
 						require.NoError(t, err)

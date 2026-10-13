@@ -35,7 +35,7 @@ func TestOwnedTrainingRecipeRendersRelevantLessonsWithoutSkillsOrTools(t *testin
 			var trainingCall string
 			nativeReads := 0
 			engine.execute = func(callCtx context.Context, q string) (any, error) {
-				if q == "builtin libraryWorkTrainingContext()" || strings.HasPrefix(q, "builtin libraryOwnedTrainingLessons(") {
+				if q == "builtin libraryWorkTrainingContext()" || q == "builtin knowledgeIndexReleaseForWork()" || strings.HasPrefix(q, "builtin libraryOwnedTrainingLessons(") {
 					nativeReads++
 					require.Equal(t, auth.OriginInternal, auth.OriginFromContext(callCtx), q)
 					wantRun, _ := common.RunFromContext(ctx)
@@ -61,7 +61,7 @@ func TestOwnedTrainingRecipeRendersRelevantLessonsWithoutSkillsOrTools(t *testin
 			}
 			prepared, err := newTestReplier(engine).prepareTurn(ctx, msg, time.Now())
 			require.NoError(t, err)
-			require.Equal(t, 2, nativeReads)
+			require.Equal(t, 3, nativeReads)
 			require.Equal(t, auth.OriginClient, auth.OriginFromContext(ctx))
 			require.Contains(t, trainingCall, "Verify the current change")
 			require.NotContains(t, trainingCall, "unrelated command")
@@ -175,4 +175,34 @@ func TestTrainingNativeRowsCrossTheCognitionAdapter(t *testing.T) {
 		require.Equal(t, "Reviewed passage", rows[0]["text"])
 		require.Equal(t, "new-domain", rows[0]["domainId"])
 	}
+}
+
+func TestReleaseIndexPreparationPreservesBudgetPauseAndOrdinaryCancellation(t *testing.T) {
+	base, ctx, msg := trainingPromptFixture(t)
+	ceiling := &memql.RunCeilingError{RunId: "run", StepKey: "section", Breach: memql.RunCeilingBreach{Ceiling: "wallClock"}}
+	engine := &trainingPauseEngine{workPromptEngine: base, refusal: ceiling, prior: []common.ChatMessage{{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "completed", Name: "effect", Arguments: `{}`}}}, {Role: "tool", ToolCallId: "completed", Content: "Already completed"}}}
+	calls := []string{}
+	base.execute = func(_ context.Context, q string) (any, error) {
+		calls = append(calls, q)
+		if q == "builtin libraryWorkTrainingContext()" {
+			return []map[string]any{{"goal": "Finish the work"}}, nil
+		}
+		if q == "builtin knowledgeIndexReleaseForWork()" {
+			return nil, context.Canceled
+		}
+		if strings.HasPrefix(q, "builtin libraryOwnedTrainingLessons(") {
+			t.Fatal("reader ran after indexing failed")
+		}
+		return nil, nil
+	}
+	_, err := newTestReplier(engine).prepareTurn(ctx, msg, time.Now())
+	var wait *work.HumanWait
+	require.ErrorAs(t, err, &wait)
+	require.Equal(t, engine.prior, engine.saved[1:])
+	require.Contains(t, calls, "builtin knowledgeIndexReleaseForWork()")
+	// The same indexing failure without a native budget cause remains ordinary
+	// cancellation; it does not create a checkpoint or manufacture approval.
+	_, err = newTestReplier(base).prepareTurn(ctx, msg, time.Now())
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, errors.As(err, &wait))
 }

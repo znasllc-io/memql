@@ -64,10 +64,10 @@ func TestWorkDBRequiredKnowledgeReachesPromptOnAnotherReplica(t *testing.T) {
 	})
 	resolve := func(context.Context, string) (memql.EmbeddingAIProvider, error) { return provider, nil }
 	for _, plugin := range memql.RegisteredPlugins() {
-		if plugin.Name != "library" && plugin.Name != "work" {
+		if plugin.Name != "library" && plugin.Name != "work" && plugin.Name != "knowledge" {
 			continue
 		}
-		native, err := plugin.Factory(memql.PluginContext{Engine: reader, Logger: reader.Logger, BunDB: func() *bun.DB { return db }, GateDB: func() *sql.DB { return gates }, ConceptDataIsStaged: reader.ConceptDataIsStaged, AdmitSourceRow: memql.AdmitSourceRow, ResolveEmbeddingProvider: resolve})
+		native, err := plugin.Factory(memql.PluginContext{ResolvePartitionFromContext: func(context.Context) string { return "default" }, Engine: reader, Logger: reader.Logger, BunDB: func() *bun.DB { return db }, GateDB: func() *sql.DB { return gates }, ConceptDataIsStaged: reader.ConceptDataIsStaged, AdmitSourceRow: memql.AdmitSourceRow, ResolveEmbeddingProvider: resolve})
 		require.NoError(t, err)
 		require.NoError(t, reader.RegisterIntegration(native))
 	}

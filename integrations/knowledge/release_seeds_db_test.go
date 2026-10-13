@@ -234,7 +234,7 @@ func TestReleaseSeedsInstalledScheduledExecutorIndexesAndRefusesOwnedInvocation(
 	defer executor.Close()
 	memql.ClearActiveEmbedderBinding()
 	_, err = executor.Execute(context.Background(), scheduled, "schedule")
-	require.Error(t, err, "missing indexing dependency is reported honestly")
+	require.NoError(t, err, "publication can precede an embedding binding; indexing remains deferred")
 	require.Empty(t, p.calls)
 	for _, seed := range seeddata.Release() {
 		row, readErr := f.b.seedChunkSnapshot(ctx, seed.ID)

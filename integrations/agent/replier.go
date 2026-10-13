@@ -519,7 +519,11 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	if len(domains) > 0 {
 		routerReq.Touches = append([]string(nil), domains...)
 	}
-	if len(domains) > 0 {
+	// First-use indexing precedes required-manual retrieval so this turn can
+	// use newly indexed manuals, not only a later turn. Keep its failure for
+	// the existing paired-history budget suspension below.
+	trainingPassages, trainingErr := r.workTrainingContext(ctx, msg)
+	if trainingErr == nil && len(domains) > 0 {
 		if query := latestUserQuery(msg); query != "" {
 			ragStart := time.Now()
 			r.logger.Info("agentReply RAG: starting retrieval",
@@ -623,7 +627,6 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// template skips the block.
 	data["etiquette"] = r.loadAssistantEtiquette(ctx)
 
-	trainingPassages, trainingErr := r.workTrainingContext(ctx, msg)
 	appendWorkTraining(data, trainingPassages)
 	for _, passage := range trainingPassages {
 		if domain, _ := passage["domainId"].(string); domain != "" {

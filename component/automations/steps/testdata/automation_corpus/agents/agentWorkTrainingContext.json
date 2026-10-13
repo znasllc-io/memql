@@ -17,6 +17,10 @@
             "name": "agentWorkTrainingFacts"
           },
           {
+            "kind": "builtin",
+            "name": "agentIndexWorkTraining"
+          },
+          {
             "args": {
               "limit": 3,
               "maxTokens": 1200,
@@ -55,6 +59,10 @@
           {
             "kind": "builtin",
             "name": "agentWorkTrainingFacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "agentIndexWorkTraining"
           },
           {
             "args": {

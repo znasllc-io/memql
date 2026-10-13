@@ -279,8 +279,10 @@ automation knowledgeInstallCapabilityCorporaWorkflow {
 /// Publish the explicit release selection before indexing; failed chunks retain their review state and retry later.
 @template
 automation knowledgeReconcileReleaseSeeds {
- args { chunkIds []string! index bool! }
- for chunkId in args.chunkIds { builtin knowledgePublishReleaseChunk(chunkId: chunkId) on error continue }
+ args { chunkIds []string! publish bool! index bool! }
+ if args.publish {
+  for chunkId in args.chunkIds { builtin knowledgePublishReleaseChunk(chunkId: chunkId) on error continue }
+ }
  if args.index {
   for chunkId in args.chunkIds { builtin knowledgeIndexReleaseChunk(chunkId: chunkId) on error continue }
  }

@@ -140,6 +140,7 @@ automation agentRecoveryConsent {
 automation agentWorkTrainingContext {
  facts := builtin agentWorkTrainingFacts()
  if facts == nil { return [] }
+ builtin agentIndexWorkTraining()
  return builtin agentReadWorkTraining(
   text: facts.section + "\nOverall goal: " + facts.goal,
   limit: 3,

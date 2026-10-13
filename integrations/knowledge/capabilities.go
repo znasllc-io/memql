@@ -94,6 +94,7 @@ func (i *Integration) IntegrationName() string { return "knowledge" }
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
 		{Name: "reconcileReleaseSeeds", Handler: i.reconcileReleaseHandler},
+		{Name: "indexReleaseForWork", Handler: i.indexReleaseForWorkHandler},
 		{
 			Name:        "ingest",
 			Description: "Split a document into chunks, embed each, and persist chunk rows linked to a knowledge domain.",

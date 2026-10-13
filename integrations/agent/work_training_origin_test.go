@@ -12,10 +12,10 @@ import (
 	"testing"
 )
 
-// Internal origin opens server-only constructs. Keep both stamps inline on the
-// two native Training reads; a returned/reassigned context could instead grant
+// Internal origin opens server-only constructs. Keep all stamps inline on the
+// three fixed native Training operations; a returned/reassigned context could instead grant
 // that origin to later authored code or model-selected tools.
-func TestTrainingInternalOriginStaysOnItsTwoNativeReads(t *testing.T) {
+func TestTrainingInternalOriginStaysOnItsFixedNativeOperations(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
 	dir := filepath.Dir(file)
 	entries, err := os.ReadDir(dir)
@@ -53,7 +53,7 @@ func TestTrainingInternalOriginStaysOnItsTwoNativeReads(t *testing.T) {
 			if expr, ok := node.(ast.Expr); ok && isStamp(expr) {
 				stamps++
 				if entry.Name() != "work_training.go" {
-					t.Errorf("%s stamps internal origin outside the two Training reads", entry.Name())
+					t.Errorf("%s stamps internal origin outside the fixed Training operations", entry.Name())
 				}
 			}
 			call, ok := node.(*ast.CallExpr)
@@ -70,7 +70,7 @@ func TestTrainingInternalOriginStaysOnItsTwoNativeReads(t *testing.T) {
 			return true
 		})
 	}
-	if stamps != 2 || inline != stamps {
-		t.Fatalf("found %d internal-origin references, %d inline native reads; want exactly two of each", stamps, inline)
+	if stamps != 3 || inline != stamps {
+		t.Fatalf("found %d internal-origin references, %d inline native reads; want exactly three of each", stamps, inline)
 	}
 }

@@ -57,6 +57,12 @@ func (r *Replier) workTrainingContext(ctx context.Context, msg *memqlv1.AgentGen
 			goal, _ := rows[0]["goal"].(string)
 			return map[string]any{"goal": bounded(goal), "section": bounded(section)}, nil
 		},
+		"agentIndexWorkTraining": func(ctx context.Context, _ map[string]any) (any, error) {
+			// Preserve the person's accepted forwarding assertion and work budget.
+			// The capability rechecks the fresh owned run before any indexing.
+			_, err := r.engine.Execute(auth.ContextWithInternalOrigin(ctx), "builtin knowledgeIndexReleaseForWork()")
+			return nil, err
+		},
 		"agentReadWorkTraining": func(ctx context.Context, args map[string]any) (any, error) {
 			call, err := parser.RenderCall("libraryOwnedTrainingLessons", args)
 			if err != nil {

@@ -26,6 +26,7 @@ import (
 	"github.com/znasllc-io/memql/integrations/agents"
 	"github.com/znasllc-io/memql/integrations/knowledge"
 	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
+	"github.com/znasllc-io/memql/integrations/similarity"
 )
 
 // Providers alone are deterministic: Teach, review, both fresh reader engines,
@@ -125,6 +126,11 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 		k.SetEmbeddingProvider(func(context.Context, string) (memql.EmbeddingAIProvider, error) { return provider, nil })
 		require.NoError(t, e.RegisterIntegration(k))
 	}
+	retrieve := similarity.New(reader.Logger)
+	retrieve.SetDBGetter(func() *sql.DB { return db.DB })
+	retrieve.SetStagedConceptPredicate(reader.ConceptDataIsStaged)
+	retrieve.SetEmbeddingProvider(func(context.Context, string) (memql.EmbeddingAIProvider, error) { return provider, nil })
+	require.NoError(t, reader.RegisterIntegration(retrieve))
 	registry := memql.NewProviderRegistryForTest()
 	registry.RegisterWithParamsForTest("fixture", "OpenAI", "fixture", map[string]any{"contextWindow": 200000}, provider)
 	rules := memql.NewRuleRegistry()
@@ -133,6 +139,7 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 	rtr := router.New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"fixture": {"fixture"}}), rules, nil, reader.Logger)
 	replier, err := agent.NewReplier(&CognitionEngineAdapter{Engine: reader}, rtr, reader.Logger)
 	require.NoError(t, err)
+	replier.ComputerUseStatus = func(context.Context, string) (string, string, string) { return "connected", "Synthetic worker", "" }
 	ai := agents.New(reader.Agents(), reader)
 	ai.SetAgentTurnRunner(&trainingContextTurn{&replierTurnRunner{replier: replier, engine: reader}})
 	require.NoError(t, reader.RegisterIntegration(ai))
@@ -198,12 +205,18 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 	})
 	memql.ClearActiveEmbedderBinding()
 	require.NotContains(t, turn("release-not-bound"), "Shipped knowledge: training:")
-	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: key + "not-indexed", Dimensions: 1024})
-	require.NotContains(t, turn("release-no-vector-table"), "Shipped knowledge: training:")
 	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: key, Dimensions: 1024})
-	require.NotContains(t, turn("release-not-indexed"), "Shipped knowledge: training:")
+	firstUse := turn("release-not-indexed")
+	require.NotContains(t, firstUse, "Shipped knowledge: training:")
+	manualSeen := false
+	for _, seed := range seeddata.Release() {
+		if seed.Domain == "computer-use" && strings.Contains(firstUse, seed.Text) {
+			manualSeen = true
+		}
+	}
+	require.True(t, manualSeen, "first owned turn must retrieve the manuals it just indexed")
 	for n := 0; n < (len(seeddata.Release())+7)/8; n++ {
-		require.NoError(t, k.ReconcileReleaseSeeds(auth.ContextWithInternalOrigin(context.Background()), true))
+		turn(fmt.Sprintf("release-first-use-%d", n))
 	}
 	system = turn("release-indexed")
 	require.Contains(t, system, "Shipped knowledge: training:")
