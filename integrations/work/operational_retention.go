@@ -709,6 +709,23 @@ func (i *Integration) loadRetirementVersions(ctx context.Context, db *bun.DB, co
 			return nil, err
 		}
 	}
+	// Archives carry complete schemas, independent of this installation's
+	// catalog. Charge the expanded bytes to the same archive budget.
+	for start := 0; start < len(nodes); start += 100 {
+		batch := nodes[start:min(start+100, len(nodes))]
+		for _, n := range batch {
+			size -= len(n.Schema)
+		}
+		if err := memorynodes.HydrateSchemas(ctx, db, batch); err != nil {
+			return nil, err
+		}
+		for _, n := range batch {
+			size += len(n.Schema)
+		}
+		if size > retirementMaxBytes {
+			return nil, errRetirementOverBudget
+		}
+	}
 	return nodes, nil
 }
 

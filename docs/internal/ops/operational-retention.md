@@ -16,6 +16,50 @@ The earlier audit/safety jobs remain count observations; this central job is now
 the actual archive/delete path. Worker soft deletion remains a UI lifecycle step;
 physical retention measures from the latest version, including that tombstone.
 
+## Shared row schemas
+
+`MemoryNodes` and `SecretMemoryNodes` store an immutable schema reference and
+its original `$id`. The schema body lives once in `memory_node_schemas`, keyed
+by its content fingerprint. Different historical definitions remain distinct;
+reads resolve the version a row actually used, including deletion schemas.
+Insert triggers also cover direct writers and backup restores. A missing
+reference is refused rather than returned as a partial schema.
+
+During a rolling upgrade, normalization waits until every registered node that
+has not stopped has recently advertised schema-reference support in
+`memory_schema_readers`. An offline node still blocks: it may be serving reads.
+Once the cluster is ready, `memory_schema_storage.references_enabled` is set and
+remains set. An orphan node that never records its stopped state must be retired
+through the existing topology lifecycle before conversion can start.
+
+Public graph reads, repository reads, backups and retention archives expand
+references to full schemas. Backups and archives therefore remain self-contained
+and keep their existing format. The catalog is not garbage-collected.
+
+Existing inline schemas are converted after startup, in batches of at most
+500 rows. A shared cursor row is locked in the same transaction as each batch;
+other replicas skip a held batch, and a replacement resumes committed progress.
+Each table is eligible at most once every five seconds, each batch has a
+five-second deadline, and failures back off for one minute. Payloads, provenance,
+IDs and version timestamps are unchanged. The conversion runs independently
+of node liveness and never holds startup for a history rewrite. Schema-only
+updates do not enqueue work-run recovery invalidations.
+
+Inspect conversion progress with:
+
+```sql
+SELECT table_name, cursor_id, cursor_at, completed, next_at
+FROM memory_schema_compaction;
+```
+
+Conversion makes old row storage reusable; it does not promise to shrink the
+volume immediately. New writes stop copying schema bodies after the reader
+readiness gate enables normalization. Older and converted rows can coexist during
+conversion. Downgrading to an engine without schema-reference support requires
+a full-schema backup restore; the down migration refuses to discard the catalog.
+
+## Incident context
+
 The September 2026 incident audit found 103,324 runs across about 17 days:
 98,838 scheduled, 2,481 webhook-triggered, 1,667 startup, 323 shutdown, four manual
 and two system goal runs. Approximately 5,500–7,800 runs/day reflected the
