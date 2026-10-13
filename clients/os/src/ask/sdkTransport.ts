@@ -2,7 +2,7 @@ import { startAskVoice, type AskVoiceOptions } from "@znasllc-io/memql-sdk-core/
 import { aiChatStream, type AiChatOptions, type AiChatMessage } from "@znasllc-io/memql-sdk-core/ai";
 import { QueryClient, type Dispatcher } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../kit/rows";
-import type { AskCallbacks, AskHandle, AskOptions, AskTransport } from "./askController";
+import type { AskCallbacks, AskHandle, AskOptions, AskTransport, WorkGuidanceRequest, WorkGuidanceReceipt } from "./askController";
 import type { ApprovalDiscussion, AskActivity, AskConversationStore, AskTurn, ConversationSummary } from "./conversationSession";
 
 export type AskStreamFn = (dispatcher: Dispatcher, messages: AiChatMessage[], opts: AiChatOptions) => { deltas: AsyncIterable<{ textDelta?: string; metadata?: Record<string, unknown> }>; result: Promise<unknown> };
@@ -66,6 +66,14 @@ export class SdkAskTransport implements AskTransport {
     const row = (await new QueryClient(dispatcher).askApprovalDiscussion({ approvalId })).rows()[0];
     if (!row) throw new Error("This approval's discussion is unavailable.");
     return flatten(row) as unknown as ApprovalDiscussion;
+  };
+
+  guideWork = async (request: WorkGuidanceRequest): Promise<WorkGuidanceReceipt> => {
+    const dispatcher = this.dispatcher();
+    if (!dispatcher) throw new Error("Not connected to the cluster.");
+    const row = (await new QueryClient(dispatcher).askGuideWork(request)).rows()[0];
+    if (!row) throw new Error("The cluster did not confirm this guidance. Retry to check the original message.");
+    return flatten(row) as unknown as WorkGuidanceReceipt;
   };
 
   approvalMessage = async (request: { approvalId: string; conversationId: string; requestId: string; prompt: string; advisor?: boolean }) => {

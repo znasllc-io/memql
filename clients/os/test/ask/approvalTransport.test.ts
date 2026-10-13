@@ -32,3 +32,17 @@ it("replays only the exact guidance answer and treats resume false as an incompl
   expect(request.executeQuery.query).toBe('builtin decideApproval(approvalId: "approval", decision: "answered", answer: {feedback: "Use \\"read only\\"."})');
   expect(request.executeQuery.query).not.toContain("permissionMode");
 });
+
+it("records active-work guidance through the generated builtin with exact target and request identity", async () => {
+  const request = { targetEpoch: "opaque-epoch", runId: "existing-run", conversationId: "original", requestId: "same-guidance", prompt: "Keep the review focused." };
+  const receipt = { ...request, status: "queued", turn: { id: "human-turn", prompt: request.prompt, guidanceTargetRunId: request.runId, guidanceStatus: "queued", answerOnly: true, answer: "", state: "done", startedAt: "2026-10-13T10:00:00Z", activity: [] } };
+  const { transport, sendAndWait, stream } = setup(receipt);
+  expect(await transport.guideWork(request)).toMatchObject(receipt);
+  expect(sendAndWait).toHaveBeenCalledWith(expect.objectContaining({ executeQuery: expect.objectContaining({ query: 'builtin askGuideWork(targetEpoch: "opaque-epoch", runId: "existing-run", conversationId: "original", requestId: "same-guidance", prompt: "Keep the review focused.")' }) }), undefined);
+  expect(stream).not.toHaveBeenCalled();
+});
+
+it("refuses guidance before dispatch when the cluster connection is unavailable", async () => {
+  const transport = new SdkAskTransport(() => null);
+  await expect(transport.guideWork({ targetEpoch: "epoch", runId: "run", conversationId: "chat", requestId: "same", prompt: "Guidance" })).rejects.toThrow("Not connected to the cluster.");
+});

@@ -1638,8 +1638,16 @@ permission-scoped MemQL agent; test transports live under `test/ask`.
 
 Quick replies stay inline. Longer requests return a durable queue receipt, free
 the composer, and continue as independent Nexus runs. `AskWorkQueue` shows up to
-three cards above the composer, then a single count linked to the conversation's
-runs. A card opens its run; no new task is submitted by navigation or polling.
+three cards above the composer. With more cards, the count expands when work can
+receive guidance; Open Nexus still opens the conversation's runs. A card opens
+its run. Guide this work explicitly scopes the existing composer to a server-
+advertised active run and its opaque guidance epoch; Return to conversation exits guidance mode without
+losing the draft or retracting a message already sent. No new task is submitted by navigation,
+polling or guidance. `askGuideWork` records a human-only conversation receipt:
+queued until a reasoning call uses it, applied after use, or not received if the
+work ended or changed first. It never grants permission. Unknown write outcomes
+retry the original request ID, target epoch and text while preserving newer
+writing. Waiting approvals retain their separate approval discussion path.
 `askConversationSnapshot` projects progress from persisted runs on any replica.
 `conversationFeed` keeps the acceptance in place and places a completed result
 at its completion time with the original request's title. Polling must preserve
