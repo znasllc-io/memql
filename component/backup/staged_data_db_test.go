@@ -172,6 +172,13 @@ func TestBackupCarriesTheStagedFlagSoARestoreCannotResurrectStagedRowsAsLive(t *
 	if found.Table != TableMemoryNodes {
 		t.Errorf("construct row exported from %q, want %q", found.Table, TableMemoryNodes)
 	}
+	var schema map[string]any
+	if err := json.Unmarshal(found.Schema, &schema); err != nil {
+		t.Fatal(err)
+	}
+	if schema["v"] != float64(1) || schema["$ref"] != nil {
+		t.Fatalf("backup must carry the full original schema, not a catalog reference: %s", found.Schema)
+	}
 
 	var payload map[string]any
 	if err := json.Unmarshal(found.Payload, &payload); err != nil {
