@@ -955,6 +955,14 @@ and then `libraryTrainFile(fileId, domainId)` ingests those into a domain as
 review queue is for. The surface says so, because hiding the second act is what
 made the first one look like it had done something.
 
+A cluster owner can enter a domain ID in the existing Teach form, including
+the first domain on an empty cluster. The picker still lists catalog and
+chunk-derived domains. Entry uses the same `libraryTrainFile` authorization and
+does not create a domain catalog row or approve knowledge. After teaching, the
+app re-reads its domains and offers Review; new passages remain pending until
+somebody explicitly approves or rejects them. Other roles keep the picker and
+the server's existing domain-write authorization.
+
 **The section is a WORKLIST, not a log.** Every file is a row that says where it
 is and offers exactly the act legal from there -- rule 12 applied per row,
 because here the state is per row. `unreadable` (a photograph, a zip) offers

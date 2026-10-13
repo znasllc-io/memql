@@ -4265,8 +4265,15 @@ a.os-button {
 }
 .os-train-teach {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+.os-train-domain-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 34rem;
 }
 /* A domain name is short, so the picker is sized for one rather than for the
  * row. A select that fills the width reads as the row's main content, which
