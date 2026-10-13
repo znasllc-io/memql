@@ -177,3 +177,35 @@ func TestComputerPermissionDBCancelledCallerRetainsClaimAndDecisionGate(t *testi
 		})
 	}
 }
+
+// A typed permission approves one tool request. It is not the generic failed
+// step Retry action, whose rerun explicitly permits repeating side effects.
+func TestComputerPermissionDBApprovalContinuesWithoutBlanketRerun(t *testing.T) {
+	a := openActsDB(t)
+	runID := a.openRun(t, map[string]any{"head": map[string]any{"done": map[string]any{"runId": "", "version": 1}}})
+	a.writeVersion(t, runID, runID, "done", 0, 1, nil, "saved", nil)
+	a.writeVersion(t, runID, runID, "section", 1, 1, nil, "", map[string]any{"status": "waiting"})
+	row, _ := computerPermissionFixture()
+	subject := rowMap(row, "subject")
+	approval := newRowId(approvalConcept)
+	a.write(t, "createWorkApproval", map[string]any{"approvalId": approval, "runId": runID, "stepKey": "section", "kind": "scopeElevation", "subject": subject, "artifactHash": workstate.ArtifactHash(subject), "requestedAt": rfc(time.Now()), "expiresAt": rfc(time.Now().Add(time.Hour))})
+	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "stepOrder": []string{"done", "section"}, "spent": map[string]any{"modelCalls": 3}, "status": "waiting", "waitingOn": map[string]any{"kind": "approval", "subject": approval, "since": rfc(time.Now().Add(-time.Second))}})
+	peerDB := workHeadsPeer(t, a.db)
+	b := New(dispatchDBEngine(t, peerDB), testLogger(), func() *bun.DB { return peerDB })
+	b.SetGateDB(testGates(t))
+	b.admitRow = memql.AdmitSourceRow
+	if _, err := b.handleDecideApproval(actorCtx(a.owner), map[string]any{"approvalId": approval, "decision": "approved", "answer": map[string]any{"permissionMode": "once"}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := b.store().query(memql.ContextWithFreshRead(actorCtx(a.owner)), "query "+call("workRunForOwner", map[string]any{"runId": runID}))
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("run read: %v %v", rows, err)
+	}
+	got := rows[0]
+	if rowString(got, "status") != "running" || !samePermissionID(rowString(got, "humanResumeId"), approval) || len(rowMap(got, "rerun")) != 0 || len(rowStringSlice(got, "staleSteps")) != 0 {
+		t.Fatalf("typed approval became a blanket rerun: %v", got)
+	}
+	if rowInt(rowMap(got, "spent"), "modelCalls") != 3 {
+		t.Fatalf("approval reset spend: %v", got["spent"])
+	}
+}

@@ -621,6 +621,15 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 			// receipt the answer resumes from are on file; nothing closes it. A
 			// no-op on a journal that is not held, as in closeRun.
 			journal.release()
+			// The capability parks the owning goal. A nested invocation has a
+			// separate journal which must also stop looking like active work.
+			if parentID, _ := ctx.Value(automationParentKey{}).(string); parentID != "" && parentID != exec.ID {
+				var wait *work.HumanWait
+				if errors.As(err, &wait) {
+					journal.call(ctx, "updateWorkRun", map[string]any{"runId": exec.ID, "status": "waiting",
+						"waitingOn": map[string]any{"kind": WaitKindApproval, "subject": wait.ApprovalID, "since": rfc3339(time.Now())}})
+				}
+			}
 			exec.Status, exec.ErrorValue = "waiting", err
 			exec.Duration = time.Since(exec.StartedAt)
 			return exec, err

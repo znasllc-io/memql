@@ -279,7 +279,7 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), symptom: work.SymptomPlan,
 			reason: rowString(rowMap(approval, "subject"), "resumeReason")}
 	}
-	if work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation") || (kind == "feedback" && rowString(rowMap(approval, "subject"), "question") != "") {
+	if work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission) || (kind == "feedback" && rowString(rowMap(approval, "subject"), "question") != "") {
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
 		if work.IsFailureQuestion(approval["options"]) {
 			retry.symptom = work.Symptom(rowString(rowMap(approval, "subject"), "symptom"))

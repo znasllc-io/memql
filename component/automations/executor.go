@@ -184,6 +184,11 @@ type AutomationTrigger interface {
 
 // StepContext holds the context for step execution.
 type StepContext struct {
+	// ResumeChild exists only for a proven suspended automation call. It never
+	// authorizes an ordinary invocation or a different child/argument set.
+	ResumeChildStepID string
+	ResumeChild       func(context.Context, string, string, map[string]any) (*AutomationExecution, error)
+
 	Logger            *slog.Logger
 	Engine            *memql.MemQLEngine
 	EventBus          *events.Bus

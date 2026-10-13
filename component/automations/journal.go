@@ -569,7 +569,11 @@ func (j *workJournal) openRun(ctx context.Context, automation *Automation, exec 
 	if j == nil || automation == nil || exec == nil {
 		return
 	}
-	j.call(ctx, "createWorkRun", j.openRunArgs(automation, exec, triggeringEvent, parent))
+	args := j.openRunArgs(automation, exec, triggeringEvent, parent)
+	if parentID, _ := ctx.Value(automationParentKey{}).(string); parentID != "" && parentID != exec.ID {
+		args["parentRunId"] = parentID
+	}
+	j.call(ctx, "createWorkRun", args)
 }
 
 // openRunArgs is the run row openRun writes; parent is openRun's.
@@ -735,6 +739,11 @@ func (j *workJournal) stepFinishedRowOnly(ctx context.Context, exec *AutomationE
 		"durationMs":        result.Duration.Milliseconds(),
 	}
 	if status == "waiting" {
+		if step.Type == StepTypeAutomation && result.Metadata != nil {
+			if child, _ := result.Metadata["executionId"].(string); child != "" {
+				args["childRunId"] = child
+			}
+		}
 		delete(args, "finishedAt")
 		delete(args, "resultFingerprint")
 	}

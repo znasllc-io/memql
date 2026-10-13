@@ -329,6 +329,16 @@ binary responses return `unsupported_content` with source metadata, rather
 than putting image or file bytes into model context. Workflows acquire binary
 assets through their image or file capabilities.
 
+A computer permission approved inside a synchronous child automation resumes
+that saved child invocation. The engine verifies the owner, parent link,
+definition, arguments and exact suspended tool receipt across replicas.
+Completed parent and child steps stay complete; the approval grants no blanket
+permission to repeat their effects. If an answer arrives before the waiting
+receipt is saved, dispatch waits briefly without consuming its claim. The
+recovery sweep can deliver the saved answer later under the same claim identity.
+The existing stale-executor abandonment policy still applies after a claimant
+stops responding.
+
 Active context and retrieval pages are bounded. The durable journal grows
 with actual work; that is retained evidence, not an in-process cache. Retention
 and storage capacity remain operational concerns. Individual calls and
