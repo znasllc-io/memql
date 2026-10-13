@@ -39,6 +39,18 @@ func (i *Integration) ApprovalGuidanceAvailable(ctx context.Context, approval ma
 	return i.validateApprovalGuidance(memql.ContextWithFreshRead(ctx), approval) == nil
 }
 
+// RecoverableApprovalGuidance lets a reopened discussion offer continuation of
+// an already-recorded answer. It never turns an edited draft into a new grant.
+func (i *Integration) RecoverableApprovalGuidance(ctx context.Context, approval map[string]any) string {
+	answer := rowMap(approval, "answer")
+	text := rowString(answer, "feedback")
+	if rowString(approval, "decision") != "answered" || len(answer) != 1 || strings.TrimSpace(text) == "" || utf8.RuneCountInString(text) > maxApprovalGuidanceCharacters ||
+		memql.BareShortId(rowString(approval, "decidedBy")) != memql.BareShortId(callerUserId(ctx)) || i.validateGuidanceRun(memql.ContextWithFreshRead(ctx), approval) != nil {
+		return ""
+	}
+	return text
+}
+
 func (i *Integration) validateApprovalGuidance(ctx context.Context, approval map[string]any) error {
 	if rowString(approval, "decision") != "" {
 		return fmt.Errorf("work: guidance needs this person's pending request")

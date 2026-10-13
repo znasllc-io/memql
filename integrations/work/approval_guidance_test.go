@@ -43,6 +43,8 @@ func TestGuidanceRecoversOnlyTheExactRecordedAnswerAfterResumeFailure(t *testing
 	require.Contains(t, decodeReply(t, nodes)["resumeError"], "connection lost")
 	decision := argsOf(t, eng, "decideWorkApproval")
 	approval["decision"], approval["answer"], approval["decidedBy"] = decision["decision"], decision["answer"], decision["decidedBy"]
+	require.False(t, i.ApprovalGuidanceAvailable(ctx, approval))
+	require.Equal(t, "Read the repository only.", i.RecoverableApprovalGuidance(ctx, approval))
 	eng.reply("workApprovalsForOwner")
 	eng.reply("workApprovalForOwner", approval)
 	eng.refuse("updateWorkRun", nil)
@@ -64,6 +66,7 @@ func TestGuidanceRecoversOnlyTheExactRecordedAnswerAfterResumeFailure(t *testing
 			run[key] = value
 		}
 	}
+	require.Empty(t, i.RecoverableApprovalGuidance(ctx, approval))
 	// Once handed off, the same retry acknowledges it without nudging work again.
 	nodes, err = i.handleDecideApproval(ctx, args, 0)
 	require.NoError(t, err)
@@ -87,6 +90,7 @@ func TestRecordedGuidanceCannotResumeACancelledOrMovedRun(t *testing.T) {
 				approval["ownerUserId"] = "other-owner"
 			}
 			result, err := i.recoverGuidanceDecision(callerContext(actOwner), rowString(approval, "id"), "answered", map[string]any{"feedback": "Read the repository only."})
+			require.Empty(t, i.RecoverableApprovalGuidance(callerContext(actOwner), approval))
 			require.NoError(t, err)
 			if result != nil {
 				require.Equal(t, false, result["runResumed"])
