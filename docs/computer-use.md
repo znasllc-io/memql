@@ -100,7 +100,7 @@ Both builds on macOS and Linux advertise `workerHost.computer_permission: 1`;
 other platforms omit it. This separate
 contract supports a person's **Once** or **Always** choice in Nexus for
 read access to one directory or for one exact shell command. It requires
-the matching engine contract; an older Cockpit cannot execute these
+Cockpit 0.18.0 and MemQL 0.27.0 or later; an older Cockpit cannot execute these
 requests by silently accepting a broader permission.
 
 The engine binds each receipt to the person, agent, enrollment and machine.

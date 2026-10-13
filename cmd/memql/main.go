@@ -59,7 +59,7 @@ import (
 // buildVariant next door stays a `const` on purpose: it is chosen by a
 // build tag, not stamped, so there is nothing for -X to set.
 // TestVersionIsSettableByLdflags guards the difference.
-var version = "0.17.0"
+var version = "0.18.0"
 var revision, dirty string
 
 func main() {
