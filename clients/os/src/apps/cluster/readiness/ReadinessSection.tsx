@@ -1,3 +1,4 @@
+import { StoragePanel } from "../../../cluster/storage/StorageHealth";
 import { ContentSkeleton } from "../../../kit/ContentSkeleton";
 import { useCallback, useMemo } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
@@ -85,6 +86,7 @@ export function ReadinessSection() {
         <InferenceLine reading={inference} />
         <PasskeyLine reading={passkeys} identityUrl={session.config.identityUrl} />
       </Panel>
+      <StoragePanel />
       <Caption>
         These are the two things a cluster needs before anybody can get useful work out of it. They
         are read once when this section opens, and nothing here stops you using the rest of the

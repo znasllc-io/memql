@@ -788,6 +788,25 @@ QueryClient.prototype.cancelGoal = function (this: QueryClient, args: CancelGoal
   return this.executeNamed("cancelGoal", buildCancelGoal(args), opts);
 };
 
+/** Read the current installation's database storage report. Cluster owner only. The monitor owns its alert thresholds; consumers must show the report age. */
+export interface ClusterStorageStatusArgs {
+}
+
+export function buildClusterStorageStatus(args: ClusterStorageStatusArgs): string {
+  void args;
+  return "builtin clusterStorageStatus()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    clusterStorageStatus(args?: ClusterStorageStatusArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.clusterStorageStatus = function (this: QueryClient, args: ClusterStorageStatusArgs = {} as ClusterStorageStatusArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("clusterStorageStatus", buildClusterStorageStatus(args), opts);
+};
+
 /** One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both. */
 export interface CommerceCompanyArgs {
   storeId?: string;

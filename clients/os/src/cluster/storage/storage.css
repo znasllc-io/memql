@@ -1,0 +1,22 @@
+.os-storage-warning {
+  position: fixed;
+  z-index: 180;
+  inset-inline: max(12px, env(safe-area-inset-left));
+  bottom: calc(var(--os-dock-h) + 20px + env(safe-area-inset-bottom));
+  width: fit-content;
+  max-width: min(40rem, calc(100vw - 24px));
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--os-space-3, 12px);
+  padding: 8px 12px;
+  border: 1px solid var(--os-warn);
+  border-radius: var(--os-radius-sm);
+  background: var(--os-plate);
+  color: var(--os-ink);
+  font: var(--os-text-base)/1.4 var(--os-font);
+}
+.os-storage-warning .os-button { flex-shrink: 0; }
+@media (max-width: 600px) {
+  .os-storage-warning { flex-wrap: wrap; bottom: calc(var(--os-dock-h) + 12px + env(safe-area-inset-bottom)); }
+}

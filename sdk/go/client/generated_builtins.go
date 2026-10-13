@@ -1039,6 +1039,21 @@ func CancelGoalBuild(args CancelGoalArgs) string {
 	return b.String()
 }
 
+// ClusterStorageStatus -- Read the current installation's database storage report. Cluster owner only. The monitor owns its alert thresholds; consumers must show the report age.
+type ClusterStorageStatusArgs struct {
+}
+
+// ClusterStorageStatus calls the engine builtin clusterStorageStatus.
+func (qc *QueryClient) ClusterStorageStatus(ctx context.Context, args ClusterStorageStatusArgs) (*Result, error) {
+	call := ClusterStorageStatusBuild(args)
+	return qc.executeNamed(ctx, "clusterStorageStatus", call)
+}
+
+func ClusterStorageStatusBuild(args ClusterStorageStatusArgs) string {
+	_ = args
+	return "builtin clusterStorageStatus()"
+}
+
 // CommerceCompany -- One B2B account: its orders in a window, how many still have payment terms outstanding, and its MemQL-owned credit limit. The two halves come from different systems, and the question a rep asks -- can this account order -- needs both.
 type CommerceCompanyArgs struct {
 	StoreId    string

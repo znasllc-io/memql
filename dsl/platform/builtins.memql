@@ -700,3 +700,9 @@ builtin customDomainRequireReservations {  }
 builtin conceptRetentionSweep {
   dryRun bool
 }
+
+/// Read the current installation's database storage report. Cluster owner only.
+/// The monitor owns its alert thresholds; consumers must show the report age.
+@executor("integration.storageHealth.read")
+@sdk
+builtin clusterStorageStatus { }

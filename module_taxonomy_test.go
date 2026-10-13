@@ -170,8 +170,9 @@ var pluginKinds = map[string]moduleKind{
 	// the same client the `storage` integration wraps, which is the
 	// relationship `database` has to Postgres rather than the one `shopify`
 	// has to Shopify.
-	"logs":      kindComponent,
-	"retention": kindComponent, // Physical retirement of declared concept versions is engine storage maintenance.
+	"logs":          kindComponent,
+	"storageHealth": kindIntegration, // Reads the Kubernetes monitor Event and database identity.
+	"retention":     kindComponent,   // Physical retirement of declared concept versions is engine storage maintenance.
 	// The work spine's entry points (epic memql#4966). A COMPONENT by this
 	// table's own test: does turning it off remove a feature, or break the
 	// engine?

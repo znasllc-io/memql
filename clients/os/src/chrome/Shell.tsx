@@ -1,3 +1,4 @@
+import { StorageHealthProvider, StorageWarning } from "../cluster/storage/StorageHealth";
 import { AskNavigator } from "../ask/AskNavigator";
 import { SharedExternalConnectionsProvider } from "../modules/connections/useExternalConnections";
 import { SharedCredentialsProvider } from "../modules/connections/useSourceCredentials";
@@ -136,6 +137,7 @@ export function Shell({
             surfaces that ask (epic memql#5118). Above the desk, because the
             gate below renders instead of it and the presence effect inside it
             has to run when the setup widget is absent. */}
+        <StorageHealthProvider>
         <SetupFactsScope>
         <MachinesProvider>
           <ShellTransports source={source} ports={ports}>
@@ -168,6 +170,7 @@ export function Shell({
       onContextMenu={suppressBrowserMenu}
     >
                     <PhoneShell onSignOut={onSignOut} />
+                    <StorageWarning />
                     <AskNavigator />
       <AskSheet />
                   </div>
@@ -185,6 +188,7 @@ export function Shell({
           </ShellTransports>
         </MachinesProvider>
         </SetupFactsScope>
+        </StorageHealthProvider>
         </SessionScope>
       </OsConnectionProvider>
     </AuthSourceProvider>
@@ -439,6 +443,7 @@ function DesktopChrome({
           setThemesOpen(true);
         }}
       />
+      <StorageWarning />
       <ThemeStore open={themesOpen} onClose={() => setThemesOpen(false)} />
       <AskNavigator />
       <AskSheet dockReserve={placement.dockReserve} />
