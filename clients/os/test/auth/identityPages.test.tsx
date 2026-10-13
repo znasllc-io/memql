@@ -47,6 +47,23 @@ describe("native identity screens", () => {
     expect(reads).toBe(2);
     expect(screen.getByRole("button", { name: "Approve device" }).hasAttribute("disabled")).toBe(false);
   });
+  it("sends the emailed sign-in token as ml when Continue is pressed, once and on the OS origin", async () => {
+    // identity reads the token from the form field "ml" and nothing else (handleAuthLanding).
+    const landing = { Layout: { Title: "Confirm sign-in", BrandName: "MemQL" }, MagicToken: "emailed-token_9x", MaskedEmail: "m***@example.test", SameDevice: false, Approved: false, Problem: "", Message: "", Local: false };
+    const fetcher = vi.fn(async (_url: URL, init?: RequestInit) => json(init?.method === "POST"
+      ? { page: "landing", data: { ...landing, Layout: { Title: "Sign-in confirmed", BrandName: "MemQL" }, MagicToken: "", Approved: true } }
+      : { page: "landing", csrf: "pair", data: landing }));
+    vi.stubGlobal("fetch", fetcher);
+    render(<IdentityScreen initialPath="/auth/complete?ml=emailed-token_9x" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", { level: 1, name: "Sign-in confirmed" });
+    const posts = fetcher.mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.[0].origin).toBe(window.location.origin);
+    expect(posts[0]?.[0].pathname).toBe("/auth/landing");
+    expect(posts[0]?.[1]?.headers).toMatchObject({ "X-CSRF-Token": "pair" });
+    expect(Object.fromEntries(posts[0]?.[1]?.body as URLSearchParams)).toEqual({ ml: "emailed-token_9x" });
+  });
   it.each([
     ["check_email", { Email: "owner@example.test", ExpiresIn: "10 minutes" }, "Check your email"],
     ["landing", { Approved: true }, "Sign-in confirmed"],
