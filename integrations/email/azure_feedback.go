@@ -13,6 +13,7 @@ import (
 	"net/mail"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/znasllc-io/memql/component/memql"
@@ -106,6 +107,29 @@ func sameAzureResource(a, b string) bool {
 // delivery also needs the credential, expected topic, and original send receipt.
 // Secrets never appear in URLs, logs, events, or the public connection response.
 func NewAzureFeedbackHandler(resolve func() *Integration, apply func(context.Context, AzureDeliveryReport) error, gateResolver ...AzureDeliveryGateResolver) http.Handler {
+	const (
+		invalidHeaders = iota
+		invalidAccount
+		invalidScheme
+		unconfiguredReceiver
+		wrongCredential
+		wrongSubscription
+	)
+	reasons := [...]string{"invalid_headers", "invalid_account", "invalid_bearer_scheme", "receiver_unconfigured", "credential_mismatch", "subscription_mismatch"}
+	// A public endpoint must not let rejected requests flood logs. Each fixed
+	// reason gets at most one warning per minute on this replica; no request or
+	// stored credential values, lengths, or derived identifiers are logged.
+	var nextWarning [len(reasons)]atomic.Int64
+	reject := func(w http.ResponseWriter, integration *Integration, reason int) {
+		if integration.logger != nil {
+			now := time.Now().Unix()
+			next := nextWarning[reason].Load()
+			if now >= next && nextWarning[reason].CompareAndSwap(next, now+60) {
+				integration.logger.Warn("Azure email feedback authorization refused", "reason", reasons[reason])
+			}
+		}
+		http.Error(w, "invalid email feedback authorization", http.StatusUnauthorized)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodPost {
@@ -122,10 +146,26 @@ func NewAzureFeedbackHandler(resolve func() *Integration, apply func(context.Con
 			http.Error(w, "email feedback unavailable", 503)
 			return
 		}
+		for _, name := range []string{"Authorization", "X-Memql-Email-Account", "aeg-subscription-name", "aeg-event-type"} {
+			values := r.Header.Values(name)
+			if len(values) != 1 || values[0] == "" || strings.Contains(values[0], ",") {
+				reject(w, integration, invalidHeaders)
+				return
+			}
+		}
 		account := r.Header.Get("X-Memql-Email-Account")
 		authorization := r.Header.Get("Authorization")
-		if len(account) == 0 || len(account) > 128 || memql.BareShortId(account) != account || strings.ContainsAny(account, "/\\\r\n\t ") || len(r.Header.Values("Authorization")) != 1 || len(r.Header.Values("X-Memql-Email-Account")) != 1 || !strings.HasPrefix(authorization, "Bearer ") || len(authorization) > 512 {
-			http.Error(w, "invalid email feedback authorization", 401)
+		if len(account) > 128 || memql.BareShortId(account) != account || strings.ContainsAny(account, "/\\\r\n\t ") {
+			reject(w, integration, invalidAccount)
+			return
+		}
+		// HTTP authentication schemes are case-insensitive (RFC 9110, 11.1).
+		// RFC 6750 permits one or more separator spaces. Consume only those;
+		// token bytes remain case-sensitive, with no trailing whitespace trimming.
+		scheme, credential, separated := strings.Cut(authorization, " ")
+		credential = strings.TrimLeft(credential, " ")
+		if !separated || !strings.EqualFold(scheme, "Bearer") || credential == "" || len(authorization) > 512 {
+			reject(w, integration, invalidScheme)
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
@@ -137,8 +177,18 @@ func NewAzureFeedbackHandler(resolve func() *Integration, apply func(context.Con
 			http.Error(w, "email feedback unavailable", 503)
 			return
 		}
-		if !found || configured.AccountID != account || configured.Secret == "" || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(authorization, "Bearer ")), []byte(configured.Secret)) != 1 || r.Header.Get("aeg-subscription-name") != configured.Subscription {
-			http.Error(w, "invalid email feedback authorization", 401)
+		if !found || configured.AccountID != account || configured.Secret == "" || configured.Subscription == "" {
+			reject(w, integration, unconfiguredReceiver)
+			return
+		}
+		if subtle.ConstantTimeCompare([]byte(credential), []byte(configured.Secret)) != 1 {
+			reject(w, integration, wrongCredential)
+			return
+		}
+		// Event Grid supplies an Azure resource name. Azure can return names
+		// with different casing than creation and requires case-insensitive comparison.
+		if !strings.EqualFold(r.Header.Get("aeg-subscription-name"), configured.Subscription) {
+			reject(w, integration, wrongSubscription)
 			return
 		}
 		// Disconnect and resource replacement invalidate the old receiver on every replica.

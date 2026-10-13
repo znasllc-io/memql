@@ -2074,6 +2074,16 @@ it never follows the supplied validation URL. See Microsoft's
 [delivery-property authentication](https://learn.microsoft.com/en-us/azure/event-grid/delivery-properties)
 and [endpoint validation](https://learn.microsoft.com/en-us/azure/event-grid/end-point-validation-event-grid-events-schema).
 
+The Bearer scheme and Azure subscription name are compared without regard to
+case; the credential and organization ID remain exact. Duplicate or comma-joined
+authentication and Event Grid routing headers are refused. For rejected requests,
+the node logs `Azure email feedback authorization refused` with one fixed `reason`
+at most once per minute per reason: `invalid_headers`, `invalid_account`,
+`invalid_bearer_scheme`, `receiver_unconfigured`, `credential_mismatch`, or
+`subscription_mismatch`. These diagnostics contain no header values or secrets.
+Azure can return resource names with changed casing; see its
+[resource-name rules](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules).
+
 `Delivered` confirms handoff to the recipient's mail server, not inbox placement
 or a read. `Expanded` records expansion without asserting delivery. `Failed`,
 `Quarantined`, and `FilteredSpam` record a delivery failure without inventing a
