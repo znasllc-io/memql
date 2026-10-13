@@ -196,10 +196,11 @@ training, where they can be tuned per agent and per workspace.
 
 - **Template stays agnostic.** New capabilities don't bloat the
   template. The same template renders for every agent + every turn.
-- **Knowledge stays curatable.** Edits land in a `.go` slice
-  literal, embed re-runs idempotently (chunk id is a sha256 of
-  domain + sourceRef + seq + text — same text, same id; new text,
-  new id, old version purged on next re-ingest).
+- **Knowledge stays curatable.** The registered corpus supplies stable
+  chunk IDs from domain + sourceRef + sequence + text. Reinstalling the
+  same content is idempotent; changed content gets a new ID. Earlier
+  approved revisions remain until an explicit review or supersession
+  decision, as described under Publication and review below.
 - **RAG does the right work.** Only chunks relevant to the user's
   current message land in the prompt. A "what's the weather?" turn
   doesn't pay for `computer-use` / `workbench` knowledge tokens; an "open Mail
