@@ -183,10 +183,43 @@ it("does not restore stale eligibility from a read started before guidance was r
 });
 
 it("opens discussion in place when the same conversation was showing its activity", async () => {
-  const { transport, session } = setup(); await session.select("original"); mount(session, transport);
+  const { transport, session } = setup(); await session.select("original"); session.setDraft("My unfinished plan"); mount(session, transport);
   fireEvent.click(screen.getByRole("button", { name: "Activity" }));
   expect(screen.queryByRole("button", { name: "Ask another agent" })).toBeNull();
   await act(async () => session.discussApproval("approval"));
   expect(screen.getByRole("button", { name: "Ask another agent" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Activity" })).toBeTruthy(); session.dispose();
+  expect(screen.getByRole("button", { name: "Activity" })).toBeTruthy();
+  expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLTextAreaElement).value).toBe("My unfinished plan"); session.dispose();
+});
+
+
+it("keeps a resolved request readable and its draft editable without offering new discussion", async () => {
+  const { transport, session } = setup();
+  transport.discussApproval.mockResolvedValue({ ...context, approval: { ...context.approval, status: "answered" }, canSendGuidance: false, canAskAdvisor: false });
+  await session.discussApproval("approval"); mount(session, transport);
+  fireEvent.change(screen.getByRole("textbox", { name: "Ask" }), { target: { value: "Keep my next thought" } });
+  expect(screen.getByRole("button", { name: "Send discussion message" })).toHaveProperty("disabled", true);
+  expect(screen.getByText("This request is no longer waiting. Return to conversation to continue.")).toBeTruthy();
+  expect(session.send("Try again", null)).toBe(false);
+  expect(session.sendDiscussion("Another investigation", true)).toBe(false);
+  expect(transport.approvalMessage).not.toHaveBeenCalled(); expect(transport.ask).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Return to conversation" }));
+  expect(session.getSnapshot().draft).toBe("Keep my next thought");
+  expect(session.getSnapshot().discussion).toBeNull(); session.dispose();
+});
+
+it("recovers an uncertain investigation after the request resolves without consuming a new draft", async () => {
+  const { transport, session } = setup(); await session.discussApproval("approval");
+  transport.approvalMessage.mockRejectedValueOnce(new Error("Response lost"));
+  session.sendDiscussion("Investigate the checkpoint", true);
+  await waitFor(() => expect(session.getSnapshot().discussionSending).toBe(false));
+  transport.discussApproval.mockResolvedValue({ ...context, approval: { ...context.approval, status: "answered" }, canSendGuidance: false, canAskAdvisor: false });
+  await session.reload(); session.setDraft("Keep this new idea"); mount(session, transport);
+  expect(session.send("New unaccepted message", null)).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Retry investigation" }));
+  await waitFor(() => expect(session.getSnapshot().discussionSending).toBe(false));
+  expect(transport.approvalMessage).toHaveBeenCalledTimes(2);
+  expect(transport.approvalMessage.mock.calls[1]?.[0]).toEqual(transport.approvalMessage.mock.calls[0]?.[0]);
+  expect(session.getSnapshot().draft).toBe("Keep this new idea");
+  expect(screen.queryByRole("button", { name: "Retry investigation" })).toBeNull(); session.dispose();
 });

@@ -58,6 +58,7 @@ export interface ConversationState {
   discussion?: ApprovalDiscussion | null;
   discussionOpening?: boolean;
   discussionSending?: boolean;
+  discussionRetry?: { approvalId: string; prompt: string; advisor: boolean } | null;
   guidanceSending?: boolean;
   guidanceNotice?: string;
   guidanceRetry?: { approvalId: string; feedback: string } | null;
@@ -130,7 +131,7 @@ export class ConversationSession {
   };
   leaveDiscussion = () => {
     this.discussionEpoch++;
-    this.patch({ discussion: null, discussionOpening: false, discussionSending: false, guidanceSending: false, guidanceNotice: "", guidanceRetry: null });
+    this.patch({ discussion: null, discussionOpening: false, discussionSending: false, discussionRetry: null, guidanceSending: false, guidanceNotice: "", guidanceRetry: null });
   };
   private guidanceReceipt(discussion: ApprovalDiscussion) {
     const approvalId = discussion.approval.id;
@@ -176,16 +177,24 @@ export class ConversationSession {
       if (epoch === this.discussionEpoch) this.patch({ guidanceSending: false });
     }
   };
-  sendDiscussion = (prompt: string, advisor = false): boolean => {
+  sendDiscussion = (prompt: string, advisor = false): boolean => this.submitDiscussion(prompt, advisor, true);
+  retryDiscussion = (): boolean => {
+    const receipt = this.state.discussionRetry;
+    if (!receipt || receipt.approvalId !== this.state.discussion?.approval.id) return false;
+    return this.submitDiscussion(receipt.prompt, receipt.advisor, false);
+  };
+  private submitDiscussion = (prompt: string, advisor: boolean, clearSubmittedDraft: boolean): boolean => {
     const discussion = this.state.discussion;
-    if (!discussion || this.state.discussionOpening || this.state.discussionSending || this.state.guidanceSending || !prompt.trim() || (advisor && !discussion.canAskAdvisor)) return false;
+    if (!discussion || this.state.discussionOpening || this.state.discussionSending || this.state.guidanceSending || !prompt.trim()) return false;
     if (!this.transport.approvalMessage) { this.patch({ error: "Approval discussion is unavailable." }); return false; }
     const epoch = this.discussionEpoch;
     const request = { approvalId: discussion.approval.id, conversationId: discussion.conversationId, prompt: prompt.trim(), advisor };
     const key = JSON.stringify(request);
-    const requestId = this.pendingDiscussionRequest?.key === key ? this.pendingDiscussionRequest.id : crypto.randomUUID();
+    const retry = this.pendingDiscussionRequest?.key === key;
+    if ((!discussion.canAskAdvisor || this.state.discussionRetry) && !retry) return false;
+    const requestId = retry ? this.pendingDiscussionRequest!.id : crypto.randomUUID();
     this.pendingDiscussionRequest = { key, id: requestId };
-    this.patch({ discussionSending: true, draft: "", error: "" });
+    this.patch({ discussionSending: true, discussionRetry: null, ...(clearSubmittedDraft ? { draft: "" } : {}), error: "" });
     void this.transport.approvalMessage({ ...request, requestId }).then(async receipt => {
       if (epoch !== this.discussionEpoch || this.disposed) return;
       this.pendingDiscussionRequest = null;
@@ -193,7 +202,7 @@ export class ConversationSession {
       this.patch({ turns: this.state.turns.some(item => item.id === turn.id) ? this.state.turns : [...this.state.turns, turn] });
       await this.reload();
     }).catch((error: unknown) => {
-      if (epoch === this.discussionEpoch) this.patch({ error: message(error), ...(this.state.draft === "" ? { draft: prompt } : {}) });
+      if (epoch === this.discussionEpoch) this.patch({ error: message(error), discussionRetry: { approvalId: request.approvalId, prompt: request.prompt, advisor }, ...(clearSubmittedDraft && this.state.draft === "" ? { draft: prompt } : {}) });
     }).finally(() => {
       if (epoch === this.discussionEpoch) this.patch({ discussionSending: false });
     });

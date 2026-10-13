@@ -12,10 +12,10 @@ import { OS_REGISTRY } from "../src/apps/registry";
 const directory = { version: 1, kind: "directory_read", registrationId: "registration", machineId: "studio", machineLabel: "Studio Mac", tool: "workerHost", action: "fs_list", directory: "/Users/dana/projects/memql", argsHash: "bound-inputs", allowedModes: ["once", "always"] };
 const command = { ...directory, kind: "exact_command", directory: undefined, command: "git status --short", cwd: "/Users/dana/projects/memql", timeoutSeconds: 60, action: "exec" };
 const approvals = [
-  approvalRow({ id: "failure", kind: "planReview", question: "How should this work continue?", subject: { symptom: "environment", stepKey: "inspect", errorMessage: "Context checkpoint did not free space; originals were retained." }, options: [{ value: "retry", label: "Retry" }, { value: "abandon", label: "Abandon" }] }),
-  approvalRow({ id: "directory", kind: "scopeElevation", question: "Read the repository on Studio Mac", subject: { computerPermission: directory }, requestedAt: "2026-09-01T09:05:00Z" }),
-  approvalRow({ id: "command", kind: "scopeElevation", question: "Check the repository for local changes", subject: { computerPermission: command }, requestedAt: "2026-09-01T09:06:00Z" }),
-  approvalRow({ id: "message", kind: "sideEffect", question: "Send the completed inspection report to the project team", subject: { summary: "Send the completed inspection report to the project team", recipients: ["team@example.com"] }, requestedAt: "2026-09-01T09:07:00Z" }),
+  approvalRow({ id: "failure", stepKey: "inspectRepository", kind: "planReview", question: "How should this work continue?", subject: { symptom: "environment", stepKey: "inspect", errorMessage: "Context checkpoint did not free space; originals were retained." }, options: [{ value: "retry", label: "Retry" }, { value: "abandon", label: "Abandon" }] }),
+  approvalRow({ id: "directory", stepKey: "inspectRepository", kind: "scopeElevation", question: "Read the repository on Studio Mac", subject: { computerPermission: directory }, requestedAt: "2026-09-01T09:05:00Z" }),
+  approvalRow({ id: "command", stepKey: "inspectRepositoryChanges", kind: "scopeElevation", question: "Check the repository for local changes", subject: { computerPermission: command }, requestedAt: "2026-09-01T09:06:00Z" }),
+  approvalRow({ id: "message", stepKey: "sendInspectionReport", kind: "sideEffect", question: "Send the completed inspection report to the project team", subject: { summary: "Send the completed inspection report to the project team", recipients: ["team@example.com"] }, requestedAt: "2026-09-01T09:07:00Z" }),
 ];
 const saved = [approvalRow({ id: "saved-directory", decision: "approved", decidedAt: "2026-09-01T09:04:00Z", subject: { computerPermission: directory }, answer: { permissionMode: "always" } }), approvalRow({ id: "saved-command", decision: "approved", subject: { computerPermission: command }, answer: { permissionMode: "always" } })];
 type Frame = ComponentType<{ fallback: string; children: ReactNode }>;
@@ -29,7 +29,7 @@ function NexusApprovalWindow({ frame: Frame, approvalId, advice }: { frame: Fram
     let guidanceToResume: string | undefined;
     return {
       ask: () => ({ cancel() {} }),
-      discussApproval: async id => ({ conversationId: "original-conversation", approval: { id, runId: "run-1", kind: "planReview", question: "How should this work continue?", summary: "Context checkpoint did not free space; originals were retained.", status: canSendGuidance ? "pending" : "answered" }, canSendGuidance, canAskAdvisor: true, guidanceToResume }),
+      discussApproval: async id => ({ conversationId: "original-conversation", approval: { id, runId: "run-1", kind: "planReview", question: "How should this work continue?", summary: "Context checkpoint did not free space; originals were retained.", status: canSendGuidance ? "pending" : "answered" }, canSendGuidance, canAskAdvisor: canSendGuidance, guidanceToResume }),
       approvalGuidance: async (_approvalId, feedback) => { canSendGuidance = false; guidanceToResume = feedback; return { runResumed: false, resumeError: "The planner is temporarily unavailable." }; },
       approvalMessage: async request => ({ conversationId: request.conversationId, turnId: request.requestId, runId: "advice-run", status: "queued" }),
       conversations: { list: async () => [{ id: "original-conversation", title: "Introduce the repository" }], create: async () => ({ id: "unused", title: "Unused" }), read: async () => turns },
