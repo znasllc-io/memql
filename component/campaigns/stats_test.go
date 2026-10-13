@@ -284,3 +284,19 @@ func TestSkippedCountReachesTheCampaignRow(t *testing.T) {
 func (e *countingEngine) OrganizationCapable(context.Context, string, string, string) bool {
 	return false
 }
+
+func TestProviderDeliveryStatisticsNeverInferDeliveryFromAcceptance(t *testing.T) {
+	engine := statsFixture()
+	got := runStats(t, engine)
+	summary := got["delivery"].(map[string]any)
+	if summary["confirmed"] != float64(0) || summary["unconfirmed"] != float64(80) {
+		t.Fatalf("accepted messages became delivered: %v", summary)
+	}
+	for status, count := range map[string]int{"delivered": 40, "bounced": 2, "suppressed": 1, "quarantined": 3, "filtered-spam": 4, "failed": 5, "expanded": 6} {
+		engine.counts[`campaignProviderDeliveryCount(campaignId: "camp-1", providerStatus: "`+status+`")`] = count
+	}
+	summary = runStats(t, engine)["delivery"].(map[string]any)
+	if summary["confirmed"] != float64(40) || summary["failed"] != float64(15) || summary["expanded"] != float64(6) || summary["unconfirmed"] != float64(19) {
+		t.Fatalf("provider counts %v", summary)
+	}
+}

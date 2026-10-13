@@ -6,13 +6,12 @@
 // on stdout. This file is the canonical parser for that envelope. The action
 // executor (#2218 / I8) and any in-process capability invocation parse a
 // script's stdout through ParseCapabilityResult instead of scraping prose, so
-// the Go effect seam (Executor, executor.go) and the DSL automation layer agree
+// every native effect adapter and the DSL automation layer agree
 // on one structured protocol.
 //
-// This is ADDITIVE: it does not change the Executor interface (which the deploy
-// pack reuses, Epic 2 / #2095). It gives capability-script backends a typed
-// result the way KubectlJSON already gives reads a typed body.
-package deploycontrol
+// This codec has no engine or service dependencies. Keeping it in core lets
+// workflow hosts parse script outcomes without depending on a deploy service.
+package capabilityresult
 
 import (
 	"encoding/json"

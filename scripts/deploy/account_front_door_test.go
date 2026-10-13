@@ -21,14 +21,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/deploycontrol"
 	"github.com/znasllc-io/memql/component/frontdoor"
+	"github.com/znasllc-io/memql/core/capabilityresult"
 	"gopkg.in/yaml.v3"
 )
 
 // resultOf decodes the envelope's result object. env.Result is raw JSON so a
 // script may return any shape; every assertion below reads it as a map.
-func resultOf(t *testing.T, env deploycontrol.CapabilityResult) map[string]any {
+func resultOf(t *testing.T, env capabilityresult.CapabilityResult) map[string]any {
 	t.Helper()
 	var out map[string]any
 	if len(env.Result) == 0 {

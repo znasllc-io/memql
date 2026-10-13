@@ -171,7 +171,7 @@ type reservingSender struct {
 	probe      func(intent string) bool
 }
 
-func (s *reservingSender) Reserve(ctx context.Context, msg email.Message, _ email.SendAs) (context.Context, func(), error) {
+func (s *reservingSender) Reserve(ctx context.Context, msg email.Message, _ email.SendAs, _ ...string) (context.Context, func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.attemptsAt = append(s.attemptsAt, s.probe != nil && s.probe(msg.IntentID))

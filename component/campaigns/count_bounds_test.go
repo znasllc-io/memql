@@ -50,3 +50,34 @@ func TestRosterCapacityCountWalksAllPagesWhenAggregateIsBounded(t *testing.T) {
 		t.Fatalf("count %d err %v", n, err)
 	}
 }
+
+type boundedProviderStats struct {
+	*countingEngine
+	status string
+}
+
+func (e boundedProviderStats) Execute(ctx context.Context, q string) (any, error) {
+	result, err := e.countingEngine.Execute(ctx, q)
+	if err == nil && strings.Contains(q, `providerStatus: "`+e.status+`"`) {
+		for _, row := range memql.MaterializeRows(result) {
+			row["atLeast"] = true
+		}
+	}
+	return result, err
+}
+func TestProviderDeliveryBoundsOmitUnconfirmedRemainder(t *testing.T) {
+	for status, field := range map[string]string{"delivered": "delivery.confirmed", "bounced": "delivery.failed", "filtered-spam": "delivery.failed", "expanded": "delivery.expanded"} {
+		w := newTestWorker(t, boundedProviderStats{statsFixture(), status}, &recordingSender{})
+		nodes, err := w.handleStats(importCtx(), map[string]any{"campaignId": "camp-1"}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := decodeResult(t, nodes)
+		if result["atLeast"].(map[string]any)[field] != true {
+			t.Fatalf("lost bound %v", result)
+		}
+		if _, present := result["delivery"].(map[string]any)["unconfirmed"]; present {
+			t.Fatal("invented remainder from a lower bound")
+		}
+	}
+}

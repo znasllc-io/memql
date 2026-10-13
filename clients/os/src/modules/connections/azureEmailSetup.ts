@@ -19,7 +19,8 @@ export interface AzureEmailReply {
   choices?: { id: string; name: string }[];
   plan?: AzureEmailPlan; planId?: string; sender?: string; replyTo?: string;
   records?: { purpose: string; name: string; type: string; value: string; status: string }[];
-  operations?: { operationId: string; status: string; detail: string; submittedAt: string }[];
+  deliveryFeedback?: "not-configured" | "pending" | "ready";
+  operations?: { operationId: string; status: string; detail: string; submittedAt: string; checkedAt?: string; deliveryStatus?: string; deliveryAt?: string }[];
 }
 export const AZURE_EMAIL_LOCATIONS = ["Africa", "Asia Pacific", "Australia", "Brazil", "Canada", "Europe", "France", "Germany", "India", "Japan", "Korea", "Norway", "Switzerland", "United Arab Emirates", "United Kingdom", "United States"];
 

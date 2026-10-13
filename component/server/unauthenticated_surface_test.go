@@ -342,7 +342,7 @@ func TestSurfacePathFormsNeverYieldsRoot(t *testing.T) {
 }
 
 func TestEmailLinkPathsAreSelfAuthenticatedAndHandlerAuthorized(t *testing.T) {
-	for _, path := range EmailLinkPaths() {
+	for _, path := range append(EmailLinkPaths(), AzureEmailFeedbackPaths()...) {
 		for _, paths := range [][]string{SelfAuthenticatedPaths(), HandlerAuthorizedPaths()} {
 			found := false
 			for _, p := range paths {

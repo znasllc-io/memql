@@ -697,6 +697,9 @@ const VIEWS: Record<
   "azure-email-dns": azureEmailView("dns"),
   "azure-email-provisioning": azureEmailView("provisioning"),
   "azure-email-empty": azureEmailView("unconfigured"),
+  "azure-email-sends": azureEmailView("ready"),
+  "azure-email-sends-pending": azureEmailView("ready", "pending"),
+  "azure-email-sends-empty": azureEmailView("ready", "not-configured"),
   ...emailScenes(WindowBody),
   // Email -> Campaigns (memql#6033): the list, and Add a campaign reached the
   // way a person reaches it, `&click=Add a campaign|Newsletter|...`.
@@ -1157,7 +1160,7 @@ function MachinePane({ over }: { over: Record<string, unknown> }) {
   );
 }
 
-function azureEmailView(status: string) {
+function azureEmailView(status: string, feedback = "ready") {
   return {
     connect: () => {
       const conn = campaignConnection({ accounts: [accountRow({ id: "studio", name: "Our Studio" })] });
@@ -1171,8 +1174,13 @@ function azureEmailView(status: string) {
       Object.assign(conn.query, { emailAzureSetup: async ({ action }: { action: string }) => rowsResult([
         action === "clusterStatus" ? { status: "connected", capture: true, resourceGroup: "mail" } :
         action === "prepare" ? { status: "planned", plan, planId: "qa" } :
+        action === "operations" ? { status: "ok", deliveryFeedback: feedback, operations: feedback === "not-configured" ? [] : [
+          { operationId: "confirmed", status: "succeeded", detail: "", submittedAt: "2026-10-12T12:00:00Z", deliveryStatus: feedback === "ready" ? "delivered" : "", deliveryAt: feedback === "ready" ? "2026-10-12T12:00:30Z" : "" },
+          { operationId: "bounced", status: "succeeded", detail: "", submittedAt: "2026-10-12T11:58:00Z", deliveryStatus: feedback === "ready" ? "bounced" : "", deliveryAt: feedback === "ready" ? "2026-10-12T11:58:30Z" : "" },
+          { operationId: "waiting", status: "accepted", detail: "", submittedAt: "2026-10-12T11:56:00Z" },
+        ] } :
         status === "unconfigured" ? { status } :
-        { status, plan, planId: "qa", ...(status === "dns" ? { records } : {}) },
+        { status, plan, planId: "qa", ...(status === "ready" ? { sender: "news@studio.example", replyTo: "hello@studio.example" } : {}), ...(status === "dns" ? { records } : {}) },
       ]) });
       return conn;
     },

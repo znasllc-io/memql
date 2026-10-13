@@ -73,8 +73,9 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 		"pipelinesteps/pod_file_live_test.go":       "verifies the exact file bytes carried by a real Kubernetes exec stream against a standard SHA-256 fixture",
 		"azureblob/verified_stream_test.go":         "independently computes standard SHA-256 artifact fixtures for the streaming storage protocol",
 		"azureblob/verified_stream_azurite_test.go": "checks real stored artifact bytes against standard SHA-256 digests, including an OCI archive",
-		"email/acs.go":      "Azure Communication Services requires SHA-256 content digests and HMAC-SHA256 request authentication; these are wire signatures, not row IDs",
-		"email/acs_test.go": "Independently verifies ACS's required SHA-256 content hash and HMAC wire signature against the outgoing request",
+		"email/acs.go":            "Azure Communication Services requires SHA-256 content digests and HMAC-SHA256 request authentication; these are wire signatures, not row IDs",
+		"email/acs_test.go":       "Independently verifies ACS's required SHA-256 content hash and HMAC wire signature against the outgoing request",
+		"email/azure_feedback.go": "correlates sealed ACS mailbox receipts with the persisted campaigns emailDigest protocol (standard SHA-256 of the normalized address); core/id's chained fingerprint cannot match existing consent and suppression digests",
 		// Retention archives are recoverable outside MemQL. Their filenames are
 		// standard SHA-256 checksums of the gzip bytes, verified with sha256sum
 		// before restoring evidence; core/id's chained fingerprint differs.

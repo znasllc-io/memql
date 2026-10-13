@@ -24,10 +24,12 @@ func TestACampaignsWorkerWithNoGatePoolNamesTheWiringItLacks(t *testing.T) {
 				_, err := w.newsletterGate(context.Background(), newsletterLock("site", "s1"))
 				return err
 			},
-			"test send":   func() error { _, err := w.testGate(context.Background(), "k"); return err },
-			"series":      func() error { _, err := w.seriesGate(context.Background(), "k"); return err },
-			"single send": func() error { _, err := w.singleSendGate(context.Background(), "k"); return err },
-			"template":    func() error { _, err := w.templateGate(context.Background(), "k"); return err },
+			"test send":       func() error { _, err := w.testGate(context.Background(), "k"); return err },
+			"series":          func() error { _, err := w.seriesGate(context.Background(), "k"); return err },
+			"provider ledger": func() error { _, err := w.providerLedgerGate(context.Background(), "k"); return err },
+			"progress":        func() error { _, err := w.progressGate(context.Background(), "k"); return err },
+			"single send":     func() error { _, err := w.singleSendGate(context.Background(), "k"); return err },
+			"template":        func() error { _, err := w.templateGate(context.Background(), "k"); return err },
 		}
 		for gate, take := range gates {
 			err := take()

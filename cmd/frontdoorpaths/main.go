@@ -202,7 +202,8 @@ var reachedThroughAggregate = map[string]declaration{
 		"request to the h2c catch-all, and the failure surfaces as a broken image in a " +
 		"recipient's inbox with nothing on our side naming the cause.",
 		server.TrackingPaths},
-	"EmailLinkPaths": {"appended by HandlerAuthorizedPaths() and SelfAuthenticatedPaths(); owner approved 2026-10-11, email-layouts-automations design section 4.4. Recipient browsers cannot speak gRPC; page-specific sealed tokens authorize exact routes; GET renders and POST acts.", server.EmailLinkPaths},
+	"AzureEmailFeedbackPaths": {"appended by HandlerAuthorizedPaths() and SelfAuthenticatedPaths(); owner-approved Azure Event Grid HTTP exception (memql#6037), authenticated by the receiver credential and resource-bound send receipt.", server.AzureEmailFeedbackPaths},
+	"EmailLinkPaths":          {"appended by HandlerAuthorizedPaths() and SelfAuthenticatedPaths(); owner approved 2026-10-11, email-layouts-automations design section 4.4. Recipient browsers cannot speak gRPC; page-specific sealed tokens authorize exact routes; GET renders and POST acts.", server.EmailLinkPaths},
 	"SitesBundlePaths": {"appended by HandlerAuthorizedPaths() (POST /sites/{id}/bundles, " +
 		"memql#3713). A documented HTTP exception, not an oversight: CLAUDE.md's " +
 		"endpoint-protocol table carries a row for it, on the same 'multipart maps poorly to " +

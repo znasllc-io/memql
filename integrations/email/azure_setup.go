@@ -16,6 +16,8 @@ import (
 )
 
 type azureSetup struct {
+	installation    *emailInstallation
+	readAssertion   func(string) ([]byte, error)
 	packageDefaults func() (*emailconfig.Campaigns, error)
 	store           *connectionStore
 	protocol        *azureProtocol
@@ -26,23 +28,24 @@ type azureSetup struct {
 }
 
 type azureSession struct {
-	ID              string    `json:"id"`
-	ClusterRevision string    `json:"clusterRevision"`
-	ClientID        string    `json:"clientId"`
-	OwnerID         string    `json:"ownerId"`
-	AccountID       string    `json:"accountId"`
-	ClusterID       string    `json:"clusterId,omitempty"`
-	Tenant          string    `json:"tenant"`
-	Status          string    `json:"status"`
-	DeviceCode      string    `json:"deviceCode,omitempty"`
-	UserCode        string    `json:"userCode,omitempty"`
-	VerificationURI string    `json:"verificationUri,omitempty"`
-	ExpiresAt       time.Time `json:"expiresAt"`
-	NextPollAt      time.Time `json:"nextPollAt"`
-	Interval        int       `json:"interval"`
-	AccessToken     string    `json:"accessToken,omitempty"`
-	RefreshToken    string    `json:"refreshToken,omitempty"`
-	TokenExpiresAt  time.Time `json:"tokenExpiresAt"`
+	WorkloadClientID string    `json:"workloadClientId,omitempty"`
+	ID               string    `json:"id"`
+	ClusterRevision  string    `json:"clusterRevision"`
+	ClientID         string    `json:"clientId"`
+	OwnerID          string    `json:"ownerId"`
+	AccountID        string    `json:"accountId"`
+	ClusterID        string    `json:"clusterId,omitempty"`
+	Tenant           string    `json:"tenant"`
+	Status           string    `json:"status"`
+	DeviceCode       string    `json:"deviceCode,omitempty"`
+	UserCode         string    `json:"userCode,omitempty"`
+	VerificationURI  string    `json:"verificationUri,omitempty"`
+	ExpiresAt        time.Time `json:"expiresAt"`
+	NextPollAt       time.Time `json:"nextPollAt"`
+	Interval         int       `json:"interval"`
+	AccessToken      string    `json:"accessToken,omitempty"`
+	RefreshToken     string    `json:"refreshToken,omitempty"`
+	TokenExpiresAt   time.Time `json:"tokenExpiresAt"`
 }
 
 func (a *azureSetup) clock() time.Time {
@@ -79,6 +82,16 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 	}
 	action := argString(args, "action")
 	options, _ := args["options"].(map[string]any)
+	if action == "feedback" {
+		if argString(options, "planId") == "" {
+			return nil, fmt.Errorf("reopen the email connection before enabling feedback")
+		}
+		result, err := a.ensureDeliveryFeedback(ctx, account, argString(options, "planId"))
+		if err != nil {
+			return nil, err
+		}
+		return configureResult(result)
+	}
 	if action == "exportPackage" {
 		organization, _ := rows[0]["domain"].(string)
 		if strings.TrimSpace(organization) == "" {
@@ -125,6 +138,14 @@ func (i *Integration) handleAzureSetup(ctx context.Context, args map[string]any,
 		})
 		if err != nil {
 			return nil, err
+		}
+		if action == "sender" {
+			feedback, feedbackErr := a.ensureDeliveryFeedback(ctx, account, argString(output, "planId"))
+			if feedbackErr != nil {
+				output["deliveryFeedback"] = "pending"
+			} else {
+				output["deliveryFeedback"] = feedback["deliveryFeedback"]
+			}
 		}
 		return configureResult(output)
 	}

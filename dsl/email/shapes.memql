@@ -8,6 +8,7 @@ shape capturedMessage capturedEmailStored {
 
 @row
 shape connectionState emailConnectionStateStored {
+  accountId
   row.id
   row.createdAt
   encryptedValue
@@ -21,4 +22,10 @@ shape sendOperation emailSendOperationStored {
   status
   nextPollAt
   encryptedValue
+}
+
+@row
+shape connectionState emailConnectionIndex {
+ row.id
+ accountId
 }

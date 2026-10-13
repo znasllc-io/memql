@@ -326,3 +326,10 @@ and the per-scene critique index stay outside this public repository.
 
 These fixture scenes verify layout and content. They do not claim that an
 Azure sender was provisioned or that a live model generated a document.
+
+Azure send receipts: `azure-email-sends`, `azure-email-sends-pending`, and
+`azure-email-sends-empty`. Choose **Our Studio**, open **Manage email for
+Our Studio**, then **Check sends**.
+These fixtures separate transport completion from timestamped recipient reports,
+show missing reports as unconfirmed, and expose feedback readiness with empty
+and populated lists. They never send email or provision Azure resources.

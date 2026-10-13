@@ -376,6 +376,7 @@ export const BoundConcepts = {
   campaignDeliveryCountByStatus: "v1:campaigns:delivery",
   campaignEngagementCountByKind: "v1:campaigns:engagementEvent",
   campaignEngagementRefs: "v1:campaigns:engagementEvent",
+  campaignProviderDeliveryCount: "v1:campaigns:delivery",
   campaignSeriesForCampaign: "v1:campaigns:campaignSeries",
   campaignSkipCountByReason: "v1:campaigns:delivery",
   campaignTestRuns: "v1:campaigns:campaign",

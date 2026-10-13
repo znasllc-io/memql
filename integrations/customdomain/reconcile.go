@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
-	"github.com/znasllc-io/memql/component/deploycontrol"
+	"github.com/znasllc-io/memql/core/capabilityresult"
 )
 
 // reconcile.go -- the sweep. One pass over every non-terminal binding, on the
@@ -319,21 +319,21 @@ func (r *Reconciler) request(b Binding) BindRequest {
 // reason, not the code. Anything else the script refuses on is issuance_failed
 // with its own sentence in the detail: an unrecognised refusal must still reach
 // the row rather than being dropped for not being on a list.
-func refusalReason(res deploycontrol.CapabilityResult) string {
+func refusalReason(res capabilityresult.CapabilityResult) string {
 	if reasonFromResult(res) == ReasonNoACMEIssuer {
 		return ReasonNoACMEIssuer
 	}
 	return ReasonIssuanceFailed
 }
 
-func refusalDetail(res deploycontrol.CapabilityResult, cerr error) string {
+func refusalDetail(res capabilityresult.CapabilityResult, cerr error) string {
 	if note := stringField(res, "detail"); note != "" {
 		return note
 	}
 	return cerr.Error()
 }
 
-func reasonFromResult(res deploycontrol.CapabilityResult) string {
+func reasonFromResult(res capabilityresult.CapabilityResult) string {
 	return stringField(res, "reason")
 }
 
@@ -343,11 +343,11 @@ func reasonFromResult(res deploycontrol.CapabilityResult) string {
 // object is not the same as holding a certificate, and a status that went live
 // on the apply would tell somebody their domain was serving while browsers
 // were still getting the ingress controller's self-signed default.
-func certificateReady(res deploycontrol.CapabilityResult) bool {
+func certificateReady(res capabilityresult.CapabilityResult) bool {
 	return boolField(res, "certificateReady")
 }
 
-func certificateNote(res deploycontrol.CapabilityResult) string {
+func certificateNote(res capabilityresult.CapabilityResult) string {
 	if note := stringField(res, "certificateStatus"); note != "" {
 		return note
 	}
@@ -362,7 +362,7 @@ func certificateNote(res deploycontrol.CapabilityResult) string {
 // `certificateReady` is read as NOT ready, so a script that stopped reporting
 // readiness would leave bindings waiting rather than declaring them live on no
 // evidence.
-func decodeResult(res deploycontrol.CapabilityResult) map[string]any {
+func decodeResult(res capabilityresult.CapabilityResult) map[string]any {
 	if len(res.Result) == 0 {
 		return map[string]any{}
 	}
@@ -373,7 +373,7 @@ func decodeResult(res deploycontrol.CapabilityResult) map[string]any {
 	return m
 }
 
-func stringField(res deploycontrol.CapabilityResult, key string) string {
+func stringField(res capabilityresult.CapabilityResult, key string) string {
 	m, ok := decodeResult(res)[key]
 	if !ok {
 		return ""
@@ -382,7 +382,7 @@ func stringField(res deploycontrol.CapabilityResult, key string) string {
 	return strings.TrimSpace(s)
 }
 
-func boolField(res deploycontrol.CapabilityResult, key string) bool {
+func boolField(res capabilityresult.CapabilityResult, key string) bool {
 	v, ok := decodeResult(res)[key]
 	if !ok {
 		return false

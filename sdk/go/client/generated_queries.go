@@ -1885,6 +1885,34 @@ func CampaignEngagementRefsBuild(args CampaignEngagementRefsArgs) string {
 	return b.String()
 }
 
+// CampaignProviderDeliveryCount -- Counts confirmed outcomes, not a subtraction from messages accepted by the transport.
+//
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["campaignProviderDeliveryCount"] in generated_concepts.go).
+type CampaignProviderDeliveryCountArgs struct {
+	CampaignId     string
+	ProviderStatus string
+}
+
+// CampaignProviderDeliveryCount calls the engine query campaignProviderDeliveryCount.
+func (qc *QueryClient) CampaignProviderDeliveryCount(ctx context.Context, args CampaignProviderDeliveryCountArgs) (*Result, error) {
+	call := CampaignProviderDeliveryCountBuild(args)
+	return qc.executeNamed(ctx, "campaignProviderDeliveryCount", call)
+}
+
+func CampaignProviderDeliveryCountBuild(args CampaignProviderDeliveryCountArgs) string {
+	var b strings.Builder
+	b.WriteString("query campaignProviderDeliveryCount(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 36 {
+		b.WriteString(", ")
+	}
+	b.WriteString("providerStatus: ")
+	b.WriteString(quoteMemQL(args.ProviderStatus))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CampaignSeriesForCampaign -- Current repeating instruction for this blueprint; organization authorization applies.
 //
 // Bound concept: v1:campaigns:campaignSeries (machine-readable: BoundConcepts["campaignSeriesForCampaign"] in generated_concepts.go).

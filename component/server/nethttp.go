@@ -1268,3 +1268,7 @@ func corsMiddleware(allowedOrigins []string, next http.Handler, router http.Hand
 		next.ServeHTTP(w, r)
 	})
 }
+
+// AzureEmailFeedbackPaths is the approved provider HTTP exception (#6037).
+// The handler authenticates Event Grid and correlates its original send receipt.
+func AzureEmailFeedbackPaths() []string { return pathsWithBase("/email/events/azure") }

@@ -974,3 +974,72 @@ query delivery deferredSingleSendById {
  filter row => actor.isClusterOwner == true && row.id == args.deliveryId
  shape deferredSendRef
 }
+
+/// Internal provider correlation after authentication. actor.userId scoping cannot represent a report after the sender loses membership; original row attribution is preserved.
+@actor
+@serverOnly
+@cache(0)
+query delivery providerDeliveryById {
+  args { deliveryId string! }
+  filter row => actor.isClusterOwner == true && row.id == args.deliveryId
+  shape deliveryFull
+}
+
+/// Internal idempotent provider audit lookup. actor.userId cannot represent a delayed external receipt.
+@actor
+@serverOnly
+@cache(0)
+query consentEvent providerConsentById {
+  args { eventId string! }
+  filter row => actor.isClusterOwner == true && row.id == args.eventId
+  shape providerConsentIdentity
+}
+
+/// Counts confirmed outcomes, not a subtraction from messages accepted by the transport.
+@actor
+query delivery campaignProviderDeliveryCount {
+  args {
+    campaignId string!
+    providerStatus string!
+  }
+  filter row => row.ownerUserId == actor.userId && row.campaignId == args.campaignId && row.providerStatus == args.providerStatus
+  count
+}
+
+/// Internal durable repair queue. actor.userId cannot represent delayed transport proof after access is revoked.
+@actor
+@serverOnly
+@cache(0)
+query delivery providerCountersToRepair {
+  filter row => actor.isClusterOwner == true && row.providerCountersPending == true
+  sort "row.createdAt", "asc"
+  paginate 100
+  shape providerCounterEntry
+}
+
+/// Internal historical attribution check; actor.userId cannot represent a revoked sender.
+@actor
+@serverOnly
+@cache(0)
+query campaign providerCounterCampaignById {
+  args { campaignId string! }
+  filter row => actor.isClusterOwner == true && row.id == args.campaignId
+  shape providerCounterCampaign
+}
+
+/// Internal exact repair scan, constrained to the original campaign, owner and organization.
+/// actor.userId scoping would suppress historical records after membership revocation.
+@actor
+@serverOnly
+@cache(0)
+query delivery providerCounterLedger {
+  args {
+    campaignId string!
+    ownerUserId string!
+    accountId string!
+  }
+  filter row => actor.isClusterOwner == true && row.campaignId == args.campaignId && row.ownerUserId == args.ownerUserId && row.accountId == args.accountId
+  sort "row.createdAt", "asc"
+  paginate 100
+  shape providerCounterEntry
+}

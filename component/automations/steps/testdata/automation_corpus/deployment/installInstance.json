@@ -10,8 +10,15 @@
             "acmeEmail": "s-acmeEmail",
             "agentId": "agent-1",
             "clusterName": "s-clusterName",
+            "communicationService": "s-communicationService",
             "createdBySubject": "subject-0",
             "dryRun": true,
+            "emailDataLocation": "s-emailDataLocation",
+            "emailIdentityName": "s-emailIdentityName",
+            "emailLocation": "s-emailLocation",
+            "emailReplyTo": "s-emailReplyTo",
+            "emailResourceGroup": "s-emailResourceGroup",
+            "emailService": "s-emailService",
             "esoClientId": "s-esoClientId",
             "fromRevision": "s-fromRevision",
             "id": "v1:probe:thing:1",
@@ -95,6 +102,34 @@
             },
             "kind": "action",
             "name": "wireExternalSecrets"
+          },
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "namespace": "s-namespace",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "inspectAzureEmail"
+          },
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "communicationService": "s-communicationService",
+              "dryRun": true,
+              "emailDataLocation": "s-emailDataLocation",
+              "emailIdentityName": "s-emailIdentityName",
+              "emailLocation": "s-emailLocation",
+              "emailResourceGroup": "s-emailResourceGroup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "emailService": "s-emailService",
+              "namespace": "s-namespace",
+              "replyTo": "s-emailReplyTo",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "configureAzureEmail"
           },
           {
             "args": {
@@ -148,8 +183,15 @@
             "acmeEmail": "s-acmeEmail",
             "agentId": "agent-1",
             "clusterName": "s-clusterName",
+            "communicationService": "s-communicationService",
             "createdBySubject": "subject-0",
             "dryRun": true,
+            "emailDataLocation": "s-emailDataLocation",
+            "emailIdentityName": "s-emailIdentityName",
+            "emailLocation": "s-emailLocation",
+            "emailReplyTo": "s-emailReplyTo",
+            "emailResourceGroup": "s-emailResourceGroup",
+            "emailService": "s-emailService",
             "esoClientId": "s-esoClientId",
             "fromRevision": "s-fromRevision",
             "id": "v1:probe:thing:1",
@@ -236,6 +278,34 @@
           },
           {
             "args": {
+              "clusterName": "s-clusterName",
+              "namespace": "s-namespace",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "inspectAzureEmail"
+          },
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "communicationService": "s-communicationService",
+              "dryRun": true,
+              "emailDataLocation": "s-emailDataLocation",
+              "emailIdentityName": "s-emailIdentityName",
+              "emailLocation": "s-emailLocation",
+              "emailResourceGroup": "s-emailResourceGroup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "emailService": "s-emailService",
+              "namespace": "s-namespace",
+              "replyTo": "s-emailReplyTo",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "configureAzureEmail"
+          },
+          {
+            "args": {
               "dryRun": true,
               "project": "s-repoProject",
               "repoUrl": "s-repoUrl",
@@ -286,8 +356,15 @@
             "acmeEmail": "s-acmeEmail",
             "agentId": "agent-1",
             "clusterName": "s-clusterName",
+            "communicationService": "s-communicationService",
             "createdBySubject": "subject-0",
             "dryRun": true,
+            "emailDataLocation": "s-emailDataLocation",
+            "emailIdentityName": "s-emailIdentityName",
+            "emailLocation": "s-emailLocation",
+            "emailReplyTo": "s-emailReplyTo",
+            "emailResourceGroup": "s-emailResourceGroup",
+            "emailService": "s-emailService",
             "esoClientId": "s-esoClientId",
             "fromRevision": "s-fromRevision",
             "id": "v1:probe:thing:1",
@@ -374,6 +451,34 @@
           },
           {
             "args": {
+              "clusterName": "s-clusterName",
+              "namespace": "s-namespace",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "inspectAzureEmail"
+          },
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "communicationService": "s-communicationService",
+              "dryRun": true,
+              "emailDataLocation": "s-emailDataLocation",
+              "emailIdentityName": "s-emailIdentityName",
+              "emailLocation": "s-emailLocation",
+              "emailResourceGroup": "s-emailResourceGroup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "emailService": "s-emailService",
+              "namespace": "s-namespace",
+              "replyTo": "s-emailReplyTo",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "configureAzureEmail"
+          },
+          {
+            "args": {
               "dryRun": true,
               "project": "s-repoProject",
               "repoUrl": "s-repoUrl",
@@ -424,8 +529,15 @@
             "acmeEmail": "s-acmeEmail",
             "agentId": "agent-1",
             "clusterName": "s-clusterName",
+            "communicationService": "s-communicationService",
             "createdBySubject": "subject-0",
             "dryRun": true,
+            "emailDataLocation": "s-emailDataLocation",
+            "emailIdentityName": "s-emailIdentityName",
+            "emailLocation": "s-emailLocation",
+            "emailReplyTo": "s-emailReplyTo",
+            "emailResourceGroup": "s-emailResourceGroup",
+            "emailService": "s-emailService",
             "esoClientId": "s-esoClientId",
             "fromRevision": "s-fromRevision",
             "id": "v1:probe:thing:1",
@@ -509,6 +621,34 @@
             },
             "kind": "action",
             "name": "wireExternalSecrets"
+          },
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "namespace": "s-namespace",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "inspectAzureEmail"
+          },
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "communicationService": "s-communicationService",
+              "dryRun": true,
+              "emailDataLocation": "s-emailDataLocation",
+              "emailIdentityName": "s-emailIdentityName",
+              "emailLocation": "s-emailLocation",
+              "emailResourceGroup": "s-emailResourceGroup-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "emailService": "s-emailService",
+              "namespace": "s-namespace",
+              "replyTo": "s-emailReplyTo",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "configureAzureEmail"
           },
           {
             "args": {

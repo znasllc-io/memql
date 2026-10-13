@@ -42,6 +42,7 @@ automation campaignDrainWorkflow {
  builtin campaignApplyWarmup()
  jobs := builtin campaignDrainableJobs()
  for id in jobs { builtin campaignDrainJob(id: id) }
+ builtin campaignRepairProviderCounters()
  builtin campaignFlushReputation()
 }
 

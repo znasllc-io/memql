@@ -29,7 +29,8 @@ func (a *azureSetup) connectionAction(ctx context.Context, account, action strin
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"status": "ok", "operations": rows, "deliveryFeedback": "not-configured"}, nil
+		status, err := a.feedbackStatus(ctx, account)
+		return map[string]any{"status": "ok", "operations": rows, "deliveryFeedback": status}, err
 	}
 	if action == "status" {
 		found, _, err := a.store.read(ctx, "organization:"+account, &connection)
@@ -107,7 +108,7 @@ func (a *azureSetup) resourceAction(ctx context.Context, session azureSession, a
 			if err := a.claimResources(ctx, session.AccountID, plan); err != nil {
 				return err
 			}
-			ready, err := a.protocol.ensureSubscription(ctx, session.AccessToken, session.ClusterID, plan)
+			ready, err := a.protocol.ensureSubscription(ctx, session.AccessToken, session.ClusterID, plan, session.WorkloadClientID != "")
 			if err != nil {
 				return err
 			}

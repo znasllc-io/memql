@@ -20,6 +20,7 @@ var BFFHTTPPaths = []string{
 	"/.well-known/memql-config.json",
 	"/.well-known/jwks.json",
 	"/automations/resume",
+	"/email/events/azure",
 	"/email/preferences",
 	"/auth/callback",
 	"/auth/exchange",

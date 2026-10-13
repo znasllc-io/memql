@@ -9,6 +9,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/deploycontrol"
+	"github.com/znasllc-io/memql/core/capabilityresult"
 )
 
 // provision.go -- the two objects a bound custom domain needs, and the two
@@ -45,7 +46,7 @@ import (
 //	                               same transport and the same reasoning.
 //	elsewhere -> scriptProvisioner the allowlisted capability script, through
 //	                               steps.RunCapabilityScript and
-//	                               deploycontrol.ParseCapabilityResult.
+//	                               capabilityresult.ParseCapabilityResult.
 //
 // Both write the SAME two objects with the same names and the same field
 // manager, so a domain bound by one and re-reconciled by the other converges
@@ -518,7 +519,7 @@ func (p *scriptProvisioner) dispatch(ctx context.Context, id string, params map[
 // resolves through.
 type allowlistedScripts struct{}
 
-func (allowlistedScripts) Run(ctx context.Context, id string, params map[string]any) (deploycontrol.CapabilityResult, error) {
+func (allowlistedScripts) Run(ctx context.Context, id string, params map[string]any) (capabilityresult.CapabilityResult, error) {
 	return steps.RunCapabilityScript(ctx, id, params)
 }
 
@@ -530,7 +531,7 @@ func (allowlistedScripts) Run(ctx context.Context, id string, params map[string]
 // never-issue-before-verified proof a unit test rather than a cluster-e2e lane
 // that CI skips on every runner.
 type ScriptRunner interface {
-	Run(ctx context.Context, id string, params map[string]any) (deploycontrol.CapabilityResult, error)
+	Run(ctx context.Context, id string, params map[string]any) (capabilityresult.CapabilityResult, error)
 }
 
 // The two capability-script ids, registered in

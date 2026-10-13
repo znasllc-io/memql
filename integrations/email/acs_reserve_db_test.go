@@ -38,9 +38,9 @@ type gatedOperations struct {
 	waitFor time.Duration
 }
 
-func (g *gatedOperations) lock(ctx context.Context, key string) (func(), error) {
+func (g *gatedOperations) lock(ctx context.Context, key string, keys ...string) (acsOperationGate, error) {
 	g.locks.Add(1)
-	return memql.AcquireWriteGatesWithin(ctx, g.pool, g.waitFor, "email-operation:"+key)
+	return memql.AcquireGateHold(ctx, g.pool, g.waitFor, append([]string{"email-operation:" + key}, keys...)...)
 }
 
 // replicaGatePool opens one replica's write-gate pool, as its database opens one
