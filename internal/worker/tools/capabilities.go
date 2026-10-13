@@ -129,9 +129,13 @@ func computeCapabilities(goos string, getenv func(string) string) CapabilityDesc
 	if displayServer == "quartz" || displayServer == "x11" {
 		displays = displayCount()
 	}
+	contracts := map[string]int{"workerHost.pipeline_step": 3}
+	if goos == "darwin" || goos == "linux" {
+		contracts["workerHost.computer_permission"] = 1
+	}
 	return CapabilityDescriptor{
 		Architecture:         runtime.GOARCH,
-		ActionContracts:      map[string]int{"workerHost.pipeline_step": 3},
+		ActionContracts:      contracts,
 		Platform:             goos,
 		DisplayServer:        displayServer,
 		ComputerUseAvailable: buildHasComputerUse,

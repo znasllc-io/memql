@@ -190,6 +190,9 @@ func (d *Dispatcher) DispatchStream(ctx context.Context, dispatch *memqlv1.ToolD
 		}
 	}
 
+	if dispatch.GetComputerPermission() != nil {
+		return d.dispatchComputerPermission(ctx, dispatch, args)
+	}
 	switch tool {
 	case "workerHost":
 		success, failure = d.dispatchHost(ctx, action, args, dispatch.GetAgentId(), d.streamTo(callId, send))

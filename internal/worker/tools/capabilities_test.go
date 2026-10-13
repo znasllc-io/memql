@@ -20,6 +20,19 @@ func fakeEnv(vars map[string]string) func(string) string {
 	return func(key string) string { return vars[key] }
 }
 
+func TestComputerPermissionContractOnlyAdvertisesSupportedPlatforms(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux", "windows", "freebsd"} {
+		got := computeCapabilities(platform, fakeEnv(nil)).ActionContracts["workerHost.computer_permission"]
+		want := 0
+		if platform == "darwin" || platform == "linux" {
+			want = 1
+		}
+		if got != want {
+			t.Fatalf("platform %s advertised contract %d, want %d", platform, got, want)
+		}
+	}
+}
+
 func TestComputeCapabilities_Headless(t *testing.T) {
 	// This test file is !computeruse, so it always exercises the headless
 	// variant: computerUseAvailable=false, empty actions, displayServer
