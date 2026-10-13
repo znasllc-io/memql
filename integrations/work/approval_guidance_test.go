@@ -1,6 +1,7 @@
 package work
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,71 @@ func guidanceFixture(t *testing.T, kind string) (*Integration, *recordingEngine,
 	eng.reply("workApprovalsForOwner", approval)
 	eng.reply("workRunForOwner", run)
 	return i, eng, approval, run
+}
+
+func TestGuidanceRecoversOnlyTheExactRecordedAnswerAfterResumeFailure(t *testing.T) {
+	i, eng, approval, run := guidanceFixture(t, workstate.ApprovalKindScopeElevation)
+	ctx := callerContext(actOwner)
+	args := map[string]any{"approvalId": approval["id"], "decision": "answered", "answer": map[string]any{"feedback": "Read the repository only."}}
+	eng.refuse("updateWorkRun", errors.New("connection lost after recording answer"))
+	nodes, err := i.handleDecideApproval(ctx, args, 0)
+	require.NoError(t, err)
+	require.Equal(t, false, decodeReply(t, nodes)["runResumed"])
+	require.Contains(t, decodeReply(t, nodes)["resumeError"], "connection lost")
+	decision := argsOf(t, eng, "decideWorkApproval")
+	approval["decision"], approval["answer"], approval["decidedBy"] = decision["decision"], decision["answer"], decision["decidedBy"]
+	eng.reply("workApprovalsForOwner")
+	eng.reply("workApprovalForOwner", approval)
+	eng.refuse("updateWorkRun", nil)
+
+	// A changed answer is not an idempotent replay and cannot authorize a plan.
+	_, err = i.handleDecideApproval(ctx, map[string]any{"approvalId": approval["id"], "decision": "answered", "answer": map[string]any{"feedback": "Read everything instead."}}, 0)
+	require.Error(t, err)
+	require.Len(t, eng.callsTo("updateWorkRun"), 1)
+	nodes, err = i.handleDecideApproval(ctx, args, 0)
+	require.NoError(t, err)
+	require.Equal(t, true, decodeReply(t, nodes)["runResumed"])
+	require.Len(t, eng.callsTo("decideWorkApproval"), 1)
+	updates := eng.callsTo("updateWorkRun")
+	require.Len(t, updates, 2)
+	update := updates[1].Args(t)
+	require.Equal(t, waitKindReplan, rowString(rowMap(update, "waitingOn"), "kind"))
+	for key, value := range update {
+		if key != "runId" {
+			run[key] = value
+		}
+	}
+	// Once handed off, the same retry acknowledges it without nudging work again.
+	nodes, err = i.handleDecideApproval(ctx, args, 0)
+	require.NoError(t, err)
+	require.Equal(t, true, decodeReply(t, nodes)["runResumed"])
+	require.Len(t, eng.callsTo("updateWorkRun"), 2)
+}
+
+func TestRecordedGuidanceCannotResumeACancelledOrMovedRun(t *testing.T) {
+	for _, scenario := range []string{"cancelled", "other approval", "other owner"} {
+		t.Run(scenario, func(t *testing.T) {
+			i, eng, approval, run := guidanceFixture(t, workstate.ApprovalKindScopeElevation)
+			approval["decision"], approval["decidedBy"], approval["answer"] = "answered", actOwner, map[string]any{"feedback": "Read the repository only."}
+			eng.reply("workApprovalsForOwner")
+			eng.reply("workApprovalForOwner", approval)
+			switch scenario {
+			case "cancelled":
+				run["cancelRequested"] = true
+			case "other approval":
+				rowMap(run, "waitingOn")["subject"] = "another-request"
+			case "other owner":
+				approval["ownerUserId"] = "other-owner"
+			}
+			result, err := i.recoverGuidanceDecision(callerContext(actOwner), rowString(approval, "id"), "answered", map[string]any{"feedback": "Read the repository only."})
+			require.NoError(t, err)
+			if result != nil {
+				require.Equal(t, false, result["runResumed"])
+			}
+			require.Empty(t, eng.callsTo("updateWorkRun"))
+			require.Empty(t, eng.callsTo("decideWorkApproval"))
+		})
+	}
 }
 
 func TestGuidanceReconsidersTheUnfinishedWorkWithoutApprovingAcrossReplicas(t *testing.T) {

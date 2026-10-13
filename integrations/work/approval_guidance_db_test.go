@@ -39,7 +39,8 @@ func TestGuidanceDBPersistsOnceAcrossReplicasWithoutGrantingAccess(t *testing.T)
 		}(n, peer)
 	}
 	wg.Wait()
-	require.NotEqual(t, errs[0] == nil, errs[1] == nil, "exactly one racing decision must land: %v", errs)
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1]) // An identical retry recovers the recorded answer.
 	run, err := b.i.store().runForOwner(memql.ContextWithFreshRead(person), runID)
 	require.NoError(t, err)
 	require.Equal(t, runStatusWaiting, rowString(run, "status"))
@@ -56,6 +57,10 @@ func TestGuidanceDBPersistsOnceAcrossReplicasWithoutGrantingAccess(t *testing.T)
 	require.Len(t, rows, 1)
 	require.Equal(t, "answered", rowString(rows[0], "decision"))
 	require.Equal(t, map[string]any{"feedback": guidance}, rowMap(rows[0], "answer"))
+	var decisions int
+	err = a.db.NewRaw(`SELECT count(*) FROM "MemoryNodes" WHERE concept = 'v1:work:approval' AND id = ? AND payload->>'decision' = 'answered'`, "v1:work:approval:"+memql.BareShortId(approvalID)).Scan(person, &decisions)
+	require.NoError(t, err)
+	require.Equal(t, 1, decisions, "an identical retry must not write another answer version")
 	require.False(t, b.i.ApprovalGuidanceAvailable(person, rows[0]))
 	for _, step := range a.query(t, a.owner, "query "+call("workStepsForOwnerRun", map[string]any{"runId": runID})) {
 		if rowString(step, "key") == "fetch" {

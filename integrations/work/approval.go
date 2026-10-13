@@ -79,6 +79,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		}
 	}
 	if approval == nil {
+		if recovered, err := i.recoverGuidanceDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
+			return nil, err
+		} else if recovered != nil {
+			return i.resultNode(recovered), nil
+		}
 		if recovered, err := i.recoverReviewDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
 			return nil, err
 		} else if recovered != nil {
@@ -269,8 +274,7 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		// A human asked for a different approach, not for the gated operation
 		// to execute. The existing replan wait keeps the completed prefix and
 		// all permission and spending checks; this answer grants nothing.
-		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId), symptom: work.SymptomPlan,
-			reason: "The person supplied guidance instead of approving the blocked action. Reconsider the unfinished work using this guidance; no permission or budget increase was granted.\n" + guidance + "\nOriginal request: " + rowString(approval, "question")}
+		retry = guidanceRetry(approval, guidance, strings.TrimSpace(ac.UserId))
 	}
 	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, retry, now)
 	if err != nil {

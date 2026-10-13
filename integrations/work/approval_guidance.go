@@ -40,6 +40,13 @@ func (i *Integration) ApprovalGuidanceAvailable(ctx context.Context, approval ma
 }
 
 func (i *Integration) validateApprovalGuidance(ctx context.Context, approval map[string]any) error {
+	if rowString(approval, "decision") != "" {
+		return fmt.Errorf("work: guidance needs this person's pending request")
+	}
+	return i.validateGuidanceRun(ctx, approval)
+}
+
+func (i *Integration) validateGuidanceRun(ctx context.Context, approval map[string]any) error {
 	principal, err := requirePrincipal(ctx)
 	if err != nil {
 		return err
@@ -47,7 +54,7 @@ func (i *Integration) validateApprovalGuidance(ctx context.Context, approval map
 	if run, running := common.RunFromContext(ctx); principal.Synthetic || principal.Unranked || (running && run.RunId != "") {
 		return fmt.Errorf("work: guidance requires a person's interactive decision")
 	}
-	if rowString(approval, "decision") != "" || memql.BareShortId(rowString(approval, "ownerUserId")) != memql.BareShortId(principal.UserId) {
+	if memql.BareShortId(rowString(approval, "ownerUserId")) != memql.BareShortId(principal.UserId) {
 		return fmt.Errorf("work: guidance needs this person's pending request")
 	}
 	if !workstate.ApprovalAcceptsGuidance(rowString(approval, "kind"), rowMap(approval, "subject"), approval["options"]) {
@@ -68,4 +75,50 @@ func (i *Integration) validateApprovalGuidance(ctx context.Context, approval map
 		return fmt.Errorf("work: this run is no longer waiting on the request being discussed")
 	}
 	return nil
+}
+
+func guidanceRetry(approval map[string]any, text, decidedBy string) *failureRetry {
+	return &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: decidedBy, symptom: workstate.SymptomPlan,
+		reason: "The person supplied guidance instead of approving the blocked action. Reconsider the unfinished work using this guidance; no permission or budget increase was granted.\n" + text + "\nOriginal request: " + rowString(approval, "question")}
+}
+
+// Recover only an exact human guidance receipt after its decision committed but
+// resuming the run failed. The caller holds the same approval decision gate.
+// No second answer is written and a changed answer never borrows this receipt.
+func (i *Integration) recoverGuidanceDecision(ctx context.Context, approvalID, decision string, answer map[string]any) (map[string]any, error) {
+	text, ok := answer["feedback"].(string)
+	text = strings.TrimSpace(text)
+	if decision != "answered" || !ok || text == "" || len(answer) != 1 || utf8.RuneCountInString(text) > maxApprovalGuidanceCharacters {
+		return nil, nil
+	}
+	rows, err := i.store().query(ctx, "query "+call("workApprovalForOwner", map[string]any{"approvalId": approvalID}))
+	if err != nil || len(rows) != 1 {
+		return nil, err
+	}
+	approval := rows[0]
+	if rowString(approval, "decision") != "answered" || rowString(rowMap(approval, "answer"), "feedback") != text || len(rowMap(approval, "answer")) != 1 ||
+		memql.BareShortId(rowString(approval, "ownerUserId")) != memql.BareShortId(callerUserId(ctx)) ||
+		memql.BareShortId(rowString(approval, "decidedBy")) != memql.BareShortId(callerUserId(ctx)) {
+		return nil, nil
+	}
+	result := map[string]any{"approvalId": approvalID, "runId": rowString(approval, "runId"), "decision": "answered", "runResumed": false}
+	run, err := i.readActRun(ctx, rowString(approval, "runId"))
+	if err != nil {
+		result["resumeError"] = err.Error()
+		return result, nil
+	}
+	if memql.BareShortId(rowString(run.row, "humanResumeId")) == memql.BareShortId(approvalID) {
+		result["runResumed"] = true
+		return result, nil
+	}
+	if err := i.validateGuidanceRun(ctx, approval); err != nil {
+		result["resumeError"] = err.Error()
+		return result, nil
+	}
+	resumed, err := i.resumeParkedRun(ownerActor(ctx, rowString(approval, "ownerUserId")), rowString(approval, "runId"), approvalID, "answered", guidanceRetry(approval, text, callerUserId(ctx)), i.clock().UTC())
+	result["runResumed"] = resumed
+	if err != nil {
+		result["resumeError"] = err.Error()
+	}
+	return result, nil
 }
