@@ -472,7 +472,7 @@ function ApprovalDetail({
       ? []
       : Object.entries(approval.subject ?? {}).filter(
           ([key]) => (shutDoors === null || (key !== "doors" && key !== "code"))
-            && (approval.kind !== "budget" || (key !== "resumeKind" && key !== "resumeReason")),
+            && (approval.kind !== "budget" || (key !== "resumeKind" && key !== "resumeReason" && key !== "continuationId")),
         );
 
   return (

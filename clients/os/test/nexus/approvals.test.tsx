@@ -753,13 +753,14 @@ it("opens a typed question in Ask without sending a decision from Nexus", async 
 describe("a budget approval", () => {
   it("shows the allowance without exposing internal recovery metadata", async () => {
     const conn = fakeConnection({ approvals: [approvalRow({ id: "budget-replan", kind: "budget", question: "More calls needed", subject: {
-      ceiling: "modelCalls", limit: "48 calls", actual: "48 made", resumeKind: "replan", resumeReason: "internal recovery diagnostic",
+      ceiling: "modelCalls", limit: "48 calls", actual: "48 made", resumeKind: "checkpoint", resumeReason: "internal recovery diagnostic", continuationId: "continuation-private-receipt",
     } })] });
     mount(conn);
     fireEvent.click(await screen.findByText("More calls needed"));
     expect(screen.getByText("48 calls")).toBeTruthy();
     expect(screen.getByText("48 made")).toBeTruthy();
     expect(screen.queryByText("resumeKind")).toBeNull();
+    expect(screen.queryByText("continuation-private-receipt")).toBeNull();
     expect(screen.queryByText("internal recovery diagnostic")).toBeNull();
     fireEvent.change(screen.getByLabelText("New total model calls"), { target: { value: "96" } });
     // Raise limit just joined the bar, and a bar that has just changed takes no press for a moment.
