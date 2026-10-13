@@ -63,6 +63,29 @@ MemQL does step 1 and 2. CI does step 3. The platform records what it did on a
 was *asked for*. Whether it finished is a question only the container registry
 answers, which is what `releaseCutStatus` is for -- see section 6.
 
+### Recover a partial registry publication
+
+If an engine build published a node's version tag in ACR but failed before
+publishing it in GHCR, use the manual `recover-engine-image-mirror.yml`
+workflow on `main`. Supply the bare `version`, the release's full
+`source_sha`, the `node`, and the exact ACR manifest `digest` recorded by the
+build. This repairs the existing release; it does not require another version.
+
+The recovery verifies the published release, its tag and `VERSION`, the ACR
+version tag and manifest/config hashes, and the image's Linux/amd64 platform.
+It extracts `/app/memql` from a stopped container and reads Go build metadata
+to verify the linked release, source commit and node without executing the
+image. Existing images need no revision label for this check.
+
+Only a successful GHCR tag listing establishes that the destination is
+missing. An identical existing digest is a verified no-op; a different digest
+is refused. Recovery shares the original builder's per-version concurrency
+group, uses `skopeo copy --all --preserve-digests`, and hashes the destination's
+raw manifest after copying. It never rebuilds an image or replaces an existing
+version tag. Registry failures stop the run; retry the same inputs after
+resolving the failure. The run summary records both image references and the
+verified digest. Deploy only after every required node image is available.
+
 ---
 
 ## 2. Configure the repository and release access
