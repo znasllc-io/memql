@@ -70,6 +70,29 @@ enables the switch. Offline nodes still block it. Downgrading after activation
 requires a complete backup restore; an old binary cannot read the observation
 store.
 
+## Steady writers
+
+Custom-domain `lastCheckedAt` and mirror `lastReconcileAt` / `lastAttemptAt`
+use the same current-observation store. Rechecking a healthy domain or a mirror
+with no drift advances its freshness and scheduling watermark without another
+business version. Changes to status, failures, drift or configuration still append
+history. Identical repeated results do nothing. This extension has its own
+`memory_reconcile_observation_readers` handshake, so an older reader that knows
+only the first three liveness concepts cannot enable it prematurely.
+
+Observation-only writes still refresh live readers and invalidate caches across
+replicas, but do not release a held scheduled work journal. Unchanged inbound
+retries also suppress graph events: the comparison runs after validation,
+create-only fields and read-merge, under the row's transaction fence. A retry
+cannot reset a processed delivery's state or its original arrival metadata.
+
+Reputation flushes acknowledge successfully saved windows and skip unchanged
+ones; failed saves remain eligible for retry. The magic-link sweep excludes
+already consumed requests. Package polling writes only a changed upstream head
+or availability, and seed materialization compares against a fresh read rather
+than a replica's cached result. These guards keep normal idle polling from
+creating business history.
+
 ## Shared row schemas
 
 `MemoryNodes` and `SecretMemoryNodes` store an immutable schema reference and
