@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 export const AUTO_REFRESH_MS = 15_000;
 
@@ -14,7 +14,9 @@ export function AutoRefresh({ onRefresh, busy = false, enabled = true, intervalM
 }) {
   const marker = useRef<HTMLSpanElement>(null);
   const latest = useRef({ onRefresh, busy, enabled });
-  useEffect(() => { latest.current = { onRefresh, busy, enabled }; });
+  // Focus/online events can arrive after a commit but before passive effects.
+  // Publish the committed read state before those events can use stale flags.
+  useLayoutEffect(() => { latest.current = { onRefresh, busy, enabled }; });
   useEffect(() => {
     let disposed = false;
     let running = false;
