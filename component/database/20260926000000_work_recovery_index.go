@@ -129,7 +129,9 @@ func ensureNamedWorkIndex(ctx context.Context, db *bun.DB, logger *slog.Logger, 
 	if st.Hypertable {
 		stmt += ` WITH (timescaledb.transaction_per_chunk)`
 	}
-	stmt += ` WHERE ` + predicate
+	if predicate != "" {
+		stmt += ` WHERE ` + predicate
+	}
 	if err := s.ddl(ctx, stmt); err != nil {
 		return err
 	}

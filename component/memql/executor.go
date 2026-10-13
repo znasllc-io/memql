@@ -175,6 +175,9 @@ func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.Quer
 		return nil, err
 	}
 
+	if err := memorynodes.HydrateSchemas(ctx, s.db, nodes); err != nil {
+		return nil, err
+	}
 	return nodes, nil
 }
 
@@ -1124,6 +1127,9 @@ func (e *MemQLEngine) buildGraphBundle(ctx context.Context, nodes []memorynodes.
 	if len(nodes) == 0 {
 		return builder.toBundle(), nil
 	}
+	if err := memorynodes.HydrateSchemas(ctx, e.database(), nodes); err != nil {
+		return nil, err
+	}
 
 	for _, node := range nodes {
 		builder.addRoot(node.ID)
@@ -1145,6 +1151,12 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		visited[id] = struct{}{}
 	}
 
+	// Roots were hydrated in a batch; relationship reads may carry references.
+	schemaRows := []memorynodes.MemoryNode{node}
+	if err := memorynodes.HydrateSchemas(ctx, e.database(), schemaRows); err != nil {
+		return err
+	}
+	node = schemaRows[0]
 	apiNode, err := toAPIMemoryNode(&node)
 	if err != nil {
 		return err

@@ -16,6 +16,50 @@ The earlier audit/safety jobs remain count observations; this central job is now
 the actual archive/delete path. Worker soft deletion remains a UI lifecycle step;
 physical retention measures from the latest version, including that tombstone.
 
+## Shared row schemas
+
+`MemoryNodes` and `SecretMemoryNodes` store an immutable schema reference and
+its original `$id`. The schema body lives once in `memory_node_schemas`, keyed
+by its content fingerprint. Different historical definitions remain distinct;
+reads resolve the version a row actually used, including deletion schemas.
+Insert triggers also cover direct writers and backup restores. A missing
+reference is refused rather than returned as a partial schema.
+
+During a rolling upgrade, normalization waits until every registered node that
+has not stopped has recently advertised schema-reference support in
+`memory_schema_readers`. An offline node still blocks: it may be serving reads.
+Once the cluster is ready, `memory_schema_storage.references_enabled` is set and
+remains set. An orphan node that never records its stopped state must be retired
+through the existing topology lifecycle before conversion can start.
+
+Public graph reads, repository reads, backups and retention archives expand
+references to full schemas. Backups and archives therefore remain self-contained
+and keep their existing format. The catalog is not garbage-collected.
+
+Existing inline schemas are converted after startup, in batches of at most
+500 rows. A shared cursor row is locked in the same transaction as each batch;
+other replicas skip a held batch, and a replacement resumes committed progress.
+Each table is eligible at most once every five seconds, each batch has a
+five-second deadline, and failures back off for one minute. Payloads, provenance,
+IDs and version timestamps are unchanged. The conversion runs independently
+of node liveness and never holds startup for a history rewrite. Schema-only
+updates do not enqueue work-run recovery invalidations.
+
+Inspect conversion progress with:
+
+```sql
+SELECT table_name, cursor_id, cursor_at, completed, next_at
+FROM memory_schema_compaction;
+```
+
+Conversion makes old row storage reusable; it does not promise to shrink the
+volume immediately. New writes stop copying schema bodies after the reader
+readiness gate enables normalization. Older and converted rows can coexist during
+conversion. Downgrading to an engine without schema-reference support requires
+a full-schema backup restore; the down migration refuses to discard the catalog.
+
+## Incident context
+
 The September 2026 incident audit found 103,324 runs across about 17 days:
 98,838 scheduled, 2,481 webhook-triggered, 1,667 startup, 323 shutdown, four manual
 and two system goal runs. Approximately 5,500–7,800 runs/day reflected the
@@ -129,17 +173,14 @@ true` in the result; the policies after it still run with their shares. The
 system-run policy is fifth of eight, so with nothing to do before it, it may
 spend a quarter of the four minutes, a minute.
 
-Nothing is stored between nights. The next pass starts again at the oldest
-version still stored, which is not always where the work is: a version no policy
-retires (a person's run, an old version of live work) anchors the start, and the
-windows from there to the work are read again every night and found to hold no
-candidate. A window with no version stored at all is jumped, so a version dated
-1970 costs a few reads and not tens of thousands; a window that holds versions
-no policy retires is read and passed, at about 21 ms at 5,000 runs a day, so
-roughly 10 to 30 s per year of installation age, per policy. A backlog is
-retired over as many nights as it takes, oldest first, and a persisted low-water
-mark or an index on `(concept, "createdAt")` that would end the re-walk is
-deferred to release 2.
+Completed pages and day windows are checkpointed in `work_retention_progress`,
+keyed by concept, policy and configured lifetime. A different cron leader resumes
+from that point. A generation fence refuses a stale replica's attempt to rewind
+it, and dry runs neither consume nor alter progress. A complete traversal resets
+the checkpoint: dependency-protected records, denied rows and backdated inserts
+must be reconsidered on a later cycle. The `(concept, createdAt, id)` index makes
+these day probes cheap even when years of protected history remain. Empty spans
+are skipped directly to the next stored version.
 
 Two statements were the ones that timed out. The batch's version load joined the
 parents' lookup to the children's with an OR, which the planner answers by
@@ -153,16 +194,13 @@ retired 21,832 runs in ten minutes and fifty seconds now retires all 43,019 in a
 little over a minute. The measurements and the plans are in the header comment of
 `operationalRetention` (`integrations/work/operational_retention.go`).
 
-Not bounded by a day: the goal policy's "no run of it remains" compares every run
-version with the goal and no index serves it (0.34 s a read at 600,000 run
-versions, 1.26 s with cold buffers). That is accepted for this release; it runs
-last, so a failure there costs nothing that went before it, and the partial
-expression index on the run's `goalId` that would bound it is deferred to
-release 2. The journal sweep's expired-rows read takes the latest version of
-every id of one concept (0.41 s for 400,000 model-call versions) and grows with
-the concept; windowing it is deferred to release 2. It no longer decides the
-night: `workRetentionSweep` runs the operational policies even when the journal
-half fails, and returns both errors.
+The goal policy's dependency check now uses a partial expression index on
+normalized `goalId`, matching both canonical and historical bare references.
+Index migrations use the verified per-chunk builder: interrupted builds and
+missing chunk coverage are repaired before success is reported. Journal detail
+reads use the same hundred-row day windows and latest-version/active-parent
+checks as operational retention. `workRetentionSweep` still runs both halves
+independently and returns both errors if they fail.
 
 ## Safeguards
 

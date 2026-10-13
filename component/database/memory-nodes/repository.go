@@ -156,6 +156,9 @@ func (db *MemoryNodesDatabase) ListRecentMemoryNodes(ctx context.Context, create
 		return nil, err
 	}
 
+	if err := HydrateSchemas(ctx, bunDB, nodes); err != nil {
+		return nil, err
+	}
 	return nodes, nil
 }
 
@@ -188,7 +191,11 @@ func (db *MemoryNodesDatabase) LoadMemoryNode(ctx context.Context, id string) (*
 		return nil, err
 	}
 
-	return &node, nil
+	rows := []MemoryNode{node}
+	if err := HydrateSchemas(ctx, bunDB, rows); err != nil {
+		return nil, err
+	}
+	return &rows[0], nil
 }
 
 // staged-data: MUST-NOT-GATE -- see ListRecentMemoryNodes above. This one is
@@ -232,6 +239,9 @@ func (db *MemoryNodesDatabase) FindMemoryNodes(ctx context.Context, params Query
 		return nil, err
 	}
 
+	if err := HydrateSchemas(ctx, bunDB, nodes); err != nil {
+		return nil, err
+	}
 	return nodes, nil
 }
 

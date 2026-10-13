@@ -116,6 +116,7 @@ func (a *App) databaseAndConcepts() {
 		}
 		return a.db.BunDB()
 	}
+	a.Dependencies = append(a.Dependencies, memoryNodesDatabase.NewSchemaCompactor(provider, a.startupNodeID, a.Logger))
 	observeSink := observe.NewSinkComponent(a.Logger, provider, observe.TimescaleSinkOptions{Logger: a.Logger}, 0)
 	a.Dependencies = append(a.Dependencies, observeSink)
 
