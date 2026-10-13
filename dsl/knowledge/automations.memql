@@ -275,3 +275,17 @@ automation knowledgeInstallCapabilityCorporaWorkflow {
   builtin knowledgeInstallCapabilityChunk(chunkId: chunkId)
  }
 }
+
+/// Publish the explicit release selection before indexing; failed chunks retain their review state and retry later.
+@template
+automation knowledgeReconcileReleaseSeeds {
+ args { chunkIds []string! index bool! }
+ for chunkId in args.chunkIds { builtin knowledgePublishReleaseChunk(chunkId: chunkId) on error continue }
+ if args.index {
+  for chunkId in args.chunkIds { builtin knowledgeIndexReleaseChunk(chunkId: chunkId) on error continue }
+ }
+}
+
+/// First boot can precede inference setup. Retry only the registered release selection, with a bounded paid-work pass.
+@trigger(schedule="0 */2 * * * *", node="bff", lease="release-knowledge")
+automation reconcileReleaseKnowledge { builtin knowledgeReconcileReleaseKnowledge() }

@@ -10,16 +10,21 @@ import (
 	"github.com/znasllc-io/memql/integrations/knowledge"
 )
 
-// Publication maintenance repairs only exact existing registered seed chunks.
-// It deliberately does not revive catalog creation or generate new knowledge.
+// Publish the explicit release seed selection before an owner or embedder exists.
+// Indexing is retried by the bounded installed DSL schedule.
 func (a *App) registerKnowledgeSeedMaintenance() {
 	integration, ok := a.engine.IntegrationByName("knowledge").(*knowledge.Integration)
 	if !ok {
 		return
 	}
 	a.Dependencies = append(a.Dependencies, &knowledgeSeedMaintenance{
-		ready: make(chan struct{}), reconcile: integration.ReconcileCanonicalSeeds,
-		warn: func(err error) { a.Logger.Warn("knowledge: canonical publication repair deferred", "error", err) },
+		ready: make(chan struct{}), reconcile: func(ctx context.Context) error {
+			if err := integration.ReconcileCanonicalSeeds(ctx); err != nil {
+				return err
+			}
+			return integration.ReconcileReleaseSeeds(ctx, false)
+		},
+		warn: func(err error) { a.Logger.Warn("knowledge: release knowledge publication deferred", "error", err) },
 	})
 }
 

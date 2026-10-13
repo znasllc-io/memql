@@ -40,6 +40,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 	"log/slog"
 	"strings"
 	"time"
@@ -308,6 +309,7 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 			  AND ($2 <> 'v1:knowledge:documentChunk' OR (
 			    latest.payload->>'validationStatus' = 'validated'
 			    AND COALESCE(latest.payload->>'superseded', 'false') = 'false'
+ AND ` + seeddata.CurrentSQL("latest", false) + `
 			  ))
 			ORDER BY nv.embedding <=> $1::vector
 			LIMIT $3
@@ -330,6 +332,7 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 			  AND ($2 <> 'v1:knowledge:documentChunk' OR (
 			    latest.payload->>'validationStatus' = 'validated'
 			    AND COALESCE(latest.payload->>'superseded', 'false') = 'false'
+ AND ` + seeddata.CurrentSQL("latest", false) + `
 			  ))
 			ORDER BY nv.embedding <=> $1::vector
 			LIMIT $4

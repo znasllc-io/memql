@@ -19,6 +19,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/integrations/knowledge"
+	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 )
 
 type trainingVector struct{ calls int }
@@ -27,7 +28,7 @@ func (p *trainingVector) Embed(_ context.Context, text string) ([]float32, error
 	p.calls++
 	v := make([]float32, 1024)
 	v[0] = 1
-	if strings.Contains(text, "unrelated") {
+	if strings.HasPrefix(text, "unrelated") {
 		v[0] = 0
 		v[1] = 1
 	}
@@ -164,4 +165,47 @@ func TestOwnedTrainingReadsReviewedTaughtSourcesAcrossReplicas(t *testing.T) {
 	_, err = f.second.handleWorkTrainingContext(auth.ContextWithClientOrigin(ctx), nil, 0)
 	require.ErrorContains(t, err, "current owned live work run")
 	require.NotEmpty(t, fmt.Sprint(got[0]["chunkVersionAt"]))
+	// Release-owned lessons use a distinct exact checked-in provenance branch;
+	// neither a trusted-looking label nor a stale revision is enough.
+	var seed seeddata.ChunkRecord
+	for _, s := range seeddata.Release() {
+		if s.Lesson {
+			seed = s
+			break
+		}
+	}
+	require.NotEmpty(t, seed.ID)
+	f.query(f.engine, person, "mutation", "createDocumentChunk", map[string]any{"chunkId": seed.ID, "domainId": seed.Domain, "sourceRef": seed.SourceRef, "source": "appStructure", "text": seed.Text, "seq": seed.Seq})
+	seedID := "v1:knowledge:documentChunk:" + seed.ID
+	t.Cleanup(func() { db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE id=?`, seedID) })
+	vector, _ := provider.Embed(person, "registered release fixture")
+	encoded, _ := json.Marshal(vector)
+	_, err = db.ExecContext(person, `INSERT INTO `+table+`(id,concept,vector_field,embedding) VALUES(?,'v1:knowledge:documentChunk','content',?::vector)`, seedID, string(encoded))
+	require.NoError(t, err)
+	require.Empty(t, search(f.second), "a pending exact release chunk is still withheld")
+	f.query(f.engine, person, "mutation", "setChunkValidationStatus", map[string]any{"chunkId": seed.ID, "status": "validated"})
+	shared := search(f.second)
+	require.Len(t, shared, 1)
+	require.Equal(t, "appStructure", shared[0]["source"])
+	require.Equal(t, seed.Revision, shared[0]["seedRevision"])
+	require.NotContains(t, shared[0], "artifactId")
+	// A previously taught byte-identical private copy keeps its own provenance,
+	// but cannot consume a second bounded passage slot beside the release copy.
+	_, duplicate, _ := teach(person, "same-release", seed.Text)
+	f.query(f.engine, person, "mutation", "setChunkValidationStatus", map[string]any{"chunkId": duplicate, "status": "validated"})
+	entries, err := f.second.handleOwnedTrainingLessons(ctx, map[string]any{"text": "Verify a change", "limit": 3, "minimumSimilarity": 0.6, "maxTokens": 1200}, 0)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	var selected map[string]any
+	require.NoError(t, json.Unmarshal(entries[0].Payload, &selected))
+	require.Equal(t, "fileUpload", selected["source"])
+	f.query(f.engine, person, "mutation", "setChunkValidationStatus", map[string]any{"chunkId": duplicate, "status": "rejected"})
+	require.Equal(t, "appStructure", search(f.second)[0]["source"], "rejecting a private copy does not rewrite the independent shared source")
+	f.query(f.engine, person, "mutation", "setChunkValidationStatus", map[string]any{"chunkId": seed.ID, "status": "rejected"})
+	require.Empty(t, search(f.second))
+	f.query(f.engine, person, "mutation", "setChunkValidationStatus", map[string]any{"chunkId": seed.ID, "status": "validated"})
+	f.query(f.engine, person, "mutation", "createDocumentChunk", map[string]any{"chunkId": seed.ID, "domainId": seed.Domain, "sourceRef": seed.SourceRef, "source": "appStructure", "text": "A forged payload under a registered ID.", "seq": seed.Seq})
+	f.query(f.engine, person, "mutation", "setChunkValidationStatus", map[string]any{"chunkId": seed.ID, "status": "validated"})
+	require.Empty(t, search(f.second), "registered identity alone cannot approve different content")
+
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 )
 
 // canonicalSeedChunk is derived only from the compiled catalog/pack registry,
@@ -37,6 +38,9 @@ func canonicalSeedChunks() map[string]canonicalSeedChunk {
 	add("work-guidance", workGuidanceCorpus)
 	for _, reg := range RegisteredSeedDomains() {
 		add(reg.Domain.ID, reg.Corpus)
+	}
+	for _, chunk := range seeddata.Release() {
+		out[chunk.ID] = canonicalSeedChunk{chunk.ID, chunk.Domain, chunk.SourceRef, chunk.Text, chunk.Seq}
 	}
 	return out
 }
@@ -90,6 +94,15 @@ func (i *Integration) reconcileCanonicalSeed(ctx context.Context, seed canonical
 	// into approval. The only legacy state eligible here is no decision yet.
 	if row.Payload["superseded"] == true || (hasStatus && status != "unvalidated") {
 		return true, nil
+	}
+	if _, release := seeddata.Find(seed.ID); release {
+		blocked, err := i.releasePredecessorDecision(ctx, seed)
+		if err != nil {
+			return true, err
+		}
+		if blocked {
+			return true, nil
+		}
 	}
 	ctx = memql.ContextWithRowVersionFence(ctx, conceptKnowledgeDocumentChunk, seed.ID, row.At)
 	_, err = i.engine.Execute(ctx, fmt.Sprintf(`mutation setChunkValidationStatus(chunkId: %s, status: "validated")`, quoteString(seed.ID)))

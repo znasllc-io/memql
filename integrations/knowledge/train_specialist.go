@@ -34,6 +34,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 	"strings"
 	"time"
 
@@ -182,6 +183,9 @@ func (i *Integration) loadExistingCorpus(ctx context.Context, domainId string) [
 	rows := memql.MaterializeRows(res)
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
+		if !seeddata.Allows(rowStringField(row, "id"), row) {
+			continue
+		}
 		// Review reads may show pending/rejected material. A Trainer prompt may
 		// only consume published knowledge, including after another replica's
 		// review decision.

@@ -39,6 +39,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/core/num"
+	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 )
 
 // Integration exposes knowledge-base capabilities to the DSL.
@@ -46,6 +47,7 @@ type Integration struct {
 	Logger            *slog.Logger
 	engine            memql.IntegrationEngineAccess
 	dbGetter          func() *sql.DB
+	gateDB            func() *sql.DB
 	embeddingProvider func(ctx context.Context, name string) (memql.EmbeddingAIProvider, error)
 	stagedConcept     func(conceptId string) bool
 }
@@ -91,6 +93,7 @@ func (i *Integration) IntegrationName() string { return "knowledge" }
 // write -- and the one-shot seed helper.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return append([]memql.IntegrationCapability{
+		{Name: "reconcileReleaseSeeds", Handler: i.reconcileReleaseHandler},
 		{
 			Name:        "ingest",
 			Description: "Split a document into chunks, embed each, and persist chunk rows linked to a knowledge domain.",
@@ -240,52 +243,7 @@ const (
 // sentence boundaries within the target window so chunks read as coherent
 // snippets rather than mid-sentence slices. Exported for tests and for
 // reuse by any caller that just wants chunks without persisting.
-func Chunk(text string, size, overlap int) []string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return nil
-	}
-	if size <= 0 {
-		size = defaultChunkSize
-	}
-	if overlap < 0 {
-		overlap = 0
-	}
-	if overlap >= size {
-		overlap = size / 4
-	}
-	if len(text) <= size {
-		return []string{text}
-	}
-
-	runes := []rune(text)
-	var chunks []string
-	i := 0
-	for i < len(runes) {
-		end := i + size
-		if end >= len(runes) {
-			chunks = append(chunks, strings.TrimSpace(string(runes[i:])))
-			break
-		}
-		// Prefer a paragraph break within the last 25% of the window.
-		window := string(runes[i:end])
-		cut := end
-		if idx := strings.LastIndex(window, "\n\n"); idx > size*3/4 {
-			cut = i + idx + 2
-		} else if idx := strings.LastIndex(window, ". "); idx > size*3/4 {
-			cut = i + idx + 2
-		} else if idx := strings.LastIndex(window, "\n"); idx > size*3/4 {
-			cut = i + idx + 1
-		}
-		chunks = append(chunks, strings.TrimSpace(string(runes[i:cut])))
-		next := cut - overlap
-		if next <= i {
-			next = i + 1
-		}
-		i = next
-	}
-	return chunks
-}
+func Chunk(text string, size, overlap int) []string { return seeddata.Chunk(text, size, overlap) }
 
 // ingestHandler chunks, embeds, and persists a document. Each chunk
 // becomes a v1:knowledge:documentChunk row with a deterministic id derived

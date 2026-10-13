@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:overview",
+      "catalog": "computerUse",
+      "sha256": "3aa8053c234f18a4c9e10cc76fc1309ae27c5ed13bb657c2f73a8671bb22de98"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:toolSurfaces",
+      "catalog": "computerUse",
+      "sha256": "3a27e53ae745724bcf2fe5dcc2455e68080fb3f7af582c223e31937f3545e49f"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:capabilityChoice",
+      "catalog": "computerUse",
+      "sha256": "b51fbbb71e942877a47d256813795802708b62069d52314aacf09cbbccee8593"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:unavailablePrerequisite",
+      "catalog": "computerUse",
+      "sha256": "8a87f21458fb6cea81107a2e88485b7599ae1a2618c221cebf43cf9761bb6311"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:fileReads",
+      "catalog": "computerUse",
+      "sha256": "5bc8664608197927626610c57a35fc67c5234d0ae2510ff936427bf70c51b012"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:archivedFileReads",
+      "catalog": "computerUse",
+      "sha256": "e7222dd4125178f07b3609ab793b4ef083305b964ecfb5e58d94c83ebba6012f"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:scopeTiers",
+      "catalog": "computerUse",
+      "sha256": "3a5ded4238887dcd022112998cc480278bbe9f1d051d9b55420e7024aa4e4be4"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:perTaskApproval",
+      "catalog": "computerUse",
+      "sha256": "e1d56a873190b6bebc49eaf5aecbf512d675dbd4f061cfc1310b00f805243d44"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:postApprovalExecution",
+      "catalog": "computerUse",
+      "sha256": "d92f9741c0d091fd93ed902f6639ddb5d8903c3e4790cb74b406e8d47bbc0b54"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:planOutcomeSemantics",
+      "catalog": "computerUse",
+      "sha256": "c2799d74739b9a3a164482c9b5bad6b044882db9f5940010c97122502ae7d63c"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:availabilityStates",
+      "catalog": "computerUse",
+      "sha256": "95b30bf7de17ea0cecf83e5d2df6b355e103459eba111759eacd3d05ee4d90c2"
+    },
+    {
+      "domainId": "computer-use",
+      "sourceRef": "computerUse:errorBudget",
+      "catalog": "computerUse",
+      "sha256": "e0351b9155cd96090cdeb649460c15857ca279cf34a8a2b885830a295c3dac85"
+    },
+    {
+      "domainId": "workbench",
+      "sourceRef": "workbench:overview",
+      "catalog": "workbench",
+      "sha256": "c8e9ad978ea9afeb60575e3763e94839fd19088b1dc1da8c8dd128c874838106"
+    },
+    {
+      "domainId": "workbench",
+      "sourceRef": "workbench:actions",
+      "catalog": "workbench",
+      "sha256": "3966087a894aca8a687ef65dd97a1656b33033f214d4598a2ec6fd1caf00adb1"
+    },
+    {
+      "domainId": "workbench",
+      "sourceRef": "workbench:environmentHint",
+      "catalog": "workbench",
+      "sha256": "c2dc066da3f27da66bd7457b8fcb91b9c1e39ffc3861805ab52f80fcc10062ef"
+    },
+    {
+      "domainId": "workbench",
+      "sourceRef": "workbench:environment",
+      "catalog": "workbench",
+      "sha256": "4fffe955a223ae3dfd50d219e05810defe1466f39df27289887906d2c6e4b380"
+    },
+    {
+      "domainId": "workbench",
+      "sourceRef": "workbench:persistence",
+      "catalog": "workbench",
+      "sha256": "14aeaa0bcc521b6be932f201a68e8268175d5489c264d832d989ceb8235240fb"
+    },
+    {
+      "domainId": "workbench",
+      "sourceRef": "workbench:failureFallback",
+      "catalog": "workbench",
+      "sha256": "0b2229ba2ea3b03b17445b561164a706df5b10738a8bd54536b7e4f69acf6782"
+    },
+    {
+      "domainId": "workbench",
+      "sourceRef": "workbench:failureFallbackManual",
+      "catalog": "workbench",
+      "sha256": "7923bc7383b50bafd21db6c2e0235e33b22aab132ab153e73d1da3125830d23d"
+    },
+    {
+      "domainId": "workbench",
+      "sourceRef": "workbench:researchApps",
+      "catalog": "workbench",
+      "sha256": "72d17e4b990a0bee667a54254c94787dd6411ed9e37bb070dc04d1781d287980"
+    },
+    {
+      "domainId": "workbench",
+      "sourceRef": "workbench:webResearchFallback",
+      "catalog": "workbench",
+      "sha256": "fcefef39d6fa58e80ea5ede6a457321fd537c6138a23324c221d3db65df82c80"
+    },
+    {
+      "domainId": "workbench",
+      "sourceRef": "workbench:taskRecovery",
+      "catalog": "workbench",
+      "sha256": "ef918027b080f29e9110fa6c79adf4aa438ef8896253ec3484010778bcc8e75d"
+    },
+    {
+      "domainId": "work-guidance",
+      "sourceRef": "memql/work/evidence/v1",
+      "catalog": "workGuidance",
+      "sha256": "063f74226664d4391287e6edee2a94fcb04740b41479a23e5e48aec931d25ce6"
+    },
+    {
+      "domainId": "work-guidance",
+      "sourceRef": "memql/work/delivery/v1",
+      "catalog": "workGuidance",
+      "sha256": "0d5185f7f6addbb5f29e18d9bc7069fd906ed0cca7622acf2d05f8c29bad9ec6"
+    },
+    {
+      "domainId": "work-guidance",
+      "sourceRef": "memql/work/escalation/v1",
+      "catalog": "workGuidance",
+      "sha256": "e127123ea2f41ee7776bd8c85b103e109be565614d4029aeb24bd507c5bb7b3c"
+    },
+    {
+      "domainId": "software-development",
+      "sourceRef": "training:git-publication",
+      "file": "knowledge/training/git-publication-v1.txt",
+      "sha256": "a3d21702d0519c4f6dc8de10f25053fc955902890e50aeb55ffb691d05ada9b9",
+      "lesson": true
+    },
+    {
+      "domainId": "software-development",
+      "sourceRef": "training:literal-data",
+      "file": "knowledge/training/literal-data-v2.txt",
+      "sha256": "80eaa34c00e21bf6dbcaff823d30279e118f5c1d76cfd0eef92eb99f789603dc",
+      "lesson": true
+    }
+  ],
+  "provenance": [
+    {
+      "file": "knowledge/training/git-publication-v1.txt",
+      "sha256": "a3d21702d0519c4f6dc8de10f25053fc955902890e50aeb55ffb691d05ada9b9"
+    },
+    {
+      "file": "knowledge/training/literal-data-v1.txt",
+      "sha256": "1d7faca11cbcc0bcd36dfc3d1a334f078d0721b56288650256ff7d08552023e6"
+    }
+  ]
+}

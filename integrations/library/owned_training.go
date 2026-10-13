@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -22,6 +23,7 @@ import (
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/embedding"
 	"github.com/znasllc-io/memql/integrations/knowledge"
+	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 )
 
 type trainingReader struct {
@@ -105,7 +107,7 @@ type trainingCandidate struct {
 // Publication and current source ownership precede top-K, so other owners'
 // nearer hits cannot crowd this caller out. Every table folds latest first.
 // staged-data: GATE -- handleOwnedTrainingLessons withholds all four source concepts before these reads.
-const trainingSourceSQL = `WITH chunks AS (
+const ownedTrainingSourceSQL = `WITH chunks AS (
  SELECT DISTINCT ON(id) id,payload,"createdAt" FROM "MemoryNodes"
  WHERE concept='v1:knowledge:documentChunk' ORDER BY id,"createdAt" DESC
 ), artifacts AS (
@@ -129,12 +131,17 @@ WHERE k.payload->>'source'='fileUpload' AND k.payload->>'validationStatus'='vali
  AND jsonb_typeof(f.payload->'trainedIntoDomainIds')='array'
  AND (f.payload->'trainedIntoDomainIds') ? (k.payload->>'domainId')`
 
+var trainingSourceSQL = ownedTrainingSourceSQL + `
+UNION ALL SELECT k.id,k.payload,k."createdAt",'' AS artifact_id,'' AS file_id,'{}'::jsonb AS artifact_payload,'{}'::jsonb AS file_payload
+FROM chunks k WHERE k.payload->>'validationStatus'='validated'
+ AND COALESCE(k.payload->>'superseded','false')='false' AND ` + seeddata.CurrentSQL("k", true)
+
 // staged-data: GATE -- handleOwnedTrainingLessons checks all source concepts before this ranked read.
-const trainingCandidateSQL = `SELECT s.id,s.payload,s."createdAt",s.artifact_id,s.file_id,s.artifact_payload,s.file_payload,1-(v.embedding <=> $2::vector)
+var trainingCandidateSQL = `SELECT s.id,s.payload,s."createdAt",s.artifact_id,s.file_id,s.artifact_payload,s.file_payload,1-(v.embedding <=> $2::vector)
 FROM (` + trainingSourceSQL + `) s
 JOIN %s v ON v.id=s.id AND v.concept='v1:knowledge:documentChunk' AND v.vector_field='content'
 WHERE 1-(v.embedding <=> $2::vector) >= $3
-ORDER BY v.embedding <=> $2::vector,s.id LIMIT $4`
+ORDER BY v.embedding <=> $2::vector,(s.artifact_id<>'') DESC,s.id LIMIT $4`
 
 func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	run, _, err := i.ownedTrainingScope(ctx)
@@ -166,6 +173,39 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 	if !present {
 		return nil, nil
 	}
+
+	// Newly published release lessons can precede inference setup/indexing. They
+	// must not make an otherwise empty optional reader a prerequisite for work.
+	var ownedPresent bool
+	if err := r.db().QueryRowContext(ctx, "SELECT EXISTS("+ownedTrainingSourceSQL+")", memql.BareShortId(run.OwnerUserId)).Scan(&ownedPresent); err != nil {
+		return nil, err
+	}
+	if !ownedPresent {
+		binding, err := memql.CurrentEmbedderBinding(ctx)
+		if errors.Is(err, memql.ErrNoEmbedderBound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		table, err := memql.EmbeddingVectorTable(binding.ProviderRef, binding.Dimensions)
+		if err != nil {
+			return nil, err
+		}
+		var exists bool
+		if err = r.db().QueryRowContext(ctx, "SELECT to_regclass($1) IS NOT NULL", table).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, nil
+		}
+		if err = r.db().QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM ("+trainingSourceSQL+") s JOIN "+table+" v ON v.id=s.id AND v.concept='v1:knowledge:documentChunk' AND v.vector_field='content')", memql.BareShortId(run.OwnerUserId)).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, nil
+		}
+	}
 	provider, err := memql.ResolveEmbedderProvider(ctx)
 	if err != nil {
 		return nil, err
@@ -195,7 +235,7 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 		c.artifact.ID, c.artifact.Concept = c.artifactID, "v1:library:artifact"
 		c.file.ID, c.file.Concept = c.fileID, "v1:library:file"
 		// Admit the actual latest source rows before materializing a passage.
-		if !r.admit(ctx, c.node) || !r.admit(ctx, c.artifact) || !r.admit(ctx, c.file) {
+		if !r.admit(ctx, c.node) || (c.artifactID != "" && (!r.admit(ctx, c.artifact) || !r.admit(ctx, c.file))) {
 			continue
 		}
 		if err = json.Unmarshal(c.node.Payload, &c.payload); err != nil {
@@ -212,6 +252,7 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 		return nil, readErr
 	}
 	out := []memorynodes.MemoryNode{}
+	seenText := map[string]bool{}
 	remaining := tokens * 3 // WorkContextSize's conservative byte budget, including provenance.
 	for _, c := range candidates {
 		if len(out) == limit {
@@ -224,6 +265,10 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 		if !ok {
 			continue
 		}
+		text, _ := payload["text"].(string)
+		if seenText[text] {
+			continue
+		}
 		raw, err := json.Marshal(payload)
 		if err != nil {
 			return nil, err
@@ -232,6 +277,7 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 			continue
 		} // Never turn a reviewed passage into a truncated claim.
 		remaining -= len(raw)
+		seenText[text] = true
 		out = append(out, memorynodes.MemoryNode{ID: c.node.ID, Concept: resultConcept, Type: memorynodes.NodeTypeObject, CreatedAt: time.Now().UTC(), Payload: raw})
 	}
 	if _, _, err := i.ownedTrainingScope(ctx); err != nil {
@@ -243,6 +289,9 @@ func (i *Integration) handleOwnedTrainingLessons(ctx context.Context, args map[s
 // staged-data: GATE -- called only after handleOwnedTrainingLessons checks all source concepts.
 func (i *Integration) revalidateTrainingCandidate(ctx context.Context, c trainingCandidate) (map[string]any, bool, error) {
 	ctx = memql.ContextWithFreshRead(ctx)
+	if c.artifactID == "" {
+		return i.revalidateReleaseLesson(ctx, c)
+	}
 	read := func(name, key, value string) (map[string]any, error) {
 		call, err := parser.RenderCall(name, map[string]any{key: memql.BareShortId(value)})
 		if err != nil {
@@ -303,4 +352,31 @@ func (i *Integration) revalidateTrainingCandidate(ctx context.Context, c trainin
 		return nil, false, nil
 	}
 	return map[string]any{"chunkId": memql.BareShortId(c.node.ID), "chunkVersionAt": c.node.CreatedAt.Format(time.RFC3339Nano), "domainId": c.payload["domainId"], "source": "fileUpload", "sourceRef": c.payload["sourceRef"], "artifactId": memql.BareShortId(c.artifactID), "fileId": memql.BareShortId(c.fileID), "citation": stringField(a, "title"), "similarity": c.score, "text": parts[seq]}, true, nil
+}
+
+// staged-data: GATE -- release lessons share the chunk gate but never borrow an
+// upload's provenance. Only exact manifest bytes, current review and row
+// admission can produce this distinct release-owned result.
+func (i *Integration) revalidateReleaseLesson(ctx context.Context, c trainingCandidate) (map[string]any, bool, error) {
+	seed, ok := seeddata.Find(c.node.ID)
+	if !ok || !seed.Lesson || !seed.Matches(c.payload) {
+		return nil, false, nil
+	}
+	var latest memorynodes.MemoryNode
+	latest.ID = c.node.ID
+	latest.Concept = c.node.Concept
+	err := i.training.db().QueryRowContext(ctx, `SELECT payload,"createdAt" FROM "MemoryNodes" WHERE id=$1 AND concept='v1:knowledge:documentChunk' ORDER BY "createdAt" DESC LIMIT 1`, c.node.ID).Scan(&latest.Payload, &latest.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if !latest.CreatedAt.Equal(c.node.CreatedAt) || !i.training.admit(ctx, latest) {
+		return nil, false, nil
+	}
+	if c.payload["validationStatus"] != "validated" || c.payload["superseded"] == true {
+		return nil, false, nil
+	}
+	return map[string]any{"chunkId": seed.ID, "chunkVersionAt": latest.CreatedAt.Format(time.RFC3339Nano), "domainId": seed.Domain, "source": "appStructure", "sourceRef": seed.SourceRef, "seedRevision": seed.Revision, "citation": "Shipped knowledge: " + seed.SourceRef, "similarity": c.score, "text": seed.Text}, true, nil
 }

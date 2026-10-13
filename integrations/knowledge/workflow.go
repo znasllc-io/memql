@@ -7,6 +7,7 @@ import (
 
 func knowledgeWorkflowCapabilities() []memql.IntegrationCapability {
 	return workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{
+		"knowledgePublishReleaseChunk": nil, "knowledgeIndexReleaseChunk": nil,
 		"knowledgeInstallCapabilityChunk": nil,
 		"knowledgeCatalogDomainExists":    nil,
 		"knowledgeCreateCatalogDomain":    nil,

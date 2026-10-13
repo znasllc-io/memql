@@ -231,7 +231,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 163 -> 164: explicit selected capability corpus installation recipe.
 // 164 -> 165: owned task retrieval of reviewed Training lessons.
 // 165 -> 166: bounded provider-call recovery before any proposed tool dispatch.
-const shippedAutomationCount = 166
+// 166 -> 168: explicit release knowledge publication and scheduled indexing.
+const shippedAutomationCount = 168
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

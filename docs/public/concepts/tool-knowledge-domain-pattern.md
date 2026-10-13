@@ -241,21 +241,46 @@ labels, does not approve content. The existing Trainer writer explicitly stamps
 validated output. The server-selected canonical corpus writer may publish only
 exact registered content, and preserves existing rejection and supersession.
 
-On startup, each node makes one bounded pass over existing exact shipped or
-pack-registered chunks to repair legacy missing review status and bare vector
-keys. It compares the registered domain, source reference, chunk position,
-content bytes and deterministic ID; unknown or uploaded content stays pending.
-Publication is fenced against concurrent review writes. A conflict or database
-failure is logged and deferred, not treated as approval; a later startup or an
-explicit catalog seed invocation can retry. No periodic repair job runs.
+### Versioned release knowledge
 
-This repair makes no model calls, creates no domains or chunks, and does not
-install a new corpus revision. Engine-only startup does not invoke the optional
-full catalog seeder, whose domain-creation mutation must be supplied by its
-caller environment. Older approved chunks retain their review history until an
-explicit review or supersession decision. Updating the registered corpus source
-alone does not replace them.
+`dsl/knowledge/training/manifest.json` explicitly selects the reviewed
+computer-use, workbench and work-guidance manuals and two software-development
+lessons. The original lesson files, their hashes and the revised literal-data
+lesson are versioned beside the manifest. Each selected source has a stable
+source reference and a SHA-256 content revision. Startup refuses an inconsistent
+manifest rather than silently approving altered bytes. Adding a catalog entry
+or a pack does not automatically add it to this release selection.
 
+Each node publishes this exact selection in one bounded startup pass, before an
+owner or embedding service is required. These are shared application-provided
+chunks, not fabricated owner uploads. They appear in Training's existing domain
+and review views, including unvalidated, rejected and superseded revisions.
+Their content identity and source reference retain provenance; no full domain
+catalog or generated prose is created. Existing user uploads remain separate.
+The legacy repair pass still repairs only exact existing registered chunks and
+bare vector keys.
+
+The installed `reconcileReleaseKnowledge` schedule retries every two minutes on
+BFF. Its two-minute pass publishes first, then attempts at most eight missing
+embeddings in the active embedding space. Independent source locks and fresh
+vector reads prevent concurrent replicas or an explicit capability installation
+from duplicating completed embedding work. Failed provider/storage calls remain
+retryable and may require another embedding; this is not an exactly-once billing
+guarantee after an uncertain external outcome. Missing configuration or an
+unavailable embedder is reported as deferred indexing. Reviewable content alone
+does not mean a lesson is indexed or has been retrieved.
+
+Unchanged revisions reuse rows and vectors. New revisions retain old audit rows,
+but ordinary retrieval selects only exact current manifest bytes for these
+release sources. Old revisions remain visible in Training. A rejected
+predecessor withholds automatic approval of a new revision. Superseded content
+with no accepted replacement also withholds approval; it cannot reappear simply
+because a release changes its text. A withheld revision remains pending for an
+explicit Training review. An already accepted current replacement remains
+usable when an older revision was explicitly superseded. Decisions apply to
+source/chunk lineage, not the whole domain. Existing current rejection and
+supersession are never reset. Concurrent writes are fenced against the current
+chunk version.
 
 ### Explicit capability corpus installation
 
@@ -268,7 +293,8 @@ builtin knowledgeInstallCapabilityCorpora(domainIds: ["computer-use", "workbench
 
 This explicit operation creates only registered document chunks and their
 vectors in the cluster's active embedding space. It does not create knowledge
-domain catalog rows, generate prose, grant tools, or run at startup. Pack corpora
+domain catalog rows, generate prose or grant tools. The release lifecycle above
+selects its own explicit manifest independently of this owner operation. Pack corpora
 qualify when registered with source `appStructure`, a nonempty
 `RequiredByToolSlugs`, and content. The caller supplies domain IDs only; uploads,
 source labels and caller text cannot become canonical publication authority.
@@ -289,15 +315,17 @@ publication. `embedded` counts vectors written by this invocation. Errors remain
 errors, so an incomplete invocation never reports full readiness.
 
 `olderPublished` counts other still-approved chunks for the same registered
-source references. They retain their content and review history and may coexist
-in retrieval. A nonzero count requires a separate explicit review/supersession
-decision if the operator wants only the current manual revision to be retrieved;
-installation does not silently retire or approve older content.
+source references. They retain their content and review history. Current release-manifest sources
+are restricted to their current exact revisions during retrieval; unselected pack
+corpora keep their existing retrieval semantics. The count is an audit fact, not
+a claim that every older row remains retrievable. Installation does not rewrite
+older review or supersession decisions.
 
 ## Owned task lessons
 
 Owned work turns can also retrieve reviewed lessons taught from the owner's
-Library files, without adding a specialist agent or assigning the lesson's
+Library files and the explicit release-owned software lessons, without adding a
+specialist agent or assigning the lesson's
 domain to an agent. The authored `agentWorkTrainingContext` recipe searches by
 the current section and overall goal. It selects at most three passages with
 cosine similarity of at least 0.60, within a conservative 1,200-token context
@@ -311,10 +339,17 @@ not qualify. A review change on another replica takes effect on the next turn;
 query-embedding caches do not cache publication decisions. If there are no
 eligible lessons, this path makes no embedding request.
 
-Returned passages include their domain, chunk, Library source, approved chunk version time and
-similarity. Only domains actually returned are added to the turn's recorded
+Release lessons use a separate provenance branch that admits only exact current
+manifest chunks; they do not borrow Library ownership. Both sources share the
+same relevance, count and context limits. Exact duplicate text occupies one slot,
+with valid owned provenance preferred on equal scores. Similar but different
+lessons remain independent. Returned passages include their domain, chunk,
+source, approved chunk version time and similarity; release passages also carry
+the source revision, while uploaded passages retain their Library identities. Only domains actually returned are added to the turn's recorded
 knowledge footprint. The prompt labels the passages as reference material;
 they grant no tools or permissions and do not replace the current instructions.
 This is retrieval of reviewed knowledge, not model training or automatic
-publication of completed work. A useful lesson must first be saved to the
-Library, taught into a domain and approved through Training review.
+publication of completed work. User-authored lessons must first be saved to the Library, taught into a domain
+and approved through Training review. Release-owned lessons follow the reviewed
+manifest publication above. Neither path guarantees a semantic match or forces
+prompt inclusion.

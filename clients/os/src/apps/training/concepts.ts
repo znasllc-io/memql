@@ -162,7 +162,7 @@ export const SOURCE_MEANINGS: Readonly<Record<string, string>> = {
   augment: "added from a chat, to close a retrieval gap",
   llmSeeded: "generated when the domain was first seeded",
   crossDomainBridge: "written to bridge two of an agent's domains",
-  appStructure: "the product UI corpus, cited silently",
+  appStructure: "application-provided knowledge; review status is recorded separately",
 };
 
 export function sourceMeaning(source: string): string {
@@ -178,7 +178,7 @@ export function sourceGroupLabel(source: string): string {
     augment: "Chat additions",
     llmSeeded: "Seeded corpus",
     crossDomainBridge: "Domain bridges",
-    appStructure: "App structure",
+    appStructure: "Application knowledge",
   };
   return labels[source] ?? (source || "Source unrecorded");
 }

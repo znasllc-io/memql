@@ -13,6 +13,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 )
 
 const maxCapabilityInstallDomains = 16
@@ -206,6 +207,21 @@ func (i *Integration) installCapabilityCorporaHandler(ctx context.Context, args 
 }
 
 func (i *Integration) installCapabilityChunk(ctx context.Context, seed canonicalSeedChunk, binding memql.EmbedderBinding, provider memql.EmbeddingAIProvider) (bool, error) {
+	if _, release := seeddata.Find(seed.ID); release {
+		var embedded bool
+		err := i.releaseSeedGate(ctx, seed, func(ctx context.Context, verify func(context.Context) error) error {
+			// Keep the installed public path on the same source lock as lifecycle
+			// indexing. Its existing bounded provider call precedes detached commits.
+			var err error
+			embedded, err = i.installCapabilityChunkHeld(ctx, seed, binding, provider, verify)
+			return err
+		})
+		return embedded, err
+	}
+	return i.installCapabilityChunkHeld(ctx, seed, binding, provider, nil)
+}
+func (i *Integration) installCapabilityChunkHeld(ctx context.Context, seed canonicalSeedChunk, binding memql.EmbedderBinding, provider memql.EmbeddingAIProvider, verify func(context.Context) error) (bool, error) {
+
 	row, err := i.seedChunkSnapshot(ctx, seed.ID)
 	if err != nil {
 		return false, err
@@ -237,6 +253,15 @@ func (i *Integration) installCapabilityChunk(ctx context.Context, seed canonical
 		if err = memql.ValidateEmbeddingVector(ctx, binding.ProviderRef, binding.Dimensions, vector); err != nil {
 			return false, err
 		}
+	}
+
+	if verify != nil {
+		commit, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		if err = verify(commit); err != nil {
+			return false, err
+		}
+		ctx = commit
 	}
 	query := fmt.Sprintf(`mutation createDocumentChunk(chunkId:%s,domainId:%s,text:%s,source:"appStructure",sourceRef:%s,seq:%d,tokenCount:%d)`, quoteString(seed.ID), quoteString(seed.Domain), quoteString(seed.Text), quoteString(seed.SourceRef), seed.Seq, approxTokens(seed.Text))
 	if err = i.writeCanonicalSeed(ctx, seed.ID, query); err != nil {

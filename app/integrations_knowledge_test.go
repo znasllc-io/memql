@@ -12,9 +12,11 @@ import (
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -82,7 +84,7 @@ func TestKnowledgePublicationStartupOwnsFreshOriginAndCancellation(t *testing.T)
 
 // Exercise the installed factory and app registration, with an empty isolated
 // schema so another test's registered corpus cannot supply accidental evidence.
-func TestKnowledgePublicationStartupRegistersWithoutCreatingCorpus(t *testing.T) {
+func TestKnowledgePublicationStartupSuppliesSelectedReviewedCorpusWithoutOwnerOrEmbedder(t *testing.T) {
 	ctx := context.Background()
 	admin := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN())))
 	t.Cleanup(func() { _ = admin.Close() })
@@ -105,9 +107,12 @@ func TestKnowledgePublicationStartupRegistersWithoutCreatingCorpus(t *testing.T)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	engine.Logger = logger
 	require.NoError(t, engine.Init(memorynodes.DefaultRegistry()))
+	gates, err := database.NewGatePool(dbtest.DSN(), 0)
+	require.NoError(t, err)
+	t.Cleanup(func() { gates.Close() })
 	for _, plugin := range memql.RegisteredPlugins() {
 		if plugin.Name == "knowledge" {
-			provider, err := plugin.Factory(memql.PluginContext{Logger: logger, Engine: engine, BunDB: func() *bun.DB { return db },
+			provider, err := plugin.Factory(memql.PluginContext{Logger: logger, Engine: engine, GateDB: func() *sql.DB { return gates }, BunDB: func() *bun.DB { return db },
 				ResolvePartitionFromContext: func(context.Context) string { return "default" }, ConceptDataIsStaged: func(string) bool { return false },
 				ResolveEmbeddingProvider: func(context.Context, string) (memql.EmbeddingAIProvider, error) {
 					return nil, fmt.Errorf("startup must not resolve an embedder")
@@ -135,10 +140,39 @@ func TestKnowledgePublicationStartupRegistersWithoutCreatingCorpus(t *testing.T)
 	select {
 	case err := <-result:
 		require.NoError(t, err)
-	case <-time.After(5 * time.Second):
+	// The production phase is 30 seconds, with at most one retained 15-second
+	// commit on cancellation; allow that same bound under race instrumentation.
+	case <-time.After(45 * time.Second):
 		t.Fatal("startup publication pass did not finish")
 	}
 	var count int
-	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM "MemoryNodes"`).Scan(&count))
-	require.Zero(t, count, "empty startup must not install or generate a corpus")
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(DISTINCT id) FROM "MemoryNodes" WHERE concept='v1:knowledge:documentChunk'`).Scan(&count))
+	require.Equal(t, len(seeddata.Release()), count, "fresh startup publishes only the explicit checked-in release selection")
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM (SELECT DISTINCT ON (id) payload FROM "MemoryNodes" WHERE concept='v1:knowledge:documentChunk' ORDER BY id,"createdAt" DESC) latest WHERE payload->>'validationStatus'='validated'`).Scan(&count))
+	require.Equal(t, len(seeddata.Release()), count, "ownerless publication approves only registered exact bytes")
+	// These are the existing Training UI reads: domain cards are chunk-derived,
+	// and opening one reads full reviewable passages without catalog rows.
+	viewer := auth.ContextWithUserActor(context.Background(), "fresh-owner")
+	resultRows, err := engine.Execute(viewer, "query knowledgeDomainsAll()")
+	require.NoError(t, err)
+	require.Empty(t, memql.MaterializeRows(resultRows))
+	resultRows, err = engine.Execute(viewer, "query allDocumentChunkDomains()")
+	require.NoError(t, err)
+	domains := map[string]bool{}
+	for _, row := range memql.MaterializeRows(resultRows) {
+		domains[row["domainId"].(string)] = true
+	}
+	require.Len(t, domains, 4)
+	for _, seed := range seeddata.Release() {
+		require.True(t, domains[seed.Domain])
+	}
+	resultRows, err = engine.Execute(viewer, `query documentChunksForDomain(domainId:"software-development")`)
+	require.NoError(t, err)
+	lessons := memql.MaterializeRows(resultRows)
+	require.NotEmpty(t, lessons)
+	for _, row := range lessons {
+		require.NotEmpty(t, row["text"])
+		require.Contains(t, row["sourceRef"], "training:")
+		require.Equal(t, "validated", row["validationStatus"])
+	}
 }

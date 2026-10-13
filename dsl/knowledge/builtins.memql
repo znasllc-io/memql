@@ -183,3 +183,17 @@ builtin knowledgeInstallCapabilityCorpora {
 builtin knowledgeInstallCapabilityChunk {
  chunkId string!
 }
+
+/// Server lifecycle only: publishes/indexes exact checked-in release knowledge. No caller text or work-run authority.
+@executor("integration.knowledge.reconcileReleaseSeeds")
+builtin knowledgeReconcileReleaseKnowledge { }
+
+/// Publish one checked-in chunk inside the release lifecycle's scoped manifest.
+@executor("integration.knowledge.knowledgePublishReleaseChunk")
+@args(profile="object")
+builtin knowledgePublishReleaseChunk { chunkId string! }
+
+/// Index one checked-in chunk inside the release lifecycle's bounded indexing pass.
+@executor("integration.knowledge.knowledgeIndexReleaseChunk")
+@args(profile="object")
+builtin knowledgeIndexReleaseChunk { chunkId string! }
