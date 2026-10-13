@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 // Nexus's Overview (epic memql#5414): measured figures from the reads Nexus
@@ -48,6 +48,15 @@ function value(label: string): string {
 }
 
 describe("the Overview's figures", () => {
+  it("removes a live decision from the waiting count without deleting its receipt", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "a1" })] });
+    mount(conn);
+    await waitFor(() => expect(value("Approvals waiting")).toBe("1"));
+    await act(async () => {
+      conn.subscriptions.emit("v1:work:approval", approvalRow({ id: "a1", decision: "answered", createdAt: "2026-09-01T13:00:00Z" }), "NODE_UPDATED");
+    });
+    await waitFor(() => expect(value("Approvals waiting")).toBe("0"));
+  });
   it("counts what is open, moving and waiting from the feeds the app already holds", async () => {
     mount(
       fakeConnection({

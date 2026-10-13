@@ -317,17 +317,29 @@ describe("the queue is live", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
     expect(await screen.findByText("Nothing needs your input.")).toBeTruthy();
   });
-  it("takes a decided approval off the list, which is the confirmation", async () => {
-    // Nothing is patched locally: the decision broadcasts and the row leaves
-    // the pending feed on its own update.
+  it("takes a decided approval off the list when its live row is updated", async () => {
     const conn = fakeConnection({ approvals: [approvalRow({ id: "a1" })] });
     mount(conn);
     await screen.findByText("Step sendInvoice");
 
     await act(async () => {
-      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "a1" }), "NODE_DELETED");
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "a1", decision: "approved", createdAt: "2026-09-01T13:00:00Z" }), "NODE_UPDATED");
     });
     await waitFor(() => expect(screen.queryByText("Step sendInvoice")).toBeNull());
+    expect(screen.getByText("Nothing needs your input.")).toBeTruthy();
+  });
+
+  it("keeps the decided detail as a receipt while Back returns to an empty queue", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "a1" })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Step sendInvoice"));
+    await act(async () => {
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "a1", decision: "approved", createdAt: "2026-09-01T13:00:00Z" }), "NODE_UPDATED");
+    });
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.getByRole("region", { name: "What is being asked" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    expect(await screen.findByText("Nothing needs your input.")).toBeTruthy();
   });
 
   it("announces one that arrived while somebody was looking", async () => {
