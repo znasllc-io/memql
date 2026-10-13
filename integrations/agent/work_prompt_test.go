@@ -118,6 +118,73 @@ func TestOwnedWorkTurnUsesShippedPrompt(t *testing.T) {
 	}
 }
 
+// Render through prepareTurn: a correct standalone directive is insufficient
+// if the owned-work prompt drops it or replaces the section's requested output.
+func TestOwnedWorkPromptKeepsSectionOutputsAndDestinationsDistinct(t *testing.T) {
+	registry := memql.NewPromptRegistry()
+	if _, err := memql.LoadUnifiedPrompts(nil, registry, template.New("partials")); err != nil {
+		t.Fatal(err)
+	}
+	engine := &workPromptEngine{registryEngine: registryEngine{registered: map[string]bool{"composeFile": true, "workerHost": true}}, prompts: registry}
+	owner := "v1:identity:user:section-output-owner"
+	ctx := common.ContextWithRun(auth.ContextWithUserActor(context.Background(), owner), common.RunContext{RunId: "section-run", GoalId: "goal", StepKey: "current", OwnerUserId: owner})
+	for _, tc := range []struct {
+		name, request string
+	}{
+		{"research handoff", "Current section: research only. Return verified sources and a draft to the later document section; do not create its PDF."},
+		{"repository effects", "Current section: update the repository source and add a regression test in its test file. Run the required checks and report their results."},
+		{"Library document", "Current section: save the completed report as a PDF in my Library and return the saved file."},
+		{"mixed outputs", "Current section: update the repository and its tests, then save a separate change report in my Library. Return the verified repository changes and report file."},
+		{"answer only", "Current section: answer from the supplied evidence. No file is requested."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := &memqlv1.AgentGenerateTurnMsg{AgentId: "assistant", ActingAgent: &memqlv1.ActingAgentIdentity{Id: "assistant", Name: "Ada", Role: "assistant"}, History: []*memqlv1.AgentTurnMessage{{Role: "user", Content: tc.request}}}
+			prepared, err := newTestReplier(engine).prepareTurn(ctx, msg, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if prepared.routerReq.PromptName != "workAgentReply" || len(prepared.messages) != 2 || prepared.messages[1].Content != tc.request {
+				t.Fatal("owned turn lost its shipped prompt or declared section outputs")
+			}
+			prompt := prepared.messages[0].Content
+			for _, forbidden := range []string{
+				"A research or section step",
+				"it must not save the final file itself",
+				"When this step is responsible for a final file or document, use composeFile",
+				"Confirm success only after receiving that outputFileId",
+			} {
+				if strings.Contains(prompt, forbidden) {
+					t.Errorf("rendered prompt treats every section or file as a Library handoff: %q", forbidden)
+				}
+			}
+			for _, required := range []string{
+				"this section's declared work and outputs",
+				"requested destination and authorized capabilities",
+				"A research-only section",
+				"final deliverable assigned to a later section",
+				"repository, source-code or test-file changes must perform those changes",
+				"All writes and commands remain subject to existing permissions and run limits",
+				"Ordinary generated documents go to the user's Library unless another destination is requested",
+				"For a Library deliverable, use composeFile",
+				"Confirm that Library file is saved only after receiving its outputFileId",
+				"Do not use produceArtifact or open another goal",
+				"An answer-only goal needs no file",
+			} {
+				if !strings.Contains(prompt, required) {
+					t.Errorf("rendered prompt lost a section output boundary: %q", required)
+				}
+			}
+			tools := make(map[string]bool)
+			for _, tool := range prepared.tools {
+				tools[tool.Name] = true
+			}
+			if !tools["workerHost"] || !tools["composeFile"] || tools["produceArtifact"] {
+				t.Fatalf("declared outputs lost their authorized tool routes: %v", tools)
+			}
+		})
+	}
+}
+
 func TestLookupClassificationDoesNotDowngradeExecutionReasoning(t *testing.T) {
 	registry := memql.NewPromptRegistry()
 	if _, err := memql.LoadUnifiedPrompts(nil, registry, template.New("partials")); err != nil {
