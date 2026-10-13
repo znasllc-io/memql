@@ -623,6 +623,15 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// template skips the block.
 	data["etiquette"] = r.loadAssistantEtiquette(ctx)
 
+	trainingPassages, trainingErr := r.workTrainingContext(ctx, msg)
+	appendWorkTraining(data, trainingPassages)
+	for _, passage := range trainingPassages {
+		if domain, _ := passage["domainId"].(string); domain != "" {
+			routerReq.Touches = ensureDomain(routerReq.Touches, domain)
+		}
+	}
+	retrievedChunks = append(retrievedChunks, chunksToRetrievedChunks(trainingPassages)...)
+
 	data["requiresHumanOutcome"] = isOwnedWorkExecution(ctx) && RoleAllowsTool(harnessRole, RespondToUserToolName)
 	renderStart := time.Now()
 	promptData := data
@@ -656,6 +665,10 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 			Name:       m.Name,
 			ToolCallId: m.ToolCallId,
 		})
+	}
+
+	if trainingErr != nil {
+		return nil, r.workTrainingFailure(ctx, trainingErr, messages)
 	}
 
 	toolDefsStart := time.Now()

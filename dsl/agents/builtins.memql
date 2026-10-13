@@ -293,3 +293,16 @@ builtin agentFactoryCreate {
 /// Verified facts about the current tool's pre-start refusal, available only in its recovery scope.
 @executor("integration.agents.agentRecoveryContext")
 builtin agentRecoveryContext {}
+
+/// Facts captured by the current owned-work Training context host; unavailable outside that scope.
+@executor("integration.agents.agentWorkTrainingFacts")
+builtin agentWorkTrainingFacts {}
+
+/// Read reviewed source-backed lessons inside the current owned-work context host.
+@executor("integration.agents.agentReadWorkTraining")
+builtin agentReadWorkTraining {
+ text string!
+ limit int!
+ minimumSimilarity number!
+ maxTokens int!
+}

@@ -133,3 +133,17 @@ automation agentRecoveryConsent {
  }
  return args.receipt.content
 }
+
+/// Select relevant reviewed uploads for this task without changing the agent's skills or tools.
+/// Mandatory tool manuals keep their separate retrieval allocation.
+@template
+automation agentWorkTrainingContext {
+ facts := builtin agentWorkTrainingFacts()
+ if facts == nil { return [] }
+ return builtin agentReadWorkTraining(
+  text: facts.section + "\nOverall goal: " + facts.goal,
+  limit: 3,
+  minimumSimilarity: 0.60,
+  maxTokens: 1200
+ )
+}

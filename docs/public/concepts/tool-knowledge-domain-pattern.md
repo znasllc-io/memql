@@ -254,3 +254,28 @@ full catalog seeder, whose domain-creation mutation must be supplied by its
 caller environment. Older approved chunks retain their review history until an
 explicit review or supersession decision. Updating the registered corpus source
 alone does not replace them.
+
+## Owned task lessons
+
+Owned work turns can also retrieve reviewed lessons taught from the owner's
+Library files, without adding a specialist agent or assigning the lesson's
+domain to an agent. The authored `agentWorkTrainingContext` recipe searches by
+the current section and overall goal. It selects at most three passages with
+cosine similarity of at least 0.60, within a conservative 1,200-token context
+budget. Existing required tool domains remain separate and unchanged.
+
+The native reader derives the owner, run and goal from the execution context.
+It folds current rows before ranking, then rechecks each candidate's approval,
+supersession, owned Library artifact and ready file, taught domain and exact
+source text. Unknown provenance, other owners' sources and changed sources do
+not qualify. A review change on another replica takes effect on the next turn;
+query-embedding caches do not cache publication decisions. If there are no
+eligible lessons, this path makes no embedding request.
+
+Returned passages include their domain, chunk, Library source, approved chunk version time and
+similarity. Only domains actually returned are added to the turn's recorded
+knowledge footprint. The prompt labels the passages as reference material;
+they grant no tools or permissions and do not replace the current instructions.
+This is retrieval of reviewed knowledge, not model training or automatic
+publication of completed work. A useful lesson must first be saved to the
+Library, taught into a domain and approved through Training review.
