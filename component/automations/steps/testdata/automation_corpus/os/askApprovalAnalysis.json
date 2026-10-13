@@ -5,13 +5,7 @@
       "input": {
         "event": {
           "kind": "unspecified",
-          "payload": {
-            "advisor": true,
-            "approvalId": "s-approvalId",
-            "conversationId": "s-conversationId",
-            "prompt": "s-prompt",
-            "requestId": "s-requestId"
-          },
+          "payload": {},
           "topic": "automation.invocation.askApprovalAnalysis"
         },
         "rows": 0
@@ -19,18 +13,13 @@
       "outcome": {
         "calls": [
           {
-            "args": {
-              "templateId": "askApprovalSecondOpinion"
-            },
             "kind": "builtin",
             "name": "askRunApprovalMessage"
           }
         ],
         "result": {
           "output": {
-            "args": {
-              "templateId": "askApprovalSecondOpinion"
-            },
+            "args": {},
             "builtin": "askRunApprovalMessage"
           },
           "status": "completed"
@@ -41,13 +30,7 @@
       "input": {
         "event": {
           "kind": "unspecified",
-          "payload": {
-            "advisor": true,
-            "approvalId": "s-approvalId",
-            "conversationId": "s-conversationId",
-            "prompt": "s-prompt",
-            "requestId": "s-requestId"
-          },
+          "payload": {},
           "topic": "automation.invocation.askApprovalAnalysis"
         },
         "rows": 2
@@ -55,18 +38,13 @@
       "outcome": {
         "calls": [
           {
-            "args": {
-              "templateId": "askApprovalSecondOpinion"
-            },
             "kind": "builtin",
             "name": "askRunApprovalMessage"
           }
         ],
         "result": {
           "output": {
-            "args": {
-              "templateId": "askApprovalSecondOpinion"
-            },
+            "args": {},
             "builtin": "askRunApprovalMessage"
           },
           "status": "completed"

@@ -1,9 +1,7 @@
-/// Discussion and independent review share the same native read-only boundary.
+/// One admitted human message has one native read-only analysis and no other effects.
 @actor
 @template
 automation askApprovalAnalysis {
- args { approvalId string! conversationId string! requestId string! prompt string! advisor bool! }
- reply := builtin askRunApprovalMessage(templateId: args.advisor ? "askApprovalSecondOpinion" : "askApprovalReply")
+ reply := builtin askRunApprovalMessage()
  return reply
 }
-

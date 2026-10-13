@@ -11,13 +11,21 @@ func TestApprovalDiscussionTemplateRefusesExpandedEffects(t *testing.T) {
 		name, body string
 		allowed    bool
 	}{
-		{"advice", `reply := builtin askRunApprovalMessage(templateId: "askApprovalReply")
+		{"advice", `reply := builtin askRunApprovalMessage()
  return reply`, true},
+		{"secret return", `reply := builtin askRunApprovalMessage()
+ return secret("PRIVATE_KEY")`, false},
+		{"expanded return", `reply := builtin askRunApprovalMessage()
+ return { reply: reply, private: secret("PRIVATE_KEY") }`, false},
+		{"secret argument", `reply := builtin askRunApprovalMessage(templateId: secret("PRIVATE_KEY"))
+ return reply`, false},
+		{"prompt override", `reply := builtin askRunApprovalMessage(templateId: "askApprovalSecondOpinion")
+ return reply`, false},
 		{"mutation", `reply := mutation decideApproval(approvalId: "parent", decision: "approved")
  return reply`, false},
 		{"host action", `reply := builtin workerRunShell(command: "touch file")
  return reply`, false},
-		{"extra action", `reply := builtin askRunApprovalMessage(templateId: "askApprovalReply")
+		{"extra action", `reply := builtin askRunApprovalMessage()
  builtin workerRunShell(command: "touch file")
  return reply`, false},
 	} {

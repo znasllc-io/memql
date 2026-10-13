@@ -118,7 +118,7 @@ func TestApprovalDiscussionAdmissionAndAnalysisSurviveReplicaChanges(t *testing.
 	}
 	done := make(chan answerResult, 1)
 	go func() {
-		r, err := b.eng.Execute(runCtx, "builtin askRunApprovalMessage(templateId: \"askApprovalSecondOpinion\")")
+		r, err := b.eng.Execute(runCtx, "builtin askRunApprovalMessage()")
 		var value map[string]any
 		if err == nil {
 			rows := memql.MaterializeRows(r.OutputPayload())
@@ -147,9 +147,11 @@ func TestApprovalDiscussionAdmissionAndAnalysisSurviveReplicaChanges(t *testing.
 	require.NoError(t, answer.err)
 	require.Equal(t, 1, model.calls)
 	// The model capability cannot spend a second call on this child's budget.
-	_, err = b.eng.Execute(runCtx, "builtin askRunApprovalMessage(templateId: \"askApprovalSecondOpinion\")")
+	_, err = b.eng.Execute(runCtx, "builtin askRunApprovalMessage()")
 	require.ErrorContains(t, err, "ceiling")
 	require.Equal(t, 1, model.calls)
+	_, err = b.eng.Execute(ctx, "query "+call("workRunForOwner", map[string]any{"runId": runID}))
+	require.NoError(t, err) // Warm this replica with the still-running child.
 	a.writeVersion(t, runID, runID, "reply", 1, 1, nil, "advice", map[string]any{"result": map[string]any{"value": answer.answer}})
 	a.finishRun(t, runID, []string{"reply"}, nil)
 	snapshot := discussionExecute(t, b.eng, ctx, "askConversationSnapshot", map[string]any{"conversationId": conversation})
@@ -179,7 +181,7 @@ func TestApprovalDiscussionAdmissionAndAnalysisSurviveReplicaChanges(t *testing.
 			require.Error(t, err)
 		})
 	}
-	for _, name := range []string{"askRunApprovalMessage(templateId: \"askApprovalReply\")", "askApprovalEvidence()"} {
+	for _, name := range []string{"askRunApprovalMessage()", "askApprovalEvidence()"} {
 		_, err := b.eng.Execute(ctx, "builtin "+name)
 		require.Error(t, err, "a direct client has no child scope")
 	}

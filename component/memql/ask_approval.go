@@ -276,6 +276,7 @@ func (e *MemQLEngine) approvalAnalysisScope(ctx context.Context) (map[string]any
 }
 
 func (e *MemQLEngine) askApprovalEvidenceBuiltin(ctx context.Context, _ map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	ctx = ContextWithFreshRead(ctx)
 	approval, parent, input, err := e.approvalAnalysisScope(ctx)
 	if err != nil {
 		return nil, err
@@ -364,9 +365,12 @@ func (e *MemQLEngine) askRunApprovalMessageBuiltin(ctx context.Context, args map
 	if e.modelSeam == nil || e.modelSeam.ceilings == nil || e.modelSeam.journal == nil {
 		return nil, fmt.Errorf("approval analysis needs its model budget and journal")
 	}
-	template := stringArg(args, "templateId")
-	if template != "askApprovalReply" && template != "askApprovalSecondOpinion" {
-		return nil, fmt.Errorf("approval analysis requires its read-only prompt")
+	if len(args) != 0 {
+		return nil, fmt.Errorf("approval analysis takes its prompt from the recorded human choice")
+	}
+	template := "askApprovalReply"
+	if input["advisor"] == true {
+		template = "askApprovalSecondOpinion"
 	}
 	evidence, err := e.askApprovalEvidenceBuiltin(ctx, nil, 0)
 	if err != nil {

@@ -37,8 +37,8 @@ builtin askApprovalMessage {
 /// This model capability requires the exact child run and durable human turn.
 /// It admits only the read-only approval prompts and one guarded model call.
 @executor("askRunApprovalMessage")
-@args(profile="object")
-builtin askRunApprovalMessage { templateId string! }
+@args(profile="optionalObject")
+builtin askRunApprovalMessage {}
 
 /// Read the current child run's owner-bound request and selected journal receipt.
 @executor("askApprovalEvidence")
