@@ -151,15 +151,19 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 				for n, e := range []*memql.MemQLEngine{writer, reader} {
 					var wi *work.Integration
 					for _, plugin := range memql.RegisteredPlugins() {
-						if plugin.Name != "work" {
+						if plugin.Name != "work" && plugin.Name != "library" {
 							continue
 						}
-						provider, err := plugin.Factory(memql.PluginContext{Engine: e, Logger: e.Logger, BunDB: func() *bun.DB { return db }, GateDB: func() *sql.DB { return gates }, AdmitSourceRow: memql.AdmitSourceRow})
+						provider, err := plugin.Factory(memql.PluginContext{Engine: e, Logger: e.Logger, BunDB: func() *bun.DB { return db }, GateDB: func() *sql.DB { return gates }, ConceptDataIsStaged: e.ConceptDataIsStaged, AdmitSourceRow: memql.AdmitSourceRow, ResolveEmbeddingProvider: func(context.Context, string) (memql.EmbeddingAIProvider, error) {
+							return nil, fmt.Errorf("synthetic work has no owned Training lessons to embed")
+						}})
 						require.NoError(t, err)
-						wi = provider.(*work.Integration)
+						require.NoError(t, e.RegisterIntegration(provider))
+						if plugin.Name == "work" {
+							wi = provider.(*work.Integration)
+						}
 					}
 					require.NotNil(t, wi)
-					require.NoError(t, e.RegisterIntegration(wi))
 					peers = append(peers, wi)
 					e.SetRunCeilingGuard(work.NewRunCeilings(e, e.Logger))
 					e.SetModelCallJournal(work.NewModelJournal(e))
@@ -232,7 +236,7 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 					// Reproduce the stored old shape through the old raw refusal,
 					// then use only the existing explicit human decision + rerun APIs.
 					require.Error(t, err)
-					require.Equal(t, 2, count)
+					require.Equal(t, 2, count, "legacy failure: %v", err)
 					legacy := load(reader, runID)
 					require.Equal(t, "failed", legacy.StepStates[legacy.FailedStep].Status)
 					require.Empty(t, legacy.StepStates[legacy.FailedStep].ChildRunId)
@@ -242,9 +246,17 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 						act("decideApproval", map[string]any{"approvalId": approvalID, "decision": "rejected"})
 					}
 					require.Equal(t, "failed", load(reader, runID).Status)
+					// A prior answered suspension remains in the run's history.
+					// New public rerun intake must not dispatch under that old answer.
+					write("updateWorkRun", map[string]any{"runId": runID, "humanResumeId": "previously-consumed-answer"})
 					act("rerunStep", map[string]any{"runId": runID, "stepKey": legacy.FailedStep})
 					j := load(reader, runID)
 					require.NotNil(t, j.Rerun)
+					require.Empty(t, j.HumanResumeId)
+					initial := work.DispatchRequest{RunId: runID, OwnerUserId: owner, GoalId: goalID, Status: "running", RerunRequestId: j.Rerun.RequestId, HumanResumeId: j.HumanResumeId}
+					initial, ready := (&workRunDispatcher{app: &App{engine: reader, Logger: reader.Logger}}).PrepareDispatch(person, initial)
+					require.True(t, ready)
+					require.True(t, workRerunServable(initial, j))
 					prepared, options, prepErr := automations.PrepareRerun(j, nil, triggers[1].template.members["parent"])
 					require.NoError(t, prepErr)
 					retry := triggers[1].executor()
