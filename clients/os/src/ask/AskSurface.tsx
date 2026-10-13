@@ -8,7 +8,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import { ArrowUp, Mic, Plus, X, Activity, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines } from "lucide-react";
 
 import { conversationFeed } from "./conversationFeed";
-import { ConversationSession } from "./conversationSession";
+import { ConversationSession, type AskTurn } from "./conversationSession";
 import { AskWait } from "./AskWait";
 import { AskWorkLink } from "./AskWorkLink";
 import { AskQuestion } from "./AskQuestion";
@@ -147,6 +147,10 @@ export function AskSurface({
   });
   const draft = providedDraft ?? state.draft;
   const setDraft = onDraftChange ?? conversation.setDraft;
+  const retryEdit = useRef(0);
+  const draftRevision = useRef({ value: draft, revision: 0 });
+  if (draftRevision.current.value !== draft) draftRevision.current = { value: draft, revision: draftRevision.current.revision + 1 };
+  useEffect(() => () => { retryEdit.current++; }, [conversation]);
   const exchanges = state.turns;
   const busy = state.busy;
   const ready = availability.state === "ready";
@@ -279,6 +283,15 @@ export function AskSurface({
     return conversation.send(prompt, context);
   }
 
+  async function editFailedTurn(turn: AskTurn) {
+    const edit = ++retryEdit.current;
+    const revision = draftRevision.current.revision;
+    if (turn.approvalId && !await conversation.prepareApprovalTurnRetry(turn.id)) return;
+    if (edit !== retryEdit.current || revision !== draftRevision.current.revision) return;
+    setDraft(turn.prompt);
+    inputRef.current?.focus();
+  }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     // Send while the mic is live means "I am done", not "send the half of it
@@ -313,6 +326,9 @@ export function AskSurface({
       {state.discussionOpening ? <p className="os-ask-approval-context" role="status">Opening approval discussion.</p> : state.discussion && panel === "conversation" ? <section className="os-ask-approval-context" aria-label="Approval discussion">
         <div><strong>{state.discussion.approval.question || "Discuss this approval"}</strong>{state.discussion.approval.summary && state.discussion.approval.summary !== state.discussion.approval.question ? <p>{state.discussion.approval.summary}</p> : null}<p>Discussion and advice do not approve the blocked operation.</p></div>
         <button type="button" className="os-ask-retry" onClick={conversation.leaveDiscussion}>Return to conversation</button>
+      </section> : state.discussionDraft && panel === "conversation" ? <section className="os-ask-approval-context" aria-label="Approval discussion">
+        <p>Reopen this request before sending a discussion message.</p>
+        <button type="button" className="os-ask-retry" onClick={conversation.leaveDiscussion}>Return to conversation</button>
       </section> : null}
       {showActivity ? <div className="os-ask-content"><AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={closePanel} onStop={busy ? () => conversation.stop() : undefined} /></div> : showConversations ? <div className="os-ask-content"><AskConversations conversation={conversation} onOpen={changed => { if (changed) { nearBottom.current = true; conversationScroll.current = 0; } setPanel("conversation"); returnToComposer.current = true; }} /></div> : state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} /></div> : <div className="os-ask-content">
         <div className="os-ask-log" ref={logRef} role="log" aria-label="Conversation" aria-live="polite" onScroll={() => { const el = logRef.current; if (el) { conversationScroll.current = el.scrollTop; nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72; } }}>
@@ -327,7 +343,7 @@ export function AskSurface({
               {!turn.approvalId && (!completion || !turn.acknowledgement) && (turn.background || turn.acknowledgement || turn.state === "queued" || turn.state === "waiting") && turn.runId && onOpenWork ? <AskWorkLink title={turn.workTitle || turn.prompt} state={workState} onOpen={() => onOpenWork(turn.runId, state.selectedId ?? undefined)} /> : null}
               {onOpenFile ? turn.activity.filter(event => event.kind === "artifact" && event.phase === "completed" && typeof event.arguments?.fileId === "string").map(event => <button key={event.id} type="button" className="os-ask-retry" onClick={() => onOpenFile(event.arguments!.fileId as string)}>Open {event.name || "file"}</button>) : null}
               {turn.state === "streaming" ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
-              {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { setDraft(turn.prompt); inputRef.current?.focus(); }}>Edit and try again</button> : null}{onOpenFleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
+              {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { void editFailedTurn(turn); }}>{turn.approvalId && turn.advisor ? "Edit and ask another agent" : "Edit and try again"}</button> : null}{onOpenFleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
             </div></div> : null}
           </div>)}
         </div>
@@ -340,7 +356,7 @@ export function AskSurface({
       {state.discussion && !state.voiceActive && panel === "conversation" ? <div className="os-ask-discussion-actions">
         <span className="os-caption" role="status">{state.discussionSending ? "Sending discussion message." : state.discussionRetry ? "Retry resends your original message. Your new text stays in the composer." : state.guidanceRetry ? "Retry continuing resends your saved guidance. Your new message stays in the composer." : exchanges.some(turn => turn.approvalId === state.discussion?.approval.id && ["queued", "waiting", "streaming"].includes(turn.state)) ? "Advice is being prepared. You can keep writing." : state.discussion.canSendGuidance ? "Send a message to discuss, or send your guidance to the waiting work." : state.discussion.canAskAdvisor ? "Send a message to discuss this request." : "This request is no longer waiting. Return to conversation to continue."}</span>
         <div>{state.discussionRetry && !state.discussionSending && !state.guidanceSending ? <Button tone="quiet" onClick={() => conversation.retryDiscussion()}>{state.discussionRetry.advisor ? "Retry investigation" : "Retry message"}</Button> : null}
-        {!state.discussionRetry && state.discussion.canAskAdvisor && !state.discussionSending && !state.guidanceSending ? <Button tone="quiet" onClick={() => conversation.sendDiscussion(draft.trim() || "Investigate why this work is blocked and suggest a safe next step.", true)}>Ask another agent</Button> : null}
+        {!state.discussionDraft?.advisor && !state.discussionRetry && state.discussion.canAskAdvisor && !state.discussionSending && !state.guidanceSending ? <Button tone="quiet" onClick={() => conversation.sendDiscussion(draft.trim() || "Investigate why this work is blocked and suggest a safe next step.", true)}>Ask another agent</Button> : null}
         {state.guidanceRetry && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.retryGuidance(); }}>Retry continuing</Button> : null}
         {!state.guidanceRetry && state.discussion.canSendGuidance && draft.trim() && Array.from(draft.trim()).length <= 4000 && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.sendGuidance(); }}>Send guidance</Button> : null}</div>
         {state.discussion.canSendGuidance && Array.from(draft.trim()).length > 4000 ? <span className="os-caption">Keep guidance to 4,000 characters or fewer.</span> : null}
@@ -401,13 +417,13 @@ export function AskSurface({
         >
           <Mic size={15} aria-hidden />
         </button>
-        {liveVoice && !state.discussion && !state.discussionOpening ? <button type="button" className="os-ask-mic" title="Talk with MemQL" aria-label="Talk with MemQL" disabled={!ready || busy || live} onClick={() => { controls?.cancel(); void liveVoice.start(context, settings.voice ?? "female"); }}><AudioLines size={17} /></button> : null}
+        {liveVoice && !state.discussion && !state.discussionOpening && !state.discussionDraft ? <button type="button" className="os-ask-mic" title="Talk with MemQL" aria-label="Talk with MemQL" disabled={!ready || busy || live} onClick={() => { controls?.cancel(); void liveVoice.start(context, settings.voice ?? "female"); }}><AudioLines size={17} /></button> : null}
         <textarea
           rows={1}
           onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (draft.trim() && send(draft)) setDraft(""); } }}
           ref={inputRef}
           className="os-ask-field"
-          placeholder={live ? "Listening" : state.discussion ? "Discuss this approval or write guidance" : "Ask"}
+          placeholder={live ? "Listening" : state.discussion || state.discussionDraft ? "Discuss this approval or write guidance" : "Ask"}
           aria-label="Ask"
           value={draft}
           // Read-only, never disabled, and only while the mic is writing it:
@@ -420,8 +436,8 @@ export function AskSurface({
         {busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" title="Stop this work" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
           type="submit"
           className="os-ask-send"
-          aria-label={live ? "Finish" : state.discussion ? "Send discussion message" : "Send"}
-          disabled={!live && (!ready || busy || state.discussionOpening || state.discussionSending || state.guidanceSending || (state.discussion && (!state.discussion.canAskAdvisor || !!state.discussionRetry)) || !draft.trim())}
+          aria-label={live ? "Finish" : state.discussionDraft?.advisor ? "Ask another agent" : state.discussion || state.discussionDraft ? "Send discussion message" : "Send"}
+          disabled={!live && (!ready || busy || state.discussionOpening || state.discussionSending || state.guidanceSending || (!!state.discussionDraft && state.discussionDraft.approvalId !== state.discussion?.approval.id) || (state.discussion && (!state.discussion.canAskAdvisor || !!state.discussionRetry)) || !draft.trim())}
         >
           <ArrowUp size={15} aria-hidden />
         </button>}

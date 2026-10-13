@@ -59,6 +59,7 @@ export interface ConversationState {
   discussionOpening?: boolean;
   discussionSending?: boolean;
   discussionRetry?: { approvalId: string; prompt: string; advisor: boolean } | null;
+  discussionDraft?: { approvalId: string; advisor: boolean } | null;
   guidanceSending?: boolean;
   guidanceNotice?: string;
   guidanceRetry?: { approvalId: string; feedback: string } | null;
@@ -109,29 +110,43 @@ export class ConversationSession {
   setDraft = (draft: string) => this.patch({ draft });
   questionFocused = () => this.patch({ focusQuestionId: null });
   discussApproval = async (approvalId: string) => {
-    if (this.state.discussionSending || this.state.guidanceSending) { this.patch({ error: "Wait for the current message to be recorded before opening another approval." }); return; }
-    if (this.state.busy || this.state.voiceActive) { this.patch({ error: "Finish the current reply before opening an approval discussion." }); return; }
+    if (this.state.discussionSending || this.state.guidanceSending) { this.patch({ error: "Wait for the current message to be recorded before opening another approval." }); return false; }
+    if (this.state.busy || this.state.voiceActive) { this.patch({ error: "Finish the current reply before opening an approval discussion." }); return false; }
     const epoch = ++this.discussionEpoch;
     const before = this.selection;
-    this.patch({ discussionOpening: true, error: "" });
+    this.patch({ discussionOpening: true, discussionDraft: this.state.discussionDraft?.approvalId === approvalId ? this.state.discussionDraft : null, error: "" });
     try {
       if (!this.transport.discussApproval) throw new Error("Approval discussion is unavailable.");
       const discussion = await this.transport.discussApproval(approvalId);
-      if (epoch !== this.discussionEpoch || before !== this.selection || this.disposed) return;
+      if (epoch !== this.discussionEpoch || before !== this.selection || this.disposed) return false;
+      if (discussion.approval.id !== approvalId) throw new Error("The approval discussion did not match the selected request.");
       // select is a no-op for the already-open conversation, preserving its draft.
-      if (!await this.select(discussion.conversationId, true)) return;
-      if (epoch !== this.discussionEpoch || this.disposed) return;
+      if (!await this.select(discussion.conversationId, true)) return false;
+      if (epoch !== this.discussionEpoch || this.disposed) return false;
       this.patch({ discussion, guidanceRetry: this.guidanceReceipt(discussion), discussionOpening: false, guidanceNotice: "" });
       await this.reload();
+      return epoch === this.discussionEpoch && !this.disposed;
     } catch (error) {
       if (epoch === this.discussionEpoch && before === this.selection) this.patch({ error: message(error) });
     } finally {
       if (epoch === this.discussionEpoch) this.patch({ discussionOpening: false });
     }
+    return false;
+  };
+  prepareApprovalTurnRetry = async (turnId: string): Promise<boolean> => {
+    const turn = this.state.turns.find(item => item.id === turnId);
+    if (!turn?.approvalId || !turn.error || this.state.busy || this.state.voiceActive || this.state.loading || this.state.discussionSending || this.state.guidanceSending) return false;
+    const selected = this.state.selectedId;
+    const intent = { approvalId: turn.approvalId, advisor: turn.advisor === true };
+    // Keep the read-only intent even if reopening fails. Only deliberately
+    // leaving discussion may turn this composer back into ordinary execution.
+    this.patch({ discussionDraft: intent, discussion: null });
+    const opened = await this.discussApproval(turn.approvalId);
+    return opened && this.state.selectedId === selected && this.state.discussionDraft === intent && this.state.discussion?.approval.id === intent.approvalId && this.state.discussion.canAskAdvisor;
   };
   leaveDiscussion = () => {
     this.discussionEpoch++;
-    this.patch({ discussion: null, discussionOpening: false, discussionSending: false, discussionRetry: null, guidanceSending: false, guidanceNotice: "", guidanceRetry: null });
+    this.patch({ discussion: null, discussionOpening: false, discussionSending: false, discussionRetry: null, discussionDraft: null, guidanceSending: false, guidanceNotice: "", guidanceRetry: null });
   };
   private guidanceReceipt(discussion: ApprovalDiscussion) {
     const approvalId = discussion.approval.id;
@@ -311,7 +326,7 @@ export class ConversationSession {
     this.listeners.clear();
   };
   beginVoice = async (): Promise<string> => {
-    if (this.state.discussion || this.state.discussionOpening) throw new Error("Use typing or dictation while discussing an approval.");
+    if (this.state.discussion || this.state.discussionOpening || this.state.discussionDraft) throw new Error("Use typing or dictation while discussing an approval.");
     if (this.state.busy || this.state.loading || this.state.voiceActive) throw new Error("Finish the current turn first.");
     const epoch = ++this.voiceEpoch;
     this.patch({ voiceActive: true, error: "" });
@@ -380,6 +395,10 @@ export class ConversationSession {
   };
   send = (prompt: string, context: string | null): boolean => {
     if (this.state.discussionOpening) return false;
+    if (this.state.discussionDraft) {
+      if (this.state.discussionDraft.approvalId !== this.state.discussion?.approval.id) return false;
+      return this.sendDiscussion(prompt, this.state.discussionDraft.advisor);
+    }
     if (this.state.discussion) return this.sendDiscussion(prompt);
     if (this.state.busy || this.state.voiceActive || this.state.loading || !prompt.trim()) return false;
     const epoch = ++this.epoch;
