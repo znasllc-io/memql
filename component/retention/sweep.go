@@ -136,7 +136,7 @@ func (s *Sweeper) claim(ctx context.Context, key string) (*cursor, error) {
 	return &c, err
 }
 
-// staged-data: MUST-NOT-GATE -- physical retirement must preserve staged rows
+// Physical retirement must preserve staged rows
 // in its archive too. Hiding them loses recovery evidence; each row still passes
 // the caller's row-admission gate before it is archived or deleted.
 func (s *Sweeper) batch(ctx context.Context, key, table string, c *memorynodes.Concept, cutoff time.Time, dry bool, report *Report) (bool, error) {
