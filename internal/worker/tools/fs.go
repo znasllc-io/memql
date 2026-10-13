@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
@@ -53,7 +54,15 @@ func runFsRead(_ context.Context, args map[string]any, policy *Policy) (*memqlv1
 // tail still distinguishes a file prefix from a complete read.
 func fileReadPreview(body []byte, fileSize int64) string {
 	metadata := fmt.Sprintf("\n[File read: returnedBytes=%d fileSize=%d truncated=%t]", len(body), fileSize, fileSize > int64(len(body)))
-	return truncate(string(body), 1024-len(metadata)) + metadata
+	limit := 1024 - len(metadata)
+	// Inspect at most one rune beyond the preview boundary. A partial file
+	// read may itself end mid-rune, and protobuf string fields require UTF-8.
+	preview := strings.ToValidUTF8(string(body[:min(len(body), limit+utf8.UTFMax)]), "\uFFFD")
+	preview = truncate(preview, limit)
+	for !utf8.ValidString(preview) {
+		preview = preview[:len(preview)-1]
+	}
+	return preview + metadata
 }
 
 // runFsWrite implements workerHost.fs_write.

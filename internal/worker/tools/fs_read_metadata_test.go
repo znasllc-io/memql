@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/consent"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestFileReadReportsByteSizeAndTruncation(t *testing.T) {
@@ -27,6 +29,8 @@ func TestFileReadReportsByteSizeAndTruncation(t *testing.T) {
 		{name: "over cap", source: "boundary plus omitted bytes", content: "boundary", maxBytes: 8, truncated: true},
 		{name: "large prefix", source: strings.Repeat("x", 9000), content: strings.Repeat("x", 8192), maxBytes: 8192, truncated: true},
 		{name: "unicode full", source: "é文", content: "é文", maxBytes: 5},
+		{name: "unicode preview", source: "p" + strings.Repeat("文", 2000), content: "p" + strings.Repeat("文", 2000), maxBytes: 10000},
+		{name: "malformed preview source", source: strings.Repeat("\xffa", 2000), content: strings.Repeat("�a", 2000), maxBytes: 8192},
 		{name: "unicode byte boundary", source: "é文", content: "é", maxBytes: 2, truncated: true},
 		// JSON replaces a partial UTF-8 sequence, as before. Byte accounting
 		// must describe the file read, not the encoded or displayed string.
@@ -81,6 +85,12 @@ func TestFileReadReportsByteSizeAndTruncation(t *testing.T) {
 				completeness := fmt.Sprintf("[File read: returnedBytes=%d fileSize=%d truncated=%t]", wantBytes, len(tc.source), tc.truncated)
 				if preview := result.GetOutputPreview(); len(preview) > 1024 || !strings.HasSuffix(preview, completeness) {
 					t.Fatalf("bounded preview lost completeness: %q", preview)
+				}
+				if !utf8.ValidString(result.GetOutputPreview()) {
+					t.Error("preview splits a UTF-8 sequence")
+				}
+				if _, err := proto.Marshal(result); err != nil {
+					t.Fatalf("successful file read cannot cross the worker stream: %v", err)
 				}
 			})
 		}
