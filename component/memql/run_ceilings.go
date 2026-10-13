@@ -252,10 +252,10 @@ func (s *modelSeam) deadlineContext(ctx context.Context, rc common.RunContext) (
 	return ctx, func() {}, nil
 }
 
-// WorkCallFailure resolves only a deadline installed by the run guard. Provider
-// timeouts and caller cancellation retain their original meaning. Re-read the
-// guard after the attempt so the refusal carries current usage, not a snapshot
-// taken before the model ran. Receipt work is bounded and survives cancellation.
+// WorkCallFailure resolves native run-guard cancellation, including a refused
+// model admission delivered through the router observer. Provider timeouts and
+// caller cancellation retain their original meaning. Re-read an expired
+// deadline after the attempt; receipt work survives its cancellation.
 func (e *MemQLEngine) WorkCallFailure(ctx context.Context) error {
 	if e == nil || e.modelSeam == nil {
 		return nil
@@ -264,6 +264,10 @@ func (e *MemQLEngine) WorkCallFailure(ctx context.Context) error {
 }
 
 func (s *modelSeam) deadlineFailure(ctx context.Context) error {
+	var ceiling *RunCeilingError
+	if errors.As(context.Cause(ctx), &ceiling) {
+		return ceiling
+	}
 	if !errors.Is(context.Cause(ctx), errRunDeadline) {
 		return nil
 	}

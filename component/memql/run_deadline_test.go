@@ -182,3 +182,28 @@ func TestInFlightRunDeadlineResolvesCurrentSpendAndKeepsProviderTimeoutsSeparate
 		t.Fatalf("user cancellation was relabeled: %v", err)
 	}
 }
+
+// The router communicates a refused native admission through cancellation;
+// provider APIs consequently report context.Canceled rather than the guard's
+// typed error. Keep that exact proof without charging or re-reading a budget.
+func TestModelAdmissionCancellationRetainsItsNativeBudgetProof(t *testing.T) {
+	for _, modality := range []airoute.Modality{airoute.ModalityTools, airoute.ModalityStreamingTools} {
+		t.Run(string(modality), func(t *testing.T) {
+			guard := &fakeGuard{breach: &RunCeilingBreach{Ceiling: "modelCalls", Limit: "1", Actual: "1"}, spent: RunSpend{ModelCalls: 1}}
+			e := &MemQLEngine{modelSeam: &modelSeam{ceilings: guard}}
+			ctx, cancel := context.WithCancelCause(common.ContextWithRun(context.Background(), aRun()))
+			defer cancel(nil)
+			e.modelSeam.observeAgentSpend(ctx, cancel)(airoute.CallObservation{ID: "refused", Phase: "running", Modality: string(modality)})
+			if !errors.Is(ctx.Err(), context.Canceled) {
+				t.Fatal("provider was not cancelled")
+			}
+			cause := context.Cause(ctx)
+			if got := e.WorkCallFailure(ctx); got != cause {
+				t.Fatalf("native cause lost: %v instead of %v", got, cause)
+			}
+			if guard.admits != 1 || len(guard.charges) != 0 {
+				t.Fatalf("refusal was re-admitted or charged: %+v", guard)
+			}
+		})
+	}
+}

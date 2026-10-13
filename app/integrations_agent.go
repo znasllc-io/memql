@@ -4,8 +4,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/work"
 
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -228,6 +230,13 @@ func (r *replierTurnRunner) RunTurn(ctx context.Context, msg *memqlv1.AgentGener
 	sink := &workTurnDeltas{ctx: ctx, engine: r.engine, id: msg.RequestId, cancel: cancel}
 	ctx = r.engine.ObserveWorkCalls(ctx, cancel)
 	result, err := r.replier.Handle(ctx, msg, sink)
+	// The loop may have saved a checkpoint after a native budget cancellation.
+	// Preserve its durable outcome: restoring the raw cancellation here would
+	// make every unwinding journal publish another, non-resumable question.
+	var wait *work.HumanWait
+	if errors.As(err, &wait) || errors.Is(err, memql.ErrWorkCheckpointRequired) {
+		return "", err
+	}
 	if cause := context.Cause(ctx); cause != nil {
 		if budgetErr := r.engine.WorkCallFailure(ctx); budgetErr != nil {
 			return "", budgetErr
