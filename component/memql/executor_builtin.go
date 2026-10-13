@@ -27,6 +27,7 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 		"askConversationSnapshot":       e.askConversationSnapshotBuiltin,
 		"askWorkConversation":           e.askWorkConversationBuiltin,
 		"askApprovalDiscussion":         e.askApprovalDiscussionBuiltin,
+		"askGuideWork":                  e.askGuideWorkBuiltin,
 		"askApprovalMessage":            e.askApprovalMessageBuiltin,
 		"askRunApprovalMessage":         e.askRunApprovalMessageBuiltin,
 		"askApprovalEvidence":           e.askApprovalEvidenceBuiltin,

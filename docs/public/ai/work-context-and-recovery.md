@@ -50,6 +50,25 @@ prefix and accumulated usage, and does not replenish automatic retries or
 raise resource limits. A transient failure's **Retry** instead repeats the
 failed step. Either decision is persisted for the cluster to resume safely.
 
+**Guide this work** adds a human message to the selected running work in its
+existing Ask conversation. It creates no second goal. The message is durably
+queued for the next safe boundary: an operation already in flight can finish,
+but unstarted calls from an older model response wait for reasoning with the
+new guidance. Completed effects and their results remain intact. A received
+receipt means a successful model call used the message, not that the task is
+finished or that the model followed the advice. If work ends or changes attempt before another
+boundary, its message is shown as not received. Waiting for a permission
+answer keeps it queued for the resumed work.
+
+The selected run and execution attempt are checked again when the message is
+saved. Replanning or an explicit rerun requires selecting the current work;
+ordinary steps and permission answers retain the selection. An uncertain send
+retries the same message identity and recovers its original receipt, even if
+work has since moved. Messages are limited to 4,000 characters each, with at
+most 16 messages and 16,000 characters per run. They do not grant permissions,
+raise budgets, reset retries, or approve a waiting request. A waiting request
+uses its own discussion and decision controls instead.
+
 **Discuss in Ask** opens the conversation that originated an approval. Work
 delegated to a child run follows its owned parent records back to that
 conversation. Work started elsewhere receives one private linked conversation. Opening the

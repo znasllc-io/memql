@@ -312,6 +312,7 @@ func (r *Replier) runNonStreamingToolLoop(
 	// Background work is the lane that actually reaches the window, being the
 	// one that runs the long journaled steps of a goal.
 	contextHandoffs := 0
+	var guidance workGuidanceCursor
 	// paused is set when the loop stops at a checkpoint because the turn was
 	// preempted ("passed", memql#906). Surfaced on TurnResult.Paused.
 	paused := false
@@ -368,6 +369,12 @@ BackgroundLoop:
 			}, fmt.Errorf("agent: %s after %s", turnWallclockSentinel, elapsed.Round(time.Second))
 		}
 
+		guided, _, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
+		messages = guided
+
 		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
 			return nil, compactErr
@@ -386,6 +393,12 @@ BackgroundLoop:
 		)
 		attempt := 0
 		for {
+			// Compaction or a retry can take time; check again before reasoning.
+			guided, _, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
+			messages = guided
 			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
 			if budgetErr != nil {
 				return nil, budgetErr
@@ -429,6 +442,20 @@ BackgroundLoop:
 			r.logger.Warn("agent background: call error -- ending turn",
 				"iter", iter, "attempt", attempt, "error", stepErr)
 			break BackgroundLoop
+		}
+
+		if err := r.acknowledgeWorkGuidance(ctx, &guidance); err != nil {
+			return nil, err
+		}
+		// Do not dispatch a stale proposal, including a terminal response, if a
+		// human corrected the work while that model call was in flight.
+		guided, redirected, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
+		messages = guided
+		if redirected {
+			continue BackgroundLoop
 		}
 
 		turnText := ""
@@ -525,7 +552,16 @@ BackgroundLoop:
 		allToolCalls = append(allToolCalls, turnCalls...)
 
 		hadSuccess := false
-		for _, tc := range turnCalls {
+		for callIndex, tc := range turnCalls {
+			guided, redirected, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, turnCalls[callIndex:])
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
+			messages = guided
+			if redirected {
+				terminalEnvelope = nil
+				continue BackgroundLoop
+			}
 			// Calls after a human question have not started yet.
 			if err := r.prepareWorkTool(ctx); err != nil {
 				return nil, err

@@ -122,6 +122,50 @@ func AskConversationSnapshotBuild(args AskConversationSnapshotArgs) string {
 	return b.String()
 }
 
+// AskGuideWork -- Record guidance for owned running work in its existing conversation. This starts no goal and grants no permission; the existing agent receives the message at its next safe reasoning boundary. Retries reuse requestId.
+type AskGuideWorkArgs struct {
+	TargetEpoch    string
+	RunId          string
+	ConversationId string
+	RequestId      string
+	Prompt         string
+}
+
+// AskGuideWork calls the engine builtin askGuideWork.
+func (qc *QueryClient) AskGuideWork(ctx context.Context, args AskGuideWorkArgs) (*Result, error) {
+	call := AskGuideWorkBuild(args)
+	return qc.executeNamed(ctx, "askGuideWork", call)
+}
+
+func AskGuideWorkBuild(args AskGuideWorkArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin askGuideWork(")
+	b.WriteString("targetEpoch: ")
+	b.WriteString(quoteMemQL(args.TargetEpoch))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("conversationId: ")
+	b.WriteString(quoteMemQL(args.ConversationId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("prompt: ")
+	b.WriteString(quoteMemQL(args.Prompt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AskWorkConversation -- Open this owner's existing work in its Ask conversation, creating a private conversation for Nexus-originated work without starting another run.
 type AskWorkConversationArgs struct {
 	RunId string

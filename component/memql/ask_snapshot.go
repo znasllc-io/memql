@@ -30,6 +30,7 @@ func (e *MemQLEngine) askSaveTurn(ctx context.Context, conversationID string, tu
 	if err := json.Unmarshal(raw, &transcript); err != nil {
 		return err
 	}
+
 	for n := range transcript.Turns {
 		if transcript.Turns[n].ID == turn.ID {
 			transcript.Turns[n] = turn
@@ -96,6 +97,26 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			seen[answer.ID] = true
 		}
 	}
+	guidanceRuns := map[string]map[string]any{}
+	for n := range transcript.Turns {
+		turn := &transcript.Turns[n]
+		target := turn.GuidanceTargetRunID
+		if target == "" || turn.GuidanceStatus != "queued" {
+			continue
+		}
+		run, seen := guidanceRuns[target]
+		if !seen {
+			rows, err := e.workRows(ctx, "workRunForOwner", target)
+			if err != nil {
+				return err
+			}
+			if len(rows) == 1 {
+				run = rows[0]
+			}
+			guidanceRuns[target] = run
+		}
+		projectWorkGuidance(turn, run)
+	}
 	for n := range transcript.Turns {
 		turn := &transcript.Turns[n]
 		if turn.RunID == "" {
@@ -109,6 +130,11 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 			return fmt.Errorf("conversation work is unavailable")
 		}
 		run := runs[0]
+		turn.CanGuideWork = runningGuidanceTarget(run) && guidanceConversation(run) != ""
+		turn.GuidanceEpoch = ""
+		if turn.CanGuideWork {
+			turn.GuidanceEpoch = workGuidanceEpoch(run)
+		}
 		turn.WorkStatus, _ = run["status"].(string)
 		waiting, _ := run["waitingOn"].(map[string]any)
 		questions, err := e.workRows(ctx, "workApprovalsForOwnedRun", turn.RunID)

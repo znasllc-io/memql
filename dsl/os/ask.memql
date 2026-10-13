@@ -34,6 +34,20 @@ builtin askApprovalMessage {
  advisor bool
 }
 
+/// Record guidance for owned running work in its existing conversation. This
+/// starts no goal and grants no permission; the existing agent receives the
+/// message at its next safe reasoning boundary. Retries reuse requestId.
+@sdk
+@executor("askGuideWork")
+@args(profile="object")
+builtin askGuideWork {
+ targetEpoch string!
+ runId string!
+ conversationId string!
+ requestId string!
+ prompt string!
+}
+
 /// This model capability requires the exact child run and durable human turn.
 /// It admits only the read-only approval prompts and one guarded model call.
 @executor("askRunApprovalMessage")

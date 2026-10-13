@@ -409,6 +409,7 @@ func (r *Replier) runStreamingToolLoop(
 	// next window instead of ending the turn on a limit that is the model's
 	// property rather than the task's.
 	contextHandoffs := 0
+	var guidance workGuidanceCursor
 
 	maxIter := maxStreamingToolLoopIterations()
 	wallclock := turnWallclockFor(turnCtx)
@@ -449,6 +450,12 @@ StreamLoop:
 			textChunks++
 		}
 
+		guided, _, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
+		messages = guided
+
 		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
 			return nil, compactErr
@@ -471,6 +478,12 @@ StreamLoop:
 		)
 		attempt := 0
 		for {
+			// Compaction or a retry can take time; check again before reasoning.
+			guided, _, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
+			messages = guided
 			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
 			if budgetErr != nil {
 				return nil, budgetErr
@@ -554,6 +567,20 @@ StreamLoop:
 			// Success: exit the inner retry loop and proceed to
 			// consume turnCalls / emit tool results.
 			break
+		}
+
+		if err := r.acknowledgeWorkGuidance(ctx, &guidance); err != nil {
+			return nil, err
+		}
+		// Do not dispatch a stale proposal, including a terminal response, if a
+		// human corrected the work while that model call was in flight.
+		guided, redirected, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, nil)
+		if guidanceErr != nil {
+			return nil, guidanceErr
+		}
+		messages = guided
+		if redirected {
+			continue StreamLoop
 		}
 
 		if workOutcomeRequired && isDelegatedWorkSession(provider) {
@@ -654,7 +681,16 @@ StreamLoop:
 		// forward them. The sink contract allows both ToolCall and
 		// ToolResult so cognition has the full picture.
 		hadSuccess := false
-		for _, tc := range turnCalls {
+		for callIndex, tc := range turnCalls {
+			guided, redirected, guidanceErr := r.receiveWorkGuidance(ctx, &guidance, messages, turnCalls[callIndex:])
+			if guidanceErr != nil {
+				return nil, guidanceErr
+			}
+			messages = guided
+			if redirected {
+				terminalEnvelope = nil
+				continue StreamLoop
+			}
 			// Calls after a human question have not started yet.
 			if err := r.prepareWorkTool(ctx); err != nil {
 				return nil, err

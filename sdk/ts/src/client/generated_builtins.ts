@@ -98,6 +98,35 @@ QueryClient.prototype.askConversationSnapshot = function (this: QueryClient, arg
   return this.executeNamed("askConversationSnapshot", buildAskConversationSnapshot(args), opts);
 };
 
+/** Record guidance for owned running work in its existing conversation. This starts no goal and grants no permission; the existing agent receives the message at its next safe reasoning boundary. Retries reuse requestId. */
+export interface AskGuideWorkArgs {
+  targetEpoch: string;
+  runId: string;
+  conversationId: string;
+  requestId: string;
+  prompt: string;
+}
+
+export function buildAskGuideWork(args: AskGuideWorkArgs): string {
+  const parts: string[] = [];
+  parts.push("targetEpoch: " + renderMemQLValue(args.targetEpoch));
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("prompt: " + renderMemQLValue(args.prompt));
+  return "builtin askGuideWork(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askGuideWork(args: AskGuideWorkArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askGuideWork = function (this: QueryClient, args: AskGuideWorkArgs = {} as AskGuideWorkArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askGuideWork", buildAskGuideWork(args), opts);
+};
+
 /** Open this owner's existing work in its Ask conversation, creating a private conversation for Nexus-originated work without starting another run. */
 export interface AskWorkConversationArgs {
   runId: string;

@@ -425,3 +425,10 @@ func (a *CognitionEngineAdapter) RestoreWorkContinuation(ctx context.Context, me
 func (a *CampaignsEngineAdapter) InvokeAIStructured(ctx context.Context, templateID string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error) {
 	return a.Engine.InvokeAIStructured(ctx, templateID, data, schemaName, schema, strict)
 }
+
+func (a *CognitionEngineAdapter) ReadWorkGuidance(ctx context.Context) ([]memql.WorkGuidance, error) {
+	return a.Engine.ReadWorkGuidance(ctx)
+}
+func (a *CognitionEngineAdapter) AcknowledgeWorkGuidance(ctx context.Context, ids []string) error {
+	return a.Engine.AcknowledgeWorkGuidance(ctx, ids)
+}
