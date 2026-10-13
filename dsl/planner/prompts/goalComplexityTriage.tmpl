@@ -202,7 +202,7 @@ Two shapes qualify:
   - "a profile of each of these 6 vendors" -> sectionable: true; one section per vendor.
 - ORDERED sections -- a few clear steps where a later section reads what an earlier one produced. The later section names that output in its `inputs`, spelled exactly as the earlier section spelled it in its `outputs`.
   - "summarise last month's invoices and draft an email to finance with the totals" -> sectionable: true; section 1 "summarise the month's invoices" has outputs ["invoiceSummary"]; section 2 "draft the email to finance" has inputs ["invoiceSummary"].
-  - Read an external request, make the requested change, then verify and publish it: the read returns observed requirements; the change consumes those requirements and declares its effects; verification and publication consume the actual change receipts. Do not preselect the implementation while classifying. Add a final saved report only when the person asks for one.
+  - Read an external request, make the requested change, then verify and publish it: the read returns observed requirements and applicable instructions; the change consumes them and declares its effects; verification and publication consume the original requirements and applicable instructions alongside the change receipts. Do not preselect the implementation while classifying. Add a final saved report only when the person asks for one.
 
 Every section entry carries:
 - `label`: a short name for the section.
@@ -224,6 +224,22 @@ to those requirements, not a survey of every linked source. Preserve required
 instruction coverage and identify any missing passage; later implementation or
 verification belongs to its own section. A drafting section still returns its
 complete requested content, never just a summary or a progress note.
+
+Earlier outputs reach a section only through named inputs; an earlier step's
+presence in the plan does not supply its contents. Name the original requirements and applicable
+instructions as inputs to every section that must obey or check them, alongside
+the relevant result receipts. Do not replace these criteria with a previous
+section's claim that its work is done.
+
+Assign every requested acceptance criterion to a section. When criteria await
+a bounded prerequisite read, make later sections responsible for its applicable
+requirements instead of guessing them. State how each
+section checks its applicable criteria and hands off unmet criteria and later
+obligations with their source references. Keep later obligations separate from
+the current section's completion condition. When verification is required,
+creating required verification and running existing checks are different obligations;
+assign both when the request requires both. A passing check or a publication
+receipt alone does not establish that every requested criterion was satisfied.
 
 Set `sectionable: false` (the default) when:
 - the work cannot be divided into independently checkable outputs, even with explicit dependencies,

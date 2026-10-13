@@ -2,6 +2,8 @@ package planner
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"text/template"
@@ -64,6 +66,10 @@ func TestSectionTurnsCarryTheirOwnCompletionBoundary(t *testing.T) {
 					"name the missing fact or applicable instruction it will resolve",
 					"Repeating the same successful fetch or the same truncated prefix is not progress",
 					"Do not skip applicable instructions or claim an unmet postcondition",
+					"Reconcile each criterion applicable to this section with recorded evidence",
+					"A change receipt alone does not prove the original requirements were met",
+					"Carry unmet criteria and later obligations explicitly in the handoff",
+					"do not label them done or perform later sections' work",
 				} {
 					if !strings.Contains(prompt, required) {
 						t.Errorf("%s turn lost %q", answer, required)
@@ -109,6 +115,10 @@ func TestSectionProgressPromptsPreserveScopeAndMissingEvidence(t *testing.T) {
 	}{
 		{"goalComplexityTriage", map[string]any{"goal": "Read the service request, apply the authorized repair, then verify it."}, []string{
 			"observable handoff", "Understood", "a survey of every linked source",
+			"original requirements and applicable instructions alongside the change receipts",
+			"Assign every requested acceptance criterion to a section",
+			"Earlier outputs reach a section only through named inputs",
+			"creating required verification and running existing checks are different obligations",
 		}},
 		{"workContextCheckpoint", map[string]any{
 			"task":   "Section: Gather requirements. Return the requirements ledger. Later work: apply and verify the repair.",
@@ -136,6 +146,98 @@ func TestSectionProgressPromptsPreserveScopeAndMissingEvidence(t *testing.T) {
 				if !strings.Contains(rendered, want) {
 					t.Errorf("rendered prompt lost %q", want)
 				}
+			}
+		})
+	}
+}
+
+// The classifier response is a fixture, not a model-quality assertion. Execute
+// the captured Spine and reload its persisted bundle on a fresh executor to
+// prove the declared requirements and instructions survive every handoff.
+func TestSectionCriteriaTravelWithChangeAndVerificationReceipts(t *testing.T) {
+	const requirements = "Request R: revise the handling procedure and its explanation. Verification must include an observed dry run. Publishing remains later work. Instructions P: retain the original evidence and use the approved review channel."
+	const changed = "Change C: revised procedure and explanation saved. Unmet criterion: dry-run verification belongs to the verify section; review publication belongs to publish."
+	const verified = "Verification V: dry run observed successfully, receipt V1. Unmet criterion: publication belongs to publish."
+	const published = "Publication P: procedure and evidence submitted through the approved review channel, receipt P1."
+	replies := map[string]string{"read": requirements, "change": changed, "verify": verified, "publish": published}
+	for _, inline := range []bool{false, true} {
+		name := "live"
+		if inline {
+			name = "inline"
+		}
+		t.Run(name, func(t *testing.T) {
+			req := CompileRequest{
+				GoalId: "v1:work:goal:criteria", RunId: "v1:work:run:criteria", OwnerUserId: "u1",
+				Statement: "Read the request, make the authorized change, verify it, and submit the result for review.",
+				Input:     map[string]any{"requestRef": "request-R"},
+			}
+			sections := []map[string]any{
+				{"label": "read", "instruction": "Read the request and applicable instructions, preserving criteria and explicit gaps.", "purpose": "Read a change request",
+					"inputs": []string{"requestRef"}, "outputs": []string{"requirements", "instructions"}},
+				{"label": "change", "instruction": "Make only the authorized change and account for its applicable criteria.", "purpose": "Apply an authorized change",
+					"inputs": []string{"requirements", "instructions"}, "outputs": []string{"changeReceipt"}, "effects": []string{"files"}, "postcondition": "the requested procedure and explanation changes are recorded"},
+				{"label": "verify", "instruction": "Perform the required verification against the original criteria and retain its evidence.", "purpose": "Verify a change",
+					"inputs": []string{"requirements", "instructions", "changeReceipt"}, "outputs": []string{"verificationReceipt"}, "effects": []string{"machine"}, "postcondition": "the required dry run has a recorded outcome"},
+				{"label": "publish", "instruction": "Submit the result and criterion coverage for review, preserving unmet items honestly.", "purpose": "Publish a change for review",
+					"inputs": []string{"requirements", "instructions", "changeReceipt", "verificationReceipt"}, "outputs": []string{"publicationReceipt"}, "effects": []string{"external"}, "postcondition": "the approved review channel confirms receipt"},
+			}
+			if inline {
+				for _, section := range sections {
+					section["purpose"] = ""
+				}
+			}
+			spine, err := workintegration.CaptureSpine("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Spine, err = workflowhost.SnapshotFromMap(spine.Map())
+			if err != nil {
+				t.Fatal(err)
+			}
+			engine := newSectionCatalogEngine(map[string]any{"complexity": "moderate", "requiresFile": false, "sectionable": true, "sections": sections, "assembly": "report the recorded outcomes and unmet criteria"})
+			out, err := (&PlannerAgentLoop{engine: engine}).CompileGoalForRun(context.Background(), req, nil, realSandbox{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(out.LiveSections) != len(sections) {
+				t.Fatalf("expected four section boundaries, got %+v", out.LiveSections)
+			}
+			for _, section := range out.LiveSections {
+				if (section.Inline != "") != inline {
+					t.Fatalf("fixture did not exercise %s: %+v", name, section)
+				}
+			}
+			turns, _ := runDraftWithReplies(t, engine.countingCompileEngine, workDraftHeadline(req), req.Input, replies)
+			for label, want := range map[string]map[string]string{
+				"change":  {"requirements": requirements, "instructions": requirements},
+				"verify":  {"requirements": requirements, "instructions": requirements, "changeReceipt": changed},
+				"publish": {"requirements": requirements, "instructions": requirements, "changeReceipt": changed, "verificationReceipt": verified},
+			} {
+				prompt := turns.prompts[replies[label]]
+				heading := sectionInputsHeading
+				if inline {
+					heading = earlierResultsHeading
+				}
+				_, encoded, ok := strings.Cut(prompt, heading)
+				if !ok {
+					t.Fatalf("%s lost its declared handoff: %s", label, prompt)
+				}
+				var got map[string]string
+				if err := json.Unmarshal([]byte(encoded), &got); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Errorf("%s inputs = %#v, want %#v", label, got, want)
+				}
+				for _, required := range []string{"Reconcile each criterion applicable to this section with recorded evidence", "Carry unmet criteria and later obligations explicitly in the handoff", "do not label them done or perform later sections' work"} {
+					if !strings.Contains(prompt, required) {
+						t.Errorf("%s prompt lost %q", label, required)
+					}
+				}
+			}
+			// Later receipts must not appear before the section that produces them.
+			if strings.Contains(turns.prompts[changed], verified) || strings.Contains(turns.prompts[verified], published) {
+				t.Fatal("handoff invented a future section's result")
 			}
 		})
 	}
