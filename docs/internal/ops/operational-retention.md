@@ -25,12 +25,35 @@ reads resolve the version a row actually used, including deletion schemas.
 Insert triggers also cover direct writers and backup restores. A missing
 reference is refused rather than returned as a partial schema.
 
-During a rolling upgrade, normalization waits until every registered node that
-has not stopped has recently advertised schema-reference support in
-`memory_schema_readers`. An offline node still blocks: it may be serving reads.
-Once the cluster is ready, `memory_schema_storage.references_enabled` is set and
-remains set. An orphan node that never records its stopped state must be retired
-through the existing topology lifecycle before conversion can start.
+First activation requires the explicit startup setting
+`MEMQL_DATABASE_SCHEMA_REFERENCES_ACTIVATE=true` as well as every registered
+node that has not stopped recently advertising schema-reference support in
+`memory_schema_readers`. The setting defaults to false; held replicas still
+advertise support. An offline node still blocks: it may be serving reads.
+An orphan node must be verified gone before retiring it through the existing
+topology lifecycle. Retirement alone does not authorize activation.
+
+Use two separate GitOps rollouts:
+
+1. Upgrade all readers with the setting absent or false on every replica.
+   Keep it false through the rollback observation window. Verify all old serving
+   processes and streams have exited, including product BFFs; a persisted
+   stopped row can precede transport closure. Check serving readiness and a
+   full-schema backup. This phase keeps both old and new writes inline.
+2. Select a known-good reference-capable rollback image, then set true in the
+   desired startup configuration and roll the affected pods. ConfigMap-only
+   changes do not update existing process environment. One opted-in replica
+   is enough to permit the cluster-wide transition after the reader check;
+   false replicas do not veto it. Verify the durable flag and conversion
+   progress with the read-only query below.
+
+`memory_schema_storage.references_enabled` remains set once activated. Returning
+the startup setting to false neither expands stored references nor stops new
+normalization or remaining conversion. Do not roll an incompatible reader back
+into this cluster: rollback images must understand schema references. An older
+engine requires a tested full-schema restore with an explicit recovery window,
+not an uninterrupted image-only rollback. Other release changes remain subject
+to their own compatibility checks even while schema activation is held.
 
 Public graph reads, repository reads, backups and retention archives expand
 references to full schemas. Backups and archives therefore remain self-contained
@@ -48,6 +71,7 @@ updates do not enqueue work-run recovery invalidations.
 Inspect conversion progress with:
 
 ```sql
+SELECT references_enabled FROM memory_schema_storage;
 SELECT table_name, cursor_id, cursor_at, completed, next_at
 FROM memory_schema_compaction;
 ```

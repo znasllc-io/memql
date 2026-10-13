@@ -491,6 +491,31 @@ All optional. Defaults baked into `component/database/database.go`:
 | `MEMORY_NODES_DATABASE_CONN_MAX_LIFETIME_MS`          | `3600000`   |
 | `MEMORY_NODES_DATABASE_CONN_MAX_IDLE_TIME_MS`         | `120000`    |
 
+`MEMQL_DATABASE_SCHEMA_REFERENCES_ACTIVATE` defaults to `false` and is read
+at startup. It permits the **first activation** of shared row-schema references;
+it does not select a reader format. Every upgraded replica advertises reader
+support while this setting is false. A true replica can activate the shared
+format only when every registered node that has not stopped recently advertised
+support. An invalid or empty boolean refuses startup.
+
+Keep this setting false on **every replica** during the reader upgrade and its
+rollback observation window. A topology row marked stopped is not proof that
+the old process has closed its existing streams. Verify all old serving
+processes have exited, check the upgraded service and a full-schema backup, and
+choose a reference-capable rollback image before a separate activation rollout.
+Setting true on even one replica permits cluster-wide activation. Change the
+desired startup configuration through the installation's GitOps overlay and
+roll the affected pods; changing a ConfigMap alone does not update process
+environment.
+
+After `memory_schema_storage.references_enabled` becomes true, false does not
+reverse existing references, stop normalization of new writes, or suspend
+remaining conversion. Readers always support both inline and referenced
+schemas. An image-only rollback must use a reference-capable engine; returning
+to an older engine requires a tested full-schema restore and its recovery
+window. The down migration refuses that downgrade. Before activation, schemas
+remain inline, but other release changes still need their own rollback checks.
+
 A migration runs only after acquiring the shared migration lock. A competing
 replica defers and retries later. If a connection or context deadline expires,
 the server may still be executing the migration: the runner retains the lock

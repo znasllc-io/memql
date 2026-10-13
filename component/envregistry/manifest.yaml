@@ -800,6 +800,13 @@ variables:
   # password). These are the non-secret database knobs, all read through named
   # constants and so unregistered until memql#3818.
 
+  - name: MEMQL_DATABASE_SCHEMA_REFERENCES_ACTIVATE
+    component: database
+    scope: node
+    default: "false"
+    optional: true
+    description: "Startup opt-in to FIRST activation of shared row-schema references after every old serving process has exited. False still advertises reader support. One true replica can activate the cluster after the all-reader check; keep all replicas false throughout the reader upgrade and rollback observation window. Once the durable format is enabled, false does not undo normalization or conversion. Rollback then requires a reference-capable engine or a full-schema restore. Invalid boolean values refuse startup."
+
   - name: MEMQL_DB_APP_NAME
     component: database
     scope: node

@@ -13,6 +13,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/component"
+	"github.com/znasllc-io/memql/core/env"
 )
 
 const schemaCompactionBatch = 500
@@ -24,19 +25,26 @@ const schemaCompactionInterval = 5 * time.Second
 // this maintenance loop; every batch has its own five-second deadline.
 type SchemaCompactor struct {
 	*component.Component
-	provider func() *bun.DB
-	nodeID   func() string
-	logger   *slog.Logger
+	provider        func() *bun.DB
+	nodeID          func() string
+	logger          *slog.Logger
+	allowActivation bool
 }
 
-func NewSchemaCompactor(provider func() *bun.DB, nodeID func() string, logger *slog.Logger) *SchemaCompactor {
+func NewSchemaCompactor(provider func() *bun.DB, nodeID func() string, logger *slog.Logger) (*SchemaCompactor, error) {
+	reader := env.NewEnvReader("MEMQL_DATABASE")
+	activate, err := reader.OptionalBool("SCHEMA_REFERENCES_ACTIVATE")
+	if err != nil {
+		return nil, err
+	}
 	comp, _ := component.New(common.ComponentName("schemaCompactor"))
 	if logger == nil {
 		logger = slog.Default()
 	}
 	c := &SchemaCompactor{Component: comp, provider: provider, nodeID: nodeID, logger: logger}
+	c.allowActivation = activate != nil && *activate
 	_ = c.ConfigureLifecycle(component.WithRunHook(c.run))
-	return c
+	return c, nil
 }
 
 func (*SchemaCompactor) Order() int { return 50 }
@@ -59,7 +67,7 @@ func (c *SchemaCompactor) run(ctx context.Context, markStarted func()) error {
 				continue
 			}
 			batchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-			enabled, err := EnableSchemaReferencesWhenReady(batchCtx, db, c.nodeID())
+			enabled, err := EnableSchemaReferencesWhenReady(batchCtx, db, c.nodeID(), c.allowActivation)
 			if err == nil && enabled {
 				_, err = CompactSchemaBatch(batchCtx, db)
 			}
@@ -153,13 +161,13 @@ func CompactSchemaBatch(ctx context.Context, db *bun.DB) (int, error) {
 	return converted, err
 }
 
-// EnableSchemaReferencesWhenReady waits for every non-retired engine node to
-// advertise support. It deliberately does not infer support from a stale
-// heartbeat: an old process could still serve reads. The topology's normal
-// stopped transitions retire old pod identities. Offline alone is insufficient:
-// a disconnected process could still serve reads. Once enabled, a
-// downgrade requires the documented full-schema restore.
-func EnableSchemaReferencesWhenReady(ctx context.Context, db *bun.DB, nodeID string) (bool, error) {
+// EnableSchemaReferencesWhenReady advertises reader support even while first
+// activation is held. Explicit operator opt-in and every non-retired reader's
+// recent advertisement are both required to enable references. A stopped row
+// alone does not prove an old process has closed its serving streams: the
+// operator must finish that rollout before opting in. Once enabled, false does
+// not downgrade storage; returning true keeps existing conversion resumable.
+func EnableSchemaReferencesWhenReady(ctx context.Context, db *bun.DB, nodeID string, allowActivation bool) (bool, error) {
 	var enabled bool
 	if err := db.QueryRowContext(ctx, `SELECT references_enabled FROM memory_schema_storage WHERE singleton`).Scan(&enabled); err != nil || enabled {
 		return enabled, err
@@ -169,6 +177,9 @@ func EnableSchemaReferencesWhenReady(ctx context.Context, db *bun.DB, nodeID str
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO memory_schema_readers (node_id,seen_at) VALUES (?,clock_timestamp()) ON CONFLICT (node_id) DO UPDATE SET seen_at=excluded.seen_at`, nodeID); err != nil {
 		return false, err
+	}
+	if !allowActivation {
+		return false, nil
 	}
 	// staged-data: MUST-NOT-GATE -- storage rollout must include all engine
 	// readers, irrespective of authored concept publication or caller identity.

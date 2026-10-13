@@ -116,7 +116,11 @@ func (a *App) databaseAndConcepts() {
 		}
 		return a.db.BunDB()
 	}
-	a.Dependencies = append(a.Dependencies, memoryNodesDatabase.NewSchemaCompactor(provider, a.startupNodeID, a.Logger))
+	schemaCompactor, err := memoryNodesDatabase.NewSchemaCompactor(provider, a.startupNodeID, a.Logger)
+	if err != nil {
+		a.fatal("invalid schema-reference activation configuration", "error", err)
+	}
+	a.Dependencies = append(a.Dependencies, schemaCompactor)
 	observeSink := observe.NewSinkComponent(a.Logger, provider, observe.TimescaleSinkOptions{Logger: a.Logger}, 0)
 	a.Dependencies = append(a.Dependencies, observeSink)
 
