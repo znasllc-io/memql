@@ -459,9 +459,15 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 			// completed prefix. Automatic retry limits and spend stay intact.
 			act := actRun{row: run, id: runId, owner: rowString(run, "ownerUserId"), order: topLevelOrder(rowStringSlice(run, "stepOrder"))}
 			key := topLevelStepKey(retry.stepKey)
-			if retry.symptom == work.SymptomPlan && act.requireExecutable() == nil && act.requireTopLevel(key) == nil {
+			if retry.symptom == work.SymptomPlan && act.requireExecutable() == nil {
+				if err := i.requireApprovalStep(ctx, &act, key); err != nil {
+					return false, err
+				}
 				fields["status"] = runStatusWaiting
 				fields["waitingOn"] = map[string]any{"kind": waitKindReplan, "subject": key, "reason": strings.TrimSpace(retry.reason), "since": rfc(now)}
+				if len(act.order) > len(topLevelOrder(rowStringSlice(run, "stepOrder"))) {
+					fields["stepOrder"] = act.checkpointOrder()
+				}
 			} else if request, stale, ok := i.failureRetryRequest(ctx, run, runId, *retry, now); ok {
 				fields["rerun"] = request
 				fields["staleSteps"] = stale

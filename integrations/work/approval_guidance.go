@@ -79,7 +79,7 @@ func (i *Integration) validateGuidanceRun(ctx context.Context, approval map[stri
 	if err := run.requireExecutable(); err != nil {
 		return err
 	}
-	if err := run.requireTopLevel(topLevelStepKey(rowString(approval, "stepKey"))); err != nil {
+	if err := i.requireApprovalStep(ctx, &run, topLevelStepKey(rowString(approval, "stepKey"))); err != nil {
 		return err
 	}
 	if rowString(run.row, "status") != runStatusWaiting || run.row["cancelRequested"] == true || rowString(rowMap(run.row, "waitingOn"), "kind") != "approval" ||
@@ -87,6 +87,19 @@ func (i *Integration) validateGuidanceRun(ctx context.Context, approval map[stri
 		return fmt.Errorf("work: this run is no longer waiting on the request being discussed")
 	}
 	return nil
+}
+
+// A human question can park inside an admitted step before its receipt advances
+// the run's checkpoint. Recover only the contiguous, owner-admitted journal tail;
+// the approval's step key alone is never evidence that a step belongs to a run.
+func (i *Integration) requireApprovalStep(ctx context.Context, run *actRun, key string) error {
+	if err := run.requireTopLevel(key); err == nil {
+		return nil
+	}
+	if _, err := i.readActVersions(memql.ContextWithFreshRead(ctx), run); err != nil {
+		return err
+	}
+	return run.requireTopLevel(key)
 }
 
 func guidanceRetry(approval map[string]any, text, decidedBy string) *failureRetry {

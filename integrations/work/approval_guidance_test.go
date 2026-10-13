@@ -238,3 +238,33 @@ func TestGuidanceLimitCountsCharactersAndProjectionDoesNotWrite(t *testing.T) {
 	require.False(t, i.ApprovalGuidanceAvailable(ctx, approval))
 	require.Empty(t, mutationsIn(eng))
 }
+
+func TestGuidanceRequiresAnAdmittedContiguousJournalTail(t *testing.T) {
+	for _, scenario := range []string{"missing", "gap", "old position", "nested only", "foreign latest"} {
+		t.Run(scenario, func(t *testing.T) {
+			i, eng, store := newActsIntegration(t)
+			i.admitRow = ownerAdmits(actOwner)
+			approval := map[string]any{"id": "a-guidance", "ownerUserId": actOwner, "runId": actRunId, "stepKey": "draft", "kind": workstate.ApprovalKindFeedback}
+			run := actRunRow(runStatusWaiting, "fetch")
+			run["waitingOn"] = map[string]any{"kind": "approval", "subject": "a-guidance"}
+			eng.reply("workRunForOwner", run)
+			eng.reply("workApprovalsForOwner", approval)
+			addPristineRun(store, actRunId, "fetch")
+			switch scenario {
+			case "gap":
+				addVersion(store, actRunId, "draft", 2, 1, "running", nil, nil)
+			case "old position":
+				addVersion(store, actRunId, "draft", 0, 1, "running", nil, nil)
+			case "nested only":
+				addVersion(store, actRunId, "draft/inner", 1, 1, "running", nil, nil)
+			case "foreign latest":
+				addVersion(store, actRunId, "draft", 1, 1, "running", nil, map[string]any{"ownerUserId": "another-owner"})
+			}
+			ctx := callerContext(actOwner)
+			require.False(t, i.ApprovalGuidanceAvailable(ctx, approval))
+			_, err := i.handleDecideApproval(ctx, map[string]any{"approvalId": "a-guidance", "decision": "answered", "answer": map[string]any{"feedback": "Try a smaller step."}}, 0)
+			require.Error(t, err)
+			require.Empty(t, mutationsIn(eng))
+		})
+	}
+}
