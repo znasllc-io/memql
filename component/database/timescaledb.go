@@ -87,6 +87,7 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 	registerMemoryNodesConceptIndexVerified(m, logger)
 	registerModuleReadinessHistoryCollapse(m, logger)
 	registerWorkRecoveryIndex(m, logger)
+	registerRetentionIndexes(m, logger)
 	registerWorkJournalLookupIndex(m, logger)
 	registerEmailDigestLookupIndexes(m, logger)
 	registerEmailProviderLookupIndex(m, logger)

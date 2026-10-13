@@ -9,6 +9,7 @@ package database
 var (
 	EnsureLatestRowIndex    = ensureLatestRowIndex
 	EnsureWorkRecoveryIndex = ensureWorkRecoveryIndex
+	EnsureRetentionIndexes  = ensureRetentionIndexes
 	InspectLatestRowIndex   = inspectLatestRowIndex
 	LatestRowIndexLockKey   = latestRowIndexLockKey
 )
