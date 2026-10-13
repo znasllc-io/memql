@@ -365,6 +365,12 @@ recovery sweep can deliver the saved answer later under the same claim identity.
 The existing stale-executor abandonment policy still applies after a claimant
 stops responding.
 
+On resumption, the model receives the exact recorded permission or budget
+decision alongside its saved exchanges. This includes the approved scope and
+any recorded use or revocation. The receipt is context, not authorization:
+dispatch still checks the current permission and budget before an operation
+can execute. It does not claim that an approved operation has already run.
+
 Active context and retrieval pages are bounded. The durable journal grows
 with actual work; that is retained evidence, not an in-process cache. Retention
 and storage capacity remain operational concerns. Individual calls and
