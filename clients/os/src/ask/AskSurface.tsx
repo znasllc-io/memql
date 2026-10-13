@@ -1,3 +1,4 @@
+import { AddButton } from "../kit/AddButton";
 import { ContentSkeleton } from "../kit/ContentSkeleton";
 import { Button } from "../kit";
 import { Mark } from "../chrome/Mark";
@@ -5,7 +6,7 @@ import { AccountAvatar } from "../chrome/AccountAvatar";
 import { AskLiveVoice } from "./AskLiveVoice";
 import type { LiveVoiceSession } from "./liveVoiceSession";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { ArrowUp, Mic, Plus, X, Activity, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines } from "lucide-react";
+import { ArrowUp, Mic, X, Activity, MessageCircle, MessagesSquare, Maximize2, Minimize2, Square, AudioLines } from "lucide-react";
 
 import { conversationFeed } from "./conversationFeed";
 import { ConversationSession, type AskTurn } from "./conversationSession";
@@ -314,7 +315,7 @@ export function AskSurface({
       <header className="os-window-bar os-ask-header">
         <div className="os-ask-heading"><strong>MemQL</strong><span>{contextLabel || "Ask"}</span></div>
         <div className="os-window-controls os-ask-actions"><div className="os-window-control-group">
-          <button type="button" className="os-icon-button" title="New conversation" aria-label="New conversation" disabled={busy || state.voiceActive} onClick={() => { conversation.newConversation(); setPanel("conversation"); returnToComposer.current = true; }}><Plus size={14} /></button>
+          <AddButton label="New conversation" style={{ minWidth: 28, minHeight: 28 }} disabled={busy || state.voiceActive} onClick={() => { conversation.newConversation(); setPanel("conversation"); returnToComposer.current = true; }} />
           </div><div className="os-window-control-group">
           <button ref={conversationsRef} type="button" className="os-icon-button" title={showConversations ? "Conversation" : "Conversations"} aria-label={showConversations ? "Conversation" : "Conversations"} onClick={() => { if (showConversations) { closePanel(); return; } controls?.cancel(); setPanel("conversations"); void conversation.refresh(); }}>{showConversations ? <MessageCircle size={14} /> : <MessagesSquare size={14} />}</button>
           <button ref={activityRef} type="button" className="os-icon-button" title={showActivity ? "Conversation" : "Activity"} aria-label={showActivity ? "Conversation" : "Activity"} onClick={() => { if (showActivity) { closePanel(); return; } controls?.cancel(); setPanel("activity"); }}>{showActivity ? <MessageCircle size={14} /> : <Activity size={14} />}</button>

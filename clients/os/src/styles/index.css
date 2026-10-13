@@ -452,6 +452,13 @@ button:not(:disabled):active {
   background: var(--os-hover);
   color: var(--os-ink);
 }
+/* Creation stays visible before hover in every app and theme. */
+.os-icon-button.os-add-button {
+  border: 1px solid color-mix(in srgb, var(--os-muted) 55%, transparent);
+}
+.os-icon-button.os-add-button:hover:not(:disabled) {
+  border-color: var(--os-muted);
+}
 .os-window-close:hover {
   background: var(--os-error);
   color: var(--os-glass-solid);

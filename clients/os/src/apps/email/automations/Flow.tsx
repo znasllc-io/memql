@@ -1,6 +1,7 @@
+import { AddButton } from "../../../kit/AddButton";
 import { isPublished } from "../rows";
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, Clock, Mail, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Clock, Mail, Trash2 } from "lucide-react";
 import { Field, Input, Select } from "../../../kit";
 import { useWide } from "../../../kit/useWide";
 import { isOperatorOrganization } from "../organizations";
@@ -53,7 +54,7 @@ export function Flow({ trigger, triggerDetail, steps, accountId, templates, send
     {target.kind === "confirm" ? <Field label="Wait up to"><Select id="email-flow-timeout" label="Wait up to" value={String(target.timeoutDays ?? 7)} onChange={v => patch({ timeoutDays: Number(v) })}>{Array.from({ length: 30 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1} {i ? "days" : "day"}</option>)}</Select></Field> : null}
   </>;
   const inspection = edit ? <div className="email-flow-inspector" onKeyDown={e => { if (e.key === "Escape") { e.preventDefault(); focus(selected || "trigger"); } }}>{fields}</div> : null;
-  function insertion(index: number) { return edit && !fixed ? <div className="email-flow-insert" key={`insert-${index}`}><button type="button" {...attrs(`insert-${index}`)} className="os-icon-button" aria-label={`Insert step ${index + 1}`} onClick={() => setInserting(inserting === index ? null : index)}><Plus size={14} aria-hidden /></button>{inserting === index ? <div className="email-flow-add" role="group" aria-label="Add a step">{([['send', 'Send an email'], ['confirm', 'Ask to confirm'], ['wait', 'Wait']] as const).map(([kind, label]) => <button type="button" className="os-button" key={kind} onClick={() => { const added = newStep(kind as StepKind); onChange?.(insertStep(steps, index, added)); setSelected(added.id); setFocused(added.id); setInserting(null); requestAnimationFrame(() => focus(added.id)); }}>{label}</button>)}</div> : null}</div> : null; }
+  function insertion(index: number) { return edit && !fixed ? <div className="email-flow-insert" key={`insert-${index}`}><AddButton {...attrs(`insert-${index}`)} label={`Insert step ${index + 1}`} style={{ minWidth: 28, minHeight: 28 }} onClick={() => setInserting(inserting === index ? null : index)} />{inserting === index ? <div className="email-flow-add" role="group" aria-label="Add a step">{([['send', 'Send an email'], ['confirm', 'Ask to confirm'], ['wait', 'Wait']] as const).map(([kind, label]) => <button type="button" className="os-button" key={kind} onClick={() => { const added = newStep(kind as StepKind); onChange?.(insertStep(steps, index, added)); setSelected(added.id); setFocused(added.id); setInserting(null); requestAnimationFrame(() => focus(added.id)); }}>{label}</button>)}</div> : null}</div> : null; }
   return <div ref={root} className="email-flow" data-wide={wide || undefined} data-proposal={proposal || undefined}>
     <div className="email-flow-spine" role="group" aria-label={proposal ? "Proposed automation flow" : "Automation flow"}>
       {issues.filter(i => !i.stepId).map((i, n) => <p key={n} className="email-flow-issue">{i.text}</p>)}
