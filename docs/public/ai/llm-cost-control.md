@@ -275,6 +275,14 @@ undo a later tighter limit. Waiting for human input does not consume active
 work time. Continuing a long goal uses durable checkpoints and renewed explicit
 allowances, never an unbounded model call or a reset of prior usage.
 
+An agent tool loop saves its exact completed exchanges before publishing a budget
+question. Synchronous parent and child invocations then wait on that same question;
+the saved child links and checkpoint identify the continuation on another replica.
+An answer arriving before that unwind finishes is retained until the waiting
+receipts are ready. Raising a limit gives no tool permission and does not replay
+completed effects. A failed legacy step without those links, a missing or changed
+checkpoint, or an uncertain in-flight tool outcome cannot use this continuation.
+
 ## Layer 4 — subscription spend, counted but not charged (memql#4362)
 
 A Task delegated to a local app (epic memql#4358) spends **real tokens that

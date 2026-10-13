@@ -168,7 +168,7 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) != 1 || stringField(rows[0], "status") != "running" ||
+	if len(rows) != 1 || rows[0]["cancelRequested"] == true || stringField(rows[0], "status") != "running" ||
 		BareShortId(stringField(rows[0], "goalId")) != BareShortId(run.GoalId) ||
 		BareShortId(stringField(rows[0], "humanResumeId")) != BareShortId(request.ApprovalID) {
 		return nil, fmt.Errorf("the run is not continuing from this human decision")
@@ -194,7 +194,7 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 	a := approvals[0]
 	decision, kind := stringField(a, "decision"), stringField(a, "kind")
 	if BareShortId(stringField(a, "runId")) != BareShortId(run.RunId) || stringField(a, "stepKey") != request.StepKey ||
-		!((kind == "feedback" && decision == "answered") || (kind == "scopeElevation" && decision == "approved")) {
+		!((kind == "feedback" && decision == "answered") || (kind == "scopeElevation" && decision == "approved") || (kind == "budget" && decision == "approved")) {
 		return nil, fmt.Errorf("the human decision does not authorize this continuation")
 	}
 	checkpoints, err := read("workContinuationForOwnerRun", map[string]any{"runId": run.RunId, "stepKey": request.StepKey})
@@ -215,6 +215,12 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 		return nil, err
 	}
 	checkpointID := BareShortId(stringField(checkpoints[0], "id"))
+	if kind == "budget" {
+		subject, _ := a["subject"].(map[string]any)
+		if stringField(subject, "resumeKind") != "checkpoint" || BareShortId(stringField(subject, "continuationId")) != checkpointID {
+			return nil, fmt.Errorf("the budget decision does not name this saved checkpoint")
+		}
+	}
 	if checkpointID != continuationID(run, canonical) {
 		return nil, fmt.Errorf("the saved work checkpoint content changed")
 	}

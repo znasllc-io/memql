@@ -51,6 +51,10 @@ func (i *Integration) AskPlanReview(ctx context.Context, owner, runID string, su
 }
 
 func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, approvalKind string, subject map[string]any, question string, options []map[string]any, expires time.Time) (string, error) {
+	return i.parkHumanDecisionWithBudget(ctx, owner, runID, approvalKind, subject, question, options, expires, nil)
+}
+
+func (i *Integration) parkHumanDecisionWithBudget(ctx context.Context, owner, runID, approvalKind string, subject map[string]any, question string, options []map[string]any, expires time.Time, budget *memql.RunCeilingError) (string, error) {
 	rc, ok := common.RunFromContext(ctx)
 	if !ok || memql.BareShortId(rc.RunId) != memql.BareShortId(runID) || memql.BareShortId(rc.OwnerUserId) != memql.BareShortId(owner) {
 		return "", fmt.Errorf("human decision requires the current owned work run")
@@ -73,8 +77,9 @@ func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, appro
 	// under them. The locked walk is the answer; one that went past the keys
 	// held (a grant expired in between) is walked and locked again.
 	var (
-		id       string
-		existing []map[string]any
+		id           string
+		existing     []map[string]any
+		verifyBudget func(context.Context) error
 	)
 	for attempt := 1; ; attempt++ {
 		// Only computer access renews; every other question is its first receipt.
@@ -85,7 +90,15 @@ func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, appro
 				return "", err
 			}
 		}
-		release, err := i.decisionGate(ctx, walked...)
+		var release func()
+		var err error
+		if budget != nil {
+			// Budget receipt writes may outlive the model's deadline. Retain the
+			// same decision lock until the bounded receipt work has settled.
+			release, verifyBudget, err = i.computerPermissionDecisionGate(ctx, first)
+		} else {
+			release, err = i.decisionGate(ctx, walked...)
+		}
 		if err != nil {
 			return "", err
 		}
@@ -113,6 +126,18 @@ func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, appro
 	if run == nil || run["cancelRequested"] == true || (rowString(run, "status") != runStatusRunning && rowString(run, "status") != runStatusWaiting) {
 		return "", fmt.Errorf("feedback run is no longer active")
 	}
+	if budget != nil && memql.BareShortId(rowString(run, "goalId")) != memql.BareShortId(rc.GoalId) {
+		return "", fmt.Errorf("budget checkpoint goal changed")
+	}
+	if budget != nil {
+		goal, err := i.store().goalForOwner(read, rc.GoalId)
+		if err != nil {
+			return "", err
+		}
+		if goal == nil || rowString(goal, "status") == "closed" {
+			return "", fmt.Errorf("budget checkpoint goal is no longer active")
+		}
+	}
 	if waiting := rowMap(run, "waitingOn"); rowString(run, "status") == runStatusWaiting && memql.BareShortId(rowString(waiting, "subject")) != id {
 		return "", fmt.Errorf("this run is already waiting for another decision")
 	}
@@ -122,6 +147,11 @@ func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, appro
 		}
 	}
 	if len(existing) == 0 {
+		if verifyBudget != nil {
+			if err := verifyBudget(read); err != nil {
+				return "", err
+			}
+		}
 		_, err = i.RaiseApproval(read, owner, ApprovalSeed{ApprovalId: id, RunId: runID, StepKey: rc.StepKey, Kind: approvalKind, Subject: subject, ArtifactHash: hash, Question: question, Options: options, ExpiresAt: expires})
 		if err != nil {
 			return "", err
@@ -130,7 +160,26 @@ func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, appro
 	if rowString(run, "status") == runStatusWaiting {
 		return id, nil
 	}
-	if err := i.store().updateRun(read, runID, map[string]any{"versionTime": rfc(workRowVersionAfter(run["createdAt"], i.clock())), "status": runStatusWaiting, "waitingOn": map[string]any{"kind": "approval", "subject": id, "approvalKind": approvalKind, "since": rfc(i.clock().UTC())}}); err != nil {
+	fields := map[string]any{"versionTime": rfc(workRowVersionAfter(run["createdAt"], i.clock())), "status": runStatusWaiting, "waitingOn": map[string]any{"kind": "approval", "subject": id, "approvalKind": approvalKind, "since": rfc(i.clock().UTC())}}
+	if budget != nil {
+		spent := map[string]any{}
+		for k, v := range rowMap(run, "spent") {
+			spent[k] = v
+		}
+		spent["tokens"] = max(rowInt(spent, "tokens"), budget.Spent.Tokens)
+		spent["tokensLocal"] = max(rowInt(spent, "tokensLocal"), budget.Spent.TokensLocal)
+		spent["tokensSubscription"] = max(rowInt(spent, "tokensSubscription"), budget.Spent.TokensSubscription)
+		spent["modelCalls"] = max(rowInt(spent, "modelCalls"), budget.Spent.ModelCalls)
+		spent["cost"] = max(rowFloat(spent, "cost"), budget.Spent.Cost)
+		spent["wallClockMs"] = max(int64(rowInt(spent, "wallClockMs")), budget.Spent.WallClockMs)
+		fields["spent"] = spent // retries/events and every higher receipt survive.
+	}
+	if verifyBudget != nil {
+		if err := verifyBudget(read); err != nil {
+			return "", err
+		}
+	}
+	if err := i.store().updateRun(read, runID, fields); err != nil {
 		return "", err
 	}
 	return id, nil

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -377,7 +378,7 @@ BackgroundLoop:
 
 		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
-			return nil, compactErr
+			return nil, r.pauseAtBudgetBoundary(ctx, compactErr, messages)
 		}
 		messages = compacted
 
@@ -401,7 +402,7 @@ BackgroundLoop:
 			messages = guided
 			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
 			if budgetErr != nil {
-				return nil, budgetErr
+				return nil, r.pauseAtBudgetBoundary(ctx, budgetErr, messages)
 			}
 			callCtx, cancel := context.WithTimeout(budgetCtx, reqTimeout)
 			stepResult, stepErr = provider.CallChatWithTools(callCtx, messages, tools)
@@ -409,10 +410,14 @@ BackgroundLoop:
 			cancel()
 			stopBudget()
 			if budgetFailure != nil {
-				return nil, budgetFailure
+				return nil, r.pauseAtBudgetBoundary(ctx, budgetFailure, messages)
 			}
 			if stepErr == nil {
 				break
+			}
+			var ceiling *memql.RunCeilingError
+			if errors.As(stepErr, &ceiling) {
+				return nil, r.pauseAtBudgetBoundary(ctx, stepErr, messages)
 			}
 			// Parent cancellation is terminal -- propagate, don't retry.
 			if ctx.Err() != nil {
@@ -564,7 +569,7 @@ BackgroundLoop:
 			}
 			// Calls after a human question have not started yet.
 			if err := r.prepareWorkTool(ctx); err != nil {
-				return nil, err
+				return nil, r.pauseAtBudgetBoundary(ctx, err, messages)
 			}
 			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
 			args := parseToolArgs(tc.Arguments)

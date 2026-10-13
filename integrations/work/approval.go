@@ -58,7 +58,8 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	var verifyPermissionDecision func(context.Context) error
 	_, typedPermission := argMap(args, "answer")["permissionMode"]
 	_, typedGuidance := argMap(args, "answer")["feedback"]
-	if (typedPermission && decision == "approved") || (typedGuidance && decision == "answered") {
+	_, budgetLimit := argMap(args, "answer")["newLimit"]
+	if ((typedPermission || budgetLimit) && decision == "approved") || (typedGuidance && decision == "answered") {
 		release, verifyPermissionDecision, err = i.computerPermissionDecisionGate(ctx, approvalId)
 	} else {
 		release, err = i.decisionGate(ctx, approvalId)

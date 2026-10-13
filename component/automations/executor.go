@@ -923,6 +923,11 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		stepExecCtx = e.engine.ObserveWorkCalls(callContext, cancel)
 	}
 	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)
+	if errors.Is(err, memql.ErrWorkCheckpointRequired) {
+		// A failed mandatory budget receipt is not an authored step failure:
+		// retry/on-error-continue must never spend the exhausted allowance.
+		return nil, fmt.Errorf("%w: %v", ErrJournalRequired, err)
+	}
 	if isHumanWait(err) {
 		// The question is already persisted. Suspension is neither completion
 		// nor failure and must not trigger repair automations.

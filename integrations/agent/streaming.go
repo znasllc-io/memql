@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -458,7 +459,7 @@ StreamLoop:
 
 		compacted, compactErr := r.compactWorkContext(ctx, messages, tools, memql.WorkContextTarget(messages, tools, 20000))
 		if compactErr != nil {
-			return nil, compactErr
+			return nil, r.pauseAtBudgetBoundary(ctx, compactErr, messages)
 		}
 		messages = compacted
 
@@ -486,7 +487,7 @@ StreamLoop:
 			messages = guided
 			budgetCtx, stopBudget, budgetErr := r.workCallContext(ctx)
 			if budgetErr != nil {
-				return nil, budgetErr
+				return nil, r.pauseAtBudgetBoundary(ctx, budgetErr, messages)
 			}
 			attemptCtx, stopAttempt := context.WithCancel(budgetCtx)
 			cancelAttempt := func() { stopAttempt(); stopBudget() }
@@ -495,8 +496,12 @@ StreamLoop:
 				budgetFailure := r.workCallFailure(attemptCtx)
 				cancelAttempt()
 				if budgetFailure != nil {
-					terminalErr = budgetFailure
+					terminalErr = r.pauseAtBudgetBoundary(ctx, budgetFailure, messages)
 					break StreamLoop
+				}
+				var ceiling *memql.RunCeilingError
+				if errors.As(err, &ceiling) {
+					return nil, r.pauseAtBudgetBoundary(ctx, err, messages)
 				}
 				if next, ok := r.handOffContext(ctx, err, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next
@@ -529,10 +534,15 @@ StreamLoop:
 			budgetFailure := r.workCallFailure(attemptCtx)
 			cancelAttempt()
 			if budgetFailure != nil {
-				terminalErr = budgetFailure
+				terminalErr = r.pauseAtBudgetBoundary(ctx, budgetFailure, messages)
 				break StreamLoop
 			}
 			if streamErr != nil {
+				var ceiling *memql.RunCeilingError
+				if errors.As(streamErr, &ceiling) {
+					terminalErr = r.pauseAtBudgetBoundary(ctx, streamErr, messages)
+					break StreamLoop
+				}
 				if ctx.Err() != nil {
 					terminalErr = ctx.Err()
 					break StreamLoop
@@ -693,7 +703,7 @@ StreamLoop:
 			}
 			// Calls after a human question have not started yet.
 			if err := r.prepareWorkTool(ctx); err != nil {
-				return nil, err
+				return nil, r.pauseAtBudgetBoundary(ctx, err, messages)
 			}
 			sink.ToolCall(tc.ID, tc.Name, tc.Arguments)
 			args := parseToolArgs(tc.Arguments)

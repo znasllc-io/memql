@@ -112,6 +112,7 @@ type RetrievedChunk struct {
 // must implement it even though lightweight replier fixtures need only the
 // methods exercised by their test. The app asserts this at compile time.
 type WorkRuntime interface {
+	PauseWorkForBudget(context.Context, *memql.RunCeilingError, []common.ChatMessage) error
 	ReadWorkGuidance(context.Context) ([]memql.WorkGuidance, error)
 	AcknowledgeWorkGuidance(context.Context, []string) error
 	WorkCallFailure(context.Context) error

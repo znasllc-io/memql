@@ -405,6 +405,10 @@ func (a *CognitionEngineAdapter) CompactWorkContext(ctx context.Context, message
 	return a.Engine.CompactWorkContext(ctx, messages, tools, target)
 }
 
+func (a *CognitionEngineAdapter) PauseWorkForBudget(ctx context.Context, ceiling *memql.RunCeilingError, messages []common.ChatMessage) error {
+	return a.Engine.PauseWorkForBudget(ctx, ceiling, messages)
+}
+
 func (a *CognitionEngineAdapter) PrepareWorkTool(ctx context.Context) error {
 	return a.Engine.PrepareWorkTool(ctx)
 }

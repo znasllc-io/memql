@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -151,4 +153,25 @@ func (r *Replier) workCallFailure(ctx context.Context) error {
 		return guard.WorkCallFailure(ctx)
 	}
 	return nil
+}
+
+// Only call at a reasoning boundary or before dispatching a tool. An arbitrary
+// in-flight tool failure is not evidence that its effects can be replayed.
+func (r *Replier) pauseAtBudgetBoundary(ctx context.Context, failure error, messages []common.ChatMessage) error {
+	var ceiling *memql.RunCeilingError
+	if !errors.As(failure, &ceiling) || !isOwnedWorkExecution(ctx) {
+		return failure
+	}
+	writer, ok := r.engine.(interface {
+		PauseWorkForBudget(context.Context, *memql.RunCeilingError, []common.ChatMessage) error
+	})
+	if !ok {
+		return fmt.Errorf("%w: durable budget continuation is unavailable", memql.ErrWorkCheckpointRequired)
+	}
+	err := writer.PauseWorkForBudget(ctx, ceiling, closePendingCalls(messages))
+	var wait *work.HumanWait
+	if errors.As(err, &wait) {
+		return err
+	}
+	return fmt.Errorf("%w: budget suspension failed: %v", memql.ErrWorkCheckpointRequired, err)
 }
