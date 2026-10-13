@@ -4296,6 +4296,20 @@ a.os-button {
 
 /* ---- the review queue ---- */
 
+.os-train-group,
+.os-train-cards,
+.os-train-card,
+.os-train-domain,
+.os-train-domain-detail,
+.os-train-domain-detail > section,
+.os-train-domain-detail .os-row-name {
+  min-width: 0;
+}
+.os-train-card .os-chip {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .os-train-group {
   display: flex;
   flex-direction: column;
@@ -4328,6 +4342,7 @@ a.os-button {
   line-height: 1.5;
   color: var(--os-ink);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .os-train-card-actions {
   display: flex;

@@ -4,14 +4,13 @@ import { flatten } from "../../kit/rows";
 
 import {
   ANALYSIS_TEMPLATE,
-  CORPUS_GROUP_ID,
-  CORPUS_GROUP_LABEL,
   FILE_ANALYZING,
   FILE_FAILED,
   FILE_READY,
   REJECTED,
   UNVALIDATED,
   VALIDATED,
+  sourceGroupLabel,
   type FileStage,
 } from "./concepts";
 
@@ -312,47 +311,48 @@ export function chunkFingerprint(chunk: Chunk): string {
 // ---------------------------------------------------------------------------
 
 export interface ChunkGroup {
-  /** `documentId`, or "" for the seeded-corpus group. */
+  /** Presentation key only; never passed back to the engine. */
   id: string;
   label: string;
   chunks: Chunk[];
 }
 
 /**
- * Chunks as review cards: one group per upload batch, plus one for everything
- * with no back-reference.
+ * Chunks as review cards: one group per document, then groups by declared
+ * source for chunks without that back-reference. sourceRef stays untouched on
+ * each chunk; it may identify a Library artifact, an external URL, or a chat.
  *
  * ORDER IS THE INPUT'S. The reads that feed this are already sorted newest
  * first by the engine, and a second sort here would be a second opinion about
  * an ordering the caller can see -- groups therefore appear in the order their
- * first chunk did. The corpus group is LAST regardless, because it is the
- * standing pile rather than something that just happened.
+ * first chunk did. Source groups follow document groups in their input order.
  */
 export function groupChunksByDocument(chunks: readonly Chunk[]): ChunkGroup[] {
   const groups: ChunkGroup[] = [];
   const byId = new Map<string, ChunkGroup>();
-  let corpus: ChunkGroup | null = null;
+  const bySource = new Map<string, ChunkGroup>();
 
   for (const chunk of chunks) {
     const documentId = chunk.documentId.trim();
-    if (documentId === CORPUS_GROUP_ID) {
-      if (corpus === null) {
-        corpus = { id: CORPUS_GROUP_ID, label: CORPUS_GROUP_LABEL, chunks: [] };
+    if (documentId === "") {
+      let group = bySource.get(chunk.source);
+      if (group === undefined) {
+        group = { id: JSON.stringify(["source", chunk.source]), label: sourceGroupLabel(chunk.source), chunks: [] };
+        bySource.set(chunk.source, group);
       }
-      corpus.chunks.push(chunk);
+      group.chunks.push(chunk);
       continue;
     }
     let group = byId.get(documentId);
     if (group === undefined) {
-      group = { id: documentId, label: documentId, chunks: [] };
+      group = { id: JSON.stringify(["document", documentId]), label: documentId, chunks: [] };
       byId.set(documentId, group);
       groups.push(group);
     }
     group.chunks.push(chunk);
   }
 
-  if (corpus !== null) groups.push(corpus);
-  return groups;
+  return [...groups, ...bySource.values()];
 }
 
 export interface DomainRollup {

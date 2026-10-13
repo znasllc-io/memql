@@ -169,13 +169,16 @@ export function sourceMeaning(source: string): string {
   return SOURCE_MEANINGS[source] ?? "";
 }
 
-/**
- * The group a chunk with no `documentId` belongs to.
- *
- * `documentId` is populated for chunks the analyzer produced from an upload
- * and null for seeded corpus content, and the concept's own comment records
- * that `v1:knowledge:document` is declared nowhere -- so this is a LABEL for
- * an absent back-reference, never a lookup that failed.
- */
-export const CORPUS_GROUP_ID = "";
-export const CORPUS_GROUP_LABEL = "Seeded corpus";
+/** An absent documentId does not imply a seed: Library uploads carry their
+ * artifact identity in sourceRef. Keep the declared provenance distinct. */
+export function sourceGroupLabel(source: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    fileUpload: "Uploaded files",
+    trainerAgent: "Trainer Agent",
+    augment: "Chat additions",
+    llmSeeded: "Seeded corpus",
+    crossDomainBridge: "Domain bridges",
+    appStructure: "App structure",
+  };
+  return labels[source] ?? (source || "Source unrecorded");
+}

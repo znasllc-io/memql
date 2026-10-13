@@ -82,7 +82,7 @@ export function ReviewSection({
 
       {groups.map((group) => (
         <ReviewGroup
-          key={group.id === "" ? "corpus" : group.id}
+          key={group.id}
           group={group}
           decisions={decisions}
           onDecide={onDecide}
@@ -123,14 +123,6 @@ function ReviewGroup({
       <Subhead>
         <FileStack size={14} aria-hidden /> {group.label}
       </Subhead>
-      {/* The corpus group is the standing pile rather than one upload, and a
-          reader should not have to infer that from an empty-looking id. */}
-      {group.id === "" ? (
-        <Caption>
-          Chunks with no source document -- seeded content, chat augments and Trainer Agent
-          output.
-        </Caption>
-      ) : null}
       {/* Full-text decisions are review cards, not summary record rows. */}
       <ul className="os-train-cards" aria-label={`Chunks from ${group.label}`}>
         {group.chunks.map((chunk) => (
@@ -184,7 +176,7 @@ function ChunkCard({
 
   return (
     <div className="os-train-card" tabIndex={0} aria-label={`Chunk ${chunk.id}`}>
-      <p className="os-train-card-text">{clamp(chunk.text)}</p>
+      <p className="os-train-card-text">{chunk.text.trim()}</p>
 
       <Chips label="Provenance">
         {/* The enum value in the data voice -- it is the word somebody greps
@@ -229,16 +221,6 @@ function ChunkCard({
       {refusal === "" ? null : <p className="os-notice-detail os-mono">{refusal}</p>}
     </div>
   );
-}
-
-const CLAMP_CHARS = 480;
-
-/** The card shows enough to decide on; the whole chunk is not the point. An
- *  ellipsis is appended only when something was actually cut. */
-export function clamp(text: string): string {
-  const trimmed = text.trim();
-  if (trimmed.length <= CLAMP_CHARS) return trimmed;
-  return `${trimmed.slice(0, CLAMP_CHARS).trimEnd()}...`;
 }
 
 /** What a collapsed card still says: enough to recognise which one it was. */

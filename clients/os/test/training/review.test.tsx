@@ -98,7 +98,7 @@ describe("the queue", () => {
         "domain-sales": [
           [
             chunkRow({ id: "c-1", documentId: "doc-terms", text: "From the terms." }),
-            chunkRow({ id: "c-2", documentId: "", text: "From the corpus." }),
+            chunkRow({ id: "c-2", documentId: "", source: "llmSeeded", text: "From the corpus." }),
           ],
         ],
       },
@@ -111,9 +111,33 @@ describe("the queue", () => {
       "doc-terms",
       "Seeded corpus",
     ]);
-    expect(
-      within(sections[1] as HTMLElement).getByText(/Chunks with no source document/),
-    ).toBeTruthy();
+  });
+
+  it("reviews the full uploaded passage under its actual source and approves only that chunk", async () => {
+    const fullText = `${"Supporting evidence. ".repeat(30)}Final qualification: no delivery has been verified.`;
+    const sourceRef = `artifact:${"a".repeat(96)}`;
+    const connection = fakeConnection({
+      domainRows: [domainLiteRow("domain-sales", "unvalidated")],
+      chunkPages: { "domain-sales": [[
+        chunkRow({ id: "upload", text: fullText, source: "fileUpload", sourceRef }),
+        chunkRow({ id: "chat", text: "A separate human contribution.", source: "augment", sourceRef: "chat:message" }),
+        chunkRow({ id: "seed", text: "Seeded guidance.", source: "llmSeeded" }),
+      ]] },
+    });
+    mount(connection);
+    await settle(6);
+    const uploads = screen.getByRole("region", { name: "Uploaded files" });
+    expect(within(uploads).getByText(fullText)).toBeTruthy();
+    expect(within(uploads).getByText(sourceRef)).toBeTruthy();
+    expect(within(uploads).queryByText("A separate human contribution.")).toBeNull();
+    expect(screen.getByRole("region", { name: "Chat additions" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Seeded corpus" })).toBeTruthy();
+    await click(within(uploads).getByRole("button", { name: "Approve chunk upload" }));
+    await settle();
+    expect(connection.callsNamed("setChunkValidationStatus")).toEqual([
+      'mutation setChunkValidationStatus(chunkId: "upload", status: "validated")',
+    ]);
+    expect(screen.getByRole("button", { name: "Approve chunk chat" })).toBeTruthy();
   });
 
   it("says nothing is awaiting review when no domain holds work", async () => {

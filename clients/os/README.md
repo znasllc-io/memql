@@ -963,6 +963,12 @@ app re-reads its domains and offers Review; new passages remain pending until
 somebody explicitly approves or rejects them. Other roles keep the picker and
 the server's existing domain-write authorization.
 
+Review and Domains group chunks with a document back-reference by that document;
+other chunks use their declared provenance, keeping uploaded files, chat additions,
+Trainer Agent output and seeded content distinct. Source references remain intact.
+Review shows the complete passage before a decision; long text and references wrap
+within the Training window.
+
 **The section is a WORKLIST, not a log.** Every file is a row that says where it
 is and offers exactly the act legal from there -- rule 12 applied per row,
 because here the state is per row. `unreadable` (a photograph, a zip) offers
