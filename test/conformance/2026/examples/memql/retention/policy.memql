@@ -1,0 +1,4 @@
+@retention(ttl="30d", keepLatest=true, archive="required")
+concept reading {
+  value float
+}

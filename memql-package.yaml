@@ -72,6 +72,7 @@ pipeline:
       - component/node
       - component/packages
       - component/pipelinerun
+      - component/retention
       - component/server
       - component/sitehealth
       - component/sitetraffic
