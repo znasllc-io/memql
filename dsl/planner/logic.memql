@@ -23,7 +23,8 @@ logic workSpineSectionInstruction {
  goal := args.section.live ? "" : "\n\nOverall goal (context only): " + args.goal
  purpose := args.section.live || args.section.purpose != "" ? "\nPurpose: " + args.section.purpose : ""
  finished := args.section.postcondition == "" ? "" : "\nIt is finished when: " + args.section.postcondition
- return prefix + dependency + goal + "\n\nSection: " + args.section.label + "\n" + args.section.instruction + purpose + finished
+ progress := "\n\nCurrent section completion: Compare recorded evidence with this section's requested output and completion condition. Once this section's requested output and any stated postcondition are supported, return that output now using the supplied completion contract. Keep requested prose and drafts complete; use a concise handoff only when the requested output is evidence or action receipts. Later sections are not unfinished work for this section; retain their relevant constraints without doing their work now. Before another read, name the missing fact or applicable instruction it will resolve. Reuse established facts and recall saved results; refresh them when changed, stale or contradicted. Repeating the same successful fetch or the same truncated prefix is not progress. Target the missing passage or change the bounded retrieval to obtain the missing bytes. Do not skip applicable instructions or claim an unmet postcondition; report a concrete blocker when required evidence cannot be obtained."
+ return prefix + dependency + goal + "\n\nSection: " + args.section.label + "\n" + args.section.instruction + purpose + finished + progress
 }
 
 /// Explain which mandatory validator refused a proposed replan.

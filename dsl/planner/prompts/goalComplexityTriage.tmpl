@@ -217,6 +217,14 @@ Every section entry carries:
 
 THE BOUNDARY RULE: every section must end at a point that can be checked. A section that changes something says how its end is checked (a `postcondition`), and a section that changes nothing names what it produces (at least one `output`). A decomposition with a section that would stop in the middle of a change -- `effects` without a `postcondition` -- is refused, and the goal is then planned as a whole instead, which costs more.
 
+For a read or prerequisite section, define an observable handoff: supported
+requirements, applicable constraints, source references and explicit gaps needed
+by the next section. "Understood" is not a checkable output. Bound the section
+to those requirements, not a survey of every linked source. Preserve required
+instruction coverage and identify any missing passage; later implementation or
+verification belongs to its own section. A drafting section still returns its
+complete requested content, never just a summary or a progress note.
+
 Set `sectionable: false` (the default) when:
 - the work cannot be divided into independently checkable outputs, even with explicit dependencies,
 - a section could only end in the middle of a change (the boundary rule above),
