@@ -255,3 +255,11 @@ builtin requestSpecialistTraining {
   topic         string   @description("What to train on. The resolved knowledge domain when empty.")
   mode          enum("initial", "refresh")  @description("initial (default) for a fresh training run, refresh for an incremental update.")
 }
+
+/// Revoke one of this person's saved computer permissions. In-flight actions
+/// may finish; no later dispatch may claim the receipt.
+@sdk
+@executor("integration.work.revokeComputerPermission")
+builtin revokeComputerPermission {
+ permissionId string! @description("The approval receipt that granted the saved permission.")
+}

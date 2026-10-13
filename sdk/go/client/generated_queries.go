@@ -13171,6 +13171,45 @@ func WorkCompletedStepsForOwnerRunsBuild(args WorkCompletedStepsForOwnerRunsArgs
 	return "query workCompletedStepsForOwnerRuns()"
 }
 
+// WorkComputerPermissions -- This owner's approved typed computer permissions. Native dispatch additionally checks the receipt hash, agent, machine, mode and revocation before each use.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerPermissions"] in generated_concepts.go).
+type WorkComputerPermissionsArgs struct {
+}
+
+// WorkComputerPermissions calls the engine query workComputerPermissions.
+func (qc *QueryClient) WorkComputerPermissions(ctx context.Context, args WorkComputerPermissionsArgs) (*Result, error) {
+	call := WorkComputerPermissionsBuild(args)
+	return qc.executeNamed(ctx, "workComputerPermissions", call)
+}
+
+func WorkComputerPermissionsBuild(args WorkComputerPermissionsArgs) string {
+	_ = args
+	return "query workComputerPermissions()"
+}
+
+// WorkComputerPermissionsForAgent -- Includes unused one-time receipts; only the native authority decides admission.
+//
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerPermissionsForAgent"] in generated_concepts.go).
+type WorkComputerPermissionsForAgentArgs struct {
+	AgentId string
+}
+
+// WorkComputerPermissionsForAgent calls the engine query workComputerPermissionsForAgent.
+func (qc *QueryClient) WorkComputerPermissionsForAgent(ctx context.Context, args WorkComputerPermissionsForAgentArgs) (*Result, error) {
+	call := WorkComputerPermissionsForAgentBuild(args)
+	return qc.executeNamed(ctx, "workComputerPermissionsForAgent", call)
+}
+
+func WorkComputerPermissionsForAgentBuild(args WorkComputerPermissionsForAgentArgs) string {
+	var b strings.Builder
+	b.WriteString("query workComputerPermissionsForAgent(")
+	b.WriteString("agentId: ")
+	b.WriteString(quoteMemQL(args.AgentId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // WorkComputerScopesForOwnerRun -- Read only this run's own computer-use decisions, including previous grants.
 //
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerScopesForOwnerRun"] in generated_concepts.go).

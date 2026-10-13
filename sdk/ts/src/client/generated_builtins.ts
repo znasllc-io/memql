@@ -3942,6 +3942,28 @@ QueryClient.prototype.restoreDocumentVersion = function (this: QueryClient, args
   return this.executeNamed("restoreDocumentVersion", buildRestoreDocumentVersion(args), opts);
 };
 
+/** Revoke one of this person's saved computer permissions. In-flight actions may finish; no later dispatch may claim the receipt. */
+export interface RevokeComputerPermissionArgs {
+  /** The approval receipt that granted the saved permission. */
+  permissionId: string;
+}
+
+export function buildRevokeComputerPermission(args: RevokeComputerPermissionArgs): string {
+  const parts: string[] = [];
+  parts.push("permissionId: " + renderMemQLValue(args.permissionId));
+  return "builtin revokeComputerPermission(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    revokeComputerPermission(args: RevokeComputerPermissionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.revokeComputerPermission = function (this: QueryClient, args: RevokeComputerPermissionArgs = {} as RevokeComputerPermissionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("revokeComputerPermission", buildRevokeComputerPermission(args), opts);
+};
+
 /** Create a custom role with its grants, in one internal-origin write. Guards, in order: the caller holds `create` on `role`; the slug matches ^[a-z][a-z0-9-]{1,39}$ and is claimed by no role and no alias (role_slug_taken); the rank is strictly below the caller's (role_rank_not_below_caller) and equal to no existing rung (role_rank_taken); every grant is a pair the caller themselves holds (role_grant_not_held, naming the pair); accountId, if given, scopes the role to that account (D10) and only members of it may then hold the role. Writes the role row (predefined false, active true) and one active capability row per grant. Returns {ok, slug, code}. */
 export interface RoleCreateArgs {
   /** Stable kebab-case identifier, ^[a-z][a-z0-9-]{1,39}$. Never renamed; a rename is a new role. Refused when any role's slug OR alias already claims it, deactivated roles included -- a retired role stays as history and keeps its name. */

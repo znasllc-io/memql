@@ -86,6 +86,7 @@ builtin agentworkerListWorkers {
 @args(profile="object")
 @description("Create a scope-elevation Plan + canvas card for a computer_use task awaiting user approval.")
 builtin agentworkerRequestScope {
+ operation object @description("For directory reads or an exact command, supply {tool: workerHost, action, args, directory?}. args must include the exact full input, with explicit absolute path or cwd. Directory covers only fs_read, fs_list and fs_stat. The server selects and binds one machine, and Nexus offers once or always. Never substitute broader scope when this request is refused.")
   intent          string!
   requestedScope  string!
   summary         string!

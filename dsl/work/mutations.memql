@@ -498,3 +498,41 @@ mutation feedbackPolicy createFeedbackPolicy {
     }
   }
 }
+
+/// Only the native receipt gate can consume computer permission. actor.userId
+/// scoping alone would let a client clear or fabricate its own consumption time;
+/// the gate must verify the exact dispatch and serialize it across replicas.
+@serverOnly
+mutation approval useWorkComputerPermission {
+ args {
+  approvalId string!
+  permissionUsedAt datetime!
+  versionTime datetime!
+ }
+ update {
+  accept { permissionUsedAt }
+  stamp {
+   id: args.approvalId
+   createdAt: args.versionTime
+  }
+ }
+}
+
+/// Revocation is a native human decision. actor.userId scoping alone cannot
+/// prove an interactive person or serialize revocation against dispatch; the
+/// builtin verifies both while holding the approval decision gate.
+@serverOnly
+mutation approval revokeWorkComputerPermission {
+ args {
+  approvalId string!
+  permissionRevokedAt datetime!
+  versionTime datetime!
+ }
+ update {
+  accept { permissionRevokedAt }
+  stamp {
+   id: args.approvalId
+   createdAt: args.versionTime
+  }
+ }
+}

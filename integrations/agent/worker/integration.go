@@ -641,7 +641,7 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	if i.dispatcher != nil {
 		target = i.dispatcher.ConsentCardTarget(ctx, ownerUserId, workerservice.CapabilityHeadless, requireLabels, nil)
 	}
-	if target != "" {
+	if target != "" && args["operation"] == nil {
 		summary = strings.TrimRight(summary, " .") + ". Runs " + target + "."
 	}
 
@@ -650,7 +650,29 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("computer access requires an owned work run with durable approvals")
 	}
 	subject := map[string]any{"agentId": agentId, "scope": scope, "requireLabels": requireLabels, "intent": intent, "summary": summary, "target": target}
-	approvalID, err := i.ScopeRequester(ctx, ownerUserId, rc.RunId, subject)
+	approvalID := ""
+	if raw, supplied := args["operation"]; supplied {
+		operation, typed := raw.(map[string]any)
+		if !typed {
+			return nil, fmt.Errorf("computer permission operation must be an object")
+		}
+		if i.dispatcher == nil {
+			return nil, fmt.Errorf("computer routing is unavailable")
+		}
+		permission, existing, err := i.dispatcher.prepareComputerPermission(ctx, ownerUserId, agentId, rc.RunId, operation, requireLabels)
+		if err != nil {
+			return nil, err
+		}
+		subject["computerPermission"] = permission.Map()
+		subject["target"] = permission.MachineLabel
+		target = permission.MachineLabel
+		if existing != nil {
+			approvalID = existing.ID
+		}
+	}
+	if approvalID == "" {
+		approvalID, err = i.ScopeRequester(ctx, ownerUserId, rc.RunId, subject)
+	}
 	if err != nil {
 		return nil, err
 	}

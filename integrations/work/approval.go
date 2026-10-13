@@ -172,6 +172,9 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			return nil, fmt.Errorf("work: this computer-access request has expired")
 		}
 	}
+	if err := validateComputerPermissionDecision(approval, decision, answer); err != nil {
+		return nil, err
+	}
 	if decision == "approved" {
 		if err := i.validatePlanReviewAnswer(ctx, kind, rowMap(approval, "subject"), answer); err != nil {
 			return nil, err

@@ -384,3 +384,21 @@ func TestRemoteImageRefusalIsAPlanProblem(t *testing.T) {
 		}
 	}
 }
+
+func TestComputerPermissionRefusalsAskRatherThanRepairEnvironment(t *testing.T) {
+	for _, code := range []string{"consent_required", "computer_permission_refused", "computer_permission_path_refused", "computer_permission_unavailable"} {
+		message := "Enable the named directory on this machine; permission denied (timeout)."
+		for _, signal := range []Signal{{ErrorCode: code, ErrorMessage: message}, {ErrorCode: "function_failed", ErrorMessage: "workerHost failed: " + code + ": " + message}, {ErrorMessage: `{"errorCode":"` + code + `","errorMessage":"` + message + `"}`}} {
+			symptom, evidence, ok := ClassifyByRules(signal)
+			if !ok || symptom != SymptomHuman || evidence.RuleId != RuleIdComputerPermission || evidence.Reason != signal.ErrorMessage || ActFor(symptom, 0, 3) != ActAsk {
+				t.Fatalf("%+v: %s %+v", signal, symptom, evidence)
+			}
+		}
+	}
+	for _, message := range []string{"permission denied writing /etc/hosts", "unrelated_computer_permission_refused_suffix", "request permission to update the environment"} {
+		_, evidence, _ := ClassifyByRules(Signal{ErrorMessage: message})
+		if evidence.RuleId == RuleIdComputerPermission {
+			t.Fatalf("generic text reclassified: %s", message)
+		}
+	}
+}

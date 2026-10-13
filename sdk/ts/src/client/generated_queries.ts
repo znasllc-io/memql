@@ -12475,6 +12475,48 @@ QueryClient.prototype.workCompletedStepsForOwnerRuns = function (this: QueryClie
   return this.executeNamed("workCompletedStepsForOwnerRuns", buildWorkCompletedStepsForOwnerRuns(args), opts);
 };
 
+/** This owner's approved typed computer permissions. Native dispatch additionally checks the receipt hash, agent, machine, mode and revocation before each use. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerPermissions"] in generated_concepts.ts).
+export interface WorkComputerPermissionsArgs {
+}
+
+export function buildWorkComputerPermissions(args: WorkComputerPermissionsArgs): string {
+  void args;
+  return "query workComputerPermissions()";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workComputerPermissions(args?: WorkComputerPermissionsArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workComputerPermissions = function (this: QueryClient, args: WorkComputerPermissionsArgs = {} as WorkComputerPermissionsArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workComputerPermissions", buildWorkComputerPermissions(args), opts);
+};
+
+/** Includes unused one-time receipts; only the native authority decides admission. */
+// Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerPermissionsForAgent"] in generated_concepts.ts).
+export interface WorkComputerPermissionsForAgentArgs {
+  agentId: string;
+}
+
+export function buildWorkComputerPermissionsForAgent(args: WorkComputerPermissionsForAgentArgs): string {
+  const parts: string[] = [];
+  parts.push("agentId: " + renderMemQLValue(args.agentId));
+  return "query workComputerPermissionsForAgent(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workComputerPermissionsForAgent(args: WorkComputerPermissionsForAgentArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workComputerPermissionsForAgent = function (this: QueryClient, args: WorkComputerPermissionsForAgentArgs = {} as WorkComputerPermissionsForAgentArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workComputerPermissionsForAgent", buildWorkComputerPermissionsForAgent(args), opts);
+};
+
 /** Read only this run's own computer-use decisions, including previous grants. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workComputerScopesForOwnerRun"] in generated_concepts.ts).
 export interface WorkComputerScopesForOwnerRunArgs {

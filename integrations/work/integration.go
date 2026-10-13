@@ -408,6 +408,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "revokeComputerPermission",
+			Description: "Revoke one saved computer permission owned by the signed-in person.",
+			Handler:     i.handleRevokeComputerPermission,
+			ArgsSchema:  map[string]string{"permissionId": "string (required) -- the approval receipt"},
+		},
+		{
 			Name:        "decideApproval",
 			Description: "Decide one of the caller's pending approvals and resume the run parked on it. Refused when the artifact changed since it was approved. Returns {approvalId, runId, decision, runResumed}.",
 			Handler:     i.handleDecideApproval,

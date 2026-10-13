@@ -5167,6 +5167,27 @@ func RestoreDocumentVersionBuild(args RestoreDocumentVersionArgs) string {
 	return b.String()
 }
 
+// RevokeComputerPermission -- Revoke one of this person's saved computer permissions. In-flight actions may finish; no later dispatch may claim the receipt.
+type RevokeComputerPermissionArgs struct {
+	// The approval receipt that granted the saved permission.
+	PermissionId string
+}
+
+// RevokeComputerPermission calls the engine builtin revokeComputerPermission.
+func (qc *QueryClient) RevokeComputerPermission(ctx context.Context, args RevokeComputerPermissionArgs) (*Result, error) {
+	call := RevokeComputerPermissionBuild(args)
+	return qc.executeNamed(ctx, "revokeComputerPermission", call)
+}
+
+func RevokeComputerPermissionBuild(args RevokeComputerPermissionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin revokeComputerPermission(")
+	b.WriteString("permissionId: ")
+	b.WriteString(quoteMemQL(args.PermissionId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RoleCreate -- Create a custom role with its grants, in one internal-origin write. Guards, in order: the caller holds `create` on `role`; the slug matches ^[a-z][a-z0-9-]{1,39}$ and is claimed by no role and no alias (role_slug_taken); the rank is strictly below the caller's (role_rank_not_below_caller) and equal to no existing rung (role_rank_taken); every grant is a pair the caller themselves holds (role_grant_not_held, naming the pair); accountId, if given, scopes the role to that account (D10) and only members of it may then hold the role. Writes the role row (predefined false, active true) and one active capability row per grant. Returns {ok, slug, code}.
 type RoleCreateArgs struct {
 	// Stable kebab-case identifier, ^[a-z][a-z0-9-]{1,39}$. Never renamed; a rename is a new role. Refused when any role's slug OR alias already claims it, deactivated roles included -- a retired role stays as history and keeps its name.

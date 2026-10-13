@@ -8511,6 +8511,8 @@
         "kind",
         "options",
         "ownerUserId",
+        "permissionRevokedAt",
+        "permissionUsedAt",
         "question",
         "requestedAt",
         "runId",
