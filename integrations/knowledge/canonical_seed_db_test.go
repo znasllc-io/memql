@@ -153,7 +153,9 @@ func TestCanonicalSeedRepairPreservesReviewAndOnlyPublishesExactRegisteredConten
 	vector, _ := seedTestProvider{}.Embed(f.ctx, "")
 	_, err = f.db.ExecContext(f.ctx, `INSERT INTO `+table+`(id,concept,vector_field,embedding) VALUES($1,'v1:knowledge:documentChunk','content',$2::vector)`, f.seeds[0].ID, vectorLiteral(vector))
 	require.NoError(t, err)
-	require.ErrorContains(t, f.a.ReconcileCanonicalSeeds(f.ctx), "does not match registered content")
+	require.ErrorContains(t, f.a.ReconcileCanonicalSeeds(f.ctx), "requires internal origin")
+	require.Empty(t, f.status(t, f.seeds[0]), "an inbound context must not publish a seed")
+	require.ErrorContains(t, f.a.ReconcileCanonicalSeeds(auth.ContextWithInternalOrigin(f.ctx)), "does not match registered content")
 	require.Equal(t, "validated", f.status(t, f.seeds[0]))
 	require.Equal(t, "rejected", f.status(t, f.seeds[1]))
 	require.Equal(t, "validated", f.status(t, f.seeds[2]))
@@ -180,7 +182,7 @@ func TestCanonicalSeedRepairPreservesReviewAndOnlyPublishesExactRegisteredConten
 	}
 	before, err := f.b.seedChunkSnapshot(f.ctx, f.seeds[0].ID)
 	require.NoError(t, err)
-	require.Error(t, f.b.ReconcileCanonicalSeeds(f.ctx)) // forged entries still fail closed
+	require.Error(t, f.b.ReconcileCanonicalSeeds(auth.ContextWithInternalOrigin(f.ctx))) // forged entries still fail closed
 	after, err := f.b.seedChunkSnapshot(f.ctx, f.seeds[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, before.At, after.At, "a repeated repair must not add versions")

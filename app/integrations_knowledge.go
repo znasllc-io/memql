@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/integrations/knowledge"
 )
@@ -40,13 +41,15 @@ func (s *knowledgeSeedMaintenance) IsRunning() bool {
 	defer s.mu.Unlock()
 	return s.running
 }
-func (s *knowledgeSeedMaintenance) Start(ctx context.Context) {
+func (s *knowledgeSeedMaintenance) Start(context.Context) {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
 		return
 	}
-	run, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	// This is a server-started pass, never a continuation of an inbound actor
+	// or origin. Stop owns its lifetime; the pass adds its own bounded deadline.
+	run, cancel := context.WithCancel(context.Background())
 	s.cancel, s.running = cancel, true
 	s.mu.Unlock()
 	s.once.Do(func() { close(s.ready) })
@@ -55,7 +58,7 @@ func (s *knowledgeSeedMaintenance) Start(ctx context.Context) {
 func (s *knowledgeSeedMaintenance) run(ctx context.Context) {
 	pass, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := s.reconcile(pass); err != nil && ctx.Err() == nil {
+	if err := s.reconcile(auth.ContextWithInternalOrigin(pass)); err != nil && ctx.Err() == nil {
 		s.warn(err)
 	}
 }

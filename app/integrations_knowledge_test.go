@@ -11,6 +11,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -44,6 +45,39 @@ func TestKnowledgePublicationMaintenanceIsOneBoundedPass(t *testing.T) {
 	}
 	require.Equal(t, int32(1), calls.Load())
 	require.Equal(t, int32(1), warnings.Load())
+}
+
+func TestKnowledgePublicationStartupOwnsFreshOriginAndCancellation(t *testing.T) {
+	type requestKey struct{}
+	inbound, cancel := context.WithCancel(auth.ContextWithUserActor(context.WithValue(context.Background(), requestKey{}, "request-only"), "person"))
+	cancel()
+	entered := make(chan context.Context, 1)
+	finished := make(chan struct{})
+	s := &knowledgeSeedMaintenance{ready: make(chan struct{}), warn: func(error) { t.Error("cancelled maintenance warned") }, reconcile: func(ctx context.Context) error {
+		entered <- ctx
+		<-ctx.Done()
+		close(finished)
+		return ctx.Err()
+	}}
+	s.Start(inbound)
+	t.Cleanup(func() { s.Stop(context.Background()) })
+	select {
+	case ctx := <-entered:
+		require.Equal(t, auth.OriginInternal, auth.OriginFromContext(ctx))
+		require.Nil(t, auth.TokenInfoFromContext(ctx))
+		require.Nil(t, ctx.Value(requestKey{}))
+		require.NoError(t, ctx.Err(), "caller cancellation must not become the maintenance lifetime")
+		_, bounded := ctx.Deadline()
+		require.True(t, bounded)
+	case <-time.After(time.Second):
+		t.Fatal("maintenance did not start")
+	}
+	s.Stop(context.Background())
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("Stop did not cancel the maintenance pass")
+	}
 }
 
 // Exercise the installed factory and app registration, with an empty isolated

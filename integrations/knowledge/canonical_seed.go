@@ -98,12 +98,16 @@ func (i *Integration) reconcileCanonicalSeed(ctx context.Context, seed canonical
 
 // ReconcileCanonicalSeeds repairs existing exact shipped/registered chunks.
 // It creates no domains/chunks, makes no model/embedding calls, and does not
-// infer trust from source labels. Called by bounded startup maintenance.
+// infer trust from source labels. Requires the bounded startup pass's internal
+// origin; this integration never upgrades an inbound caller's context.
 func (i *Integration) ReconcileCanonicalSeeds(ctx context.Context) error {
+	if auth.OriginFromContext(ctx) != auth.OriginInternal {
+		return fmt.Errorf("knowledge seed maintenance requires internal origin")
+	}
 	if i.engine == nil || i.db() == nil {
 		return fmt.Errorf("knowledge seed: engine/database not configured")
 	}
-	trusted := auth.ContextWithInternalOrigin(auth.ContextWithSystemActor(ctx, "knowledge-seed"))
+	trusted := auth.ContextWithSystemActor(ctx, "knowledge-seed")
 	tables, err := memql.EmbeddingVectorTables(trusted, i.db())
 	if err != nil {
 		return err
