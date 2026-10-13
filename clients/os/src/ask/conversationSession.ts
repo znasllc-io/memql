@@ -95,6 +95,7 @@ export class ConversationSession {
   private listeners = new Set<() => void>();
   private active: AskHandle | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private reloadRequest: { key: string; refreshHistory: boolean; promise: Promise<void> } | null = null;
   private disposed = false;
   private stopRequested = false;
   private cancelling = false;
@@ -416,30 +417,42 @@ export class ConversationSession {
     if (this.disposed || !this.state.turns.some(isBackgroundTurn)) return;
     this.refreshTimer = setTimeout(() => { this.refreshTimer = null; void this.reload(false); }, this.state.error ? 10000 : this.state.turns.some(turn => isBackgroundTurn(turn) && turn.state !== "waiting") ? 2500 : 10000);
   }
-  reload = async (refreshHistory = true) => {
+  reload = (refreshHistory = true): Promise<void> => {
     const id = this.state.selectedId;
     const selection = this.selection;
+    const epoch = this.epoch;
+    const discussionEpoch = this.discussionEpoch;
     const revision = this.voiceRevision;
     const guidanceRevision = this.guidanceRevision;
     const workGuidanceRevision = this.workGuidanceRevision;
-    if (!id || !this.transport.conversations) return;
-    try { const turns = await this.transport.conversations.read(id); if (this.state.selectedId === id && selection === this.selection && revision === this.voiceRevision && workGuidanceRevision === this.workGuidanceRevision) {
-      // A background completion may arrive while a newer foreground reply is
-      // streaming. Preserve that local stream and any not-yet-accepted turn.
-      const local = new Map(this.state.turns.filter(turn => turn.state === "streaming").map(turn => [turn.id, turn]));
-      const merged = turns.map(turn => local.get(turn.id) ?? turn);
-      for (const turn of local.values()) if (!merged.some(item => item.id === turn.id)) merged.push(turn);
-      this.patch({ turns: merged, ...(this.state.discussion || this.state.workGuidance ? {} : { error: "" }) });
-      const discussion = this.state.discussion;
-      const discussionEpoch = this.discussionEpoch;
-      if (discussion && this.transport.discussApproval) {
-        const latest = await this.transport.discussApproval(discussion.approval.id);
-        if (discussionEpoch === this.discussionEpoch && guidanceRevision === this.guidanceRevision && selection === this.selection && this.state.selectedId === id) this.patch({ discussion: latest, guidanceRetry: this.guidanceReceipt(latest) });
-      }
-    } }
-    catch (error) { if (selection === this.selection && revision === this.voiceRevision && workGuidanceRevision === this.workGuidanceRevision) this.patch({ error: message(error) }); }
-    if (refreshHistory) void this.refresh();
-    this.scheduleRefresh();
+    if (!id || !this.transport.conversations || this.disposed || this.state.loading || this.state.discussionOpening) return Promise.resolve();
+    const key = JSON.stringify([id, selection, epoch, discussionEpoch, revision, guidanceRevision, workGuidanceRevision]);
+    if (this.reloadRequest?.key === key) {
+      this.reloadRequest.refreshHistory ||= refreshHistory;
+      return this.reloadRequest.promise;
+    }
+    const request = { key, refreshHistory, promise: Promise.resolve() };
+    this.reloadRequest = request;
+    const current = () => !this.disposed && this.state.selectedId === id && selection === this.selection && epoch === this.epoch && discussionEpoch === this.discussionEpoch && revision === this.voiceRevision && guidanceRevision === this.guidanceRevision && workGuidanceRevision === this.workGuidanceRevision;
+    request.promise = (async () => {
+      try { const turns = await this.transport.conversations!.read(id); if (current()) {
+        // A background completion may arrive while a newer foreground reply is
+        // streaming. Preserve that local stream and any not-yet-accepted turn.
+        const local = new Map(this.state.turns.filter(turn => turn.state === "streaming").map(turn => [turn.id, turn]));
+        const merged = turns.map(turn => local.get(turn.id) ?? turn);
+        for (const turn of local.values()) if (!merged.some(item => item.id === turn.id)) merged.push(turn);
+        this.patch({ turns: merged, ...(this.state.discussion || this.state.workGuidance ? {} : { error: "" }) });
+        const discussion = this.state.discussion;
+        if (discussion && this.transport.discussApproval) {
+          const latest = await this.transport.discussApproval(discussion.approval.id);
+          if (current()) this.patch({ discussion: latest, guidanceRetry: this.guidanceReceipt(latest) });
+        }
+      } }
+      catch (error) { if (current()) this.patch({ error: message(error) }); }
+      if (request.refreshHistory && current()) void this.refresh();
+      this.scheduleRefresh();
+    })().finally(() => { if (this.reloadRequest === request) this.reloadRequest = null; });
+    return request.promise;
   };
   voiceEvent = (event: { type: string; turnId?: string; text?: string; error?: string; activity?: AskActivity }) => {
     if (!this.state.voiceActive || !event.turnId) return;

@@ -92,6 +92,9 @@ export function AskProvider({
   useEffect(() => () => liveVoice.dispose(), [liveVoice]);
   useEffect(() => { if (availability.state === "ready") { void conversation.refresh(); void conversation.reload(false); } }, [availability.state, conversation]);
   const [sheet, setSheet] = useState<AskSheetState>({ open: false, context: null });
+  // Work can be rerun from Nexus after its terminal snapshot stopped polling.
+  // Reopen the viewer with one fresh snapshot, retaining this session's draft.
+  useEffect(() => { if (sheet.open) void conversation.reload(false); }, [sheet.open, conversation]);
   const [settings, setSettings] = useState<AskSettings>(() => storeRef.current!.load());
 
   const openAsk = useCallback((context: string | null = null, contextLabel?: string) => setSheet({ open: true, context, contextLabel }), []);
