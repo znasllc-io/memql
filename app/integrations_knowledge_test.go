@@ -162,7 +162,13 @@ func TestKnowledgePublicationStartupSuppliesSelectedReviewedCorpusWithoutOwnerOr
 	for _, row := range memql.MaterializeRows(resultRows) {
 		domains[row["domainId"].(string)] = true
 	}
-	require.Len(t, domains, 4)
+	require.Equal(t, map[string]bool{
+		"computer-use":         true,
+		"workbench":            true,
+		"work-guidance":        true,
+		"software-development": true,
+		"research-methodology": true,
+	}, domains, "fresh startup exposes exactly the reviewed release domains")
 	for _, seed := range seeddata.Release() {
 		require.True(t, domains[seed.Domain])
 	}
