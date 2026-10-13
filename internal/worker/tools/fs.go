@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,17 +31,29 @@ func runFsRead(_ context.Context, args map[string]any, policy *Policy) (*memqlv1
 		return nil, failure("fs_failed", err.Error())
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, failure("fs_failed", err.Error())
+	}
 	limited := io.LimitReader(f, int64(maxBytes))
 	body, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, failure("fs_failed", err.Error())
 	}
-	preview := truncate(string(body), 1024)
 	return successJSON(map[string]any{
-		"path":    path,
-		"content": string(body),
-		"size":    len(body),
-	}, 0, 0, len(body), preview), nil
+		"path":      path,
+		"content":   string(body),
+		"size":      len(body),
+		"fileSize":  info.Size(),
+		"truncated": info.Size() > int64(len(body)),
+	}, 0, 0, len(body), fileReadPreview(body, info.Size())), nil
+}
+
+// Keep completeness at the end of the bounded preview, so a retained result
+// tail still distinguishes a file prefix from a complete read.
+func fileReadPreview(body []byte, fileSize int64) string {
+	metadata := fmt.Sprintf("\n[File read: returnedBytes=%d fileSize=%d truncated=%t]", len(body), fileSize, fileSize > int64(len(body)))
+	return truncate(string(body), 1024-len(metadata)) + metadata
 }
 
 // runFsWrite implements workerHost.fs_write.
