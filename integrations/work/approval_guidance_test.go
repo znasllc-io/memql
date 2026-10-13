@@ -1,6 +1,7 @@
 package work
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -10,6 +11,28 @@ import (
 	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
+
+func TestGuidanceRecoveryVerifiesReceiptGateBeforeResuming(t *testing.T) {
+	i, eng, approval, _ := guidanceFixture(t, workstate.ApprovalKindScopeElevation)
+	approval["decision"], approval["decidedBy"], approval["answer"] = "answered", actOwner, map[string]any{"feedback": "Read the repository only."}
+	eng.reply("workApprovalsForOwner")
+	eng.reply("workApprovalForOwner", approval)
+	verified, released := false, false
+	i.computerDecisionGate = func(context.Context, string) (func(), func(context.Context) error, error) {
+		return func() { released = true }, func(context.Context) error {
+			verified = true
+			return errors.New("receipt lock connection lost")
+		}, nil
+	}
+	nodes, err := i.handleDecideApproval(callerContext(actOwner), map[string]any{"approvalId": approval["id"], "decision": "answered", "answer": approval["answer"]}, 0)
+	require.NoError(t, err)
+	require.True(t, verified)
+	require.True(t, released)
+	require.Equal(t, false, decodeReply(t, nodes)["runResumed"])
+	require.Contains(t, decodeReply(t, nodes)["resumeError"], "receipt lock connection lost")
+	require.Empty(t, eng.callsTo("updateWorkRun"))
+	require.Empty(t, eng.callsTo("decideWorkApproval"))
+}
 
 func guidanceFixture(t *testing.T, kind string) (*Integration, *recordingEngine, map[string]any, map[string]any) {
 	t.Helper()

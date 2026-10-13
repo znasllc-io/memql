@@ -1,13 +1,55 @@
 package work
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
+
+func TestGuidanceDBRecoveryKeepsReceiptGateThroughCancelledCommit(t *testing.T) {
+	a, b := openActsDB(t), openActsDB(t)
+	b.owner = a.owner
+	runID := a.openRun(t, nil)
+	a.writeVersion(t, runID, runID, "draft", 0, 1, nil, "", map[string]any{"status": "failed"})
+	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "stepOrder": []string{"draft"}})
+	person := actorCtx(a.owner)
+	runContext := common.ContextWithRun(person, common.RunContext{RunId: runID, OwnerUserId: a.owner, StepKey: "draft", Mode: common.RunModeLive})
+	id, err := a.i.AskComputerScope(runContext, a.owner, runID, map[string]any{"agentId": "agent-a", "summary": "Inspect a directory", "mode": "observe"})
+	require.NoError(t, err)
+	answer := map[string]any{"feedback": "Read the repository only."}
+	a.write(t, "decideWorkApproval", map[string]any{"approvalId": id, "decision": "answered", "decidedBy": a.owner, "decidedAt": rfc(time.Now()), "answer": answer})
+	ctx, cancel := context.WithCancel(person)
+	defer cancel()
+	wrapper := &permissionCommitEngine{Engine: a.eng, mutation: "updateWorkRun", entered: make(chan struct{}), proceed: make(chan struct{}), cancel: cancel}
+	a.i.engine = wrapper
+	args := map[string]any{"approvalId": id, "decision": "answered", "answer": answer}
+	done := make(chan error, 1)
+	go func() { _, err := a.i.handleDecideApproval(ctx, args, 0); done <- err }()
+	select {
+	case <-wrapper.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("recovery did not reach run commit")
+	}
+	other := make(chan error, 1)
+	go func() { _, err := b.i.handleDecideApproval(person, args, 0); other <- err }()
+	select {
+	case err := <-other:
+		t.Fatalf("second replica entered before recovered commit: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(wrapper.proceed)
+	require.NoError(t, <-done)
+	require.NoError(t, <-other)
+	run, err := b.i.store().runForOwner(memql.ContextWithFreshRead(person), runID)
+	require.NoError(t, err)
+	require.Equal(t, memql.BareShortId(id), rowString(run, "humanResumeId"))
+	require.Equal(t, waitKindReplan, rowString(rowMap(run, "waitingOn"), "kind"))
+}
 
 // The decision, exact human guidance and replan wait must be visible to a
 // replica that did not create the request. Racing the same answer must record

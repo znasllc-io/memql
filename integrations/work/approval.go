@@ -468,6 +468,11 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 			}
 		}
 	}
+	// A saved guidance receipt can enter here through recovery without a new
+	// decision write. Recheck its held receipt gate at this actual commit seam.
+	if err := verifyApprovalDecisionWrite(ctx); err != nil {
+		return false, err
+	}
 	if err := st.updateRun(ctx, runId, fields); err != nil {
 		return false, err
 	}
