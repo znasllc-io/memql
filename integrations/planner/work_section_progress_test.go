@@ -59,7 +59,7 @@ func TestSectionTurnsCarryTheirOwnCompletionBoundary(t *testing.T) {
 				t.Logf("%s %s actual turn:\n%s", name, answer, prompt)
 				for _, required := range []string{
 					"Current section completion:",
-					"Once this section's requested output and any stated postcondition are supported",
+					"Once this section's applicable criteria, requested output and any stated postcondition are supported",
 					"return that output now using the supplied completion contract",
 					"Keep requested prose and drafts complete",
 					"Later sections are not unfinished work for this section",
