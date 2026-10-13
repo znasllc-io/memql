@@ -272,19 +272,13 @@ const workChildConceptsSQL = `('v1:work:step','v1:work:approval','v1:work:modelC
 //     cutoff once (69 ms at most for 600,000 run versions), and a bounded one
 //     reads the entries after the window it jumps from, once for each empty
 //     stretch;
-//   - the goal policy's "no run of it remains", in its candidate read and in the
-//     delete's guard (goalRefSQL), compares every run version's goalId with the
-//     goal's, and no index serves it. MEASURED BOUND: 0.34 s a read warm and 1.26 s
-//     the first time on cold buffers, for 600,000 run versions, whatever the
-//     window; 14 to 15 s for the policy as a whole, 1,828 goals. ACCEPTED for this
-//     release. The policy runs last, so a failure there costs nothing that went
-//     before it, and the partial expression index on the run's goalId that would
-//     bound it is deferred to release 2;
-//   - the journal sweep's expired-rows read (expiredJournalRowsSQL in sweep.go)
-//     is not part of this walk: it takes the latest version of every id of one
-//     concept, 0.41 s for 400,000 model-call versions, and grows with them.
-//     RetentionSweep no longer lets it stop this pass when it fails. Windowing it
-//     is deferred to release 2.
+//   - the goal policy's "no run of it remains" must see runs outside the
+//     candidate day. Its normalized goalId probes now use the partial
+//     memory_nodes_retention_goal_idx expression index (memql#6059).
+//
+// The journal sweep has its own bounded day walk in sweep.go. Both walks use
+// memory_nodes_retention_time_idx to skip empty stretches without scanning
+// each concept's complete history.
 //
 // staged-data: MUST-NOT-GATE -- retention is physical retirement, including
 // staged historical versions. Every fetched row still passes AdmitSourceRow.
@@ -808,8 +802,7 @@ func retirementDelete(concept string, withChildren bool, parentIDs []string, raw
 		// goal by writing the goal first -- a newer version, which the
 		// statement's own newer-version check refuses -- and then the run,
 		// refused here; a run written on its own is refused here too. Like the
-		// candidate read's, this compares every run version (accepted for this
-		// release; the goalId index is deferred to release 2).
+		// candidate read's, this probes the normalized goalId expression index.
 		guard += ` AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" r WHERE r.concept='v1:work:run' AND ` + goalRefSQL(`r.payload->>'goalId'`) + ` IN (SELECT ` + goalRefSQL(`k.id`) + ` FROM keys k))`
 	}
 	return retirementStatement{
