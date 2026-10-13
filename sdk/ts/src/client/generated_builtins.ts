@@ -2091,6 +2091,27 @@ QueryClient.prototype.integrationStatus = function (this: QueryClient, args: Int
   return this.executeNamed("integrationStatus", buildIntegrationStatus(args), opts);
 };
 
+/** Install only selected registered capability manuals. Explicit cluster-owner operation; no domain catalog creation or generated content. Returns per-domain ready, preserved, embedded and olderPublished counts. */
+export interface KnowledgeInstallCapabilityCorporaArgs {
+  domainIds: string[];
+}
+
+export function buildKnowledgeInstallCapabilityCorpora(args: KnowledgeInstallCapabilityCorporaArgs): string {
+  const parts: string[] = [];
+  parts.push("domainIds: " + renderMemQLValue(args.domainIds));
+  return "builtin knowledgeInstallCapabilityCorpora(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    knowledgeInstallCapabilityCorpora(args: KnowledgeInstallCapabilityCorporaArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.knowledgeInstallCapabilityCorpora = function (this: QueryClient, args: KnowledgeInstallCapabilityCorporaArgs = {} as KnowledgeInstallCapabilityCorporaArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("knowledgeInstallCapabilityCorpora", buildKnowledgeInstallCapabilityCorpora(args), opts);
+};
+
 /** The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease, deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn, refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column, text). The uses are the answering node's last load; every mesh node mounts the same tree, so any of them answers for the cluster. */
 export interface LanguageStatusArgs {
 }

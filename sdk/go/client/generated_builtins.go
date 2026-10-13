@@ -2722,6 +2722,26 @@ func IntegrationStatusBuild(args IntegrationStatusArgs) string {
 	return b.String()
 }
 
+// KnowledgeInstallCapabilityCorpora -- Install only selected registered capability manuals. Explicit cluster-owner operation; no domain catalog creation or generated content. Returns per-domain ready, preserved, embedded and olderPublished counts.
+type KnowledgeInstallCapabilityCorporaArgs struct {
+	DomainIds []string
+}
+
+// KnowledgeInstallCapabilityCorpora calls the engine builtin knowledgeInstallCapabilityCorpora.
+func (qc *QueryClient) KnowledgeInstallCapabilityCorpora(ctx context.Context, args KnowledgeInstallCapabilityCorporaArgs) (*Result, error) {
+	call := KnowledgeInstallCapabilityCorporaBuild(args)
+	return qc.executeNamed(ctx, "knowledgeInstallCapabilityCorpora", call)
+}
+
+func KnowledgeInstallCapabilityCorporaBuild(args KnowledgeInstallCapabilityCorporaArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin knowledgeInstallCapabilityCorpora(")
+	b.WriteString("domainIds: ")
+	b.WriteString(renderMemQLValue(args.DomainIds))
+	b.WriteString(")")
+	return b.String()
+}
+
 // LanguageStatus -- The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease, deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn, refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column, text). The uses are the answering node's last load; every mesh node mounts the same tree, so any of them answers for the cluster.
 type LanguageStatusArgs struct {
 }

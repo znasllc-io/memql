@@ -168,3 +168,18 @@ builtin knowledgeOpenRefresh {  }
 @executor("integration.planner.knowledgeDispatchRefresh")
 @args(profile="object")
 builtin knowledgeDispatchRefresh { owner string! statement string! automation string! input object! requestedVia string! triggeredBy string! }
+
+/// Install only selected registered capability manuals. Explicit cluster-owner operation; no domain catalog creation or generated content. Returns per-domain ready, preserved, embedded and olderPublished counts.
+@sdk
+@executor("integration.knowledge.installCapabilityCorpora")
+@args(profile="object")
+builtin knowledgeInstallCapabilityCorpora {
+ domainIds []string!
+}
+
+/// Index one exact registered chunk within the authorized capability installation scope.
+@executor("integration.knowledge.knowledgeInstallCapabilityChunk")
+@args(profile="object")
+builtin knowledgeInstallCapabilityChunk {
+ chunkId string!
+}

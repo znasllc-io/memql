@@ -7,12 +7,13 @@ import (
 
 func knowledgeWorkflowCapabilities() []memql.IntegrationCapability {
 	return workflowhost.ScopedCapabilities(map[string]workflowhost.Operation{
-		"knowledgeCatalogDomainExists": nil,
-		"knowledgeCreateCatalogDomain": nil,
-		"knowledgeSeedCorpusExists":    nil,
-		"knowledgeIngestSeedCorpus":    nil,
-		"knowledgePurgeRetiredCorpus":  nil,
-		"knowledgeSeedSelectedDomain":  nil,
+		"knowledgeInstallCapabilityChunk": nil,
+		"knowledgeCatalogDomainExists":    nil,
+		"knowledgeCreateCatalogDomain":    nil,
+		"knowledgeSeedCorpusExists":       nil,
+		"knowledgeIngestSeedCorpus":       nil,
+		"knowledgePurgeRetiredCorpus":     nil,
+		"knowledgeSeedSelectedDomain":     nil,
 
 		"knowledgeBridgeExists": nil, "knowledgeBridgeInputs": nil, "knowledgeStampBridge": nil,
 		"knowledgeGenerateSeedChunks":  nil,

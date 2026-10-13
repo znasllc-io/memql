@@ -266,3 +266,12 @@ automation knowledgeOpenRefreshWorkflow {
   input: {domainId: args.domainId, mode: "refresh", specialistId: "", topic: name},
   requestedVia: "api", triggeredBy: "refresh.cadence")
 }
+
+/// Install only the selected registered chunks. Every embedding/publication failure stops the operation; a later explicit call repairs missing vectors.
+@template
+automation knowledgeInstallCapabilityCorporaWorkflow {
+ args { chunkIds []string! }
+ for chunkId in args.chunkIds {
+  builtin knowledgeInstallCapabilityChunk(chunkId: chunkId)
+ }
+}

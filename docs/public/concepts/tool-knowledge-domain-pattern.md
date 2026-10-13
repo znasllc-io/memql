@@ -255,6 +255,44 @@ caller environment. Older approved chunks retain their review history until an
 explicit review or supersession decision. Updating the registered corpus source
 alone does not replace them.
 
+
+### Explicit capability corpus installation
+
+A cluster owner can install selected shipped capability manuals through the
+ordinary authenticated query surface:
+
+```memql
+builtin knowledgeInstallCapabilityCorpora(domainIds: ["computer-use", "workbench", "work-guidance"])
+```
+
+This explicit operation creates only registered document chunks and their
+vectors in the cluster's active embedding space. It does not create knowledge
+domain catalog rows, generate prose, grant tools, or run at startup. Pack corpora
+qualify when registered with source `appStructure`, a nonempty
+`RequiredByToolSlugs`, and content. The caller supplies domain IDs only; uploads,
+source labels and caller text cannot become canonical publication authority.
+Work-run invocations are refused, even with inherited owner credentials.
+
+The compiled installation recipe stops on the first publication or embedding
+failure. Repeating the same selection on any replica skips existing vectors
+and repairs missing ones, without changing recorded rejection or supersession.
+Requests accept 1–16 distinct domains and at most 256 registered chunks, with a
+five-minute execution bound. The three domains above currently contain 23
+chunks: at most 23 missing-vector embedding calls, with no generative calls.
+
+The result reports `domains`, with `domainId`, `chunks`, `ready`, `preserved`,
+`embedded` and `olderPublished` for each selected domain, plus the embedding
+`provider`. `ready` counts currently validated, nonsuperseded registered chunks
+with vectors; `preserved` counts existing review states that prevent their
+publication. `embedded` counts vectors written by this invocation. Errors remain
+errors, so an incomplete invocation never reports full readiness.
+
+`olderPublished` counts other still-approved chunks for the same registered
+source references. They retain their content and review history and may coexist
+in retrieval. A nonzero count requires a separate explicit review/supersession
+decision if the operator wants only the current manual revision to be retrieved;
+installation does not silently retire or approve older content.
+
 ## Owned task lessons
 
 Owned work turns can also retrieve reviewed lessons taught from the owner's

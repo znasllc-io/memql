@@ -105,6 +105,12 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "installCapabilityCorpora",
+			Description: "Explicitly install selected registered capability manuals, preserving review decisions and reporting older published revisions. Cluster owner only.",
+			Handler:     i.installCapabilityCorporaHandler,
+			ArgsSchema:  map[string]string{"domainIds": "array of string (required) - 1 to 16 registered capability domains"},
+		},
+		{
 			Name:        "seedStandardDomains",
 			Description: "Seed the shipped knowledge-domain catalog plus any pack-registered seed domains and their corpora. Idempotent: skips domains that already exist and chunk sources that were previously ingested.",
 			Handler:     i.seedStandardDomainsHandler,
