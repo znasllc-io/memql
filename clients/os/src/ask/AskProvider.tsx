@@ -65,6 +65,12 @@ export function useOpenAskWork() {
   return ask ? (runId: string) => { ask.openAsk(); void ask.conversation.openWork(runId); } : null;
 }
 
+/** An explicit discussion never grants access or resumes the blocked work. */
+export function useDiscussApproval() {
+  const ask = useContext(Ctx);
+  return ask ? (approvalId: string) => { ask.openAsk(); void ask.conversation.discussApproval(approvalId); } : null;
+}
+
 export function AskProvider({
   transport,
   voice = null,

@@ -3,7 +3,7 @@ import { aiChatStream, type AiChatOptions, type AiChatMessage } from "@znasllc-i
 import { QueryClient, type Dispatcher } from "@znasllc-io/memql-sdk-core/client";
 import { flatten } from "../kit/rows";
 import type { AskCallbacks, AskHandle, AskOptions, AskTransport } from "./askController";
-import type { AskActivity, AskConversationStore, AskTurn, ConversationSummary } from "./conversationSession";
+import type { ApprovalDiscussion, AskActivity, AskConversationStore, AskTurn, ConversationSummary } from "./conversationSession";
 
 export type AskStreamFn = (dispatcher: Dispatcher, messages: AiChatMessage[], opts: AiChatOptions) => { deltas: AsyncIterable<{ textDelta?: string; metadata?: Record<string, unknown> }>; result: Promise<unknown> };
 
@@ -60,10 +60,35 @@ export class SdkAskTransport implements AskTransport {
     return flatten(row) as unknown as ConversationSummary;
   };
 
+  discussApproval = async (approvalId: string): Promise<ApprovalDiscussion> => {
+    const dispatcher = this.dispatcher();
+    if (!dispatcher) throw new Error("Not connected to the cluster.");
+    const row = (await new QueryClient(dispatcher).askApprovalDiscussion({ approvalId })).rows()[0];
+    if (!row) throw new Error("This approval's discussion is unavailable.");
+    return flatten(row) as unknown as ApprovalDiscussion;
+  };
+
+  approvalMessage = async (request: { approvalId: string; conversationId: string; requestId: string; prompt: string; advisor?: boolean }) => {
+    const dispatcher = this.dispatcher();
+    if (!dispatcher) throw new Error("Not connected to the cluster.");
+    const row = (await new QueryClient(dispatcher).askApprovalMessage(request)).rows()[0];
+    if (!row) throw new Error("The cluster did not confirm this discussion message.");
+    return flatten(row) as unknown as { conversationId: string; turnId: string; runId: string; status: string };
+  };
+
   answerQuestion = async (approvalId: string, answer: Record<string, unknown>) => {
     const dispatcher = this.dispatcher();
     if (!dispatcher) throw new Error("Not connected to the cluster.");
     await new QueryClient(dispatcher).decideApproval({ approvalId, decision: "answered", answer });
+  };
+
+  approvalGuidance = async (approvalId: string, feedback: string) => {
+    const dispatcher = this.dispatcher();
+    if (!dispatcher) throw new Error("Not connected to the cluster.");
+    const row = (await new QueryClient(dispatcher).decideApproval({ approvalId, decision: "answered", answer: { feedback } })).rows()[0];
+    if (!row) throw new Error("The cluster did not confirm whether guidance was recorded. Reopen this approval to check its state.");
+    const receipt = flatten(row);
+    return { runResumed: receipt.runResumed === true, ...(typeof receipt.resumeError === "string" ? { resumeError: receipt.resumeError } : {}) };
   };
 
   startVoice = (options: AskVoiceOptions, signal: AbortSignal) => {

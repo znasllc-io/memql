@@ -10067,6 +10067,38 @@ a.os-button {
 }
 
 /* ---- approvals --------------------------------------------------------*/
+.os-nexus-approval-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 18px;
+}
+.os-nexus-approval-content .os-record-row:focus-visible {
+  outline-offset: -2px;
+}
+.os-nexus-approval-content > .os-panel {
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding: 16px 0;
+}
+.os-nexus-approval-content > .os-panel + .os-panel {
+  border-top: 1px solid var(--os-line);
+}
+.os-nexus-approval-failure {
+  margin: 12px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: var(--os-text-sm);
+  color: var(--os-muted);
+}
+.os-nexus-permission-remember {
+  margin-top: 18px;
+}
+.os-nexus-approvals .os-record-row {
+  padding-block: 15px;
+}
 /* AN APPROVAL ROW CARRIES NO SUMMARY FACTS, so the record row's quiet middle
  * column stood empty: a third of the row reserved for nothing while the
  * question beside it -- the one thing the row is for -- was clamped
@@ -15315,6 +15347,15 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 }
 
 /* Ask's durable work sits above the composer, within the same page gutters. */
+.os-ask-approval-context { display: flex; flex: none; align-items: flex-start; justify-content: space-between; gap: 12px; margin: 0; padding: 14px 18px; border-bottom: 1px solid var(--os-line); font-size: var(--os-text-sm); }
+.os-ask-approval-context > div { min-width: 0; }
+.os-ask-approval-context strong { display: block; font-weight: 500; overflow-wrap: anywhere; }
+.os-ask-approval-context p { margin: 5px 0 0; color: var(--os-muted); }
+.os-ask-approval-context > button { flex: none; margin: 0; }
+.os-ask-discussion-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; margin: 0 18px 10px; }
+.os-ask-discussion-actions > .os-caption { flex: 1 1 20ch; }
+.os-ask-discussion-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.os-ask-guidance-notice { margin: 0 18px 10px; font-size: var(--os-text-sm); color: var(--os-muted); }
 .os-ask-work-queue { display: grid; gap: 6px; margin: 0 18px 10px; max-height: 32vh; overflow-y: auto; }
 .os-ask-work-card { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); color: var(--os-ink); background: var(--os-plate); text-align: left; font: inherit; cursor: pointer; }
 .os-ask-work-card:hover { background: var(--os-hover); }

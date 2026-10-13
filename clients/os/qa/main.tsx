@@ -1,4 +1,5 @@
 import { emailScenes, EMAIL_CLICKS } from "./emailScenes";
+import { nexusApprovalScenes, NEXUS_APPROVAL_CLICKS } from "./nexusApprovalScenes";
 import { MATERIALIZER_VIEWS } from "./materializerScenes";
 import { FilesApp } from "../src/apps/files/FilesApp";
 import { LocalFilesSettingsStore } from "../src/apps/files/settings";
@@ -701,6 +702,7 @@ const VIEWS: Record<
   "azure-email-sends-pending": azureEmailView("ready", "pending"),
   "azure-email-sends-empty": azureEmailView("ready", "not-configured"),
   ...emailScenes(WindowBody),
+  ...nexusApprovalScenes(WindowBody),
   // Email -> Campaigns (memql#6033): the list, and Add a campaign reached the
   // way a person reaches it, `&click=Add a campaign|Newsletter|...`.
 
@@ -1903,7 +1905,7 @@ if (new URLSearchParams(window.location.search).get("open") === "1") {
 // `?click=A|B` presses the first control whose text (or accessible name) is A
 // once the reads have landed, then B a beat later. `element.click()` is a real
 // click event, which React's root listener handles like a person's.
-const clicks = (new URLSearchParams(window.location.search).get("click") ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
+const clicks = (new URLSearchParams(window.location.search).get("click") ?? NEXUS_APPROVAL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? EMAIL_CLICKS[new URLSearchParams(window.location.search).get("view") ?? ""] ?? "").split("|").filter((c) => c !== "");
 clicks.forEach((label, i) => {
   window.setTimeout(() => {
     // A choice card and a record row answer to their names: a card's note ("1,204

@@ -333,3 +333,15 @@ Our Studio**, then **Check sends**.
 These fixtures separate transport completion from timestamped recipient reports,
 show missing reports as unconfirmed, and expose feedback readiness with empty
 and populated lists. They never send email or provision Azure resources.
+
+Nexus approvals: `nexus-approvals`, `nexus-approvals-empty`,
+`nexus-approval-failure`, `nexus-approval-directory`, `nexus-approval-command`,
+`nexus-approval-message`, `nexus-permissions`, `nexus-permissions-empty`, and
+`nexus-permission` show the inbox, in-place decisions, and saved permissions.
+`nexus-approval-discussion`, `nexus-approval-advice`,
+`nexus-approval-advice-running`, and `nexus-approval-guidance-recorded` open the
+real Ask sheet from a selected approval. Inspect both modes at desktop and
+narrow widths, including the action bar, named computer scope, readable advice,
+editable composer during investigation, and recorded-but-not-resumed guidance.
+These scenes use synthetic conversation and permission receipts; they never
+approve production work, run commands, or call a model.
