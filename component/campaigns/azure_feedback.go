@@ -50,6 +50,9 @@ func (w *Worker) ApplyAzureDelivery(ctx context.Context, report email.AzureDeliv
 		if !sameOrganization(str(delivery, "accountId"), report.AccountID) || EmailDigest(str(delivery, "email")) != digest {
 			return fmt.Errorf("the provider receipt does not match the campaign delivery")
 		}
+		if bare(str(delivery, "ownerUserId")) == "" {
+			return fmt.Errorf("the original campaign delivery has no owner")
+		}
 	}
 	hard := report.Status == "bounced" || report.Status == "suppressed"
 	if hard {
@@ -67,8 +70,20 @@ func (w *Worker) ApplyAzureDelivery(ctx context.Context, report email.AzureDeliv
 				return err
 			}
 			if prior == nil {
-				values := map[string]any{"eventId": eventID, "emailDigest": digest, "ownerUserId": str(delivery, "ownerUserId"), "accountId": report.AccountID, "recipientId": str(delivery, "recipientId"), "campaignId": str(delivery, "campaignId"), "occurredAt": report.OccurredAt.UTC().Format(time.RFC3339Nano)}
-				if err := write(func(commit context.Context) error { return w.newsletterWrite(commit, "recordProviderBounce", values) }); err != nil {
+				values := map[string]any{"eventId": eventID, "emailDigest": digest, "accountId": report.AccountID, "recipientId": str(delivery, "recipientId"), "campaignId": str(delivery, "campaignId"), "occurredAt": report.OccurredAt.UTC().Format(time.RFC3339Nano)}
+				if err := write(func(commit context.Context) error {
+					// This ONE mandatory historical audit retains the receiver's
+					// operator authority, with attribution borrowed from its fresh,
+					// authenticated delivery. The borrowed person may no longer
+					// have sending authority. It is not Synthetic: that would
+					// erase the owner stamp on the newly inserted audit.
+					ownerID := bare(str(delivery, "ownerUserId"))
+					claims := map[string]any{"sub": ownerID, "role": "owner"}
+					owner := auth.ContextWithClaims(commit, claims)
+					owner = auth.ContextWithToken(owner, auth.BuildTokenInfo(claims))
+					owner = auth.ContextWithAccess(owner, &auth.AccessContext{UserId: ownerID, Role: auth.RoleOwner})
+					return w.newsletterWrite(owner, "recordProviderBounce", values)
+				}); err != nil {
 					return err
 				}
 				w.reputation.observe(w.nowUTC(), report.Email, "hard_bounce")

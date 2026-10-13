@@ -1583,22 +1583,21 @@ mutation delivery recordProviderDelivery {
 }
 
 /// Mandatory audit from an authenticated, correlated provider report. The engine
-/// copies ownership from the original delivery; actor.userId is the provider service.
+/// borrows only the correlated delivery's owner as actor.userId for this audit.
 @actor
 @serverOnly
 mutation consentEvent recordProviderBounce {
   args {
     eventId string!
     emailDigest string!
-    ownerUserId string!
     accountId string!
     recipientId string!
     campaignId string
     occurredAt datetime!
   }
   insert {
-    accept { emailDigest, ownerUserId, accountId, recipientId, campaignId, occurredAt }
-    stamp { id: args.eventId, kind: "bounce", source: "provider" }
+    accept { emailDigest, accountId, recipientId, campaignId, occurredAt }
+    stamp { id: args.eventId, ownerUserId: actor.userId, kind: "bounce", source: "provider" }
   }
 }
 

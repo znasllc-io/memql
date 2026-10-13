@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/secret"
 	"github.com/znasllc-io/memql/core/id"
@@ -159,7 +161,7 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 				t.Fatalf("ledger %v", row)
 			}
 			var count int
-			if err := db2.QueryRowContext(context.Background(), `SELECT count(*) FROM "MemoryNodes" WHERE concept='v1:campaigns:consentEvent' AND payload->>'emailDigest'=? AND payload->>'kind'='bounce'`, EmailDigest(address)).Scan(&count); err != nil {
+			if err := db2.QueryRowContext(context.Background(), `SELECT count(*) FROM "MemoryNodes" WHERE concept='v1:campaigns:consentEvent' AND payload->>'emailDigest'=? AND payload->>'kind'='bounce' AND payload->>'ownerUserId' IN (?,?)`, EmailDigest(address), n.user, "v1:identity:user:"+n.user).Scan(&count); err != nil {
 				t.Fatal(err)
 			}
 			want := 0
@@ -280,8 +282,33 @@ func TestAzureFeedbackCampaignAttributionAcrossReplicas(t *testing.T) {
 	if err := w2.ApplyAzureDelivery(n.system, email.AzureDeliveryReport{OperationID: "forged", AccountID: n.org, Email: "forged@example.test", Status: "bounced"}); err == nil {
 		t.Fatal("constructed report suppressed an address")
 	}
-	if _, err := n.engine.Execute(n.owner, call("mutation", "recordProviderBounce", arg{"eventId", "forged"}, arg{"emailDigest", EmailDigest("forged@example.test")}, arg{"accountId", n.org}, arg{"ownerUserId", n.user}, arg{"recipientId", "forged"}, arg{"occurredAt", now.Format(time.RFC3339Nano)})); err == nil {
+	if _, err := n.engine.Execute(n.owner, call("mutation", "recordProviderBounce", arg{"eventId", "forged"}, arg{"emailDigest", EmailDigest("forged@example.test")}, arg{"accountId", n.org}, arg{"recipientId", "forged"}, arg{"occurredAt", now.Format(time.RFC3339Nano)})); err == nil {
 		t.Fatal("public caller forged provider audit")
+	}
+
+	// A corrupt historical row must not silently give the audit to the
+	// engine's system actor or suppress a mailbox before attribution is known.
+	operation, address, missingOwner := receipt("missing-owner", "failed")
+	if _, err := db2.ExecContext(context.Background(), `UPDATE "MemoryNodes" SET payload=payload-'ownerUserId' WHERE concept='v1:campaigns:delivery' AND id=?`, "v1:campaigns:delivery:"+missingOwner); err != nil {
+		t.Fatal(err)
+	}
+	if code := post(operation, address, "Bounced"); code != http.StatusServiceUnavailable {
+		t.Fatalf("missing owner report code %d", code)
+	}
+	if _, suppressed, err := w2.store.SuppressionByDigest(n.system, EmailDigest(address)); err != nil || suppressed {
+		t.Fatalf("missing owner changed suppression: %v %v", suppressed, err)
+	}
+
+	// Revoking future send permission cannot erase the attribution of a
+	// provider outcome for a message already submitted.
+	operation, address, _ = receipt("revoked-owner", "failed")
+	n.execute(t, n.system, fmt.Sprintf(`insert("v1:identity:user", id=%s, payload={"primaryEmail":%s,"displayName":"Sender","role":"reader","active":true})`, langparser.QuoteString(n.user), langparser.QuoteString(n.user+"@example.test")))
+	if code := post(operation, address, "Bounced"); code != http.StatusNoContent {
+		t.Fatalf("revoked owner report code %d", code)
+	}
+	var auditOwner string
+	if err := db2.QueryRowContext(context.Background(), `SELECT payload->>'ownerUserId' FROM "MemoryNodes" WHERE concept='v1:campaigns:consentEvent' AND payload->>'emailDigest'=? AND payload->>'kind'='bounce'`, EmailDigest(address)).Scan(&auditOwner); err != nil || bare(auditOwner) != n.user {
+		t.Fatalf("revoked owner audit %q: %v", auditOwner, err)
 	}
 }
 

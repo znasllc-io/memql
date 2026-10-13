@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TestDeploymentActionsValidateStrictly loads the 12 authored deployment
+// TestDeploymentActionsValidateStrictly loads the authored deployment
 // actions (dsl/deployment/actions.memql) under Story 8 STRICT capability
 // arg-typing and confirms every one validates against the reconciled catalog.
 // This is the live proof that the real authored actions satisfy the strict
@@ -36,8 +36,10 @@ func TestDeploymentActionsValidateStrictly(t *testing.T) {
 	// reportInstanceVersion (the declared/rendered/running triple, memql#4486)
 	// and releaseEngine (publish a release, then prove the image build it
 	// triggers actually started, memql#4485).
-	if len(acts) != 21 {
-		t.Fatalf("expected 21 authored deployment actions, got %d.\n"+
+	// 21 -> 23 with Azure email installation: inspectAzureEmail
+	// and configureAzureEmail inspect and authorize the cluster.
+	if len(acts) != 23 {
+		t.Fatalf("expected 23 authored deployment actions, got %d.\n"+
 			"If you ADDED one, update this count. If the count DROPPED, find out which action "+
 			"went and why: each of these is the backend of a lifecycle step, and several exist "+
 			"because the step they perform failed silently when nobody did it.", len(acts))
