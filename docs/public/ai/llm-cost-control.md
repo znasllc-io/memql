@@ -259,6 +259,29 @@ Verdict: no loop lacks a per-turn terminal condition. The agent / engine tool
 loops have no native cross-turn cap and rely on Layer 0 (process) and Layer 4
 (per plan-lineage / work run) for cumulative bounding.
 
+### Run usage across replicas
+
+Before admission, the run guard reads fresh, paged usage summaries and counts
+an identity-based union of durable model-call receipts and local charges.
+Returning to a replica that previously ran the same work does not lose calls
+completed on a peer. Each completed request shares one receipt ID between its
+charge and journal write; rereading that receipt does not charge it again.
+Metered, subscription and local tokens keep their separate buckets.
+
+A failed journal write and an unjournaled cache hit remain counted on the
+current process. They cannot be reconstructed on another process or after
+that run's in-memory entry is evicted. The guard retains at most 2,048 run
+entries and 4,096 receipt identities per entry; reaching the receipt bound or
+failing to read every summary page refuses further calls rather than dropping
+identities. These are completed-call counters, not distributed reservations:
+simultaneous calls can be admitted before either has completed.
+
+The model-call `served` enum includes `subscription` so covered calls can be
+journaled and recovered on another replica. After those rows are written,
+rolling back to an engine whose schema lacks that value is unsafe: its schema
+can reject writes involving those rows. Keep a compatible engine during
+rollback or prepare an explicit data migration first.
+
 ### Run time limits and approved continuation
 
 A run's wall-clock deadline is a budget boundary, including when it interrupts

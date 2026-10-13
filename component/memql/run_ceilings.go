@@ -52,6 +52,7 @@ import (
 
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Served values a charge reports. They mirror component/work's set; the two
@@ -97,6 +98,8 @@ type RunSpend struct {
 
 // ModelSpend is what one answered request cost, as the seam reports it.
 type ModelSpend struct {
+	// ReceiptID is shared with JournaledCall; blank means an unjournaled cache charge.
+	ReceiptID string
 	// Served is one of the Served* constants above.
 	Served       string
 	InputTokens  int
@@ -336,12 +339,13 @@ func (s *modelSeam) observeAgentSpend(ctx context.Context, cancel context.Cancel
 				} else if call.Billing == "subscription" {
 					served = ServedSubscription
 				}
-				s.charge(ctx, ModelSpend{Served: served, InputTokens: call.InputTokens, OutputTokens: call.OutputTokens, Cost: call.TotalCost})
+				receiptID := id.NewShortId()
+				s.charge(ctx, ModelSpend{ReceiptID: receiptID, Served: served, InputTokens: call.InputTokens, OutputTokens: call.OutputTokens, Cost: call.TotalCost})
 				if rc, ok := common.RunFromContext(ctx); ok {
 					receiptCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 					// This is an attempt receipt, not a reusable model response: its unique
 					// hash cannot accidentally serve an empty answer from the replay cache.
-					s.record(receiptCtx, rc, JournaledCall{RunId: rc.RunId, StepKey: rc.StepKey, RequestHash: "attempt:" + call.ID, PromptRef: call.PromptName, Provider: call.Provider, Model: call.Model, InputTokens: call.InputTokens, OutputTokens: call.OutputTokens, Cost: call.TotalCost, LatencyMs: call.ElapsedMS, Served: served, Error: call.Error})
+					s.record(receiptCtx, rc, JournaledCall{ReceiptID: receiptID, RunId: rc.RunId, StepKey: rc.StepKey, RequestHash: "attempt:" + call.ID, PromptRef: call.PromptName, Provider: call.Provider, Model: call.Model, InputTokens: call.InputTokens, OutputTokens: call.OutputTokens, Cost: call.TotalCost, LatencyMs: call.ElapsedMS, Served: served, Error: call.Error})
 					stop()
 				}
 			}

@@ -207,3 +207,29 @@ func TestModelAdmissionCancellationRetainsItsNativeBudgetProof(t *testing.T) {
 		})
 	}
 }
+
+func TestToolObserverChargeAndJournalShareReceiptIdentity(t *testing.T) {
+	guard, journal := &fakeGuard{}, newCountingJournal()
+	seam := &modelSeam{ceilings: guard, journal: journal}
+	rc := aRun()
+	ctx, cancel := context.WithCancelCause(common.ContextWithRun(context.Background(), rc))
+	defer cancel(nil)
+	observe := seam.observeAgentSpend(ctx, cancel)
+	call := airoute.CallObservation{ID: "tool-attempt", Phase: "running", Modality: string(airoute.ModalityTools), Billing: "subscription"}
+	observe(call)
+	call.Phase = "completed"
+	call.InputTokens = 12
+	call.OutputTokens = 4
+	observe(call)
+	observe(call)
+	rows := journal.rows[rc.RunId]
+	if len(rows) != 1 || len(guard.charges) != 1 {
+		t.Fatalf("one completion produced %d receipts/%d charges", len(rows), len(guard.charges))
+	}
+	if rows[0].ReceiptID == "" || rows[0].ReceiptID != guard.charges[0].ReceiptID {
+		t.Fatal("observer charge and receipt identities differ")
+	}
+	if rows[0].Served != ServedSubscription || guard.charges[0].Served != ServedSubscription {
+		t.Fatal("billing classification changed")
+	}
+}

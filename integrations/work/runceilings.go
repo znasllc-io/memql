@@ -9,20 +9,16 @@ package work
 // runner, the journal or the router); this holds the decision, beside the rows
 // it is made from -- exactly as ModelJournal holds work.DecideServe's.
 //
-// WHAT IT READS, AND HOW OFTEN. Once per run per process:
+// Before each admission, fresh owner-scoped summary pages are folded into an
+// identity-based union with local charges. Warm replicas therefore see calls
+// completed on peers without recharging their own durable receipts. Failed
+// journal writes and unjournaled cache answers remain counted locally. Observed
+// receipts never disappear from spend if a later read omits them.
 //
-//	the run row     for startedAt (the wall-clock ceiling) and to confirm the
-//	                goal the context names.
-//	the goal row    for ceilings.
-//	its modelCall   folded into the run's spend so far -- which is what makes
-//	                rows        the count survive a resume onto another
-//	                replica. See "RE-ENTRY" below.
-//
-// Thereafter every admit is an in-memory counter read and every charge an
-// in-memory add -- with ONE exception: an admit that is about to REFUSE
-// re-reads the goal's ceilings first, so a person who raised the ceiling the
-// budget approval asked them to raise is not answered with the old number. It
-// re-reads the ceilings only, never the spend.
+// This accounts for completed requests, not distributed in-flight reservations:
+// simultaneous calls can still be admitted before either has finished. A failed
+// journal write also cannot be recovered by a different process. Receipt IDs are
+// bounded per tracked run; exhausting that bound refuses further admission.
 //
 // THE BLAST RADIUS IS GOAL-BACKED RUNS, DELIBERATELY. A run with no goalId on
 // its context inherits no ceilings -- ceilings live on v1:work:goal, and an
@@ -49,7 +45,7 @@ package work
 // than believing it is.
 //
 // RE-ENTRY: SPEND ACCUMULATES, A NEW RUN STARTS FRESH. A resumed or
-// re-dispatched run is the same v1:work:run id, so the seed folds the calls it
+// re-dispatched run is the same v1:work:run id, so admission folds the calls it
 // already made and the second attempt continues the first one's budget -- park,
 // approve, park again is not a way to buy another allowance. A replay or a
 // fork is a DIFFERENT run id with its own (empty) journal and its own
@@ -75,6 +71,10 @@ import (
 // read rather than an allowance.
 const maxTrackedRuns = 2048
 
+// Bound identity retention even when a goal has no model-call ceiling. Do not
+// evict individual receipt IDs: that would silently double-count on reread.
+const maxTrackedRunReceipts = 4096
+
 // RunCeilings implements memqlengine.RunCeilingGuard over v1:work:goal's
 // ceilings and v1:work:modelCall's rows.
 type RunCeilings struct {
@@ -92,7 +92,9 @@ var _ memqlengine.RunCeilingGuard = (*RunCeilings)(nil)
 type runBudget struct {
 	mu sync.Mutex
 	// seeded is false until the rows have been read once.
-	seeded bool
+	seeded          bool
+	receipts        map[string]struct{}
+	receiptOverflow bool
 	// ceilings are the goal's, with the two this seam cannot evaluate
 	// cleared. unbounded is true when nothing is left to check.
 	ceilings    work.Ceilings
@@ -137,6 +139,9 @@ func (c *RunCeilings) Admit(ctx context.Context, rc common.RunContext, estimated
 		return breachOf(work.UnevaluatedBreach(
 			"this run's ceilings could not be read, so whether it is within them is unknown: " + err.Error()))
 	}
+	if err := c.refreshReceipts(ctx, rc, b); err != nil {
+		return breachOf(work.UnevaluatedBreach("this run’s model usage could not be reconciled: " + err.Error()))
+	}
 	if b.unbounded {
 		return nil
 	}
@@ -156,9 +161,8 @@ func (c *RunCeilings) Admit(ctx context.Context, rc common.RunContext, estimated
 	// THIS process after its ceiling was raised would meet the old number and
 	// park again, with the approval's promise plainly untrue.
 	//
-	// It re-reads only the CEILINGS, never the spend: re-folding the journal
-	// would discard the in-process counts that no row records -- a cache hit
-	// is not journaled -- and quietly hand a looping run its allowance back.
+	// Usage was reconciled above by receipt identity, preserving local charges
+	// even when their journal write failed or the answer came from a cache.
 	//
 	// The read only happens on the path that is about to STOP a run, so it
 	// costs at most a handful per run rather than one per call. A read that
@@ -188,12 +192,18 @@ func (c *RunCeilings) Charge(ctx context.Context, rc common.RunContext, spend me
 	b := c.budgetFor(rc)
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.spent = work.AddCall(b.spent, work.CallSpend{
-		Served:       spend.Served,
-		InputTokens:  spend.InputTokens,
-		OutputTokens: spend.OutputTokens,
-		Cost:         spend.Cost,
-	})
+	call := work.CallSpend{Served: spend.Served, InputTokens: spend.InputTokens, OutputTokens: spend.OutputTokens, Cost: spend.Cost}
+	if receiptID := memqlengine.BareShortId(strings.TrimSpace(spend.ReceiptID)); receiptID != "" {
+		if err := b.addReceipt(receiptID, call); err != nil {
+			// An already-admitted answer must still count even after the bound was
+			// reached. No further calls can be admitted with uncertain identity.
+			b.receiptOverflow = true
+			b.spent = work.AddCall(b.spent, call)
+		}
+		return
+	}
+	// Cache hits have no durable row and therefore cannot overlap a fresh read.
+	b.spent = work.AddCall(b.spent, call)
 }
 
 // Spent reports the run's spend so far, for a refusal to carry onto the row.
@@ -218,7 +228,7 @@ func (c *RunCeilings) Spent(_ context.Context, rc common.RunContext) memqlengine
 	return out
 }
 
-// seed reads the run, its goal and its journal once. A seeded budget returns
+// seed reads the run and its goal once. A seeded budget returns
 // immediately.
 func (c *RunCeilings) seed(ctx context.Context, rc common.RunContext, b *runBudget) error {
 	if b.seeded {
@@ -233,7 +243,7 @@ func (c *RunCeilings) seed(ctx context.Context, rc common.RunContext, b *runBudg
 		// presents as "this goal has no ceilings", unbounded.
 		return fmt.Errorf("run %s names goal %s and carries no owner, so its ceilings cannot be read as anybody", rc.RunId, rc.GoalId)
 	}
-	scoped := ownerActor(ctx, owner)
+	scoped := ownerActor(memqlengine.ContextWithFreshRead(ctx), owner)
 
 	run, err := c.store.runForOwner(scoped, rc.RunId)
 	if err != nil {
@@ -241,6 +251,9 @@ func (c *RunCeilings) seed(ctx context.Context, rc common.RunContext, b *runBudg
 	}
 	if run == nil {
 		return fmt.Errorf("run %s is not readable as %s", rc.RunId, owner)
+	}
+	if memqlengine.BareShortId(rowString(run, "goalId")) != memqlengine.BareShortId(rc.GoalId) {
+		return fmt.Errorf("run does not belong to the named goal")
 	}
 	b.startedAt, _ = time.Parse(time.RFC3339Nano, rowString(run, "startedAt"))
 	b.humanWaitMs = int64(rowInt(run, "humanWaitMs"))
@@ -255,34 +268,57 @@ func (c *RunCeilings) seed(ctx context.Context, rc common.RunContext, b *runBudg
 	b.ceilings = enforceableHere(declared)
 	b.unbounded = b.ceilings == work.Ceilings{}
 
-	if !b.unbounded {
-		rows, err := readModelCalls(ctx, c.store, owner, rc.RunId)
-		if err != nil {
-			return fmt.Errorf("reading run %s's model calls: %w", rc.RunId, err)
-		}
-		// FOLDED INTO A LOCAL AND ADDED, never assigned. Two reasons, and
-		// both are about staying wrong in the safe direction:
-		//
-		//   - A partial fold must not survive a failed read. Assigning as we
-		//     go leaves half a journal behind when the read errors, and the
-		//     retry then folds the same rows on top of it.
-		//   - An in-process charge must not be discarded. Nothing charges
-		//     before the first admit today, so there is nothing here to add
-		//     to -- but if that ever stops being true, ADDING over-counts
-		//     (the run stops early, visibly) where assigning would silently
-		//     hand it its allowance back.
-		journaled := work.Spent{}
-		for _, row := range rows {
-			journaled = work.AddCall(journaled, work.CallSpend{
-				Served:       rowString(row, "served"),
-				InputTokens:  rowInt(row, "inputTokens"),
-				OutputTokens: rowInt(row, "outputTokens"),
-				Cost:         rowFloat(row, "cost"),
-			})
-		}
-		b.spent = addSpent(b.spent, journaled)
-	}
 	b.seeded = true
+	return nil
+}
+
+// addReceipt counts each stable ID once, whether first seen locally or in a
+// peer's durable journal. Keeping the union monotonic prevents a stale/deleted
+// row from refunding spend. Caller holds b.mu.
+func (b *runBudget) addReceipt(receiptID string, call work.CallSpend) error {
+	if _, exists := b.receipts[receiptID]; exists {
+		return nil
+	}
+	if len(b.receipts) >= maxTrackedRunReceipts {
+		return fmt.Errorf("model usage receipt tracking reached its %d-receipt safety bound", maxTrackedRunReceipts)
+	}
+	if b.receipts == nil {
+		b.receipts = map[string]struct{}{}
+	}
+	b.receipts[receiptID] = struct{}{}
+	b.spent = work.AddCall(b.spent, call)
+	return nil
+}
+
+// refreshReceipts reads only bounded usage summaries, never prompt/response
+// bodies. Every page skips the result cache. A partial read may add known spend,
+// but cannot authorize a call; a retry deduplicates the same IDs.
+func (c *RunCeilings) refreshReceipts(ctx context.Context, rc common.RunContext, b *runBudget) error {
+	if b.receiptOverflow {
+		return fmt.Errorf("model usage receipt tracking is exhausted")
+	}
+	query := "query " + call("workModelCallsPageForOwnerRun", map[string]any{"runId": rc.RunId})
+	err := memqlengine.WalkQueryPages(ownerActor(ctx, rc.OwnerUserId), c.store.engine.Execute, query, maxTrackedRunReceipts+1, func(result *memqlengine.ExecuteResult) error {
+		for _, row := range memqlRows(result) {
+			receiptID := memqlengine.BareShortId(rowString(row, "id"))
+			if receiptID == "" {
+				return fmt.Errorf("model usage receipt has no identity")
+			}
+			if memqlengine.BareShortId(rowString(row, "ownerUserId")) != memqlengine.BareShortId(strings.TrimSpace(rc.OwnerUserId)) || memqlengine.BareShortId(rowString(row, "runId")) != memqlengine.BareShortId(rc.RunId) {
+				return fmt.Errorf("model usage receipt attribution does not match this run")
+			}
+			if err := b.addReceipt(receiptID, work.CallSpend{Served: rowString(row, "served"), InputTokens: rowInt(row, "inputTokens"), OutputTokens: rowInt(row, "outputTokens"), Cost: rowFloat(row, "cost")}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if len(b.receipts) >= maxTrackedRunReceipts {
+		return fmt.Errorf("model usage receipt tracking reached its %d-receipt safety bound", maxTrackedRunReceipts)
+	}
 	return nil
 }
 
@@ -310,20 +346,6 @@ func (c *RunCeilings) goalCeilings(ctx context.Context, rc common.RunContext) (w
 		return work.Ceilings{}, fmt.Errorf("run workload is unavailable: %v", err)
 	}
 	return approvedWorkloadCeilings(goal, ceilings, rowString(rowMap(run, "classification"), "workload"))
-}
-
-// addSpent sums two spends, bucket by bucket.
-func addSpent(a, b work.Spent) work.Spent {
-	return work.Spent{
-		Tokens:             a.Tokens + b.Tokens,
-		TokensSubscription: a.TokensSubscription + b.TokensSubscription,
-		TokensLocal:        a.TokensLocal + b.TokensLocal,
-		Cost:               a.Cost + b.Cost,
-		ModelCalls:         a.ModelCalls + b.ModelCalls,
-		Retries:            a.Retries + b.Retries,
-		Events:             a.Events + b.Events,
-		WallClockMs:        a.WallClockMs + b.WallClockMs,
-	}
 }
 
 // enforceableHere drops the ceilings this seam cannot evaluate.
@@ -357,9 +379,15 @@ func (c *RunCeilings) warnAboutUnenforceable(rc common.RunContext, ceilings work
 		"why", "a run's published events are the executor's counter, reach no model call, and no executor counts them yet")
 }
 
+// The owner and goal are part of the cache identity. A different actor cannot
+// borrow a seeded result by presenting the same run ID.
+func runBudgetKey(rc common.RunContext) string {
+	return memqlengine.BareShortId(strings.TrimSpace(rc.OwnerUserId)) + "\x00" + memqlengine.BareShortId(rc.GoalId) + "\x00" + memqlengine.BareShortId(rc.RunId)
+}
+
 // budgetFor returns the run's counters, creating them on first sight.
 func (c *RunCeilings) budgetFor(rc common.RunContext) *runBudget {
-	key := memqlengine.BareShortId(rc.RunId)
+	key := runBudgetKey(rc)
 	now := c.clock()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -424,6 +452,9 @@ func (c *RunCeilings) Deadline(ctx context.Context, rc common.RunContext) (time.
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if err := c.seed(ctx, rc, b); err != nil {
+		return time.Time{}, err
+	}
+	if err := c.refreshReceipts(ctx, rc, b); err != nil {
 		return time.Time{}, err
 	}
 	declared, err := c.goalCeilings(ctx, rc)
