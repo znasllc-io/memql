@@ -129,17 +129,14 @@ true` in the result; the policies after it still run with their shares. The
 system-run policy is fifth of eight, so with nothing to do before it, it may
 spend a quarter of the four minutes, a minute.
 
-Nothing is stored between nights. The next pass starts again at the oldest
-version still stored, which is not always where the work is: a version no policy
-retires (a person's run, an old version of live work) anchors the start, and the
-windows from there to the work are read again every night and found to hold no
-candidate. A window with no version stored at all is jumped, so a version dated
-1970 costs a few reads and not tens of thousands; a window that holds versions
-no policy retires is read and passed, at about 21 ms at 5,000 runs a day, so
-roughly 10 to 30 s per year of installation age, per policy. A backlog is
-retired over as many nights as it takes, oldest first, and a persisted low-water
-mark or an index on `(concept, "createdAt")` that would end the re-walk is
-deferred to release 2.
+Completed pages and day windows are checkpointed in `work_retention_progress`,
+keyed by concept, policy and configured lifetime. A different cron leader resumes
+from that point. A generation fence refuses a stale replica's attempt to rewind
+it, and dry runs neither consume nor alter progress. A complete traversal resets
+the checkpoint: dependency-protected records, denied rows and backdated inserts
+must be reconsidered on a later cycle. The `(concept, createdAt, id)` index makes
+these day probes cheap even when years of protected history remain. Empty spans
+are skipped directly to the next stored version.
 
 Two statements were the ones that timed out. The batch's version load joined the
 parents' lookup to the children's with an OR, which the planner answers by
@@ -153,16 +150,13 @@ retired 21,832 runs in ten minutes and fifty seconds now retires all 43,019 in a
 little over a minute. The measurements and the plans are in the header comment of
 `operationalRetention` (`integrations/work/operational_retention.go`).
 
-Not bounded by a day: the goal policy's "no run of it remains" compares every run
-version with the goal and no index serves it (0.34 s a read at 600,000 run
-versions, 1.26 s with cold buffers). That is accepted for this release; it runs
-last, so a failure there costs nothing that went before it, and the partial
-expression index on the run's `goalId` that would bound it is deferred to
-release 2. The journal sweep's expired-rows read takes the latest version of
-every id of one concept (0.41 s for 400,000 model-call versions) and grows with
-the concept; windowing it is deferred to release 2. It no longer decides the
-night: `workRetentionSweep` runs the operational policies even when the journal
-half fails, and returns both errors.
+The goal policy's dependency check now uses a partial expression index on
+normalized `goalId`, matching both canonical and historical bare references.
+Index migrations use the verified per-chunk builder: interrupted builds and
+missing chunk coverage are repaired before success is reported. Journal detail
+reads use the same hundred-row day windows and latest-version/active-parent
+checks as operational retention. `workRetentionSweep` still runs both halves
+independently and returns both errors if they fail.
 
 ## Safeguards
 

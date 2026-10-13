@@ -89,3 +89,9 @@ func testWorkIndex(t *testing.T, indexName string, build func(context.Context, *
 		})
 	}
 }
+
+func TestRetentionIndexesBuildAndRepairChunkCoverage(t *testing.T) {
+	for _, name := range []string{"memory_nodes_retention_goal_idx", "memory_nodes_retention_time_idx"} {
+		t.Run(name, func(t *testing.T) { testWorkIndex(t, name, database.EnsureRetentionIndexes) })
+	}
+}

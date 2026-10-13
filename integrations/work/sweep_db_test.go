@@ -44,6 +44,7 @@ func sweepDB(t *testing.T) (*bun.DB, *Integration) {
 	for _, q := range []string{
 		`CREATE TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`,
 		`CREATE TABLE node_vectors (LIKE public.node_vectors INCLUDING ALL)`,
+		`CREATE TABLE work_retention_progress (LIKE public.work_retention_progress INCLUDING ALL)`,
 	} {
 		if _, err := db.ExecContext(context.Background(), q); err != nil {
 			t.Fatal(err)
