@@ -278,8 +278,8 @@ The compiled installation recipe stops on the first publication or embedding
 failure. Repeating the same selection on any replica skips existing vectors
 and repairs missing ones, without changing recorded rejection or supersession.
 Requests accept 1–16 distinct domains and at most 256 registered chunks, with a
-five-minute execution bound. The three domains above currently contain 23
-chunks: at most 23 missing-vector embedding calls, with no generative calls.
+five-minute execution bound. The three domains above currently contain 25
+chunks: at most 25 missing-vector embedding calls, with no generative calls.
 
 The result reports `domains`, with `domainId`, `chunks`, `ready`, `preserved`,
 `embedded` and `olderPublished` for each selected domain, plus the embedding
