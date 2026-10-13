@@ -560,3 +560,67 @@ func TestScheduledJournalOpensLiveAndNeverReplaysStaleHeartbeats(t *testing.T) {
 		t.Fatalf("the run was created without a heartbeat (%v); until a later write lands it would be judged by its start time alone", runWrites)
 	}
 }
+
+// A synchronous child belongs to the held parent's journal lifetime. The
+// child may finish before a later parent step writes; it must then be replayed
+// after its parent, or leave nothing when the whole tick remains idle.
+func TestScheduledJournalHoldsSynchronousChildren(t *testing.T) {
+	for _, mode := range []string{"idle", "child-writes", "parent-writes-later", "child-fails", "required-child"} {
+		t.Run(mode, func(t *testing.T) {
+			e, rec, reg, parent, child := subAutomationHarness(t)
+			parent.Trigger = nil
+			parent.Schedule = "0 */10 * * * *"
+			parent.Steps = append(parent.Steps, scheduledSteps("after")...)
+			child.JournalRequired = mode == "required-child"
+			probe := &heldChildProbe{base: reg, rec: rec, mode: mode, child: child.Name}
+			e.stepRegistry = probe
+			exec, err := e.Execute(context.Background(), parent, "schedule")
+			if mode != "child-fails" && err != nil {
+				t.Fatal(err)
+			}
+			if mode == "idle" {
+				if writes := journalWriteNames(rec); len(writes) != 0 {
+					t.Fatalf("idle parent/child wrote %v", writes)
+				}
+				return
+			}
+			if mode != "required-child" && len(probe.beforeChild) != 0 {
+				t.Fatalf("child opened before an effect: %v", probe.beforeChild)
+			}
+			var opens []map[string]any
+			_, args := journalWrites(t, rec)
+			names, _ := journalWrites(t, rec)
+			for n, name := range names {
+				if name == "createWorkRun" {
+					opens = append(opens, args[n])
+				}
+			}
+			if len(opens) != 2 || opens[0]["runId"] != exec.ID || opens[1]["parentRunId"] != exec.ID {
+				t.Fatalf("parent must precede child and exist exactly once: %v", opens)
+			}
+		})
+	}
+}
+
+type heldChildProbe struct {
+	base        *subAutomationRegistry
+	rec         *recordingJournalExecutor
+	mode, child string
+	beforeChild []string
+}
+
+func (p *heldChildProbe) Execute(ctx context.Context, step *Step, sc *StepContext) (*StepResult, error) {
+	if sc.Execution.AutomationName == p.child {
+		p.beforeChild = journalWriteNames(p.rec)
+		if p.mode == "child-writes" {
+			common.NotifyWrite(ctx, "v1:probe:thing", "child")
+		}
+		if p.mode == "child-fails" {
+			return nil, errBoom
+		}
+	}
+	if step.ID == "after" && p.mode == "parent-writes-later" {
+		common.NotifyWrite(ctx, "v1:probe:thing", "parent")
+	}
+	return p.base.Execute(ctx, step, sc)
+}

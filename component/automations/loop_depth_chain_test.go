@@ -514,6 +514,7 @@ func (r *subAutomationRegistry) Execute(ctx context.Context, step *Step, stepCtx
 	r.mu.Unlock()
 	now := time.Now()
 	if step.Automation != nil {
+		ctx = ContextWithAutomationParent(ctx, stepCtx.Execution.ID)
 		if _, err := stepCtx.AutomationTrigger.TriggerAutomationWithArgs(ctx, step.Automation.Name, map[string]any{"from": stepCtx.Execution.ID}); err != nil {
 			msg := fmt.Sprintf("automation %q execution failed: %v", step.Automation.Name, err)
 			return &StepResult{StepId: step.ID, Status: "failed", Error: msg, StartedAt: now, CompletedAt: now}, fmt.Errorf("automation %q execution failed: %w", step.Automation.Name, err)

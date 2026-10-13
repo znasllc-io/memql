@@ -86,24 +86,10 @@ func (e *AutomationExecutor) Execute(ctx context.Context, step *automations.Step
 			"async":      true,
 		}
 
-		// Record step execution in the database
-		runId := ""
-		if stepCtx.Execution != nil {
-			runId = stepCtx.Execution.ID
-		}
-		stepRecordQuery := RecordStepExecution(ctx, stepCtx.Engine, StepRecordData{
-			RunId:    runId,
-			StepId:   step.ID,
-			StepType: "automation",
-			Status:   result.Status,
-			Duration: float64(result.Duration.Milliseconds()),
-		})
-
 		if stepCtx.Logger != nil {
 			stepCtx.Logger.Debug("automation step triggered (async)",
 				"step", step.ID,
 				"targetAutomation", automationName,
-				"stepRecord", stepRecordQuery,
 			)
 		}
 
@@ -185,28 +171,11 @@ func (e *AutomationExecutor) Execute(ctx context.Context, step *automations.Step
 		"executionId": execResult.ID,
 	}
 
-	// Record step execution in the database
-	runId := ""
-	if stepCtx.Execution != nil {
-		runId = stepCtx.Execution.ID
-	}
-	// Build result query to retrieve the triggered automation's run record
-	resultQuery := fmt.Sprintf(`concept==v1:memql:automation:run&&id==%s)`, jsonString(execResult.ID))
-	stepRecordQuery := RecordStepExecution(ctx, stepCtx.Engine, StepRecordData{
-		RunId:       runId,
-		StepId:      step.ID,
-		StepType:    "automation",
-		Status:      result.Status,
-		ResultQuery: resultQuery,
-		Duration:    float64(result.Duration.Milliseconds()),
-	})
-
 	if stepCtx.Logger != nil {
 		stepCtx.Logger.Debug("automation step completed",
 			"step", step.ID,
 			"targetAutomation", automationName,
 			"executionId", execResult.ID,
-			"stepRecord", stepRecordQuery,
 			"duration", formatDuration(result.Duration),
 		)
 	}

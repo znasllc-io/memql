@@ -522,7 +522,7 @@ func (h *heldWrites) dropsPulses() bool {
 // which for a run that opened late is minutes earlier. Everything else is
 // written as it was held. release calls it with the hold's lock taken.
 func (h *heldWrites) beating(w heldWrite) map[string]any {
-	if !h.opensLive || w.name != "updateWorkRun" {
+	if !h.opensLive || (w.name != "updateWorkRun" && w.name != "createWorkRun") {
 		return w.args
 	}
 	if _, beats := w.args["heartbeatAt"]; !beats {
@@ -585,6 +585,9 @@ func (j *workJournal) openRun(ctx context.Context, automation *Automation, exec 
 	args := j.openRunArgs(automation, exec, triggeringEvent, parent)
 	if parentID, _ := ctx.Value(automationParentKey{}).(string); parentID != "" && parentID != exec.ID {
 		args["parentRunId"] = parentID
+	}
+	if j.hold != nil {
+		args["heartbeatAt"] = rfc3339(time.Now())
 	}
 	j.call(ctx, "createWorkRun", args)
 }

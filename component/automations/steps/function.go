@@ -90,27 +90,10 @@ func (e *FunctionExecutor) Execute(ctx context.Context, step *automations.Step, 
 		"itemCount": itemCount,
 	}
 
-	// Record step execution in the database
-	runId := ""
-	if stepCtx.Execution != nil {
-		runId = stepCtx.Execution.ID
-	}
-	stepRecordQuery := RecordStepExecution(ctx, stepCtx.Engine, StepRecordData{
-		RunId:        runId,
-		StepId:       step.ID,
-		StepType:     "function",
-		Status:       result.Status,
-		Query:        query,
-		FunctionName: funcName,
-		ItemCount:    itemCount,
-		Duration:     float64(result.Duration.Milliseconds()),
-	})
-
 	if stepCtx.Logger != nil {
 		stepCtx.Logger.Debug("function step completed",
 			"step", step.ID,
 			"function", funcName,
-			"stepRecord", stepRecordQuery,
 			"duration", formatDuration(result.Duration),
 		)
 	}

@@ -790,8 +790,22 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if adopt != nil {
 		exec.overrides = adopt.Overrides
 	}
+	parentJournal, _ := runJournalFrom(ctx)
+	if journal != nil && parentJournal != nil && parentJournal.hold != nil && automation.JournalRequired {
+		// A required child must be durable before it starts, including its parent.
+		parentJournal.release()
+	}
 	if adopt != nil {
 		journal.adoptRun(ctx, automation, exec)
+	} else if journal != nil && parentJournal != nil && parentJournal.hold != nil && !automation.JournalRequired {
+		// A sync child shares the parent's lifetime. Even if the child finishes
+		// before the parent's first write, its queued rows follow the parent's
+		// open. A child failure releases the same queue. Async dispatch has no
+		// parent context and therefore still opens an independent journal.
+		child := *journal
+		child.hold = parentJournal.hold
+		journal = &child
+		journal.openRun(ctx, automation, exec, triggeringEvent, parentCause)
 	} else if journal != nil && holdsScheduledJournal(automation, triggeredBy, adopt) {
 		// A CRON TICK'S RUN OPENS AT ITS FIRST WRITE, NOT HERE (journal.go, the
 		// header). An idle instance's ticks mostly change nothing, and a durable
