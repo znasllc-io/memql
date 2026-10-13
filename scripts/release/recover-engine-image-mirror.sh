@@ -23,15 +23,28 @@ SCRATCH=""
 CONTAINER=""
 TARGET_PRESENT="false"
 
-# Invoked by the EXIT trap below, including cap_fail paths.
+# Called by the EXIT handler below.
 # shellcheck disable=SC2329
 function cleanup() {
     if [[ -n "$CONTAINER" ]]; then docker rm "$CONTAINER" >&2 || true; fi
     if [[ -n "$SCRATCH" ]]; then rm -rf "$SCRATCH"; fi
     return 0
 }
-# Preserve the capability's exactly-one-result guarantee before cleaning up.
-trap '_cap_on_exit; cleanup' EXIT
+# Bash 5.2 can return the trapped failure from _cap_on_exit's bare return.
+# With errexit still active that skips the rest of a chained EXIT trap.
+# Keep cleanup independent of result emission and restore the original status
+# before handing it to the capability's exactly-one-result guarantee.
+# shellcheck disable=SC2329
+function recovery_on_exit() {
+    local code=$?
+    trap - EXIT
+    set +e
+    cleanup
+    (exit "$code")
+    _cap_on_exit
+    exit "$code"
+}
+trap 'recovery_on_exit' EXIT
 
 function validate_inputs() {
     [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || cap_fail 2 "version must be bare X.Y.Z"

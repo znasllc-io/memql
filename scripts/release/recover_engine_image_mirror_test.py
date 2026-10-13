@@ -213,8 +213,19 @@ class RecoveryTest(unittest.TestCase):
         self.no_copy(reason="engine binary provenance")
 
     def test_stopped_container_is_cleaned_after_extraction_failure(self):
-        self.no_copy("extract-failed")
-        self.assertIn(["docker", "rm", "stopped-inspection-container"], self.calls)
+        result = self.no_copy("extract-failed", reason="could not extract engine binary")
+        self.assertEqual(result.returncode, 5)
+        self.assertEqual(self.calls.count(["docker", "rm", "stopped-inspection-container"]), 1)
+        scratch = Path(next(call[-1] for call in self.calls if call[:2] == ["docker", "cp"])).parent
+        self.assertFalse(scratch.exists(), "failed extraction must remove its scratch directory")
+
+    def test_unhandled_failure_retains_exit_code_and_one_failure_envelope(self):
+        mktemp = self.root / "mktemp"
+        mktemp.write_text("#!/usr/bin/env bash\nexit 5\n")
+        mktemp.chmod(0o755)
+        result = self.no_copy(reason="aborted (exit 5)")
+        self.assertEqual(result.returncode, 5)
+        self.assertEqual(self.calls, [])
 
     def test_refuses_non_build_server_or_non_main_before_external_calls(self):
         for key, value in [("GITHUB_ACTIONS", "false"), ("GITHUB_REF", "refs/heads/other"), ("GITHUB_REPOSITORY", "other/repo")]:
