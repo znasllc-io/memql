@@ -111,7 +111,7 @@ func (f *permissionGuidanceTurn) RunTurn(ctx context.Context, msg *memqlv1.Agent
 }
 
 func TestWorkDBTypedPermissionGuidanceKeepsExactNestedProgress(t *testing.T) {
-	for _, mode := range []string{"ordinary", "early-answer", "refusals"} {
+	for _, mode := range []string{"ordinary", "early-answer", "refusals", "fresh-rerun"} {
 		t.Run(mode, func(t *testing.T) {
 			writer, db := workTemplateDBEngineAndDB(t)
 			reader := workTemplateDBEngine(t)
@@ -201,6 +201,56 @@ func TestWorkDBTypedPermissionGuidanceKeepsExactNestedProgress(t *testing.T) {
 			require.NotEmpty(t, childID)
 			checkpoint := query(reader, "workContinuationForOwnerRun", map[string]any{"runId": runID, "stepKey": query(reader, "workApprovalForOwner", map[string]any{"approvalId": first.ApprovalID})[0]["stepKey"]})
 			require.Len(t, checkpoint, 1)
+			if mode == "fresh-rerun" {
+				// A public rejection closes the root but retains its selected
+				// section's waiting receipt. Run again authorizes a NEW version;
+				// it must not resume that older child's checkpoint.
+				decide(first.ApprovalID, "rejected", nil)
+				require.Equal(t, "failed", load().Status)
+				target := journal.FailedStep
+				call, err := parser.RenderCall("rerunStep", map[string]any{"runId": runID, "stepKey": target})
+				require.NoError(t, err)
+				_, err = writer.Execute(person, "builtin "+call)
+				require.NoError(t, err)
+				journal = load() // The execution peer knows only durable rows.
+				require.Empty(t, journal.HumanResumeId)
+				require.NotNil(t, journal.Rerun)
+				require.True(t, journal.Rerun.Override.Empty(), "requestedBy alone is an empty override")
+				require.Equal(t, 2, journal.Rerun.Versions[target])
+				require.Equal(t, 1, journal.StepStates[target].Version)
+				require.Equal(t, "waiting", journal.StepStates[target].Status)
+				peerCtx, err := workExecutionContext(person, journal, nil, nil)
+				require.NoError(t, err)
+				resume, opts, code, err := workRerunResumption(journal, nil, triggers[1].template.members["parent"])
+				require.NoError(t, err, code)
+				peer := triggers[1].executor()
+				defer peer.Close()
+				_, err = peer.ResumeFrom(peerCtx, resume, triggers[1].template.members["parent"], opts)
+				var next *workstate.HumanWait
+				require.ErrorAs(t, err, &next, "a fresh public rerun must start its new version")
+				require.NotEqual(t, first.ApprovalID, next.ApprovalID)
+				current := load()
+				require.Equal(t, 2, current.StepStates[target].Version)
+				require.NotEqual(t, childID, current.StepStates[target].ChildRunId)
+				require.Equal(t, journal.Rerun.RequestId, current.Rerun.RequestId)
+				require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 2, "completed-tool": 2}, effects)
+				oldChild, err := automations.LoadRunJournal(memql.ContextWithFreshRead(person), reader, childID)
+				require.NoError(t, err)
+				require.Equal(t, "waiting", oldChild.Status, "the old checkpoint is never borrowed")
+				require.Len(t, runners[1].requests, 1)
+				// The new version has now stopped at its OWN unanswered wait.
+				// Re-delivering the rerun must not repeat any of its effects.
+				resume, opts, code, err = workRerunResumption(current, nil, triggers[1].template.members["parent"])
+				require.NoError(t, err, code)
+				_, err = peer.ResumeFrom(peerCtx, resume, triggers[1].template.members["parent"], opts)
+				require.ErrorIs(t, err, automations.ErrNonRetryableStep)
+				require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 2, "completed-tool": 2}, effects)
+				require.Len(t, runners[1].requests, 1)
+				finalRun := query(writer, "workRunForOwner", map[string]any{"runId": runID})[0]
+				require.Equal(t, float64(3), finalRun["spent"].(map[string]any)["modelCalls"])
+				require.Equal(t, float64(2), finalRun["spent"].(map[string]any)["retries"])
+				return
+			}
 			if mode != "early-answer" {
 				decide(first.ApprovalID, "answered", map[string]any{"feedback": permissionCorrection})
 			}

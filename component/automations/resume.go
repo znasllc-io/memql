@@ -494,7 +494,23 @@ func (e *Executor) ResumeFrom(
 	// A person's rerun authorized a new version, not repetition of the effects
 	// that version completed before a native human wait. Its answer must prove
 	// the checkpoint even though ordinary rerun admission allows effects.
-	rerunWait := rerun != nil && journal.StepStates[resumeStepId].Status == "waiting"
+	waitingState := journal.StepStates[resumeStepId]
+	rerunWait := rerun != nil && waitingState.Status == "waiting"
+	// Run again can target a terminal run whose previous version stopped at
+	// a human wait. Only a persisted, explicitly newer version is a new
+	// execution; its old waiting receipt is not a checkpoint to resume.
+	// Branches and unknown/same generations still require native proof.
+	if rerunWait && rerun.Reason == RerunReasonRerun && rerun.RequestId != "" &&
+		journal.Status == "running" && journal.HumanResumeId == "" && journal.Rerun != nil &&
+		journal.Rerun.RequestId == rerun.RequestId && journal.Rerun.Reason == rerun.Reason && waitingState.Version > 0 {
+		floor := rerun.Versions[resumeStepId]
+		run, ok := common.RunFromContext(ctx)
+		if floor > waitingState.Version && floor > journal.MaxAttempt[resumeStepId] &&
+			journal.Rerun.Versions[resumeStepId] == floor && ok &&
+			memql.BareShortId(run.RunId) == memql.BareShortId(journal.RunId) && run.RerunRequestId == rerun.RequestId {
+			rerunWait = false
+		}
+	}
 	ordinaryWait := !opts.AllowSideEffects && !e.stepRetryable(resumeStep) && rerun == nil && !checkpoint &&
 		journal.StepStates[resumeStepId].Status == "waiting" && journal.HumanResumeId != "" && opts.Overrides[resumeStepId].Empty()
 	if rerunWait || ordinaryWait {
