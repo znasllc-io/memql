@@ -261,7 +261,7 @@ alone does not replace them.
 A cluster owner can install selected shipped capability manuals through the
 ordinary authenticated query surface:
 
-```memql
+```memql fragment
 builtin knowledgeInstallCapabilityCorpora(domainIds: ["computer-use", "workbench", "work-guidance"])
 ```
 

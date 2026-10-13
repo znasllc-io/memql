@@ -60,11 +60,7 @@ func (i *Integration) parkHumanDecisionWithBudget(ctx context.Context, owner, ru
 		return "", fmt.Errorf("human decision requires the current owned work run")
 	}
 	hash := workstate.ArtifactHash(subject)
-	identity := map[string]any{"run": memql.BareShortId(runID), "step": rc.StepKey, "question": hash, "kind": approvalKind}
-	if rc.RerunRequestId != "" {
-		identity["rerunRequestId"] = rc.RerunRequestId
-	}
-	first := "question-" + workstate.ArtifactHash(identity)[:32]
+	first := workstate.HumanQuestionID(memql.BareShortId(runID), rc.StepKey, approvalKind, hash, rc.RerunRequestId)
 	if i.decisionGate == nil {
 		return "", fmt.Errorf("feedback coordination is unavailable")
 	}

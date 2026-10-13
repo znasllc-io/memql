@@ -73,6 +73,17 @@ func ArtifactHash(subject map[string]any) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// HumanQuestionID binds a native question to one explicit execution request.
+// runID is bare. Omitting rerunRequestID preserves the original receipt bytes;
+// an explicit rerun must not reuse a prior execution's answer.
+func HumanQuestionID(runID, stepKey, kind, artifactHash, rerunRequestID string) string {
+	identity := map[string]any{"run": runID, "step": stepKey, "question": artifactHash, "kind": kind}
+	if rerunRequestID != "" {
+		identity["rerunRequestId"] = rerunRequestID
+	}
+	return "question-" + ArtifactHash(identity)[:32]
+}
+
 func writeCanonical(h interface{ Write([]byte) (int, error) }, m map[string]any) {
 	keys := make([]string, 0, len(m))
 	for k := range m {
