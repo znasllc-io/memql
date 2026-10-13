@@ -307,6 +307,13 @@ Owned work uses the following layers:
    phrase inside that source. Omit `offset` for the initial match; an explicit
    offset still selects the exact page. This avoids scanning a long metadata
    record or bibliography to locate one fact.
+   Searches compare decoded JSON string text, including newlines, quotes and
+   literal backslashes, and map a match back to the unchanged serialized page.
+   Complete JSON object or array envelopes inside strings are searched through
+   at most four JSON layers (including the message), with an 8 MiB parsing
+   budget per message. Escape-looking prose is not decoded. Searches do not
+   span separate JSON values; a deeper or larger source may require exact
+   message paging without a search. The raw archive is never rewritten.
 
 The runtime bounds summarizer input and output, model calls per compaction,
 and recall excerpts. A single exchange too large for the summarizer is
