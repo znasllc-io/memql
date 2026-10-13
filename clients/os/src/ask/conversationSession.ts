@@ -83,6 +83,7 @@ export interface ConversationState {
   busy: boolean;
   loading: boolean;
   error: string;
+  snapshotError: string;
   activity: AskActivity | null;
   voiceActive: boolean;
 }
@@ -91,7 +92,7 @@ export interface ConversationState {
  * Transcripts live on the cluster; no private conversation enters localStorage.
  * Routing stays automatic; deliberate overrides belong to run controls. */
 export class ConversationSession {
-  private state: ConversationState = { conversations: [], dictationActivity: [], historyLoading: false, historyError: "", selectionError: "", openingId: null, selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", activity: null, voiceActive: false };
+  private state: ConversationState = { conversations: [], dictationActivity: [], historyLoading: false, historyError: "", selectionError: "", openingId: null, selectedId: null, turns: [], draft: "", busy: false, loading: false, error: "", snapshotError: "", activity: null, voiceActive: false };
   private listeners = new Set<() => void>();
   private active: AskHandle | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -325,14 +326,14 @@ export class ConversationSession {
     this.selection++;
     this.leaveDiscussion();
     this.leaveWorkGuidance();
-    this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", loading: false, focusQuestionId: null });
+    this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", snapshotError: "", loading: false, focusQuestionId: null });
   };
   select = async (id: string, forDiscussion = false) => {
     if (id === this.state.selectedId && !this.state.openingId) return true;
     if (this.state.busy || this.state.voiceActive || !this.transport.conversations) return false;
     if (!forDiscussion) this.leaveDiscussion();
     const selection = ++this.selection;
-    this.patch({ loading: true, openingId: id, selectionError: "", error: "", focusQuestionId: null });
+    this.patch({ loading: true, openingId: id, selectionError: "", error: "", snapshotError: "", focusQuestionId: null });
     try {
       const turns = await this.transport.conversations.read(id);
       if (selection === this.selection) {
@@ -415,7 +416,7 @@ export class ConversationSession {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     if (this.disposed || !this.state.turns.some(isBackgroundTurn)) return;
-    this.refreshTimer = setTimeout(() => { this.refreshTimer = null; void this.reload(false); }, this.state.error ? 10000 : this.state.turns.some(turn => isBackgroundTurn(turn) && turn.state !== "waiting") ? 2500 : 10000);
+    this.refreshTimer = setTimeout(() => { this.refreshTimer = null; void this.reload(false); }, this.state.error || this.state.snapshotError ? 10000 : this.state.turns.some(turn => isBackgroundTurn(turn) && turn.state !== "waiting") ? 2500 : 10000);
   }
   reload = (refreshHistory = true): Promise<void> => {
     const id = this.state.selectedId;
@@ -441,14 +442,16 @@ export class ConversationSession {
         const local = new Map(this.state.turns.filter(turn => turn.state === "streaming").map(turn => [turn.id, turn]));
         const merged = turns.map(turn => local.get(turn.id) ?? turn);
         for (const turn of local.values()) if (!merged.some(item => item.id === turn.id)) merged.push(turn);
-        this.patch({ turns: merged, ...(this.state.discussion || this.state.workGuidance ? {} : { error: "" }) });
+        // Read recovery must not retain an old snapshot error or erase an
+        // uncertain guidance/discussion write and its retry receipt.
+        this.patch({ turns: merged, snapshotError: "", ...(this.state.discussion || this.state.workGuidance ? {} : { error: "" }) });
         const discussion = this.state.discussion;
         if (discussion && this.transport.discussApproval) {
           const latest = await this.transport.discussApproval(discussion.approval.id);
           if (current()) this.patch({ discussion: latest, guidanceRetry: this.guidanceReceipt(latest) });
         }
       } }
-      catch (error) { if (current()) this.patch({ error: message(error) }); }
+      catch (error) { if (current()) this.patch({ snapshotError: message(error) }); }
       if (request.refreshHistory && current()) void this.refresh();
       this.scheduleRefresh();
     })().finally(() => { if (this.reloadRequest === request) this.reloadRequest = null; });

@@ -129,6 +129,7 @@ export function AskSurface({
   if (!providedConversation && !localConversation.current) localConversation.current = new ConversationSession(transport);
   const conversation = providedConversation ?? localConversation.current!;
   const state = useSyncExternalStore(conversation.subscribe, conversation.getSnapshot);
+  const error = state.error || state.snapshotError;
   const [panel, setPanel] = useState<"conversation" | "activity" | "conversations">("conversation");
   const showActivity = panel === "activity";
   const showConversations = panel === "conversations";
@@ -355,7 +356,7 @@ export function AskSurface({
         </div>
       </div>
       }
-      {state.error ? <p className="os-ask-error" role="alert">{askErrorSummary(state.error)}</p> : null}
+      {error ? <p className="os-ask-error" role="alert">{askErrorSummary(error)}</p> : null}
       {state.guidanceNotice ? <p className="os-ask-guidance-notice" role="status">{state.guidanceNotice}</p> : null}
       {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
       {!state.voiceActive && panel === "conversation" ? <AskWorkQueue turns={exchanges.filter(turn => !turn.approvalId)} onOpen={onOpenWork ? runId => onOpenWork(runId, state.selectedId ?? undefined) : undefined} onGuide={transport.guideWork ? turnId => { controls?.cancel(); if (conversation.beginWorkGuidance(turnId)) inputRef.current?.focus(); } : undefined} guideDisabled={busy || state.loading || state.workGuidanceSending || !!state.discussion || !!state.discussionDraft || state.discussionOpening} /> : null}
