@@ -98,20 +98,20 @@ describe("Refine (rule 2: filters are questions, not furniture)", () => {
 });
 
 describe("SortControl", () => {
-  it("offers both orders, marks the selected order, and leaves it unchanged when selected again", () => {
-    const onToggle = vi.fn();
-    const { rerender } = render(<SortControl ascending={false} onToggle={onToggle} />);
-    const control = screen.getByRole("combobox", { name: "Sort order" });
+  it("switches orders directly and keeps focus on the same control", () => {
+    function SortHarness() {
+      const [ascending, setAscending] = useState(false);
+      return <SortControl ascending={ascending} onToggle={() => setAscending(value => !value)} />;
+    }
+    render(<SortHarness />);
+    const control = screen.getByRole("button", { name: "Sort order: Newest first" });
+    control.focus();
+    fireEvent.click(control);
+    expect(screen.getByRole("button", { name: "Sort order: Oldest first" })).toBe(control);
+    expect(document.activeElement).toBe(control);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.click(control);
     expect(control.textContent).toBe("Newest first");
-    fireEvent.click(control);
-    expect(screen.getByRole("option", { name: "Newest first" }).getAttribute("aria-selected")).toBe("true");
-    fireEvent.click(screen.getByRole("option", { name: "Newest first" }));
-    expect(onToggle).not.toHaveBeenCalled();
-    fireEvent.click(control);
-    fireEvent.click(screen.getByRole("option", { name: "Oldest first" }));
-    expect(onToggle).toHaveBeenCalledOnce();
-    rerender(<SortControl ascending onToggle={onToggle} />);
-    expect(control.textContent).toBe("Oldest first");
   });
 });
 

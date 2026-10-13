@@ -89,6 +89,8 @@ import { useAutomationFeeds } from "../src/apps/nexus/useAutomations";
 import {
   constructRow as nexusConstructRow,
   fakeConnection as nexusConnection,
+  goalRow as nexusGoal,
+  runRow as nexusRun,
   ladderPolicyRow as nexusLadderPolicyRow,
   procedureRow as nexusProcedureRow,
   withSession as nexusSession,
@@ -748,6 +750,22 @@ const VIEWS: Record<
     connect: () => nexusConnection({ learnedProcedures: [nexusProcedureRow({ id: "p1" })], ladderPolicy: [nexusLadderPolicyRow()] }),
     wrap: (el, role) => nexusSession(el, { role }),
     render: () => <NexusPane section="automations" intent={{ id: "qa", payload: { procedureId: "p1" } }} />,
+  },
+  "nexus-runs": {
+    connect: () => nexusConnection({
+      goals: [nexusGoal({ id: "g1", statement: "Please inspect the repository in my home directory, read its instructions, find the reported issue, fix it and open a pull request with the test results." })],
+      runs: [
+        nexusRun({ id: "r1", goalId: "g1", classification: { workTitle: "Fix repository issue" }, status: "waiting", waitingOn: { kind: "approval" }, createdAt: "2026-09-02T09:00:00Z" }),
+        nexusRun({ id: "r2", workTitle: "Review release notes", status: "running", createdAt: "2026-09-01T09:00:00Z" }),
+      ],
+    }),
+    wrap: (el, role) => nexusSession(el, { role }),
+    render: () => <NexusPane section="runs" />,
+  },
+  "nexus-runs-empty": {
+    connect: () => nexusConnection({ runs: [] }),
+    wrap: (el, role) => nexusSession(el, { role }),
+    render: () => <NexusPane section="runs" />,
   },
   "nexus-automations": {
     connect: () => nexusConnection(nexusLibrary()),

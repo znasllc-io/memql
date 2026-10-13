@@ -18,32 +18,20 @@ import {
   type LiveListSource,
 } from "../../kit";
 import {
-  goalTitle,
-  idTail,
   runFingerprint,
   runFromRow,
   runIsTerminal,
   runMatches,
   runTitle,
   runWaitsOnYou,
-  type GoalRow,
   type RunRow,
 } from "./rows";
-import { runModeDetail, runModeWord, runStatusWord, waitingWord } from "./words";
+import { runModeDetail, runModeWord, runStatusWord } from "./words";
 
 // THE RUNS LIST: every execution this person owns, newest first.
 //
-// ===========================================================================
-// "WAITING FOR YOU" IS A STANDING MARK, NOT AN ARRIVAL CUE
-// ===========================================================================
-// The two are different statements and this list needs both. The arrival ring
-// says "this just changed" and decays on the clock; the mark says "this run
-// is stuck until you do something" and stays until somebody does it. A cue
-// alone would make the news visible only to whoever happened to be looking at
-// the moment it parked -- and a run can wait for days. That pairing is the
-// Deployables update chip's, adopted for the same reason.
+// Waiting is stated once in each row; urgency still informs its emphasis.
 //
-// ===========================================================================
 // THE HEARTBEAT IS NOT IN THE FINGERPRINT, AND THAT IS THIS APP'S SHARPEST
 // CASE OF THE RULE
 // ===========================================================================
@@ -57,14 +45,13 @@ import { runModeDetail, runModeWord, runStatusWord, waitingWord } from "./words"
 
 export interface RunsSectionProps {
   runs: LiveListSource<Row> | null;
-  goalsById: Map<string, GoalRow>;
   showFinished: boolean;
   onOpenRun: (runId: string) => void;
   conversationId?: string;
   onClearConversation?: () => void;
 }
 
-export function RunsSection({ runs, goalsById, showFinished, onOpenRun, conversationId, onClearConversation }: RunsSectionProps) {
+export function RunsSection({ runs, showFinished, onOpenRun, conversationId, onClearConversation }: RunsSectionProps) {
   const [search, setSearch] = useState("");
   const [ascending, setAscending] = useState(false);
   const now = useNow(15_000);
@@ -97,6 +84,7 @@ export function RunsSection({ runs, goalsById, showFinished, onOpenRun, conversa
         title="Runs"
         meta={listCount(view?.snapshot) === undefined ? undefined : `${listCount(view?.snapshot)}${parked > 0 ? ` · ${parked} waiting for you` : ""}`}
       >
+        <SortControl ascending={ascending} onToggle={() => setAscending((v) => !v)} />
         <Refine
           chips={conversationId ? [{ id: "conversation", label: "This conversation", onRemove: () => onClearConversation?.() }] : []}
           search={search}
@@ -105,10 +93,6 @@ export function RunsSection({ runs, goalsById, showFinished, onOpenRun, conversa
           label="Search your runs"
         />
       </Head>
-
-      <div className="os-nexus-scope">
-        <SortControl ascending={ascending} onToggle={() => setAscending((v) => !v)} />
-      </div>
 
       <LiveList<RunRow>
         source={view}
@@ -125,7 +109,6 @@ export function RunsSection({ runs, goalsById, showFinished, onOpenRun, conversa
         renderRow={(run) => (
           <RunLine
             run={run}
-            goal={goalsById.get(idTail(run.goalId)) ?? null}
             now={now}
             onOpen={() => onOpenRun(run.id)}
           />
@@ -135,39 +118,21 @@ export function RunsSection({ runs, goalsById, showFinished, onOpenRun, conversa
   );
 }
 
-/**
- * One run, as a line.
- *
- * Exported because the goal's detail lists the same thing and a second
- * spelling of a run row is a second answer to "what does a run look like".
- */
+/** A run's generated task summary and one lifecycle status. */
 export function RunLine({
   run,
-  goal,
   now,
   onOpen,
-  showContext = true,
 }: {
   run: RunRow;
-  goal: GoalRow | null;
   now: Date;
   onOpen: () => void;
-  /**
-   * Whether the row says what the run is FOR.
-   *
-   * SAY IT ONCE (rule 7). On the Runs list it is the most useful thing on the
-   * row -- a run's own name is an automation name and the goal's statement is
-   * why it exists. Inside a goal's own detail it repeats the heading two
-   * inches above it, and it was doing so at the cost of the run's name, which
-   * truncated to "re...".
-   */
-  showContext?: boolean;
 }) {
   const parked = runWaitsOnYou(run);
   const moving = run.status === "running" || run.status === "compiling";
   return (
     <KitRow
-      name={<span className="os-nexus-run-name">{showContext && goal ? goalTitle(goal) : runTitle(run)}</span>}
+      name={<span className="os-nexus-run-name">{runTitle(run)}</span>}
       onOpen={onOpen}
       // `current` takes a row from muted to full ink: a run that is moving or
       // one that is stuck on you is what this list is about, and everything
@@ -179,11 +144,6 @@ export function RunLine({
       secondary={undefined}
       stateExtra={
         <>
-          {parked ? (
-            <Chip tone="accent" title={waitingWord(run.waitingOnKind)}>
-              waiting for you
-            </Chip>
-          ) : null}
           {run.mode === "live" ? null : (
             <Chip tone="muted" title={runModeDetail(run.mode)}>
               {runModeWord(run.mode)}
@@ -202,7 +162,7 @@ export function RunLine({
  * A goal's runs as marks -- the compact form, for a list row.
  *
  * Each mark carries its own accessible name, so the strip reads as "run 1,
- * done; run 2, waiting for you" rather than as decoration. It is the same
+ * done; run 2, waiting" rather than as decoration. It is the same
  * shape the Deployables list row's compact rail takes, and for the same
  * reason: a row should be readable as the thing it opens into.
  */
