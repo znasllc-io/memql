@@ -287,6 +287,10 @@ func Chunk(text string, size, overlap int) []string {
 // idempotent (the engine treats same-id inserts as new time-series
 // versions; the latest wins and the vector is replaced via ON CONFLICT).
 func (i *Integration) ingestHandler(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	return i.ingest(ctx, args, false)
+}
+
+func (i *Integration) ingest(ctx context.Context, args map[string]any, canonicalSeed bool) ([]memorynodes.MemoryNode, error) {
 	handlerStart := time.Now()
 
 	domainId, _ := args["domainId"].(string)
@@ -371,7 +375,12 @@ func (i *Integration) ingestHandler(ctx context.Context, args map[string]any, _ 
 				seq,
 				approxTokens(chunkText),
 			)
-			if _, err := i.engine.Execute(ctx, insertQuery); err != nil {
+			if canonicalSeed {
+				err = i.writeCanonicalSeed(ctx, chunkId, insertQuery)
+			} else {
+				_, err = i.engine.Execute(ctx, insertQuery)
+			}
+			if err != nil {
 				return nil, fmt.Errorf("knowledge.ingest: insert chunk %d: %w", seq, err)
 			}
 
@@ -416,6 +425,9 @@ func (i *Integration) storeVector(ctx context.Context, provider, nodeId, concept
 		  concept = EXCLUDED.concept,
 		  updated_at = NOW()
 	`
+	if !strings.HasPrefix(nodeId, conceptName+":") {
+		nodeId = id.BuildNodeId(conceptName, nodeId)
+	}
 	_, err = i.db().ExecContext(ctx, sqlText, nodeId, conceptName, vectorLiteral(vec))
 	return err
 }

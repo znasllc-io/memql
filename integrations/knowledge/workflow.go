@@ -10,7 +10,6 @@ func knowledgeWorkflowCapabilities() []memql.IntegrationCapability {
 		"knowledgeCatalogDomainExists": nil,
 		"knowledgeCreateCatalogDomain": nil,
 		"knowledgeSeedCorpusExists":    nil,
-		"knowledgePurgeSeedCorpus":     nil,
 		"knowledgeIngestSeedCorpus":    nil,
 		"knowledgePurgeRetiredCorpus":  nil,
 		"knowledgeSeedSelectedDomain":  nil,

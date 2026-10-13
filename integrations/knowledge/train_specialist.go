@@ -173,7 +173,7 @@ func (i *Integration) loadSpecialist(ctx context.Context, specialistId string) m
 // text-truncated) for the Trainer's refresh decision. Best-effort: a query
 // failure yields an empty corpus, which the prompt tolerates.
 func (i *Integration) loadExistingCorpus(ctx context.Context, domainId string) []map[string]any {
-	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query documentChunksForDomain(domainId:%s)`, langparser.QuoteString(domainId)))
+	res, err := i.engine.Execute(memql.ContextWithFreshRead(ctx), fmt.Sprintf(`query documentChunksForDomain(domainId:%s)`, langparser.QuoteString(domainId)))
 	if err != nil {
 		i.Logger.Warn("trainSpecialist: loadExistingCorpus failed",
 			"component", "knowledge.train", "domainId", domainId, "error", err)
@@ -182,8 +182,12 @@ func (i *Integration) loadExistingCorpus(ctx context.Context, domainId string) [
 	rows := memql.MaterializeRows(res)
 	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		// Skip already-superseded chunks -- the Trainer only needs to reason
-		// about live content.
+		// Review reads may show pending/rejected material. A Trainer prompt may
+		// only consume published knowledge, including after another replica's
+		// review decision.
+		if rowStringField(row, "validationStatus") != "validated" {
+			continue
+		}
 		if b, ok := row["superseded"].(bool); ok && b {
 			continue
 		}

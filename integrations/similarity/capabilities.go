@@ -286,7 +286,10 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 	// on concept so the operator is reusable for any vector-indexed
 	// concept (not just documentChunk). CTE picks the latest payload
 	// per id (MemQL is time-series; re-ingests append new versions)
-	// then cosine-ranks on node_vectors.
+	// then cosine-ranks on node_vectors. Knowledge publication is checked AFTER
+	// that fold and BEFORE top-K: an old approved version must not resurrect
+	// a rejected/superseded head, and pending hits must not consume the limit.
+	// Other vector-indexed concepts retain their own semantics.
 	db := i.dbGetter()
 	var rows *sql.Rows
 	if len(domainIds) == 0 {
@@ -302,6 +305,10 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 			FROM latest
 			JOIN ` + table + ` nv ON nv.id = latest.id
 			WHERE nv.vector_field = 'content'
+			  AND ($2 <> 'v1:knowledge:documentChunk' OR (
+			    latest.payload->>'validationStatus' = 'validated'
+			    AND COALESCE(latest.payload->>'superseded', 'false') = 'false'
+			  ))
 			ORDER BY nv.embedding <=> $1::vector
 			LIMIT $3
 		`
@@ -312,7 +319,6 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 				SELECT DISTINCT ON (id) id, payload
 				FROM "MemoryNodes"
 				WHERE concept = $2
-				  AND (payload->>'domainId') = ANY($3)
 				ORDER BY id, "createdAt" DESC
 			)
 			SELECT latest.id, latest.payload,
@@ -320,6 +326,11 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 			FROM latest
 			JOIN ` + table + ` nv ON nv.id = latest.id
 			WHERE nv.vector_field = 'content'
+			  AND (latest.payload->>'domainId') = ANY($3)
+			  AND ($2 <> 'v1:knowledge:documentChunk' OR (
+			    latest.payload->>'validationStatus' = 'validated'
+			    AND COALESCE(latest.payload->>'superseded', 'false') = 'false'
+			  ))
 			ORDER BY nv.embedding <=> $1::vector
 			LIMIT $4
 		`

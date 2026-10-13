@@ -913,7 +913,10 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	var organizationPrior map[string]any
 
 	id := strings.TrimSpace(mutation.ID)
-	if len(rowVersionFences(ctx)) > 0 && id != "" {
+	// Knowledge publication and review must serialize with canonical-seed
+	// reconciliation, including ordinary client review writes. Otherwise a
+	// late repair could overwrite a rejection read on another replica.
+	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk") && id != "" {
 		var err error
 		ctx, err = e.fenceWriteTarget(ctx, conceptMeta.Name, id)
 		if err != nil {

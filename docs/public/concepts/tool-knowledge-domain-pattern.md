@@ -61,21 +61,22 @@ The arrow goes one way:
 
 ### Wiring
 
-Three places to touch when adding the pattern for a new
+Four places to touch when adding the pattern for a new
 capability `<cap>`:
 
 1. **Knowledge domain catalog**
-   `integrations/knowledge/seed.go` — append a `StandardDomain`
-   entry with `RequiredByToolSlugs: []string{"<cap>"}`. Same
+   `dsl/knowledge/catalog/automations.memql` — append a domain
+   entry with `RequiredByToolSlugs: ["<cap>"]`. Same
    `RelevantForRoles` shape as the existing entries. Mark
    `Category: "internal"` for capability-knowledge domains
    (vs. `"product"` / `"business"` etc. for subject-matter
    domains).
 
 2. **Seed corpus**
-   `integrations/knowledge/seed.go` — declare a
-   `<cap>SeedCorpus []SeedCorpusEntry` (SourceRef + Text) near the
-   existing `computerUseSeedCorpus`. Each entry is one chunk; rules:
+   Add `SourceRef` + `Text` entries to the shipped DSL catalog and expose
+   the corpus through `integrations/knowledge/seed.go`, like
+   `computerUseSeedCorpus`. Keep entries short; larger entries are split
+   by the normal ingestion chunker:
 
    - Lead with the topic anchor in the first sentence — it's what
      the embedding picks up most strongly.
@@ -91,8 +92,10 @@ capability `<cap>`:
      (`workerHost`, `workerComputer`, `requestComputerUseScope`).
 
    Wire the corpus into the ingestion loop in
-   `seedStandardDomainsHandler` — extend the existing
-   `ingestCorpus(...)` helper call list to cover the new domain.
+   `seedStandardDomainsHandler` and the exact-content registry in
+   `canonicalSeedChunks`. Pack-registered corpora enter both automatically.
+   Registration describes content; installation still requires ingestion as
+   described under Publication and review below.
 
 3. **Auto-attach in the retrieval domain set**
    `integrations/agent/replier.go` — in the block that builds
@@ -130,7 +133,7 @@ capability `<cap>`:
    - One short sentence pointing the agent at its `<cap>` knowledge
      domain.
    - Any state field that genuinely changes per turn (CONNECTED /
-     DISCONNECTED / scope value, planApprovedTrigger flag).
+     DISCONNECTED and the current operation's approval state).
 
    Move EVERYTHING else (tool-surface descriptions, scope tiers,
    approval flows, failure modes, things-you-must-never-do) into
@@ -144,9 +147,8 @@ from RAG:
 
 - Capability availability (the `{{if .computerUseStatus}}` gate
   itself).
-- Current state values (CONNECTED / DISCONNECTED, current scope,
-  whether THIS turn is a post-approval execution dispatch via
-  `planApprovedTrigger`).
+- Current state values (CONNECTED / DISCONNECTED and the durable run's
+  current permission and execution state).
 - Pointers ("consult your `<cap>` knowledge domain") to the
   retrievable knowledge.
 
@@ -221,3 +223,34 @@ training, where they can be tuned per agent and per workspace.
 - **Subject-matter knowledge** — accounting, HR, legal, etc. Those
   are user-attached knowledge domains via the Knowledge panel, not
   capability-bundled internal documentation.
+
+
+## Publication and review
+
+Agent retrieval uses only the latest version of each document chunk whose
+`validationStatus` is `validated` and whose `superseded` flag is not true.
+Pending, missing-status, rejected and superseded chunks remain visible to
+Training review reads but cannot supply retrieved agent context or the Trainer's
+refresh prompt. The filter runs before the similarity result limit, so pending
+matches do not displace approved material. A review on another replica takes
+effect on the next retrieval; cached query embeddings do not cache approval.
+
+General ingestion, including file uploads and caller-supplied `appStructure`
+labels, does not approve content. The existing Trainer writer explicitly stamps
+validated output. The server-selected canonical corpus writer may publish only
+exact registered content, and preserves existing rejection and supersession.
+
+On startup, each node makes one bounded pass over existing exact shipped or
+pack-registered chunks to repair legacy missing review status and bare vector
+keys. It compares the registered domain, source reference, chunk position,
+content bytes and deterministic ID; unknown or uploaded content stays pending.
+Publication is fenced against concurrent review writes. A conflict or database
+failure is logged and deferred, not treated as approval; a later startup or an
+explicit catalog seed invocation can retry. No periodic repair job runs.
+
+This repair makes no model calls, creates no domains or chunks, and does not
+install a new corpus revision. Engine-only startup does not invoke the optional
+full catalog seeder, whose domain-creation mutation must be supplied by its
+caller environment. Older approved chunks retain their review history until an
+explicit review or supersession decision. Updating the registered corpus source
+alone does not replace them.

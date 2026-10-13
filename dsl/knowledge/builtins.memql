@@ -128,11 +128,6 @@ builtin knowledgeCreateCatalogDomain { domainId string! tier string! category st
 builtin knowledgeSeedCorpusExists { key string! }
 
 /// Bounded operation in the knowledge catalog scope.
-@executor("integration.knowledge.knowledgePurgeSeedCorpus")
-@args(profile="object")
-builtin knowledgePurgeSeedCorpus { key string! }
-
-/// Bounded operation in the knowledge catalog scope.
 @executor("integration.knowledge.knowledgeIngestSeedCorpus")
 @args(profile="object")
 builtin knowledgeIngestSeedCorpus { key string! source string! }

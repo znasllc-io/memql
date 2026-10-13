@@ -189,7 +189,7 @@ automation knowledgeBridgeWorkflow {
  return args.bridgeId
 }
 
-/// Create missing catalog entries, replace changed corpus sources and remove retired sources.
+/// Create missing catalog entries, ingest current corpora without erasing review decisions, and remove retired sources.
 @template
 automation knowledgeSeedCatalogWorkflow {
  args { domains []any! corpora []any! retired []any! forceIngest bool! }
@@ -204,7 +204,6 @@ automation knowledgeSeedCatalogWorkflow {
  for corpus in args.corpora {
   exists := builtin knowledgeSeedCorpusExists(key: corpus.key)
   if args.forceIngest || exists != true {
-   builtin knowledgePurgeSeedCorpus(key: corpus.key) on error continue
    builtin knowledgeIngestSeedCorpus(key: corpus.key, source: "appStructure") on error continue
   }
  }
