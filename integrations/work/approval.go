@@ -88,6 +88,14 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	}
 
 	kind := rowString(approval, "kind")
+	answer := argMap(args, "answer")
+	guidance, err := i.approvalGuidance(ctx, approval, decision, answer)
+	if err != nil {
+		return nil, err
+	}
+	if guidance != "" {
+		answer = map[string]any{"feedback": guidance}
+	}
 	if kind == work.ApprovalKindPlanReview && rowString(rowMap(approval, "subject"), "reviewType") != "" && decision == "answered" {
 		return nil, fmt.Errorf("work: this draft request needs an approval or a rejection")
 	}
@@ -101,7 +109,7 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// recorded -- spending the approval -- and then move nothing, leaving the
 	// construct waiting on an approval nobody can decide again. So it is
 	// refused before anything is read or written.
-	if kind == "scopeElevation" && decision == "answered" {
+	if kind == "scopeElevation" && decision == "answered" && guidance == "" {
 		return nil, fmt.Errorf("work: computer access requires approval or rejection")
 	}
 	if kind == work.ApprovalKindProcedurePromotion && decision == "answered" {
@@ -164,13 +172,12 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			return nil, fmt.Errorf("work: this computer-access request has expired")
 		}
 	}
-	answer := argMap(args, "answer")
 	if decision == "approved" {
 		if err := i.validatePlanReviewAnswer(ctx, kind, rowMap(approval, "subject"), answer); err != nil {
 			return nil, err
 		}
 	}
-	if kind == "feedback" && decision != "rejected" {
+	if kind == "feedback" && decision != "rejected" && guidance == "" {
 		if err := validateFeedbackAnswer(rowMap(approval, "subject"), decision, answer); err != nil {
 			return nil, err
 		}
@@ -254,6 +261,13 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			}
 			retry.reason = rowString(rowMap(approval, "evidence"), "reason") + "\n" + rowString(rowMap(approval, "subject"), "errorMessage")
 		}
+	}
+	if guidance != "" {
+		// A human asked for a different approach, not for the gated operation
+		// to execute. The existing replan wait keeps the completed prefix and
+		// all permission and spending checks; this answer grants nothing.
+		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId), symptom: work.SymptomPlan,
+			reason: "The person supplied guidance instead of approving the blocked action. Reconsider the unfinished work using this guidance; no permission or budget increase was granted.\n" + guidance + "\nOriginal request: " + rowString(approval, "question")}
 	}
 	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, retry, now)
 	if err != nil {
