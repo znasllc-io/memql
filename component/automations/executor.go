@@ -445,6 +445,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 
 	exec := NewExecution(automation.Name, triggeredBy)
+	exec.journalFingerprint = automation.DefinitionFingerprint(fingerprintEngine)
 	if adopt != nil {
 		exec.ID = adopt.RunId
 	}

@@ -575,6 +575,7 @@ func (e *Executor) ResumeFrom(
 	// Create new execution tracking the resume
 	triggeredBy := fmt.Sprintf("resumed:%s", journal.RunId)
 	exec := NewExecution(automation.Name, triggeredBy)
+	exec.journalFingerprint = automation.DefinitionFingerprint(fingerprintEngine)
 	// The resumed run IS the original run: same id, new versions of its rows.
 	exec.ID = journal.RunId
 	// The SAME rule as executeWithEvent: internal origin requires a trusted

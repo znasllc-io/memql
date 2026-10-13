@@ -249,6 +249,13 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 				return seqOutcome{}, err
 			}
 			if run.cancelPoll != nil && run.cancelPoll.due(time.Now()) {
+				stopped, failure := run.journal.finishOwnedStop(ctx, exec, run.chainHead, nil)
+				if failure != nil {
+					return seqOutcome{}, failure
+				}
+				if stopped {
+					return seqOutcome{}, &runCancelled{}
+				}
 				if asked, by := run.journal.cancelRequested(ctx, exec.ID); asked {
 					return seqOutcome{}, &runCancelled{by: by}
 				}
@@ -396,6 +403,24 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 			return nil, err
 		}
 		result, err = e.executeJournaledStep(ctx, run.heartbeatJournal(), step, stepCtx)
+		if errors.Is(err, ErrJournalRequired) {
+			// A child refused an unconfirmed generation. Its parent must not
+			// write a new receipt over that same stale execution.
+			return result, err
+		}
+		if run.top && err != nil && !errors.Is(err, ErrJournalRequired) && !isHumanWait(err) {
+			stopped, failure := run.journal.finishOwnedStop(ctx, exec, run.chainHead, func(commit context.Context) {
+				if result != nil {
+					e.recordStep(commit, run, step, result)
+				}
+			})
+			if failure != nil {
+				return result, failure
+			}
+			if stopped {
+				return result, &runCancelled{}
+			}
+		}
 		if result != nil && !isHumanWait(err) && run.top && stepCtx.ChainTrackingEnabled {
 			result.PreviousChainHead = run.chainHead
 			result.ContentId = StepDeterministicFingerprint(step, result)
@@ -611,6 +636,16 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 		return exec, err
 	}
 	if err != nil {
+		if !isHumanWait(err) && !exec.cancelRecorded {
+			stopped, failure := journal.finishOwnedStop(ctx, exec, chainHead, nil)
+			if failure != nil {
+				exec.Fail(failure)
+				return exec, failure
+			}
+			if stopped {
+				err = &runCancelled{}
+			}
+		}
 		var cancelled *runCancelled
 		switch {
 		case isHumanWait(err):
@@ -635,7 +670,12 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 			return exec, err
 		case errors.As(err, &cancelled):
 			// Somebody decided the work should stop; nothing failed.
-			journal.cancelStop(ctx, exec, chainHead, cancelled.by)
+			if !exec.cancelRecorded {
+				journal.cancelStop(ctx, exec, chainHead, cancelled.by)
+			}
+			if parent, _ := ctx.Value(automationParentKey{}).(string); parent != "" {
+				return exec, err
+			}
 			return exec, nil
 		case ctx.Err() != nil && errors.Is(err, ctx.Err()):
 			exec.Cancel()

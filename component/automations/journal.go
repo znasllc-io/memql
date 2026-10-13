@@ -380,6 +380,19 @@ func (j *workJournal) write(ctx context.Context, name string, args map[string]an
 		return failure
 	}
 	defer func() { j.required.fail(name, err) }()
+	if writes, ok := ctx.Value(cancellationWriteVerifierKey{}).(*cancellationWrites); ok {
+		defer func() {
+			if err != nil && writes.err == nil {
+				writes.err = err
+			}
+		}()
+		if writes.err != nil {
+			return writes.err
+		}
+		if err := writes.verify(ctx); err != nil {
+			return err
+		}
+	}
 	query, err := journalArgs(name, args)
 	if err != nil {
 		j.warn(name, err)
