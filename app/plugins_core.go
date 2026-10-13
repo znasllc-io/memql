@@ -89,6 +89,7 @@ import (
 	// integrations/azureblob for the archive, which the root module already
 	// requires and integrations could not import back.
 	_ "github.com/znasllc-io/memql/component/logstore"
+	_ "github.com/znasllc-io/memql/component/retention"
 	_ "github.com/znasllc-io/memql/integrations/library"
 	// Procedure learning and its certification ladder (epics memql#5402 and
 	// memql#5408). Registered on every node type: its automations load

@@ -315,6 +315,19 @@ func (s *Sweeper) archiveDay(ctx context.Context, src rowSource, day time.Time) 
 		if _, err := s.Archive.Upload(ctx, s.Container, object, body, archiveContentType); err != nil {
 			return total, objects, fmt.Errorf("logstore: archive %s: %w", object, err)
 		}
+		verifier, ok := s.Archive.(interface {
+			DownloadWithLimit(context.Context, string, string, int64) ([]byte, error)
+		})
+		if !ok {
+			return total, objects, fmt.Errorf("logstore: bounded archive verification unavailable; lines preserved")
+		}
+		stored, err := verifier.DownloadWithLimit(ctx, s.Container, object, int64(len(body))+1)
+		if err != nil {
+			return total, objects, fmt.Errorf("logstore: archive verification failed; lines preserved: %w", err)
+		}
+		if !bytes.Equal(body, stored) {
+			return total, objects, fmt.Errorf("logstore: archive verification mismatch; lines preserved")
+		}
 		total += n
 		objects = append(objects, object)
 	}

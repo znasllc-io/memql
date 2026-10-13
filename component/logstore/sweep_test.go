@@ -721,3 +721,33 @@ func TestArchiveObjectNameRoundTrips(t *testing.T) {
 		t.Errorf("parse: %+v %v", obj, ok)
 	}
 }
+
+func (m *memArchiver) DownloadWithLimit(ctx context.Context, container, object string, limit int64) ([]byte, error) {
+	body, err := m.Download(ctx, container, object)
+	if err == nil && int64(len(body)) > limit {
+		return nil, fmt.Errorf("archive too large")
+	}
+	return body, err
+}
+
+type corruptVerifiedArchive struct{ *memArchiver }
+
+func (a corruptVerifiedArchive) DownloadWithLimit(context.Context, string, string, int64) ([]byte, error) {
+	return []byte("corrupt"), nil
+}
+
+func TestSweepKeepsDayWhenDownloadedArchiveDiffers(t *testing.T) {
+	now := time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)
+	journal := []string{}
+	src := &memSource{rows: []Row{{ID: "old", OccurredAt: now.AddDate(0, 0, -60), NodeType: "bff"}}, journal: &journal}
+	s := newSweeper(src, corruptVerifiedArchive{newMemArchiver(&journal)}, "c", now)
+	rep, err := s.Run(context.Background())
+	if err == nil || rep.RowsDeleted != 0 || len(src.rows) != 1 {
+		t.Fatalf("corrupt archive: %+v %v", rep, err)
+	}
+	for _, entry := range journal {
+		if strings.HasPrefix(entry, "drop:") || strings.HasPrefix(entry, "delete:") {
+			t.Fatalf("deleted before verification: %v", journal)
+		}
+	}
+}
