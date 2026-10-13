@@ -196,7 +196,7 @@ export function IdentityScreen({ initialPath, embedded = false }: { initialPath:
     case "landing":
       title = value(data, "Problem") || (data.Approved ? "Sign-in confirmed" : "Confirm sign-in");
       body = <><p>{value(data, "Message") || `Sign in as ${value(data, "MaskedEmail")}.`}</p>
-        {data.Approved === true ? <p>Return to the device where you requested the link.</p> : !data.Problem && act("Continue", () => submit("/auth/landing", { token: value(data, "MagicToken") }))}</>; break;
+        {data.Approved === true ? <p>Return to the device where you requested the link.</p> : !data.Problem && act("Continue", () => submit("/auth/landing", { ml: value(data, "MagicToken") }))}</>; break;
     case "enroll":
       title = value(data, "Heading") || value(data, "LiveHeading") || "Set up your passkey";
       body = <><p>{value(data, "Message") || `Add a passkey for ${value(data, "AccountLabel")}.`}</p><p>{value(data, "NextStep") || value(data, "SingleUseNote")}</p>
