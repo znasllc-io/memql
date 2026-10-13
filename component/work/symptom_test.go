@@ -174,6 +174,9 @@ func TestClassifyByRules_ExhaustedContextWindowNeedsAPerson(t *testing.T) {
 		{"openai", Signal{ErrorMessage: "This model's maximum context length is 128000 tokens (context_length_exceeded)"}},
 		{"anthropic", Signal{ErrorMessage: "prompt is too long: 216000 tokens > 200000 maximum"}},
 		{"a catalogued code", Signal{ErrorCode: "context_length_exceeded"}},
+		{"checkpoint grew", Signal{ErrorMessage: `function "runAgentTurn" execution failed: runAgentTurn: context checkpoint did not free space; originals were retained`}},
+		{"checkpoint attempts spent", Signal{ErrorMessage: "context checkpoint budget exhausted; originals were retained"}},
+		{"pinned request too large", Signal{ErrorMessage: "context checkpoint cannot fit the active request, tool contracts and pending exchange; history retained"}},
 	} {
 		sym, ev, ok := ClassifyByRules(tc.signal)
 		if !ok {
@@ -185,6 +188,19 @@ func TestClassifyByRules_ExhaustedContextWindowNeedsAPerson(t *testing.T) {
 		}
 		if ev.RuleId != RuleIdContextExhausted {
 			t.Errorf("%s: ruleId = %q, want %q", tc.name, ev.RuleId, RuleIdContextExhausted)
+		}
+	}
+}
+
+func TestCheckpointStorageFailuresAreNotContextCapacityFailures(t *testing.T) {
+	for _, message := range []string{
+		"save context checkpoint: permission denied",
+		"save context checkpoint: no space left on device",
+		"context checkpoint failed; history retained: deadline exceeded",
+	} {
+		_, evidence, _ := ClassifyByRules(Signal{ErrorMessage: message})
+		if evidence.RuleId == RuleIdContextExhausted {
+			t.Fatalf("storage/provider failure was misclassified as context capacity: %s", message)
 		}
 	}
 }

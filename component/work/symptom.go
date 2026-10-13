@@ -123,8 +123,9 @@ var budgetExhaustedMarkers = []string{
 	"llm kill-switch",
 }
 
-// contextExhaustedMarkers are the ways a provider reports that the request no
-// longer fits the model's context window.
+// contextExhaustedMarkers are provider and engine capacity refusals. Only
+// known capacity errors belong here: an archival permission, storage or
+// provider failure during checkpointing still needs its own classification.
 //
 // REACHING THIS TABLE MEANS RECOVERY ALREADY FAILED. The tool loops compress
 // the conversation and hand the work into the next window when a call
@@ -140,6 +141,9 @@ var contextExhaustedMarkers = []string{
 	"input length exceeds the context length",
 	"prompt is too long",
 	"reduce the length of the messages",
+	"context checkpoint did not free space; originals were retained",
+	"context checkpoint budget exhausted; originals were retained",
+	"context checkpoint cannot fit the active request, tool contracts and pending exchange; history retained",
 }
 
 // Evidence sources. A verdict always says where it came from, because
@@ -248,7 +252,7 @@ var rules = []rule{
 	},
 	{
 		id: RuleIdContextExhausted, tier: "escalate", symptom: SymptomHuman,
-		reason: "the work no longer fits the model's context window and compressing it freed nothing, so the same bytes would meet the same limit again",
+		reason: "the active request still exceeds the model's context budget after checkpointing; its history is retained, and retrying unchanged does not resolve the limit",
 		match: func(s Signal) bool {
 			return s.ErrorCode == "context_length_exceeded" || anyOf(lower(s.ErrorMessage), contextExhaustedMarkers...)
 		},
