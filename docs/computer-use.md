@@ -94,6 +94,37 @@ The computer-use action table (`computerActionHandlers` in
 routes through it AND the capability descriptor derives its advertised
 action list from it, so the two can never drift.
 
+### Scoped host permissions from Nexus
+
+Both builds on macOS and Linux advertise `workerHost.computer_permission: 1`;
+other platforms omit it. This separate
+contract supports a person's **Once** or **Always** choice in Nexus for
+read access to one directory or for one exact shell command. It requires
+the matching engine contract; an older Cockpit cannot execute these
+requests by silently accepting a broader permission.
+
+The engine binds each receipt to the person, agent, enrollment and machine.
+Once permits one exact dispatch and is durably consumed by the replica
+holding that machine's stream. Always permits matching calls until the
+person revokes it under **Nexus → Approvals → Saved permissions**. A saved
+permission never opens Cockpit's local consent window, overrides a local
+deny rule, or raises the machine's consent ceiling. When local consent is
+closed, enable computer access on that machine before retrying the action.
+
+Directory permissions cover only `fs_read`, `fs_list` and `fs_stat` under
+the reviewed absolute directory. Cockpit opens path components without
+following symlinks and reads through the held descriptor, including list
+metadata. A link or alias is refused with an instruction to request the
+real directory. Local workspace and filesystem deny rules still apply.
+
+Command permissions accept only `cmd`, an explicit canonical absolute
+`cwd`, and optional integer `timeoutSec` from 1 to 600 (default 60).
+Nexus shows all three resolved values. Environment overrides, stdin and
+unknown command options are refused instead of stored as hidden approval
+inputs. The original argument hash binds the invocation, including whether
+the timeout was supplied; changed arguments require a new approval. Local
+shell policy still decides whether the approved command may execute.
+
 ## Action vocabulary
 
 16 actions. "Consent class" is the cockpit consent gate's

@@ -1013,6 +1013,13 @@ func (r *Runner) runToolDispatch(ctx context.Context, conn *Connection, dispatch
 	if dispatch == nil {
 		return
 	}
+	if c := dispatch.GetComputerPermission(); c != nil {
+		machineID, err := machineIDFor(r.cfg)
+		if err != nil || c.GetOwnerUserId() != conn.OwnerUserId || c.GetRegistrationId() != conn.RegistrationId || c.GetMachineId() != machineID {
+			_ = conn.SendToolResult(dispatch.GetCallId(), nil, &memqlv1.Failure{ErrorCode: "computer_permission_refused", ErrorMessage: "This permission belongs to a different machine or enrollment."})
+			return
+		}
+	}
 	if r.tools == nil {
 		_ = conn.SendToolResult(dispatch.GetCallId(), nil, &memqlv1.Failure{
 			ErrorCode:    "no_tools_configured",
