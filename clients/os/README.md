@@ -1833,11 +1833,24 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   and counters, and resumes the saved run. A human-approved allowance overrides
   the workload estimate only for that named limit, across replicas.
 
-  **`answer` is the one contract this window guesses at.** It is declared
-  `object` on both the concept and the builtin and epic A2 owns the executor
-  that reads it, so `answerPayload` sends back the option the approval itself
-  offered (`{value, label}`) or `{text}` for a question with none -- written
-  down in one function rather than spread through the surface.
+  Approvals open in place with Back to the list. Failure questions offer
+  Retry and Abandon even when a historical row says `planReview`; their offered
+  option values identify the failure contract. They do not imply a proposed
+  repair or a permission grant.
+
+  Typed computer permissions name the machine and exact directory read or
+  command, working directory and time limit. **Allow once** is the default;
+  remembering a scope is an explicit choice. Legacy broad requests remain
+  **Allow for this work**. Saved permissions are nested under Approvals and can
+  be revoked individually.
+
+  **Discuss in Ask** reuses the request's conversation. Discussion messages and
+  explicit **Ask another agent** investigations are read-only child work;
+  neither decides the request. The composer remains editable during advice.
+  **Send guidance** submits the human's draft only when the server says the
+  waiting work can accept it. A recorded answer that did not resume offers
+  **Retry continuing**, using the exact stored guidance, including after a
+  reload via **View request** on the persisted guidance message. Retrying never substitutes a newer composer draft or grants access.
 
 - **THE JOURNAL IS NOT LIVE AND SAYS SO; THE STEPS FEED BELONGS TO THE PAGE.**
   `v1:work:goal`, `run`, `step` and `approval` broadcast; `modelCall` and

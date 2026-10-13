@@ -27,6 +27,56 @@ QueryClient.prototype.artifactProbe = function (this: QueryClient, args: Artifac
   return this.executeNamed("artifactProbe", buildArtifactProbe(args), opts);
 };
 
+/** Discuss an owned request in its original conversation. Opening this view neither calls a model nor approves, retries or resumes the blocked work. */
+export interface AskApprovalDiscussionArgs {
+  approvalId: string;
+}
+
+export function buildAskApprovalDiscussion(args: AskApprovalDiscussionArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "builtin askApprovalDiscussion(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askApprovalDiscussion(args: AskApprovalDiscussionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askApprovalDiscussion = function (this: QueryClient, args: AskApprovalDiscussionArgs = {} as AskApprovalDiscussionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askApprovalDiscussion", buildAskApprovalDiscussion(args), opts);
+};
+
+/** Record a human message and return its read-only child analysis immediately. advisor selects an independent second opinion only on an explicit request. */
+export interface AskApprovalMessageArgs {
+  approvalId: string;
+  conversationId: string;
+  requestId: string;
+  prompt: string;
+  advisor?: boolean;
+}
+
+export function buildAskApprovalMessage(args: AskApprovalMessageArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("prompt: " + renderMemQLValue(args.prompt));
+  if (args.advisor !== undefined) parts.push("advisor: " + renderMemQLValue(args.advisor));
+  return "builtin askApprovalMessage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askApprovalMessage(args: AskApprovalMessageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askApprovalMessage = function (this: QueryClient, args: AskApprovalMessageArgs = {} as AskApprovalMessageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askApprovalMessage", buildAskApprovalMessage(args), opts);
+};
+
 /** Read this person's conversation with current progress and completed results projected from its durable work runs. Reconnects never execute work again. */
 export interface AskConversationSnapshotArgs {
   conversationId: string;
@@ -3940,6 +3990,28 @@ declare module "./query.js" {
 
 QueryClient.prototype.restoreDocumentVersion = function (this: QueryClient, args: RestoreDocumentVersionArgs = {} as RestoreDocumentVersionArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("restoreDocumentVersion", buildRestoreDocumentVersion(args), opts);
+};
+
+/** Revoke one of this person's saved computer permissions. In-flight actions may finish; no later dispatch may claim the receipt. */
+export interface RevokeComputerPermissionArgs {
+  /** The approval receipt that granted the saved permission. */
+  permissionId: string;
+}
+
+export function buildRevokeComputerPermission(args: RevokeComputerPermissionArgs): string {
+  const parts: string[] = [];
+  parts.push("permissionId: " + renderMemQLValue(args.permissionId));
+  return "builtin revokeComputerPermission(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    revokeComputerPermission(args: RevokeComputerPermissionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.revokeComputerPermission = function (this: QueryClient, args: RevokeComputerPermissionArgs = {} as RevokeComputerPermissionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("revokeComputerPermission", buildRevokeComputerPermission(args), opts);
 };
 
 /** Create a custom role with its grants, in one internal-origin write. Guards, in order: the caller holds `create` on `role`; the slug matches ^[a-z][a-z0-9-]{1,39}$ and is claimed by no role and no alias (role_slug_taken); the rank is strictly below the caller's (role_rank_not_below_caller) and equal to no existing rung (role_rank_taken); every grant is a pair the caller themselves holds (role_grant_not_held, naming the pair); accountId, if given, scopes the role to that account (D10) and only members of it may then hold the role. Writes the role row (predefined false, active true) and one active capability row per grant. Returns {ok, slug, code}. */

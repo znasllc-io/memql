@@ -4,6 +4,7 @@ package agent
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	agentworker "github.com/znasllc-io/memql/integrations/agent/worker"
@@ -200,5 +201,32 @@ func TestAnUnparseableFleetResultIsNotReadAsARefusal(t *testing.T) {
 	// already have run on the user's machine.
 	if got := rerouteErrorCode(`not json at all`); got != "" {
 		t.Fatalf("errorCode = %q, want empty", got)
+	}
+}
+
+func TestRecoveryPermissionBindsExactOriginalOperation(t *testing.T) {
+	for _, action := range []string{"fs_read", "fs_list", "fs_stat", "exec"} {
+		inner := map[string]any{"path": "/home/alice/reports/report.md"}
+		if action == "exec" {
+			inner = map[string]any{"cmd": "cat report.md", "cwd": "/home/alice/reports", "env": map[string]any{"SECRET": "refuse this unsupported input"}}
+		}
+		planned, ok := planWorkbenchReroute(mismatchResult(t, []string{workbench.NeedUserFiles}, ""), map[string]any{"action": action, "args": inner}, testTurn())
+		if !ok {
+			t.Fatal("missing reroute")
+		}
+		operation, _ := planned.CardArgs["operation"].(map[string]any)
+		if operation["tool"] != "workerHost" || operation["action"] != action || !reflect.DeepEqual(operation["args"], inner) {
+			t.Fatalf("operation changed or omitted: %v", operation)
+		}
+		if action == "fs_read" || action == "fs_stat" {
+			if operation["directory"] != "/home/alice/reports" {
+				t.Fatal(operation)
+			}
+		}
+		if action == "fs_list" {
+			if operation["directory"] != inner["path"] {
+				t.Fatal(operation)
+			}
+		}
 	}
 }

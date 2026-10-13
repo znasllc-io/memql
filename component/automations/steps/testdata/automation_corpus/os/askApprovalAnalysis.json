@@ -1,0 +1,55 @@
+{
+  "automation": "os/automations.memql askApprovalAnalysis",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.askApprovalAnalysis"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "askRunApprovalMessage"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "askRunApprovalMessage"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.askApprovalAnalysis"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "askRunApprovalMessage"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {},
+            "builtin": "askRunApprovalMessage"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

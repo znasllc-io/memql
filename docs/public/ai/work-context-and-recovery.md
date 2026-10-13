@@ -50,6 +50,31 @@ prefix and accumulated usage, and does not replenish automatic retries or
 raise resource limits. A transient failure's **Retry** instead repeats the
 failed step. Either decision is persisted for the cluster to resume safely.
 
+**Discuss in Ask** opens the conversation that originated an approval. Work
+delegated to a child run follows its owned parent records back to that
+conversation. Work started elsewhere receives one private linked conversation. Opening the
+discussion makes no model call and does not decide the approval. Human messages
+and advisory replies remain in that conversation across reconnections and
+replicas. You can add information while a reply is running.
+
+Ordinary discussion and **Ask another agent** each start a separate, bounded
+read-only analysis of that owned request: its recorded failure, selected work
+receipt, original goal and recent linked discussion. The second opinion uses
+a separate model call and is labelled as advice. Neither path inspects the host,
+executes tools, grants permissions, approves the parent, or retries its blocked
+action. Each child has one journalled model call and a two-minute ceiling; a
+failed analysis ends with its error instead of creating a repair plan or another
+approval. The original records are preserved.
+
+For supported requests, **Send guidance** records your own direction and lets
+the existing work reconsider its unfinished steps. It is an answered request,
+not approval of the blocked action. The completed prefix, permissions, consumed
+budget and retry limits remain in force. That direction is also projected into
+the original Ask transcript, even when you send guidance without first asking
+for advice. The saved message retains a link to its request after reload. If saving succeeds but continuing is interrupted,
+retrying the same guidance resumes that saved decision; it does not create a
+second answer. Artifact-specific reviews retain their own decision contracts.
+
 Replanning an existing sealed program uses structured, exact source edits so
 that repairing a small part does not require the model to repeat a large
 program. The runtime rejects ambiguous or overlapping edits and changes to
@@ -269,8 +294,12 @@ and recall excerpts. A single exchange too large for the summarizer is
 archived with a preview instead of overflowing the summarizer itself.
 Summaries and retrieved sources are historical data, never new authority.
 The source is saved before an active-context replacement is returned. Failed
-storage, an invalid summary, or a checkpoint that saves no space returns a
-failure without mutating the caller's original conversation.
+storage or an invalid summary returns a failure without mutating the caller's
+original conversation. If a checkpoint would be larger than its source, that
+exchange stays exact while the engine tries another complete exchange. A short
+older exchange before a pinned correction cannot block later tool evidence
+from being compacted. All candidates share the same eight-attempt bound; if
+none can make the context fit, the original conversation remains unchanged.
 
 The proactive working-set threshold is an estimate that includes message
 envelopes, tool schemas and arguments. Its preference is 20,000 tokens. When

@@ -19,6 +19,8 @@ export interface AskActivity {
   error?: string;
 }
 export interface AskTurn {
+  approvalId?: string;
+  advisor?: boolean;
   question?: AskQuestion;
   answerOnly?: boolean;
   goalId?: string;
@@ -40,12 +42,26 @@ export interface AskTurn {
 }
 export interface AskQuestion { id: string; text: string; kind: "text" | "choice" | "multi"; options: { value: string; label: string }[] }
 export interface ConversationSummary { id: string; title: string; createdAt?: string }
+export interface ApprovalDiscussion {
+  conversationId: string;
+  approval: { id: string; runId: string; kind: string; question: string; summary?: string; status: string };
+  canSendGuidance: boolean;
+  canAskAdvisor: boolean;
+  guidanceToResume?: string;
+}
 export interface AskConversationStore {
   list(): Promise<ConversationSummary[]>;
   create(): Promise<ConversationSummary>;
   read(id: string): Promise<AskTurn[]>;
 }
 export interface ConversationState {
+  discussion?: ApprovalDiscussion | null;
+  discussionOpening?: boolean;
+  discussionSending?: boolean;
+  discussionRetry?: { approvalId: string; prompt: string; advisor: boolean } | null;
+  guidanceSending?: boolean;
+  guidanceNotice?: string;
+  guidanceRetry?: { approvalId: string; feedback: string } | null;
   focusQuestionId?: string | null;
   conversations: ConversationSummary[];
   dictationActivity: AskActivity[];
@@ -78,6 +94,10 @@ export class ConversationSession {
   private epoch = 0;
   private selection = 0;
   private historyEpoch = 0;
+  private discussionEpoch = 0;
+  private guidanceRevision = 0;
+  private uncertainGuidance = new Map<string, string>();
+  private pendingDiscussionRequest: { key: string; id: string } | null = null;
   private voiceEpoch = 0;
   private voiceRevision = 0;
   private voiceTurnId: string | null = null;
@@ -88,6 +108,106 @@ export class ConversationSession {
   private patch(patch: Partial<ConversationState>) { this.state = { ...this.state, ...patch }; this.listeners.forEach(listener => listener()); }
   setDraft = (draft: string) => this.patch({ draft });
   questionFocused = () => this.patch({ focusQuestionId: null });
+  discussApproval = async (approvalId: string) => {
+    if (this.state.discussionSending || this.state.guidanceSending) { this.patch({ error: "Wait for the current message to be recorded before opening another approval." }); return; }
+    if (this.state.busy || this.state.voiceActive) { this.patch({ error: "Finish the current reply before opening an approval discussion." }); return; }
+    const epoch = ++this.discussionEpoch;
+    const before = this.selection;
+    this.patch({ discussionOpening: true, error: "" });
+    try {
+      if (!this.transport.discussApproval) throw new Error("Approval discussion is unavailable.");
+      const discussion = await this.transport.discussApproval(approvalId);
+      if (epoch !== this.discussionEpoch || before !== this.selection || this.disposed) return;
+      // select is a no-op for the already-open conversation, preserving its draft.
+      if (!await this.select(discussion.conversationId, true)) return;
+      if (epoch !== this.discussionEpoch || this.disposed) return;
+      this.patch({ discussion, guidanceRetry: this.guidanceReceipt(discussion), discussionOpening: false, guidanceNotice: "" });
+      await this.reload();
+    } catch (error) {
+      if (epoch === this.discussionEpoch && before === this.selection) this.patch({ error: message(error) });
+    } finally {
+      if (epoch === this.discussionEpoch) this.patch({ discussionOpening: false });
+    }
+  };
+  leaveDiscussion = () => {
+    this.discussionEpoch++;
+    this.patch({ discussion: null, discussionOpening: false, discussionSending: false, discussionRetry: null, guidanceSending: false, guidanceNotice: "", guidanceRetry: null });
+  };
+  private guidanceReceipt(discussion: ApprovalDiscussion) {
+    const approvalId = discussion.approval.id;
+    // A saved receipt is authoritative after reopening. An uncertain local
+    // send can only retry its original text while the request is still open.
+    const feedback = discussion.guidanceToResume || (discussion.canSendGuidance ? this.uncertainGuidance.get(approvalId) : undefined);
+    if (!feedback) this.uncertainGuidance.delete(approvalId);
+    return feedback ? { approvalId, feedback } : null;
+  }
+  sendGuidance = async () => {
+    const discussion = this.state.discussion;
+    const feedback = this.state.draft.trim();
+    if (!discussion?.canSendGuidance || this.state.guidanceRetry || !feedback) return false;
+    if (Array.from(feedback).length > 4000) { this.patch({ error: "Keep guidance to 4,000 characters or fewer." }); return false; }
+    return this.submitGuidance(discussion.approval.id, feedback, true);
+  };
+  retryGuidance = async () => {
+    const receipt = this.state.guidanceRetry;
+    if (!receipt || receipt.approvalId !== this.state.discussion?.approval.id) return false;
+    return this.submitGuidance(receipt.approvalId, receipt.feedback, false);
+  };
+  private submitGuidance = async (approvalId: string, feedback: string, clearSubmittedDraft: boolean) => {
+    if (this.state.guidanceSending || this.state.discussionOpening || this.state.discussionSending) return false;
+    const epoch = this.discussionEpoch;
+    this.guidanceRevision++;
+    this.uncertainGuidance.set(approvalId, feedback);
+    this.patch({ guidanceSending: true, error: "" });
+    try {
+      if (!this.transport.approvalGuidance) throw new Error("Sending guidance is unavailable.");
+      // The same approval and exact original answer are the retry identity.
+      const receipt = await this.transport.approvalGuidance(approvalId, feedback);
+      this.uncertainGuidance.delete(approvalId);
+      if (epoch !== this.discussionEpoch || this.disposed) return true;
+      this.guidanceRevision++;
+      const discussion = { ...this.state.discussion!, canSendGuidance: false, guidanceToResume: receipt.runResumed ? undefined : feedback };
+      this.patch({ discussion, guidanceRetry: this.guidanceReceipt(discussion), guidanceNotice: receipt.runResumed ? "Guidance sent. Work is continuing." : `Guidance was recorded, but the work has not resumed.${receipt.resumeError ? ` ${receipt.resumeError}` : ""}`, ...(clearSubmittedDraft && this.state.draft.trim() === feedback ? { draft: "" } : {}) });
+      await this.reload();
+      return true;
+    } catch (error) {
+      if (epoch === this.discussionEpoch) this.patch({ error: message(error), guidanceRetry: { approvalId, feedback } });
+      return false;
+    } finally {
+      if (epoch === this.discussionEpoch) this.patch({ guidanceSending: false });
+    }
+  };
+  sendDiscussion = (prompt: string, advisor = false): boolean => this.submitDiscussion(prompt, advisor, true);
+  retryDiscussion = (): boolean => {
+    const receipt = this.state.discussionRetry;
+    if (!receipt || receipt.approvalId !== this.state.discussion?.approval.id) return false;
+    return this.submitDiscussion(receipt.prompt, receipt.advisor, false);
+  };
+  private submitDiscussion = (prompt: string, advisor: boolean, clearSubmittedDraft: boolean): boolean => {
+    const discussion = this.state.discussion;
+    if (!discussion || this.state.discussionOpening || this.state.discussionSending || this.state.guidanceSending || !prompt.trim()) return false;
+    if (!this.transport.approvalMessage) { this.patch({ error: "Approval discussion is unavailable." }); return false; }
+    const epoch = this.discussionEpoch;
+    const request = { approvalId: discussion.approval.id, conversationId: discussion.conversationId, prompt: prompt.trim(), advisor };
+    const key = JSON.stringify(request);
+    const retry = this.pendingDiscussionRequest?.key === key;
+    if ((!discussion.canAskAdvisor || this.state.discussionRetry) && !retry) return false;
+    const requestId = retry ? this.pendingDiscussionRequest!.id : crypto.randomUUID();
+    this.pendingDiscussionRequest = { key, id: requestId };
+    this.patch({ discussionSending: true, discussionRetry: null, ...(clearSubmittedDraft ? { draft: "" } : {}), error: "" });
+    void this.transport.approvalMessage({ ...request, requestId }).then(async receipt => {
+      if (epoch !== this.discussionEpoch || this.disposed) return;
+      this.pendingDiscussionRequest = null;
+      const turn: AskTurn = { id: receipt.turnId, runId: receipt.runId, prompt: request.prompt, answer: "", state: "queued", startedAt: new Date().toISOString(), activity: [], background: true, approvalId: request.approvalId, advisor };
+      this.patch({ turns: this.state.turns.some(item => item.id === turn.id) ? this.state.turns : [...this.state.turns, turn] });
+      await this.reload();
+    }).catch((error: unknown) => {
+      if (epoch === this.discussionEpoch) this.patch({ error: message(error), discussionRetry: { approvalId: request.approvalId, prompt: request.prompt, advisor }, ...(clearSubmittedDraft && this.state.draft === "" ? { draft: prompt } : {}) });
+    }).finally(() => {
+      if (epoch === this.discussionEpoch) this.patch({ discussionSending: false });
+    });
+    return true;
+  };
   openWork = async (runId: string) => {
     if (this.state.busy || this.state.voiceActive) { this.patch({ error: "Finish the current reply before opening another conversation." }); return; }
     const before = this.selection;
@@ -126,16 +246,19 @@ export class ConversationSession {
   newConversation = () => {
     if (this.state.busy || this.state.voiceActive) return;
     this.selection++;
+    this.leaveDiscussion();
     this.patch({ selectedId: null, openingId: null, selectionError: "", turns: [], dictationActivity: [], draft: "", error: "", loading: false, focusQuestionId: null });
   };
-  select = async (id: string) => {
+  select = async (id: string, forDiscussion = false) => {
     if (id === this.state.selectedId && !this.state.openingId) return true;
     if (this.state.busy || this.state.voiceActive || !this.transport.conversations) return false;
+    if (!forDiscussion) this.leaveDiscussion();
     const selection = ++this.selection;
     this.patch({ loading: true, openingId: id, selectionError: "", error: "", focusQuestionId: null });
     try {
       const turns = await this.transport.conversations.read(id);
       if (selection === this.selection) {
+        this.patch({ discussion: null });
         this.patch({ selectedId: id, openingId: null, turns, dictationActivity: [], draft: "", loading: false });
         this.scheduleRefresh();
         return true;
@@ -184,10 +307,11 @@ export class ConversationSession {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
     this.detach();
-    this.selection++; this.historyEpoch++; this.voiceEpoch++;
+    this.selection++; this.historyEpoch++; this.voiceEpoch++; this.discussionEpoch++;
     this.listeners.clear();
   };
   beginVoice = async (): Promise<string> => {
+    if (this.state.discussion || this.state.discussionOpening) throw new Error("Use typing or dictation while discussing an approval.");
     if (this.state.busy || this.state.loading || this.state.voiceActive) throw new Error("Finish the current turn first.");
     const epoch = ++this.voiceEpoch;
     this.patch({ voiceActive: true, error: "" });
@@ -211,6 +335,7 @@ export class ConversationSession {
     const id = this.state.selectedId;
     const selection = this.selection;
     const revision = this.voiceRevision;
+    const guidanceRevision = this.guidanceRevision;
     if (!id || !this.transport.conversations) return;
     try { const turns = await this.transport.conversations.read(id); if (this.state.selectedId === id && selection === this.selection && revision === this.voiceRevision) {
       // A background completion may arrive while a newer foreground reply is
@@ -218,7 +343,13 @@ export class ConversationSession {
       const local = new Map(this.state.turns.filter(turn => turn.state === "streaming").map(turn => [turn.id, turn]));
       const merged = turns.map(turn => local.get(turn.id) ?? turn);
       for (const turn of local.values()) if (!merged.some(item => item.id === turn.id)) merged.push(turn);
-      this.patch({ turns: merged, error: "" });
+      this.patch({ turns: merged, ...(this.state.discussion ? {} : { error: "" }) });
+      const discussion = this.state.discussion;
+      const discussionEpoch = this.discussionEpoch;
+      if (discussion && this.transport.discussApproval) {
+        const latest = await this.transport.discussApproval(discussion.approval.id);
+        if (discussionEpoch === this.discussionEpoch && guidanceRevision === this.guidanceRevision && selection === this.selection && this.state.selectedId === id) this.patch({ discussion: latest, guidanceRetry: this.guidanceReceipt(latest) });
+      }
     } }
     catch (error) { if (selection === this.selection && revision === this.voiceRevision) this.patch({ error: message(error) }); }
     if (refreshHistory) void this.refresh();
@@ -248,6 +379,8 @@ export class ConversationSession {
     }
   };
   send = (prompt: string, context: string | null): boolean => {
+    if (this.state.discussionOpening) return false;
+    if (this.state.discussion) return this.sendDiscussion(prompt);
     if (this.state.busy || this.state.voiceActive || this.state.loading || !prompt.trim()) return false;
     const epoch = ++this.epoch;
     this.stopRequested = false; this.requestStarted = false;

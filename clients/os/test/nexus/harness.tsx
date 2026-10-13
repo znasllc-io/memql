@@ -100,6 +100,7 @@ function fakeSubscriptions(onEvent?: (concept: string, payload: Row) => void) {
 }
 
 export interface FakeSeed {
+  computerPermissions?: Row[] | Error;
   goals?: Row[];
   runs?: Row[];
   approvals?: Row[];
@@ -176,6 +177,12 @@ export function fakeConnection(seed: FakeSeed = {}) {
       workApprovalsForOwner: vi.fn(async (_args?: Record<string, unknown>, _opts?: unknown) =>
         rowsResult(seed.approvals ?? []),
       ),
+      workComputerPermissions: read(seed.computerPermissions),
+      revokeComputerPermission: vi.fn(async (args: Record<string, unknown>) => {
+        if (seed.writeError) throw seed.writeError;
+        if (Array.isArray(seed.computerPermissions)) seed.computerPermissions.splice(0, seed.computerPermissions.length, ...seed.computerPermissions.filter(row => row.id !== args.permissionId));
+        return rowsResult([]);
+      }),
       // The account roster the goal detail resolves tags through and the
       // create form offers. Seeded EMPTY by default -- which is the state
       // most tests want -- but present, because a read this surface issues

@@ -595,3 +595,21 @@ query observation workDraftsForOwnerRun {
  paginate 1
  shape workObservationFull
 }
+
+/// This owner's approved typed computer permissions. Native dispatch additionally
+/// checks the receipt hash, agent, machine, mode and revocation before each use.
+@actor
+@unbounded("computer permissions bounded by the authenticated owner")
+query approval workComputerPermissions {
+ filter row => row.ownerUserId == actor.userId && row.kind == "scopeElevation" && row.decision == "approved" && row.?subject.computerPermission.version == 1 && row.?answer.permissionMode == "always" && (row.?permissionRevokedAt == nil || row.?permissionRevokedAt == "")
+ shape workApprovalFull
+}
+
+/// Includes unused one-time receipts; only the native authority decides admission.
+@actor
+@unbounded("computer decisions bounded by one authenticated owner and agent")
+query approval workComputerPermissionsForAgent {
+ args { agentId string! }
+ filter row => row.ownerUserId == actor.userId && row.kind == "scopeElevation" && row.decision == "approved" && row.?subject.agentId == args.agentId && row.?subject.computerPermission.version == 1
+ shape workApprovalFull
+}

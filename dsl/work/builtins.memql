@@ -18,6 +18,21 @@
 // caller-scoped rather than ranked: a person acts on their own goals, and
 // the row tier is what decides which those are.
 
+/// Admit one human message about an owned approval. This cannot be called from
+/// a model run, changes no approval, and records a child before async dispatch.
+@executor("integration.work.openApprovalDiscussion")
+builtin workOpenApprovalDiscussion {
+ approvalId string!
+ conversationId string!
+ requestId string!
+ prompt string!
+ advisor bool
+}
+
+/// Project the same owned, pending executable-run gate used by Send guidance.
+@executor("integration.work.approvalDiscussionState")
+builtin workApprovalDiscussionState { approvalId string! }
+
 /// Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first
 /// v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a
 /// gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog
@@ -254,4 +269,12 @@ builtin requestSpecialistTraining {
   specialistId  string!  @description("The v1:agents:agent to train.")
   topic         string   @description("What to train on. The resolved knowledge domain when empty.")
   mode          enum("initial", "refresh")  @description("initial (default) for a fresh training run, refresh for an incremental update.")
+}
+
+/// Revoke one of this person's saved computer permissions. In-flight actions
+/// may finish; no later dispatch may claim the receipt.
+@sdk
+@executor("integration.work.revokeComputerPermission")
+builtin revokeComputerPermission {
+ permissionId string! @description("The approval receipt that granted the saved permission.")
 }

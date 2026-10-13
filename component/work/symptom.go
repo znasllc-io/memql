@@ -123,8 +123,9 @@ var budgetExhaustedMarkers = []string{
 	"llm kill-switch",
 }
 
-// contextExhaustedMarkers are the ways a provider reports that the request no
-// longer fits the model's context window.
+// contextExhaustedMarkers are provider and engine capacity refusals. Only
+// known capacity errors belong here: an archival permission, storage or
+// provider failure during checkpointing still needs its own classification.
 //
 // REACHING THIS TABLE MEANS RECOVERY ALREADY FAILED. The tool loops compress
 // the conversation and hand the work into the next window when a call
@@ -140,6 +141,9 @@ var contextExhaustedMarkers = []string{
 	"input length exceeds the context length",
 	"prompt is too long",
 	"reduce the length of the messages",
+	"context checkpoint did not free space; originals were retained",
+	"context checkpoint budget exhausted; originals were retained",
+	"context checkpoint cannot fit the active request, tool contracts and pending exchange; history retained",
 }
 
 // Evidence sources. A verdict always says where it came from, because
@@ -228,6 +232,25 @@ func anyOf(haystack string, needles ...string) bool {
 // which transient.rateLimit would claim; a full context window arrives as a
 // request error that a retry sends again byte for byte. Retrying either one
 // spends the run's budget to rediscover a number only a person changes.
+const RuleIdComputerPermission = "human.computerPermission"
+
+func computerPermissionSignal(s Signal) bool {
+	codes := map[string]bool{"consent_required": true, "computer_permission_refused": true, "computer_permission_path_refused": true, "computer_permission_unavailable": true}
+	if codes[s.ErrorCode] {
+		return true
+	}
+	// Tool/automation wrappers retain a code as a token or JSON value. Never
+	// classify generic permission prose, prefixes or environment access failures.
+	for _, token := range strings.FieldsFunc(s.ErrorMessage, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_')
+	}) {
+		if codes[token] {
+			return true
+		}
+	}
+	return false
+}
+
 var rules = []rule{
 	{
 		id: "human.stalled", tier: "escalate", symptom: SymptomHuman,
@@ -248,7 +271,7 @@ var rules = []rule{
 	},
 	{
 		id: RuleIdContextExhausted, tier: "escalate", symptom: SymptomHuman,
-		reason: "the work no longer fits the model's context window and compressing it freed nothing, so the same bytes would meet the same limit again",
+		reason: "the active request still exceeds the model's context budget after checkpointing; its history is retained, and retrying unchanged does not resolve the limit",
 		match: func(s Signal) bool {
 			return s.ErrorCode == "context_length_exceeded" || anyOf(lower(s.ErrorMessage), contextExhaustedMarkers...)
 		},
@@ -277,6 +300,11 @@ var rules = []rule{
 		id: "plan.imageSource", tier: "plan", symptom: SymptomPlan,
 		reason: "the selected public image source could not be acquired; research an accessible licensed source rather than changing the person's file permissions",
 		match:  func(s Signal) bool { return strings.Contains(lower(s.ErrorMessage), "image source unusable:") },
+	},
+	{
+		id: RuleIdComputerPermission, tier: "escalate", symptom: SymptomHuman,
+		reason: "Computer access needs the person’s decision or the named machine’s local access setting; it cannot be repaired by changing the environment.",
+		match:  computerPermissionSignal,
 	},
 	{
 		id: "transient.rateLimit", tier: "retryable", symptom: SymptomTransient,
@@ -337,9 +365,13 @@ func lower(s string) string { return strings.ToLower(s) }
 func ClassifyByRules(s Signal) (Symptom, Evidence, bool) {
 	for _, r := range rules {
 		if r.match(s) {
+			reason := r.reason
+			if r.id == RuleIdComputerPermission && strings.TrimSpace(s.ErrorMessage) != "" {
+				reason = s.ErrorMessage
+			}
 			return r.symptom, Evidence{
 				Tier:   r.tier,
-				Reason: r.reason,
+				Reason: reason,
 				RuleId: r.id,
 				Source: EvidenceSourceRules,
 			}, true

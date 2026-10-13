@@ -158,7 +158,7 @@ func (i *Integration) renewalChain(ctx context.Context, approvalKind, first stri
 	}
 	for renewals := 0; approvalKind == "scopeElevation" && len(existing) > 0 && rowString(existing[0], "decision") != "rejected"; renewals++ {
 		until, valid := rowTime(existing[0], "expiresAt")
-		if valid && i.clock().Before(until) {
+		if valid && i.clock().Before(until) && rowString(existing[0], "permissionUsedAt") == "" && rowString(existing[0], "permissionRevokedAt") == "" {
 			break
 		}
 		if renewals >= maxScopeRenewals {

@@ -1102,6 +1102,8 @@ var BoundConcepts = map[string]string{
 	"workAutomationStepsForOwner":                      "v1:work:step",
 	"workCheckpointForOwner":                           "v1:work:observation",
 	"workCompletedStepsForOwnerRuns":                   "v1:work:step",
+	"workComputerPermissions":                          "v1:work:approval",
+	"workComputerPermissionsForAgent":                  "v1:work:approval",
 	"workComputerScopesForOwnerRun":                    "v1:work:approval",
 	"workContextSourcesForOwnerRun":                    "v1:work:observation",
 	"workContinuationForOwnerRun":                      "v1:work:observation",

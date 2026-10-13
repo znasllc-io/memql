@@ -47,6 +47,7 @@ func (s *EngineStore) WorkersForOwner(ctx context.Context, ownerUserId string) (
 		sharing := workerservice.SharingFromRow(row["sharing"])
 		out = append(out, Candidate{
 			RegistrationId: id,
+			MachineId:      rowStringMap(row, "labels")["machineId"],
 			Name:           rowString(row, "name"),
 			DisplayName:    rowString(row, "displayName"),
 			// Stamp the scoped owner so PlanUserModelWithShared recovery and
@@ -107,6 +108,7 @@ func (s *EngineStore) SharedInferenceWorkers(ctx context.Context) ([]Candidate, 
 		sharing := workerservice.SharingFromRow(row["sharing"])
 		out = append(out, Candidate{
 			RegistrationId:   id,
+			MachineId:        rowStringMap(row, "labels")["machineId"],
 			Name:             rowString(row, "name"),
 			DisplayName:      rowString(row, "displayName"),
 			Capabilities:     rowStringList(row, "capabilities"),

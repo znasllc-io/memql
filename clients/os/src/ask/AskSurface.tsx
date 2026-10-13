@@ -1,4 +1,5 @@
 import { ContentSkeleton } from "../kit/ContentSkeleton";
+import { Button } from "../kit";
 import { Mark } from "../chrome/Mark";
 import { AccountAvatar } from "../chrome/AccountAvatar";
 import { AskLiveVoice } from "./AskLiveVoice";
@@ -130,7 +131,7 @@ export function AskSurface({
   const [panel, setPanel] = useState<"conversation" | "activity" | "conversations">("conversation");
   const showActivity = panel === "activity";
   const showConversations = panel === "conversations";
-  useEffect(() => { setPanel("conversation"); }, [state.selectedId]);
+  useEffect(() => { setPanel("conversation"); }, [state.selectedId, state.discussion?.approval.id]);
   const activityRef = useRef<HTMLButtonElement | null>(null);
   const conversationsRef = useRef<HTMLButtonElement | null>(null);
   const closePanel = useCallback(() => {
@@ -309,17 +310,21 @@ export function AskSurface({
           {onClose ? <button type="button" className="os-icon-button os-window-close" title="Close Ask" aria-label="Close Ask" onClick={onClose}><X size={14} /></button> : null}</div> : null}
         </div>
       </header>
+      {state.discussionOpening ? <p className="os-ask-approval-context" role="status">Opening approval discussion.</p> : state.discussion && panel === "conversation" ? <section className="os-ask-approval-context" aria-label="Approval discussion">
+        <div><strong>{state.discussion.approval.question || "Discuss this approval"}</strong>{state.discussion.approval.summary && state.discussion.approval.summary !== state.discussion.approval.question ? <p>{state.discussion.approval.summary}</p> : null}<p>Discussion and advice do not approve the blocked operation.</p></div>
+        <button type="button" className="os-ask-retry" onClick={conversation.leaveDiscussion}>Return to conversation</button>
+      </section> : null}
       {showActivity ? <div className="os-ask-content"><AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={closePanel} onStop={busy ? () => conversation.stop() : undefined} /></div> : showConversations ? <div className="os-ask-content"><AskConversations conversation={conversation} onOpen={changed => { if (changed) { nearBottom.current = true; conversationScroll.current = 0; } setPanel("conversation"); returnToComposer.current = true; }} /></div> : state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} /></div> : <div className="os-ask-content">
         <div className="os-ask-log" ref={logRef} role="log" aria-label="Conversation" aria-live="polite" onScroll={() => { const el = logRef.current; if (el) { conversationScroll.current = el.scrollTop; nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 72; } }}>
           {state.loading ? <ContentSkeleton kind="conversation" label="Opening conversation" /> : null}
           {exchanges.length === 0 && !state.loading ? <div className="os-ask-empty"><strong>What would you like to do?</strong><p>Ask a question, explore your workspace, or let MemQL help you get something done.</p></div> : null}
           {conversationFeed(exchanges).map(({ turn, completion, key, workState, responseAt, showAssistant }) => <div key={key} className="os-ask-exchange" data-state={turn.state}>
-            {!completion ? <div className="os-ask-message"><AccountAvatar className="os-ask-avatar" /><div><div className="os-ask-byline"><strong>You</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p></div></div> : null}
-            {showAssistant ? <div className="os-ask-message"><span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>MemQL</strong>{responseAt ? <time dateTime={responseAt} title={new Date(responseAt).toLocaleString()}>{messageTime(responseAt)}</time> : null}</div>
+            {!completion ? <div className="os-ask-message"><AccountAvatar className="os-ask-avatar" /><div><div className="os-ask-byline"><strong>You</strong><time dateTime={turn.startedAt}>{messageTime(turn.startedAt)}</time></div><p>{turn.prompt}</p>{turn.approvalId && state.discussion?.approval.id !== turn.approvalId ? <button type="button" className="os-ask-retry" onClick={() => { void conversation.discussApproval(turn.approvalId!); }}>View request</button> : null}</div></div> : null}
+            {showAssistant ? <div className="os-ask-message"><span className="os-avatar os-ask-avatar os-ask-avatar-memql" aria-hidden><Mark size={22} /></span><div><div className="os-ask-byline"><strong>{turn.advisor ? "Another agent" : "MemQL"}</strong>{turn.approvalId ? <span>Advice</span> : null}{responseAt ? <time dateTime={responseAt} title={new Date(responseAt).toLocaleString()}>{messageTime(responseAt)}</time> : null}</div>
               {completion ? <p className="os-ask-result-context">{turn.workTitle || turn.prompt}</p> : null}
               {turn.answer ? <AskMessage text={turn.answer} /> : null}
               {turn.question && !completion ? <AskQuestion key={turn.question.id} question={turn.question} onAnswer={answer => conversation.answerQuestion(turn.question!, answer)} /> : null}
-              {(!completion || !turn.acknowledgement) && (turn.background || turn.acknowledgement || turn.state === "queued" || turn.state === "waiting") && turn.runId && onOpenWork ? <AskWorkLink title={turn.workTitle || turn.prompt} state={workState} onOpen={() => onOpenWork(turn.runId, state.selectedId ?? undefined)} /> : null}
+              {!turn.approvalId && (!completion || !turn.acknowledgement) && (turn.background || turn.acknowledgement || turn.state === "queued" || turn.state === "waiting") && turn.runId && onOpenWork ? <AskWorkLink title={turn.workTitle || turn.prompt} state={workState} onOpen={() => onOpenWork(turn.runId, state.selectedId ?? undefined)} /> : null}
               {onOpenFile ? turn.activity.filter(event => event.kind === "artifact" && event.phase === "completed" && typeof event.arguments?.fileId === "string").map(event => <button key={event.id} type="button" className="os-ask-retry" onClick={() => onOpenFile(event.arguments!.fileId as string)}>Open {event.name || "file"}</button>) : null}
               {turn.state === "streaming" ? <AskWait activity={turn.activity} startedAt={turn.startedAt} hasText={Boolean(turn.answer)} /> : null}
               {turn.error ? <div className="os-ask-error"><p role="alert">{askErrorSummary(turn.error)}</p>{askErrorSummary(turn.error) !== turn.error ? <details><summary>Details</summary><p>{turn.error}</p></details> : null}{!busy ? <button type="button" className="os-ask-retry" onClick={() => { setDraft(turn.prompt); inputRef.current?.focus(); }}>Edit and try again</button> : null}{onOpenFleet ? <button type="button" className="os-ask-retry" onClick={onOpenFleet}>Open Fleet</button> : null}</div> : null}
@@ -329,8 +334,17 @@ export function AskSurface({
       </div>
       }
       {state.error ? <p className="os-ask-error" role="alert">{askErrorSummary(state.error)}</p> : null}
+      {state.guidanceNotice ? <p className="os-ask-guidance-notice" role="status">{state.guidanceNotice}</p> : null}
       {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
-      {!state.voiceActive && panel === "conversation" ? <AskWorkQueue turns={exchanges} onOpen={runId => onOpenWork?.(runId, state.selectedId ?? undefined)} /> : null}
+      {!state.voiceActive && panel === "conversation" ? <AskWorkQueue turns={exchanges.filter(turn => !turn.approvalId)} onOpen={runId => onOpenWork?.(runId, state.selectedId ?? undefined)} /> : null}
+      {state.discussion && !state.voiceActive && panel === "conversation" ? <div className="os-ask-discussion-actions">
+        <span className="os-caption" role="status">{state.discussionSending ? "Sending discussion message." : state.discussionRetry ? "Retry resends your original message. Your new text stays in the composer." : state.guidanceRetry ? "Retry continuing resends your saved guidance. Your new message stays in the composer." : exchanges.some(turn => turn.approvalId === state.discussion?.approval.id && ["queued", "waiting", "streaming"].includes(turn.state)) ? "Advice is being prepared. You can keep writing." : state.discussion.canSendGuidance ? "Send a message to discuss, or send your guidance to the waiting work." : state.discussion.canAskAdvisor ? "Send a message to discuss this request." : "This request is no longer waiting. Return to conversation to continue."}</span>
+        <div>{state.discussionRetry && !state.discussionSending && !state.guidanceSending ? <Button tone="quiet" onClick={() => conversation.retryDiscussion()}>{state.discussionRetry.advisor ? "Retry investigation" : "Retry message"}</Button> : null}
+        {!state.discussionRetry && state.discussion.canAskAdvisor && !state.discussionSending && !state.guidanceSending ? <Button tone="quiet" onClick={() => conversation.sendDiscussion(draft.trim() || "Investigate why this work is blocked and suggest a safe next step.", true)}>Ask another agent</Button> : null}
+        {state.guidanceRetry && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.retryGuidance(); }}>Retry continuing</Button> : null}
+        {!state.guidanceRetry && state.discussion.canSendGuidance && draft.trim() && Array.from(draft.trim()).length <= 4000 && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.sendGuidance(); }}>Send guidance</Button> : null}</div>
+        {state.discussion.canSendGuidance && Array.from(draft.trim()).length > 4000 ? <span className="os-caption">Keep guidance to 4,000 characters or fewer.</span> : null}
+      </div> : null}
       {!state.voiceActive && panel === "conversation" ? <form className="os-ask-input" onSubmit={onSubmit}>
         <button
           ref={micRef}
@@ -387,13 +401,13 @@ export function AskSurface({
         >
           <Mic size={15} aria-hidden />
         </button>
-        {liveVoice ? <button type="button" className="os-ask-mic" title="Talk with MemQL" aria-label="Talk with MemQL" disabled={!ready || busy || live} onClick={() => { controls?.cancel(); void liveVoice.start(context, settings.voice ?? "female"); }}><AudioLines size={17} /></button> : null}
+        {liveVoice && !state.discussion && !state.discussionOpening ? <button type="button" className="os-ask-mic" title="Talk with MemQL" aria-label="Talk with MemQL" disabled={!ready || busy || live} onClick={() => { controls?.cancel(); void liveVoice.start(context, settings.voice ?? "female"); }}><AudioLines size={17} /></button> : null}
         <textarea
           rows={1}
           onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); if (draft.trim() && send(draft)) setDraft(""); } }}
           ref={inputRef}
           className="os-ask-field"
-          placeholder={live ? "Listening" : "Ask"}
+          placeholder={live ? "Listening" : state.discussion ? "Discuss this approval or write guidance" : "Ask"}
           aria-label="Ask"
           value={draft}
           // Read-only, never disabled, and only while the mic is writing it:
@@ -406,8 +420,8 @@ export function AskSurface({
         {busy ? <button type="button" className="os-ask-send" aria-label="Stop reply" title="Stop this work" onClick={() => conversation.stop()}><Square size={13} /></button> : <button
           type="submit"
           className="os-ask-send"
-          aria-label={live ? "Finish" : "Send"}
-          disabled={!live && (!ready || busy || !draft.trim())}
+          aria-label={live ? "Finish" : state.discussion ? "Send discussion message" : "Send"}
+          disabled={!live && (!ready || busy || state.discussionOpening || state.discussionSending || state.guidanceSending || (state.discussion && (!state.discussion.canAskAdvisor || !!state.discussionRetry)) || !draft.trim())}
         >
           <ArrowUp size={15} aria-hidden />
         </button>}

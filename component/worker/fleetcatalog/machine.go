@@ -18,6 +18,7 @@ type Candidate struct {
 	ActionContracts  workerservice.ActionContracts
 	RepositoryScopes workerservice.RepositoryScopes
 	RegistrationId   string
+	MachineId        string // Raw enrollment identity; operator labels cannot replace it.
 	Name             string
 	DisplayName      string
 	// OwnerUserId is always stamped when known: SharedInferenceWorkers reads

@@ -314,7 +314,8 @@ func (r *ForwardRouter) ForwardDispatch(
 		Authority:      node.ForwardedAuthorityToProto(authority, r.SelfNodeId(), r.SelfNodeType()),
 		// The receiver re-decides rule 0 from this (purposeBinding). Without
 		// it, a pipeline step held by a sibling would be refused there.
-		Purpose: req.Purpose,
+		Purpose:              req.Purpose,
+		ComputerPermissionId: computerPermissionID(req),
 	}
 	if !r.sender.Send(nodeId, &nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),

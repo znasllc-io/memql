@@ -46,14 +46,16 @@ import (
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	workerservice "github.com/znasllc-io/memql/component/worker"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
 	"github.com/znasllc-io/memql/core/id"
 )
 
 // ForwardHandler serves inbound WorkerForwardRequest envelopes.
 type ForwardHandler struct {
-	registry *workerservice.Registry
-	store    FleetStore
-	logger   *slog.Logger
+	registry    *workerservice.Registry
+	store       FleetStore
+	logger      *slog.Logger
+	permissions permission.Authority
 
 	mu       sync.Mutex
 	inflight map[string]context.CancelFunc
@@ -224,7 +226,7 @@ func (h *ForwardHandler) HandleForwardedRequest(
 	}
 	defer w.Release(capability)
 
-	envelope := buildToolDispatch(Request{
+	dispatchRequest := Request{
 		Tool:          req.GetTool(),
 		Action:        req.GetAction(),
 		Purpose:       req.GetPurpose(),
@@ -234,7 +236,18 @@ func (h *ForwardHandler) HandleForwardedRequest(
 		RunId:         req.GetRunId(),
 		StepId:        req.GetStepId(),
 		CorrelationId: req.GetCorrelationId(),
-	}, timeout)
+	}
+	if id := req.GetComputerPermissionId(); id != "" {
+		dispatchRequest.computerPermission = &permission.Grant{ID: id}
+		constraint, err := claimComputerPermission(dispatchCtx, h.permissions, dispatchRequest, w)
+		if err != nil {
+			h.sendRefusal(send, requestId, "computer_permission_refused", err.Error())
+			return
+		}
+		dispatchRequest.computerConstraint = constraint
+		dispatchRequest.computerOwner = w.OwnerUserId
+	}
+	envelope := buildToolDispatch(dispatchRequest, timeout)
 
 	// THE CALLER MAY ALREADY HAVE GONE: the node layer ends this context when
 	// the dispatch's cancel arrives, even one read before this goroutine ran.

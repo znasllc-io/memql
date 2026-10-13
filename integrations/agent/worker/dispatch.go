@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/znasllc-io/memql/core/common"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
 	"log/slog"
 	"maps"
 	"sort"
@@ -44,9 +45,10 @@ type Dispatcher struct {
 	store    Store
 	clock    func() time.Time
 
-	router     *Router
-	selfNodeId string
-	remote     RemoteDispatcher
+	router      *Router
+	selfNodeId  string
+	remote      RemoteDispatcher
+	permissions permission.Authority
 }
 
 // Store is the persistence side of the dispatcher (resolve agent
@@ -149,8 +151,12 @@ type Result struct {
 // owner's routing policy decides which of their machines that lands on. A
 // model cannot name a machine, so it cannot hallucinate one.
 type Request struct {
-	Tool   string
-	Action string
+	// Native-only receipt and freshly claimed constraint; never read from model args.
+	computerPermission *permission.Grant
+	computerConstraint *permission.Scope
+	computerOwner      string
+	Tool               string
+	Action             string
 	// Purpose says WHO is asking, which decides which gates apply. Empty is an
 	// agent's call: per-task approval, the kill switch, standing scope and the
 	// classifier, exactly as before the field existed. PurposePipeline is a
@@ -322,6 +328,15 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 	}
 	startedAt := d.clock()
 
+	if req.Purpose == "" && d.permissions != nil {
+		if rc, ok := common.RunFromContext(ctx); ok && rc.GoalId != "" {
+			grant, err := d.permissions.Find(ctx, permissionRequest(req))
+			if err != nil {
+				return Result{ErrorCode: "computer_permission_unavailable", ErrorMessage: err.Error(), RefusedBeforeStart: true, RefusedByGate: true}, nil
+			}
+			req.computerPermission = grant
+		}
+	}
 	gate := d.preDispatchCheck(ctx, req)
 	if gate.deny {
 		denied := Result{
@@ -355,6 +370,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 			plan.RequireNativePlatform(platform)
 		}
 	}
+	if err == nil && req.computerPermission != nil {
+		plan.RequireActionContract(permission.Contract, permission.Version)
+		kept := plan.Candidates[:0]
+		for _, cand := range plan.Candidates {
+			if sameSubject(cand.RegistrationId, req.computerPermission.Scope.RegistrationID) && cand.MachineId == req.computerPermission.Scope.MachineID {
+				kept = append(kept, cand)
+			}
+		}
+		plan.Candidates = kept
+	}
 	record := plan.Record()
 	record.ReroutedFrom = req.ReroutedFrom
 	if err != nil {
@@ -366,6 +391,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, req Request) (Result, error) 
 		res := Result{OK: false, ErrorCode: "no_worker_available", ErrorMessage: err.Error(),
 			RefusedBeforeStart: true, RefusedByGate: true}
 		d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "no_worker_available", record)
+		return res, nil
+	}
+	if len(plan.Candidates) == 0 && req.computerPermission != nil {
+		res := Result{ErrorCode: "computer_permission_unavailable", ErrorMessage: "Connect " + req.computerPermission.Scope.MachineLabel + " with an updated MemQL Cockpit to use this permission. It cannot run on a different machine.", RefusedBeforeStart: true}
+		d.recordInvocation(ctx, req, "", startedAt, d.clock(), res, "denied_by_policy", record)
 		return res, nil
 	}
 	if len(plan.Candidates) == 0 {
@@ -534,6 +564,14 @@ func (d *Dispatcher) attemptLocal(
 	}
 	defer w.Release(capability)
 
+	if req.computerPermission != nil {
+		constraint, err := claimComputerPermission(dispatchCtx, d.permissions, req, w)
+		if err != nil {
+			return Result{ErrorCode: "computer_permission_refused", ErrorMessage: err.Error()}, ForwardRefusedBeforeStart
+		}
+		req.computerConstraint = constraint
+		req.computerOwner = w.OwnerUserId
+	}
 	d.stampSelected(ctx, req.OwnerUserId, cand.RegistrationId)
 
 	envelope := buildToolDispatch(req, timeout)
@@ -799,7 +837,9 @@ func (d *Dispatcher) preDispatchCheck(ctx context.Context, req Request) gateResu
 		effectiveScope := standingScope
 		// A goal's id is not a grant. Owned work must present a current,
 		// matching decision read from storage on whichever replica dispatches.
-		if rc, ok := common.RunFromContext(ctx); ok && rc.GoalId != "" {
+		if req.computerPermission != nil {
+			effectiveScope = required.Scope
+		} else if rc, ok := common.RunFromContext(ctx); ok && rc.GoalId != "" {
 			grants, has := d.store.(interface {
 				WorkComputerScope(context.Context, Request, time.Time) (string, error)
 			})
@@ -869,15 +909,16 @@ func buildToolDispatch(req Request, timeout time.Duration) *memqlv1.ToolDispatch
 		agentId = ""
 	}
 	return &memqlv1.ToolDispatch{
-		CallId:        newCallId(),
-		RunId:         req.RunId,
-		StepId:        req.StepId,
-		AgentId:       agentId,
-		CorrelationId: req.CorrelationId,
-		Tool:          req.Tool,
-		Action:        req.Action,
-		ArgsJson:      args,
-		Timeout:       durationpb.New(timeout),
+		CallId:             newCallId(),
+		RunId:              req.RunId,
+		StepId:             req.StepId,
+		AgentId:            agentId,
+		CorrelationId:      req.CorrelationId,
+		Tool:               req.Tool,
+		Action:             req.Action,
+		ArgsJson:           args,
+		Timeout:            durationpb.New(timeout),
+		ComputerPermission: permissionConstraint(req),
 	}
 }
 

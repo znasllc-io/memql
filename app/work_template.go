@@ -41,6 +41,9 @@ func workTemplateRows(ctx context.Context, engine workTemplateReader, name strin
 // A compiled draft is durable but private to its run. An agent reconstructs
 // it from owned rows; no planner registry or scheduler activation is assumed.
 func loadWorkTemplate(ctx context.Context, engine *memql.MemQLEngine, loader *automations.Loader, journal *automations.RunJournal) (*workTemplate, error) {
+	if journal.TriggeredBy == "approval-discussion" && (journal.AutomationName != memql.ApprovalDiscussionTemplate || journal.TemplateConstructId != "" || journal.Rerun != nil || journal.ForkedFromRunId != "") {
+		return nil, fmt.Errorf("approval discussion cannot execute a changed or replayed plan")
+	}
 	if journal.TemplateConstructId == "" {
 		a, err := loader.LoadByName(journal.AutomationName)
 		if err != nil {
@@ -48,6 +51,11 @@ func loadWorkTemplate(ctx context.Context, engine *memql.MemQLEngine, loader *au
 		}
 		if err = automationRunRefusal(a); err != nil {
 			return nil, err
+		}
+		if journal.TriggeredBy == "approval-discussion" {
+			if err := approvalDiscussionTemplateRefusal(a); err != nil {
+				return nil, err
+			}
 		}
 		return &workTemplate{automation: a}, nil
 	}

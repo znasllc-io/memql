@@ -54,11 +54,28 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	if i.decisionGate == nil {
 		return nil, fmt.Errorf("work: approval coordination is unavailable")
 	}
-	release, err := i.decisionGate(ctx, approvalId)
+	var release func()
+	var verifyPermissionDecision func(context.Context) error
+	_, typedPermission := argMap(args, "answer")["permissionMode"]
+	_, typedGuidance := argMap(args, "answer")["feedback"]
+	if (typedPermission && decision == "approved") || (typedGuidance && decision == "answered") {
+		release, verifyPermissionDecision, err = i.computerPermissionDecisionGate(ctx, approvalId)
+	} else {
+		release, err = i.decisionGate(ctx, approvalId)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer release()
+	if verifyPermissionDecision != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		ctx = context.WithValue(ctx, approvalDecisionVerifierKey{}, verifyPermissionDecision)
+	}
 	ctx = memql.ContextWithFreshRead(ctx)
 	st := i.store()
 
@@ -79,6 +96,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		}
 	}
 	if approval == nil {
+		if recovered, err := i.recoverGuidanceDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
+			return nil, err
+		} else if recovered != nil {
+			return i.resultNode(recovered), nil
+		}
 		if recovered, err := i.recoverReviewDecision(ctx, approvalId, decision, argMap(args, "answer")); err != nil {
 			return nil, err
 		} else if recovered != nil {
@@ -88,6 +110,14 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	}
 
 	kind := rowString(approval, "kind")
+	answer := argMap(args, "answer")
+	guidance, err := i.approvalGuidance(ctx, approval, decision, answer)
+	if err != nil {
+		return nil, err
+	}
+	if guidance != "" {
+		answer = map[string]any{"feedback": guidance}
+	}
 	if kind == work.ApprovalKindPlanReview && rowString(rowMap(approval, "subject"), "reviewType") != "" && decision == "answered" {
 		return nil, fmt.Errorf("work: this draft request needs an approval or a rejection")
 	}
@@ -101,7 +131,7 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// recorded -- spending the approval -- and then move nothing, leaving the
 	// construct waiting on an approval nobody can decide again. So it is
 	// refused before anything is read or written.
-	if kind == "scopeElevation" && decision == "answered" {
+	if kind == "scopeElevation" && decision == "answered" && guidance == "" {
 		return nil, fmt.Errorf("work: computer access requires approval or rejection")
 	}
 	if kind == work.ApprovalKindProcedurePromotion && decision == "answered" {
@@ -164,13 +194,15 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			return nil, fmt.Errorf("work: this computer-access request has expired")
 		}
 	}
-	answer := argMap(args, "answer")
+	if err := validateComputerPermissionDecision(approval, decision, answer); err != nil {
+		return nil, err
+	}
 	if decision == "approved" {
 		if err := i.validatePlanReviewAnswer(ctx, kind, rowMap(approval, "subject"), answer); err != nil {
 			return nil, err
 		}
 	}
-	if kind == "feedback" && decision != "rejected" {
+	if kind == "feedback" && decision != "rejected" && guidance == "" {
 		if err := validateFeedbackAnswer(rowMap(approval, "subject"), decision, answer); err != nil {
 			return nil, err
 		}
@@ -184,10 +216,14 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// came off the approval row this caller already read under their own
 	// actor.
 	writeCtx := ownerActor(ctx, owner)
+
 	if decision == "approved" && kind == work.ApprovalKindBudget {
 		if err := i.raiseApprovedBudget(writeCtx, approval, answer, now); err != nil {
 			return nil, err
 		}
+	}
+	if err := verifyApprovalDecisionWrite(writeCtx); err != nil {
+		return nil, err
 	}
 	if err := st.decideApprovalRow(writeCtx, approvalId, decision, strings.TrimSpace(ac.UserId), now, answer, workRowVersionAfter(approval["createdAt"], now)); err != nil {
 		return nil, err
@@ -254,6 +290,12 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			}
 			retry.reason = rowString(rowMap(approval, "evidence"), "reason") + "\n" + rowString(rowMap(approval, "subject"), "errorMessage")
 		}
+	}
+	if guidance != "" {
+		// A human asked for a different approach, not for the gated operation
+		// to execute. The existing replan wait keeps the completed prefix and
+		// all permission and spending checks; this answer grants nothing.
+		retry = guidanceRetry(approval, guidance, strings.TrimSpace(ac.UserId))
 	}
 	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, retry, now)
 	if err != nil {
@@ -425,6 +467,11 @@ func (i *Integration) resumeParkedRun(ctx context.Context, runId, approvalId, de
 				fields["staleSteps"] = stale
 			}
 		}
+	}
+	// A saved guidance receipt can enter here through recovery without a new
+	// decision write. Recheck its held receipt gate at this actual commit seam.
+	if err := verifyApprovalDecisionWrite(ctx); err != nil {
+		return false, err
 	}
 	if err := st.updateRun(ctx, runId, fields); err != nil {
 		return false, err

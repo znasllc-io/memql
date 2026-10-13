@@ -174,6 +174,9 @@ func TestClassifyByRules_ExhaustedContextWindowNeedsAPerson(t *testing.T) {
 		{"openai", Signal{ErrorMessage: "This model's maximum context length is 128000 tokens (context_length_exceeded)"}},
 		{"anthropic", Signal{ErrorMessage: "prompt is too long: 216000 tokens > 200000 maximum"}},
 		{"a catalogued code", Signal{ErrorCode: "context_length_exceeded"}},
+		{"checkpoint grew", Signal{ErrorMessage: `function "runAgentTurn" execution failed: runAgentTurn: context checkpoint did not free space; originals were retained`}},
+		{"checkpoint attempts spent", Signal{ErrorMessage: "context checkpoint budget exhausted; originals were retained"}},
+		{"pinned request too large", Signal{ErrorMessage: "context checkpoint cannot fit the active request, tool contracts and pending exchange; history retained"}},
 	} {
 		sym, ev, ok := ClassifyByRules(tc.signal)
 		if !ok {
@@ -185,6 +188,19 @@ func TestClassifyByRules_ExhaustedContextWindowNeedsAPerson(t *testing.T) {
 		}
 		if ev.RuleId != RuleIdContextExhausted {
 			t.Errorf("%s: ruleId = %q, want %q", tc.name, ev.RuleId, RuleIdContextExhausted)
+		}
+	}
+}
+
+func TestCheckpointStorageFailuresAreNotContextCapacityFailures(t *testing.T) {
+	for _, message := range []string{
+		"save context checkpoint: permission denied",
+		"save context checkpoint: no space left on device",
+		"context checkpoint failed; history retained: deadline exceeded",
+	} {
+		_, evidence, _ := ClassifyByRules(Signal{ErrorMessage: message})
+		if evidence.RuleId == RuleIdContextExhausted {
+			t.Fatalf("storage/provider failure was misclassified as context capacity: %s", message)
 		}
 	}
 }
@@ -365,6 +381,24 @@ func TestRemoteImageRefusalIsAPlanProblem(t *testing.T) {
 		symptom, evidence, known := ClassifyByRules(Signal{ErrorMessage: "function libraryPrepareRevisionImage execution failed: image source unusable: " + detail})
 		if !known || symptom != SymptomPlan || evidence.RuleId != "plan.imageSource" {
 			t.Fatalf("remote source misclassified: %v %v %v", symptom, evidence, known)
+		}
+	}
+}
+
+func TestComputerPermissionRefusalsAskRatherThanRepairEnvironment(t *testing.T) {
+	for _, code := range []string{"consent_required", "computer_permission_refused", "computer_permission_path_refused", "computer_permission_unavailable"} {
+		message := "Enable the named directory on this machine; permission denied (timeout)."
+		for _, signal := range []Signal{{ErrorCode: code, ErrorMessage: message}, {ErrorCode: "function_failed", ErrorMessage: "workerHost failed: " + code + ": " + message}, {ErrorMessage: `{"errorCode":"` + code + `","errorMessage":"` + message + `"}`}} {
+			symptom, evidence, ok := ClassifyByRules(signal)
+			if !ok || symptom != SymptomHuman || evidence.RuleId != RuleIdComputerPermission || evidence.Reason != signal.ErrorMessage || ActFor(symptom, 0, 3) != ActAsk {
+				t.Fatalf("%+v: %s %+v", signal, symptom, evidence)
+			}
+		}
+	}
+	for _, message := range []string{"permission denied writing /etc/hosts", "unrelated_computer_permission_refused_suffix", "request permission to update the environment"} {
+		_, evidence, _ := ClassifyByRules(Signal{ErrorMessage: message})
+		if evidence.RuleId == RuleIdComputerPermission {
+			t.Fatalf("generic text reclassified: %s", message)
 		}
 	}
 }

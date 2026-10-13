@@ -121,6 +121,12 @@ var promptLevels = map[string]string{
 	// limits through repeated checkpoints. The fast band copied stale metadata
 	// in the long research trace; recallability alone did not prevent that loop.
 	"workContextCheckpoint": "strong",
+	// Explains one pending request from bounded saved evidence, without tools
+	// or execution authority; this short discussion stays in the fast band.
+	"askApprovalReply": "fast",
+	// An explicitly requested independent opinion weighs alternatives for the
+	// person to review. It cannot approve or run those alternatives.
+	"askApprovalSecondOpinion": "strong",
 	// deriveProcedureHole: proposes how ONE argument of a learned procedure is
 	// derived from an earlier step's result (epic memql#5402, D6's single
 	// bounded call). Reasoning rather than fast, and the reason is the shape

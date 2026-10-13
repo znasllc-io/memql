@@ -68,10 +68,33 @@ func (e *MemQLEngine) askConversationSnapshotBuiltin(ctx context.Context, args m
 }
 
 func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscript) error {
+	ctx = ContextWithFreshRead(ctx)
 	var answers []AskTurn
 	seen := map[string]bool{}
 	for _, turn := range transcript.Turns {
 		seen[turn.ID] = true
+	}
+	// Discussion links are separate from visible turns: merely opening a
+	// request invokes no model and must not manufacture a chat message.
+	if len(transcript.ApprovalIDs) > maxAskApprovalLinks {
+		return fmt.Errorf("conversation linked requests exceed their limit")
+	}
+	linked := map[string]bool{}
+	for _, approvalID := range transcript.ApprovalIDs {
+		approvalID = BareShortId(approvalID)
+		if approvalID == "" || linked[approvalID] {
+			continue
+		}
+		linked[approvalID] = true
+		approval, _, err := e.approvalRows(ctx, approvalID)
+		if err != nil {
+			return err
+		}
+		_, answer := askFeedbackProjection(approval)
+		if answer != nil && !seen[answer.ID] {
+			answers = append(answers, *answer)
+			seen[answer.ID] = true
+		}
 	}
 	for n := range transcript.Turns {
 		turn := &transcript.Turns[n]
@@ -88,7 +111,7 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 		run := runs[0]
 		turn.WorkStatus, _ = run["status"].(string)
 		waiting, _ := run["waitingOn"].(map[string]any)
-		questions, err := e.workRows(ctx, "workQuestionsForOwnerRun", turn.RunID)
+		questions, err := e.workRows(ctx, "workApprovalsForOwnedRun", turn.RunID)
 		if err != nil {
 			return err
 		}

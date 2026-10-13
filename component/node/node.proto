@@ -605,6 +605,8 @@ message WorkerForwardRequest {
   // command admitted without a consent window, so a sender that forwarded one
   // past its gate is not trusted to have been right.
   string purpose = 14;
+  // Receipt ID only: the stream holder must claim fresh durable authority.
+  string computer_permission_id = 15;
 }
 
 // WorkerForwardResponse carries the dispatch result back to the originating
