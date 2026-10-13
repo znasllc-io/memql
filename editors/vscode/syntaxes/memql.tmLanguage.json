@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "MemQL",
   "scopeName": "source.memql",
-  "comment": "Generated from dslspec by 'memql-lsp gen-grammar'. Do not edit by hand. GrammarVersion: 2026.10-workflow-placement-df34b1a1",
+  "comment": "Generated from dslspec by 'memql-lsp gen-grammar'. Do not edit by hand. GrammarVersion: 2026.10-concept-retention-bd219665",
   "patterns": [
     {
       "include": "#comments"

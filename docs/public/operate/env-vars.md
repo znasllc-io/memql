@@ -649,7 +649,7 @@ MemQL OS Logs app reads them (epic memql#4893). Runbook: [Logs](logs.md).
 |-------------------------------------|-------------------------------|------------------------------------------------------------------------------------------------------------------------|
 | `MEMQL_LOGS_LEVEL`                  | `info`                        | The store's floor on this node: `debug`, `info`, `warn`, `error` or `off`. The console handler's level is untouched, so a node keeps printing what it printed. |
 | `MEMQL_LOGS_MAX_LINES_PER_SECOND`   | `2000`                        | Per-node, per-second cap on stored lines (clamped 10..100000). Beyond it a line is dropped and counted on `memql_logs_dropped_total{reason="rate"}`; the node writes one stored warning per minute naming the drops, so the gap is visible in the Logs app. |
-| `MEMQL_LOGS_RETENTION_DAYS`         | `30`                          | Days of lines kept before the nightly `logsRetentionSweep` archives a day to blob storage and then deletes it (clamped 1..365). No archive, no delete: with no container the sweep keeps every line and says so. |
+| `MEMQL_LOGS_RETENTION_DAYS`         | `30`                          | Fallback log lifetime when logLine has no `@retention` declaration (clamped 1..365). The declared policy takes precedence. The nightly sweep verifies each archive before deletion; with no archive, every line stays. |
 | `MEMQL_LOGS_ARCHIVE_CONTAINER`      | `MEMQL_AZURE_BLOB_CONTAINER`  | The blob container the archive objects (`logs/<day>/<nodeType>.ndjson.gz`) land in. Empty means no archive is configured. |
 
 #### Pipelines (the substrate)

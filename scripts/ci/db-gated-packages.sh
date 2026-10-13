@@ -271,6 +271,7 @@ readonly DB_GATED_TREES=(
 	"component/grpc"
 	"component/identity"
 	"component/logstore"
+	"component/retention"
 	"component/node"
 	"component/packages"
 	"component/pipelinerun"

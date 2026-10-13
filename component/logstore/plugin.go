@@ -65,11 +65,14 @@ type Integration struct {
 	limiter   *ClientLimiter
 	now       func() time.Time
 	sink      func() *Sink
+	concepts  memorynodes.Registry
 }
 
 func init() {
 	memql.RegisterPlugin("logs", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		return NewIntegration(pctx.Logger, pctx.BunDB, pctx.DirectBunDB), nil
+		i := NewIntegration(pctx.Logger, pctx.BunDB, pctx.DirectBunDB)
+		i.concepts = pctx.Concepts
+		return i, nil
 	})
 }
 
@@ -350,7 +353,7 @@ func (i *Integration) handleStatus(ctx context.Context, _ map[string]any, _ int)
 		return nil, err
 	}
 	rep := StatusReport{
-		RetentionDays:     RetentionDays(),
+		RetentionDays:     i.retentionDays(),
 		Level:             LevelName(),
 		MaxLinesPerSecond: MaxLinesPerSecond(),
 		ArchiveConfigured: i.container != "",
@@ -511,12 +514,13 @@ func (i *Integration) sweeper() *Sweeper {
 		lock = i.directDB()
 	}
 	return &Sweeper{
-		DB:        i.database(),
-		LockDB:    lock,
-		Archive:   i.archiver,
-		Container: i.container,
-		Logger:    i.logger,
-		Now:       i.now,
+		DB:            i.database(),
+		LockDB:        lock,
+		Archive:       i.archiver,
+		Container:     i.container,
+		Logger:        i.logger,
+		Now:           i.now,
+		RetentionDays: i.retentionDays(),
 	}
 }
 
@@ -678,4 +682,15 @@ func argInt(args map[string]any, key string, def int) int {
 		}
 	}
 	return def
+}
+
+// An absent declaration retains the installed store's existing configuration.
+// Declared policy is resolved each pass, including after a concept reload.
+func (i *Integration) retentionDays() int {
+	if i.concepts != nil {
+		if c, err := i.concepts.Get("v1:observability:logLine"); err == nil && c.Retention != nil {
+			return int(c.Retention.TTL / (24 * time.Hour))
+		}
+	}
+	return RetentionDays()
 }

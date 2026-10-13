@@ -153,6 +153,7 @@ func lifecycle(r Receiver, description string) []Placement {
 // Receiver-specific docs, for the names that mean something different on
 // different receivers.
 const (
+	docRetention       = "Expire versions older than ttl, measured from their stored createdAt. Keep the newest version by default, including tombstones. Require a verified archive unless archive=\"none\" explicitly marks disposable history. Undeclared concepts retain their current behavior. The logLine store requires whole days, keepLatest=false and archive=\"required\"."
 	docActorOnFunction = "Declares that the body reads the authenticated actor (actor.userId, actor.role, actor.identityId, actor.isClusterOwner, actor.primaryEmail, actor.now). The actor-binding load rule refuses a body that reads actor.* without it (memql#2621)."
 	docActorOnShape    = "Shape kind marker: the shape projects the authenticated actor's envelope (actor.userId / actor.role / ...), and carries no signature concept."
 	// docRequiresRankOnTool is @requiresRank on a tool, which differs from the
@@ -239,6 +240,11 @@ var (
 		{Name: "secondary", Type: "string", Doc: "The field shown under the title."},
 		{Name: "tertiary", Type: "string", Doc: "A third field shown in the row's detail line."},
 		{Name: "status", Type: "string", Doc: "The field shown as the row's status."},
+	}
+	retentionKeys = []ArgSpec{
+		{Name: "ttl", Type: "string", Doc: "Version lifetime, e.g. 30d or 24h. Required; 1 second to 36500 days."},
+		{Name: "keepLatest", Type: "bool", Doc: "Preserve the newest version of each record, including a tombstone. Default true."},
+		{Name: "archive", Type: "string", Doc: "required (default): verify a recoverable archive before deletion; none: explicitly disposable history."},
 	}
 	composableKeys = []ArgSpec{
 		{Name: "as", Type: "string", Doc: "The label a composed file names the row kind by, e.g. \"invoice\"."},
@@ -400,6 +406,7 @@ var placementTable = concat(
 		{Receiver: Concept, Name: "displayCard", Forms: FormKeywords, Keys: displayCardKeys, Example: `@displayCard(primary="title", secondary="status")`},
 		{Receiver: Concept, Name: "mirroredTo", Forms: FormString | FormStrings, Example: `@mirroredTo("shopify")`},
 		{Receiver: Concept, Name: "origin", Forms: FormString, Example: `@origin("memql")`},
+		{Receiver: Concept, Name: "retention", Forms: FormKeywords, Keys: retentionKeys, Example: `@retention(ttl="30d", keepLatest=true, archive="required")`, Doc: docRetention},
 		{Receiver: Concept, Name: "rowAuthz", Forms: FormKeywords, Keys: rowAuthzKeys, Example: `@rowAuthz(owner="ownerUserId", clusterOwner)`},
 		{Receiver: Concept, Name: "serverWritten", Forms: FormFlag, Example: "@serverWritten"},
 		{Receiver: Concept, Name: "type", Forms: FormString, Example: `@type("collection")`, Doc: "The concept's row kind: \"object\" (the default), \"collection\" or \"reference\"."},
@@ -481,6 +488,7 @@ func concat(groups ...[]Placement) []Placement {
 // own Placement.Doc; every other placement shows this one (enforced by
 // TestEveryPlacementHasADoc).
 var Docs = map[string]string{
+	"retention":       docRetention,
 	"journalRequired": "Require confirmed work-journal writes before an automation starts work, advances beyond a step or reports completion. A failed write stops the run even inside retry or on error continue. Preview runs remain sandboxed. This does not guarantee exactly-once external effects; reconcile uncertain effects before resuming.",
 	// Lifecycle / shared.
 	"disabled":             "Disable this definition.",
