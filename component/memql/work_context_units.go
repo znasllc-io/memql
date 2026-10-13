@@ -85,9 +85,19 @@ func WorkContextTarget(messages []common.ChatMessage, tools []common.ToolDefinit
 // latest exchange verbatim. Six recent messages is a preference, never a cut
 // through a parallel call group. Short transcripts can still retire an older
 // complete exchange when the preferred tail occupies the entire conversation.
-func workContextChunk(messages []common.ChatMessage, sourceLimit int) (int, int) {
+func workContextChunk(messages []common.ChatMessage, sourceLimit int, excluded map[string]bool) (int, int) {
 	units := workContextUnits(messages)
 	firstUser, lastUser := workContextHumanBounds(messages)
+	usable := func(start, end int, fresh bool) bool {
+		if !fresh {
+			return false
+		}
+		if len(excluded) == 0 {
+			return true
+		}
+		raw, _ := json.Marshal(messages[start:end])
+		return !excluded[workContextHash("chunk", raw)]
+	}
 	eligible := func(u workContextUnit) bool {
 		if !u.complete || u.end == len(messages) {
 			return false
@@ -103,10 +113,10 @@ func workContextChunk(messages []common.ChatMessage, sourceLimit int) (int, int)
 		start, end, fresh := -1, -1, false
 		for _, u := range units {
 			if !eligible(u) || u.start >= cutoff {
-				if fresh {
+				if usable(start, end, fresh) {
 					return start, end
 				}
-				start, end = -1, -1
+				start, end, fresh = -1, -1, false
 				continue
 			}
 			if start < 0 {
@@ -116,12 +126,15 @@ func workContextChunk(messages []common.ChatMessage, sourceLimit int) (int, int)
 			// size; the caller archives oversized units without an LLM call.
 			raw, _ := json.Marshal(messages[start:u.end])
 			if fresh && len(raw) > sourceLimit {
-				return start, end
+				if usable(start, end, fresh) {
+					return start, end
+				}
+				start, fresh = u.start, false
 			}
 			end = u.end
 			fresh = fresh || !isWorkMemory(messages[u.start])
 		}
-		if fresh {
+		if usable(start, end, fresh) {
 			return start, end
 		}
 	}

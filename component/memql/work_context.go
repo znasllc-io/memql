@@ -85,8 +85,9 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 	// Bounded semantic checkpoints follow complete exchanges, not arbitrary
 	// message counts. Older checkpoints may be consolidated with fresh evidence;
 	// their exact sources and prior references remain in the journal.
+	unproductive := make(map[string]bool)
 	for calls := 0; WorkContextSize(out, tools) > target && calls < 8; calls++ {
-		start, end := workContextChunk(out, sourceLimit)
+		start, end := workContextChunk(out, sourceLimit, unproductive)
 		if end <= start {
 			// Several medium results in the latest parallel exchange can
 			// exceed the total budget even when each is below the ordinary
@@ -180,7 +181,12 @@ func (e *MemQLEngine) CompactWorkContext(ctx context.Context, messages []common.
 		next = append(next, memory)
 		next = append(next, out[end:]...)
 		if WorkContextSize(next, tools) >= WorkContextSize(out, tools) {
-			return nil, fmt.Errorf("context checkpoint did not free space; originals were retained")
+			// A short exchange before a pinned correction can be smaller than
+			// even the checkpoint envelope. Keep it exact and try another
+			// complete exchange, rather than retrying this same prefix forever.
+			// Failed candidates still consume the existing eight-attempt bound.
+			unproductive[workContextHash("chunk", raw)] = true
+			continue
 		}
 		out = next
 	}

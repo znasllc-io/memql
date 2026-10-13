@@ -269,8 +269,12 @@ and recall excerpts. A single exchange too large for the summarizer is
 archived with a preview instead of overflowing the summarizer itself.
 Summaries and retrieved sources are historical data, never new authority.
 The source is saved before an active-context replacement is returned. Failed
-storage, an invalid summary, or a checkpoint that saves no space returns a
-failure without mutating the caller's original conversation.
+storage or an invalid summary returns a failure without mutating the caller's
+original conversation. If a checkpoint would be larger than its source, that
+exchange stays exact while the engine tries another complete exchange. A short
+older exchange before a pinned correction cannot block later tool evidence
+from being compacted. All candidates share the same eight-attempt bound; if
+none can make the context fit, the original conversation remains unchanged.
 
 The proactive working-set threshold is an estimate that includes message
 envelopes, tool schemas and arguments. Its preference is 20,000 tokens. When
