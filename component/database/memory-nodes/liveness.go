@@ -9,6 +9,10 @@ import (
 	"github.com/uptrace/bun"
 )
 
+// staged-data: MUST-NOT-GATE -- this shared row source serves both ordinary
+// authorized reads and maintenance. Filtering here would hide staged rows from
+// mutation read-merge and erase fields on the next write. Callers apply their
+// own publication and row-admission rules after selecting the current version.
 // ObservedRowsSQL includes the one current observation of a record.
 // Historical observation samples are deliberately not retained. Business
 // versions and deletion markers remain in MemoryNodes.
