@@ -164,6 +164,13 @@
       "file": "knowledge/training/literal-data-v2.txt",
       "sha256": "80eaa34c00e21bf6dbcaff823d30279e118f5c1d76cfd0eef92eb99f789603dc",
       "lesson": true
+    },
+    {
+      "domainId": "research-methodology",
+      "sourceRef": "training:research-evidence",
+      "file": "knowledge/training/research-evidence-v1.txt",
+      "sha256": "3092ad8c3c6a65a5a6f9bdcd99735998be7d7ddcfd1fa240207b6dbbd6d543db",
+      "lesson": true
     }
   ],
   "provenance": [

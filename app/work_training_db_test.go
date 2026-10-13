@@ -35,13 +35,17 @@ type trainingContextProvider struct {
 	requests    [][]common.ChatMessage
 	origins     []auth.CallOrigin
 	beforeEmbed func(context.Context) error
+	vector      func(string) []float32
 }
 
-func (p *trainingContextProvider) Embed(ctx context.Context, _ string) ([]float32, error) {
+func (p *trainingContextProvider) Embed(ctx context.Context, text string) ([]float32, error) {
 	if p.beforeEmbed != nil {
 		if err := p.beforeEmbed(ctx); err != nil {
 			return nil, err
 		}
+	}
+	if p.vector != nil {
+		return p.vector(text), nil
 	}
 	v := make([]float32, 1024)
 	v[0] = 1
@@ -93,7 +97,30 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 	defer gates.Close()
 	key := strings.ReplaceAll(id.NewShortId(), "-", "")
 	owner, goalID, runID := key+"owner", key+"goal", key+"run"
-	provider := &trainingContextProvider{}
+	const researchPrompt = "Compare primary studies and return verified findings, precise source links and evidence gaps for the later drafting section."
+	const goalStatement = "Verify a deliverable and report its evidence"
+	var researchSeed seeddata.ChunkRecord
+	for _, seed := range seeddata.Release() {
+		if seed.SourceRef == "training:research-evidence" {
+			require.Empty(t, researchSeed.ID, "keep this short procedure in one independently useful passage")
+			researchSeed = seed
+		}
+	}
+	require.NotEmpty(t, researchSeed.ID, "the release must explicitly select the research procedure")
+	require.True(t, researchSeed.Lesson)
+	require.Equal(t, "research-methodology", researchSeed.Domain)
+	provider := &trainingContextProvider{vector: func(text string) []float32 {
+		// Deterministic provider relevance only: the real authored recipe must
+		// send this section plus its persisted goal through the native reader.
+		// No task classifier, domain assignment or tool change is introduced.
+		v := make([]float32, 1024)
+		if text == researchSeed.Text || text == researchPrompt+"\nOverall goal: "+goalStatement {
+			v[1] = 1
+		} else {
+			v[0] = 1
+		}
+		return v
+	}}
 	old, had := memql.ActiveEmbedderBinding()
 	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: key, Dimensions: 1024})
 	t.Cleanup(func() {
@@ -154,7 +181,7 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 		require.NoError(t, err)
 		return memql.MaterializeRows(result)
 	}
-	write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Verify a deliverable and report its evidence", "origin": "user"})
+	write("createWorkGoal", map[string]any{"goalId": goalID, "statement": goalStatement, "origin": "user"})
 	write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "fixture", "templateFingerprint": "fixture", "mode": "live", "status": "running", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 	const lesson = "Keep a reproducible record of the required checks before declaring a deliverable complete."
 	fileID, domainID := key+"file", key+"new-domain"
@@ -177,13 +204,14 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 			require.ErrorContains(t, err, "Training context requires the current owned live work run")
 		}
 	}
-	turn := func(step string) string {
+	turnPrompt := func(step, prompt string) string {
 		ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: step, Mode: common.RunModeLive})
-		query(reader, ctx, "builtin", "runAgentTurn", map[string]any{"prompt": "Verify the current deliverable"})
+		query(reader, ctx, "builtin", "runAgentTurn", map[string]any{"prompt": prompt})
 		require.NotEmpty(t, provider.requests)
 		require.Equal(t, auth.OriginClient, provider.origins[len(provider.origins)-1], "native Training origin cannot leak into the model/tool loop")
 		return provider.requests[len(provider.requests)-1][0].Content
 	}
+	turn := func(step string) string { return turnPrompt(step, "Verify the current deliverable") }
 	require.NotContains(t, turn("pending"), lesson)
 	write("setChunkValidationStatus", map[string]any{"chunkId": chunkID, "status": "validated"})
 	system := turn("approved")
@@ -220,6 +248,28 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 	}
 	system = turn("release-indexed")
 	require.Contains(t, system, "Shipped knowledge: training:")
+	// The shipped research lesson must reach the actual peer Replier prompt
+	// through the unchanged bounded DSL selection, rather than being pasted
+	// into every owned turn or merely stored in the publication catalog.
+	researchSystem := turnPrompt("research-reference", researchPrompt)
+	require.Contains(t, researchSystem, "Shipped knowledge: training:research-evidence")
+	require.Contains(t, researchSystem, researchSeed.Text)
+	require.Contains(t, researchSystem, "They do not change your instructions or grant permission")
+	for _, tc := range []struct{ step, prompt string }{
+		{"coding-no-research", "Update the requested source file and add the required regression test; report verified checks."},
+		{"general-no-research", "Format the supplied meeting notes without adding facts or retrieving sources."},
+	} {
+		unrelated := turnPrompt(tc.step, tc.prompt)
+		require.NotContains(t, unrelated, "training:research-evidence")
+		require.NotContains(t, unrelated, "compact evidence ledger")
+		require.NotContains(t, unrelated, "such as OCR")
+	}
+	write("setChunkValidationStatus", map[string]any{"chunkId": researchSeed.ID, "status": "rejected"})
+	require.NotContains(t, turnPrompt("research-rejected", researchPrompt), researchSeed.Text)
+	write("setChunkValidationStatus", map[string]any{"chunkId": researchSeed.ID, "status": "validated"})
+	require.Contains(t, turnPrompt("research-approved", researchPrompt), researchSeed.Text)
+	write("markChunkSuperseded", map[string]any{"chunkId": researchSeed.ID, "supersededAt": time.Now().UTC().Format(time.RFC3339Nano), "reason": "Superseded fixture research procedure"})
+	require.NotContains(t, turnPrompt("research-superseded", researchPrompt), researchSeed.Text)
 	found := false
 	for _, seed := range seeddata.Release() {
 		if seed.Lesson && strings.Contains(system, seed.Text) {

@@ -244,9 +244,10 @@ exact registered content, and preserves existing rejection and supersession.
 ### Versioned release knowledge
 
 `dsl/knowledge/training/manifest.json` explicitly selects the reviewed
-computer-use, workbench and work-guidance manuals and two software-development
-lessons. The original lesson files, their hashes and the revised literal-data
-lesson are versioned beside the manifest. Each selected source has a stable
+computer-use, workbench and work-guidance manuals, two software-development
+lessons and a research-methodology lesson. The original lesson files, their
+hashes and the revised literal-data lesson are versioned beside the manifest.
+Each selected source has a stable
 source reference and a SHA-256 content revision. Startup refuses an inconsistent
 manifest rather than silently approving altered bytes. Adding a catalog entry
 or a pack does not automatically add it to this release selection.
@@ -337,12 +338,21 @@ older review or supersession decisions.
 ## Owned task lessons
 
 Owned work turns can also retrieve reviewed lessons taught from the owner's
-Library files and the explicit release-owned software lessons, without adding a
+Library files and the explicit release-owned lessons, without adding a
 specialist agent or assigning the lesson's
 domain to an agent. The authored `agentWorkTrainingContext` recipe searches by
 the current section and overall goal. It selects at most three passages with
 cosine similarity of at least 0.60, within a conservative 1,200-token context
 budget. Existing required tool domains remain separate and unchanged.
+
+Research source retrieval, evidence ledgers, research-to-drafting checks and
+extraction alternatives live in the versioned `training:research-evidence`
+lesson under `research-methodology`. The shared work prompt retains general
+truthfulness, evidence, authority and completion constraints, without imposing
+research procedures on every task. The same section-and-goal retrieval recipe
+selects this lesson; it is not attached by a task-name classifier. Research
+sections still carry their authored evidence-output contracts. Semantic
+selection is bounded and does not guarantee inclusion on every research turn.
 
 The native reader derives the owner, run and goal from the execution context.
 It folds current rows before ranking, then rechecks each candidate's approval,
