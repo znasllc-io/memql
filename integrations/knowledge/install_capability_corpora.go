@@ -120,7 +120,12 @@ func (i *Integration) installCapabilityCorporaHandler(ctx context.Context, args 
 	if err != nil {
 		return nil, err
 	}
-	if provider == nil || provider.Dimensions() != binding.Dimensions || binding.Dimensions <= 0 {
+	if provider == nil || binding.Dimensions <= 0 {
+		return nil, fmt.Errorf("capability installation embedder dimensions do not match the active binding")
+	}
+	// Fleet models may report an unknown width. The active binding is the
+	// authority in that case; an explicit conflicting width still refuses.
+	if declared := provider.Dimensions(); declared > 0 && declared != binding.Dimensions {
 		return nil, fmt.Errorf("capability installation embedder dimensions do not match the active binding")
 	}
 	receipts := map[string]*capabilityInstallReceipt{}
@@ -223,6 +228,14 @@ func (i *Integration) installCapabilityChunk(ctx context.Context, seed canonical
 		vector, err = provider.Embed(ctx, seed.Text)
 		if err != nil {
 			return false, fmt.Errorf("embed registered capability chunk: %w", err)
+		}
+		// Validate before publication, against both this installation's selected
+		// width and the current binding. Storage checks alone happen too late.
+		if len(vector) != binding.Dimensions {
+			return false, fmt.Errorf("embedding model returned %d dimensions, expected %d", len(vector), binding.Dimensions)
+		}
+		if err = memql.ValidateEmbeddingVector(ctx, binding.ProviderRef, binding.Dimensions, vector); err != nil {
+			return false, err
 		}
 	}
 	query := fmt.Sprintf(`mutation createDocumentChunk(chunkId:%s,domainId:%s,text:%s,source:"appStructure",sourceRef:%s,seq:%d,tokenCount:%d)`, quoteString(seed.ID), quoteString(seed.Domain), quoteString(seed.Text), quoteString(seed.SourceRef), seed.Seq, approxTokens(seed.Text))

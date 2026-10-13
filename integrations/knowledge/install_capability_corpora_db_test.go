@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -17,18 +18,21 @@ import (
 
 type installTestEmbedder struct {
 	seedTestProvider
-	calls     int
-	fail      bool
-	badVector bool
+	calls              int
+	fail               bool
+	declaredDimensions int
+	vector             []float32
 }
+
+func (p *installTestEmbedder) Dimensions() int { return p.declaredDimensions }
 
 func (p *installTestEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	p.calls++
 	if p.fail {
 		return nil, errors.New("embedding unavailable")
 	}
-	if p.badVector {
-		return []float32{1, 0, 0}, nil
+	if p.vector != nil {
+		return p.vector, nil
 	}
 	return p.seedTestProvider.Embed(ctx, text)
 }
@@ -44,7 +48,7 @@ func capabilityInstallFixture(t *testing.T) (*seedFixture, *installTestEmbedder)
 		}
 	}
 	seedDomainMu.Unlock()
-	p := &installTestEmbedder{}
+	p := &installTestEmbedder{declaredDimensions: 1024}
 	resolve := func(context.Context, string) (memql.EmbeddingAIProvider, error) { return p, nil }
 	f.a.SetEmbeddingProvider(resolve)
 	f.b.SetEmbeddingProvider(resolve)
@@ -163,16 +167,67 @@ func TestCapabilityInstallationFailsStrictlyAndPreservesPeerReview(t *testing.T)
 
 func TestCapabilityInstallationRetryRepairsPartialPublicationOnAnotherReplica(t *testing.T) {
 	f, p := capabilityInstallFixture(t)
-	p.badVector = true
-	_, err := f.a.installCapabilityCorporaHandler(f.ctx, map[string]any{"domainIds": []string{f.domain}}, 0)
-	require.Error(t, err)
+	table, err := memql.EnsureEmbeddingVectorTable(f.ctx, f.db, f.provider, 1024)
+	require.NoError(t, err)
+	_, err = f.db.ExecContext(f.ctx, `ALTER TABLE `+table+` ADD CONSTRAINT fixture_refuse_vector CHECK (false)`)
+	require.NoError(t, err)
+	_, err = f.a.installCapabilityCorporaHandler(f.ctx, map[string]any{"domainIds": []string{f.domain}}, 0)
+	require.ErrorContains(t, err, "fixture_refuse_vector")
 	require.Equal(t, 1, p.calls)
 	var published int
 	require.NoError(t, f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM (SELECT DISTINCT ON (id) payload FROM "MemoryNodes" WHERE concept='v1:knowledge:documentChunk' ORDER BY id,"createdAt" DESC) latest WHERE payload->>'domainId'=$1 AND payload->>'validationStatus'='validated'`, f.domain).Scan(&published))
 	require.Equal(t, 1, published, "vector failure can leave one exact registered publication, not an acknowledged complete install")
-	p.badVector = false
+	_, err = f.db.ExecContext(f.ctx, `ALTER TABLE `+table+` DROP CONSTRAINT fixture_refuse_vector`)
+	require.NoError(t, err)
 	r := installFixtureCorpus(t, f, f.b)
 	require.Equal(t, len(f.seeds), r.Ready)
 	require.Equal(t, len(f.seeds), r.Embedded)
 	require.Equal(t, len(f.seeds)+1, p.calls)
+}
+
+func TestCapabilityInstallationUsesBoundWidthForUnknownProviderAcrossReplicas(t *testing.T) {
+	f, p := capabilityInstallFixture(t)
+	p.declaredDimensions = 0 // Fleet models outside the catalogue report unknown.
+	_, err := f.ea.Execute(f.ctx, fmt.Sprintf(`builtin knowledgeInstallCapabilityCorpora(domainIds:[%s])`, quoteString(f.domain)))
+	require.NoError(t, err)
+	require.Equal(t, len(f.seeds), p.calls)
+	r := installFixtureCorpus(t, f, f.b)
+	require.Equal(t, len(f.seeds), r.Ready)
+	require.Zero(t, r.Embedded)
+	require.Equal(t, len(f.seeds), p.calls, "peer retry reuses vectors in the bound model space")
+}
+
+func TestCapabilityInstallationRejectsInvalidVectorsBeforePublication(t *testing.T) {
+	f, p := capabilityInstallFixture(t)
+	valid := make([]float32, 1024)
+	valid[0] = 1
+	nan := append([]float32(nil), valid...)
+	nan[0] = float32(math.NaN())
+	infinite := append([]float32(nil), valid...)
+	infinite[0] = float32(math.Inf(1))
+	for _, tc := range []struct {
+		name     string
+		declared int
+		vector   []float32
+		want     string
+		calls    int
+	}{
+		{"explicit width conflicts", 512, valid, "do not match", 0},
+		{"declared width wrong response", 1024, []float32{1, 0, 0}, "expected 1024", 1},
+		{"unknown width wrong response", 0, []float32{1, 0, 0}, "expected 1024", 1},
+		{"empty response", 0, []float32{}, "expected 1024", 1},
+		{"zero response", 0, make([]float32, 1024), "zero vector", 1},
+		{"non-finite response", 0, nan, "non-finite", 1},
+		{"infinite response", 0, infinite, "non-finite", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p.declaredDimensions, p.vector, p.calls = tc.declared, tc.vector, 0
+			_, err := f.ea.Execute(f.ctx, fmt.Sprintf(`builtin knowledgeInstallCapabilityCorpora(domainIds:[%s])`, quoteString(f.domain)))
+			require.ErrorContains(t, err, tc.want)
+			require.Equal(t, tc.calls, p.calls)
+			var written int
+			require.NoError(t, f.db.QueryRowContext(f.ctx, `SELECT count(*) FROM "MemoryNodes" WHERE concept='v1:knowledge:documentChunk' AND payload->>'domainId'=$1`, f.domain).Scan(&written))
+			require.Zero(t, written, "invalid embedding cannot publish even an exact registered chunk")
+		})
+	}
 }
