@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.10
+
+- Support concept retention declarations in edition 2026, grammar
+  `2026.10-concept-retention-bd219665`: TTL, keep-latest and verified archival.
+
 ## 0.6.9
 
 - Claim a new local cluster on one page. Register owner passkey opens the

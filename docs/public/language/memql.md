@@ -628,6 +628,7 @@ client that ignores it sees exactly the previous contract.
 
 Declare version lifetime on the concept:
 
+<!-- corpus: 2026/examples/memql/retention/policy.memql -->
 ```memql
 @retention(ttl="30d", keepLatest=true, archive="required")
 concept reading {
