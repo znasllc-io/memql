@@ -2,12 +2,14 @@ package app
 
 import (
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/envregistry"
 	"sync"
 	"testing"
 )
 
 const packagePollAutomation = "pollPackageUpstreams"
 const pipelinesPollAutomation = "pollPipelines"
+const releaseKnowledgeAutomation = "reconcileReleaseKnowledge"
 
 var placementFixture = sync.OnceValues(func() ([]*automations.Automation, error) {
 	return automations.NewLoader(automations.LoaderOptions{}).LoadAll()
@@ -69,6 +71,10 @@ func TestPipelinesPollRunsOnlyOnElectedAgent(t *testing.T) {
 	assertPlacedOnlyOn(t, pipelinesPollAutomation, "agent")
 }
 
+func TestReleaseKnowledgeReconciliationRunsOnlyOnElectedBFF(t *testing.T) {
+	assertPlacedOnlyOn(t, releaseKnowledgeAutomation, "bff")
+}
+
 // TestALeaseRunsOnlyItsOwnAutomation: the leases are independent, so holding
 // one never fires the other placed automation, even where general leadership
 // would admit everything.
@@ -97,9 +103,13 @@ func TestOnlyTheirNodeTypesCreateThePlacedLeases(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			expectedNodeType := nodeType
+			if expectedNodeType == "" {
+				expectedNodeType = envregistry.DefaultNodeType
+			}
 			expected := 0
 			for _, p := range placementsForTest(t) {
-				if string(p.nodeType) == nodeType {
+				if string(p.nodeType) == expectedNodeType {
 					expected++
 				}
 			}
@@ -112,6 +122,9 @@ func TestOnlyTheirNodeTypesCreateThePlacedLeases(t *testing.T) {
 			}
 			if gate(pipelinesPollAutomation) {
 				t.Fatal("a node with no acquired agent lease must not run the pipelines poll")
+			}
+			if gate(releaseKnowledgeAutomation) {
+				t.Fatal("a node with no acquired bff lease must not reconcile release knowledge")
 			}
 		})
 	}
