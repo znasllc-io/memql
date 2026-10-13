@@ -206,8 +206,7 @@ func doorIngressWithRoutes(req DoorBindRequest, b doorBackend, routes []doorRout
 	}
 	// AFTER the copy: whether the error pages can stand behind this Ingress is
 	// decided by the backend protocol the copy just brought in. The app. and
-	// api. HTTP Ingresses fall back to them; the gRPC and identity ones, which
-	// the proxy reaches over GRPC and HTTPS, do not. The Service is looked up in
+	// api. HTTP Ingresses use HTTP; identity uses the TLS Service. gRPC is excluded. The Service is looked up in
 	// req.Namespace, so a door created outside the engine's namespace needs its
 	// own `error-pages` there (withErrorPagesBackend says what happens until
 	// it has one).

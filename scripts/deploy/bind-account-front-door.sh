@@ -40,14 +40,11 @@
 # `nginx.ingress.kubernetes.io/default-backend: error-pages` sends a request to
 # `memql error-pages` instead when its Service has no ready endpoints, and this
 # script applies it under the rule integrations/customdomain's doorIngressObjects
-# applies: only an Ingress whose proxy speaks plain HTTP carries it. That is
+# applies: HTTP locations use error-pages and HTTPS uses error-pages-tls. That is
 # app. (the edge) and api.'s HTTP paths (bff-http). It is NOT on api.'s gRPC
-# Ingress (backend-protocol GRPC) or on id. (backend-protocol HTTPS):
-# ingress-nginx keeps an Ingress's backend protocol when it swaps in the
-# default backend, and the error pages are a plain HTTP/1.1 server, so behind
-# grpc_pass they would be sent h2c and behind HTTPS a TLS handshake -- and
-# either way the proxy answers 502, which is worse than the bare 503 it
-# replaces. The Service is looked up in --namespace; a namespace other than the
+# Ingress (backend-protocol GRPC). The id. HTTPS Ingress uses error-pages-tls,
+# whose first port speaks TLS. Both Services live in the Ingress namespace.
+# An installation using a namespace other than the
 # engine's needs an `error-pages` Deployment AND Service of its own (a Service
 # alone selects no pods there), and until it has both ingress-nginx skips the
 # fallback and the Ingress behaves as it did before.
@@ -159,6 +156,7 @@ readonly PROXY_BODY_SIZE="48m"
 # plain-HTTP Ingresses only -- see the header for why id. and the gRPC one do
 # not carry it.
 readonly ERROR_PAGES_BACKEND='nginx.ingress.kubernetes.io/default-backend: error-pages'
+readonly ERROR_PAGES_TLS_BACKEND='nginx.ingress.kubernetes.io/default-backend: error-pages-tls'
 
 OBJECT_NAME=""
 APPLIED=false
@@ -326,7 +324,7 @@ YAML
 # on every request while the row says live; and ingress-nginx defaults
 # proxy-body-size to 1m, so `api.` without it 413s every upload past a
 # megabyte with a message naming no knob. app. passes ERROR_PAGES_BACKEND here;
-# id. does not, because its HTTPS backend protocol rules the error pages out.
+# id. uses the TLS fallback Service because its backend speaks HTTPS.
 function render_simple_ingress() {
     local name="$1" host="$2" service="$3" port="$4"
     shift 4
@@ -516,7 +514,8 @@ function render_objects() {
     printf -- '---\n'
     render_simple_ingress "${OBJECT_NAME}-id" "$ID_HOST" "$IDENTITY_SERVICE" "$IDENTITY_PORT" \
         'nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"' \
-        'nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"' 
+        'nginx.ingress.kubernetes.io/proxy-ssl-verify: "off"' \
+        "$ERROR_PAGES_TLS_BACKEND"
     # THE HTTP RULE SET IS OMITTED WHEN THERE ARE NO PATHS, rather than emitted
     # empty. An Ingress whose rule carries a zero-length `paths` list is
     # rejected by the API server, so an empty --apiPaths would take the whole

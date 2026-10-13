@@ -66,15 +66,7 @@ func TestCustomDomainIngressHasErrorPagesBackend(t *testing.T) {
 	}
 }
 
-// An account's front door is four Ingresses and only two of them can fall back
-// to the error pages. The proxy keeps the Ingress's backend protocol when it
-// swaps in the default backend (ingress-nginx's buildProxyPass reads the
-// location's protocol, and only its own built-in default backend is forced back
-// to http), and the error pages are a plain HTTP/1.1 server. Each of the other
-// two protocols rules an Ingress out on its own account: behind GRPC the proxy
-// speaks h2c to them, and behind HTTPS it opens a TLS connection to a server
-// that speaks none, so the handshake fails. Both answer 502 -- worse than the
-// bare 503 they replace.
+// HTTP and HTTPS page backends use different Services; gRPC is excluded.
 func TestAccountDoorIngressHasErrorPagesBackend(t *testing.T) {
 	door := DoorBindRequest{
 		AccountID: "a1", ReservedName: "memql.example.com", Namespace: "memql",
@@ -94,7 +86,7 @@ func TestAccountDoorIngressHasErrorPagesBackend(t *testing.T) {
 		"-app":      true,  // edge, plain HTTP
 		"-api":      true,  // bff-http, plain HTTP
 		"-api-grpc": false, // backend-protocol GRPC: the proxy would speak h2c to a server that speaks HTTP/1.1
-		"-id":       false, // backend-protocol HTTPS: the proxy would start a TLS handshake with a server that speaks none
+		"-id":       true,  // HTTPS uses a separate TLS Service
 	}
 	seen := map[string]bool{}
 	for _, obj := range objects {
@@ -109,8 +101,12 @@ func TestAccountDoorIngressHasErrorPagesBackend(t *testing.T) {
 
 		annotations := ingressAnnotations(t, obj)
 		got, has := annotations[defaultBackendKey]
+		expected := "error-pages"
+		if suffix == "-id" {
+			expected = "error-pages-tls"
+		}
 		switch {
-		case fit && got != "error-pages":
+		case fit && got != expected:
 			t.Errorf("%s carries %s=%v, want error-pages", name, defaultBackendKey, got)
 		case !fit && has:
 			t.Errorf("%s carries %s=%v, but its backend protocol is %v and the error pages speak plain HTTP/1.1: the proxy would answer 502",
@@ -139,7 +135,7 @@ func TestErrorPagesAreOfferedOnlyToPlainHTTPBackends(t *testing.T) {
 		{set: false, fits: true},
 		{protocol: "HTTP", set: true, fits: true},
 		{protocol: "http", set: true, fits: true},
-		{protocol: "HTTPS", set: true, fits: false},
+		{protocol: "HTTPS", set: true, fits: true},
 		{protocol: "GRPC", set: true, fits: false},
 		{protocol: "GRPCS", set: true, fits: false},
 		{protocol: "AUTO_HTTP", set: true, fits: false},
@@ -148,6 +144,7 @@ func TestErrorPagesAreOfferedOnlyToPlainHTTPBackends(t *testing.T) {
 		annotations := map[string]any{}
 		if tc.set {
 			annotations[backendProtocolKey] = tc.protocol
+			annotations["nginx.ingress.kubernetes.io/proxy-ssl-verify"] = "off"
 		}
 		withErrorPagesBackend(annotations)
 		_, has := annotations[defaultBackendKey]
@@ -163,7 +160,7 @@ func TestErrorPagesAreOfferedOnlyToPlainHTTPBackends(t *testing.T) {
 // ships does not carry it until it is bound again.
 // docs/public/operate/front-door.md gives the one-off that adds it: it lists
 // the custom-domain and door Ingresses by their labels, and annotates each one
-// whose backend-protocol annotation is absent or HTTP -- withErrorPagesBackend's
+// whose backend protocol has a compatible fallback -- withErrorPagesBackend's
 // own rule, read off the object. The protocol and not a name suffix, because the
 // objects it acts on were written by OLDER engine versions: what an Ingress's
 // proxy speaks is on the object whichever version wrote it, while a suffix is a
@@ -181,10 +178,12 @@ func TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel(t *testing.T) {
 		// beside its name, and its awk filter keeps the rows whose protocol is
 		// empty or HTTP.
 		protocolPath   = `{.metadata.annotations.nginx\.ingress\.kubernetes\.io/backend-protocol}`
-		protocolFilter = `$2 == "" || toupper($2) == "HTTP"`
+		protocolFilter = `$2 == "" || toupper($2) == "HTTP" || (toupper($2) == "HTTPS" && $3 == "off")`
 	)
 	// picks is protocolFilter as awk applies it to the printed protocol.
-	picks := func(protocol string) bool { return protocol == "" || strings.ToUpper(protocol) == "HTTP" }
+	picks := func(protocol string) bool {
+		return protocol == "" || strings.ToUpper(protocol) == "HTTP" || strings.ToUpper(protocol) == "HTTPS"
+	}
 
 	labelOf := func(obj map[string]any, key string) string {
 		labels, _ := obj["metadata"].(map[string]any)["labels"].(map[string]any)
@@ -225,8 +224,8 @@ func TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel(t *testing.T) {
 			selected++
 		}
 	}
-	if annotated != 2 || selected != 2 {
-		t.Errorf("a door renders %d annotated and %d selected Ingresses, want 2 and 2 (app and api)", annotated, selected)
+	if annotated != 3 || selected != 3 {
+		t.Errorf("a door renders %d annotated and %d selected Ingresses, want 3 and 3 (app, api, id)", annotated, selected)
 	}
 
 	raw, err := os.ReadFile("../../docs/public/operate/front-door.md")
@@ -239,12 +238,22 @@ func TestTheUpgradeBackfillInTheDocsSelectsWhatTheBuildersLabel(t *testing.T) {
 	// dropped, and the same loop then annotates every plain-HTTP Ingress in the
 	// namespace, the front door's own (mcp-front-door included).
 	loop := "for sel in " + customDomainSelector + " " + doorSelector + "; do"
-	for _, want := range []string{loop, `get ingress -l "$sel"`, protocolPath, "'" + protocolFilter, "default-backend=error-pages"} {
+	for _, want := range []string{loop, `get ingress -l "$sel"`, protocolPath, "'" + protocolFilter, `default-backend="$backend"`, "error-pages-tls"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("docs/public/operate/front-door.md does not contain %q; the upgrade backfill the page gives must select exactly what the builders annotate", want)
 		}
 	}
 	if strings.Contains(doc, "-(app|api)$") {
 		t.Error("docs/public/operate/front-door.md still selects door Ingresses by name suffix; an older engine's names are a convention, its backend protocol is on the object")
+	}
+}
+
+func TestHTTPSFallbackDoesNotWeakenUpstreamVerification(t *testing.T) {
+	for _, verify := range []string{"", "on"} {
+		annotations := map[string]any{backendProtocolKey: "HTTPS", "nginx.ingress.kubernetes.io/proxy-ssl-verify": verify}
+		withErrorPagesBackend(annotations)
+		if _, ok := annotations[defaultBackendKey]; ok {
+			t.Errorf("offered an untrusted fallback with verification %q", verify)
+		}
 	}
 }
