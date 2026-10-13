@@ -60,7 +60,11 @@ func (i *Integration) parkHumanDecisionWithBudget(ctx context.Context, owner, ru
 		return "", fmt.Errorf("human decision requires the current owned work run")
 	}
 	hash := workstate.ArtifactHash(subject)
-	first := "question-" + workstate.ArtifactHash(map[string]any{"run": memql.BareShortId(runID), "step": rc.StepKey, "question": hash, "kind": approvalKind})[:32]
+	identity := map[string]any{"run": memql.BareShortId(runID), "step": rc.StepKey, "question": hash, "kind": approvalKind}
+	if rc.RerunRequestId != "" {
+		identity["rerunRequestId"] = rc.RerunRequestId
+	}
+	first := "question-" + workstate.ArtifactHash(identity)[:32]
 	if i.decisionGate == nil {
 		return "", fmt.Errorf("feedback coordination is unavailable")
 	}
@@ -125,6 +129,9 @@ func (i *Integration) parkHumanDecisionWithBudget(ctx context.Context, owner, ru
 	}
 	if run == nil || run["cancelRequested"] == true || (rowString(run, "status") != runStatusRunning && rowString(run, "status") != runStatusWaiting) {
 		return "", fmt.Errorf("feedback run is no longer active")
+	}
+	if rowString(rowMap(run, "rerun"), "requestId") != rc.RerunRequestId {
+		return "", fmt.Errorf("human decision execution request changed")
 	}
 	if budget != nil && memql.BareShortId(rowString(run, "goalId")) != memql.BareShortId(rc.GoalId) {
 		return "", fmt.Errorf("budget checkpoint goal changed")

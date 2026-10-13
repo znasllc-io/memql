@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -83,4 +84,86 @@ func TestWorkContinuationRequiresTheExactOwnedAnsweredCheckpoint(t *testing.T) {
 	write("updateWorkRun", map[string]any{"runId": runID, "status": "cancelled"})
 	_, err = b.PrepareWorkContinuation(runCtx, request)
 	require.Error(t, err, "cancelled work resumed")
+}
+
+// A new replica must bind the immutable transcript to the exact rerun request,
+// even when the messages are identical to a prior attempt. Missing legacy proof
+// is a refusal, not permission to restart the effectful turn.
+func TestWorkContinuationBindsTheFreshRerunRequestAcrossReplicas(t *testing.T) {
+	a, _, _ := readMergeTestEngine(t)
+	b, _, _ := readMergeTestEngine(t)
+	previous := auth.InstalledCapabilityCatalog()
+	auth.SetCapabilityCatalog(nil)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+	ctx := askTestActor()
+	ac, _ := auth.AccessFromContext(ctx)
+	runID, goalID, approvalID := id.NewShortId(), id.NewShortId(), id.NewShortId()
+	write := func(name string, args map[string]any) {
+		t.Helper()
+		call, err := parser.RenderCall(name, args)
+		require.NoError(t, err)
+		_, err = a.Execute(auth.ContextWithInternalOrigin(ctx), "mutation "+call)
+		require.NoError(t, err)
+	}
+	write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Continue one explicit rerun", "origin": "user"})
+	write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "feedback", "templateFingerprint": "test", "status": "running", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	write("createWorkApproval", map[string]any{"approvalId": approvalID, "runId": runID, "stepKey": "reason", "kind": "feedback", "artifactHash": "question", "question": "Continue?", "requestedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+	write("decideWorkApproval", map[string]any{"approvalId": approvalID, "decision": "answered", "decidedBy": ac.UserId, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": map[string]any{"text": "Continue"}})
+	rerun := map[string]any{"requestId": id.NewShortId(), "stepKey": "reason", "reason": "rerun"}
+	setRerun := func(value map[string]any) {
+		write("updateWorkRun", map[string]any{"runId": runID, "status": "running", "humanResumeId": approvalID, "rerun": value})
+	}
+	setRerun(rerun)
+	run := common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: ac.UserId, StepKey: "reason", Mode: common.RunModeLive, RerunRequestId: rerun["requestId"].(string)}
+	request := CheckpointResumeRequest{RunID: runID, StepKey: run.StepKey, ApprovalID: approvalID, RerunRequestID: run.RerunRequestId}
+	messages := []common.ChatMessage{{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "effect", Name: "writeFile", Arguments: "{}"}}}, {Role: "tool", ToolCallId: "effect", Name: "writeFile", Content: "Committed once"}}
+	prepare := func() (context.Context, error) {
+		return b.PrepareWorkContinuation(common.ContextWithRun(ctx, run), request)
+	}
+	raw, err := json.Marshal(messages)
+	require.NoError(t, err)
+	old := run
+	old.RerunRequestId = ""
+	require.NotEqual(t, continuationID(old, raw), continuationID(run, raw))
+	require.NoError(t, a.SaveWorkContinuation(common.ContextWithRun(ctx, old), messages))
+	_, err = prepare()
+	require.Error(t, err, "ordinary transcript cannot authorize a rerun")
+	freshInput := []common.ChatMessage{{Role: "user", Content: "Explicit new version"}}
+	restored, err := b.RestoreWorkContinuation(common.ContextWithRun(ctx, run), freshInput)
+	require.NoError(t, err)
+	require.Equal(t, freshInput, restored, "a new explicit rerun must not inherit the previous attempt's transcript")
+	require.NoError(t, a.SaveWorkContinuation(common.ContextWithRun(ctx, run), messages))
+	prepared, err := prepare()
+	require.NoError(t, err)
+	restored, err = b.RestoreWorkContinuation(prepared, nil)
+	require.NoError(t, err)
+	require.Equal(t, messages, restored)
+	for _, next := range []map[string]any{{}, {"requestId": "another", "stepKey": "reason", "reason": "rerun"}} {
+		setRerun(next)
+		_, err = prepare()
+		require.Error(t, err, "fresh peer mutation must invalidate warmed admission")
+		_, err = b.RestoreWorkContinuation(prepared, nil)
+		require.Error(t, err, "already prepared context is not an authority token")
+	}
+	setRerun(rerun)
+	for _, missing := range []bool{true, false} {
+		changed := run
+		changed.RerunRequestId = "different"
+		if missing {
+			changed.RerunRequestId = ""
+		}
+		_, err = b.PrepareWorkContinuation(common.ContextWithRun(ctx, changed), request)
+		require.Error(t, err)
+		badRequest := request
+		badRequest.RerunRequestID = changed.RerunRequestId
+		_, err = b.PrepareWorkContinuation(common.ContextWithRun(ctx, run), badRequest)
+		require.Error(t, err)
+		// Preserve the original row ID but strip/change its proof: neither a
+		// legacy record nor a mutable metadata field can authorize the content.
+		write("createWorkObservation", map[string]any{"observationId": continuationID(run, raw), "runId": runID, "stepKey": run.StepKey, "kind": "note", "content": "Saved execution progress", "data": map[string]any{"continuation": true, "messages": messages, "rerunRequestId": changed.RerunRequestId}})
+		_, err = prepare()
+		require.Error(t, err)
+		_, err = b.RestoreWorkContinuation(prepared, nil)
+		require.Error(t, err)
+	}
 }

@@ -1016,6 +1016,10 @@ func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, ste
 	if run, ok := common.RunFromContext(ctx); ok {
 		if memql.BareShortId(run.RunId) == memql.BareShortId(exec.ID) {
 			run.StepKey = key
+			run.RerunRequestId = ""
+			if exec.rerun != nil {
+				run.RerunRequestId = exec.rerun.RequestId
+			}
 			if run.Continuation != nil && run.Continuation.StepKey != key {
 				run.Continuation = nil
 			}

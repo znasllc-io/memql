@@ -60,8 +60,12 @@ func TestWorkDBHumanDispatchWaitsBeforeClaimAndRecoversTimedOutWakeup(t *testing
 		t.Fatal(err)
 	}
 	defer gates.Close()
-	for _, timeout := range []bool{false, true} {
-		t.Run(fmt.Sprint(timeout), func(t *testing.T) {
+	for _, fixture := range []struct {
+		rerun   string
+		timeout bool
+	}{{}, {timeout: true}, {rerun: "explicit-rerun"}, {rerun: "explicit-rerun", timeout: true}} {
+		rerun, timeout := fixture.rerun, fixture.timeout
+		t.Run(fmt.Sprintf("rerun=%s/timeout=%t", rerun, timeout), func(t *testing.T) {
 			key := id.NewShortId()
 			owner, runID, goalID, approval, child := key+"owner", key+"run", key+"goal", key+"approval", key+"child"
 			ctx := auth.ContextWithAccess(auth.ContextWithUserActor(context.Background(), owner), &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
@@ -70,6 +74,9 @@ func TestWorkDBHumanDispatchWaitsBeforeClaimAndRecoversTimedOutWakeup(t *testing
 			}
 			write("createWorkGoal", map[string]any{"goalId": goalID, "statement": "Synthetic early typed approval", "origin": "user"})
 			write("createWorkRun", map[string]any{"runId": runID, "goalId": goalID, "automationName": "parent", "templateFingerprint": "parent-fixture", "status": "waiting", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339Nano), "heartbeatAt": time.Now().UTC().Format(time.RFC3339Nano), "waitingOn": map[string]any{"kind": "approval", "subject": approval}})
+			if rerun != "" {
+				write("updateWorkRun", map[string]any{"runId": runID, "rerun": map[string]any{"requestId": rerun, "stepKey": "section", "reason": "rerun"}})
+			}
 			write("createWorkRun", map[string]any{"runId": child, "parentRunId": runID, "automationName": "child", "templateFingerprint": "child-fixture", "status": "running", "mode": "live", "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 			write("createWorkStep", map[string]any{"stepId": key + "step", "runId": runID, "key": "section", "seq": 0, "stepType": "automation", "status": "running", "attempt": 1, "startedAt": time.Now().UTC().Format(time.RFC3339Nano)})
 			argsHash, _ := permission.Hash("workerHost", "fs_read", map[string]any{"path": "/fixture/file"})
@@ -105,7 +112,7 @@ func TestWorkDBHumanDispatchWaitsBeforeClaimAndRecoversTimedOutWakeup(t *testing
 			if !decided {
 				t.Fatal("decision handler missing")
 			}
-			event := events.Event{Payload: map[string]any{"id": runID, "payload": map[string]any{"status": "running", "automationName": "parent", "goalId": goalID, "ownerUserId": owner, "humanResumeId": approval}}}
+			event := events.Event{Payload: map[string]any{"id": runID, "payload": map[string]any{"status": "running", "automationName": "parent", "goalId": goalID, "ownerUserId": owner, "humanResumeId": approval, "rerun": map[string]any{"requestId": rerun}}}}
 			for range 2 {
 				for _, peer := range peers {
 					peer.HandleRunEvent(event)
@@ -131,7 +138,7 @@ func TestWorkDBHumanDispatchWaitsBeforeClaimAndRecoversTimedOutWakeup(t *testing
 			}
 			select {
 			case req := <-admitted:
-				if req.HumanResumeId != approval || req.Recovery {
+				if req.HumanResumeId != approval || req.RerunRequestId != rerun || req.Recovery {
 					t.Fatalf("wrong answer claim: %+v", req)
 				}
 			case <-time.After(5 * time.Second):
@@ -153,7 +160,7 @@ func TestWorkDBHumanDispatchWaitsBeforeClaimAndRecoversTimedOutWakeup(t *testing
 				write("updateWorkRun", map[string]any{"runId": runID, "heartbeatAt": time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339Nano)})
 				// Expire only the synthetic answer claim. The original run claim
 				// remains held: takeover must use the same answer identity.
-				_, err := db.DB.ExecContext(ctx, `UPDATE automation_execution_claims SET claimed_at=now()-interval '5 minutes', expires_at=NULL WHERE automation_name=$1 AND dedup_key=$2`, "work.run.dispatch", runID+"#answer:"+approval+"#rerun:")
+				_, err := db.DB.ExecContext(ctx, `UPDATE automation_execution_claims SET claimed_at=now()-interval '5 minutes', expires_at=NULL WHERE automation_name=$1 AND dedup_key=$2`, "work.run.dispatch", runID+"#answer:"+approval+"#rerun:"+rerun)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -177,6 +184,9 @@ func TestWorkDBHumanDispatchWaitsBeforeClaimAndRecoversTimedOutWakeup(t *testing
 			stale := work.DispatchRequest{RunId: runID, HumanResumeId: "another"}
 			if _, ok := d.PrepareDispatch(ctx, stale); ok {
 				t.Fatal("stale answer admitted")
+			}
+			if _, ok := d.PrepareDispatch(ctx, work.DispatchRequest{RunId: runID, HumanResumeId: approval, RerunRequestId: "changed"}); ok {
+				t.Fatal("changed rerun admitted")
 			}
 			write("updateWorkRun", map[string]any{"runId": runID, "cancelRequested": true})
 			if _, ok := d.PrepareDispatch(ctx, work.DispatchRequest{RunId: runID, HumanResumeId: approval}); ok {

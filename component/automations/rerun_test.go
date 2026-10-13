@@ -774,7 +774,7 @@ func TestAReplayedOverrideNeverReachesAnotherStep(t *testing.T) {
 }
 
 // A failure retry can be planned before the downstream steps exist. After
-// recovery reaches human review, another replica must serve those newly
+// recovery reaches a later failed step, another replica must serve those newly
 // completed steps, not interpret their absent version floors as a fresh rerun.
 func TestPartialRerunPlanPreservesCompletedDownstreamSteps(t *testing.T) {
 	for _, status := range []string{"done", "skipped"} {
@@ -788,7 +788,7 @@ func TestPartialRerunPlanPreservesCompletedDownstreamSteps(t *testing.T) {
 			if status == "skipped" {
 				steps[1]["result"] = map[string]any{"stepId": "b", "status": "skipped"}
 			}
-			steps[2]["status"] = "waiting"
+			steps[2]["status"] = "failed"
 			probe, rec, _ := runAgain(t, run, steps)
 			if got := probe.callees(); !reflect.DeepEqual(got, []string{"publish"}) {
 				t.Fatalf("resumed calls %v: completed downstream steps must be served from their receipts", got)
@@ -798,6 +798,23 @@ func TestPartialRerunPlanPreservesCompletedDownstreamSteps(t *testing.T) {
 				if name == "createWorkStep" && (args["key"] == "a" || args["key"] == "b") {
 					t.Fatalf("a completed step received another intent: %s", c)
 				}
+			}
+		})
+	}
+}
+
+// Explicit rerun permission authorizes the new version, not repeated effects
+// after that version asks a person. Even a missing answer must fail closed.
+func TestWaitingRerunNeverFallsBackToRepeatedEffects(t *testing.T) {
+	for _, answer := range []string{"", "answered-but-no-native-proof"} {
+		t.Run(answer, func(t *testing.T) {
+			run, rows := finishedRun("waiting-rerun")
+			run["status"], run["rerun"], run["humanResumeId"] = "running", rerunRequest(RerunReasonRerun, "publish", nil), answer
+			rows[2]["status"] = "waiting"
+			probe := newRunContextProbe()
+			rec, execution, err := runAgainWith(t, probe, run, rows)
+			if !errors.Is(err, ErrNonRetryableStep) || execution != nil || len(probe.callees()) != 0 || len(rec.all()) != 0 {
+				t.Fatalf("unproven waiting version executed: execution=%v calls=%v writes=%v error=%v", execution, probe.callees(), rec.all(), err)
 			}
 		})
 	}

@@ -283,6 +283,13 @@ receipts are ready. Raising a limit gives no tool permission and does not replay
 completed effects. A failed legacy step without those links, a missing or changed
 checkpoint, or an uncertain in-flight tool outcome cannot use this continuation.
 
+The same rule applies after a person chooses **Run again** with unchanged inputs.
+That act starts a new version, but a later native question pauses that version
+rather than starting it again. Its saved progress is bound to the exact rerun
+request and survives the hop to another replica. A missing or changed request,
+checkpoint, override, or child link is refused; an older question cannot authorize
+the newer version. Prior usage and the completed prefix remain intact.
+
 ## Layer 4 — subscription spend, counted but not charged (memql#4362)
 
 A Task delegated to a local app (epic memql#4358) spends **real tokens that

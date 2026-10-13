@@ -22,6 +22,9 @@ func workExecutionContext(ctx context.Context, j, source *automations.RunJournal
 	// every model call the run's steps make on this replica honours it.
 	run := common.RunContext{RunId: j.RunId, GoalId: j.GoalId, OwnerUserId: j.OwnerUserId, Mode: j.Mode, ReplayPolicy: j.ReplayPolicy, ForkAtStepKey: j.ForkAtStepKey, Routing: j.Routing}
 	run.Spine = j.Spine
+	if j.Rerun != nil {
+		run.RerunRequestId = j.Rerun.RequestId
+	}
 	if run.Mode == "" {
 		run.Mode = common.RunModeLive
 	}

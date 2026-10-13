@@ -17,7 +17,7 @@ import (
 // lets the ordinary recovery sweep claim that same answer, even while the
 // original execution's leased claim still exists.
 func (d *workRunDispatcher) PrepareDispatch(ctx context.Context, req work.DispatchRequest) (work.DispatchRequest, bool) {
-	if req.RerunRequestId != "" || (!req.Recovery && req.HumanResumeId == "") {
+	if !req.Recovery && req.HumanResumeId == "" {
 		return req, true
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -28,15 +28,19 @@ func (d *workRunDispatcher) PrepareDispatch(ctx context.Context, req work.Dispat
 			return req, false
 		}
 		if req.Recovery {
-			if journal.GoalId == "" || journal.Status != "running" || journal.Rerun != nil || journal.HumanResumeId == "" || journal.StepStates[journal.FailedStep].Status != "waiting" {
+			if journal.GoalId == "" || journal.Status != "running" || journal.HumanResumeId == "" || journal.StepStates[journal.FailedStep].Status != "waiting" {
 				return req, true
 			}
 			req.HumanResumeId = journal.HumanResumeId
+			req.RerunRequestId = ""
+			if journal.Rerun != nil {
+				req.RerunRequestId = journal.Rerun.RequestId
+			}
 			req.OwnerUserId, req.GoalId, req.AutomationName = journal.OwnerUserId, journal.GoalId, journal.AutomationName
 			req.HumanResumeRecovery = !journal.HeartbeatAt.IsZero() && time.Since(journal.HeartbeatAt) >= work.DefaultAbandonedAfterSeconds*time.Second
 			req.Recovery = req.HumanResumeRecovery
 		}
-		if journal.CancelRequested || journal.Status != "running" || req.HumanResumeId != journal.HumanResumeId || journal.GoalId == "" || journal.Rerun != nil {
+		if journal.CancelRequested || journal.Status != "running" || req.HumanResumeId != journal.HumanResumeId || journal.GoalId == "" || !workRerunServable(req, journal) {
 			return req, false
 		}
 		if !journal.HasRunningStep && journal.StepStates[journal.FailedStep].Status == "waiting" {

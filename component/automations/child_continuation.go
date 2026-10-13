@@ -23,7 +23,8 @@ type automationResolver interface {
 }
 
 // checkpointPlan is native, call-local evidence. It cannot arrive in a request
-// or a saved row, and authorizes only the recorded suspended path, never a rerun.
+// or a saved row, and authorizes only the recorded suspended path, never a
+// fresh execution of completed effects (including within an explicit rerun).
 type checkpointPlan struct {
 	journal    *RunJournal
 	automation *Automation
@@ -41,15 +42,30 @@ func (e *Executor) prepareCheckpoint(ctx context.Context, journal *RunJournal, a
 	if journal.CancelRequested || !ok || run.OwnerUserId == "" || memql.BareShortId(journal.OwnerUserId) != memql.BareShortId(run.OwnerUserId) {
 		return ctx, nil, fmt.Errorf("checkpoint journal is not owned by this work")
 	}
-	if err := validateRunJournal(journal, auto, fingerprintEngine, false); err != nil {
+	rerun := depth == 0 && journal.Rerun != nil
+	if err := validateRunJournal(journal, auto, fingerprintEngine, rerun); err != nil {
 		return ctx, nil, err
 	}
 	key := statementResumePoint(journal, auto)
+	if rerun {
+		target, err := rerunTargetIndex(auto, journal.Rerun, journal.ForkAtStepKey)
+		if err != nil {
+			return ctx, nil, err
+		}
+		key = rerunResumePoint(journal, auto, journal.Rerun, target)
+	}
 	if depth == 0 && key != request.StepKey {
 		return ctx, nil, fmt.Errorf("checkpoint target changed")
 	}
-	if journal.StepStates[key].Status != "waiting" || !journal.StepOverrides[key].Empty() || journal.Rerun != nil {
+	if journal.StepStates[key].Status != "waiting" || !journal.StepOverrides[key].Empty() {
 		return ctx, nil, fmt.Errorf("checkpoint step is not an unchanged suspension")
+	}
+	if journal.Rerun != nil {
+		if depth != 0 || request.RerunRequestID == "" || journal.Rerun.RequestId != request.RerunRequestID || !journal.Rerun.Override.Empty() || journal.Rerun.Snapshot != nil {
+			return ctx, nil, fmt.Errorf("checkpoint rerun request changed")
+		}
+	} else if depth == 0 && request.RerunRequestID != "" {
+		return ctx, nil, fmt.Errorf("checkpoint rerun request is unavailable")
 	}
 	var step *Step
 	for _, candidate := range auto.Steps {

@@ -72,6 +72,8 @@ type modelBudgetAdapter struct {
 	*CognitionEngineAdapter
 	reads          *int
 	failCheckpoint bool
+	legacyFailure  bool
+	legacyCeiling  *memql.RunCeilingError
 }
 
 func (a *modelBudgetAdapter) ToolDefinitionsForNames(names []string) []common.ToolDefinition {
@@ -88,6 +90,10 @@ func (a *modelBudgetAdapter) ExecuteToolByName(_ context.Context, name string, _
 	return `{"evidence":"read completed once"}`, nil
 }
 func (a *modelBudgetAdapter) PauseWorkForBudget(ctx context.Context, c *memql.RunCeilingError, m []common.ChatMessage) error {
+	if a.legacyFailure {
+		a.legacyCeiling = c
+		return c
+	}
 	if a.failCheckpoint {
 		return fmt.Errorf("%w: synthetic checkpoint failure", memql.ErrWorkCheckpointRequired)
 	}
@@ -97,6 +103,7 @@ func (a *modelBudgetAdapter) PauseWorkForBudget(ctx context.Context, c *memql.Ru
 type installedBudgetTurn struct {
 	*replierTurnRunner
 	background bool
+	legacy     *modelBudgetAdapter
 }
 
 func (r *installedBudgetTurn) ResolveOwnerAgent(context.Context, string) (string, error) {
@@ -109,12 +116,22 @@ func (r *installedBudgetTurn) RunTurn(ctx context.Context, msg *memqlv1.AgentGen
 		}
 		msg.Hints[agent.ExecutionLaneHintKey] = "background"
 	}
-	return r.replierTurnRunner.RunTurn(ctx, msg)
+	answer, err := r.replierTurnRunner.RunTurn(ctx, msg)
+	if r.legacy != nil && r.legacy.legacyCeiling != nil {
+		return "", r.legacy.legacyCeiling
+	}
+	return answer, err
 }
 
 func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
+	testModelBudgetBoundaries(t, []string{"initial", "after-tool", "checkpoint-failure"})
+}
+func TestWorkDBNativeBudgetContinuesTheExplicitRerun(t *testing.T) {
+	testModelBudgetBoundaries(t, []string{"legacy-rerun"})
+}
+func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 	for _, background := range []bool{false, true} {
-		for _, boundary := range []string{"initial", "after-tool", "checkpoint-failure"} {
+		for _, boundary := range boundaries {
 			t.Run(fmt.Sprintf("background=%v/%s", background, boundary), func(t *testing.T) {
 				writer, db := workTemplateDBEngineAndDB(t)
 				reader := workTemplateDBEngine(t)
@@ -152,11 +169,11 @@ func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
 					require.NoError(t, rules.Register(&memql.RuleConfig{Name: memql.DefaultRuleName, Policy: "fixture", Locked: true, OnUnavailable: memql.OnUnavailableDegrade, SourceFile: "dsl/rules/rules.memql"}))
 					require.NoError(t, rules.Finalize())
 					rtr := router.New(registry, memql.NewPolicyRegistryForTest(map[string][]string{"fixture": {"fixture"}}), rules, nil, e.Logger)
-					adapter := &modelBudgetAdapter{CognitionEngineAdapter: &CognitionEngineAdapter{Engine: e}, reads: &reads, failCheckpoint: n == 0 && boundary == "checkpoint-failure"}
+					adapter := &modelBudgetAdapter{CognitionEngineAdapter: &CognitionEngineAdapter{Engine: e}, reads: &reads, failCheckpoint: n == 0 && boundary == "checkpoint-failure", legacyFailure: n == 0 && boundary == "legacy-rerun"}
 					replier, err := agent.NewReplier(adapter, rtr, e.Logger)
 					require.NoError(t, err)
 					ai := agents.New(e.Agents(), e)
-					ai.SetAgentTurnRunner(&installedBudgetTurn{replierTurnRunner: &replierTurnRunner{replier: replier, engine: e}, background: background})
+					ai.SetAgentTurnRunner(&installedBudgetTurn{replierTurnRunner: &replierTurnRunner{replier: replier, engine: e}, background: background, legacy: adapter})
 					require.NoError(t, e.RegisterIntegration(ai))
 					require.NoError(t, e.RegisterIntegration(&childPauseFixture{engine: e, t: t, effects: effects}))
 					require.NoError(t, e.Functions().Upsert(&memql.Function{Name: "fixtureeffect", Type: memql.FunctionTypeBuiltin, Enabled: true, BuiltinArgs: &memql.BuiltinArgContract{Profile: memql.BuiltinArgProfileOptionalObject, Properties: map[string]string{"label": "string"}}, ArgsSchema: &memql.ArgsSchemaConfig{Fields: []*memql.FunctionArgsField{{Name: "label", Type: "string"}}}, FunctionKind: "builtin", Executor: "integration.childPauseFixture.effect"}))
@@ -166,6 +183,9 @@ func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
 						`@template automation section { builtin fixtureeffect(label: "child-prefix"); answer := builtin runAgentTurn(prompt: "Complete the synthetic section") retry(2) on error continue; builtin fixtureeffect(label: "child-tail"); return answer }`,
 						`@template automation parent { builtin fixtureeffect(label: "completed-section"); answer := automation section(); builtin fixtureeffect(label: "later-section"); return answer }`,
 					} {
+						if boundary == "legacy-rerun" {
+							src = strings.ReplaceAll(src, " retry(2) on error continue", "")
+						}
 						a, err := loader.CompileSource(strings.ReplaceAll(src, "; ", "\n"), "model-budget.memql")
 						require.NoError(t, err)
 						tpl.members[a.Name] = a
@@ -197,9 +217,54 @@ func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
 					require.NoError(t, err)
 					return j
 				}
+				act := func(name string, args map[string]any) {
+					for _, cap := range peers[1].Capabilities() {
+						if cap.Name == name {
+							_, err := cap.Handler(person, args, 0)
+							require.NoError(t, err)
+							return
+						}
+					}
+					t.Fatalf("missing capability %s", name)
+				}
 				var wait *workstate.HumanWait
-				require.ErrorAs(t, err, &wait)
-				require.Equal(t, 1, count, "every journal must reuse the same native question")
+				if boundary == "legacy-rerun" {
+					// Reproduce the stored old shape through the old raw refusal,
+					// then use only the existing explicit human decision + rerun APIs.
+					require.Error(t, err)
+					require.Equal(t, 2, count)
+					legacy := load(reader, runID)
+					require.Equal(t, "failed", legacy.StepStates[legacy.FailedStep].Status)
+					require.Empty(t, legacy.StepStates[legacy.FailedStep].ChildRunId)
+					var approvalIDs []string
+					require.NoError(t, db.NewRaw(`SELECT DISTINCT id FROM "MemoryNodes" WHERE concept='v1:work:approval' AND payload->>'ownerUserId' IN (?,?)`, owner, "v1:identity:user:"+owner).Scan(person, &approvalIDs))
+					for _, approvalID := range approvalIDs {
+						act("decideApproval", map[string]any{"approvalId": approvalID, "decision": "rejected"})
+					}
+					require.Equal(t, "failed", load(reader, runID).Status)
+					act("rerunStep", map[string]any{"runId": runID, "stepKey": legacy.FailedStep})
+					j := load(reader, runID)
+					require.NotNil(t, j.Rerun)
+					prepared, options, prepErr := automations.PrepareRerun(j, nil, triggers[1].template.members["parent"])
+					require.NoError(t, prepErr)
+					retry := triggers[1].executor()
+					defer retry.Close()
+					retryCtx, contextErr := workExecutionContext(person, j, nil, nil)
+					require.NoError(t, contextErr)
+					_, err = retry.ResumeFrom(retryCtx, prepared, triggers[1].template.members["parent"], options)
+					require.ErrorAs(t, err, &wait)
+					require.Equal(t, 1, effects["completed-section"], "explicit retry preserves the completed prefix")
+					require.Equal(t, 2, effects["child-prefix"], "only the explicitly selected section starts a new version")
+					require.Zero(t, providers[1].calls, "original spend must refuse before a provider or another tool")
+					fresh := load(reader, runID)
+					require.Equal(t, "waiting", fresh.StepStates[fresh.FailedStep].Status)
+					require.NotEmpty(t, fresh.StepStates[fresh.FailedStep].ChildRunId)
+					// The legacy question was not reused or guessed into native proof.
+					require.NotContains(t, approvalIDs, "v1:work:approval:"+wait.ApprovalID)
+				} else {
+					require.ErrorAs(t, err, &wait)
+					require.Equal(t, 1, count, "every journal must reuse the same native question")
+				}
 				journal := load(reader, runID)
 				require.Equal(t, "waiting", journal.Status)
 				suspended := journal.StepStates[journal.FailedStep]
@@ -209,20 +274,27 @@ func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
 				require.Equal(t, "waiting", child.Status)
 				require.Equal(t, wait.ApprovalID, memql.BareShortId(fmt.Sprint(child.WaitingOn["subject"])))
 				expectedReads := 0
-				if boundary == "after-tool" {
+				if boundary == "after-tool" || boundary == "legacy-rerun" {
 					expectedReads = 1
 				}
 				require.Equal(t, expectedReads, reads)
 				require.Equal(t, expectedReads, providers[0].calls, "refused model admission must never execute another provider")
+				limit := 8
+				if boundary == "legacy-rerun" {
+					limit = 2
+					providers[1].readFirst = true
+				}
 				for _, cap := range peers[1].Capabilities() {
 					if cap.Name == "decideApproval" {
-						_, err := cap.Handler(person, map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": map[string]any{"newLimit": 8}}, 0)
+						_, err := cap.Handler(person, map[string]any{"approvalId": wait.ApprovalID, "decision": "approved", "answer": map[string]any{"newLimit": limit}}, 0)
 						require.NoError(t, err)
 					}
 				}
 				journal = load(reader, runID)
 				require.Equal(t, "running", journal.Status)
-				require.Nil(t, journal.Rerun)
+				if boundary != "legacy-rerun" {
+					require.Nil(t, journal.Rerun)
+				}
 				admitted := make(chan work.DispatchRequest, 2)
 				for n, p := range peers {
 					p.SetDispatcher(&humanReadyDispatcher{workRunDispatcher: &workRunDispatcher{app: triggers[n].app}, admitted: admitted})
@@ -243,12 +315,111 @@ func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
 				}
 				resume := triggers[1].executor()
 				defer resume.Close()
-				done, err := resume.ResumeFrom(ctx, journal, triggers[1].template.members["parent"], nil)
+				resumeCtx := ctx
+				var options *automations.ResumeOptions
+				if boundary == "legacy-rerun" {
+					// A new replica reconstructs lineage from the persisted row, with none
+					// of the first executor's local context or pending-call state.
+					var contextErr error
+					resumeCtx, contextErr = workExecutionContext(person, journal, nil, nil)
+					require.NoError(t, contextErr)
+					rc, ok := common.RunFromContext(resumeCtx)
+					require.True(t, ok)
+					require.Equal(t, journal.Rerun.RequestId, rc.RerunRequestId)
+					var prepareErr error
+					journal, options, prepareErr = automations.PrepareRerun(journal, nil, triggers[1].template.members["parent"])
+					require.NoError(t, prepareErr)
+				}
+				if boundary == "legacy-rerun" {
+					// Each rejected admission must leave the suspended effects untouched.
+					for _, change := range []string{"missing answer", "missing context lineage", "changed context lineage", "missing request lineage", "changed request lineage", "override", "snapshot", "missing child"} {
+						t.Run(change, func(t *testing.T) {
+							bad := *journal
+							spec := *journal.Rerun
+							bad.Rerun = &spec
+							badOpts := *options
+							badOpts.Rerun = &spec
+							badCtx := resumeCtx
+							switch change {
+							case "missing answer":
+								bad.HumanResumeId = ""
+							case "missing context lineage", "changed context lineage":
+								rc, _ := common.RunFromContext(badCtx)
+								rc.RerunRequestId = ""
+								if change == "changed context lineage" {
+									rc.RerunRequestId = "another"
+								}
+								badCtx = common.ContextWithRun(badCtx, rc)
+							case "missing request lineage", "changed request lineage":
+								spec.RequestId = ""
+								if change == "changed request lineage" {
+									spec.RequestId = "another"
+								}
+							case "override":
+								spec.Override = &common.StepOverride{Prompt: "Changed input"}
+							case "snapshot":
+								spec.Snapshot = &common.WorkspaceSnapshot{}
+							case "missing child":
+								bad.StepStates = map[string]automations.StepState{}
+								for k, v := range journal.StepStates {
+									bad.StepStates[k] = v
+								}
+								state := bad.StepStates[options.FromStep]
+								state.ChildRunId = ""
+								bad.StepStates[options.FromStep] = state
+							}
+							_, err := resume.ResumeFrom(badCtx, &bad, triggers[1].template.members["parent"], &badOpts)
+							require.ErrorIs(t, err, automations.ErrNonRetryableStep)
+							require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 2}, effects)
+							require.Zero(t, providers[1].calls)
+						})
+					}
+				}
+				done, err := resume.ResumeFrom(resumeCtx, journal, triggers[1].template.members["parent"], options)
+				if boundary == "legacy-rerun" {
+					var again *workstate.HumanWait
+					require.ErrorAs(t, err, &again)
+					require.NotEqual(t, wait.ApprovalID, again.ApprovalID)
+					parked := load(writer, runID)
+					require.Equal(t, suspended.ChildRunId, parked.StepStates[parked.FailedStep].ChildRunId, "same child pauses again; a new invocation must not repeat its prefix")
+					require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 2}, effects)
+					require.Equal(t, 2, reads)
+					require.Equal(t, 1, providers[1].calls)
+					// The first answer cannot authorize this later saved transcript.
+					_, oldErr := resume.ResumeFrom(resumeCtx, journal, triggers[1].template.members["parent"], options)
+					require.ErrorIs(t, oldErr, automations.ErrNonRetryableStep)
+					act("decideApproval", map[string]any{"approvalId": again.ApprovalID, "decision": "approved", "answer": map[string]any{"newLimit": 8}})
+					require.True(t, peers[0].DispatchRun(person, runID, owner))
+					peers[1].DispatchRun(person, runID, owner)
+					req := <-admitted
+					require.Equal(t, again.ApprovalID, req.HumanResumeId)
+					require.Equal(t, journal.Rerun.RequestId, req.RerunRequestId)
+					select {
+					case <-admitted:
+						t.Fatal("second answer dispatched twice")
+					default:
+					}
+					fresh := load(writer, runID)
+					freshCtx, contextErr := workExecutionContext(person, fresh, nil, nil)
+					require.NoError(t, contextErr)
+					fresh, nextOptions, prepErr := automations.PrepareRerun(fresh, nil, triggers[1].template.members["parent"])
+					require.NoError(t, prepErr)
+					done, err = resume.ResumeFrom(freshCtx, fresh, triggers[1].template.members["parent"], nextOptions)
+					expectedReads++
+				}
 				require.NoError(t, err)
 				require.Equal(t, "completed", done.Status)
-				require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": 1, "child-tail": 1, "later-section": 1}, effects)
+				expectedPrefix := 1
+				if boundary == "legacy-rerun" {
+					expectedPrefix = 2
+				}
+				require.Equal(t, map[string]int{"completed-section": 1, "child-prefix": expectedPrefix, "child-tail": 1, "later-section": 1}, effects)
 				require.Equal(t, expectedReads, reads, "the completed read must not replay")
-				require.Equal(t, 1, providers[1].calls)
+				expectedCalls := 1
+				if boundary == "legacy-rerun" {
+					expectedCalls = 2
+				}
+				require.Equal(t, expectedCalls, providers[1].calls)
 				raw, err := json.Marshal(providers[1].requests[0])
 				require.NoError(t, err)
 				require.Contains(t, string(raw), "Recorded answer for this suspended step")
@@ -257,7 +428,7 @@ func TestWorkDBModelAdmissionBudgetKeepsOneNestedCheckpoint(t *testing.T) {
 				}
 				var spend string
 				require.NoError(t, db.NewRaw(`SELECT payload->'spent' FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, "v1:work:run:"+runID).Scan(person, &spend))
-				require.Contains(t, spend, `"modelCalls": 1`, "resumption must not reset prior spend")
+				require.Contains(t, spend, fmt.Sprintf(`"modelCalls": %d`, expectedCalls), "resumption must not reset prior spend")
 			})
 		}
 	}

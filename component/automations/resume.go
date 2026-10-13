@@ -491,17 +491,36 @@ func (e *Executor) ResumeFrom(
 	// repeating its effect. This exception applies to this suspended step only.
 	checkpoint := opts.checkpoint != nil && opts.checkpoint.journal.RunId == journal.RunId && opts.checkpoint.stepID == resumeStepId
 	plan := opts.checkpoint
-	if !opts.AllowSideEffects && !e.stepRetryable(resumeStep) && rerun == nil && !checkpoint &&
-		journal.StepStates[resumeStepId].Status == "waiting" && journal.HumanResumeId != "" && e.engine != nil &&
-		opts.Overrides[resumeStepId].Empty() {
+	// A person's rerun authorized a new version, not repetition of the effects
+	// that version completed before a native human wait. Its answer must prove
+	// the checkpoint even though ordinary rerun admission allows effects.
+	rerunWait := rerun != nil && journal.StepStates[resumeStepId].Status == "waiting"
+	ordinaryWait := !opts.AllowSideEffects && !e.stepRetryable(resumeStep) && rerun == nil && !checkpoint &&
+		journal.StepStates[resumeStepId].Status == "waiting" && journal.HumanResumeId != "" && opts.Overrides[resumeStepId].Empty()
+	if rerunWait || ordinaryWait {
+		if e.engine == nil || !opts.Overrides[resumeStepId].Empty() {
+			return nil, fmt.Errorf("%w: unchanged checkpoint execution is unavailable", ErrNonRetryableStep)
+		}
+		request := memql.CheckpointResumeRequest{RunID: journal.RunId, StepKey: resumeStepId, ApprovalID: journal.HumanResumeId}
+		if rerunWait {
+			if journal.HumanResumeId == "" || !rerun.Override.Empty() || rerun.Snapshot != nil {
+				return nil, fmt.Errorf("%w: checkpoint override changed", ErrNonRetryableStep)
+			}
+			request.RerunRequestID = rerun.RequestId
+			run, ok := common.RunFromContext(ctx)
+			if !ok || memql.BareShortId(run.RunId) != memql.BareShortId(journal.RunId) || run.RerunRequestId != rerun.RequestId {
+				return nil, fmt.Errorf("%w: checkpoint rerun context changed", ErrNonRetryableStep)
+			}
+		}
 		var err error
-		ctx, plan, err = e.prepareCheckpoint(ctx, journal, automation, memql.CheckpointResumeRequest{
-			RunID: journal.RunId, StepKey: resumeStepId, ApprovalID: journal.HumanResumeId,
-		}, 0)
+		ctx, plan, err = e.prepareCheckpoint(ctx, journal, automation, request, 0)
 		if err != nil {
 			return nil, fmt.Errorf("%w: step %q continuation: %v", ErrNonRetryableStep, resumeStepId, err)
 		}
 		checkpoint = plan != nil
+		if rerunWait && !checkpoint {
+			return nil, fmt.Errorf("%w: the waiting rerun has no native continuation", ErrNonRetryableStep)
+		}
 	}
 	if !e.stepRetryable(resumeStep) && !opts.AllowSideEffects && !checkpoint {
 		return nil, fmt.Errorf("%w: step %q is type %s, set AllowSideEffects to retry",
