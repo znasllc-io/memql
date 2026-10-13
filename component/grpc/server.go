@@ -120,6 +120,8 @@ type Server struct {
 	lifecycle         common.Lifecycle
 	listener          net.Listener
 	grpcServer        *grpc.Server
+	shutdownMu        sync.Mutex
+	forceStop         func()
 	engine            *memqlengine.MemQLEngine
 	eventBus          *events.Bus
 	sttProvider       stt.StreamingProvider
@@ -260,9 +262,19 @@ func (s *Server) Start(ctx context.Context) {
 	})
 }
 
-// Stop gracefully shuts down the gRPC server.
+// Stop gracefully shuts down the gRPC server. Even when the caller's deadline
+// expires first, it closes the transport before returning: dependencies such
+// as the database can then be torn down without admitting another request.
 func (s *Server) Stop(ctx context.Context) {
-	_ = s.lifecycle.Stop(ctx, s.logger)
+	// Capture this generation before cancellation lets cleanup clear it.
+	// grpc.Server.Stop is safe to repeat, including concurrently with its
+	// graceful stop and the dependency sweep's second Stop.
+	s.shutdownMu.Lock()
+	forceStop := s.forceStop
+	s.shutdownMu.Unlock()
+	if err := s.lifecycle.Stop(ctx, s.logger); err != nil && forceStop != nil {
+		forceStop()
+	}
 }
 
 // IsRunning reports whether the gRPC server lifecycle is active.
@@ -361,6 +373,9 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
 	}
 	s.grpcServer = grpc.NewServer(serverOpts...)
+	s.shutdownMu.Lock()
+	s.forceStop = s.grpcServer.Stop
+	s.shutdownMu.Unlock()
 	identityResolver := auth.NewIdentityResolver(&engineQueryRunner{engine: s.engine}, s.logger)
 	svc := &service{
 		logger:                 s.logger,
@@ -471,6 +486,9 @@ func (s *Server) cleanup() {
 	}
 	s.grpcServer = nil
 	s.listener = nil
+	s.shutdownMu.Lock()
+	s.forceStop = nil
+	s.shutdownMu.Unlock()
 }
 
 // SetEngine wires the MemQL engine used by the gRPC surface.
