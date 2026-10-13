@@ -59,7 +59,9 @@ type Integration struct {
 	// order given, with ONE acquisition: one transaction on one connection of
 	// the gate pool (memql.AcquireWriteGates). A flow that needs several names
 	// them together rather than taking one inside another (memql#6022).
-	decisionGate           func(context.Context, ...string) (func(), error)
+	decisionGate func(context.Context, ...string) (func(), error)
+	// Optional test seam for verified decision holds; production uses GateDB.
+	computerDecisionGate   func(context.Context, string) (func(), func(context.Context) error, error)
 	reviewValidators       map[string]func(context.Context, map[string]any) error
 	reviewAnswerValidators map[string]func(context.Context, map[string]any, map[string]any) error
 	logger                 *slog.Logger

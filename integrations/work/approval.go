@@ -54,11 +54,28 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	if i.decisionGate == nil {
 		return nil, fmt.Errorf("work: approval coordination is unavailable")
 	}
-	release, err := i.decisionGate(ctx, approvalId)
+	var release func()
+	var verifyPermissionDecision func(context.Context) error
+	_, typedPermission := argMap(args, "answer")["permissionMode"]
+	_, typedGuidance := argMap(args, "answer")["feedback"]
+	if (typedPermission && decision == "approved") || (typedGuidance && decision == "answered") {
+		release, verifyPermissionDecision, err = i.computerPermissionDecisionGate(ctx, approvalId)
+	} else {
+		release, err = i.decisionGate(ctx, approvalId)
+	}
 	if err != nil {
 		return nil, err
 	}
 	defer release()
+	if verifyPermissionDecision != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		ctx = context.WithValue(ctx, approvalDecisionVerifierKey{}, verifyPermissionDecision)
+	}
 	ctx = memql.ContextWithFreshRead(ctx)
 	st := i.store()
 
@@ -199,10 +216,14 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	// came off the approval row this caller already read under their own
 	// actor.
 	writeCtx := ownerActor(ctx, owner)
+
 	if decision == "approved" && kind == work.ApprovalKindBudget {
 		if err := i.raiseApprovedBudget(writeCtx, approval, answer, now); err != nil {
 			return nil, err
 		}
+	}
+	if err := verifyApprovalDecisionWrite(writeCtx); err != nil {
+		return nil, err
 	}
 	if err := st.decideApprovalRow(writeCtx, approvalId, decision, strings.TrimSpace(ac.UserId), now, answer, workRowVersionAfter(approval["createdAt"], now)); err != nil {
 		return nil, err

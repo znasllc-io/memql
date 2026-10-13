@@ -8,8 +8,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path"
 	"strings"
+
+	"github.com/znasllc-io/memql/core/num"
 )
 
 const Contract = "workerHost.computer_permission"
@@ -27,6 +30,7 @@ type Scope struct {
 	Directory      string   `json:"directory,omitempty"`
 	Command        string   `json:"command,omitempty"`
 	CWD            string   `json:"cwd,omitempty"`
+	TimeoutSeconds int      `json:"timeoutSeconds,omitempty"`
 	ArgsHash       string   `json:"argsHash"`
 	AllowedModes   []string `json:"allowedModes"`
 }
@@ -81,7 +85,8 @@ func (s Scope) Map() map[string]any {
 }
 
 // CleanAbsolute restricts this contract to explicit POSIX paths. Cockpit also
-// proves their real filesystem identity and confines reads with os.OpenRoot.
+// proves their real filesystem identity and opens each component without
+// following symlinks, then reads the held descriptor.
 func CleanAbsolute(p string) bool {
 	return strings.HasPrefix(p, "/") && p != "/" && path.Clean(p) == p && !strings.ContainsAny(p, "\x00\\")
 }
@@ -100,11 +105,11 @@ func (s Scope) Validate() error {
 	}
 	switch s.Kind {
 	case "directory_read":
-		if !CleanAbsolute(s.Directory) || !ReadAction(s.Action) || s.Command != "" || s.CWD != "" {
+		if !CleanAbsolute(s.Directory) || !ReadAction(s.Action) || s.Command != "" || s.CWD != "" || s.TimeoutSeconds != 0 {
 			return fmt.Errorf("directory permission needs an explicit directory and read action")
 		}
 	case "exact_command":
-		if s.Action != "exec" || strings.TrimSpace(s.Command) == "" || !CleanAbsolute(s.CWD) || s.Directory != "" {
+		if s.Action != "exec" || strings.TrimSpace(s.Command) == "" || !CleanAbsolute(s.CWD) || s.Directory != "" || s.TimeoutSeconds < 1 || s.TimeoutSeconds > 600 {
 			return fmt.Errorf("command permission needs an exact command and explicit working directory")
 		}
 	default:
@@ -115,17 +120,50 @@ func (s Scope) Validate() error {
 func ReadAction(action string) bool {
 	return action == "fs_read" || action == "fs_list" || action == "fs_stat"
 }
+
+// CommandInput accepts only reviewable command inputs. Environment overrides,
+// stdin and unknown options are refused rather than hidden behind a hash or
+// written as potential secrets into a long-lived approval receipt.
+func CommandInput(args map[string]any) (command, cwd string, seconds int, err error) {
+	for key := range args {
+		if key != "cmd" && key != "cwd" && key != "timeoutSec" {
+			return "", "", 0, fmt.Errorf("exact-command approval supports only cmd, cwd and timeoutSec; remove %s and request the exact supported command, without requesting broader access", key)
+		}
+	}
+	command, _ = args["cmd"].(string)
+	cwd, _ = args["cwd"].(string)
+	seconds = 60
+	if strings.TrimSpace(command) == "" || !CleanAbsolute(cwd) {
+		return "", "", 0, fmt.Errorf("command permission needs an exact command and explicit working directory")
+	}
+	if value, present := args["timeoutSec"]; present {
+		raw, e := json.Marshal(value)
+		var n float64
+		if e != nil || json.Unmarshal(raw, &n) != nil || n < 1 || n > 600 || math.Trunc(n) != n {
+			return "", "", 0, fmt.Errorf("timeoutSec must be a whole number from 1 to 600")
+		}
+		seconds = num.Float64OrZero(n)
+	}
+	return
+}
 func (s Scope) Matches(req Request, mode string) bool {
-	if s.Validate() != nil || req.Tool != s.Tool {
+	if s.Validate() != nil || req.Tool != s.Tool || (mode != "once" && mode != "always") {
 		return false
 	}
 	h, err := Hash(req.Tool, req.Action, req.Args)
 	if err != nil {
 		return false
 	}
-	if mode == "once" || s.Kind == "exact_command" {
-		return (mode == "once" || mode == "always") && req.Action == s.Action && h == s.ArgsHash
+	if s.Kind == "exact_command" {
+		cmd, cwd, timeout, err := CommandInput(req.Args)
+		return err == nil && req.Action == s.Action && h == s.ArgsHash && cmd == s.Command && cwd == s.CWD && timeout == s.TimeoutSeconds
 	}
 	p, _ := req.Args["path"].(string)
-	return mode == "always" && s.Kind == "directory_read" && ReadAction(req.Action) && Within(s.Directory, p)
+	if !ReadAction(req.Action) || !Within(s.Directory, p) {
+		return false
+	}
+	if mode == "once" {
+		return req.Action == s.Action && h == s.ArgsHash
+	}
+	return true
 }

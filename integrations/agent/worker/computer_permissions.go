@@ -74,8 +74,10 @@ func (d *Dispatcher) prepareComputerPermission(ctx context.Context, owner, agent
 		}
 	case tool == "workerHost" && action == "exec":
 		scope.Kind = "exact_command"
-		scope.Command, _ = args["cmd"].(string)
-		scope.CWD, _ = args["cwd"].(string)
+		scope.Command, scope.CWD, scope.TimeoutSeconds, err = permission.CommandInput(args)
+		if err != nil {
+			return scope, nil, err
+		}
 	default:
 		return scope, nil, fmt.Errorf("saved computer permissions support directory reads or an exact command")
 	}

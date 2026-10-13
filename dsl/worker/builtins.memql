@@ -72,9 +72,8 @@ builtin agentworkerListWorkers {
 //
 // Bridges the requestComputerUseScope.memql tool definition to the
 // agentworker Go integration's `requestScope` capability. The
-// integration creates a v1:planner:plan in awaitingFeedback +
-// emits a canvas card; the agent's tool result is just a small
-// JSON payload acknowledging the request.
+// integration parks owned work on a durable Nexus approval receipt.
+// The agent receives the request status; a human decision resumes the run.
 
 // requireLabels is what makes the card's promise honest (design D6). The
 // user's Allow covers the task on ANY of their machines that match, so the
@@ -86,7 +85,7 @@ builtin agentworkerListWorkers {
 @args(profile="object")
 @description("Create a scope-elevation Plan + canvas card for a computer_use task awaiting user approval.")
 builtin agentworkerRequestScope {
- operation object @description("For directory reads or an exact command, supply {tool: workerHost, action, args, directory?}. args must include the exact full input, with explicit absolute path or cwd. Directory covers only fs_read, fs_list and fs_stat. The server selects and binds one machine, and Nexus offers once or always. Never substitute broader scope when this request is refused.")
+ operation object @description("For directory reads or an exact command, supply {tool: workerHost, action, args, directory?}. args must include the exact full input, with explicit absolute path or cwd. Exact commands support only cmd, cwd and optional timeoutSec (1-600); environment overrides, stdin and extra options are refused rather than hidden. Directory covers only fs_read, fs_list and fs_stat. The server selects and binds one machine, and Nexus offers once or always. Never substitute broader scope when this request is refused.")
   intent          string!
   requestedScope  string!
   summary         string!

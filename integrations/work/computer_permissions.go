@@ -69,6 +69,9 @@ func permissionFromRow(row map[string]any, req permission.Request, now time.Time
 }
 
 func (i *Integration) permissionRun(ctx context.Context, req permission.Request, claiming bool) error {
+	if rc, present := common.RunFromContext(ctx); present && (!samePermissionID(rc.RunId, req.RunID) || !samePermissionID(rc.OwnerUserId, req.OwnerID)) {
+		return fmt.Errorf("computer permission must belong to the originating work run")
+	}
 	if !samePermissionID(callerUserId(ctx), req.OwnerID) || req.AgentID == "" || req.RunID == "" {
 		return fmt.Errorf("computer permission requires the current owner, agent and run")
 	}
@@ -193,4 +196,33 @@ func (i *Integration) handleRevokeComputerPermission(ctx context.Context, args m
 		}
 	}
 	return i.resultNode(map[string]any{"permissionId": id, "revoked": true}), nil
+}
+
+// Permission decisions use the same receipt lock as claim and revocation, held
+// independently of caller cancellation until the bounded durable write returns.
+func (i *Integration) computerPermissionDecisionGate(ctx context.Context, id string) (func(), func(context.Context) error, error) {
+	if i.computerDecisionGate != nil {
+		return i.computerDecisionGate(ctx, id)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	pool, err := i.gatePool()
+	if err != nil {
+		return nil, nil, err
+	}
+	hold, err := memql.AcquireGateHold(context.WithoutCancel(ctx), pool, 0, "work-approval-decision:"+memql.BareShortId(id))
+	if err != nil {
+		return nil, nil, err
+	}
+	return hold.Release, hold.Verify, nil
+}
+
+type approvalDecisionVerifierKey struct{}
+
+func verifyApprovalDecisionWrite(ctx context.Context) error {
+	if verify, ok := ctx.Value(approvalDecisionVerifierKey{}).(func(context.Context) error); ok {
+		return verify(ctx)
+	}
+	return nil
 }

@@ -362,7 +362,7 @@ implements the reroute (`integrations/agent/workbench_reroute_agent.go`):
 
 > Never silently switch to the user's own machine. If the workbench cannot do
 > the job, say so and request computer-use scope through
-> `requestComputerUseScope` -- the user approves on the canvas card before any
+> `requestComputerUseScope` -- the user decides in Nexus Approvals before any
 > tool touches their machine.
 
 What the automatic path removes is not the consent. It is the second **asking**
@@ -426,12 +426,35 @@ above the tier the unmet needs imply -- or the card goes up. If the agent holds
 no computer-use slug at all, it names the limitation and tells the user that
 enabling Computer Use would unblock it.
 
-The user-gated escalation described in memql#790 is unchanged and is still what
-runs for every workbench failure that is not an `environment_mismatch`: the
-agent calls `requestComputerUseScope({intent, requestedScope, summary})`, ends
-its turn with a short `respondToUser`, and on **Allow**
-`handlePlanApprovedForExecution` (`integrations/planner/plan_execution.go`)
-dispatches a fresh turn with `planApprovedTrigger=true`.
+Computer-use requests park the current owned work run on a durable Nexus approval.
+The decision is rechecked from storage by the replica holding the selected
+machine's connection. A run ID alone is never permission.
+
+For directory reads and exact commands, `requestComputerUseScope` accepts an
+`operation` object containing `tool: "workerHost"`, `action` and the complete
+`args`. A directory request also names an explicit absolute `directory`.
+Nexus offers **Once** for one exact dispatch, or **Always** for the displayed
+scope on the named machine, for this owner and agent:
+
+- A directory permission covers `fs_read`, `fs_list` and `fs_stat` inside that
+  directory. It permits no file writes or shell commands. Cockpit opens path
+  components without following symlinks, including links changed during a read.
+- A command permission covers the displayed command, working directory and
+  time limit. Supported inputs are `cmd`, an explicit absolute `cwd` and
+  optional `timeoutSec` (1–600; default 60). Environment overrides, standard
+  input and additional options are refused rather than stored as hidden input
+  or potential secrets in a long-lived approval. Every accepted input is
+  included in the exact invocation hash.
+
+Saved permissions appear inside Nexus Approvals and can be revoked there.
+Revocation prevents later dispatches; an action already admitted may finish.
+An Always decision survives the pending request's one-hour expiry. Once is
+consumed durably before dispatch on the replica holding the machine stream.
+Neither mode overrides the machine's local policy or access window. A closed
+window names the required local access action, rather than asking to repair
+the environment. Unsupported or disconnected machines cannot silently fall
+back to another machine or a broader permission. Other existing computer-use
+requests remain run-scoped and do not offer Always.
 
 ---
 

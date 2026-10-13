@@ -2,6 +2,8 @@ package work
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -93,5 +95,85 @@ func TestComputerPermissionDBTwoReplicasConsumeOnceAndRevokeAlways(t *testing.T)
 	cancel()
 	if _, err := b.Claim(cancelled, always, req, "worker", "machine"); err == nil {
 		t.Fatal("cancelled request claimed")
+	}
+}
+
+// The engine may finish a bounded durable write after its caller disconnects.
+// Its receipt gate must survive that disconnect until the actual commit lands.
+type permissionCommitEngine struct {
+	Engine
+	mutation string
+	entered  chan struct{}
+	proceed  chan struct{}
+	cancel   context.CancelFunc
+}
+
+func (e *permissionCommitEngine) Execute(ctx context.Context, q string) (*memql.ExecuteResult, error) {
+	if strings.HasPrefix(q, "mutation "+e.mutation+"(") {
+		e.cancel()
+		close(e.entered)
+		<-e.proceed
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("durable commit inherited cancellation: %w", err)
+		}
+	}
+	return e.Engine.Execute(ctx, q)
+}
+func TestComputerPermissionDBCancelledCallerRetainsClaimAndDecisionGate(t *testing.T) {
+	for _, mutation := range []string{"useWorkComputerPermission", "decideWorkApproval"} {
+		t.Run(mutation, func(t *testing.T) {
+			a := openActsDB(t)
+			run := a.openRun(t, nil)
+			row, req := computerPermissionFixture()
+			req.OwnerID = a.owner
+			req.RunID = run
+			id := newRowId(approvalConcept)
+			subject := rowMap(row, "subject")
+			a.write(t, "createWorkApproval", map[string]any{"approvalId": id, "runId": run, "kind": "scopeElevation", "subject": subject, "artifactHash": workstate.ArtifactHash(subject), "requestedAt": rfc(time.Now()), "expiresAt": rfc(time.Now().Add(time.Hour))})
+			if mutation == "useWorkComputerPermission" {
+				a.write(t, "decideWorkApproval", map[string]any{"approvalId": id, "decision": "approved", "decidedBy": a.owner, "decidedAt": rfc(time.Now()), "answer": map[string]any{"permissionMode": "once"}})
+			}
+			peerDB := workHeadsPeer(t, a.db)
+			b := New(dispatchDBEngine(t, peerDB), testLogger())
+			b.SetGateDB(testGates(t))
+			person := actorCtx(a.owner)
+			ctx, cancel := context.WithCancel(person)
+			defer cancel()
+			wrapper := &permissionCommitEngine{Engine: a.eng, mutation: mutation, entered: make(chan struct{}), proceed: make(chan struct{}), cancel: cancel}
+			a.i.engine = wrapper
+			done := make(chan error, 1)
+			go func() {
+				if mutation == "useWorkComputerPermission" {
+					_, err := a.i.Claim(ctx, id, req, "worker", "machine")
+					done <- err
+				} else {
+					_, err := a.i.handleDecideApproval(ctx, map[string]any{"approvalId": id, "decision": "approved", "answer": map[string]any{"permissionMode": "once"}}, 0)
+					done <- err
+				}
+			}()
+			select {
+			case <-wrapper.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("commit not reached")
+			}
+			other := make(chan error, 1)
+			go func() { _, err := b.Claim(person, id, req, "worker", "machine"); other <- err }()
+			select {
+			case err := <-other:
+				t.Fatalf("other replica entered before detached commit: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(wrapper.proceed)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			err := <-other
+			if mutation == "useWorkComputerPermission" && err == nil {
+				t.Fatal("second replica reused consumed once")
+			}
+			if mutation == "decideWorkApproval" && err != nil {
+				t.Fatalf("decision did not become visible after commit: %v", err)
+			}
+		})
 	}
 }

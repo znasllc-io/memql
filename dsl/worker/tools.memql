@@ -13,7 +13,7 @@ tool workerStatus {
 @handler(type="function", name="agentworkerRequestScope")
 @requiresAgentRole("assistant", "specialist")
 tool requestComputerUseScope {
- operation object @description("For directory reads or an exact command, supply {tool: workerHost, action, args, directory?}. args must include the exact full input, with explicit absolute path or cwd. Directory covers only fs_read, fs_list and fs_stat. The server selects and binds one machine, and Nexus offers once or always. Never substitute broader scope when this request is refused.")
+ operation object @description("For directory reads or an exact command, supply {tool: workerHost, action, args, directory?}. args must include the exact full input, with explicit absolute path or cwd. Exact commands support only cmd, cwd and optional timeoutSec (1-600); environment overrides, stdin and extra options are refused rather than hidden. Directory covers only fs_read, fs_list and fs_stat. The server selects and binds one machine, and Nexus offers once or always. Never substitute broader scope when this request is refused.")
  intent string!
  requestedScope enum("observe", "full")!
  summary string!

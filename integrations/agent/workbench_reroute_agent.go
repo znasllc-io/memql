@@ -12,6 +12,8 @@ import (
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
+	"path"
 	"slices"
 	"strings"
 
@@ -89,6 +91,7 @@ func (s *toolRecoveryScope) operations() map[string]workflowhost.Operation {
 			s.plan.RequestedScope = "observe"
 			s.plan.CardArgs["requestedScope"] = "observe"
 			s.plan.CardArgs["intent"] = observation
+			delete(s.plan.CardArgs, "operation")
 			return s.attempt(ctx, "workerComputer", map[string]any{
 				"action": observation, "args": map[string]any{}, "requireLabels": s.plan.RequireLabels,
 				"agentId": s.turn.AgentId, "ownerUserId": s.turn.OwnerUserId, "runId": s.turn.RunId,
@@ -236,7 +239,7 @@ func planWorkbenchReroute(result string, args map[string]any, turnCtx turnContex
 	requireLabels := agentworker.EnvironmentNeedsLabels(mismatch.UnmetNeeds, mismatch.RequestedOS)
 	scope := agentworker.EnvironmentNeedsScope(mismatch.UnmetNeeds)
 
-	return workbenchReroute{
+	planned := workbenchReroute{
 		Mismatch:       mismatch,
 		Action:         action,
 		RequireLabels:  requireLabels,
@@ -263,11 +266,24 @@ func planWorkbenchReroute(result string, args map[string]any, turnCtx turnContex
 			"agentId":     turnCtx.AgentId,
 			"ownerUserId": turnCtx.OwnerUserId,
 			"partitionId": turnCtx.PartitionId,
-			// The card names the requirement, so the user's Allow visibly
-			// covers a SET of machines rather than appearing to name one.
+			// Ordinary routing requirements select the candidate. Typed
+			// operations below bind approval to that exact selected machine.
 			"requireLabels": requireLabels,
 		},
-	}, true
+	}
+	if permission.ReadAction(action) || action == "exec" {
+		operation := map[string]any{"tool": "workerHost", "action": action, "args": inner}
+		if permission.ReadAction(action) {
+			readPath, _ := inner["path"].(string)
+			directory := readPath
+			if action != "fs_list" {
+				directory = path.Dir(readPath)
+			}
+			operation["directory"] = directory
+		}
+		planned.CardArgs["operation"] = operation
+	}
+	return planned, true
 }
 
 // The current agent tool conversation is text-based. Structured desktop facts
