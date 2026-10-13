@@ -1850,7 +1850,7 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   **Send guidance** submits the human's draft only when the server says the
   waiting work can accept it. A recorded answer that did not resume offers
   **Retry continuing**, using the exact stored guidance, including after a
-  reload. Retrying never substitutes a newer composer draft or grants access.
+  reload via **View request** on the persisted guidance message. Retrying never substitutes a newer composer draft or grants access.
 
 - **THE JOURNAL IS NOT LIVE AND SAYS SO; THE STEPS FEED BELONGS TO THE PAGE.**
   `v1:work:goal`, `run`, `step` and `approval` broadcast; `modelCall` and

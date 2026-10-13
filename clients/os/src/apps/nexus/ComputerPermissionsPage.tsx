@@ -79,7 +79,7 @@ export function ComputerPermissionsPage({ approvalVersion, onBack }: { approvalV
             onOpen={() => { setWriteError(""); setSelectedId(id); }} />;
         })}</RecordList>
       </> : selected ? <Panel label="Computer access">
-        {scope ? <Facts>
+        {scope ? <div className="os-nexus-permission-scope"><Facts>
           <Fact label="Computer" value={scope.machineLabel} />
           <Fact label="Access" value={scope.kind === "directory_read" ? "Read files, list folders and inspect file details" : "Run this exact command"} />
           {scope.kind === "directory_read" ? <Fact label="Directory" value={<CopyValue value={scope.directory!} label="directory" />} /> : <>
@@ -88,7 +88,7 @@ export function ComputerPermissionsPage({ approvalVersion, onBack }: { approvalV
             <Fact label="Time limit" value={`${scope.timeoutSeconds} seconds`} />
           </>}
           <Fact label="Allowed" value={formatMoment(String(selected.decidedAt ?? selected.createdAt ?? ""))} />
-        </Facts> : <Notice tone="warn" sentence="The details of this saved permission cannot be read." next="You can still revoke it." />}
+        </Facts></div> : <Notice tone="warn" sentence="The details of this saved permission cannot be read." next="You can still revoke it." />}
       </Panel> : loaded ? <Caption>This permission is no longer active.</Caption> : null}
     </div>
     {selected ? <ActionBar state="Allowed" detail="Revoke to ask again before future use." acts={[{ label: "Revoke permission", busy: revoking, onAct: () => { void revoke(); } }]}>{writeError ? <span role="alert">{writeError}</span> : null}</ActionBar>

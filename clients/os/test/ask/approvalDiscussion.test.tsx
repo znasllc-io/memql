@@ -223,3 +223,24 @@ it("recovers an uncertain investigation after the request resolves without consu
   expect(session.getSnapshot().draft).toBe("Keep this new idea");
   expect(screen.queryByRole("button", { name: "Retry investigation" })).toBeNull(); session.dispose();
 });
+
+
+it("reopens the exact request from persisted guidance after reload and recovers continuation", async () => {
+  const { transport, session, setTurns } = setup();
+  const feedback = "Use a narrower repository read.";
+  setTurns([{ id: "guidance-approval", approvalId: "approval", prompt: `Guidance sent:\n${feedback}`, answer: "", answerOnly: true, state: "done", startedAt: "2026-10-12T20:00:00Z", endedAt: "2026-10-12T20:00:00Z", activity: [] }]);
+  transport.discussApproval.mockResolvedValue({ ...context, approval: { ...context.approval, status: "answered" }, canSendGuidance: false, canAskAdvisor: false, guidanceToResume: feedback });
+  // A fresh session reads only the persisted conversation, with no in-memory
+  // discussion selection or retry receipt left from the earlier browser.
+  await session.select("original"); session.setDraft("My new note after reopening"); mount(session, transport);
+  expect(session.getSnapshot().discussion).toBeFalsy();
+  fireEvent.click(screen.getByRole("button", { name: "View request" }));
+  expect(await screen.findByRole("button", { name: "Retry continuing" })).toBeTruthy();
+  expect(transport.discussApproval).toHaveBeenCalledWith("approval");
+  expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLTextAreaElement).value).toBe("My new note after reopening");
+  expect(screen.queryByRole("button", { name: "Send guidance" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry continuing" }));
+  await waitFor(() => expect(transport.approvalGuidance).toHaveBeenCalledExactlyOnceWith("approval", feedback));
+  expect(session.getSnapshot().draft).toBe("My new note after reopening");
+  expect(transport.ask).not.toHaveBeenCalled(); session.dispose();
+});

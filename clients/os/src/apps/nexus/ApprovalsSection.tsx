@@ -522,7 +522,7 @@ function ApprovalDetail({
       </Panel>
 
       {!failure && approval.kind === "scopeElevation" && permission ? <Panel label="Computer access">
-        <Facts>
+        <div className="os-nexus-permission-scope"><Facts>
           <Fact label="Computer" value={permission.machineLabel} />
           <Fact label="Access" value={permission.kind === "directory_read" ? "Read files, list folders and inspect file details" : "Run this exact command"} />
           {permission.kind === "directory_read" ? <Fact label="Directory" value={<CopyValue value={permission.directory!} label="directory" />} /> : <>
@@ -530,7 +530,7 @@ function ApprovalDetail({
             <Fact label="Working directory" value={<CopyValue value={permission.cwd!} label="working directory" />} />
             <Fact label="Time limit" value={`${permission.timeoutSeconds} seconds`} />
           </>}
-        </Facts>
+        </Facts></div>
         <Caption>{permission.kind === "directory_read" ? "Includes files and folders inside this directory. Does not allow writing files or running commands." : "Applies only to this command, working directory and time limit on this computer."}</Caption>
         {canDecide && permission.allowedModes.includes("always") ? <div className="os-nexus-permission-remember"><Check checked={rememberPermission} onChange={onRememberPermission}>{permissionRememberLabel(permission)}</Check><Caption>Saved permissions can be revoked from Approvals.</Caption></div> : null}
       </Panel> : !failure && approval.kind === "scopeElevation" && approval.subject?.computerPermission !== undefined ? <Notice tone="warn" sentence="This permission request cannot be read." next="You can reject it and ask for a new request." /> : !failure && approval.kind === "scopeElevation" ? <Panel label="Computer access"><Facts>

@@ -10093,6 +10093,12 @@ a.os-button {
   font-size: var(--os-text-sm);
   color: var(--os-muted);
 }
+.os-nexus-permission-scope .os-copyvalue-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
+}
 .os-nexus-permission-remember {
   margin-top: 18px;
 }
