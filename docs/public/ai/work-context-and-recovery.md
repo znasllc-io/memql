@@ -44,6 +44,21 @@ existing plan-review approval. There is no promise that every failure can be
 recovered automatically or that a language model can identify every platform
 bug correctly.
 
+A worker model call that reaches its whole-call time limit before a complete
+response is handled at the agent's reasoning boundary. The installed recovery
+recipe permits one automatic retry of that model call, with the exact completed
+tool exchanges retained. Each call still consumes the current model and time
+allowances. A partial streamed response is not retried automatically. If recovery
+is exhausted or the recipe requires a person, the run saves its checkpoint and
+asks **Retry** or **Abandon**. Retry continues the same suspended child from that
+checkpoint on any replica; it does not rewrite the workflow, replay completed
+tool effects, grant permission or replenish a budget. **Discuss in Ask** can
+supply guidance instead; the same checkpoint continues with that recorded
+feedback in its context, without a structural replan or an access grant.
+In-flight tool failures cannot enter this path. Missing or changed checkpoints and failures to save the
+suspension stop execution. Older failed runs without native waiting child links
+still require the existing explicit recovery controls; no links are inferred.
+
 If a plan failure exhausts automatic recovery, **Revise plan** authorizes one
 further replanning attempt for the unfinished work. It preserves the completed
 prefix and accumulated usage, and does not replenish automatic retries or

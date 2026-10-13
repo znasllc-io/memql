@@ -341,3 +341,9 @@ func short(h string) string {
 	}
 	return h
 }
+
+// IsModelCallCheckpoint identifies native pre-tool provider suspensions. The
+// checkpoint itself is validated again by the execution replica before use.
+func IsModelCallCheckpoint(subject map[string]any) bool {
+	return subject["providerFailure"] == "model_call_ceiling"
+}

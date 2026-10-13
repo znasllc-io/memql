@@ -103,6 +103,11 @@ func (i *Integration) requireApprovalStep(ctx context.Context, run *actRun, key 
 }
 
 func guidanceRetry(approval map[string]any, text, decidedBy string) *failureRetry {
+	// The model stopped before dispatching any tool from the failed response.
+	// Its exact checkpoint can take recorded guidance without rewriting a workflow.
+	if rowString(approval, "kind") == "feedback" && workstate.IsModelCallCheckpoint(rowMap(approval, "subject")) {
+		return nil
+	}
 	return &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: decidedBy, symptom: workstate.SymptomPlan,
 		reason: "The person supplied guidance instead of approving the blocked action. Reconsider the unfinished work using this guidance; no permission or budget increase was granted.\n" + text + "\nOriginal request: " + rowString(approval, "question")}
 }

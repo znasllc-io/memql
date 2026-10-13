@@ -423,6 +423,13 @@ BackgroundLoop:
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
+			if handled, recoveryErr := r.recoverModelCeiling(ctx, stepErr, messages, attempt, stepResult == nil); handled {
+				if recoveryErr != nil {
+					return nil, recoveryErr
+				}
+				attempt++
+				continue
+			}
 			if next, ok := r.handOffContext(ctx, stepErr, messages, &contextHandoffs, iter, requestId); ok {
 				messages = next
 				continue

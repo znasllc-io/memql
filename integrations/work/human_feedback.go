@@ -55,6 +55,7 @@ func (i *Integration) parkHumanDecision(ctx context.Context, owner, runID, appro
 }
 
 func (i *Integration) parkHumanDecisionWithBudget(ctx context.Context, owner, runID, approvalKind string, subject map[string]any, question string, options []map[string]any, expires time.Time, budget *memql.RunCeilingError) (string, error) {
+	checkpoint := budget != nil || (approvalKind == "feedback" && workstate.IsModelCallCheckpoint(subject))
 	rc, ok := common.RunFromContext(ctx)
 	if !ok || memql.BareShortId(rc.RunId) != memql.BareShortId(runID) || memql.BareShortId(rc.OwnerUserId) != memql.BareShortId(owner) {
 		return "", fmt.Errorf("human decision requires the current owned work run")
@@ -92,8 +93,8 @@ func (i *Integration) parkHumanDecisionWithBudget(ctx context.Context, owner, ru
 		}
 		var release func()
 		var err error
-		if budget != nil {
-			// Budget receipt writes may outlive the model's deadline. Retain the
+		if checkpoint {
+			// Checkpoint receipt writes may outlive the model's deadline. Retain the
 			// same decision lock until the bounded receipt work has settled.
 			release, verifyBudget, err = i.computerPermissionDecisionGate(ctx, first)
 		} else {
@@ -129,10 +130,10 @@ func (i *Integration) parkHumanDecisionWithBudget(ctx context.Context, owner, ru
 	if rowString(rowMap(run, "rerun"), "requestId") != rc.RerunRequestId {
 		return "", fmt.Errorf("human decision execution request changed")
 	}
-	if budget != nil && memql.BareShortId(rowString(run, "goalId")) != memql.BareShortId(rc.GoalId) {
+	if checkpoint && memql.BareShortId(rowString(run, "goalId")) != memql.BareShortId(rc.GoalId) {
 		return "", fmt.Errorf("budget checkpoint goal changed")
 	}
-	if budget != nil {
+	if checkpoint {
 		goal, err := i.store().goalForOwner(read, rc.GoalId)
 		if err != nil {
 			return "", err

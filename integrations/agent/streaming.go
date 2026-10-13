@@ -503,6 +503,13 @@ StreamLoop:
 				if errors.As(err, &ceiling) {
 					return nil, r.pauseAtBudgetBoundary(ctx, err, messages)
 				}
+				if handled, recoveryErr := r.recoverModelCeiling(ctx, err, messages, attempt, true); handled {
+					if recoveryErr != nil {
+						return nil, recoveryErr
+					}
+					attempt++
+					continue
+				}
 				if next, ok := r.handOffContext(ctx, err, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next
 					continue
@@ -546,6 +553,13 @@ StreamLoop:
 				if ctx.Err() != nil {
 					terminalErr = ctx.Err()
 					break StreamLoop
+				}
+				if handled, recoveryErr := r.recoverModelCeiling(ctx, streamErr, messages, attempt, turnText == "" && len(turnCalls) == 0); handled {
+					if recoveryErr != nil {
+						return nil, recoveryErr
+					}
+					attempt++
+					continue
 				}
 				if next, ok := r.handOffContext(ctx, streamErr, messages, &contextHandoffs, iter, requestId); ok {
 					messages = next

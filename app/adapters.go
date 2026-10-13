@@ -436,3 +436,7 @@ func (a *CognitionEngineAdapter) ReadWorkGuidance(ctx context.Context) ([]memql.
 func (a *CognitionEngineAdapter) AcknowledgeWorkGuidance(ctx context.Context, ids []string) error {
 	return a.Engine.AcknowledgeWorkGuidance(ctx, ids)
 }
+
+func (a *CognitionEngineAdapter) RecoverWorkModelCall(ctx context.Context, failure string, attempt, maxRetries int, messages []common.ChatMessage) (bool, error) {
+	return a.Engine.RecoverWorkModelCall(ctx, failure, attempt, maxRetries, messages)
+}

@@ -59,7 +59,18 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	_, typedPermission := argMap(args, "answer")["permissionMode"]
 	_, typedGuidance := argMap(args, "answer")["feedback"]
 	_, budgetLimit := argMap(args, "answer")["newLimit"]
-	if ((typedPermission || budgetLimit) && decision == "approved") || (typedGuidance && decision == "answered") {
+	_, choiceAnswer := argMap(args, "answer")["value"]
+	modelCheckpointAnswer := false
+	if choiceAnswer && decision == "answered" {
+		// This read selects lock lifetime only. Ownership and the exact pending
+		// decision are checked again under that lock below.
+		rows, readErr := i.store().query(memql.ContextWithFreshRead(ctx), "query "+call("workApprovalForOwner", map[string]any{"approvalId": approvalId}))
+		if readErr != nil {
+			return nil, readErr
+		}
+		modelCheckpointAnswer = len(rows) == 1 && rowString(rows[0], "kind") == "feedback" && work.IsModelCallCheckpoint(rowMap(rows[0], "subject"))
+	}
+	if ((typedPermission || budgetLimit) && decision == "approved") || ((typedGuidance || modelCheckpointAnswer) && decision == "answered") {
 		release, verifyPermissionDecision, err = i.computerPermissionDecisionGate(ctx, approvalId)
 	} else {
 		release, err = i.decisionGate(ctx, approvalId)
@@ -203,6 +214,11 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 			return nil, err
 		}
 	}
+	if kind == "feedback" && work.IsModelCallCheckpoint(rowMap(approval, "subject")) && decision != "rejected" && guidance == "" {
+		if !modelCheckpointAnswer || verifyPermissionDecision == nil || decision != "answered" || len(answer) != 1 || (answer["value"] != "retry" && answer["value"] != "abandon") {
+			return nil, fmt.Errorf("work: choose Retry or Abandon for this saved model checkpoint")
+		}
+	}
 	if kind == "feedback" && decision != "rejected" && guidance == "" {
 		if err := validateFeedbackAnswer(rowMap(approval, "subject"), decision, answer); err != nil {
 			return nil, err
@@ -280,7 +296,7 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), symptom: work.SymptomPlan,
 			reason: rowString(rowMap(approval, "subject"), "resumeReason")}
 	}
-	if work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission) || (kind == "feedback" && rowString(rowMap(approval, "subject"), "question") != "") {
+	if !(kind == "feedback" && work.IsModelCallCheckpoint(rowMap(approval, "subject"))) && (work.IsFailureQuestion(approval["options"]) || (kind == "scopeElevation" && !typedPermission) || (kind == "feedback" && rowString(rowMap(approval, "subject"), "question") != "")) {
 		retry = &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: strings.TrimSpace(ac.UserId)}
 		if work.IsFailureQuestion(approval["options"]) {
 			retry.symptom = work.Symptom(rowString(rowMap(approval, "subject"), "symptom"))
@@ -294,8 +310,8 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	}
 	if guidance != "" {
 		// A human asked for a different approach, not for the gated operation
-		// to execute. The existing replan wait keeps the completed prefix and
-		// all permission and spending checks; this answer grants nothing.
+		// to execute. A model checkpoint accepts it without a structural replan;
+		// other requests keep their existing replan path. Neither grants access.
 		retry = guidanceRetry(approval, guidance, strings.TrimSpace(ac.UserId))
 	}
 	resumed, err := i.resumeParkedRun(writeCtx, runId, approvalId, runDecision, retry, now)

@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -234,10 +236,19 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 		return nil, err
 	}
 	checkpointID := BareShortId(stringField(checkpoints[0], "id"))
-	if kind == "budget" {
-		subject, _ := a["subject"].(map[string]any)
+	subject, _ := a["subject"].(map[string]any)
+	modelCheckpoint := kind == "feedback" && work.IsModelCallCheckpoint(subject)
+	if modelCheckpoint {
+		answer, _ := a["answer"].(map[string]any)
+		feedback, _ := answer["feedback"].(string)
+		guided := strings.TrimSpace(feedback) != "" && feedback == strings.TrimSpace(feedback) && utf8.RuneCountInString(feedback) <= 4000
+		if len(answer) != 1 || (answer["value"] != "retry" && !guided) {
+			return nil, fmt.Errorf("the provider checkpoint has no retry or guidance answer")
+		}
+	}
+	if kind == "budget" || modelCheckpoint {
 		if stringField(subject, "resumeKind") != "checkpoint" || BareShortId(stringField(subject, "continuationId")) != checkpointID {
-			return nil, fmt.Errorf("the budget decision does not name this saved checkpoint")
+			return nil, fmt.Errorf("the decision does not name this saved checkpoint")
 		}
 	}
 	if checkpointID != continuationID(run, canonical) {
