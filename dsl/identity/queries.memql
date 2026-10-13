@@ -1094,9 +1094,8 @@ query authCode expiredConsumedAuthCodes {
 //
 // Returns magic-link request rows whose expiresAt is before the
 // supplied `now` cutoff. Used by the magicLinkExpirySweep cron to
-// retire stale rows. Returns rows regardless of consumedAt -- the
-// cron decides what to do with them (a consumed-then-expired row
-// is identical to an expired row from the consume handler's POV).
+// retire stale rows. Already-consumed rows are excluded: stamping them again
+// would append a new version every hour and overwrite their consumption time.
 //
 // The cutoff is the `asOf` argument rather than the clock read inline,
 // as in expiredActiveDelegations; the magicLinkExpirySweep logic
@@ -1115,7 +1114,7 @@ query magicLinkRequest expiredMagicLinkRequests {
   args {
     asOf  string!
   }
-  filter  row => row.expiresAt < args.asOf
+  filter  row => row.expiresAt < args.asOf && (row.consumedAt == nil || row.consumedAt == "")
   shape   magicLinkRequestFull
 }
 
