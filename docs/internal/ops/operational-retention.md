@@ -302,6 +302,26 @@ independently and returns both errors if they fail.
 - Index migrations build one Timescale chunk per transaction, serialize index
   builders, and verify coverage after interrupted-build repair.
 
+## Owner storage warning
+
+MemQL OS reads the existing `database-health` Kubernetes Event through the
+owner-only `clusterStorageStatus` builtin on its ordinary stream. The read
+verifies the Event's source and current CloudNativePG cluster UID, so a report
+from a replaced installation cannot describe the new one. The shared base grants
+only `get` on that named Event and cluster. There is no new monitor or stored
+health history in the engine.
+
+The OS uses the monitor's data/WAL capacity warning (over 80%). Owners see one
+notice above the dock, opening Cluster → Readiness for usage and measurement
+time. Data usage is the monitor's estimate from summed database sizes and
+configured capacity; WAL usage comes from the exporter. It is not a filesystem
+free-space measurement. The five-minute monitor is read once a minute while the
+OS is visible and connected. Reports older than fifteen minutes, future reports,
+missing measurements and read failures are unavailable, never zero. A previously
+seen warning remains until a fresh complete report clears it. Other roles neither
+request nor render the report, and the native capability independently enforces
+the owner gate.
+
 ## Verify a deployment
 
 1. Confirm the work integration constructed its Azure archive client. A configured

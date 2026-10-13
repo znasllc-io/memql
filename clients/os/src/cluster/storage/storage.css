@@ -20,3 +20,11 @@
 @media (max-width: 600px) {
   .os-storage-warning { flex-wrap: wrap; bottom: calc(var(--os-dock-h) + 12px + env(safe-area-inset-bottom)); }
 }
+
+.os-storage-warning[data-inline] {
+  position: static;
+  width: auto;
+  max-width: none;
+  margin: 8px 12px;
+  flex-shrink: 0;
+}

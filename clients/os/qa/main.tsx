@@ -692,6 +692,7 @@ const VIEWS: Record<
   }
 > = {
   ...MATERIALIZER_VIEWS,
+  "storage-phone": { render: () => <StorageScene state="warning" phone /> },
   "storage-warning": { render: () => <StorageScene state="warning" /> },
   "storage-healthy": { render: () => <StorageScene state="healthy" /> },
   "storage-missing": { render: () => <StorageScene state="missing" /> },

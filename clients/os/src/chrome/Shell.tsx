@@ -170,7 +170,6 @@ export function Shell({
       onContextMenu={suppressBrowserMenu}
     >
                     <PhoneShell onSignOut={onSignOut} />
-                    <StorageWarning />
                     <AskNavigator />
       <AskSheet />
                   </div>
@@ -384,9 +383,10 @@ function DesktopChrome({
   // and the marketplace's whole gesture is watching this desktop restyle.
   const [themesOpen, setThemesOpen] = useState(false);
 
+  const [storageWarningHeight, setStorageWarningHeight] = useState(0);
   const placement = useMemo<PlacementTokens>(
-    () => ({ margin: 28, gutter: 16, dockReserve: 118, maxSoloWidth: 1280 }),
-    [],
+    () => ({ margin: 28, gutter: 16, dockReserve: 118 + storageWarningHeight, maxSoloWidth: 1280 }),
+    [storageWarningHeight],
   );
 
   // Desk keyboard bindings (spec A): scoped off editable targets and off
@@ -443,7 +443,7 @@ function DesktopChrome({
           setThemesOpen(true);
         }}
       />
-      <StorageWarning />
+      <StorageWarning onHeightChange={setStorageWarningHeight} />
       <ThemeStore open={themesOpen} onClose={() => setThemesOpen(false)} />
       <AskNavigator />
       <AskSheet dockReserve={placement.dockReserve} />

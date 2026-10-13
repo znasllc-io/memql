@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useOsIfPresent } from "../../chrome/state";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { QueryClient } from "@znasllc-io/memql-sdk-core/client";
 import { useSession } from "../../chrome/access";
 import { useConnectionStatus } from "../../chrome/connection";
@@ -26,12 +27,17 @@ export function StorageHealthFeed({ query, connected, children }: { query: Stora
   const [snapshot, setSnapshot] = useState<{ source: StorageQuery | null; report: StorageReport | null; warning: StorageReport | null; error: string; busy: boolean }>({ source: query, report: null, warning: null, error: "", busy: false });
   const now = useNow(30_000).getTime();
   useEffect(() => {
-    if (!query || !connected) return;
+    if (!query || !connected || document.visibilityState === "hidden" || navigator.onLine === false) return;
     let live = true;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     setSnapshot((old) => ({ source: query, report: old.source === query ? old.report : null, warning: old.source === query ? old.warning : null, error: "", busy: true }));
-    query.clusterStorageStatus({}, { signal: controller.signal }).then((result) => {
+    let abortRead!: () => void;
+    const cancelled = new Promise<never>((_, reject) => {
+      abortRead = () => reject(new Error("The storage report timed out."));
+      controller.signal.addEventListener("abort", abortRead, { once: true });
+    });
+    Promise.race([query.clusterStorageStatus({}, { signal: controller.signal }), cancelled]).then((result) => {
       if (!live) return;
       if (controller.signal.aborted) throw new Error("The storage report timed out.");
       const report = readStorageReport(result.single());
@@ -39,7 +45,7 @@ export function StorageHealthFeed({ query, connected, children }: { query: Stora
       setSnapshot({ source: query, report, warning: storageWarning(report) ? report : null, error: "", busy: false });
     }).catch((error: unknown) => {
       if (live) setSnapshot((old) => ({ source: query, report: null, warning: old.source === query ? old.warning : null, error: controller.signal.aborted ? "The storage report timed out." : error instanceof Error ? error.message : String(error), busy: false }));
-    }).finally(() => clearTimeout(timer));
+    }).finally(() => { clearTimeout(timer); controller.signal.removeEventListener("abort", abortRead); });
     return () => { live = false; clearTimeout(timer); controller.abort(); };
   }, [query, connected, revision]);
   const same = snapshot.source === query;
@@ -48,13 +54,28 @@ export function StorageHealthFeed({ query, connected, children }: { query: Stora
   return <Ctx.Provider value={value}><AutoRefresh intervalMs={60_000} enabled={connected && query !== null} busy={value.busy} onRefresh={() => reread((n) => n + 1)} />{children}</Ctx.Provider>;
 }
 
-export function StorageWarning() {
+export function StorageWarning({ onReview, inline = false, onHeightChange }: { onReview?: () => void; inline?: boolean; onHeightChange?: (height: number) => void }) {
   const reading = useContext(Ctx);
   const cluster = useAppReach("cluster");
-  if (!reading?.warning) return null;
-  return <div className="os-storage-warning" role="status">
+  const os = useOsIfPresent();
+  const desk = os?.state.shell.desks.find((item) => item.id === os.state.shell.activeDeskId);
+  const reviewing = !inline && desk?.windows.some((id) => {
+    const win = os?.state.shell.windows[id];
+    return win?.appId === "cluster" && win.sectionId === "readiness" && win.mode !== "minimized";
+  });
+  const element = useRef<HTMLDivElement>(null);
+  const present = !!reading?.warning && !reviewing;
+  useLayoutEffect(() => {
+    const update = () => onHeightChange?.(element.current?.getBoundingClientRect().height ?? 0);
+    update();
+    const observer = new ResizeObserver(update);
+    if (element.current) observer.observe(element.current);
+    return () => { observer.disconnect(); onHeightChange?.(0); };
+  }, [present, onHeightChange]);
+  if (!reading?.warning || reviewing) return null;
+  return <div ref={element} className="os-storage-warning" data-inline={inline || undefined} role="status">
     <span>{reading.fresh ? warningSentence(reading.warning) : "Storage was nearly full. A current reading is unavailable."}</span>
-    {cluster.sections.includes("readiness") ? <Button onClick={() => cluster.open("readiness")}>Review storage</Button> : null}
+    {onReview || (cluster.canOpenWindows && cluster.sections.includes("readiness")) ? <Button onClick={onReview ?? (() => cluster.open("readiness", { storageWarning: true }))}>Review storage</Button> : null}
   </div>;
 }
 
