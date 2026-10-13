@@ -124,6 +124,10 @@ unknown command options are refused instead of stored as hidden approval
 inputs. The original argument hash binds the invocation, including whether
 the timeout was supplied; changed arguments require a new approval. Local
 shell policy still decides whether the approved command may execute.
+Cockpit preserves the exact command and directory bytes. It opens the working
+directory without following links and enters that held directory in the child
+process, so replacing the pathname cannot redirect the approved command. The
+existing process-group cancellation and child resource limits still apply.
 
 ## Action vocabulary
 

@@ -5,15 +5,41 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql-cockpit/internal/worker/consent"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	permission "github.com/znasllc-io/memql/core/computerpermission"
 )
+
+func TestMain(m *testing.M) {
+	if handled, err := RunScopedCommandChild(os.Args[1:]); handled {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(125)
+	}
+	os.Exit(m.Run())
+}
+
+func TestScopedCommandChildRefusesMissingDirectory(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(self, scopedCommandChildFlag, "/bin/sh", "-c", "printf must-not-run")
+	output, err := command.CombinedOutput()
+	if err == nil || strings.Contains(string(output), "must-not-run") || !strings.Contains(string(output), "inherited directory") {
+		t.Fatalf("missing descriptor was not refused: output=%s error=%v", output, err)
+	}
+	if handled, err := RunScopedCommandChild([]string{scopedCommandChildFlag, "/bin/other", "-c", "true"}); !handled || err == nil {
+		t.Fatal("unexpected child command accepted")
+	}
+}
 
 func permissionDispatch(t *testing.T, kind, directory, action string, args map[string]any) *memqlv1.ToolDispatch {
 	t.Helper()
@@ -76,6 +102,92 @@ func TestComputerPermissionLocalWorkspaceUsesDirectoryBoundary(t *testing.T) {
 	policy.fs.WorkspaceRoot = "/"
 	if err := permissionLocalPath(policy, "/fixture/repository/file"); err != nil {
 		t.Fatalf("broad local ceiling refused narrower approved path: %v", err)
+	}
+}
+
+func TestComputerPermissionCommandPreservesReviewedDirectoryWhitespace(t *testing.T) {
+	root := realPermissionDirectory(t)
+	approved := filepath.Join(root, "approved ")
+	for _, p := range []string{approved, strings.TrimSpace(approved)} {
+		if err := os.Mkdir(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	policy := DefaultPolicy()
+	policy.fs.WorkspaceRoot = approved
+	d := NewDispatcher(quietLogger(), policy, &fakeGate{decision: consent.Decision{Allowed: true}})
+	ok, fail := d.Dispatch(context.Background(), permissionDispatch(t, "exact_command", "", "exec", map[string]any{"cmd": "pwd -P", "cwd": approved}))
+	if fail != nil || ok == nil || ok.GetExitCode() != 0 {
+		t.Fatalf("approved command failed: success=%v failure=%v", ok, fail)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(ok.GetResultJson(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["stdout"] != approved+"\n" {
+		t.Fatalf("executed outside exact reviewed cwd: %q", result["stdout"])
+	}
+}
+
+func TestComputerPermissionCommandStaysOnOpenedDirectoryAfterReplacement(t *testing.T) {
+	root := realPermissionDirectory(t)
+	approved, outside := filepath.Join(root, "approved"), filepath.Join(root, "outside")
+	for _, p := range []string{approved, outside} {
+		if err := os.Mkdir(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	directory, err := openPermissionPath(approved, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer directory.Close()
+	moved := approved + "-moved"
+	if err := os.Rename(approved, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, approved); err != nil {
+		t.Fatal(err)
+	}
+	ok, fail := runExecWithDirectory(context.Background(), map[string]any{"cmd": "pwd -P", "cwd": approved}, DefaultPolicy(), directory)
+	if fail != nil || ok == nil || ok.GetExitCode() != 0 {
+		t.Fatalf("anchored command failed: success=%v failure=%v", ok, fail)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(ok.GetResultJson(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["stdout"] != moved+"\n" {
+		t.Fatalf("cwd reopened through replacement: %q", result["stdout"])
+	}
+}
+
+func TestComputerPermissionCommandRetainsLimitsAndCancellation(t *testing.T) {
+	root := realPermissionDirectory(t)
+	directory, err := openPermissionPath(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer directory.Close()
+	policy := DefaultPolicy()
+	policy.shell = ShellPolicy{Allow: []string{"ulimit", "sleep"}, MaxOpenFiles: 64, MaxCPUSeconds: 3}
+	ok, fail := runExecWithDirectory(context.Background(), map[string]any{"cmd": "ulimit -n; ulimit -t", "cwd": root}, policy, directory)
+	if fail != nil || ok.GetExitCode() != 0 {
+		t.Fatalf("limited command failed: success=%v failure=%v", ok, fail)
+	}
+	var result map[string]any
+	if err := json.Unmarshal(ok.GetResultJson(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result["stdout"] != "64\n3\n" {
+		t.Fatalf("lost child limits: %q", result["stdout"])
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	ok, fail = runExecWithDirectory(ctx, map[string]any{"cmd": "sleep 30", "cwd": root}, policy, directory)
+	if ok != nil || fail.GetErrorCode() != "timeout" || time.Since(started) > 5*time.Second {
+		t.Fatalf("scoped cancellation failed: success=%v failure=%v", ok, fail)
 	}
 }
 func TestComputerPermissionDirectoryReadRejectsSymlinkAndPolicyEscapes(t *testing.T) {

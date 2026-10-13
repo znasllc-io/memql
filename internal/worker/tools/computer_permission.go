@@ -42,11 +42,12 @@ func (d *Dispatcher) dispatchComputerPermission(ctx context.Context, dispatch *m
 		if err := permissionLocalPath(d.policy, cwd); err != nil {
 			return nil, failure("fs_denied", err.Error())
 		}
-		real, err := filepath.EvalSymlinks(cwd)
-		if err != nil || real != cwd {
+		directory, err := openPermissionPath(cwd, true)
+		if err != nil {
 			return nil, failure("computer_permission_refused", "Request this command again using the working directory's real path.")
 		}
-		return d.dispatchHost(ctx, dispatch.GetAction(), args, dispatch.GetAgentId(), nil)
+		defer directory.Close()
+		return runExecWithDirectory(ctx, args, d.policy, directory)
 	default:
 		return nil, failure("computer_permission_refused", "This Cockpit does not support this computer permission.")
 	}

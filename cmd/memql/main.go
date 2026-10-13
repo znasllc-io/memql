@@ -38,6 +38,7 @@ import (
 	"github.com/znasllc-io/memql-cockpit/internal/lint"
 	"github.com/znasllc-io/memql-cockpit/internal/setupproject"
 	"github.com/znasllc-io/memql-cockpit/internal/worker"
+	"github.com/znasllc-io/memql-cockpit/internal/worker/tools"
 )
 
 // version is the cockpit's semantic version. The git tag is the
@@ -62,6 +63,10 @@ var version = "0.17.0"
 var revision, dirty string
 
 func main() {
+	if handled, err := tools.RunScopedCommandChild(os.Args[1:]); handled {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(125)
+	}
 	// The worker registers this version with the cluster, and this
 	// package owns the symbol -ldflags stamps. Handing it over here is
 	// what keeps the machine's recorded version the one it was built

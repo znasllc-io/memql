@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -16,8 +17,17 @@ import (
 // stdout/stderr, return exit code + previews. Uses a process group
 // so context cancellation kills the whole tree.
 func runExec(ctx context.Context, args map[string]any, policy *Policy) (*memqlv1.Success, *memqlv1.Failure) {
-	cmdLine := strings.TrimSpace(argString(args, "cmd"))
-	if cmdLine == "" {
+	return runExecWithDirectory(ctx, args, policy, nil)
+}
+
+// A scoped command retains the exact reviewed bytes and inherits a directory
+// descriptor opened without following links. The legacy path keeps its defaults.
+func runExecWithDirectory(ctx context.Context, args map[string]any, policy *Policy, directory *os.File) (*memqlv1.Success, *memqlv1.Failure) {
+	cmdLine := argString(args, "cmd")
+	if directory == nil {
+		cmdLine = strings.TrimSpace(cmdLine)
+	}
+	if strings.TrimSpace(cmdLine) == "" {
 		return nil, failure("bad_request", "exec: cmd required")
 	}
 	if err := policy.CheckShell(cmdLine); err != nil {
@@ -46,6 +56,18 @@ func runExec(ctx context.Context, args map[string]any, policy *Policy) (*memqlv1
 	}
 	if err := prepareShellLimits(cmd, limits); err != nil {
 		return nil, failure("denied_by_policy", err.Error())
+	}
+	if directory != nil {
+		// Enter the held directory in a short-lived child, never by reopening
+		// its pathname or changing the long-lived worker's current directory.
+		self, err := os.Executable()
+		if err != nil {
+			return nil, failure("exec_failed", "Cannot locate the scoped command launcher.")
+		}
+		cmd.Args = append([]string{self, scopedCommandChildFlag}, cmd.Args...)
+		cmd.Path = self
+		cmd.ExtraFiles = []*os.File{directory}
+		cwd = ""
 	}
 	cmd.Cancel = func() error { signalProcessGroup(cmd, true); return nil }
 	cmd.WaitDelay = time.Second
