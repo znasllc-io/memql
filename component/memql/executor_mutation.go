@@ -913,7 +913,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	var organizationPrior map[string]any
 
 	id := strings.TrimSpace(mutation.ID)
-	if len(rowVersionFences(ctx)) > 0 && id != "" {
+	// Observation and business writers share the same version fence. A pulse
+	// must never replace fields merged before another replica changed them.
+	if (len(rowVersionFences(ctx)) > 0 || memorynodes.HasLiveness(conceptMeta.Name)) && id != "" {
 		var err error
 		ctx, err = e.fenceWriteTarget(ctx, conceptMeta.Name, id)
 		if err != nil {
@@ -2124,7 +2126,7 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 	// Collapse covering-index keys first. Selecting every historical payload
 	// here would undo the read-path optimization as soon as candidates are
 	// rechecked against their true latest version.
-	keys := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).
+	keys := db.NewSelect().Model((*memorynodes.MemoryNode)(nil)).ModelTableExpr(memorynodes.ObservedRowsSQL+" AS mn").
 		Column("id", "createdAt").DistinctOn("id").
 		OrderExpr(`id ASC, "createdAt" DESC`).Where("id IN (?)", bun.In(unique))
 	if timestamp != nil {
@@ -2133,7 +2135,7 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 	var latest []memorynodes.MemoryNode
 	query := db.NewSelect().Model(&latest).
 		ModelTableExpr("(?) AS latest_keys", keys).
-		Join(`JOIN LATERAL (SELECT * FROM "MemoryNodes" WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
+		Join(`JOIN LATERAL (SELECT * FROM ` + memorynodes.ObservedRowsSQL + ` AS observed WHERE id=latest_keys.id AND "createdAt"=latest_keys."createdAt" LIMIT 1) AS mn ON true`)
 
 	if err := query.Scan(ctx); err != nil {
 		return nil, err

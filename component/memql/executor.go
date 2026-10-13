@@ -146,7 +146,7 @@ func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.Quer
 	}
 
 	var nodes []memorynodes.MemoryNode
-	query := s.db.NewSelect().Model(&nodes)
+	query := s.db.NewSelect().Model(&nodes).ModelTableExpr(memorynodes.ObservedRowsSQL + " AS mn")
 
 	if len(params.IDs) > 0 {
 		query = query.Where("id IN (?)", bun.In(params.IDs))

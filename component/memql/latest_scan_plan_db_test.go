@@ -60,6 +60,7 @@ func TestLatestScanPlanBoundsPayloadReadsAcrossTimescaleChunks(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	for _, stmt := range []string{
 		`CREATE TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`,
+		`CREATE TABLE memory_liveness (LIKE public.memory_liveness INCLUDING ALL)`,
 		`SELECT public.create_hypertable('"MemoryNodes"','createdAt',chunk_time_interval=>interval '1 day')`,
 		`INSERT INTO "MemoryNodes" (id,concept,"createdAt","createdBy",schema,payload)
          SELECT 'v1:worker:registration:machine-'||n,'v1:worker:registration',TIMESTAMPTZ '2026-01-01'+day*interval '1 day'+v*interval '1 second','fixture','{}',

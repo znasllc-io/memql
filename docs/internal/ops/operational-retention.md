@@ -43,6 +43,33 @@ The existing log sweep reads logLine's retention declaration and verifies each
 archive before dropping a day's chunks. It continues to use
 `MEMQL_LOGS_ARCHIVE_CONTAINER` (falling back to `MEMQL_AZURE_BLOB_CONTAINER`).
 
+## Current liveness observations
+
+Worker registration heartbeats, cluster-node health and mesh observations, and
+module-readiness reports have one current row per record in `memory_liveness`.
+Repeated observations replace that row instead of appending history. The normal
+engine read path merges this table with `MemoryNodes` before filtering, sorting,
+authorization and pagination. Its `createdAt` remains the observation version,
+so live feeds and reads from another replica order updates consistently.
+
+The first record and changes outside the closed observation-field list still
+append to `MemoryNodes`. A business change clears its preceding observation in
+the same transaction. Every engine write to these concepts carries a version
+fence: a concurrent change rejects the stale decision rather than overwriting
+it. Normal ownership checks, schema validation and cluster event publication
+remain in the mutation path. Retiring all base versions also removes the current
+observation. The earlier bounded status-history sweep continues to clear legacy
+versions and keeps the latest base record.
+
+Historical reads retain business versions and, when within the requested time,
+the current observation. Superseded heartbeat samples are deliberately absent;
+backups retain the durable business records, and fresh heartbeats rebuild current
+liveness after a restore. During an upgrade, `memory_liveness_readers` must show
+recent support from every non-stopped node before `memory_liveness_storage`
+enables the switch. Offline nodes still block it. Downgrading after activation
+requires a complete backup restore; an old binary cannot read the observation
+store.
+
 ## Shared row schemas
 
 `MemoryNodes` and `SecretMemoryNodes` store an immutable schema reference and

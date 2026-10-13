@@ -13,6 +13,7 @@ import (
 	"github.com/uptrace/bun"
 
 	"github.com/znasllc-io/memql/component/auth"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/envregistry"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqldsl "github.com/znasllc-io/memql/dsl"
@@ -570,7 +571,7 @@ func latestRowsByConcept(ctx context.Context, db *bun.DB, conceptID string) ([]c
 	}
 	err := db.NewRaw(
 		`SELECT DISTINCT ON (id) id, "createdAt", payload
-		   FROM "MemoryNodes"
+		   FROM `+memorynodes.ObservedRowsSQL+` AS observed
 		  WHERE concept = ?
 		  ORDER BY id, "createdAt" DESC`,
 		conceptID,
