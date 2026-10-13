@@ -28,7 +28,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    Pause hidden/offline views, avoid overlapping requests, and cancel stale reads.
    Explicit probes and writes stay deliberate actions; never repeat them on a timer.
    Creation actions use the shared icon-only `AddButton` (plus), with an
-   accessible label and tooltip. Do not replace it with a text button such as
+   accessible label, tooltip and visible border in light and dark. Keep that
+   border in the shared component’s style, including creation links; never
+   restyle it separately per app. Do not replace it with a text button such as
    "Connect GitHub account". A settings page is titled **Settings**; subjects
    such as **GitHub accounts** are sections beneath that title, with their Add
    control on the section heading (`kit` `Subhead` `actions`). Settings lists
