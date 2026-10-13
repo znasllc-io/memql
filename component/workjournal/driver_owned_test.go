@@ -35,7 +35,7 @@ func (e *lockedEngine) snapshot() []string {
 func heartbeatsIn(calls []string) int {
 	n := 0
 	for _, c := range calls {
-		if strings.HasPrefix(c, "mutation updateWorkRun(") && strings.Contains(c, "heartbeatAt:") {
+		if (strings.HasPrefix(c, "mutation updateWorkRun(") || strings.HasPrefix(c, "mutation createWorkRun(")) && strings.Contains(c, "heartbeatAt:") {
 			n++
 		}
 	}
