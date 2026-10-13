@@ -457,7 +457,7 @@ func (m *SeedMaterializer) seedRowIsCurrent(ctx context.Context, def *SeedDefini
 	// and EVERY sweep appends a fresh version of an unchanged row -- the exact
 	// regression this function exists to prevent, and silent, because a failed
 	// freshness check is indistinguishable from a row that really did change.
-	result, err := m.engine.Execute(systemActorContext(ctx), "concept=="+conceptId+" && row.id=="+dslStringLiteral(id))
+	result, err := m.engine.Execute(ContextWithFreshRead(systemActorContext(ctx)), "concept=="+conceptId+" && row.id=="+dslStringLiteral(id))
 	if err != nil || result == nil || result.Bundle == nil || len(result.Bundle.Nodes) != 1 {
 		return false
 	}

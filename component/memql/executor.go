@@ -66,7 +66,8 @@ func mutationActor(ctx context.Context) (string, error) {
 // reuses this adapter instead of growing a second one that could drift
 // from it. See component/memql/outbox_append.go.
 type bunStore struct {
-	db bun.IDB
+	db       bun.IDB
+	onInsert func(concept string, appended bool)
 }
 
 // newBunStore wraps the engine's database handle.
@@ -120,10 +121,17 @@ func (s *bunStore) InsertMemoryNode(ctx context.Context, node *memorynodes.Memor
 	// createdAt timestamps in the common case; only the
 	// pathological "same row, same microsecond" case dedups, which
 	// is the right behavior anyway.
-	_, err := s.db.NewInsert().
+	res, err := s.db.NewInsert().
 		Model(node).
 		On("CONFLICT (id, \"createdAt\") DO NOTHING").
 		Exec(ctx)
+	if err == nil && s.onInsert != nil {
+		n, countErr := res.RowsAffected()
+		if countErr != nil {
+			return countErr
+		}
+		s.onInsert(node.Concept, n > 0)
+	}
 	return err
 }
 

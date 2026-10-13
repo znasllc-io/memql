@@ -673,3 +673,24 @@ func TestThePollRefusesACredentialledPackageOnANodeThatCannotResolve(t *testing.
 		t.Fatal("nothing may be written for a package that was not polled")
 	}
 }
+
+func TestRepeatedPackagePollsWriteOnlyWhenTheHeadChanges(t *testing.T) {
+	i, engine := feedHarness(t, trackedPackage("oldsha0000000000", "newsha0000000000", true))
+	gh := &recordingTransport{sha: "newsha0000000000"}
+	i.deps.HTTP = &http.Client{Transport: gh}
+	for n := 0; n < 4; n++ {
+		if _, err := i.handlePollUpstream(context.Background(), nil, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if engine.sawStatement("mutation recordPackageUpstreamVersion") {
+		t.Fatal("an unchanged poll appended a package version")
+	}
+	gh.sha = "changedsha0000000"
+	if _, err := i.handlePollUpstream(context.Background(), nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	if !engine.sawStatement("mutation recordPackageUpstreamVersion") {
+		t.Fatal("a changed head must be recorded")
+	}
+}

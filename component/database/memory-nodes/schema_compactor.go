@@ -64,6 +64,9 @@ func (c *SchemaCompactor) run(ctx context.Context, markStarted func()) error {
 				_, err = CompactSchemaBatch(batchCtx, db)
 				if err == nil {
 					_, err = EnableLivenessStorageWhenReady(batchCtx, db, c.nodeID())
+					if err == nil {
+						_, err = EnableReconcileObservationsWhenReady(batchCtx, db, c.nodeID())
+					}
 				}
 			}
 			cancel()
