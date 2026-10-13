@@ -23,6 +23,9 @@ func runFsRead(_ context.Context, args map[string]any, policy *Policy) (*memqlv1
 	if err := policy.CheckPath(path); err != nil {
 		return nil, failure("fs_denied", err.Error())
 	}
+	if refusal := validateFsReadArgs(args); refusal != nil {
+		return nil, refusal
+	}
 	maxBytes := argInt(args, "maxBytes", 5*1024*1024)
 	f, err := os.Open(expandHome(path))
 	if err != nil {
@@ -48,6 +51,17 @@ func runFsRead(_ context.Context, args map[string]any, policy *Policy) (*memqlv1
 		"fileSize":  info.Size(),
 		"truncated": info.Size() > int64(len(body)),
 	}, 0, 0, len(body), fileReadPreview(body, info.Size())), nil
+}
+
+// Never turn an unsupported range or misspelled limit into a successful full
+// read. Both read paths call this after their existing gates, before opening.
+func validateFsReadArgs(args map[string]any) *memqlv1.Failure {
+	for key := range args {
+		if key != "path" && key != "maxBytes" {
+			return failure("bad_request", "fs_read supports only path and optional maxBytes. Line ranges, offsets, search and other arguments are not supported.")
+		}
+	}
+	return nil
 }
 
 // Keep completeness at the end of the bounded preview, so a retained result
