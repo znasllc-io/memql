@@ -57,9 +57,7 @@ automation guardedBeforeWrite { query beforeWriteNestedEffect() }`, "test")
 	if err := guardedHook.Apply(context.Background(), row); err == nil || !strings.Contains(err.Error(), "dry-run refused builtin executor") {
 		t.Fatalf("nested builtin escaped read-only classification: %v", err)
 	}
-	if query := RecordStepExecution(memql.ContextWithBeforeWrite(context.Background()), engine, StepRecordData{StepId: "read"}); query != "" {
-		t.Fatal("hook produced journal query", query)
-	}
+
 }
 
 type beforeWriteNoQueries struct{ t *testing.T }

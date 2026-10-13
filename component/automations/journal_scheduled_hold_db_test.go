@@ -220,3 +220,52 @@ func TestScheduledJournal_DB(t *testing.T) {
 		}
 	})
 }
+
+func TestScheduledChildJournal_DB(t *testing.T) {
+	engine := sharedJournalEngine(t)
+	for _, mode := range []string{"idle", "child-writes", "parent-writes-later"} {
+		t.Run(mode, func(t *testing.T) {
+			e, rec, reg, parent, child := subAutomationHarness(t)
+			parent.Trigger = nil
+			parent.Schedule = "0 */10 * * * *"
+			parent.Steps = append(parent.Steps, scheduledSteps("after")...)
+			probe := &heldChildDBProbe{heldChildProbe: heldChildProbe{base: reg, rec: rec, mode: mode, child: child.Name}, engine: engine}
+			e.stepRegistry = probe
+			e.journal = newWorkJournal(engine, nil)
+			exec, err := e.Execute(context.Background(), parent, "schedule")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range []string{exec.ID, probe.childID} {
+				j, err := LoadRunJournal(context.Background(), engine, id)
+				if mode == "idle" {
+					if !errors.Is(err, ErrRunNotFound) {
+						t.Fatalf("idle run %s persisted: %v", id, err)
+					}
+				} else if err != nil || j.Status != "succeeded" {
+					t.Fatalf("run %s did not persist a completed journal: %+v %v", id, j, err)
+				}
+			}
+		})
+	}
+}
+
+type heldChildDBProbe struct {
+	heldChildProbe
+	engine  *memql.MemQLEngine
+	childID string
+}
+
+func (p *heldChildDBProbe) Execute(ctx context.Context, step *Step, sc *StepContext) (*StepResult, error) {
+	child := sc.Execution.AutomationName == p.child
+	if child {
+		p.childID = sc.Execution.ID
+	}
+	if (child && p.mode == "child-writes") || (step.ID == "after" && p.mode == "parent-writes-later") {
+		writer := &dbLogicProbe{engine: p.engine}
+		if _, err := writer.Execute(ctx, &Step{ID: step.ID, Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "write"}}, sc); err != nil {
+			return nil, err
+		}
+	}
+	return p.base.Execute(ctx, step, sc)
+}

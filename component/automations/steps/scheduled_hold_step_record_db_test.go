@@ -1,32 +1,7 @@
 package steps
 
-// scheduled_hold_step_record_db_test.go -- an idle cron tick driven through the
-// REAL step registry leaves no run (storage growth stability release,
-// 2026-10-11; component/automations/journal.go, "A SCHEDULED FIRING THAT WRITES
-// NOTHING LEAVES NO JOURNAL").
-//
-// A scheduled firing's journal is held until the engine reports the run's first
-// graph write to the write observer the executor installed. The executors in
-// this package record each step they run with an engine insert of their own
-// (RecordStepExecution, v1:memql:automation:step). That record is the executor's
-// bookkeeping, not a write the run made, for the reason the journal's own writes
-// are masked (journalContext): heard by the observer, it would open the run of
-// every tick at its first step, and the hold would save nothing.
-//
-// TODAY THE RECORD NEVER LANDS, for two reasons: its insert is rendered in the
-// object-literal call form the parser has refused since memql#2335
-// (`insert("<concept>", { payload: {...} })`, "expected identifier"), and the
-// step concept is not registered. So nothing would turn red the day both are
-// put right and the record starts landing under the observer. This test
-// registers the concept, on this engine's own registry and nowhere else, so the
-// case is armed for that day: the moment the insert lands, a record heard by
-// the observer opens the run and the assertion below fails. Measured on
-// 2026-10-12 with the insert rendered in the accepted form
-// (`insert("<concept>", payload={...})`): without the mask the idle tick's run
-// was on file; with it, none.
-//
-// Postgres-gated: skips cleanly when no DB is reachable, FAILS under
-// MEMQL_REQUIRE_DB=1.
+// An idle scheduled firing through the real registry writes neither a work
+// journal nor the retired per-step record (#6059).
 
 import (
 	"context"
@@ -50,7 +25,7 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// stepRecordConceptSource declares every field RecordStepExecution writes.
+// The retired concept is deliberately registered to catch an accidental writer.
 const stepRecordConceptSource = `concept step {
   runId           string
   stepId          string
@@ -128,25 +103,13 @@ func TestIdleScheduledTickThroughTheRealStepRegistryLeavesNoRun_DB(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, "completed", exec.Status, "the idle tick itself must succeed: %s", exec.Error)
 
-	// Whether the record landed decides what this run of the test proved. Landed,
-	// the observer was given a real write to hear, and the assertions below pin
-	// the mask. Not landed (today: see the file comment), they pin only that the
-	// real registry's idle tick writes nothing else the observer hears.
 	records, err := db.NewSelect().
 		TableExpr(`"MemoryNodes"`).
 		Where("concept = ?", memorynodes.ConceptMemQLAutomationStep).
 		Where("payload->>'runId' = ?", exec.ID).
 		Count(ctx)
 	require.NoError(t, err)
-	if records == 0 {
-		t.Logf("the step record's insert did not land (it does not parse yet; see the file comment), so this run did not exercise the mask")
-	}
-	t.Cleanup(func() {
-		_, _ = db.NewDelete().TableExpr(`"MemoryNodes"`).
-			Where("concept = ?", memorynodes.ConceptMemQLAutomationStep).
-			Where("payload->>'runId' = ?", exec.ID).
-			Exec(context.Background())
-	})
+	require.Zero(t, records, "retired step records must never be written")
 
 	// No run: neither through the read resume uses nor in the table itself.
 	if _, err := automations.LoadRunJournal(ctx, eng, exec.ID); !errors.Is(err, automations.ErrRunNotFound) {
