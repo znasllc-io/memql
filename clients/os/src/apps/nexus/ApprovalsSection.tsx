@@ -528,9 +528,10 @@ function ApprovalDetail({
           {permission.kind === "directory_read" ? <Fact label="Directory" value={<CopyValue value={permission.directory!} label="directory" />} /> : <>
             <Fact label="Command" value={<CopyValue value={permission.command!} label="command" />} />
             <Fact label="Working directory" value={<CopyValue value={permission.cwd!} label="working directory" />} />
+            <Fact label="Time limit" value={`${permission.timeoutSeconds} seconds`} />
           </>}
         </Facts>
-        <Caption>{permission.kind === "directory_read" ? "Includes files and folders inside this directory. Does not allow writing files or running commands." : "Applies only to this command, working directory and supplied inputs on this computer."}</Caption>
+        <Caption>{permission.kind === "directory_read" ? "Includes files and folders inside this directory. Does not allow writing files or running commands." : "Applies only to this command, working directory and time limit on this computer."}</Caption>
         {canDecide && permission.allowedModes.includes("always") ? <div className="os-nexus-permission-remember"><Check checked={rememberPermission} onChange={onRememberPermission}>{permissionRememberLabel(permission)}</Check><Caption>Saved permissions can be revoked from Approvals.</Caption></div> : null}
       </Panel> : !failure && approval.kind === "scopeElevation" && approval.subject?.computerPermission !== undefined ? <Notice tone="warn" sentence="This permission request cannot be read." next="You can reject it and ask for a new request." /> : !failure && approval.kind === "scopeElevation" ? <Panel label="Computer access"><Facts>
         <Fact label="Access" value={approval.subject?.scope === "observe" ? "Read and observe" : "Read, write and control"} />

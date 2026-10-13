@@ -342,6 +342,7 @@ Nexus approvals: `nexus-approvals`, `nexus-approvals-empty`,
 `nexus-approval-advice-running`, and `nexus-approval-guidance-recorded` open the
 real Ask sheet from a selected approval. Inspect both modes at desktop and
 narrow widths, including the action bar, named computer scope, readable advice,
-editable composer during investigation, and recorded-but-not-resumed guidance.
+editable composer during investigation, and recorded-but-not-resumed guidance
+with **Retry continuing** using the saved answer.
 These scenes use synthetic conversation and permission receipts; they never
 approve production work, run commands, or call a model.

@@ -11,6 +11,7 @@ export interface ComputerPermission {
   directory?: string;
   command?: string;
   cwd?: string;
+  timeoutSeconds?: number;
   allowedModes: ("once" | "always")[];
 }
 
@@ -23,7 +24,7 @@ export function computerPermission(subject: unknown): ComputerPermission | null 
   if (["registrationId", "machineId", "machineLabel", "tool", "action", "argsHash"].some(key => typeof value[key] !== "string" || (value[key] as string).trim() === "")) return null;
   if (!Array.isArray(value.allowedModes) || !value.allowedModes.includes("once") || value.allowedModes.some(mode => mode !== "once" && mode !== "always")) return null;
   if (value.kind === "directory_read" && (typeof value.directory !== "string" || value.directory.trim() === "")) return null;
-  if (value.kind === "exact_command" && (typeof value.command !== "string" || value.command.trim() === "" || typeof value.cwd !== "string" || value.cwd.trim() === "")) return null;
+  if (value.kind === "exact_command" && (typeof value.command !== "string" || value.command.trim() === "" || typeof value.cwd !== "string" || value.cwd.trim() === "" || typeof value.timeoutSeconds !== "number" || !Number.isInteger(value.timeoutSeconds) || value.timeoutSeconds <= 0 || value.timeoutSeconds > 600)) return null;
   return value as unknown as ComputerPermission;
 }
 

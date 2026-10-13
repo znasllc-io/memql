@@ -47,6 +47,7 @@ export interface ApprovalDiscussion {
   approval: { id: string; runId: string; kind: string; question: string; summary?: string; status: string };
   canSendGuidance: boolean;
   canAskAdvisor: boolean;
+  guidanceToResume?: string;
 }
 export interface AskConversationStore {
   list(): Promise<ConversationSummary[]>;
@@ -59,6 +60,7 @@ export interface ConversationState {
   discussionSending?: boolean;
   guidanceSending?: boolean;
   guidanceNotice?: string;
+  guidanceRetry?: { approvalId: string; feedback: string } | null;
   focusQuestionId?: string | null;
   conversations: ConversationSummary[];
   dictationActivity: AskActivity[];
@@ -92,6 +94,8 @@ export class ConversationSession {
   private selection = 0;
   private historyEpoch = 0;
   private discussionEpoch = 0;
+  private guidanceRevision = 0;
+  private uncertainGuidance = new Map<string, string>();
   private pendingDiscussionRequest: { key: string; id: string } | null = null;
   private voiceEpoch = 0;
   private voiceRevision = 0;
@@ -104,6 +108,7 @@ export class ConversationSession {
   setDraft = (draft: string) => this.patch({ draft });
   questionFocused = () => this.patch({ focusQuestionId: null });
   discussApproval = async (approvalId: string) => {
+    if (this.state.discussionSending || this.state.guidanceSending) { this.patch({ error: "Wait for the current message to be recorded before opening another approval." }); return; }
     if (this.state.busy || this.state.voiceActive) { this.patch({ error: "Finish the current reply before opening an approval discussion." }); return; }
     const epoch = ++this.discussionEpoch;
     const before = this.selection;
@@ -115,7 +120,7 @@ export class ConversationSession {
       // select is a no-op for the already-open conversation, preserving its draft.
       if (!await this.select(discussion.conversationId, true)) return;
       if (epoch !== this.discussionEpoch || this.disposed) return;
-      this.patch({ discussion, discussionOpening: false, guidanceNotice: "" });
+      this.patch({ discussion, guidanceRetry: this.guidanceReceipt(discussion), discussionOpening: false, guidanceNotice: "" });
       await this.reload();
     } catch (error) {
       if (epoch === this.discussionEpoch && before === this.selection) this.patch({ error: message(error) });
@@ -125,24 +130,47 @@ export class ConversationSession {
   };
   leaveDiscussion = () => {
     this.discussionEpoch++;
-    this.patch({ discussion: null, discussionOpening: false, discussionSending: false, guidanceSending: false, guidanceNotice: "" });
+    this.patch({ discussion: null, discussionOpening: false, discussionSending: false, guidanceSending: false, guidanceNotice: "", guidanceRetry: null });
   };
+  private guidanceReceipt(discussion: ApprovalDiscussion) {
+    const approvalId = discussion.approval.id;
+    // A saved receipt is authoritative after reopening. An uncertain local
+    // send can only retry its original text while the request is still open.
+    const feedback = discussion.guidanceToResume || (discussion.canSendGuidance ? this.uncertainGuidance.get(approvalId) : undefined);
+    if (!feedback) this.uncertainGuidance.delete(approvalId);
+    return feedback ? { approvalId, feedback } : null;
+  }
   sendGuidance = async () => {
     const discussion = this.state.discussion;
     const feedback = this.state.draft.trim();
-    if (!discussion?.canSendGuidance || !feedback || this.state.guidanceSending || this.state.discussionOpening) return false;
+    if (!discussion?.canSendGuidance || this.state.guidanceRetry || !feedback) return false;
     if (Array.from(feedback).length > 4000) { this.patch({ error: "Keep guidance to 4,000 characters or fewer." }); return false; }
+    return this.submitGuidance(discussion.approval.id, feedback, true);
+  };
+  retryGuidance = async () => {
+    const receipt = this.state.guidanceRetry;
+    if (!receipt || receipt.approvalId !== this.state.discussion?.approval.id) return false;
+    return this.submitGuidance(receipt.approvalId, receipt.feedback, false);
+  };
+  private submitGuidance = async (approvalId: string, feedback: string, clearSubmittedDraft: boolean) => {
+    if (this.state.guidanceSending || this.state.discussionOpening || this.state.discussionSending) return false;
     const epoch = this.discussionEpoch;
+    this.guidanceRevision++;
+    this.uncertainGuidance.set(approvalId, feedback);
     this.patch({ guidanceSending: true, error: "" });
     try {
       if (!this.transport.approvalGuidance) throw new Error("Sending guidance is unavailable.");
-      const receipt = await this.transport.approvalGuidance(discussion.approval.id, feedback);
+      // The same approval and exact original answer are the retry identity.
+      const receipt = await this.transport.approvalGuidance(approvalId, feedback);
+      this.uncertainGuidance.delete(approvalId);
       if (epoch !== this.discussionEpoch || this.disposed) return true;
-      this.patch({ discussion: { ...discussion, canSendGuidance: false }, guidanceNotice: receipt.runResumed ? "Guidance sent. Work is continuing." : `Guidance was recorded, but the work has not resumed.${receipt.resumeError ? ` ${receipt.resumeError}` : ""}`, ...(this.state.draft.trim() === feedback ? { draft: "" } : {}) });
+      this.guidanceRevision++;
+      const discussion = { ...this.state.discussion!, canSendGuidance: false, guidanceToResume: receipt.runResumed ? undefined : feedback };
+      this.patch({ discussion, guidanceRetry: this.guidanceReceipt(discussion), guidanceNotice: receipt.runResumed ? "Guidance sent. Work is continuing." : `Guidance was recorded, but the work has not resumed.${receipt.resumeError ? ` ${receipt.resumeError}` : ""}`, ...(clearSubmittedDraft && this.state.draft.trim() === feedback ? { draft: "" } : {}) });
       await this.reload();
       return true;
     } catch (error) {
-      if (epoch === this.discussionEpoch) this.patch({ error: message(error) });
+      if (epoch === this.discussionEpoch) this.patch({ error: message(error), guidanceRetry: { approvalId, feedback } });
       return false;
     } finally {
       if (epoch === this.discussionEpoch) this.patch({ guidanceSending: false });
@@ -298,6 +326,7 @@ export class ConversationSession {
     const id = this.state.selectedId;
     const selection = this.selection;
     const revision = this.voiceRevision;
+    const guidanceRevision = this.guidanceRevision;
     if (!id || !this.transport.conversations) return;
     try { const turns = await this.transport.conversations.read(id); if (this.state.selectedId === id && selection === this.selection && revision === this.voiceRevision) {
       // A background completion may arrive while a newer foreground reply is
@@ -310,7 +339,7 @@ export class ConversationSession {
       const discussionEpoch = this.discussionEpoch;
       if (discussion && this.transport.discussApproval) {
         const latest = await this.transport.discussApproval(discussion.approval.id);
-        if (discussionEpoch === this.discussionEpoch && selection === this.selection && this.state.selectedId === id) this.patch({ discussion: latest });
+        if (discussionEpoch === this.discussionEpoch && guidanceRevision === this.guidanceRevision && selection === this.selection && this.state.selectedId === id) this.patch({ discussion: latest, guidanceRetry: this.guidanceReceipt(latest) });
       }
     } }
     catch (error) { if (selection === this.selection && revision === this.voiceRevision) this.patch({ error: message(error) }); }

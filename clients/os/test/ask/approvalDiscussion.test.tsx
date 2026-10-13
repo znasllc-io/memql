@@ -85,7 +85,7 @@ it("does not inject a late advice receipt into another conversation", async () =
 
 it("sends trimmed guidance explicitly and reports recorded without resumed", async () => {
   const { transport, session } = setup(); await session.discussApproval("approval");
-  transport.approvalGuidance.mockImplementationOnce(async () => { transport.discussApproval.mockResolvedValue({ ...context, canSendGuidance: false }); return { runResumed: false, resumeError: "The planner is unavailable." }; });
+  transport.approvalGuidance.mockImplementationOnce(async () => { transport.discussApproval.mockResolvedValue({ ...context, canSendGuidance: false, guidanceToResume: "Read only the repository first." }); return { runResumed: false, resumeError: "The planner is unavailable." }; });
   session.setDraft("  Read only the repository first.  "); await session.sendGuidance();
   expect(transport.approvalGuidance).toHaveBeenCalledExactlyOnceWith("approval", "Read only the repository first.");
   expect(transport.approvalMessage).not.toHaveBeenCalled(); expect(transport.ask).not.toHaveBeenCalled();
@@ -125,4 +125,68 @@ it("keeps guidance refusal and composed text visible", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Send guidance" }));
   expect(await screen.findByRole("alert")).toHaveProperty("textContent", "This approval has already been decided.");
   expect((screen.getByRole("textbox", { name: "Ask" }) as HTMLTextAreaElement).value).toBe("Different approach"); session.dispose();
+});
+
+
+it("retries recorded guidance with the original answer while preserving a new draft", async () => {
+  const { transport, session } = setup(); await session.discussApproval("approval");
+  const feedback = "Read only the repository first.";
+  transport.approvalGuidance.mockImplementationOnce(async () => {
+    transport.discussApproval.mockResolvedValue({ ...context, canSendGuidance: false, guidanceToResume: feedback });
+    return { runResumed: false, resumeError: "The planner is unavailable." };
+  });
+  session.setDraft(feedback); await session.sendGuidance(); mount(session, transport);
+  fireEvent.change(screen.getByRole("textbox", { name: "Ask" }), { target: { value: "A different note, not the saved guidance." } });
+  expect(screen.queryByRole("button", { name: "Send guidance" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry continuing" }));
+  await waitFor(() => expect(transport.approvalGuidance).toHaveBeenCalledTimes(2));
+  expect(transport.approvalGuidance.mock.calls[1]).toEqual(["approval", feedback]);
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Retry continuing" })).toBeNull());
+  expect(session.getSnapshot().draft).toBe("A different note, not the saved guidance.");
+  expect(session.getSnapshot().guidanceNotice).toBe("Guidance sent. Work is continuing."); session.dispose();
+});
+
+it("restores a saved retry from the server after reopening without enabling a new decision", async () => {
+  const { transport, session } = setup();
+  transport.discussApproval.mockResolvedValue({ ...context, canSendGuidance: false, guidanceToResume: "Original stored guidance" });
+  await session.discussApproval("approval"); session.setDraft("New discussion only");
+  expect(await session.sendGuidance()).toBe(false);
+  transport.approvalGuidance.mockResolvedValueOnce({ runResumed: false, resumeError: "Still unavailable" });
+  expect(await session.retryGuidance()).toBe(true);
+  expect(transport.approvalGuidance).toHaveBeenCalledExactlyOnceWith("approval", "Original stored guidance");
+  expect(session.getSnapshot().guidanceRetry?.feedback).toBe("Original stored guidance");
+  expect(session.getSnapshot().draft).toBe("New discussion only");
+  session.leaveDiscussion(); expect(session.getSnapshot().guidanceRetry).toBeNull();
+  await session.discussApproval("approval"); expect(session.getSnapshot().guidanceRetry?.feedback).toBe("Original stored guidance"); session.dispose();
+});
+
+it("retains exact guidance after an uncertain response, even if the composer is edited", async () => {
+  const { transport, session } = setup(); await session.discussApproval("approval");
+  transport.approvalGuidance.mockRejectedValueOnce(new Error("Response lost"));
+  session.setDraft("Original guidance"); expect(await session.sendGuidance()).toBe(false);
+  expect(session.getSnapshot().draft).toBe("Original guidance");
+  session.setDraft("New text"); await session.reload();
+  expect(await session.sendGuidance()).toBe(false);
+  expect(await session.retryGuidance()).toBe(true);
+  expect(transport.approvalGuidance.mock.calls).toEqual([["approval", "Original guidance"], ["approval", "Original guidance"]]);
+  expect(session.getSnapshot().draft).toBe("New text"); session.dispose();
+});
+
+it("does not restore stale eligibility from a read started before guidance was recorded", async () => {
+  const { transport, session } = setup(); await session.discussApproval("approval");
+  const stale = deferred<ApprovalDiscussion>();
+  transport.discussApproval.mockReturnValueOnce(stale.promise);
+  const read = session.reload(); await Promise.resolve();
+  session.setDraft("Original guidance"); await session.sendGuidance();
+  stale.resolve(context); await read;
+  expect(session.getSnapshot().discussion?.canSendGuidance).toBe(false); session.dispose();
+});
+
+it("opens discussion in place when the same conversation was showing its activity", async () => {
+  const { transport, session } = setup(); await session.select("original"); mount(session, transport);
+  fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+  expect(screen.queryByRole("button", { name: "Ask another agent" })).toBeNull();
+  await act(async () => session.discussApproval("approval"));
+  expect(screen.getByRole("button", { name: "Ask another agent" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Activity" })).toBeTruthy(); session.dispose();
 });

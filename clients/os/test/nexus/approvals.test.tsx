@@ -370,7 +370,7 @@ describe("a failure question", () => {
 const scopedComputerRequest = (kind = "directory_read") => ({
   version: 1, kind, registrationId: "registration", machineId: "machine", machineLabel: "Studio Mac",
   tool: "workerHost", action: kind === "directory_read" ? "fs_list" : "exec", argsHash: "exact-inputs",
-  ...(kind === "directory_read" ? { directory: "/Users/dana/projects" } : { command: "git status --short", cwd: "/Users/dana/projects/memql" }),
+  ...(kind === "directory_read" ? { directory: "/Users/dana/projects" } : { command: "git status --short", cwd: "/Users/dana/projects/memql", timeoutSeconds: 60 }),
   allowedModes: ["once", "always"],
 });
 
@@ -382,6 +382,7 @@ describe("computer permission choices", () => {
     fireEvent.click(await screen.findByText("Inspect the repository"));
     expect(screen.getByText("Studio Mac")).toBeTruthy();
     expect(screen.getAllByText("directory" in scope ? scope.directory : scope.command).length).toBeGreaterThan(0);
+    if (kind === "exact_command") expect(screen.getByText("60 seconds")).toBeTruthy();
     expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Allow once" }));
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "permission", decision: "approved", answer: { permissionMode: "once" } }));

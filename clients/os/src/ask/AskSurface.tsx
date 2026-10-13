@@ -131,7 +131,7 @@ export function AskSurface({
   const [panel, setPanel] = useState<"conversation" | "activity" | "conversations">("conversation");
   const showActivity = panel === "activity";
   const showConversations = panel === "conversations";
-  useEffect(() => { setPanel("conversation"); }, [state.selectedId]);
+  useEffect(() => { setPanel("conversation"); }, [state.selectedId, state.discussion?.approval.id]);
   const activityRef = useRef<HTMLButtonElement | null>(null);
   const conversationsRef = useRef<HTMLButtonElement | null>(null);
   const closePanel = useCallback(() => {
@@ -311,7 +311,7 @@ export function AskSurface({
         </div>
       </header>
       {state.discussionOpening ? <p className="os-ask-approval-context" role="status">Opening approval discussion.</p> : state.discussion && panel === "conversation" ? <section className="os-ask-approval-context" aria-label="Approval discussion">
-        <div><strong>{state.discussion.approval.question || state.discussion.approval.summary || "Discuss this approval"}</strong><p>Discussion and advice do not approve the blocked operation.</p></div>
+        <div><strong>{state.discussion.approval.question || "Discuss this approval"}</strong>{state.discussion.approval.summary && state.discussion.approval.summary !== state.discussion.approval.question ? <p>{state.discussion.approval.summary}</p> : null}<p>Discussion and advice do not approve the blocked operation.</p></div>
         <button type="button" className="os-ask-retry" onClick={conversation.leaveDiscussion}>Return to conversation</button>
       </section> : null}
       {showActivity ? <div className="os-ask-content"><AskActivityLog turns={exchanges} dictation={state.dictationActivity} onClose={closePanel} onStop={busy ? () => conversation.stop() : undefined} /></div> : showConversations ? <div className="os-ask-content"><AskConversations conversation={conversation} onOpen={changed => { if (changed) { nearBottom.current = true; conversationScroll.current = 0; } setPanel("conversation"); returnToComposer.current = true; }} /></div> : state.voiceActive && liveVoice ? <div className="os-ask-content"><AskLiveVoice session={liveVoice} /></div> : <div className="os-ask-content">
@@ -338,9 +338,10 @@ export function AskSurface({
       {liveVoice && !state.voiceActive ? <AskLiveVoice session={liveVoice} errorsOnly /> : null}
       {!state.voiceActive && panel === "conversation" ? <AskWorkQueue turns={exchanges.filter(turn => !turn.approvalId)} onOpen={runId => onOpenWork?.(runId, state.selectedId ?? undefined)} /> : null}
       {state.discussion && !state.voiceActive && panel === "conversation" ? <div className="os-ask-discussion-actions">
-        <span className="os-caption" role="status">{state.discussionSending ? "Sending discussion message." : exchanges.some(turn => turn.approvalId === state.discussion?.approval.id && ["queued", "waiting", "streaming"].includes(turn.state)) ? "Advice is being prepared. You can keep writing." : "Send a message to discuss, or send your guidance to the waiting work."}</span>
+        <span className="os-caption" role="status">{state.discussionSending ? "Sending discussion message." : state.guidanceRetry ? "Retry continuing resends your saved guidance. Your new message stays in the composer." : exchanges.some(turn => turn.approvalId === state.discussion?.approval.id && ["queued", "waiting", "streaming"].includes(turn.state)) ? "Advice is being prepared. You can keep writing." : state.discussion.canSendGuidance ? "Send a message to discuss, or send your guidance to the waiting work." : "Send a message to discuss this request."}</span>
         <div>{state.discussion.canAskAdvisor && !state.discussionSending && !state.guidanceSending ? <Button tone="quiet" onClick={() => conversation.sendDiscussion(draft.trim() || "Investigate why this work is blocked and suggest a safe next step.", true)}>Ask another agent</Button> : null}
-        {state.discussion.canSendGuidance && draft.trim() && Array.from(draft.trim()).length <= 4000 && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.sendGuidance(); }}>Send guidance</Button> : null}</div>
+        {state.guidanceRetry && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.retryGuidance(); }}>Retry continuing</Button> : null}
+        {!state.guidanceRetry && state.discussion.canSendGuidance && draft.trim() && Array.from(draft.trim()).length <= 4000 && !state.discussionSending ? <Button tone="quiet" busy={state.guidanceSending} onClick={() => { void conversation.sendGuidance(); }}>Send guidance</Button> : null}</div>
         {state.discussion.canSendGuidance && Array.from(draft.trim()).length > 4000 ? <span className="os-caption">Keep guidance to 4,000 characters or fewer.</span> : null}
       </div> : null}
       {!state.voiceActive && panel === "conversation" ? <form className="os-ask-input" onSubmit={onSubmit}>

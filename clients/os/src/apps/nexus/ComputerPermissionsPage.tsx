@@ -85,6 +85,7 @@ export function ComputerPermissionsPage({ approvalVersion, onBack }: { approvalV
           {scope.kind === "directory_read" ? <Fact label="Directory" value={<CopyValue value={scope.directory!} label="directory" />} /> : <>
             <Fact label="Command" value={<CopyValue value={scope.command!} label="command" />} />
             <Fact label="Working directory" value={<CopyValue value={scope.cwd!} label="working directory" />} />
+            <Fact label="Time limit" value={`${scope.timeoutSeconds} seconds`} />
           </>}
           <Fact label="Allowed" value={formatMoment(String(selected.decidedAt ?? selected.createdAt ?? ""))} />
         </Facts> : <Notice tone="warn" sentence="The details of this saved permission cannot be read." next="You can still revoke it." />}

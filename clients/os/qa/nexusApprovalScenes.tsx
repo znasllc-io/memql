@@ -10,7 +10,7 @@ import { OsProvider } from "../src/chrome/state";
 import { OS_REGISTRY } from "../src/apps/registry";
 
 const directory = { version: 1, kind: "directory_read", registrationId: "registration", machineId: "studio", machineLabel: "Studio Mac", tool: "workerHost", action: "fs_list", directory: "/Users/dana/projects/memql", argsHash: "bound-inputs", allowedModes: ["once", "always"] };
-const command = { ...directory, kind: "exact_command", directory: undefined, command: "git status --short", cwd: "/Users/dana/projects/memql", action: "exec" };
+const command = { ...directory, kind: "exact_command", directory: undefined, command: "git status --short", cwd: "/Users/dana/projects/memql", timeoutSeconds: 60, action: "exec" };
 const approvals = [
   approvalRow({ id: "failure", kind: "planReview", question: "How should this work continue?", subject: { symptom: "environment", stepKey: "inspect", errorMessage: "Context checkpoint did not free space; originals were retained." }, options: [{ value: "retry", label: "Retry" }, { value: "abandon", label: "Abandon" }] }),
   approvalRow({ id: "directory", kind: "scopeElevation", question: "Read the repository on Studio Mac", subject: { computerPermission: directory }, requestedAt: "2026-09-01T09:05:00Z" }),
@@ -26,10 +26,11 @@ function NexusApprovalWindow({ frame: Frame, approvalId, advice }: { frame: Fram
     const turns: AskTurn[] = [{ id: "original", prompt: "Inspect my repository and introduce yourself to the project.", answer: "I need your input before this work can continue.", state: "waiting", runId: "run-1", background: true, activity: [], startedAt: "2026-10-12T19:14:00Z" }];
     if (advice) turns.push({ id: "advice", approvalId: "failure", advisor: true, prompt: "Investigate why the work is blocked.", answer: advice === "running" ? "" : "The saved checkpoint was larger than the short exchange it replaced. Keep the original request and compact a later complete exchange, then retry the read of the repository.", state: advice === "running" ? "queued" : "done", background: true, runId: "advice-run", startedAt: "2026-10-12T19:15:00Z", ...(advice !== "running" ? { endedAt: "2026-10-12T19:16:00Z" } : {}), activity: [] });
     let canSendGuidance = true;
+    let guidanceToResume: string | undefined;
     return {
       ask: () => ({ cancel() {} }),
-      discussApproval: async id => ({ conversationId: "original-conversation", approval: { id, runId: "run-1", kind: "planReview", question: "How should this work continue?", status: "pending" }, canSendGuidance, canAskAdvisor: true }),
-      approvalGuidance: async () => { canSendGuidance = false; return { runResumed: false, resumeError: "The planner is temporarily unavailable." }; },
+      discussApproval: async id => ({ conversationId: "original-conversation", approval: { id, runId: "run-1", kind: "planReview", question: "How should this work continue?", summary: "Context checkpoint did not free space; originals were retained.", status: canSendGuidance ? "pending" : "answered" }, canSendGuidance, canAskAdvisor: true, guidanceToResume }),
+      approvalGuidance: async (_approvalId, feedback) => { canSendGuidance = false; guidanceToResume = feedback; return { runResumed: false, resumeError: "The planner is temporarily unavailable." }; },
       approvalMessage: async request => ({ conversationId: request.conversationId, turnId: request.requestId, runId: "advice-run", status: "queued" }),
       conversations: { list: async () => [{ id: "original-conversation", title: "Introduce the repository" }], create: async () => ({ id: "unused", title: "Unused" }), read: async () => turns },
     };
