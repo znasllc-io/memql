@@ -16,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/database"
 	"github.com/znasllc-io/memql/component/database/dbtest"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
@@ -175,11 +176,11 @@ func exerciseChildStop(t *testing.T, mode string) {
 		t.Fatal("missing real intermediate child")
 	}
 	// Warm a result cache before the other engine records Stop.
-	if _, err := writer.Execute(person, fmt.Sprintf("query workRunForOwner(runId: %q)", rootID)); err != nil {
+	if _, err := writer.Execute(person, fmt.Sprintf("query workRunForOwner(runId: %s)", langparser.QuoteString(rootID))); err != nil {
 		t.Fatal(err)
 	}
 	if !noStop {
-		if _, err := reader.Execute(person, fmt.Sprintf("builtin cancelGoal(goalId: %q)", goalID)); err != nil {
+		if _, err := reader.Execute(person, fmt.Sprintf("builtin cancelGoal(goalId: %s)", langparser.QuoteString(goalID))); err != nil {
 			t.Fatal(err)
 		}
 	}
