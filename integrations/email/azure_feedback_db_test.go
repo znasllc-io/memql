@@ -1,11 +1,13 @@
 package email
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -149,8 +151,24 @@ func TestAzureFeedbackAuthenticatesAndReplaysAcrossReplicas(t *testing.T) {
 	}{
 		{"missing credential", body, func(r *http.Request) { r.Header.Del("Authorization") }, 401},
 		{"wrong credential", body, func(r *http.Request) { r.Header.Set("Authorization", "Bearer incorrect") }, 401},
+		{"credential remains case sensitive", body, func(r *http.Request) { r.Header.Set("Authorization", "bEaReR "+strings.ToUpper(w.configured.Secret)) }, 401},
+		{"credential whitespace is not trimmed", body, func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+w.configured.Secret+" ") }, 401},
+		{"tab is not a scheme separator", body, func(r *http.Request) { r.Header.Set("Authorization", "Bearer\t"+w.configured.Secret) }, 401},
 		{"wrong organization", body, func(r *http.Request) { r.Header.Set("X-Memql-Email-Account", "another") }, 401},
+		{"organization remains case sensitive", body, func(r *http.Request) { r.Header.Set("X-Memql-Email-Account", strings.ToUpper(w.account)) }, 401},
 		{"wrong subscription", body, func(r *http.Request) { r.Header.Set("aeg-subscription-name", "other") }, 401},
+		{"duplicate authorization", body, func(r *http.Request) { r.Header.Add("Authorization", "Bearer "+w.configured.Secret) }, 401},
+		{"duplicate organization", body, func(r *http.Request) { r.Header.Add("X-Memql-Email-Account", w.account) }, 401},
+		{"duplicate subscription", body, func(r *http.Request) { r.Header.Add("aeg-subscription-name", w.configured.Subscription) }, 401},
+		{"duplicate event type", body, func(r *http.Request) { r.Header.Add("aeg-event-type", "Notification") }, 401},
+		{"combined authorization", body, func(r *http.Request) {
+			r.Header.Set("Authorization", "Bearer "+w.configured.Secret+",Bearer "+w.configured.Secret)
+		}, 401},
+		{"combined organization", body, func(r *http.Request) { r.Header.Set("X-Memql-Email-Account", w.account+","+w.account) }, 401},
+		{"combined subscription", body, func(r *http.Request) {
+			r.Header.Set("aeg-subscription-name", w.configured.Subscription+","+w.configured.Subscription)
+		}, 401},
+		{"combined event type", body, func(r *http.Request) { r.Header.Set("aeg-event-type", "Notification,Notification") }, 401},
 		{"wrong resource", strings.ReplaceAll(body, w.configured.Topic, w.configured.Topic+"-foreign"), nil, 400},
 		{"changed mailbox", strings.ReplaceAll(body, "receiver@example.test", "foreign@example.test"), nil, 503},
 		{"unknown operation", strings.ReplaceAll(body, op.ID, "00000000-0000-0000-0000-000000000000"), nil, 503},
@@ -172,7 +190,10 @@ func TestAzureFeedbackAuthenticatesAndReplaysAcrossReplicas(t *testing.T) {
 		wg.Add(1)
 		go func(handler http.Handler) {
 			defer wg.Done()
-			response := w.request(handler, body, nil)
+			response := w.request(handler, body, func(r *http.Request) {
+				r.Header.Set("Authorization", "bEaReR "+w.configured.Secret)
+				r.Header.Set("aeg-subscription-name", strings.ToUpper(w.configured.Subscription))
+			})
 			if response.Code != 204 {
 				t.Errorf("code=%d %s", response.Code, response.Body.String())
 			}
@@ -253,7 +274,14 @@ func TestAzureFeedbackSubscriptionValidatesAfterCredentialIsDurable(t *testing.T
 		}
 		w.configured = saved
 		validation := fmt.Sprintf(`[{"id":"validate","topic":%q,"eventType":%q,"data":{"validationCode":"challenge","validationUrl":"https://attacker.invalid/do-not-follow"}}]`, saved.Topic, azureValidationEvent)
-		response := w.request(handler, validation, func(r *http.Request) { r.Header.Set("aeg-event-type", "SubscriptionValidation") })
+		// Build the peer's validation from the actual outbound provider body,
+		// preserving the secret while varying only case-insensitive protocol fields.
+		response := w.request(handler, validation, func(r *http.Request) {
+			r.Header.Set("Authorization", "bEaReR   "+strings.TrimPrefix(bearer, "Bearer "))
+			r.Header.Set("aeg-subscription-name", strings.ToUpper(name))
+			r.Header.Set("X-Memql-Email-Account", mappings[1].(map[string]any)["properties"].(map[string]any)["value"].(string))
+			r.Header.Set("aeg-event-type", "SubscriptionValidation")
+		})
 		if response.Code != 200 || !strings.Contains(response.Body.String(), `"validationResponse":"challenge"`) {
 			t.Fatalf("validation %d %s", response.Code, response.Body.String())
 		}
@@ -272,6 +300,51 @@ func TestAzureFeedbackSubscriptionValidatesAfterCredentialIsDurable(t *testing.T
 	encoded, _ := json.Marshal(result)
 	if strings.Contains(string(encoded), bearer) || strings.Contains(string(encoded), w.configured.Secret) {
 		t.Fatal("public setup leaked credential")
+	}
+}
+
+func TestAzureFeedbackAuthorizationDiagnosticsAreBoundedAndPrivate(t *testing.T) {
+	w := newAzureFeedbackWorld(t)
+	var output bytes.Buffer
+	w.instances[1].logger = slog.New(slog.NewJSONHandler(&output, nil))
+	handler := NewAzureFeedbackHandler(func() *Integration { return w.instances[1] }, func(context.Context, AzureDeliveryReport) error {
+		t.Fatal("rejected authorization reached delivery handling")
+		return nil
+	})
+	cases := []struct {
+		reason string
+		change func(*http.Request)
+	}{
+		{"invalid_headers", func(r *http.Request) { r.Header.Add("Authorization", "Bearer private-duplicate") }},
+		{"invalid_account", func(r *http.Request) { r.Header.Set("X-Memql-Email-Account", "private/account") }},
+		{"invalid_bearer_scheme", func(r *http.Request) { r.Header.Set("Authorization", "Basic private-credential") }},
+		{"receiver_unconfigured", func(r *http.Request) { r.Header.Set("X-Memql-Email-Account", "private-unknown-account") }},
+		{"credential_mismatch", func(r *http.Request) { r.Header.Set("Authorization", "Bearer private-wrong-credential") }},
+		{"subscription_mismatch", func(r *http.Request) { r.Header.Set("aeg-subscription-name", "private-wrong-subscription") }},
+	}
+	for _, test := range cases {
+		for range 3 {
+			response := w.request(handler, "private-body", test.change)
+			if response.Code != http.StatusUnauthorized || response.Body.String() != "invalid email feedback authorization\n" {
+				t.Fatalf("%s changed public refusal: %d %s", test.reason, response.Code, response.Body.String())
+			}
+		}
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != len(cases) {
+		t.Fatalf("expected one warning per fixed reason, got %d", len(lines))
+	}
+	for index, line := range lines {
+		var fields map[string]any
+		if err := json.Unmarshal([]byte(line), &fields); err != nil {
+			t.Fatal(err)
+		}
+		if len(fields) != 4 || fields["reason"] != cases[index].reason || fields["msg"] != "Azure email feedback authorization refused" || fields["level"] != "WARN" || fields["time"] == nil {
+			t.Fatalf("unexpected diagnostic fields: %v", fields)
+		}
+	}
+	if strings.Contains(output.String(), "private-") || strings.Contains(output.String(), w.account) || strings.Contains(output.String(), w.configured.Secret) {
+		t.Fatal("authentication diagnostic exposed request or credential data")
 	}
 }
 
