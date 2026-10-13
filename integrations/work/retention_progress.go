@@ -2,10 +2,11 @@ package work
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // Retention checkpoints survive a cron leader moving to another replica. A
@@ -26,7 +27,7 @@ func (i *Integration) loadRetentionProgress(ctx context.Context, p operationalPo
 	if err != nil {
 		return nil, err
 	}
-	key := fmt.Sprintf("%s/%s/%x", p.concept, p.env, sha256.Sum256([]byte(fmt.Sprintf("%d:%s", p.days, p.predicate))))
+	key := fmt.Sprintf("%s/%s/%s", p.concept, p.env, id.NewUntracked().FromString(fmt.Sprintf("%d:%s", p.days, p.predicate)))
 	if _, err := db.ExecContext(ctx, `INSERT INTO work_retention_progress (policy) VALUES (?) ON CONFLICT DO NOTHING`, key); err != nil {
 		return nil, err
 	}
