@@ -16,6 +16,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func livenessEngines(t *testing.T) (*MemQLEngine, *MemQLEngine, *bun.DB, *bun.DB, context.Context) {
@@ -162,7 +163,7 @@ func TestLivenessWorkerAuthorizationAndReadinessUseCurrentRows(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(rows[workerID].Payload), `"activeCount": 3`)
 	stranger := auth.ContextWithUserActor(context.Background(), "different-owner")
-	_, err = second.Execute(stranger, fmt.Sprintf(`mutation updateWorkerLastSeen(registrationId: %q, lastSeenAt: "2026-10-13T01:00:00Z")`, workerID))
+	_, err = second.Execute(stranger, fmt.Sprintf(`mutation updateWorkerLastSeen(registrationId: %s, lastSeenAt: "2026-10-13T01:00:00Z")`, langparser.QuoteString(workerID)))
 	require.Error(t, err)
 	internal := auth.ContextWithInternalOrigin(ctx)
 	for i := 0; i < 3; i++ {
