@@ -4,6 +4,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -193,6 +194,63 @@ func TestRequestedComputerPermissionHasNoLegacyGrant(t *testing.T) {
 			res, err := h.dispatch.Dispatch(ctx, req)
 			if err != nil || !res.OK || dispatched == nil || dispatched.GetComputerPermission() == nil || holder.claims != 1 {
 				t.Fatalf("typed request lost authorized cross-replica dispatch: %+v %v", res, err)
+			}
+		})
+	}
+}
+
+func TestComputerPermissionDefaultTimeoutKeepsExactWireHashAcrossHop(t *testing.T) {
+	for _, explicitApproval := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit-approval-%v", explicitApproval), func(t *testing.T) {
+			var got *memqlv1.ToolDispatch
+			h := newHop(t, func(_ context.Context, d *memqlv1.ToolDispatch, _ func(*memqlv1.ToolStream)) (*memqlv1.ToolResult, error) {
+				got = d
+				return okResult(d.GetCallId()), nil
+			}, func(c *Candidate) {
+				c.MachineId = "machine"
+				c.ActionContracts = workerservice.ActionContracts{permission.Contract: permission.Version}
+			})
+			w := h.registry.WorkerById("laptop")
+			w.Labels = map[string]string{"machineId": "machine"}
+			w.CapabilityDescriptor = &workerservice.CapabilityDescriptor{ActionContracts: workerservice.ActionContracts{permission.Contract: permission.Version}}
+			req := h.request()
+			req.Action, req.Args = "exec", map[string]any{"cmd": "pwd", "cwd": "/fixture/repository"}
+			approved := map[string]any{"cmd": "pwd", "cwd": "/fixture/repository"}
+			if explicitApproval {
+				approved["timeoutSec"] = 60
+			} else {
+				req.Args["timeoutSec"] = 60
+			}
+			hash, _ := permission.Hash(req.Tool, req.Action, approved)
+			grant := &permission.Grant{ID: "receipt", Scope: permission.Scope{Version: 1, Kind: "exact_command", RegistrationID: "laptop", MachineID: "machine", MachineLabel: "Laptop", Tool: req.Tool, Action: req.Action, Command: "pwd", CWD: "/fixture/repository", TimeoutSeconds: 60, ArgsHash: hash, AllowedModes: []string{"once", "always"}}}
+			origin, holder := &permissionTestAuthority{grant: grant, origin: true}, &permissionTestAuthority{grant: grant}
+			h.dispatch.SetComputerPermissions(origin)
+			h.link.handler.SetComputerPermissions(holder)
+			ctx := common.ContextWithRun(authorityCtx(t, h.owner), common.RunContext{OwnerUserId: h.owner, RunId: req.RunId, GoalId: "goal"})
+			result, err := h.dispatch.Dispatch(ctx, req)
+			if err != nil || !result.OK || got == nil {
+				t.Fatalf("equivalent command did not cross hop: %+v %v", result, err)
+			}
+			var envelope map[string]any
+			if err := json.Unmarshal(got.GetArgsJson(), &envelope); err != nil {
+				t.Fatal(err)
+			}
+			wireArgs, ok := envelope[req.Action].(map[string]any)
+			if !ok {
+				t.Fatal("wire envelope lost action arguments")
+			}
+			wireHash, _ := permission.Hash(req.Tool, req.Action, wireArgs)
+			requestedHash, _ := permission.Hash(req.Tool, req.Action, req.Args)
+			if wireHash != requestedHash || wireHash == hash || got.GetComputerPermission().GetArgsHash() != wireHash {
+				t.Fatal("transport lost the exact invocation hash")
+			}
+			if origin.claims != 0 || holder.claims != 1 {
+				t.Fatalf("wrong claim owner: origin=%d holder=%d", origin.claims, holder.claims)
+			}
+			got = nil
+			result, err = h.dispatch.Dispatch(ctx, req)
+			if err != nil || result.OK || got != nil || !result.RefusedBeforeStart {
+				t.Fatalf("once replay dispatched: %+v %v", result, err)
 			}
 		})
 	}

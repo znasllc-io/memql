@@ -11,6 +11,7 @@ import (
 	"github.com/uptrace/bun"
 	"github.com/znasllc-io/memql/component/memql"
 	workstate "github.com/znasllc-io/memql/component/work"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
 )
 
 func TestComputerPermissionDBTwoReplicasConsumeOnceAndRevokeAlways(t *testing.T) {
@@ -207,5 +208,88 @@ func TestComputerPermissionDBApprovalContinuesWithoutBlanketRerun(t *testing.T) 
 	}
 	if rowInt(rowMap(got, "spent"), "modelCalls") != 3 {
 		t.Fatalf("approval reset spend: %v", got["spent"])
+	}
+}
+
+func TestComputerPermissionDBDefaultTimeoutKeepsOneDurableClaim(t *testing.T) {
+	for _, explicitApproval := range []bool{false, true} {
+		t.Run(fmt.Sprintf("explicit-approval-%v", explicitApproval), func(t *testing.T) {
+			a := openActsDB(t)
+			runID := a.openRun(t, nil)
+			peerDB := workHeadsPeer(t, a.db)
+			b := New(dispatchDBEngine(t, peerDB), testLogger(), func() *bun.DB { return peerDB })
+			b.SetGateDB(testGates(t))
+			person := actorCtx(a.owner)
+			approved := map[string]any{"cmd": "pwd", "cwd": "/fixture/repository"}
+			requested := map[string]any{"cmd": "pwd", "cwd": "/fixture/repository"}
+			if explicitApproval {
+				approved["timeoutSec"] = 60
+			} else {
+				requested["timeoutSec"] = 60
+			}
+			hash, err := permission.Hash("workerHost", "exec", approved)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope := permission.Scope{Version: 1, Kind: "exact_command", RegistrationID: "worker", MachineID: "machine", MachineLabel: "Test machine", Tool: "workerHost", Action: "exec", Command: "pwd", CWD: "/fixture/repository", TimeoutSeconds: 60, ArgsHash: hash, AllowedModes: []string{"once", "always"}}
+			subject := map[string]any{"agentId": "agent", "computerPermission": scope.Map()}
+			id := newRowId(approvalConcept)
+			a.write(t, "createWorkApproval", map[string]any{"approvalId": id, "runId": runID, "kind": "scopeElevation", "subject": subject, "artifactHash": workstate.ArtifactHash(subject), "requestedAt": rfc(time.Now()), "expiresAt": rfc(time.Now().Add(time.Hour))})
+			req := permission.Request{OwnerID: a.owner, AgentID: "agent", RunID: runID, Tool: "workerHost", Action: "exec", Args: requested}
+			if found, err := b.Find(person, req); err != nil || found != nil {
+				t.Fatalf("pending receipt admitted: %v %v", found, err)
+			}
+			if _, err := a.i.handleDecideApproval(person, map[string]any{"approvalId": id, "decision": "approved", "answer": map[string]any{"permissionMode": "once"}}, 0); err != nil {
+				t.Fatal(err)
+			}
+			if found, err := b.Find(person, req); err != nil || found == nil {
+				t.Fatalf("peer refused the equivalent default: %v %v", found, err)
+			}
+			for _, changed := range []string{"owner", "agent", "run", "machine"} {
+				other := req
+				machine := "machine"
+				switch changed {
+				case "owner":
+					other.OwnerID = "other"
+				case "agent":
+					other.AgentID = "other"
+				case "run":
+					other.RunID = a.openRun(t, nil)
+				case "machine":
+					machine = "other"
+				}
+				if _, err := b.Claim(person, id, other, "worker", machine); err == nil {
+					t.Fatalf("changed %s claimed permission", changed)
+				}
+			}
+			// The two encodings compete for the SAME durable once receipt.
+			var wg sync.WaitGroup
+			errs := make([]error, 2)
+			for n, replica := range []*Integration{a.i, b} {
+				wg.Add(1)
+				go func(n int, replica *Integration) {
+					defer wg.Done()
+					request := req
+					if n == 0 {
+						request.Args = approved
+					}
+					_, errs[n] = replica.Claim(person, id, request, "worker", "machine")
+				}(n, replica)
+			}
+			wg.Wait()
+			if (errs[0] == nil) == (errs[1] == nil) {
+				t.Fatalf("exactly one peer must consume: %v", errs)
+			}
+			if found, err := b.Find(person, req); err != nil || found != nil {
+				t.Fatalf("consumed receipt returned: %v %v", found, err)
+			}
+			rows, err := b.store().query(memql.ContextWithFreshRead(person), "query "+call("workApprovalForOwner", map[string]any{"approvalId": id}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 || rowString(rows[0], "permissionUsedAt") == "" || rowString(rowMap(rowMap(rows[0], "subject"), "computerPermission"), "argsHash") != hash {
+				t.Fatal("claim changed or lost original receipt")
+			}
+		})
 	}
 }
