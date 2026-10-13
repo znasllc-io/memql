@@ -58,6 +58,57 @@ func discussionExecute(t *testing.T, e *memql.MemQLEngine, ctx context.Context, 
 	return rows[0]
 }
 
+func TestApprovalDiscussionFindsDelegatedOriginAndReloadsGuidanceWithoutAnalysis(t *testing.T) {
+	a, b := openActsDB(t), openActsDB(t)
+	b.owner = a.owner
+	previous := auth.InstalledCapabilityCatalog()
+	auth.SetCapabilityCatalog(nil)
+	t.Cleanup(func() { auth.SetCapabilityCatalog(previous) })
+	for _, peer := range []actsDB{a, b} {
+		require.NoError(t, peer.eng.RegisterIntegration(peer.i))
+	}
+	ctx := actorCtx(a.owner)
+	rows := a.query(t, a.owner, "mutation "+call("createAskConversation", map[string]any{"requestId": id.NewShortId(), "title": "Original conversation"}))
+	require.Len(t, rows, 1)
+	conversation := rowString(rows[0], "id")
+	a.write(t, "saveAskConversation", map[string]any{"id": conversation, "title": "Original conversation", "versionTime": rfc(time.Now()), "transcript": map[string]any{"turns": []any{map[string]any{"id": "original", "prompt": "Inspect the repository", "answer": "Starting the inspection", "state": "done", "startedAt": rfc(time.Now())}}}})
+	root := a.openRun(t, map[string]any{"input": map[string]any{"conversation": map[string]any{"id": conversation}}})
+	middle := a.openRun(t, map[string]any{"input": map[string]any{"app": "codex"}})
+	// Cache an incomplete parent on the observer, then bind its ancestry on
+	// another replica. Neither delegated run copies the conversation input.
+	_, err := b.i.store().runForOwner(ctx, middle)
+	require.NoError(t, err)
+	a.write(t, "updateWorkRun", map[string]any{"runId": middle, "parentRunId": root})
+	child := a.openRun(t, map[string]any{"parentRunId": middle, "input": map[string]any{"app": "codex"}})
+	a.writeVersion(t, child, child, "inspect", 0, 1, nil, "", map[string]any{"status": "failed"})
+	a.write(t, "updateWorkRun", map[string]any{"runId": child, "stepOrder": []string{"inspect"}})
+	runCtx := common.ContextWithRun(ctx, common.RunContext{RunId: child, OwnerUserId: a.owner, StepKey: "inspect", Mode: common.RunModeLive})
+	approvalID, err := a.i.AskComputerScope(runCtx, a.owner, child, map[string]any{"agentId": "fixture-agent", "summary": "Inspect the repository", "mode": "observe"})
+	require.NoError(t, err)
+	opened := discussionExecute(t, b.eng, ctx, "askApprovalDiscussion", map[string]any{"approvalId": approvalID})
+	require.Equal(t, memql.BareShortId(conversation), opened["conversationId"])
+	require.True(t, opened["canSendGuidance"].(bool))
+	before := discussionExecute(t, a.eng, ctx, "askConversationSnapshot", map[string]any{"conversationId": conversation})
+	require.Len(t, rowMap(before, "transcript")["turns"], 1, "opening must not add a model or visible turn")
+
+	guidance := "Read only the repository directory; leave the rest of the home directory alone."
+	_, err = b.i.handleDecideApproval(ctx, map[string]any{"approvalId": approvalID, "decision": "answered", "answer": map[string]any{"feedback": guidance}}, 0)
+	require.NoError(t, err)
+	reloaded := discussionExecute(t, a.eng, ctx, "askConversationSnapshot", map[string]any{"conversationId": conversation})
+	turns := rowMap(reloaded, "transcript")["turns"].([]any)
+	require.Len(t, turns, 2)
+	answer := turns[1].(map[string]any)
+	require.Equal(t, "Guidance sent:\n"+guidance, answer["prompt"])
+	require.Equal(t, memql.BareShortId(approvalID), answer["approvalId"], "the reloaded turn must retain View request")
+	require.Equal(t, true, answer["answerOnly"])
+	reopened := discussionExecute(t, b.eng, ctx, "askApprovalDiscussion", map[string]any{"approvalId": answer["approvalId"]})
+	require.Equal(t, opened["conversationId"], reopened["conversationId"])
+	require.Equal(t, "answered", rowMap(reopened, "approval")["status"])
+	require.False(t, reopened["canAskAdvisor"].(bool))
+	_, err = b.eng.Execute(actorCtx("unrelated-owner"), "builtin "+call("askApprovalDiscussion", map[string]any{"approvalId": approvalID}))
+	require.Error(t, err)
+}
+
 func TestApprovalDiscussionAdmissionAndAnalysisSurviveReplicaChanges(t *testing.T) {
 	a, b := openActsDB(t), openActsDB(t)
 	previous := auth.InstalledCapabilityCatalog()

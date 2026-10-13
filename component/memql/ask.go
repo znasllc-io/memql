@@ -65,7 +65,8 @@ type AskRoute struct {
 }
 
 type askTranscript struct {
-	Turns []AskTurn `json:"turns"`
+	Turns       []AskTurn `json:"turns"`
+	ApprovalIDs []string  `json:"approvalIds,omitempty"`
 }
 
 // RunAsk is shared by text and live voice. Only the server can append an

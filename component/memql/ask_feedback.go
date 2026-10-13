@@ -89,7 +89,11 @@ func (e *MemQLEngine) askWorkConversationBuiltin(ctx context.Context, args map[s
 	if err != nil || len(runs) != 1 {
 		return nil, fmt.Errorf("work is unavailable")
 	}
-	run := runs[0]
+	run, err := e.askOriginatingRun(ctx, runs[0])
+	if err != nil {
+		return nil, err
+	}
+	runID = stringArg(run, "id")
 	input, _ := run["input"].(map[string]any)
 	conversation, _ := input["conversation"].(map[string]any)
 	if id, _ := conversation["id"].(string); id != "" {
@@ -147,4 +151,30 @@ func (e *MemQLEngine) askWorkConversationBuiltin(ctx context.Context, args map[s
 	}
 	raw, err = json.Marshal(map[string]any{"id": BareShortId(id), "title": title})
 	return []memorynodes.MemoryNode{{ID: id, Payload: raw}}, err
+}
+
+// Delegated sessions retain parentRunId but need not copy their parent's input.
+// Every hop is a fresh owner-scoped read; malformed or unavailable ancestry
+// refuses rather than creating an unrelated conversation or crossing owners.
+func (e *MemQLEngine) askOriginatingRun(ctx context.Context, run map[string]any) (map[string]any, error) {
+	ctx = ContextWithFreshRead(ctx)
+	seen := map[string]bool{}
+	for depth := 0; depth < 32; depth++ {
+		id := BareShortId(stringArg(run, "id"))
+		if id == "" || seen[id] {
+			return nil, fmt.Errorf("work conversation ancestry is unavailable")
+		}
+		seen[id] = true
+		input, _ := run["input"].(map[string]any)
+		conversation, _ := input["conversation"].(map[string]any)
+		if stringArg(conversation, "id") != "" || stringArg(run, "parentRunId") == "" {
+			return run, nil
+		}
+		rows, err := e.workRows(ctx, "workRunForOwner", stringArg(run, "parentRunId"))
+		if err != nil || len(rows) != 1 {
+			return nil, fmt.Errorf("work conversation ancestry is unavailable")
+		}
+		run = rows[0]
+	}
+	return nil, fmt.Errorf("work conversation ancestry exceeds its limit")
 }

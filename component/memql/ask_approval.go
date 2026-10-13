@@ -16,6 +16,8 @@ import (
 
 const ApprovalDiscussionTemplate = "askApprovalAnalysis"
 
+const maxAskApprovalLinks = 128
+
 // ApprovalDiscussionMessage is a human-authored turn. The work integration
 // binds its child identities before publishing the run's dispatch event.
 type ApprovalDiscussionMessage struct {
@@ -82,6 +84,9 @@ func (e *MemQLEngine) askApprovalDiscussionBuiltin(ctx context.Context, args map
 	var row map[string]any
 	if len(conversation) != 1 || json.Unmarshal(conversation[0].Payload, &row) != nil {
 		return nil, fmt.Errorf("conversation is unavailable")
+	}
+	if err := e.linkAskApproval(ctx, stringArg(row, "id"), stringArg(approval, "id")); err != nil {
+		return nil, err
 	}
 	pending := approvalDiscussionPending(approval, run)
 	subject, _ := approval["subject"].(map[string]any)
@@ -189,6 +194,41 @@ func approvalTranscript(row map[string]any) (askTranscript, error) {
 	}
 	err = json.Unmarshal(raw, &transcript)
 	return transcript, err
+}
+
+// A discussion can go straight from opening to sending guidance, without an
+// analysis turn. Keep its durable request link so a later snapshot can recover
+// that human decision, including when the request belongs to a delegated run.
+func (e *MemQLEngine) linkAskApproval(ctx context.Context, conversationID, approvalID string) error {
+	hold, err := e.holdAskConversation(ctx, conversationID, "write")
+	if err != nil {
+		return err
+	}
+	defer hold.release()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	row, err := e.askRead(ContextWithFreshRead(ctx), conversationID)
+	if err != nil {
+		return err
+	}
+	transcript, err := approvalTranscript(row)
+	if err != nil {
+		return err
+	}
+	id := BareShortId(approvalID)
+	for _, linked := range transcript.ApprovalIDs {
+		if BareShortId(linked) == id {
+			return nil
+		}
+	}
+	if len(transcript.ApprovalIDs) >= maxAskApprovalLinks {
+		return fmt.Errorf("this conversation has reached its linked request limit")
+	}
+	transcript.ApprovalIDs = append(transcript.ApprovalIDs, id)
+	if err := hold.verify(ctx); err != nil {
+		return err
+	}
+	return e.askSave(ctx, conversationID, stringArg(row, "title"), transcript)
 }
 
 // AppendApprovalDiscussionTurn records a human message before the child run is

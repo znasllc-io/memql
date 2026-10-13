@@ -51,7 +51,8 @@ raise resource limits. A transient failure's **Retry** instead repeats the
 failed step. Either decision is persisted for the cluster to resume safely.
 
 **Discuss in Ask** opens the conversation that originated an approval. Work
-started elsewhere receives one private linked conversation. Opening the
+delegated to a child run follows its owned parent records back to that
+conversation. Work started elsewhere receives one private linked conversation. Opening the
 discussion makes no model call and does not decide the approval. Human messages
 and advisory replies remain in that conversation across reconnections and
 replicas. You can add information while a reply is running.
@@ -69,7 +70,8 @@ For supported requests, **Send guidance** records your own direction and lets
 the existing work reconsider its unfinished steps. It is an answered request,
 not approval of the blocked action. The completed prefix, permissions, consumed
 budget and retry limits remain in force. That direction is also projected into
-the original Ask transcript. If saving succeeds but continuing is interrupted,
+the original Ask transcript, even when you send guidance without first asking
+for advice. The saved message retains a link to its request after reload. If saving succeeds but continuing is interrupted,
 retrying the same guidance resumes that saved decision; it does not create a
 second answer. Artifact-specific reviews retain their own decision contracts.
 
