@@ -33,7 +33,20 @@ func TestOwnedTrainingRecipeRendersRelevantLessonsWithoutSkillsOrTools(t *testin
 		t.Run(fmt.Sprint(match), func(t *testing.T) {
 			engine, ctx, msg := trainingPromptFixture(t)
 			var trainingCall string
-			engine.execute = func(_ context.Context, q string) (any, error) {
+			nativeReads := 0
+			engine.execute = func(callCtx context.Context, q string) (any, error) {
+				if q == "builtin libraryWorkTrainingContext()" || strings.HasPrefix(q, "builtin libraryOwnedTrainingLessons(") {
+					nativeReads++
+					require.Equal(t, auth.OriginInternal, auth.OriginFromContext(callCtx), q)
+					wantRun, _ := common.RunFromContext(ctx)
+					gotRun, _ := common.RunFromContext(callCtx)
+					require.Equal(t, wantRun, gotRun)
+					wantActor, _ := auth.AccessFromContext(ctx)
+					gotActor, _ := auth.AccessFromContext(callCtx)
+					require.Equal(t, wantActor, gotActor)
+				} else {
+					require.Equal(t, auth.OriginClient, auth.OriginFromContext(callCtx), q)
+				}
 				if q == "builtin libraryWorkTrainingContext()" {
 					return []map[string]any{{"goal": "Complete a verified deliverable"}}, nil
 				}
@@ -48,6 +61,8 @@ func TestOwnedTrainingRecipeRendersRelevantLessonsWithoutSkillsOrTools(t *testin
 			}
 			prepared, err := newTestReplier(engine).prepareTurn(ctx, msg, time.Now())
 			require.NoError(t, err)
+			require.Equal(t, 2, nativeReads)
+			require.Equal(t, auth.OriginClient, auth.OriginFromContext(ctx))
 			require.Contains(t, trainingCall, "Verify the current change")
 			require.NotContains(t, trainingCall, "unrelated command")
 			for _, policy := range []string{"limit: 3", "minimumSimilarity: 0.6", "maxTokens: 1200"} {
@@ -62,6 +77,25 @@ func TestOwnedTrainingRecipeRendersRelevantLessonsWithoutSkillsOrTools(t *testin
 				require.NotContains(t, tool.Name, "Training")
 			}
 		})
+	}
+}
+
+func TestTrainingPreparationDoesNotStampUnownedOrReplayCalls(t *testing.T) {
+	engine, ctx, msg := trainingPromptFixture(t)
+	engine.execute = func(context.Context, string) (any, error) {
+		t.Fatal("Training native reader reached without a live owned execution")
+		return nil, nil
+	}
+	run, _ := common.RunFromContext(ctx)
+	person := auth.ContextWithUserActor(context.Background(), run.OwnerUserId)
+	for _, invalid := range []common.RunContext{
+		{},
+		{RunId: run.RunId, GoalId: run.GoalId, OwnerUserId: "another-owner"},
+		{RunId: run.RunId, GoalId: run.GoalId, OwnerUserId: run.OwnerUserId, Mode: common.RunModeReplay},
+	} {
+		rows, err := newTestReplier(engine).workTrainingContext(common.ContextWithRun(person, invalid), msg)
+		require.NoError(t, err)
+		require.Empty(t, rows)
 	}
 }
 

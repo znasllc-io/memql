@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -39,7 +40,10 @@ func (r *Replier) workTrainingContext(ctx context.Context, msg *memqlv1.AgentGen
 	var passages []map[string]any
 	_, err := workflowhost.Run(ctx, "agentWorkTrainingContext", nil, workflowhost.Options{Logger: r.logger, Operations: map[string]workflowhost.Operation{
 		"agentWorkTrainingFacts": func(ctx context.Context, _ map[string]any) (any, error) {
-			result, err := r.engine.Execute(ctx, "builtin libraryWorkTrainingContext()")
+			// Only this fixed native read is internal. The owned run and its
+			// source rows are still revalidated under the unchanged actor; the
+			// model, tools and authored execution retain their original origin.
+			result, err := r.engine.Execute(auth.ContextWithInternalOrigin(ctx), "builtin libraryWorkTrainingContext()")
 			if err != nil {
 				return nil, err
 			}
@@ -58,7 +62,7 @@ func (r *Replier) workTrainingContext(ctx context.Context, msg *memqlv1.AgentGen
 			if err != nil {
 				return nil, err
 			}
-			result, err := r.engine.Execute(ctx, "builtin "+call)
+			result, err := r.engine.Execute(auth.ContextWithInternalOrigin(ctx), "builtin "+call)
 			if err != nil {
 				return nil, err
 			}

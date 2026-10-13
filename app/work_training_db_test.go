@@ -31,6 +31,7 @@ import (
 // installed runAgentTurn, DSL selection, native provenance and Replier are real.
 type trainingContextProvider struct {
 	requests    [][]common.ChatMessage
+	origins     []auth.CallOrigin
 	beforeEmbed func(context.Context) error
 }
 
@@ -55,8 +56,9 @@ func (*trainingContextProvider) Dimensions() int { return 1024 }
 func (*trainingContextProvider) Call(context.Context, string) (any, error) {
 	return nil, fmt.Errorf("unexpected text model call")
 }
-func (p *trainingContextProvider) CallChatWithTools(_ context.Context, m []common.ChatMessage, _ []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
+func (p *trainingContextProvider) CallChatWithTools(ctx context.Context, m []common.ChatMessage, _ []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
 	p.requests = append(p.requests, append([]common.ChatMessage(nil), m...))
+	p.origins = append(p.origins, auth.OriginFromContext(ctx))
 	return &common.ToolCallingChatResult{ToolCalls: []common.ToolCall{{ID: "answer", Name: "respondToUser", Arguments: `{"status":"complete","response":"Synthetic evidence recorded"}`}}}, nil
 }
 func (p *trainingContextProvider) CallChatStreamWithTools(ctx context.Context, m []common.ChatMessage, tools []common.ToolDefinition) (<-chan common.StreamToolChunk, error) {
@@ -132,8 +134,10 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 	ai := agents.New(reader.Agents(), reader)
 	ai.SetAgentTurnRunner(&trainingContextTurn{&replierTurnRunner{replier: replier, engine: reader}})
 	require.NoError(t, reader.RegisterIntegration(ai))
-	person := auth.ContextWithInternalOrigin(auth.ContextWithAccess(auth.ContextWithUserActor(context.Background(), owner), &auth.AccessContext{UserId: owner, Role: auth.RoleOwner}))
-	write := func(name string, args map[string]any) { templateMutation(t, writer, person, name, args) }
+	person := auth.ContextWithClientOrigin(auth.ContextWithAccess(auth.ContextWithUserActor(context.Background(), owner), &auth.AccessContext{UserId: owner, Role: auth.RoleOwner}))
+	write := func(name string, args map[string]any) {
+		templateMutation(t, writer, auth.ContextWithInternalOrigin(person), name, args)
+	}
 	query := func(e *memql.MemQLEngine, ctx context.Context, kind, name string, args map[string]any) []map[string]any {
 		call, err := parser.RenderCall(name, args)
 		require.NoError(t, err)
@@ -156,10 +160,19 @@ func TestWorkDBApprovedTrainingReachesOrdinaryTurnOnAnotherReplica(t *testing.T)
 	chunks := query(writer, person, "query", "documentChunksForDomain", map[string]any{"domainId": domainID})
 	require.Len(t, chunks, 1)
 	chunkID := chunks[0]["id"]
+	// The same real client actor cannot call either native reader directly,
+	// even with the owned run context that the engine normally supplies.
+	for _, client := range []context.Context{person, common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, Mode: common.RunModeLive})} {
+		for _, call := range []string{"builtin libraryWorkTrainingContext()", `builtin libraryOwnedTrainingLessons(text: "deliverable", limit: 3, minimumSimilarity: 0.6, maxTokens: 1200)`} {
+			_, err := reader.Execute(client, call)
+			require.ErrorContains(t, err, "Training context requires the current owned live work run")
+		}
+	}
 	turn := func(step string) string {
 		ctx := common.ContextWithRun(person, common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: owner, StepKey: step, Mode: common.RunModeLive})
 		query(reader, ctx, "builtin", "runAgentTurn", map[string]any{"prompt": "Verify the current deliverable"})
 		require.NotEmpty(t, provider.requests)
+		require.Equal(t, auth.OriginClient, provider.origins[len(provider.origins)-1], "native Training origin cannot leak into the model/tool loop")
 		return provider.requests[len(provider.requests)-1][0].Content
 	}
 	require.NotContains(t, turn("pending"), lesson)
