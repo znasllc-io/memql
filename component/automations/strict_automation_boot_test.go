@@ -229,7 +229,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 158 -> 161: campaign journey proposal, drain and step workflows.
 // 161 -> 162: bounded initial Azure email installation workflow.
 // 163 -> 164: explicit selected capability corpus installation recipe.
-const shippedAutomationCount = 164
+// 164 -> 165: owned task retrieval of reviewed Training lessons.
+const shippedAutomationCount = 165
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
