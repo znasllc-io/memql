@@ -109,6 +109,14 @@ for advice. The saved message retains a link to its request after reload. If sav
 retrying the same guidance resumes that saved decision; it does not create a
 second answer. Artifact-specific reviews retain their own decision contracts.
 
+For a typed computer-permission request raised inside a saved native turn,
+guidance continues that exact checkpoint with the correction in context instead
+of rewriting the workflow. The original request remains answered, not approved;
+a corrected command or directory request still needs its own applicable
+permission. Another replica rechecks the owner, question, execution lineage and
+saved exchange before continuing. A missing or changed checkpoint is refused,
+and a later failure request cannot borrow an earlier permission checkpoint.
+
 Replanning an existing sealed program uses structured, exact source edits so
 that repairing a small part does not require the model to repeat a large
 program. The runtime rejects ambiguous or overlapping edits and changes to

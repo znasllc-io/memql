@@ -51,7 +51,7 @@ func TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica(t *testin
 	ai := agents.New(reader.Agents(), reader)
 	ai.SetAgentTurnRunner(runner)
 	require.NoError(t, reader.RegisterIntegration(ai))
-	for _, mode := range []string{"exact-command", "budget", "foreign-owner", "pending", "wrong-step", "wrong-run"} {
+	for _, mode := range []string{"exact-command", "permission-guidance", "budget", "foreign-owner", "pending", "wrong-step", "wrong-run"} {
 		t.Run(mode, func(t *testing.T) {
 			runner.calls, runner.restored = 0, nil
 			key := id.NewShortId()
@@ -97,8 +97,13 @@ func TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica(t *testin
 			require.NoError(t, err)
 			scope := permission.Scope{Version: 1, Kind: "exact_command", RegistrationID: "fixture-worker", MachineID: "fixture-machine", MachineLabel: "Fixture computer", Tool: "workerHost", Action: "exec", Command: command, CWD: "/fixture/repository", TimeoutSeconds: 60, ArgsHash: hash, AllowedModes: []string{"once", "always"}}
 			kind := "scopeElevation"
-			subject := map[string]any{"computerPermission": scope.Map()}
+			subject := map[string]any{"agentId": "fixture-agent", "computerPermission": scope.Map()}
 			answer := map[string]any{"permissionMode": "once"}
+			decisionKind := "approved"
+			if mode == "permission-guidance" {
+				decisionKind = "answered"
+				answer = map[string]any{"feedback": "Correct the command and request its exact permission; this is not approval."}
+			}
 			if mode == "budget" {
 				kind = "budget"
 				subject = map[string]any{"ceiling": "wallClock", "resumeKind": "checkpoint", "continuationId": checkpointID}
@@ -125,9 +130,9 @@ func TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica(t *testin
 				require.Empty(t, prior[0]["decision"])
 			}
 			if mode != "pending" {
-				templateMutation(t, writer, auth.ContextWithInternalOrigin(approvalPerson), "decideWorkApproval", map[string]any{"approvalId": approvalID, "decision": "approved", "decidedBy": owner, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": answer})
+				templateMutation(t, writer, auth.ContextWithInternalOrigin(approvalPerson), "decideWorkApproval", map[string]any{"approvalId": approvalID, "decision": decisionKind, "decidedBy": owner, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano), "answer": answer})
 			}
-			valid := mode == "exact-command" || mode == "budget"
+			valid := mode == "exact-command" || mode == "permission-guidance" || mode == "budget"
 			prepared, err := reader.PrepareWorkContinuation(ctx, memql.CheckpointResumeRequest{RunID: runID, StepKey: stepKey, ApprovalID: approvalID})
 			if valid {
 				require.NoError(t, err)
@@ -155,9 +160,12 @@ func TestWorkDBNativeContinuationProjectsExactDecisionOnAnotherReplica(t *testin
 			var decision map[string]any
 			require.NoError(t, json.Unmarshal([]byte(strings.SplitN(receipt.Content, "\n", 2)[1]), &decision))
 			require.Equal(t, approvalID, decision["approvalId"])
-			require.Equal(t, "approved", decision["decision"])
+			require.Equal(t, decisionKind, decision["decision"])
 			require.Equal(t, kind, decision["kind"])
-			if mode == "exact-command" {
+			if mode == "permission-guidance" {
+				require.Equal(t, answer["feedback"], decision["answer"].(map[string]any)["feedback"])
+				require.NotContains(t, decision["answer"], "permissionMode")
+			} else if mode == "exact-command" {
 				require.Equal(t, "once", decision["answer"].(map[string]any)["permissionMode"])
 				require.Equal(t, command, decision["subject"].(map[string]any)["computerPermission"].(map[string]any)["command"])
 			} else {

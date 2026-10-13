@@ -211,8 +211,13 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 	}
 	a := approvals[0]
 	decision, kind := stringField(a, "decision"), stringField(a, "kind")
+	subject, _ := a["subject"].(map[string]any)
+	answer, _ := a["answer"].(map[string]any)
+	permissionGuidance := decision == "answered" &&
+		BareShortId(stringField(a, "decidedBy")) == BareShortId(run.OwnerUserId) &&
+		WorkPermissionGuidance(kind, subject, answer, stringField(a, "artifactHash"))
 	if BareShortId(stringField(a, "runId")) != BareShortId(run.RunId) || stringField(a, "stepKey") != request.StepKey ||
-		!((kind == "feedback" && decision == "answered") || (kind == "scopeElevation" && decision == "approved") || (kind == "budget" && decision == "approved")) {
+		!((kind == "feedback" && decision == "answered") || (kind == "scopeElevation" && decision == "approved") || (kind == "budget" && decision == "approved") || permissionGuidance) {
 		return nil, fmt.Errorf("the human decision does not authorize this continuation")
 	}
 	checkpoints, err := read("workContinuationForOwnerRun", map[string]any{"runId": run.RunId, "stepKey": request.StepKey})
@@ -236,7 +241,6 @@ func (e *MemQLEngine) PrepareWorkContinuation(ctx context.Context, request Check
 		return nil, err
 	}
 	checkpointID := BareShortId(stringField(checkpoints[0], "id"))
-	subject, _ := a["subject"].(map[string]any)
 	modelCheckpoint := kind == "feedback" && work.IsModelCallCheckpoint(subject)
 	if modelCheckpoint {
 		answer, _ := a["answer"].(map[string]any)

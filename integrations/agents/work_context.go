@@ -134,8 +134,13 @@ func workContinuationAnswer(ctx context.Context, engine interface {
 	if a["kind"] == "feedback" && a["decision"] == "answered" {
 		return nil, nil // Already included by workQuestionsForOwnerRun above.
 	}
-	if a["decision"] != "approved" || (a["kind"] != "scopeElevation" && a["kind"] != "budget") {
-		return nil, fmt.Errorf("work context: the continuation has no approved decision")
+	subject, _ := a["subject"].(map[string]any)
+	answer, _ := a["answer"].(map[string]any)
+	permissionGuidance := a["decision"] == "answered" &&
+		memql.BareShortId(asString(a["decidedBy"])) == memql.BareShortId(run.OwnerUserId) &&
+		memql.WorkPermissionGuidance(asString(a["kind"]), subject, answer, asString(a["artifactHash"]))
+	if !permissionGuidance && (a["decision"] != "approved" || (a["kind"] != "scopeElevation" && a["kind"] != "budget")) {
+		return nil, fmt.Errorf("work context: the continuation has no approval or typed-scope correction")
 	}
 	raw, err := json.Marshal(map[string]any{
 		"approvalId": proof.ApprovalID, "kind": a["kind"], "decision": a["decision"],

@@ -103,9 +103,11 @@ func (i *Integration) requireApprovalStep(ctx context.Context, run *actRun, key 
 }
 
 func guidanceRetry(approval map[string]any, text, decidedBy string) *failureRetry {
-	// The model stopped before dispatching any tool from the failed response.
-	// Its exact checkpoint can take recorded guidance without rewriting a workflow.
-	if rowString(approval, "kind") == "feedback" && workstate.IsModelCallCheckpoint(rowMap(approval, "subject")) {
+	// A model failure or a typed permission question suspended a native turn.
+	// Its exact checkpoint can take the correction without rewriting a workflow.
+	// The execution replica revalidates that checkpoint; feedback grants no scope.
+	if (rowString(approval, "kind") == "feedback" && workstate.IsModelCallCheckpoint(rowMap(approval, "subject"))) ||
+		memql.WorkPermissionGuidance(rowString(approval, "kind"), rowMap(approval, "subject"), map[string]any{"feedback": text}, rowString(approval, "artifactHash")) {
 		return nil
 	}
 	return &failureRetry{stepKey: rowString(approval, "stepKey"), decidedBy: decidedBy, symptom: workstate.SymptomPlan,

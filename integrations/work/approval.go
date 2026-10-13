@@ -310,7 +310,7 @@ func (i *Integration) handleDecideApproval(ctx context.Context, args map[string]
 	}
 	if guidance != "" {
 		// A human asked for a different approach, not for the gated operation
-		// to execute. A model checkpoint accepts it without a structural replan;
+		// to execute. Native model/typed-scope checkpoints take the correction;
 		// other requests keep their existing replan path. Neither grants access.
 		retry = guidanceRetry(approval, guidance, strings.TrimSpace(ac.UserId))
 	}
