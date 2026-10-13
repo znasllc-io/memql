@@ -101,7 +101,7 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 	turnStart := time.Now()
 	prep, err := r.prepareTurn(ctx, msg, turnStart)
 	if err != nil {
-		return nil, err
+		return nil, r.PauseWorkBeforeTurn(ctx, err, msg)
 	}
 
 	// Resume from a saved checkpoint (memql#907). When the planner re-admits
@@ -135,7 +135,7 @@ func (r *Replier) handleBackground(ctx context.Context, msg *memqlv1.AgentGenera
 
 	selection, err := r.router.ResolveFor(ctx, prep.routerReq)
 	if err != nil {
-		return nil, fmt.Errorf("router: resolve with-tools (background lane): %w", err)
+		return nil, r.pauseBeforeTools(ctx, fmt.Errorf("router: resolve with-tools (background lane): %w", err), msg, prep.messages)
 	}
 	provider, ok := selection.Client.(common.ToolCallingChatAIProvider)
 	if !ok {

@@ -797,12 +797,12 @@ func (r *Replier) handleStreaming(ctx context.Context, msg *memqlv1.AgentGenerat
 	turnStart := time.Now()
 	prep, err := r.prepareTurn(ctx, msg, turnStart)
 	if err != nil {
-		return nil, err
+		return nil, r.PauseWorkBeforeTurn(ctx, err, msg)
 	}
 
 	selection, err := r.router.ResolveFor(ctx, prep.routerReq)
 	if err != nil {
-		return nil, fmt.Errorf("router: resolve stream-with-tools: %w", err)
+		return nil, r.pauseBeforeTools(ctx, fmt.Errorf("router: resolve stream-with-tools: %w", err), msg, prep.messages)
 	}
 	provider, ok := selection.Client.(common.ChatStreamWithToolsProvider)
 	if !ok {

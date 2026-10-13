@@ -221,9 +221,15 @@ func (r *replierTurnRunner) ResolveOwnerAgent(ctx context.Context, owner string)
 func (r *replierTurnRunner) RunTurn(ctx context.Context, msg *memqlv1.AgentGenerateTurnMsg) (string, error) {
 	bounded, stopBudget, err := r.engine.ContextWithRunDeadline(ctx)
 	if err != nil {
-		return "", err
+		return "", r.replier.PauseWorkBeforeTurn(ctx, err, msg)
 	}
 	defer stopBudget()
+	// A declared deadline already in the past returns a cancelled context,
+	// not a setup error. Save the native wait before cancelled preparation
+	// reads can unwind as raw budget failures through every parent journal.
+	if failure := r.engine.WorkCallFailure(bounded); failure != nil {
+		return "", r.replier.PauseWorkBeforeTurn(bounded, failure, msg)
+	}
 	ctx = bounded
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
