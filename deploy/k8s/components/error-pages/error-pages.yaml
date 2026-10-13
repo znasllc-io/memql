@@ -20,14 +20,9 @@
 # sends a custom default backend to the Service's FIRST port -- the Service
 # below lists exactly one, on purpose.
 #
-# The Ingresses whose proxy speaks gRPC or HTTPS to their backend do NOT name
-# it, each on its own account. ingress-nginx keeps an Ingress's backend protocol
-# when it swaps in the default backend, and this server is plain HTTP/1.1. Behind
-# backend-protocol GRPC (the api host's gRPC half) the proxy would speak h2c to
-# it; behind HTTPS (the identity host, and an account door's id. host) it would
-# open a TLS connection to a server that speaks none. Either answers 502 instead
-# of ingress-nginx's own 503, so those hosts keep that 503 until this can answer
-# TLS (cmd/frontdoorhosts/manifest.go has the detail).
+# HTTPS identity backends use error-pages-tls, a separate Service whose first
+# port speaks TLS with an in-memory certificate. Those ingress locations already
+# disable upstream certificate verification. gRPC does not use page fallbacks.
 #
 # THE IMAGE IS THE EDGE'S, NOT A NEW ONE. The server is a subcommand of the
 # engine binary (the same reason dsl-fetch is), so every image the cluster
@@ -49,7 +44,7 @@
 # custom-domain Role (it can write Ingresses and Certificates) and the vendor
 # identities: a page server has no use for either, so it mounts no token at all.
 #
-# TWO LISTENERS, ONE PROCESS. The public one (8080, `http`) is what the Service
+# THREE LISTENERS, ONE PROCESS. HTTP and HTTPS are public. The public one (8080, `http`) is what the Service
 # lists, so the only one a request that came through an ingress can reach, and
 # it answers EVERY path with the 503 page, /healthz included: this is the
 # default backend of every front door, so `https://api.<domain>/healthz` lands
@@ -153,6 +148,7 @@ spec:
             # `http` is what the Service targets; `health` is what the probes
             # target and the Service does not list.
             - { name: http, containerPort: 8080 }
+            - { name: https, containerPort: 8443 }
             - { name: health, containerPort: 8081 }
           envFrom:
             # MEMQL_DOMAIN, from the same ConfigMap every engine node reads it
@@ -167,6 +163,7 @@ spec:
             # probes are one decision in one file. They must stay on different
             # ports: the server refuses to start otherwise.
             - { name: MEMQL_ERROR_PAGES_ADDR, value: ":8080" }
+            - { name: MEMQL_ERROR_PAGES_TLS_ADDR, value: ":8443" }
             - { name: MEMQL_ERROR_PAGES_HEALTH_ADDR, value: ":8081" }
             # Under the 128Mi limit, so the collector works before the kernel
             # does. RSS of the memql binary serving these pages is 53-55 MiB.
@@ -214,6 +211,22 @@ spec:
     app.kubernetes.io/name: error-pages
   ports:
     - { name: http, port: 80, targetPort: http }
+---
+# HTTPS backends need their own FIRST Service port. The probe is never exposed.
+apiVersion: v1
+kind: Service
+metadata:
+  name: error-pages-tls
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: error-pages
+    app.kubernetes.io/part-of: memql
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: error-pages
+  ports:
+    - { name: https, port: 443, targetPort: https }
 ---
 # Keep >=1 error-pages pod serving through voluntary disruptions (node drain,
 # upgrade, rollout): the fallback is the last thing that should be taken away.

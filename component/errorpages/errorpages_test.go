@@ -54,7 +54,7 @@ func serve(t *testing.T, domain, method, host, target string, header http.Header
 		}
 	}
 	rec := httptest.NewRecorder()
-	Handler(domain).ServeHTTP(rec, req)
+	Handler(domain, "MemQL").ServeHTTP(rec, req)
 	return rec
 }
 
@@ -791,5 +791,25 @@ func TestMarkMatchesBrand(t *testing.T) {
 	if string(source) != string(copied) {
 		t.Errorf("component/errorpages/mark.svg has drifted from brand/mark.svg.\n" +
 			"Copy the brand file over it: cp brand/mark.svg component/errorpages/mark.svg")
+	}
+}
+
+func TestWhiteLabelAndUnconfiguredInstallationsDoNotBorrowMemQLBrand(t *testing.T) {
+	for _, name := range []string{"", "Acme", `<script>alert("x")</script>`} {
+		for _, host := range []string{"identity.example.test", "os.example.test", "id.memql.customer.test"} {
+			req := httptest.NewRequest(http.MethodGet, "https://"+host+"/", nil)
+			rec := httptest.NewRecorder()
+			Handler("example.test", name).ServeHTTP(rec, req)
+			body := rec.Body.String()
+			if rec.Code != 503 || strings.Contains(body, "MemQL") || strings.Contains(body, "<svg") || strings.Contains(body, "Squada") || strings.Contains(body, "<script>") {
+				t.Errorf("brand %q host %s: unsafe or wrong page: %s", name, host, body)
+			}
+			if name == "Acme" && host != "id.memql.customer.test" && !strings.Contains(body, "Acme is temporarily unavailable.") {
+				t.Errorf("missing installation name on %s", host)
+			}
+			if host == "id.memql.customer.test" && strings.Contains(body, "Acme") {
+				t.Error("installation brand leaked to customer identity host")
+			}
+		}
 	}
 }

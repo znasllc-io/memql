@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -20,7 +25,8 @@ import (
 const (
 	// errorPagesDefaultAddr is the public listener: the one the Service lists,
 	// so the one every front door's default backend reaches.
-	errorPagesDefaultAddr = ":8080"
+	errorPagesDefaultAddr    = ":8080"
+	errorPagesDefaultTLSAddr = ":8443"
 	// errorPagesDefaultHealthAddr is the probe listener: the one the kubelet
 	// reaches at the pod's own address and the Service does not list.
 	errorPagesDefaultHealthAddr = ":8081"
@@ -33,12 +39,14 @@ func printErrorPagesUsage(w io.Writer) {
 	fmt.Fprintf(w, `usage: memql error-pages
 
 Serves the 503 maintenance pages a front door falls back to when the host it
-was asked for has nothing ready behind it: a MemQL page for the platform's own
-hosts, a neutral page for every other host (the bare domain included), and JSON
+was asked for has nothing ready behind it: the configured installation name on
+its own hosts, a neutral page for every other host (the bare domain included), and JSON
 for an API client. Reads no database and no secret.
 
 Environment:
   MEMQL_ERROR_PAGES_ADDR         public address to listen on (default %s)
+  MEMQL_ERROR_PAGES_TLS_ADDR     HTTPS address to listen on (default :8443)
+  MEMQL_IDENTITY_BRAND_NAME      optional installation name; blank uses the neutral page
   MEMQL_ERROR_PAGES_HEALTH_ADDR  probe address to listen on (default %s)
   MEMQL_DOMAIN                   the cluster's domain; decides which hosts are the platform's
 
@@ -57,7 +65,7 @@ Exit codes:
 }
 
 // error-pages serves the maintenance pages every front-door Ingress names as
-// its default backend (component/errorpages): a MemQL page for the platform's
+// its default backend (component/errorpages): an installation page for its
 // own hosts, a neutral one for everyone else's, JSON for an API client, all of
 // them a 503 with Retry-After. It is what a visitor sees when the host they
 // asked for has nothing ready behind it, in place of ingress-nginx's bare
@@ -69,15 +77,14 @@ Exit codes:
 // the Deployment names an image the cluster has and the pages ship with the
 // release they belong to.
 //
-// IT NEEDS NOTHING BUT A DOMAIN. No database, no mesh, no secret, no object
+// IT NEEDS ONLY A DOMAIN AND AN OPTIONAL DISPLAY NAME. No database, no mesh, no secret, no object
 // storage: the one thing that must still answer when all of those are gone
 // cannot depend on any of them. It is also why this does not go through the
 // server bootstrap, which would start the dependency chain it exists to
 // outlive.
 //
-// TWO LISTENERS, ONE SERVER. The public listener (MEMQL_ERROR_PAGES_ADDR) is
-// the one the Service lists, so the only one a request that came through an
-// ingress can reach, and it answers every path with the 503 page, /healthz
+// THREE LISTENERS, ONE SERVER. HTTP and HTTPS are public; The public listener (MEMQL_ERROR_PAGES_ADDR) is
+// listed by the HTTP Service; the TLS listener has its own Service. Both and it answers every path with the 503 page, /healthz
 // included. The probe listener (MEMQL_ERROR_PAGES_HEALTH_ADDR) is the one the
 // Service does not list, reached only by the kubelet at the pod's own address,
 // and it answers GET /healthz with 200 ok. That split is the point. This server
@@ -86,7 +93,7 @@ Exit codes:
 // if /healthz were answered 200 on the same port, the status-code loop in
 // docs/public/operate/instance-scale-and-upgrade.md, the post-roll /healthz gate
 // and any uptime monitor would all read the middle of an outage as healthy. It
-// is one http.Server serving both listeners, with the branch on the port a
+// is one http.Server serving all listeners, with the branch on the port a
 // connection arrived on (http.LocalAddrContextKey), so the probe is answered by
 // the same server, handler and accept machinery that answers the pages and still
 // proves this process is alive; a second server would prove only itself.
@@ -134,7 +141,7 @@ func runErrorPagesSubcommand(args []string) int {
 
 	// Built before the listeners open: a page that cannot render fails the
 	// start, not the first visitor.
-	handler := errorpages.Handler(domain)
+	handler := errorpages.Handler(domain, os.Getenv("MEMQL_IDENTITY_BRAND_NAME"))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -150,11 +157,18 @@ func runErrorPagesSubcommand(args []string) int {
 		fmt.Fprintf(os.Stderr, "error-pages: probe listener: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "error-pages: serving on %s, probe on %s\n", public.Addr(), probe.Addr())
+	secure, err := listenErrorPagesTLS(errorPagesTLSAddr())
+	if err != nil {
+		public.Close()
+		probe.Close()
+		fmt.Fprintf(os.Stderr, "error-pages: TLS listener: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(os.Stderr, "error-pages: serving on %s and TLS %s, probe on %s\n", public.Addr(), secure.Addr(), probe.Addr())
 
 	done := make(chan int, 1)
 	go func() {
-		done <- serveErrorPages(ctx, public, probe, handler, app.DefaultShutdownDrainDelay, errorPagesShutdownTimeout)
+		done <- serveErrorPages(ctx, []net.Listener{public, secure}, probe, handler, app.DefaultShutdownDrainDelay, errorPagesShutdownTimeout)
 	}()
 	select {
 	case code := <-done:
@@ -231,7 +245,7 @@ func arrivedOnPort(r *http.Request, port string) bool {
 }
 
 // serveErrorPages serves pages on public, and answers the probe on probe, until
-// ctx is done, then stops. It returns the exit code. It owns both listeners.
+// ctx is done, then stops. It returns the exit code and owns every listener.
 //
 // A stop is a drain, then a shutdown. The drain keeps serving, on both
 // listeners, for the same endpoint-removal window the engine's nodes keep
@@ -242,18 +256,22 @@ func arrivedOnPort(r *http.Request, port string) bool {
 // better than that. The probe keeps answering through it: a pod that is leaving
 // is alive until it has left.
 //
-// The two listeners must be on different ports, because the branch between
+// Public listeners must use different ports from the probe, because the branch between
 // them is by port. Two on one would make /healthz a 200 on the public side,
 // which is the answer this arrangement exists to prevent, so it is refused.
 //
 // Logging is startup and shutdown only. A line per request is exactly the
 // volume this release is removing.
-func serveErrorPages(ctx context.Context, public, probe net.Listener, pages http.Handler, drain, shutdownTimeout time.Duration) int {
-	if portOf(public.Addr()) == portOf(probe.Addr()) {
-		fmt.Fprintf(os.Stderr, "error-pages: the public and probe listeners must be on different ports (both are on %q)\n", portOf(public.Addr()))
-		public.Close()
-		probe.Close()
-		return 1
+func serveErrorPages(ctx context.Context, public []net.Listener, probe net.Listener, pages http.Handler, drain, shutdownTimeout time.Duration) int {
+	for _, listener := range public {
+		if portOf(listener.Addr()) == portOf(probe.Addr()) {
+			fmt.Fprintln(os.Stderr, "error-pages: public and probe listeners must use different ports")
+			for _, ln := range public {
+				ln.Close()
+			}
+			probe.Close()
+			return 1
+		}
 	}
 
 	srv := &http.Server{
@@ -272,8 +290,10 @@ func serveErrorPages(ctx context.Context, public, probe net.Listener, pages http
 		IdleTimeout: 2 * time.Minute,
 	}
 
-	failed := make(chan error, 2)
-	go func() { failed <- srv.Serve(public) }()
+	failed := make(chan error, len(public)+1)
+	for _, listener := range public {
+		go func() { failed <- srv.Serve(listener) }()
+	}
 	go func() { failed <- srv.Serve(probe) }()
 
 	select {
@@ -303,4 +323,37 @@ func serveErrorPages(ctx context.Context, public, probe net.Listener, pages http
 	}
 	fmt.Fprintln(os.Stderr, "error-pages: stopped")
 	return 0
+}
+
+// errorPagesTLSAddr is the HTTPS fallback's address. Its separate Service puts
+// this port first: ingress-nginx retains the identity location's HTTPS protocol.
+func errorPagesTLSAddr() string {
+	if addr := strings.TrimSpace(os.Getenv("MEMQL_ERROR_PAGES_TLS_ADDR")); addr != "" {
+		return addr
+	}
+	return errorPagesDefaultTLSAddr
+}
+
+// The existing identity ingress disables upstream certificate verification.
+// This ephemeral certificate encrypts that internal hop without depending on
+// secrets, disk, the mesh, or the database that may be unavailable.
+func listenErrorPagesTLS(addr string) (net.Listener, error) {
+	pub, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	certificate := &x509.Certificate{SerialNumber: serial, DNSNames: []string{"error-pages"},
+		NotBefore: now.Add(-time.Hour), NotAfter: now.AddDate(10, 0, 0),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	der, err := x509.CreateCertificate(rand.Reader, certificate, certificate, pub, key)
+	if err != nil {
+		return nil, err
+	}
+	return tls.Listen("tcp", addr, &tls.Config{MinVersion: tls.VersionTLS12,
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}})
 }

@@ -357,14 +357,8 @@ func TestBindDoorRefusesAMalformedWorkerPrefix(t *testing.T) {
 }
 
 // An account's front door is four Ingresses and only two of them can fall back
-// to the error pages, under the same rule integrations/customdomain applies
-// (doorIngressObjects): the app. Ingress (the edge) and the api. HTTP Ingress
-// (bff-http) speak plain HTTP and carry the annotation; the api. gRPC Ingress
-// (backend-protocol GRPC) and the id. Ingress (backend-protocol HTTPS) do not.
-// ingress-nginx keeps an Ingress's backend protocol when it swaps in the
-// default backend, and the error pages are a plain HTTP/1.1 server: behind
-// grpc_pass they would be sent h2c and behind HTTPS a TLS handshake, and either
-// way the proxy answers 502, which is worse than the bare 503 it replaces.
+// to the error pages using a Service that speaks its backend protocol. HTTP
+// uses error-pages, identity HTTPS uses error-pages-tls, and gRPC is excluded.
 //
 // Parsed from --renderTo, because the envelope re-checks the input and the
 // objects are what a cluster applies.
@@ -389,7 +383,7 @@ func TestBindDoorFallsBackToTheErrorPagesOnItsPlainHTTPIngresses(t *testing.T) {
 		"-app":      {true, "the edge, plain HTTP"},
 		"-api":      {true, "bff-http, plain HTTP"},
 		"-api-grpc": {false, "backend-protocol GRPC: the proxy would speak h2c to a server that speaks HTTP/1.1"},
-		"-id":       {false, "backend-protocol HTTPS: the proxy would start a TLS handshake with a server that speaks none"},
+		"-id":       {true, "HTTPS fallback uses the TLS Service"},
 	}
 	ingresses := ingressesOfManifest(t, string(raw))
 	if len(ingresses) != len(want) {
@@ -403,8 +397,12 @@ func TestBindDoorFallsBackToTheErrorPagesOnItsPlainHTTPIngresses(t *testing.T) {
 			continue
 		}
 		got, has := ing.Metadata.Annotations[scriptDefaultBackendKey]
+		expected := scriptErrorPagesService
+		if suffix == "-id" {
+			expected = "error-pages-tls"
+		}
 		switch {
-		case w.fits && got != scriptErrorPagesService:
+		case w.fits && got != expected:
 			t.Errorf("%s carries %s=%q, want %q (%s)", ing.Metadata.Name, scriptDefaultBackendKey, got, scriptErrorPagesService, w.why)
 		case !w.fits && has:
 			t.Errorf("%s carries %s=%q, but it must not (%s); the proxy would answer 502", ing.Metadata.Name, scriptDefaultBackendKey, got, w.why)
