@@ -230,7 +230,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 161 -> 162: bounded initial Azure email installation workflow.
 // 163 -> 164: explicit selected capability corpus installation recipe.
 // 164 -> 165: owned task retrieval of reviewed Training lessons.
-const shippedAutomationCount = 165
+// 165 -> 166: bounded provider-call recovery before any proposed tool dispatch.
+const shippedAutomationCount = 166
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):
