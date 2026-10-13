@@ -35,6 +35,73 @@ func ArtifactProbeBuild(args ArtifactProbeArgs) string {
 	return b.String()
 }
 
+// AskApprovalDiscussion -- Discuss an owned request in its original conversation. Opening this view neither calls a model nor approves, retries or resumes the blocked work.
+type AskApprovalDiscussionArgs struct {
+	ApprovalId string
+}
+
+// AskApprovalDiscussion calls the engine builtin askApprovalDiscussion.
+func (qc *QueryClient) AskApprovalDiscussion(ctx context.Context, args AskApprovalDiscussionArgs) (*Result, error) {
+	call := AskApprovalDiscussionBuild(args)
+	return qc.executeNamed(ctx, "askApprovalDiscussion", call)
+}
+
+func AskApprovalDiscussionBuild(args AskApprovalDiscussionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin askApprovalDiscussion(")
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AskApprovalMessage -- Record a human message and return its read-only child analysis immediately. advisor selects an independent second opinion only on an explicit request.
+type AskApprovalMessageArgs struct {
+	ApprovalId     string
+	ConversationId string
+	RequestId      string
+	Prompt         string
+	Advisor        bool
+	AdvisorSet     bool // set true to send advisor; required because zero-value bool is ambiguous
+}
+
+// AskApprovalMessage calls the engine builtin askApprovalMessage.
+func (qc *QueryClient) AskApprovalMessage(ctx context.Context, args AskApprovalMessageArgs) (*Result, error) {
+	call := AskApprovalMessageBuild(args)
+	return qc.executeNamed(ctx, "askApprovalMessage", call)
+}
+
+func AskApprovalMessageBuild(args AskApprovalMessageArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin askApprovalMessage(")
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("conversationId: ")
+	b.WriteString(quoteMemQL(args.ConversationId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("prompt: ")
+	b.WriteString(quoteMemQL(args.Prompt))
+	if args.AdvisorSet {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("advisor: ")
+		b.WriteString(fmt.Sprintf("%v", args.Advisor))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // AskConversationSnapshot -- Read this person's conversation with current progress and completed results projected from its durable work runs. Reconnects never execute work again.
 type AskConversationSnapshotArgs struct {
 	ConversationId string

@@ -653,6 +653,7 @@ func (i *Integration) FailRun(ctx context.Context, ownerUserId, runId, code, mes
 
 // DirectGoal is a goal whose template is already known.
 type DirectGoal struct {
+	ParentRunID string
 	// AccountIds and Ceilings apply the same scope and limits as a compiled goal.
 	AccountIds []string
 	Ceilings   map[string]any

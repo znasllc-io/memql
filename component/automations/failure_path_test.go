@@ -775,3 +775,25 @@ func lastCallNamed(t *testing.T, calls []string, name string) string {
 	t.Fatalf("no %s call in %v", name, calls)
 	return ""
 }
+
+func TestBoundedAnalysisFailureNeverClassifiesOrRequestsApproval(t *testing.T) {
+	for _, failure := range []error{errors.New("connection reset"), errors.New("provider offline"), &memql.RunCeilingError{}} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			run := failedRun("analysis", failure.Error(), 1, 0)
+			run.Fail(failure)
+			recorder := &budgetAnsweringExecutor{run: goalRun("analysis", 0)}
+			classifier := &countingClassifier{symptom: work.SymptomPlan}
+			journal := newWorkJournal(recorder, nil)
+			journal.terminalFailures = true
+			journal.classifier = classifier
+			journal.closeRun(context.Background(), run, "")
+			if classifier.calls != 0 {
+				t.Fatal("analysis failure spent a classification call")
+			}
+			joined := strings.Join(recorder.calls, "\n")
+			if !strings.Contains(joined, `status: "failed"`) || strings.Contains(joined, "createWorkApproval") || strings.Contains(joined, `status: "waiting"`) {
+				t.Fatalf("analysis did not end terminally: %s", joined)
+			}
+		})
+	}
+}

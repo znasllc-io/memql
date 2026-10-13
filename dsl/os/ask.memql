@@ -14,6 +14,37 @@ builtin askConversationSnapshot { conversationId string! }
 @args(profile="object")
 builtin askWorkConversation { runId string! }
 
+/// Discuss an owned request in its original conversation. Opening this view
+/// neither calls a model nor approves, retries or resumes the blocked work.
+@sdk
+@executor("askApprovalDiscussion")
+@args(profile="object")
+builtin askApprovalDiscussion { approvalId string! }
+
+/// Record a human message and return its read-only child analysis immediately.
+/// advisor selects an independent second opinion only on an explicit request.
+@sdk
+@executor("askApprovalMessage")
+@args(profile="object")
+builtin askApprovalMessage {
+ approvalId string!
+ conversationId string!
+ requestId string!
+ prompt string!
+ advisor bool
+}
+
+/// This model capability requires the exact child run and durable human turn.
+/// It admits only the read-only approval prompts and one guarded model call.
+@executor("askRunApprovalMessage")
+@args(profile="object")
+builtin askRunApprovalMessage { templateId string! }
+
+/// Read the current child run's owner-bound request and selected journal receipt.
+@executor("askApprovalEvidence")
+@args(profile="object")
+builtin askApprovalEvidence {}
+
 /// A private conversation with MemQL. The transcript is written by the agent
 /// service; ownership is always taken from the authenticated caller.
 // @no-displayCard: contains a private transcript object; Ask renders named message rows and a separate conversation list, not a generic concept card.

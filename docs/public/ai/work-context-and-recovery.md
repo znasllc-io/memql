@@ -50,6 +50,29 @@ prefix and accumulated usage, and does not replenish automatic retries or
 raise resource limits. A transient failure's **Retry** instead repeats the
 failed step. Either decision is persisted for the cluster to resume safely.
 
+**Discuss in Ask** opens the conversation that originated an approval. Work
+started elsewhere receives one private linked conversation. Opening the
+discussion makes no model call and does not decide the approval. Human messages
+and advisory replies remain in that conversation across reconnections and
+replicas. You can add information while a reply is running.
+
+Ordinary discussion and **Ask another agent** each start a separate, bounded
+read-only analysis of that owned request: its recorded failure, selected work
+receipt, original goal and recent linked discussion. The second opinion uses
+a separate model call and is labelled as advice. Neither path inspects the host,
+executes tools, grants permissions, approves the parent, or retries its blocked
+action. Each child has one journalled model call and a two-minute ceiling; a
+failed analysis ends with its error instead of creating a repair plan or another
+approval. The original records are preserved.
+
+For supported requests, **Send guidance** records your own direction and lets
+the existing work reconsider its unfinished steps. It is an answered request,
+not approval of the blocked action. The completed prefix, permissions, consumed
+budget and retry limits remain in force. That direction is also projected into
+the original Ask transcript. If saving succeeds but continuing is interrupted,
+retrying the same guidance resumes that saved decision; it does not create a
+second answer. Artifact-specific reviews retain their own decision contracts.
+
 Replanning an existing sealed program uses structured, exact source edits so
 that repairing a small part does not require the model to repeat a large
 program. The runtime rejects ambiguous or overlapping edits and changes to

@@ -33,6 +33,20 @@ func TestAskFeedbackDistinguishesInformationFromRecovery(t *testing.T) {
 	require.True(t, a.AnswerOnly)
 }
 
+func TestAskProjectsHumanGuidanceAcrossApprovalKinds(t *testing.T) {
+	for _, kind := range []string{"feedback", "scopeElevation", "sideEffect", "planReview"} {
+		t.Run(kind, func(t *testing.T) {
+			q, turn := askFeedbackProjection(map[string]any{"id": "approval", "kind": kind, "decision": "answered", "answer": map[string]any{"feedback": "Keep the existing receipts and inspect the saved error."}, "decidedAt": time.Now().UTC().Format(time.RFC3339Nano)})
+			require.Nil(t, q)
+			require.NotNil(t, turn)
+			require.True(t, turn.AnswerOnly)
+			require.False(t, turn.Advisor)
+			require.Equal(t, "approval", turn.ApprovalID)
+			require.Equal(t, "Guidance sent:\nKeep the existing receipts and inspect the saved error.", turn.Prompt)
+		})
+	}
+}
+
 func TestAskWorkConversationAndContinuationSurviveReplicaChanges(t *testing.T) {
 	a, _, _ := readMergeTestEngine(t)
 	b, _, _ := readMergeTestEngine(t)

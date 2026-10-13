@@ -310,6 +310,8 @@ func (i *Integration) IntegrationName() string { return integrationName }
 // the registry lacks is a BOOT failure on every node type.
 func (i *Integration) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
+		{Name: "approvalDiscussionState", Description: "Read human-guidance eligibility for one owned approval.", Handler: i.handleApprovalDiscussionState},
+		{Name: "openApprovalDiscussion", Description: "Record a human discussion message and open its bounded read-only child run.", Handler: i.handleOpenApprovalDiscussion},
 		{
 			Name:        "createGoal",
 			Description: "Accept a goal and start work on it: opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile (locally or via the run graph event to a planner). Refuses with no compile surface when neither a local compiler nor event forward is available. Returns {goalId, runId, compileDispatched}.",

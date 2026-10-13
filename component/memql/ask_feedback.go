@@ -15,6 +15,14 @@ import (
 // Only a typed information request becomes an Ask question. Failure recovery
 // and permission approvals keep their own action contracts.
 func askFeedbackProjection(row map[string]any) (*AskQuestion, *AskTurn) {
+	if row["decision"] == "answered" {
+		answer, _ := row["answer"].(map[string]any)
+		feedback, _ := answer["feedback"].(string)
+		if at, valid := askTimestamp(row["decidedAt"]); valid && strings.TrimSpace(feedback) != "" {
+			id := BareShortId(fmt.Sprint(row["id"]))
+			return nil, &AskTurn{ID: "guidance-" + id, ApprovalID: id, Prompt: "Guidance sent:\n" + feedback, State: "done", StartedAt: at, EndedAt: &at, AnswerOnly: true, Activity: []WorkEvent{}}
+		}
+	}
 	subject, _ := row["subject"].(map[string]any)
 	kind, _ := subject["kind"].(string)
 	if row["kind"] != "feedback" || (kind != "text" && kind != "choice" && kind != "multi") {

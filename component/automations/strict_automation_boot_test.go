@@ -228,7 +228,7 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 157 -> 158: DSL-owned evidence limits for replanning completed work.
 // 158 -> 161: campaign journey proposal, drain and step workflows.
 // 161 -> 162: bounded initial Azure email installation workflow.
-const shippedAutomationCount = 162
+const shippedAutomationCount = 163
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

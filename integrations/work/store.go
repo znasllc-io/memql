@@ -317,6 +317,9 @@ func (s *store) createRunRow(ctx context.Context, r runSeed) error {
 	if sig := trim(r.GoalSignature); sig != "" {
 		args["goalSignature"] = sig
 	}
+	if r.ParentRunID != "" {
+		args["parentRunId"] = r.ParentRunID
+	}
 	return s.writeInternal(ctx, "mutation "+call("createWorkRun", withArgs(args, routingArg(r.Routing))))
 }
 
@@ -411,6 +414,7 @@ type goalSeed struct {
 }
 
 type runSeed struct {
+	ParentRunID         string
 	Spine               map[string]any
 	WaitingOn           map[string]any
 	ExecutionAuthority  map[string]any

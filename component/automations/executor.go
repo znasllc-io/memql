@@ -229,6 +229,11 @@ type ExecutorOptions struct {
 	// when this is set, which is the mechanical form of that rule.
 	SandboxRun bool
 
+	// TerminalFailures is for a bounded native analysis capability whose scope
+	// cannot expand through classification, a budget approval or replanning.
+	// Journal writes remain enabled; only failure recovery is disabled.
+	TerminalFailures bool
+
 	// CancelPollInterval bounds how often a run re-reads its own
 	// `cancelRequested` flag (memql#5066, cancel.go). Zero takes the default.
 	//
@@ -296,6 +301,7 @@ func NewExecutor(opts ExecutorOptions) *Executor {
 	// than letting newWorkJournal decide.
 	if !opts.SandboxRun && opts.Engine != nil {
 		e.journal = newWorkJournal(opts.Engine, opts.Logger)
+		e.journal.terminalFailures = opts.TerminalFailures
 	}
 
 	// Initialize dedup tracker if dedup is enabled

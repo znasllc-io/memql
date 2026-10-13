@@ -1,0 +1,77 @@
+{
+  "automation": "os/automations.memql askApprovalAnalysis",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "advisor": true,
+            "approvalId": "s-approvalId",
+            "conversationId": "s-conversationId",
+            "prompt": "s-prompt",
+            "requestId": "s-requestId"
+          },
+          "topic": "automation.invocation.askApprovalAnalysis"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "templateId": "askApprovalSecondOpinion"
+            },
+            "kind": "builtin",
+            "name": "askRunApprovalMessage"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "templateId": "askApprovalSecondOpinion"
+            },
+            "builtin": "askRunApprovalMessage"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "advisor": true,
+            "approvalId": "s-approvalId",
+            "conversationId": "s-conversationId",
+            "prompt": "s-prompt",
+            "requestId": "s-requestId"
+          },
+          "topic": "automation.invocation.askApprovalAnalysis"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "templateId": "askApprovalSecondOpinion"
+            },
+            "kind": "builtin",
+            "name": "askRunApprovalMessage"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "templateId": "askApprovalSecondOpinion"
+            },
+            "builtin": "askRunApprovalMessage"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

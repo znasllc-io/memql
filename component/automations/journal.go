@@ -123,7 +123,8 @@ type workJournal struct {
 	// a node that can reach a model. Nil is a working state: a table miss then
 	// falls to ActAsk, which is what a failed run did before any of this was
 	// wired. See failure_path.go.
-	classifier SymptomClassifier
+	classifier       SymptomClassifier
+	terminalFailures bool
 
 	// hold, when set, keeps every write until release: a directly called
 	// logic's journal, whose run opens only if the logic writes, and a
@@ -797,6 +798,10 @@ func (j *workJournal) reopenRun(ctx context.Context, exec *AutomationExecution) 
 // closeRun writes the terminal status. The executor's status vocabulary
 // (completed / failed / cancelled) maps onto the spec's.
 func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, chainHead string) {
+	if j != nil && j.terminalFailures {
+		j.closeRunRecord(ctx, exec, chainHead)
+		return
+	}
 	if j == nil || exec == nil {
 		return
 	}

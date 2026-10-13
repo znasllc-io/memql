@@ -27,6 +27,56 @@ QueryClient.prototype.artifactProbe = function (this: QueryClient, args: Artifac
   return this.executeNamed("artifactProbe", buildArtifactProbe(args), opts);
 };
 
+/** Discuss an owned request in its original conversation. Opening this view neither calls a model nor approves, retries or resumes the blocked work. */
+export interface AskApprovalDiscussionArgs {
+  approvalId: string;
+}
+
+export function buildAskApprovalDiscussion(args: AskApprovalDiscussionArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  return "builtin askApprovalDiscussion(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askApprovalDiscussion(args: AskApprovalDiscussionArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askApprovalDiscussion = function (this: QueryClient, args: AskApprovalDiscussionArgs = {} as AskApprovalDiscussionArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askApprovalDiscussion", buildAskApprovalDiscussion(args), opts);
+};
+
+/** Record a human message and return its read-only child analysis immediately. advisor selects an independent second opinion only on an explicit request. */
+export interface AskApprovalMessageArgs {
+  approvalId: string;
+  conversationId: string;
+  requestId: string;
+  prompt: string;
+  advisor?: boolean;
+}
+
+export function buildAskApprovalMessage(args: AskApprovalMessageArgs): string {
+  const parts: string[] = [];
+  parts.push("approvalId: " + renderMemQLValue(args.approvalId));
+  parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("prompt: " + renderMemQLValue(args.prompt));
+  if (args.advisor !== undefined) parts.push("advisor: " + renderMemQLValue(args.advisor));
+  return "builtin askApprovalMessage(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askApprovalMessage(args: AskApprovalMessageArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askApprovalMessage = function (this: QueryClient, args: AskApprovalMessageArgs = {} as AskApprovalMessageArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askApprovalMessage", buildAskApprovalMessage(args), opts);
+};
+
 /** Read this person's conversation with current progress and completed results projected from its durable work runs. Reconnects never execute work again. */
 export interface AskConversationSnapshotArgs {
   conversationId: string;

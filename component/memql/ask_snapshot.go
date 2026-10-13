@@ -88,7 +88,7 @@ func (e *MemQLEngine) refreshAskRuns(ctx context.Context, transcript *askTranscr
 		run := runs[0]
 		turn.WorkStatus, _ = run["status"].(string)
 		waiting, _ := run["waitingOn"].(map[string]any)
-		questions, err := e.workRows(ctx, "workQuestionsForOwnerRun", turn.RunID)
+		questions, err := e.workRows(ctx, "workApprovalsForOwnedRun", turn.RunID)
 		if err != nil {
 			return err
 		}
