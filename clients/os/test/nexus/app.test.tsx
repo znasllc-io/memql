@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readTheBar } from "../readTheBar";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 const h = vi.hoisted(() => ({ connection: null as unknown }));
@@ -151,12 +152,14 @@ describe("goals, the landing surface", () => {
     });
     mount(conn);
     fireEvent.click(await screen.findByText("Reconcile the ledger"));
-    fireEvent.click(await screen.findByText("Close this goal"));
+    await screen.findByLabelText(/Type the goal's own words/);
+    expect(screen.queryByText("Close this goal")).toBeNull();
     expect(conn.query.cancelGoal).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByLabelText(/Type the goal's own words/), {
       target: { value: "Reconcile the ledger" },
     });
+    await readTheBar();
     fireEvent.click(screen.getByText("Close this goal"));
     await waitFor(() => expect(conn.query.cancelGoal).toHaveBeenCalled());
     expect(conn.query.cancelGoal.mock.calls[0]?.[0]).toMatchObject({ goalId: "g1" });
