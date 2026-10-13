@@ -780,6 +780,7 @@ StreamLoop:
 				}
 			}
 			var content string
+			var failureAbort error
 			if execErr != nil {
 				// Structured, typed tool error (#584): classify the raw
 				// error into {type, message, retryable, userFixable} so the
@@ -791,19 +792,14 @@ StreamLoop:
 					"retryable", se.Retryable, "userFixable", se.UserFixable,
 					"error", execErr)
 				content = se.JSON()
-				sink.ToolResult(tc.ID, "", execErr.Error())
+				sink.ToolResult(tc.ID, result, execErr.Error())
 				// Repeated-identical-failure breaker (memql#1128): abort the
 				// whole turn rather than loop to maxIterations when the model
 				// is stuck re-issuing the same failing call.
 				if trip, count := failBreaker.observeFailure(tc.Name, tc.Arguments, execErr); trip {
 					r.logger.Warn("agent streaming: aborting turn -- repeated identical tool failure",
 						"tool", tc.Name, "count", count, "requestId", requestId)
-					return &TurnResult{
-						FinalText:  strings.TrimSpace(fullText.String()),
-						TextChunks: textChunks,
-						ToolCalls:  allToolCalls,
-						Iterations: iterations,
-					}, repeatFailureAbortError(tc.Name, count)
+					failureAbort = repeatFailureAbortError(tc.Name, count)
 				}
 			} else {
 				content = result
@@ -857,7 +853,15 @@ StreamLoop:
 				Content:    content,
 			})
 			if err := r.saveWorkProgress(ctx, messages); err != nil {
+				if failureAbort != nil {
+					return nil, fmt.Errorf("%w: saving final failed tool result: %v", memql.ErrWorkCheckpointRequired, err)
+				}
 				return nil, err
+			}
+			// Retain the final failed operation's evidence before aborting;
+			// saveWorkProgress pairs undispatched siblings as not executed.
+			if failureAbort != nil {
+				return &TurnResult{FinalText: strings.TrimSpace(fullText.String()), TextChunks: textChunks, ToolCalls: allToolCalls, Iterations: iterations}, failureAbort
 			}
 		}
 

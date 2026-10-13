@@ -629,6 +629,7 @@ BackgroundLoop:
 				}
 			}
 			var content string
+			var failureAbort error
 			if execErr != nil {
 				se := memql.ClassifyToolError(execErr)
 				r.logger.Warn("agent background: tool execution failed",
@@ -636,18 +637,13 @@ BackgroundLoop:
 					"retryable", se.Retryable, "userFixable", se.UserFixable,
 					"error", execErr)
 				content = se.JSON()
-				sink.ToolResult(tc.ID, "", execErr.Error())
+				sink.ToolResult(tc.ID, result, execErr.Error())
 				// Repeated-identical-failure breaker (memql#1128): abort the
 				// turn rather than spin to maxIterations on a stuck call.
 				if trip, count := failBreaker.observeFailure(tc.Name, tc.Arguments, execErr); trip {
 					r.logger.Warn("agent background: aborting turn -- repeated identical tool failure",
 						"tool", tc.Name, "count", count, "requestId", requestId)
-					return &TurnResult{
-						FinalText:  strings.TrimSpace(fullText.String()),
-						TextChunks: textChunks,
-						ToolCalls:  allToolCalls,
-						Iterations: iterations,
-					}, repeatFailureAbortError(tc.Name, count)
+					failureAbort = repeatFailureAbortError(tc.Name, count)
 				}
 			} else {
 				content = result
@@ -678,7 +674,15 @@ BackgroundLoop:
 				Content:    content,
 			})
 			if err := r.saveWorkProgress(ctx, messages); err != nil {
+				if failureAbort != nil {
+					return nil, fmt.Errorf("%w: saving final failed tool result: %v", memql.ErrWorkCheckpointRequired, err)
+				}
 				return nil, err
+			}
+			// The last failure can carry partial effects. Save its actual result
+			// and mark later calls unexecuted before the breaker ends the turn.
+			if failureAbort != nil {
+				return &TurnResult{FinalText: strings.TrimSpace(fullText.String()), TextChunks: textChunks, ToolCalls: allToolCalls, Iterations: iterations}, failureAbort
 			}
 		}
 

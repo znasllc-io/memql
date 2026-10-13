@@ -18,6 +18,9 @@ func agentToolResultText(raw string) (string, error) {
 	}
 	if result.IsError {
 		if len(result.Content) == 1 && result.Content[0].Type == "text" {
+			if failure := memql.WorkerToolResultFailure(result.Content[0].Text); failure != nil {
+				return result.Content[0].Text, failure
+			}
 			return "", fmt.Errorf("%s", result.Content[0].Text)
 		}
 		return "", fmt.Errorf("engine tool refused: %s", raw)

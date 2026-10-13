@@ -706,7 +706,8 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 		if err != nil {
 			return nil, err
 		}
-		return &ToolCallResult{Content: []ToolResultContent{{Type: "text", Text: text}}}, nil
+		resultError := declaredWorkerTool(tool) && WorkerToolResultFailure(text) != nil
+		return &ToolCallResult{IsError: resultError, Content: []ToolResultContent{{Type: "text", Text: text}}}, nil
 
 	case "webhook":
 		return e.executeWebhook(ctx, tool.Name, handler, args)

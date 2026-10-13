@@ -3,11 +3,150 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/require"
+	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
 )
+
+type workerFailureHistoryProvider struct {
+	calls    int
+	messages []common.ChatMessage
+}
+
+func (p *workerFailureHistoryProvider) CallChatWithTools(_ context.Context, messages []common.ChatMessage, _ []common.ToolDefinition) (*common.ToolCallingChatResult, error) {
+	p.calls++
+	p.messages = append([]common.ChatMessage(nil), messages...)
+	calls := []common.ToolCall{{ID: fmt.Sprintf("worker-call-%d", p.calls), Name: "workerHost", Arguments: `{"action":"exec","args":{"cmd":"example"}}`}}
+	if p.calls == 3 {
+		calls = append(calls, common.ToolCall{ID: "later-proposal", Name: "workerHost", Arguments: `{"action":"fs_write","args":{"path":"not-executed"}}`})
+	}
+	return &common.ToolCallingChatResult{ToolCalls: calls}, nil
+}
+
+func (p *workerFailureHistoryProvider) CallChatStreamWithTools(ctx context.Context, messages []common.ChatMessage, tools []common.ToolDefinition) (<-chan common.StreamToolChunk, error) {
+	result, err := p.CallChatWithTools(ctx, messages, tools)
+	if err != nil {
+		return nil, err
+	}
+	ch := make(chan common.StreamToolChunk, 2)
+	var deltas []common.ToolCallDelta
+	for index, call := range result.ToolCalls {
+		deltas = append(deltas, common.ToolCallDelta{Index: index, ID: call.ID, Name: call.Name, Arguments: call.Arguments})
+	}
+	ch <- common.StreamToolChunk{ToolCalls: deltas}
+	ch <- common.StreamToolChunk{Done: true}
+	close(ch)
+	return ch, nil
+}
+
+type workerFailureCheckpointEngine struct {
+	workPromptEngine
+	saves int
+	fail  bool
+}
+
+func (e *workerFailureCheckpointEngine) SaveWorkContinuation(ctx context.Context, messages []common.ChatMessage) error {
+	e.saves++
+	if e.fail && e.saves == 3 {
+		return errors.New("checkpoint storage refused")
+	}
+	return e.workPromptEngine.SaveWorkContinuation(ctx, messages)
+}
+
+type workerFailureSink struct {
+	captureSink
+	results map[string]string
+	errors  map[string]string
+}
+
+func (s *workerFailureSink) ToolResult(id, result, failure string) {
+	s.results[id], s.errors[id] = result, failure
+}
+
+func TestReportedWorkerFailureReachesBothLoopHistories(t *testing.T) {
+	for _, streaming := range []bool{false, true} {
+		for _, failCheckpoint := range []bool{false, true} {
+			t.Run(fmt.Sprintf("streaming=%t/checkpointFailure=%t", streaming, failCheckpoint), func(t *testing.T) {
+				r := testReplier()
+				engine := &workerFailureCheckpointEngine{fail: failCheckpoint}
+				r.engine = engine
+				exec := &scriptedExecutor{fn: func(call int, _ string) (string, error) {
+					text := fmt.Sprintf(`{"nodes":[{"concept":"integration:worker:result","payload":{"ok":false,"errorCode":"exec_timeout","errorMessage":"Inspect before repeating","output":{"stdout":"partial effect evidence %d"}}}]}`, call+1)
+					return text, memql.WorkerToolResultFailure(text)
+				}}
+				r.stamper = newToolRecorder(exec, r.logger)
+				rec := &recordingRecorder{}
+				r.stamper.SetRecorder(rec)
+				provider := &workerFailureHistoryProvider{}
+				ctx := auth.ContextWithUserActor(context.Background(), "owner")
+				ctx = common.ContextWithRun(ctx, common.RunContext{RunId: "worker-result-history", GoalId: "goal", OwnerUserId: "owner", StepKey: "step"})
+				sink := &workerFailureSink{results: map[string]string{}, errors: map[string]string{}}
+				var err error
+				if streaming {
+					_, err = r.runStreamingToolLoop(ctx, provider, nil, nil, sink, time.Now(), "worker-result", turnContext{})
+				} else {
+					_, err = r.runNonStreamingToolLoop(ctx, provider, nil, nil, nil, sink, time.Now(), "worker-result", turnContext{})
+				}
+				require.Error(t, err, "repeated failures must trip the existing breaker")
+				require.Equal(t, 3, provider.calls)
+				require.Equal(t, provider.calls, exec.calls, "no automatic dispatch retry between model calls")
+				require.Equal(t, 3, engine.saves, "the final actual result must be saved before abort")
+				require.Contains(t, sink.results["worker-call-3"], "partial effect evidence 3")
+				require.NotEmpty(t, sink.errors["worker-call-3"])
+				require.NotContains(t, sink.results, "later-proposal")
+				if failCheckpoint {
+					require.ErrorIs(t, err, memql.ErrWorkCheckpointRequired)
+					require.ErrorContains(t, err, "checkpoint storage refused")
+				} else {
+					paired := map[string]string{}
+					for _, msg := range engine.savedContinuation {
+						if msg.Role == "tool" {
+							paired[msg.ToolCallId] = msg.Content
+						}
+					}
+					require.Len(t, paired, 4)
+					require.Contains(t, paired["worker-call-3"], "partial effect evidence 3")
+					require.Contains(t, paired["later-proposal"], "Not executed before the saved checkpoint")
+				}
+				results := 0
+				for _, msg := range provider.messages {
+					if msg.Role == "tool" {
+						results++
+						require.Contains(t, msg.Content, "partial effect evidence")
+						require.Contains(t, msg.Content, `"retryable":false`)
+					}
+				}
+				require.Equal(t, 2, results, "both prior failed tool results reached the next model request")
+				require.Len(t, rec.all(), 3)
+				for _, record := range rec.all() {
+					require.True(t, record.IsError)
+				}
+			})
+		}
+	}
+}
+
+func TestReportedWorkerFailureIsRecordedWithoutRedispatch(t *testing.T) {
+	failure := &memql.StructuredToolError{Type: memql.ToolErrorPermission, Message: "Call requestComputerUseScope", Retryable: false}
+	exec := &countingExecutor{err: failure}
+	rec := &recordingRecorder{}
+	r := newToolRecorder(exec, nil)
+	r.SetRecorder(rec)
+	out, err := r.ExecuteToolByName(runCtx("run", "owner"), "workerHost", map[string]any{"action": "exec"})
+	if !errors.Is(err, failure) || exec.calls != 1 || out != "result of workerHost" {
+		t.Fatalf("outcome changed or repeated: %v, calls=%d", err, exec.calls)
+	}
+	got := rec.all()
+	if len(got) != 1 || !got[0].IsError || got[0].Error != failure.Error() {
+		t.Fatalf("worker refusal recorded as success: %+v", got)
+	}
+}
 
 type recordingRecorder struct {
 	mu   sync.Mutex
