@@ -376,6 +376,12 @@ describe("a failure question", () => {
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "failed", decision: "answered", answer: { value: "retry" } }));
     fireEvent.click(screen.getByRole("button", { name: "Abandon" }));
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "failed", decision: "answered", answer: { value: "abandon" } }));
+    await act(async () => {
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "failed", kind, decision: "answered", answer: { value: "abandon" }, createdAt: "2026-09-01T13:00:00Z" }), "NODE_UPDATED");
+    });
+    expect(screen.getAllByText("Your response was recorded.").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/picked up from where it parked/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Abandon" })).toBeNull();
   });
 });
 
