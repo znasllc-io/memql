@@ -36,9 +36,9 @@ func (p *installTestEmbedder) Embed(ctx context.Context, text string) ([]float32
 	}
 	return p.seedTestProvider.Embed(ctx, text)
 }
-func capabilityInstallFixture(t *testing.T) (*seedFixture, *installTestEmbedder) {
+func capabilityInstallFixture(t *testing.T, shared *seedFixture) (*seedFixture, *installTestEmbedder) {
 	t.Helper()
-	f := newSeedFixture(t)
+	f := seedFixtureForCase(t, shared)
 	f.ctx = auth.ContextWithAccess(f.ctx, &auth.AccessContext{UserId: f.domain, Role: auth.RoleOwner})
 	seedDomainMu.Lock()
 	for n := range seedDomainRegs {
@@ -52,10 +52,15 @@ func capabilityInstallFixture(t *testing.T) (*seedFixture, *installTestEmbedder)
 	resolve := func(context.Context, string) (memql.EmbeddingAIProvider, error) { return p, nil }
 	f.a.SetEmbeddingProvider(resolve)
 	f.b.SetEmbeddingProvider(resolve)
+	old, had := memql.ActiveEmbedderBinding()
 	memql.SetActiveEmbedderBinding(memql.EmbedderBinding{ProviderRef: f.provider, Dimensions: 1024})
-	t.Cleanup(memql.ClearActiveEmbedderBinding)
-	require.NoError(t, f.ea.RegisterIntegration(f.a))
-	require.NoError(t, f.eb.RegisterIntegration(f.b))
+	t.Cleanup(func() {
+		if had {
+			memql.SetActiveEmbedderBinding(old)
+		} else {
+			memql.ClearActiveEmbedderBinding()
+		}
+	})
 	return f, p
 }
 func installFixtureCorpus(t *testing.T, f *seedFixture, i *Integration) capabilityInstallReceipt {
@@ -71,8 +76,22 @@ func installFixtureCorpus(t *testing.T, f *seedFixture, i *Integration) capabili
 	return result.Domains[0]
 }
 
-func TestCapabilityInstallationAcrossReplicasPublishesOnlySelectedAndRepairsVectors(t *testing.T) {
-	f, p := capabilityInstallFixture(t)
+func TestCapabilityInstallationDB(t *testing.T) {
+	f := newSeedReplicas(t)
+	require.NoError(t, f.ea.RegisterIntegration(f.a))
+	require.NoError(t, f.eb.RegisterIntegration(f.b))
+	t.Run("AcrossReplicasPublishesOnlySelectedAndRepairsVectors", func(t *testing.T) {
+		testCapabilityInstallationAcrossReplicasPublishesOnlySelectedAndRepairsVectors(t, f)
+	})
+	t.Run("PreservesReviewAndReportsOlderPublishedRevisions", func(t *testing.T) { testCapabilityInstallationPreservesReviewAndReportsOlderPublishedRevisions(t, f) })
+	t.Run("FailsStrictlyAndPreservesPeerReview", func(t *testing.T) { testCapabilityInstallationFailsStrictlyAndPreservesPeerReview(t, f) })
+	t.Run("RetryRepairsPartialPublicationOnAnotherReplica", func(t *testing.T) { testCapabilityInstallationRetryRepairsPartialPublicationOnAnotherReplica(t, f) })
+	t.Run("UsesBoundWidthForUnknownProviderAcrossReplicas", func(t *testing.T) { testCapabilityInstallationUsesBoundWidthForUnknownProviderAcrossReplicas(t, f) })
+	t.Run("RejectsInvalidVectorsBeforePublication", func(t *testing.T) { testCapabilityInstallationRejectsInvalidVectorsBeforePublication(t, f) })
+}
+
+func testCapabilityInstallationAcrossReplicasPublishesOnlySelectedAndRepairsVectors(t *testing.T, shared *seedFixture) {
+	f, p := capabilityInstallFixture(t, shared)
 	// Entry through the installed public builtin, not a test-only ingestion path.
 	_, err := f.ea.Execute(f.ctx, fmt.Sprintf(`builtin knowledgeInstallCapabilityCorpora(domainIds:[%s])`, quoteString(f.domain)))
 	require.NoError(t, err)
@@ -113,8 +132,8 @@ func TestCapabilityInstallationAcrossReplicasPublishesOnlySelectedAndRepairsVect
 	}
 }
 
-func TestCapabilityInstallationPreservesReviewAndReportsOlderPublishedRevisions(t *testing.T) {
-	f, p := capabilityInstallFixture(t)
+func testCapabilityInstallationPreservesReviewAndReportsOlderPublishedRevisions(t *testing.T, shared *seedFixture) {
+	f, p := capabilityInstallFixture(t, shared)
 	f.write(t, f.seeds[0], "appStructure")
 	f.decide(t, f.seeds[0], "rejected")
 	f.write(t, f.seeds[1], "appStructure")
@@ -143,8 +162,8 @@ func TestCapabilityInstallationPreservesReviewAndReportsOlderPublishedRevisions(
 	require.Equal(t, 1, r.OlderPublished)
 }
 
-func TestCapabilityInstallationFailsStrictlyAndPreservesPeerReview(t *testing.T) {
-	f, p := capabilityInstallFixture(t)
+func testCapabilityInstallationFailsStrictlyAndPreservesPeerReview(t *testing.T, shared *seedFixture) {
+	f, p := capabilityInstallFixture(t, shared)
 	p.fail = true
 	_, err := f.a.installCapabilityCorporaHandler(f.ctx, map[string]any{"domainIds": []string{f.domain}}, 0)
 	require.ErrorContains(t, err, "embedding unavailable")
@@ -165,8 +184,8 @@ func TestCapabilityInstallationFailsStrictlyAndPreservesPeerReview(t *testing.T)
 	require.Equal(t, len(f.seeds)-1, r.Ready)
 }
 
-func TestCapabilityInstallationRetryRepairsPartialPublicationOnAnotherReplica(t *testing.T) {
-	f, p := capabilityInstallFixture(t)
+func testCapabilityInstallationRetryRepairsPartialPublicationOnAnotherReplica(t *testing.T, shared *seedFixture) {
+	f, p := capabilityInstallFixture(t, shared)
 	table, err := memql.EnsureEmbeddingVectorTable(f.ctx, f.db, f.provider, 1024)
 	require.NoError(t, err)
 	_, err = f.db.ExecContext(f.ctx, `ALTER TABLE `+table+` ADD CONSTRAINT fixture_refuse_vector CHECK (false)`)
@@ -185,8 +204,8 @@ func TestCapabilityInstallationRetryRepairsPartialPublicationOnAnotherReplica(t 
 	require.Equal(t, len(f.seeds)+1, p.calls)
 }
 
-func TestCapabilityInstallationUsesBoundWidthForUnknownProviderAcrossReplicas(t *testing.T) {
-	f, p := capabilityInstallFixture(t)
+func testCapabilityInstallationUsesBoundWidthForUnknownProviderAcrossReplicas(t *testing.T, shared *seedFixture) {
+	f, p := capabilityInstallFixture(t, shared)
 	p.declaredDimensions = 0 // Fleet models outside the catalogue report unknown.
 	_, err := f.ea.Execute(f.ctx, fmt.Sprintf(`builtin knowledgeInstallCapabilityCorpora(domainIds:[%s])`, quoteString(f.domain)))
 	require.NoError(t, err)
@@ -197,8 +216,8 @@ func TestCapabilityInstallationUsesBoundWidthForUnknownProviderAcrossReplicas(t 
 	require.Equal(t, len(f.seeds), p.calls, "peer retry reuses vectors in the bound model space")
 }
 
-func TestCapabilityInstallationRejectsInvalidVectorsBeforePublication(t *testing.T) {
-	f, p := capabilityInstallFixture(t)
+func testCapabilityInstallationRejectsInvalidVectorsBeforePublication(t *testing.T, shared *seedFixture) {
+	f, p := capabilityInstallFixture(t, shared)
 	valid := make([]float32, 1024)
 	valid[0] = 1
 	nan := append([]float32(nil), valid...)

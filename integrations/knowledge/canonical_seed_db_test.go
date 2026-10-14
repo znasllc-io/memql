@@ -50,6 +50,11 @@ type seedFixture struct {
 
 func newSeedFixture(t *testing.T) *seedFixture {
 	t.Helper()
+	return seedFixtureForCase(t, newSeedReplicas(t))
+}
+
+func newSeedReplicas(t *testing.T) *seedFixture {
+	t.Helper()
 	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN())))
 	t.Cleanup(func() { _ = db.Close() })
 	if err := db.PingContext(context.Background()); err != nil {
@@ -58,8 +63,7 @@ func newSeedFixture(t *testing.T) *seedFixture {
 	}
 	_, err := memql.LoadUnifiedConcepts(nil)
 	require.NoError(t, err)
-	prefix := fmt.Sprintf("seed-review-%d", time.Now().UnixNano())
-	f := &seedFixture{db: db, domain: prefix, provider: prefix, ctx: auth.ContextWithUserActor(context.Background(), prefix)}
+	f := &seedFixture{db: db}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	open := func() (*Integration, *memql.MemQLEngine) {
 		pool := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dbtest.DSN()))), pgdialect.New())
@@ -77,6 +81,29 @@ func newSeedFixture(t *testing.T) *seedFixture {
 	}
 	f.a, f.ea = open()
 	f.b, f.eb = open()
+	return f
+}
+
+func seedFixtureForCase(t *testing.T, shared *seedFixture) *seedFixture {
+	t.Helper()
+	// A parent owns only the fixed replicas and pools. Every sequential case
+	// registers a new corpus and uses new caller and vector/cache identities.
+	prefix := fmt.Sprintf("seed-review-%d", time.Now().UnixNano())
+	f := *shared
+	f.domain, f.provider = prefix, prefix
+	f.ctx = auth.ContextWithUserActor(context.Background(), prefix)
+	f.seeds = nil
+	for _, i := range []*Integration{f.a, f.b} {
+		engine, dbGetter, gateDB := i.engine, i.dbGetter, i.gateDB
+		embeddingProvider, stagedConcept := i.embeddingProvider, i.stagedConcept
+		t.Cleanup(func() {
+			i.SetEngine(engine)
+			i.SetDBGetter(dbGetter)
+			i.SetGateDB(gateDB)
+			i.SetEmbeddingProvider(embeddingProvider)
+			i.SetStagedConceptPredicate(stagedConcept)
+		})
+	}
 	entries := []SeedCorpusEntry{}
 	for n := 0; n < 10; n++ {
 		entries = append(entries, SeedCorpusEntry{SourceRef: fmt.Sprintf("manual-%d", n), Text: fmt.Sprintf("Registered general capability guidance %d.", n)})
@@ -92,10 +119,10 @@ func newSeedFixture(t *testing.T) *seedFixture {
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept='v1:knowledge:documentChunk' AND payload->>'domainId'=$1`, prefix)
-		_, _ = db.ExecContext(context.Background(), `DELETE FROM embedding_cache WHERE provider=$1`, prefix)
+		_, _ = f.db.ExecContext(context.Background(), `DELETE FROM "MemoryNodes" WHERE concept='v1:knowledge:documentChunk' AND payload->>'domainId'=$1`, prefix)
+		_, _ = f.db.ExecContext(context.Background(), `DELETE FROM embedding_cache WHERE provider=$1`, prefix)
 		table, _ := memql.EmbeddingVectorTable(prefix, 1024)
-		_, _ = db.ExecContext(context.Background(), `DROP TABLE IF EXISTS `+table)
+		_, _ = f.db.ExecContext(context.Background(), `DROP TABLE IF EXISTS `+table)
 		seedDomainMu.Lock()
 		defer seedDomainMu.Unlock()
 		delete(seedDomainIDs, prefix)
@@ -106,7 +133,7 @@ func newSeedFixture(t *testing.T) *seedFixture {
 			}
 		}
 	})
-	return f
+	return &f
 }
 func (f *seedFixture) write(t *testing.T, seed canonicalSeedChunk, source string) {
 	t.Helper()
@@ -127,8 +154,16 @@ func (f *seedFixture) decide(t *testing.T, seed canonicalSeedChunk, status strin
 	require.NoError(t, err)
 }
 
-func TestCanonicalSeedRepairPreservesReviewAndOnlyPublishesExactRegisteredContent(t *testing.T) {
-	f := newSeedFixture(t)
+func TestCanonicalKnowledgeDB(t *testing.T) {
+	f := newSeedReplicas(t)
+	t.Run("CanonicalSeedRepairPreservesReviewAndOnlyPublishesExactRegisteredContent", func(t *testing.T) { testCanonicalSeedRepairPreservesReviewAndOnlyPublishesExactRegisteredContent(t, f) })
+	t.Run("CanonicalSeedRepairCannotOverwriteAnotherReplicasDecision", func(t *testing.T) { testCanonicalSeedRepairCannotOverwriteAnotherReplicasDecision(t, f) })
+	t.Run("CanonicalIngestPublishesOnlyServerSelectedCorpusAndPreservesRejection", func(t *testing.T) { testCanonicalIngestPublishesOnlyServerSelectedCorpusAndPreservesRejection(t, f) })
+	t.Run("TrainerRefreshUsesOnlyFreshPublishedKnowledge", func(t *testing.T) { testTrainerRefreshUsesOnlyFreshPublishedKnowledge(t, f) })
+}
+
+func testCanonicalSeedRepairPreservesReviewAndOnlyPublishesExactRegisteredContent(t *testing.T, shared *seedFixture) {
+	f := seedFixtureForCase(t, shared)
 	for _, seed := range f.seeds[:8] {
 		f.write(t, seed, "appStructure")
 	}
@@ -199,8 +234,8 @@ func (e beforeSeedWrite) Execute(ctx context.Context, q string) (*memql.ExecuteR
 	}
 	return e.IntegrationEngineAccess.Execute(ctx, q)
 }
-func TestCanonicalSeedRepairCannotOverwriteAnotherReplicasDecision(t *testing.T) {
-	f := newSeedFixture(t)
+func testCanonicalSeedRepairCannotOverwriteAnotherReplicasDecision(t *testing.T, shared *seedFixture) {
+	f := seedFixtureForCase(t, shared)
 	seed := f.seeds[0]
 	f.write(t, seed, "appStructure")
 	// Deterministically put rejection after the repair read but before commit.
@@ -231,8 +266,8 @@ func TestCanonicalSeedRepairCannotOverwriteAnotherReplicasDecision(t *testing.T)
 	require.Equal(t, "validated", f.status(t, seed))
 }
 
-func TestCanonicalIngestPublishesOnlyServerSelectedCorpusAndPreservesRejection(t *testing.T) {
-	f := newSeedFixture(t)
+func testCanonicalIngestPublishesOnlyServerSelectedCorpusAndPreservesRejection(t *testing.T, shared *seedFixture) {
+	f := seedFixtureForCase(t, shared)
 	seed := f.seeds[0]
 	args := map[string]any{"domainId": seed.Domain, "text": seed.Text, "sourceRef": seed.SourceRef, "source": "appStructure", "provider": f.provider}
 	newSeed := f.seeds[1]
@@ -254,8 +289,8 @@ func TestCanonicalIngestPublishesOnlyServerSelectedCorpusAndPreservesRejection(t
 	require.True(t, has, "ingestion must index the same canonical ID retrieval joins")
 }
 
-func TestTrainerRefreshUsesOnlyFreshPublishedKnowledge(t *testing.T) {
-	f := newSeedFixture(t)
+func testTrainerRefreshUsesOnlyFreshPublishedKnowledge(t *testing.T, shared *seedFixture) {
+	f := seedFixtureForCase(t, shared)
 	for _, seed := range f.seeds[:4] {
 		f.write(t, seed, "fileUpload")
 	}
