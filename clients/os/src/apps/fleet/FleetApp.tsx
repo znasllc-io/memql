@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Concepts } from "@znasllc-io/memql-sdk-core/client";
 
 import { AppLogsSection } from "../../logs/AppLogsSection";
+import { PageContent } from "../../kit/PageContent";
 import type { OsAppProps } from "../../system/registry";
 import { accessAdmits } from "../../system/registry";
 import { AppsSection } from "./apps/AppsSection";
@@ -118,7 +119,7 @@ export function FleetApp({
       const section = FLEET_SECTIONS.find(s => s.id === id);
       if (!section || !accessAdmits(section.requires)) return null;
       const active = id === sectionId;
-      return <div className="fleet-page" data-fleet-section={id} key={id} hidden={!active}>
+      return <PageContent className="fleet-page" data-fleet-section={id} key={id} hidden={!active}>
         {id === "overview" ? <FleetOverview onOpenMachine={machineId => { select({ machineId, view: "equipment" }); navigate("machines", { fromContent: true }); }} />
           : id === "settings" ? <FleetSettingsSection settings={settings} update={update} />
           : id === "logs" ? <AppLogsSection app="fleet" subjectConcepts={FLEET_LOG_CONCEPTS} intent={active ? intent : undefined} consumeIntent={consumeIntent} />
@@ -130,7 +131,7 @@ export function FleetApp({
           : <FleetWorkspace onOpenSession={id => { setSessionTarget(held => ({ id, revision: (held?.revision ?? 0) + 1 })); navigate("apps", { fromContent: true }); }} selection={selection} select={select} navigate={navigate}
               showRevoked={settings.showRevoked} flow={addMachine}
               intent={active ? intent : undefined} consumeIntent={consumeIntent} />}
-      </div>;
+      </PageContent>;
     })}
   </div>;
 }

@@ -14,7 +14,7 @@
 .fleet-routing-tab { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .fleet-routing-tab[hidden] { display: none; }
 .fleet-routing-tab > .os-deploy-scroll,
-.fleet-routing-tab > .os-deploy-pane > .os-deploy-scroll { padding: 0 20px 28px; gap: 14px; }
+.fleet-routing-tab > .os-deploy-pane > .os-deploy-scroll { padding: 0 var(--os-page-gutter, 20px) 28px; gap: 14px; }
 .fleet-routing-tab > .os-deploy-pane { height: 100%; }
 .fleet-routing-tab .os-wizard { height: 100%; }
 

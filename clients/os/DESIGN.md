@@ -113,6 +113,11 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    maximised one. The measure belongs to the THING (a sentence at ~80ch, a
    field at ~34rem), never to the page: capping the page to keep a text box
    from stretching is how the margins got painted empty.
+   `kit/PageContent` owns the full-width page bounds and responsive horizontal
+   gutter for window contents and retained pages. Use it once around the app
+   or each retained page, rather than adding width fixes to each section.
+   Page roots must not add centered maximum widths; constrain individual prose,
+   fields or diagrams inside them when their content needs a readable measure.
 
 10. **In-surface state is never a checkbox.** "Show archived" as a standing
     checkbox is the legacy tell this language exists to remove: archived

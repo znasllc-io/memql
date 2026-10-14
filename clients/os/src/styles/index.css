@@ -506,7 +506,7 @@ button:not(:disabled):active {
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  padding: 18px 20px;
+  padding: 18px var(--os-page-gutter, 20px);
   font-size: var(--os-text-md);
 }
 
@@ -8104,7 +8104,8 @@ a.os-button {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 18px 20px;
+  padding: 18px var(--os-page-gutter, 20px);
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -11317,7 +11318,8 @@ a.os-button {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 18px 20px;
+  padding: 18px var(--os-page-gutter, 20px);
+  scrollbar-gutter: stable;
 }
 
 /* A dead letter's confirm, in its row (Origins): the sentence and its two
@@ -14209,7 +14211,7 @@ button.os-cluster-mesh-peer:focus-visible {
 
 /* Fleet: a machine workbench. Inventory occupies equipment bays; controls
    open a scoped inspector. All colors follow the user's active OS theme. */
-.fleet-workspace { container-type: inline-size; width: 100%; max-width: 1280px; margin-inline: auto; padding: 22px 26px; }
+.fleet-workspace { container-type: inline-size; width: 100%; padding: 22px 26px; }
 .fleet-feed-label, .fleet-machine-presence, .fleet-slot-empty, .fleet-selection-hint, .fleet-empty-footnote { color: var(--os-muted); font-size: var(--os-text-sm); }
 .fleet-workspace-body { display: grid; grid-template-columns: minmax(0, 1fr); margin-top: 20px; min-height: 370px; }
 .fleet-workspace-body[data-has-machines] { grid-template-columns: 158px minmax(0,1fr); gap: 26px; }
@@ -14455,7 +14457,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-window-nav-item[aria-current="page"] { background: transparent; border-bottom-color: var(--os-accent); }
 .os-window-more-nav { display: none; min-width: 0; margin: 4px 0 4px auto; max-width: 180px; color: var(--os-ink); background: var(--os-glass-solid); border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); padding: 4px 8px; font: inherit; }
 .os-window[data-maximized], .os-window[data-fullscreen] { border-radius: 0; }
-.os-window[data-os-window="fleet"] .os-window-content { padding: 0; overflow: hidden; }
+.os-window[data-os-window="fleet"] .os-window-content { padding: 0; overflow: hidden; scrollbar-gutter: auto; }
 .fleet-app { height: 100%; min-height: 0; }
 /* ONE WINDOW RHYTHM. Fleet zeroes `.os-window-content`'s padding so its pages
  * can own their scrolling, and then set its own: 24px at the sides and 12px
@@ -14464,7 +14466,7 @@ button.os-cluster-mesh-peer:focus-visible {
  * side with Deployables, Fleet's title sat 6px high and 4px to the right, and
  * nothing lined up. These are the standard values now, in all four places a
  * Fleet page sets a heading, so a list starts at the same x and y everywhere. */
-.fleet-page { height: 100%; overflow: auto; scrollbar-gutter: stable; padding: 0 20px 28px; container: fleet-page / inline-size; }
+.fleet-page { height: 100%; overflow: auto; padding: 0 var(--os-page-gutter, 20px) 28px; container: fleet-page / inline-size; }
 .fleet-page .os-head { flex-wrap: wrap; gap: 10px; }
 .fleet-page > .os-fleet > .os-head,
 .fleet-page > .os-settings > .os-head,
@@ -14489,7 +14491,6 @@ button.os-cluster-mesh-peer:focus-visible {
   .os-window-secondary-control { display: none; }
   .os-window-nav { padding-inline: 8px; }
   .os-window-nav-item { padding-inline: 8px; }
-  .fleet-page { padding-inline: 14px; }
 }
 @container fleet-page (max-width: 620px) {
   .fleet-home .fleet-equipment-rig { display: flex; flex-direction: column; gap: 20px; }
@@ -14628,7 +14629,6 @@ button.os-cluster-mesh-peer:focus-visible {
 .fleet-pane-overview .os-fleet-sessions { margin:0; }
 @container fleet-page (max-width:500px) { .fleet-activity-record { flex-wrap:wrap; gap:8px 12px; } }
 
-.fleet-page .os-panel:has(> .os-field-group) { max-width:780px; }
 
 /* Equipment navigation belongs to its heading or reading, not an action bar. */
 .fleet-heading-actions { display: inline-flex; align-items: center; gap: 2px; }
@@ -14701,9 +14701,10 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-window-content:has(:is(.os-deploy-pane, .os-cluster-pane, .os-action-pane, .os-nexus-goals, .os-nexus-list, .os-nexus-approvals, .os-nexus-run, .os-nexus-goalview, .os-nexus-automations):not([hidden] *)) {
   padding: 0;
   overflow: hidden;
+  scrollbar-gutter: auto;
 }
 .os-action-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0; }
-.os-action-body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; padding: 18px 20px; }
+.os-action-body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; padding: 18px var(--os-page-gutter, 20px); scrollbar-gutter: stable; }
 .os-action-body > * { flex-shrink: 0; }
 .os-actbar-acts:empty { display: none; }
 .os-actbar-acts .os-button { max-width: 100%; height: auto; min-height: var(--os-control-h); white-space: normal; overflow-wrap: anywhere; }
@@ -14715,7 +14716,7 @@ button.os-cluster-mesh-peer:focus-visible {
 /* App overviews: one unboxed summary strip, a subject-specific picture,
  * and measured distributions. Details stay in their dedicated sections. */
 .os-overview { container: overview / inline-size; padding-bottom: 20px; }
-.fleet-page:has(> .os-overview) { padding: 18px 20px; }
+.fleet-page:has(> .os-overview) { padding-block: 18px; }
 .os-overview > .os-head .os-head-actions { width: auto; margin-left: auto; }
 .os-overview > .os-head { margin-bottom: 4px; }
 .os-overview-metrics { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 20px; margin: 0 0 10px; padding: 12px 0 22px; border-bottom: 1px solid var(--os-line); }

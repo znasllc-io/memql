@@ -1,6 +1,7 @@
 import { visiblePageContext, visiblePageLabel } from "../kit/pageContext";
 import { PageNavigationProvider } from "../kit/pageNavigation";
 import { TrailRow } from "../kit/TrailRow";
+import { PageContent } from "../kit/PageContent";
 import { WindowSearchContext, useWindowSearchHost } from "../kit/windowSearch";
 import { useDraggable } from "@dnd-kit/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -300,7 +301,7 @@ export function WindowFrame({
           </nav>
         ) : null}
         <TrailRow fallback={current?.name ?? manifest.name} />
-        <div ref={content} className="os-window-content" data-os-window-content>
+        <PageContent ref={content} className="os-window-content" data-os-window-content>
           {/* THE REFUSED SURFACE (epic memql#4832, D6).
               A window can be open on an app this actor's rank does not clear,
               two ways that both happen: a desk restored from storage naming an
@@ -354,7 +355,7 @@ export function WindowFrame({
               /></WindowSearchContext.Provider>
             </WindowErrorBoundary>
           )}
-        </div>
+        </PageContent>
         </PageNavigationProvider>
       </div>
       {menu ? <ContextMenu x={menu.x} y={menu.y} label={`${manifest.name} window actions`} onClose={() => setMenu(null)} entries={[
