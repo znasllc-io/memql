@@ -654,7 +654,7 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 	if raw, supplied := args["operation"]; supplied {
 		operation, typed := raw.(map[string]any)
 		if !typed {
-			return nil, fmt.Errorf("computer permission operation must be an object")
+			return nil, computerPermissionInputError("operation", "computer permission operation must be an object")
 		}
 		if i.dispatcher == nil {
 			return nil, fmt.Errorf("computer routing is unavailable")

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	permission "github.com/znasllc-io/memql/core/computerpermission"
 )
@@ -70,16 +71,16 @@ func (d *Dispatcher) prepareComputerPermission(ctx context.Context, owner, agent
 		scope.Directory, _ = operation["directory"].(string)
 		p, _ := args["path"].(string)
 		if !permission.Within(scope.Directory, p) {
-			return scope, nil, fmt.Errorf("request an explicit absolute directory containing this read path")
+			return scope, nil, computerPermissionInputError("operation", "request an explicit absolute directory containing this read path")
 		}
 	case tool == "workerHost" && action == "exec":
 		scope.Kind = "exact_command"
 		scope.Command, scope.CWD, scope.TimeoutSeconds, err = permission.CommandInput(args)
 		if err != nil {
-			return scope, nil, err
+			return scope, nil, computerPermissionInputError("operation.args", err.Error())
 		}
 	default:
-		return scope, nil, fmt.Errorf("saved computer permissions support directory reads or an exact command")
+		return scope, nil, computerPermissionInputError("operation", "saved computer permissions support directory reads or an exact command")
 	}
 	if d.permissions == nil {
 		return scope, nil, fmt.Errorf("computer permission verification is unavailable")
@@ -114,4 +115,11 @@ func (d *Dispatcher) prepareComputerPermission(ctx context.Context, owner, agent
 		return scope, nil, err
 	}
 	return scope, nil, nil
+}
+
+// Only caller-controlled operation validation belongs here. Receipt, routing
+// and approval failures retain their original error and recovery semantics.
+func computerPermissionInputError(field, message string) error {
+	return memql.NewStructuredError(memql.ErrorCodeInvalidArgument, message).
+		WithDetails(map[string]any{"field": field})
 }
