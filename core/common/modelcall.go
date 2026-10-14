@@ -114,6 +114,7 @@ type RunContext struct {
 }
 
 type StepContinuation struct {
+	OverrideKey   string // Effective inputs/guidance bound by the admitted receipt.
 	StepKey       string
 	ObservationID string
 	ApprovalID    string
@@ -332,3 +333,65 @@ func (r ModelRequest) Hash() string {
 
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// StepOverrideFingerprint binds a checkpoint to the effective execution inputs,
+// including repair guidance. Nil and an empty override describe the same work.
+func StepOverrideFingerprint(o *StepOverride) (string, error) {
+	if o.Empty() {
+		return "", nil
+	}
+	normalized := *o
+	if len(normalized.Inputs) == 0 {
+		normalized.Inputs = nil
+	}
+	normalized.GuidanceAxes = append([]string(nil), o.GuidanceAxes...)
+	sort.Strings(normalized.GuidanceAxes)
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func SameStepOverride(a, b *StepOverride) bool {
+	x, xe := StepOverrideFingerprint(a)
+	y, ye := StepOverrideFingerprint(b)
+	return xe == nil && ye == nil && x == y
+}
+
+// StepOverrideFromRecord decodes the recorded execution override without granting authority.
+func StepOverrideFromRecord(m map[string]any) *StepOverride {
+	if len(m) == 0 {
+		return nil
+	}
+	whole, _ := m["wholePrompt"].(bool)
+	o := &StepOverride{
+		Level:       strings.TrimSpace(overrideString(m, "level")),
+		Model:       strings.TrimSpace(overrideString(m, "model")),
+		Effort:      strings.TrimSpace(overrideString(m, "effort")),
+		Prompt:      overrideString(m, "prompt"),
+		RequestedBy: strings.TrimSpace(overrideString(m, "requestedBy")),
+	}
+	o.WholePrompt = whole && strings.TrimSpace(o.Prompt) != ""
+	if inputs, ok := m["inputs"].(map[string]any); ok && len(inputs) > 0 {
+		o.Inputs = inputs
+	}
+	if g, ok := m["guidance"].(map[string]any); ok {
+		if axes, ok := g["axes"].(map[string]any); ok {
+			for _, name := range []string{"product", "process", "performance"} {
+				if on, _ := axes[name].(bool); on {
+					o.GuidanceAxes = append(o.GuidanceAxes, name)
+				}
+			}
+		}
+		o.GuidanceReason = overrideString(g, "reason")
+		o.FeedbackId = strings.TrimSpace(overrideString(g, "feedbackId"))
+	}
+	if o.Empty() {
+		return nil
+	}
+	return o
+}
+
+func overrideString(m map[string]any, key string) string { s, _ := m[key].(string); return s }

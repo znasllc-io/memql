@@ -519,7 +519,7 @@ func (e *Executor) ResumeFrom(
 		}
 		request := memql.CheckpointResumeRequest{RunID: journal.RunId, StepKey: resumeStepId, ApprovalID: journal.HumanResumeId}
 		if rerunWait {
-			if journal.HumanResumeId == "" || !rerun.Override.Empty() || rerun.Snapshot != nil {
+			if journal.HumanResumeId == "" || rerun.Snapshot != nil {
 				return nil, fmt.Errorf("%w: checkpoint override changed", ErrNonRetryableStep)
 			}
 			request.RerunRequestID = rerun.RequestId

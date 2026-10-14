@@ -197,7 +197,7 @@ func TestRepositoryScopeSurvivesThePersistedCatalogRead(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = db.NewDelete().Model((*memorynodes.MemoryNode)(nil)).Where("concept = ?", "v1:worker:registration").Where("id = ?", id).Exec(ctx)
 	})
-	descriptor := &worker.CapabilityDescriptor{Platform: "linux", Architecture: "arm64", ActionContracts: worker.ActionContracts{"workerHost.pipeline_step": 2}, DisplayServer: "none", SchemaVersion: 1, RepositoryScopes: worker.RepositoryScopes{"workerHost.pipeline_step": {"o/a"}}}
+	descriptor := &worker.CapabilityDescriptor{Platform: "linux", Architecture: "arm64", HomeDirectory: "/home/Actual Person", ActionContracts: worker.ActionContracts{"workerHost.pipeline_step": 2}, DisplayServer: "none", SchemaVersion: 1, RepositoryScopes: worker.RepositoryScopes{"workerHost.pipeline_step": {"o/a"}}}
 	payload, err := json.Marshal(map[string]any{"name": prefix, "ownerUserId": owner, "capabilities": []string{"HEADLESS"}, "labels": map[string]string{"pipelines": "allowed"}, "capabilityDescriptor": descriptor.AsMap(), "lastSeenAt": time.Now().UTC().Format(time.RFC3339Nano), "connectedNodeId": "other-agent"})
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +215,7 @@ func TestRepositoryScopeSurvivesThePersistedCatalogRead(t *testing.T) {
 	if len(candidates) != 1 {
 		t.Fatalf("got %d candidates", len(candidates))
 	}
-	if candidates[0].NativePlatform != "linux/arm64" || !candidates[0].ActionContracts.Supports("workerHost.pipeline_step", 2) {
+	if candidates[0].HomeDirectory != "/home/Actual Person" || candidates[0].NativePlatform != "linux/arm64" || !candidates[0].ActionContracts.Supports("workerHost.pipeline_step", 2) {
 		t.Fatalf("stored runtime metadata did not cross replicas: %+v", candidates[0])
 	}
 	scopes := candidates[0].RepositoryScopes

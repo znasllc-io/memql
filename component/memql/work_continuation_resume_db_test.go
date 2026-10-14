@@ -90,6 +90,12 @@ func TestWorkContinuationRequiresTheExactOwnedAnsweredCheckpoint(t *testing.T) {
 // even when the messages are identical to a prior attempt. Missing legacy proof
 // is a refusal, not permission to restart the effectful turn.
 func TestWorkContinuationBindsTheFreshRerunRequestAcrossReplicas(t *testing.T) {
+	for _, variant := range []string{"ordinary", "repair", "model", "inputs"} {
+		t.Run(variant, func(t *testing.T) { testWorkContinuationRerunAcrossReplicas(t, variant) })
+	}
+}
+
+func testWorkContinuationRerunAcrossReplicas(t *testing.T, variant string) {
 	a, _, _ := readMergeTestEngine(t)
 	b, _, _ := readMergeTestEngine(t)
 	previous := auth.InstalledCapabilityCatalog()
@@ -113,8 +119,18 @@ func TestWorkContinuationBindsTheFreshRerunRequestAcrossReplicas(t *testing.T) {
 	setRerun := func(value map[string]any) {
 		write("updateWorkRun", map[string]any{"runId": runID, "status": "running", "humanResumeId": approvalID, "rerun": value})
 	}
+	override := map[string]any{}
+	switch variant {
+	case "repair":
+		override["guidance"] = map[string]any{"reason": "The prior turn did not produce a valid completion or durable question."}
+	case "model":
+		override["level"] = "strong"
+	case "inputs":
+		override["inputs"] = map[string]any{"path": "/home/person"}
+	}
+	rerun["override"] = override
 	setRerun(rerun)
-	run := common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: ac.UserId, StepKey: "reason", Mode: common.RunModeLive, RerunRequestId: rerun["requestId"].(string)}
+	run := common.RunContext{RunId: runID, GoalId: goalID, OwnerUserId: ac.UserId, StepKey: "reason", Mode: common.RunModeLive, RerunRequestId: rerun["requestId"].(string), Override: common.StepOverrideFromRecord(override)}
 	request := CheckpointResumeRequest{RunID: runID, StepKey: run.StepKey, ApprovalID: approvalID, RerunRequestID: run.RerunRequestId}
 	messages := []common.ChatMessage{{Role: "assistant", ToolCalls: []common.ToolCall{{ID: "effect", Name: "writeFile", Arguments: "{}"}}}, {Role: "tool", ToolCallId: "effect", Name: "writeFile", Content: "Committed once"}}
 	prepare := func() (context.Context, error) {
@@ -138,6 +154,19 @@ func TestWorkContinuationBindsTheFreshRerunRequestAcrossReplicas(t *testing.T) {
 	restored, err = b.RestoreWorkContinuation(prepared, nil)
 	require.NoError(t, err)
 	require.Equal(t, messages, restored)
+	changedExecution := run
+	changedExecution.Override = &common.StepOverride{Prompt: "Different execution"}
+	_, err = b.PrepareWorkContinuation(common.ContextWithRun(ctx, changedExecution), request)
+	require.Error(t, err, "an override must not borrow the prior execution's answer")
+	changedRecord := map[string]any{}
+	for k, v := range rerun {
+		changedRecord[k] = v
+	}
+	changedRecord["override"] = map[string]any{"prompt": "Changed after admission"}
+	setRerun(changedRecord)
+	_, err = b.RestoreWorkContinuation(prepared, nil)
+	require.Error(t, err, "a fresh peer change invalidates prepared proof")
+	setRerun(rerun)
 	for _, next := range []map[string]any{{}, {"requestId": "another", "stepKey": "reason", "reason": "rerun"}} {
 		setRerun(next)
 		_, err = prepare()

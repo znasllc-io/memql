@@ -127,13 +127,39 @@ mutation skill createSkill {
   }
 }
 
+/// Materialize a reviewed global skill edge from the installed seed catalog.
+/// The seed convention supplies skillEdgeId. Shared catalog edges are committed
+/// and unowned; runtime proposals use proposeSkillEdge and retain their actor.
+/// @serverOnly keeps release-provided relationships outside client authority.
+/// actor.userId scoping cannot establish release provenance for a shared public
+/// catalog; it would hide the relationships from every other signed-in user.
+@serverOnly
+mutation skillEdge createSkillEdge {
+  args {
+    skillEdgeId  string!
+    fromSkillId  string!
+    toSkillId    string!
+    edgeType     string!
+    evidence     []object
+  }
+  insert {
+    accept { fromSkillId, toSkillId, edgeType, evidence }
+    stamp {
+      id: args.skillEdgeId
+      ownerUserId: ""
+      proposedBy: "system"
+      status: "committed"
+    }
+  }
+}
+
 /// Propose an edge. @serverOnly: an edge is EVIDENCE that two skills relate, gathered from runs the
 /// engine executed, so a caller-written one is a claim about executions the caller did not observe.
 /// actor.userId scoping does not help -- the concept is public-tier by design, so there is no owner
 /// conjunct to narrow by, and narrowing it would hide the catalog it exists to describe.
 @serverOnly
 @actor
-mutation skillEdge createSkillEdge {
+mutation skillEdge proposeSkillEdge {
   args {
     edgeId       string!
     fromSkillId  string!
@@ -152,7 +178,7 @@ mutation skillEdge createSkillEdge {
   }
 }
 
-/// Commit a proposed edge after a successful run. @serverOnly for createSkillEdge's reason: only the
+/// Commit a proposed edge after a successful run. @serverOnly for proposeSkillEdge's reason: only the
 /// run knows it succeeded, and a public-tier concept has no actor.userId conjunct to scope by.
 @serverOnly
 mutation skillEdge commitSkillEdge {
@@ -195,7 +221,7 @@ mutation skill setSkillScripts {
 
 /// Move a skill along the trust ladder. @serverOnly: reliability is EVIDENCE gathered from runs the
 /// engine executed, so a caller-written value is a claim about executions the caller did not
-/// observe -- the same reasoning createSkillEdge carries, and the same non-answer applies, because
+/// observe -- the same reasoning proposeSkillEdge carries, and the same non-answer applies, because
 /// scoping by actor.userId cannot narrow a public-tier catalog whose rows are the deployment's.
 ///
 /// The caller computes the new value rather than sending a delta. Reliability decays on disuse as

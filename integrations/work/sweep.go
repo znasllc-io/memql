@@ -479,7 +479,7 @@ func lastHeartbeat(run map[string]any) (time.Time, bool) {
 //
 // Two shapes share the abandoned status and must NOT share a sentence:
 //
-//   - A run that was executing and whose node went silent -- "lost the node".
+//   - A run whose execution heartbeat stopped; node liveness is unknown.
 //   - A run that never left `compiling` / still carries the work.compile
 //     sentinel -- compile never ran. Saying the node was lost sends the reader
 //     at infrastructure for a goal the bff accepted with no compile surface.
@@ -494,7 +494,7 @@ func abandonedMessage(run map[string]any, last time.Time) string {
 		where = fmt.Sprintf(" (%s)", node)
 	}
 	return fmt.Sprintf(
-		"this cluster lost the node that was running this%s; it was last heard from at %s. Completed steps are in the journal, so a resume serves them rather than running them again.",
+		"This run stopped reporting progress%s. Its last update was at %s. Completed steps are saved; resume will check them before continuing.",
 		where, last.UTC().Format(time.RFC3339))
 }
 

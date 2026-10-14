@@ -60,6 +60,12 @@ func (d *Dispatcher) prepareComputerPermission(ctx context.Context, owner, agent
 	action, _ := operation["action"].(string)
 	args, _ := operation["args"].(map[string]any)
 	scope := permission.Scope{Version: permission.Version, Tool: tool, Action: action, AllowedModes: []string{"once", "always"}}
+	if tool != "workerHost" {
+		return scope, nil, computerPermissionInputError("operation.tool", "operation.tool must be workerHost; supply operation={tool: workerHost, action: fs_list, args: {path: <absolute directory>}, directory: <same absolute directory>}")
+	}
+	if args == nil {
+		return scope, nil, computerPermissionInputError("operation.args", "operation.args must be an object containing path for a read, or cmd and cwd for exec")
+	}
 	var err error
 	scope.ArgsHash, err = permission.Hash(tool, action, args)
 	if err != nil {
@@ -70,8 +76,14 @@ func (d *Dispatcher) prepareComputerPermission(ctx context.Context, owner, agent
 		scope.Kind = "directory_read"
 		scope.Directory, _ = operation["directory"].(string)
 		p, _ := args["path"].(string)
+		if !permission.CleanAbsolute(scope.Directory) {
+			return scope, nil, computerPermissionInputError("operation.directory", "operation.directory is required for this read: copy the absolute directory from the selected machine's homeDirectory or a path supplied by the person; do not guess a username or use /, ~ or $HOME")
+		}
+		if !permission.CleanAbsolute(p) {
+			return scope, nil, computerPermissionInputError("operation.args.path", "operation.args.path must be an explicit absolute path; for a home listing, copy the selected machine's homeDirectory")
+		}
 		if !permission.Within(scope.Directory, p) {
-			return scope, nil, computerPermissionInputError("operation", "request an explicit absolute directory containing this read path")
+			return scope, nil, computerPermissionInputError("operation.args.path", "operation.args.path is outside operation.directory; request only the directory needed for this read")
 		}
 	case tool == "workerHost" && action == "exec":
 		scope.Kind = "exact_command"
@@ -80,7 +92,7 @@ func (d *Dispatcher) prepareComputerPermission(ctx context.Context, owner, agent
 			return scope, nil, computerPermissionInputError("operation.args", err.Error())
 		}
 	default:
-		return scope, nil, computerPermissionInputError("operation", "saved computer permissions support directory reads or an exact command")
+		return scope, nil, computerPermissionInputError("operation.action", "operation.action must be fs_read, fs_list, fs_stat or exec")
 	}
 	if d.permissions == nil {
 		return scope, nil, fmt.Errorf("computer permission verification is unavailable")

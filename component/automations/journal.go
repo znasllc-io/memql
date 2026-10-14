@@ -816,6 +816,7 @@ func (j *workJournal) reopenRun(ctx context.Context, exec *AutomationExecution) 
 	j.call(ctx, "updateWorkRun", map[string]any{
 		"runId":       exec.ID,
 		"status":      "running",
+		"nodeId":      j.nodeId,
 		"heartbeatAt": rfc3339(time.Now()),
 	})
 }

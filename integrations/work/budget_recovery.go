@@ -63,9 +63,15 @@ func (i *Integration) recoverBudgetDecision(ctx context.Context, approvalID, dec
 		err = fmt.Errorf("the saved work checkpoint is unavailable")
 	}
 	if err == nil {
+		rerun := rowMap(run.row, "rerun")
+		var override *common.StepOverride
+		if rowString(rerun, "stepKey") == rowString(approval, "stepKey") {
+			override = common.StepOverrideFromRecord(rowMap(rerun, "override"))
+		}
 		err = memql.ValidateWorkContinuationReceipt(common.RunContext{
 			RunId: run.id, GoalId: rowString(run.row, "goalId"), OwnerUserId: run.owner, StepKey: rowString(approval, "stepKey"),
-			Mode: rowString(run.row, "mode"), RerunRequestId: rowString(rowMap(run.row, "rerun"), "requestId"),
+			Override: override,
+			Mode:     rowString(run.row, "mode"), RerunRequestId: rowString(rowMap(run.row, "rerun"), "requestId"),
 		}, checkpoints[0], rowString(subject, "continuationId"))
 	}
 	if err != nil {
