@@ -38,6 +38,7 @@ import { useResolvedAccess } from "../modules/profile/useResolvedAccess";
 import { useRoleLadder } from "../modules/profile/useRoleLadder";
 import { useEffectiveAccess } from "../modules/profile/useEffectiveAccess";
 import type { PlacementTokens } from "../system/placement";
+import { activeDesk } from "../system/desks";
 import { GraphDesktopStore } from "../system/graphStore";
 import { LocalDesktopStore, type DesktopStore } from "../system/store";
 import { SessionProvider, useSession } from "./access";
@@ -377,6 +378,7 @@ function DesktopChrome({
   onSignOut: () => void;
 }) {
   const { actions, state } = useOs();
+  const fullscreen = activeDesk(state.shell).windows.some(id => state.shell.windows[id]?.mode === "fullscreen");
   const [launcherOpen, setLauncherOpen] = useState(false);
   // Themes is chrome, like Ask -- see themes/ThemeStore.tsx. Opening it
   // CLOSES the Launcher, because the Launcher is a full-screen glass overlay
@@ -432,8 +434,8 @@ function DesktopChrome({
           never resolve a drop in the dock at all. The Bin is the first target
           on the far side of that line. */}
       <ShellDragScope>
-        <Desktop viewport={viewport} placement={placement} uploads={uploads} />
-        <Dock onOpenLauncher={() => setLauncherOpen(true)} onSignOut={onSignOut} />
+        <Desktop viewport={viewport} placement={placement} uploads={uploads} hidePager={fullscreen} />
+        <Dock hidden={fullscreen} onOpenLauncher={() => setLauncherOpen(true)} onSignOut={onSignOut} />
       </ShellDragScope>
       <LauncherOverlay
         open={launcherOpen}

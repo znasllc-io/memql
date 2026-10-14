@@ -67,6 +67,7 @@ export function Button({
   ariaLabel,
   ariaExpanded,
   title,
+  className = "",
 }: {
   children: ReactNode;
   onClick?: () => void;
@@ -78,11 +79,12 @@ export function Button({
   ariaLabel?: string;
   ariaExpanded?: boolean;
   title?: string;
+  className?: string;
 }) {
   return (
     <button
       type={type}
-      className="os-button"
+      className={`os-button ${className}`.trim()}
       data-tone={tone}
       // A busy control is disabled for its duration. Writes in this shell are
       // non-idempotent from the person's side -- a second revoke is a second

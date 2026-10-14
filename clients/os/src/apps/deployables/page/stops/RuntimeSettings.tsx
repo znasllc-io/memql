@@ -197,7 +197,7 @@ export function RuntimeSettingsPanel({
       )}
 
       <div className="os-settings-actions">
-        <Button tone="quiet" onClick={() => setDraft((rows) => [...rows, newRow()])}>
+        <Button tone="quiet" className="os-add-button" onClick={() => setDraft((rows) => [...rows, newRow()])}>
           <Plus size={12} aria-hidden /> Add a setting
         </Button>
         <Button

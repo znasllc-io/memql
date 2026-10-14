@@ -334,7 +334,7 @@ function StoreGroup({
       )}
       {canEdit ? (
         <div>
-          <Button tone="quiet" onClick={() => onEdit((held) => [...held, newRow()])} ariaLabel={`Add a value for ${label}`}>
+          <Button tone="quiet" className="os-add-button" onClick={() => onEdit((held) => [...held, newRow()])} ariaLabel={`Add a value for ${label}`}>
             <Plus size={12} aria-hidden /> Add a value
           </Button>
         </div>

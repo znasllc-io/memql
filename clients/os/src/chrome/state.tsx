@@ -29,7 +29,7 @@ import {
   switchDesk as switchDeskFn,
   switchDeskBy as switchDeskByFn,
   throwToDesk as throwToDeskFn,
-  toggleFullscreen as toggleFullscreenFn,
+  cycleWindowMode as cycleWindowModeFn,
   type ShellEffect,
   type ShellState,
 } from "../system/desks";
@@ -112,7 +112,7 @@ export interface OsActions {
   consumeWindowIntent: (windowId: WindowId, intentId: string) => void;
   closeWindow: (id: WindowId) => void;
   minimizeWindow: (id: WindowId) => void;
-  toggleFullscreen: (id: WindowId) => void;
+  cycleWindowMode: (id: WindowId) => void;
   focusWindow: (id: WindowId) => void;
   navigateSection: (id: WindowId, sectionId: string, origin?: "peer" | "content" | "back") => void;
   swapSides: (deskId: DeskId) => void;
@@ -602,10 +602,10 @@ export function OsProvider({
         set((s) => ({ ...s, shell: consumeIntentFn(s.shell, windowId, intentId) })),
       closeWindow: (id) => set((s) => ({ ...s, shell: closeWindowFn(s.shell, id).state })),
       minimizeWindow: (id) => set((s) => ({ ...s, shell: setWindowMode(s.shell, id, "minimized") })),
-      toggleFullscreen: (id) =>
+      cycleWindowMode: (id) =>
         set((s) => ({
           ...s,
-          shell: toggleFullscreenFn(s.shell, id, hasContent(s)),
+          shell: cycleWindowModeFn(s.shell, id, hasContent(s)),
         })),
       focusWindow: (id) => set((s) => ({ ...s, shell: focusWindowFn(s.shell, id) })),
       navigateSection: (id, sectionId, origin) => set((s) => ({ ...s, shell: setWindowSection(s.shell, id, sectionId, origin) })),

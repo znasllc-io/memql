@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   activeDesk,
-  toggleFullscreen,
+  cycleWindowMode,
   focusWindow,
   addDesk,
   closeWindow,
@@ -228,34 +228,51 @@ describe("open intents (epic memql#4842, #4845)", () => {
 
 describe("dedicated desktop maximize and contextual navigation", () => {
   it("moves the same window to an exclusive desk and restores its original slot and intent", () => {
-    let state = openMany(initialShell(), "files", "fleet");
+    const intent = { id: "size-cycle", payload: { machineId: "m-1" } };
+    let state = openApp(openMany(initialShell(), "files"), "fleet", "overview", intent).state;
     const fleet = windowForApp(state, "fleet")!;
     const origin = state.activeDeskId;
     state = setWindowSection(state, fleet.id, "routing");
-    state = toggleFullscreen(state, fleet.id);
+    state = cycleWindowMode(state, fleet.id);
+    const dedicated = state.activeDeskId;
+    expect(state.windows[fleet.id]?.mode).toBe("maximized");
     expect(activeDesk(state).windows).toEqual([fleet.id]);
     expect(state.activeDeskId).not.toBe(origin);
     expect(state.windows[fleet.id]?.sectionId).toBe("routing");
     const opened = openApp(state, "logs").state;
     expect(opened.activeDeskId).not.toBe(state.activeDeskId);
-    state = toggleFullscreen(state, fleet.id);
+    state = cycleWindowMode(state, fleet.id);
+    expect(state.windows[fleet.id]?.mode).toBe("fullscreen");
+    expect(state.activeDeskId).toBe(dedicated);
+    expect(state.desks).toHaveLength(2);
+    expect(openApp(state, "logs").state.activeDeskId).not.toBe(dedicated);
+    state = cycleWindowMode(state, fleet.id);
     expect(state.activeDeskId).toBe(origin);
     expect(activeDesk(state).windows[1]).toBe(fleet.id);
     expect(state.windows[fleet.id]?.mode).toBe("normal");
+    expect(state.windows[fleet.id]?.expandedReturn).toBeUndefined();
+    expect(state.windows[fleet.id]?.intent).toEqual(intent);
+    expect(state.windows[fleet.id]?.sectionId).toBe("routing");
     expect(state.desks).toHaveLength(1);
   });
-  it("restores maximized mode from minimize and never displaces a filled origin", () => {
+  it.each(["maximized", "fullscreen"] as const)("restores %s from minimize and never displaces a filled origin", mode => {
     let state = openMany(initialShell(), "files", "fleet");
     const fleet = windowForApp(state, "fleet")!;
     const origin = state.activeDeskId;
-    state = toggleFullscreen(state, fleet.id);
+    state = cycleWindowMode(state, fleet.id);
+    if (mode === "fullscreen") state = cycleWindowMode(state, fleet.id);
     const dedicated = state.activeDeskId;
     state = setWindowMode(state, fleet.id, "minimized");
+    expect(openApp(state, "logs").state.activeDeskId).not.toBe(dedicated);
     state = focusWindow(state, fleet.id);
-    expect(state.windows[fleet.id]?.mode).toBe("fullscreen");
+    expect(state.windows[fleet.id]?.mode).toBe(mode);
+    state = setWindowMode(state, fleet.id, "minimized");
+    state = openApp(state, "fleet").state;
+    expect(state.windows[fleet.id]?.mode).toBe(mode);
     state = switchDesk(state, origin);
     state = openApp(state, "logs").state;
-    state = toggleFullscreen(state, fleet.id);
+    if (mode === "maximized") state = cycleWindowMode(state, fleet.id);
+    state = cycleWindowMode(state, fleet.id);
     expect(state.activeDeskId).toBe(dedicated);
     expect(state.windows[fleet.id]?.mode).toBe("normal");
     expect(deskById(state, origin)?.windows).toHaveLength(2);
@@ -263,10 +280,24 @@ describe("dedicated desktop maximize and contextual navigation", () => {
   it("preserves a dedicated desk with surface content when restoring", () => {
     let state = openMany(initialShell(), "fleet");
     const id = windowForApp(state, "fleet")!.id;
-    state = toggleFullscreen(state, id);
+    state = cycleWindowMode(state, id);
     const dedicated = state.activeDeskId;
-    state = toggleFullscreen(state, id, deskId => deskId === dedicated);
+    state = cycleWindowMode(state, id);
+    state = cycleWindowMode(state, id, deskId => deskId === dedicated);
+    expect(state.windows[id]?.mode).toBe("normal");
     expect(deskById(state, dedicated)).toBeTruthy();
+  });
+  it.each(["maximized", "fullscreen"] as const)("moving a %s window clears its old return slot", mode => {
+    let state = openMany(initialShell(), "files", "fleet");
+    const fleet = windowForApp(state, "fleet")!;
+    const origin = state.activeDeskId;
+    state = cycleWindowMode(state, fleet.id);
+    if (mode === "fullscreen") state = cycleWindowMode(state, fleet.id);
+    state = throwToDesk(state, fleet.id, origin).state;
+    expect(state.windows[fleet.id]?.mode).toBe("normal");
+    expect(state.windows[fleet.id]?.expandedReturn).toBeUndefined();
+    expect(activeDesk(state).windows[1]).toBe(fleet.id);
+    expect(state.desks).toHaveLength(1);
   });
   it("a breadcrumb can return across multiple sections without leaving a stale trail", () => {
     let state = openApp(initialShell(), "fleet", "overview").state;
