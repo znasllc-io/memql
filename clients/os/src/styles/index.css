@@ -15610,7 +15610,6 @@ button.os-cluster-mesh-peer:focus-visible {
 
 .os-map-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .os-map-heading h4 { margin: 0; font-size: var(--os-text-base); font-weight: 600; }
-.os-map-heading .os-info-detail { position: static; }
 
 /* Shared wizard trail: content determines step count; narrow windows scroll. */
 .os-journey-trail { list-style: none; padding: 0; margin: 24px 0 28px; display: flex; overflow-x: auto; gap: 12px; }
