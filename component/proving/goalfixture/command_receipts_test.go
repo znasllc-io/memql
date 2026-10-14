@@ -1,8 +1,10 @@
-package goaleval
+package goalfixture
 
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/work/goaleval"
 )
 
 func TestRecordedChecksRefuseEchoesErrorsAndForeignDirectories(t *testing.T) {
@@ -21,7 +23,7 @@ func TestRecordedChecksRefuseEchoesErrorsAndForeignDirectories(t *testing.T) {
 			if variant == "model-claim" {
 				row["kind"] = "note"
 			}
-			assertions := []Assertion{{CriterionID: "checks", Verdict: "pass"}}
+			assertions := []goaleval.Assertion{{CriterionID: "checks", Verdict: "pass"}}
 			if err := w.ConfirmRecordedChecks(assertions, []map[string]any{row}); err != nil {
 				t.Fatal(err)
 			}

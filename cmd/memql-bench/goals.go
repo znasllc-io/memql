@@ -14,7 +14,8 @@ import (
 
 	"github.com/znasllc-io/memql/component/proving"
 	"github.com/znasllc-io/memql/component/proving/capability"
-	"github.com/znasllc-io/memql/component/proving/goaleval"
+	"github.com/znasllc-io/memql/component/proving/goalfixture"
+	"github.com/znasllc-io/memql/component/work/goaleval"
 	"github.com/znasllc-io/memql/sdk/go/client"
 )
 
@@ -83,11 +84,11 @@ func doGoalEvaluation(c *capability.Capability) int {
 	if len(built) < 12 || strings.Contains(built, "dirty") || !strings.HasPrefix(engineCommit, built) {
 		return c.Fail(capability.ExitRefused, "server build %q does not match the exact engine commit", built)
 	}
-	harness, err := goaleval.Command(ctx, ".", "git", "rev-parse", "HEAD")
+	harness, err := goalfixture.Command(ctx, ".", "git", "rev-parse", "HEAD")
 	if err != nil {
 		return c.Fail(capability.ExitPrerequisite, "read harness provenance: %v", err)
 	}
-	dirty, err := goaleval.Command(ctx, ".", "git", "status", "--porcelain")
+	dirty, err := goalfixture.Command(ctx, ".", "git", "status", "--porcelain")
 	if err != nil || strings.TrimSpace(dirty) != "" {
 		return c.Fail(capability.ExitRefused, "commit the harness before measuring it")
 	}

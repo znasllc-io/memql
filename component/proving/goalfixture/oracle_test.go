@@ -1,4 +1,4 @@
-package goaleval
+package goalfixture
 
 import (
 	"context"
@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/work/goaleval"
 )
 
-func scenarioByID(t *testing.T, id string) Scenario {
+func scenarioByID(t *testing.T, id string) goaleval.Scenario {
 	t.Helper()
 	for _, s := range catalog(t).Scenarios {
 		if s.ID == id {
@@ -16,13 +18,13 @@ func scenarioByID(t *testing.T, id string) Scenario {
 		}
 	}
 	t.Fatal(id)
-	return Scenario{}
+	return goaleval.Scenario{}
 }
 
 func prepared(t *testing.T, id string) *Workspace {
 	t.Helper()
 	s := scenarioByID(t, id)
-	f, err := ReadFixture(os.DirFS("../../.."), "test/proving/goals", s.Fixture)
+	f, err := goaleval.ReadFixture(os.DirFS("../../.."), "test/proving/goals", s.Fixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,22 +139,22 @@ func TestMatrixRefusesSpendAndUndeclaredTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := Decode[Matrix](b)
+	m, err := goaleval.Decode[goaleval.Matrix](b)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Validate(catalog(t)); err != nil {
 		t.Fatal(err)
 	}
-	for name, change := range map[string]func(*Matrix){
-		"paid budget": func(m *Matrix) { m.PaidProviderBudgetUSD = 1 },
-		"paid route": func(m *Matrix) {
+	for name, change := range map[string]func(*goaleval.Matrix){
+		"paid budget": func(m *goaleval.Matrix) { m.PaidProviderBudgetUSD = 1 },
+		"paid route": func(m *goaleval.Matrix) {
 			m.Setups = append([]SetupRequest{}, m.Setups...)
 			m.Setups[0].ReasoningModel = "policy:localFirst"
 		},
-		"unbounded calls":       func(m *Matrix) { m.MaxModelCalls = 0 },
-		"production repository": func(m *Matrix) { m.GitHubRepositories = []string{"znasllc-io/memql"} },
-		"schedule enabled":      func(m *Matrix) { m.Schedule.Enabled = true },
+		"unbounded calls":       func(m *goaleval.Matrix) { m.MaxModelCalls = 0 },
+		"production repository": func(m *goaleval.Matrix) { m.GitHubRepositories = []string{"znasllc-io/memql"} },
+		"schedule enabled":      func(m *goaleval.Matrix) { m.Schedule.Enabled = true },
 	} {
 		t.Run(name, func(t *testing.T) {
 			v := m
@@ -162,7 +164,16 @@ func TestMatrixRefusesSpendAndUndeclaredTargets(t *testing.T) {
 			}
 		})
 	}
-	if Availability(scenarioByID(t, "checkpoint-restoration")) == "" {
+	if goaleval.Availability(scenarioByID(t, "checkpoint-restoration")) == "" {
 		t.Fatal("missing checkpoint adapter silently skipped injection")
 	}
+}
+
+func catalog(t *testing.T) goaleval.Catalog {
+	t.Helper()
+	c, err := goaleval.Load(os.DirFS("../../.."), "test/proving/goals/catalog.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }

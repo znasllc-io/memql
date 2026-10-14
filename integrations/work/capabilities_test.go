@@ -12,8 +12,8 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 )
 
-// TestCapabilityNamesMatchTheDSL is the gate that makes the seven builtins in
-// dsl/work/builtins.memql actually reachable.
+// TestCapabilityNamesMatchTheDSL is the gate that makes the work capabilities in
+// dsl/work and the scoped dsl/bench workflow actually reachable.
 //
 // A capability the DSL names and the registry LACKS is not a quiet no-op: it
 // is a boot-time resolution failure on every node type, because
@@ -27,7 +27,7 @@ import (
 func TestCapabilityNamesMatchTheDSL(t *testing.T) {
 	declared := executorsDeclaredInDSL(t)
 	if len(declared) == 0 {
-		t.Fatal("found no integration.work.* executors in dsl/work/builtins.memql, so this test asserts nothing")
+		t.Fatal("found no integration.work.* executors in the work and bench builtin declarations, so this test asserts nothing")
 	}
 
 	registered := map[string]bool{}
@@ -46,7 +46,7 @@ func TestCapabilityNamesMatchTheDSL(t *testing.T) {
 
 	for name := range declared {
 		if !registered[name] {
-			t.Errorf("dsl/work/builtins.memql declares @executor(\"integration.work.%s\") and nothing registers it -- strict boot refuses a builtin whose executor does not resolve, on EVERY node type", name)
+			t.Errorf("the DSL declares @executor(\"integration.work.%s\") and nothing registers it -- strict boot refuses a builtin whose executor does not resolve, on EVERY node type", name)
 		}
 	}
 	for name := range registered {
@@ -127,7 +127,8 @@ var executorPattern = regexp.MustCompile(`@executor\("integration\.work\.([A-Za-
 
 func executorsDeclaredInDSL(t *testing.T) map[string]bool {
 	t.Helper()
-	src := readRepoFile(t, filepath.Join("dsl", "work", "builtins.memql"))
+	src := readRepoFile(t, filepath.Join("dsl", "work", "builtins.memql")) + "\n" +
+		readRepoFile(t, filepath.Join("dsl", "bench", "builtins.memql"))
 	out := map[string]bool{}
 	for _, m := range executorPattern.FindAllStringSubmatch(src, -1) {
 		out[m[1]] = true

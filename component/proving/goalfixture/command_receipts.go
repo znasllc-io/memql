@@ -1,10 +1,12 @@
-package goaleval
+package goalfixture
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
+
+	"github.com/znasllc-io/memql/component/work/goaleval"
 )
 
 var recordedGoTest = regexp.MustCompile(`^(GOWORK=off )?go test( [A-Za-z0-9_./=,-]+)*$`)
@@ -12,7 +14,7 @@ var recordedGoTest = regexp.MustCompile(`^(GOWORK=off )?go test( [A-Za-z0-9_./=,
 // ConfirmRecordedChecks complements independent test execution with a durable
 // worker receipt. Unsupported shell wrappers remain unverified; a string in a
 // model's answer or an echoed command is not a command execution receipt.
-func (w *Workspace) ConfirmRecordedChecks(assertions []Assertion, observations []map[string]any) error {
+func (w *Workspace) ConfirmRecordedChecks(assertions []goaleval.Assertion, observations []map[string]any) error {
 	for n := range assertions {
 		if assertions[n].CriterionID != "checks" {
 			continue

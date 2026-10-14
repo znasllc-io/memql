@@ -1,4 +1,4 @@
-package goaleval
+package goalfixture
 
 import (
 	"context"
@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/work/goaleval"
 )
 
 const sumOracle = `package totals
@@ -34,7 +36,7 @@ type OracleEvidence struct {
 	Output      string `json:"output,omitempty"`
 }
 
-func (w *Workspace) Verify(ctx context.Context, s Scenario) ([]Assertion, error) {
+func (w *Workspace) Verify(ctx context.Context, s goaleval.Scenario) ([]goaleval.Assertion, error) {
 	files, snapshotErr := w.Snapshot()
 	if snapshotErr == nil {
 		b, err := json.MarshalIndent(files, "", "  ")
@@ -45,7 +47,7 @@ func (w *Workspace) Verify(ctx context.Context, s Scenario) ([]Assertion, error)
 			return nil, err
 		}
 	}
-	var assertions []Assertion
+	var assertions []goaleval.Assertion
 	for _, c := range s.Criteria {
 		e := OracleEvidence{CriterionID: c.ID, Verdict: "unverified", Detail: "no executable oracle for this criterion"}
 		if snapshotErr != nil {
@@ -150,7 +152,7 @@ func (w *Workspace) Verify(ctx context.Context, s Scenario) ([]Assertion, error)
 		if err := os.WriteFile(filepath.Join(w.Root, name), append(b, '\n'), 0600); err != nil {
 			return nil, err
 		}
-		assertions = append(assertions, Assertion{CriterionID: c.ID, Verdict: e.Verdict, Evidence: []string{filepath.Join(w.Root, name)}})
+		assertions = append(assertions, goaleval.Assertion{CriterionID: c.ID, Verdict: e.Verdict, Evidence: []string{filepath.Join(w.Root, name)}})
 	}
 	return assertions, nil
 }

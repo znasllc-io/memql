@@ -10,7 +10,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
-	"github.com/znasllc-io/memql/component/proving/goaleval"
+	"github.com/znasllc-io/memql/component/work/goaleval"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
 )

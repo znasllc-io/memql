@@ -1,5 +1,5 @@
-// Package goaleval defines real-goal evaluation contracts within the proving
-// suite. It never solves a goal or turns a replay into a live measurement.
+// Package goaleval defines shared real-goal evaluation contracts. It has no
+// engine, provider or operator-runner dependency and never solves a goal.
 package goaleval
 
 import (

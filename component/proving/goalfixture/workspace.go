@@ -1,4 +1,4 @@
-package goaleval
+package goalfixture
 
 import (
 	"context"
@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/znasllc-io/memql/component/work/goaleval"
 )
 
 // Workspace keeps the immutable fixture outside the model's checkout. The
@@ -22,7 +24,7 @@ type Workspace struct {
 	Preserved  map[string][]byte `json:"-"`
 }
 
-func Prepare(ctx context.Context, parent string, s Scenario, files map[string][]byte) (*Workspace, error) {
+func Prepare(ctx context.Context, parent string, s goaleval.Scenario, files map[string][]byte) (*Workspace, error) {
 	root, err := os.MkdirTemp(parent, "memql-evaluation-"+s.ID+"-")
 	if err != nil {
 		return nil, err

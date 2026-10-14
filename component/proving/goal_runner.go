@@ -12,7 +12,8 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations/workflowhost"
-	"github.com/znasllc-io/memql/component/proving/goaleval"
+	"github.com/znasllc-io/memql/component/proving/goalfixture"
+	"github.com/znasllc-io/memql/component/work/goaleval"
 	"github.com/znasllc-io/memql/sdk/go/client"
 )
 
@@ -108,7 +109,7 @@ func (g *GoalRunner) Run(ctx context.Context, catalog goaleval.Catalog, matrix g
 
 func (g *GoalRunner) runCase(ctx context.Context, s goaleval.Scenario, setup goaleval.SetupRequest, matrix goaleval.Matrix) (attempt GoalAttempt, err error) {
 	attempt = GoalAttempt{ScenarioID: s.ID, Setup: setup.Name, State: "not-run", Reason: goaleval.Availability(s)}
-	var workspace *goaleval.Workspace
+	var workspace *goalfixture.Workspace
 	var result goaleval.Result
 	var run map[string]any
 	var calls, observations []client.Row
@@ -149,7 +150,7 @@ func (g *GoalRunner) runCase(ctx context.Context, s goaleval.Scenario, setup goa
 			if err != nil {
 				return nil, err
 			}
-			workspace, err = goaleval.Prepare(ctx, g.OutputDir, s, files)
+			workspace, err = goalfixture.Prepare(ctx, g.OutputDir, s, files)
 			if err != nil {
 				return nil, err
 			}

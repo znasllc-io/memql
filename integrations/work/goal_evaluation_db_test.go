@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/znasllc-io/memql/component/proving/goaleval"
+	"github.com/znasllc-io/memql/component/work/goaleval"
 )
 
 func TestGoalEvaluationPublicationIsOwnedAndImmutableAcrossReplicas(t *testing.T) {

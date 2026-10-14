@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/proving/goaleval"
+	"github.com/znasllc-io/memql/component/work/goaleval"
 	"github.com/znasllc-io/memql/core/common"
 )
 
