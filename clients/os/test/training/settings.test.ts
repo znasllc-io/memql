@@ -111,10 +111,12 @@ describe("the Training manifest", () => {
       }
       expect(section.requires).toBeUndefined();
     }
-    // A writer therefore sees the four that are this app's, and a reader sees
+    // A writer therefore sees the six that are this app's, and a reader sees
     // the app not at all.
     installSeededAccess("writer");
-    expect(sectionsFor(app!)).toHaveLength(4);
+    expect(sectionsFor(app!).map((section) => section.id)).toEqual([
+      "upload", "review", "domains", "skills", "evaluations", "settings",
+    ]);
   });
 
   it("opens on Upload", () => {

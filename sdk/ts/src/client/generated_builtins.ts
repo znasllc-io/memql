@@ -1101,6 +1101,13 @@ QueryClient.prototype.composeRunRecipe = function (this: QueryClient, args: Comp
 
 /** Accept a goal and start work on it. Opens a v1:work:goal owned by the caller and its first v1:work:run in `compiling`, then dispatches compile: catalog exact match, then near-match with a gap list, then the cheap triage. Returns {goalId, runId}. A goal that fully matches the catalog reaches no model at all. */
 export interface CreateGoalArgs {
+  /** Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it. */
+  noPaidProviders?: boolean;
+  /** The human caller's routing choice, using the same source grammar as Ask. A pinned fleet source never falls back to a paid provider. Child/model calls cannot replace their inherited choice. */
+  source?: string;
+  /** Optional human-selected intelligence level for this goal's steps; compiler calls retain their own levels. */
+  // Enum: fast | strong | reasoning
+  level?: string;
   /** Installed Spine template name. Defaults to defaultWorkSpine. Its templates, pure logic, scoped actions and selected phase recipes are frozen onto this run before compilation. */
   spine?: string;
   /** The goal in the person's own words. */
@@ -1117,6 +1124,9 @@ export interface CreateGoalArgs {
 
 export function buildCreateGoal(args: CreateGoalArgs): string {
   const parts: string[] = [];
+  if (args.noPaidProviders !== undefined) parts.push("noPaidProviders: " + renderMemQLValue(args.noPaidProviders));
+  if (args.source !== undefined) parts.push("source: " + renderMemQLValue(args.source));
+  if (args.level !== undefined) parts.push("level: " + renderMemQLValue(args.level));
   if (args.spine !== undefined) parts.push("spine: " + renderMemQLValue(args.spine));
   parts.push("statement: " + renderMemQLValue(args.statement));
   if (args.input !== undefined) parts.push("input: " + renderMemQLValue(args.input));
@@ -5309,6 +5319,29 @@ declare module "./query.js" {
 
 QueryClient.prototype.storefrontProbe = function (this: QueryClient, args: StorefrontProbeArgs = {} as StorefrontProbeArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("storefrontProbe", buildStorefrontProbe(args), opts);
+};
+
+/** Record an external evaluator's artifact verdicts for the human caller's finished run. MemQL verifies ownership and call receipts, not local files. Model calls cannot publish their own evaluation. Repeated identities are idempotent only for identical evidence; changed claims are refused. */
+export interface WorkRecordGoalEvaluationArgs {
+  scenario: Record<string, unknown>;
+  result: Record<string, unknown>;
+}
+
+export function buildWorkRecordGoalEvaluation(args: WorkRecordGoalEvaluationArgs): string {
+  const parts: string[] = [];
+  parts.push("scenario: " + renderMemQLValue(args.scenario));
+  parts.push("result: " + renderMemQLValue(args.result));
+  return "builtin workRecordGoalEvaluation(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    workRecordGoalEvaluation(args: WorkRecordGoalEvaluationArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.workRecordGoalEvaluation = function (this: QueryClient, args: WorkRecordGoalEvaluationArgs = {} as WorkRecordGoalEvaluationArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("workRecordGoalEvaluation", buildWorkRecordGoalEvaluation(args), opts);
 };
 
 /** Inspect the catalog and verify baseline content against installed seeds. */

@@ -1,0 +1,13 @@
+/// The evaluator observes the ordinary work spine. It may prepare the declared
+/// fixture and run independent oracles, but never supplies the goal's solution.
+/// The manual host binds each operation to one matrix entry and one new root.
+@template
+automation runGoalEvaluation {
+  ready := builtin goalEvaluationPrepare()
+  if ready.available == true {
+    builtin goalEvaluationSubmit()
+    builtin goalEvaluationObserve()
+    builtin goalEvaluationVerify()
+  }
+  return builtin goalEvaluationRecord()
+}

@@ -72,6 +72,10 @@ mutation skill mintSkill {
 /// triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to
 /// materialize with `function "createSkill" not found`. The materializer convention itself lives in
 /// component/memql/seed_materializer.go.
+/// Only the installed seed materializer may write this shared reviewed catalog.
+/// Scoping to actor.userId cannot establish release provenance: these public
+/// catalog rows have no owner scope, and a client could otherwise replace the
+/// instructions every owner's selector reads. Private candidates use mintSkill.
 @serverOnly
 mutation skill createSkill {
   args {

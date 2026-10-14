@@ -366,7 +366,7 @@ func TestAReplayRunsWithTheOverridesItsSourceRecorded(t *testing.T) {
 // owner's routing choice is part of that row: every model call the run's steps
 // make reads it from here.
 func TestExecutionHopRestoresTheOwnersRouteChoice(t *testing.T) {
-	choice := common.RouteChoice{Source: "policy:localFirst", Level: "reasoning", By: "u"}
+	choice := common.RouteChoice{Source: "policy:localFirst", Level: "reasoning", By: "u", NoPaidProviders: true}
 	j := &automations.RunJournal{RunId: "r", GoalId: "g", OwnerUserId: "u", Mode: "live", Routing: choice}
 	ctx, err := workExecutionContext(context.Background(), j, nil, nil)
 	if err != nil {

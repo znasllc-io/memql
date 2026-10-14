@@ -21,7 +21,7 @@ domain independent; software expertise belongs in reviewed skills and lessons.
 | Inspect | Training Skills and Evaluations lists with drilldown into content, provenance, exact versions and evidence | UI behavior and desktop/narrow light/dark inspection | Implemented locally; review and live verification pending |
 | Bind | Multiple relevant skills and reviewed passages selected by installed DSL; immutable receipt on the owned work run | Exact text/version/score/reason survives a checkpoint and a replica hop | Skill snapshots implemented and tested across two engine instances; lesson integration pending PR6070 |
 | Learn | Successful work, human guidance and research can propose owner-scoped lessons | Candidate never silently validates; source and verification receipts required for promotion; no private-to-official publication | Planned |
-| Execute | Manual goal evaluation through MemQL, observed by independent artifact oracles | MemQL and the selected model perform the task; evaluator performs only fixture setup, declared injections and verification | Planned |
+| Execute | Manual goal evaluation through MemQL, observed by independent artifact oracles | MemQL and the selected model perform the task; evaluator performs only fixture setup, declared injections and verification | Runner and five local case adapters pass workflow and cross-replica publication checks. Nine advanced adapters remain prerequisites |
 | Baseline | First manually run model/scenario matrix | Complete raw result records including failures and interventions | Not run |
 | Repeat | Configurable monthly product evaluation, comparison with prior compatible runs | Explicit model/budget/fixture authority; schedule disabled until owner enables it | Planned |
 | Demonstrate | Documentation cases connecting capability claims to real goals and observable artifacts | Original request, full setup, actual bindings, acceptance evidence, human assistance and limits | Publishing format added; software case5817 remains unfinished |
@@ -49,7 +49,12 @@ required-database checks above establish persistence coverage.
 
 This slice is not a live benchmark: no model calls or paid-provider spend,
 evaluation-repository effects, monthly executor or production deployment have
-occurred. The execution, learning and baseline milestones remain open.
+occurred. The first oracle checks pass locally, including false-success,
+behavioral red/green, build-failure rejection and preservation controls.
+The scoped workflow, no-paid-provider ceiling, strict DSL boot and publication
+checks now pass. The publication check uses the isolated scratch database and
+two engine instances. The live baseline still awaits release of the shared model.
+The advanced adapters, learning and baseline milestones remain open.
 
 ## Source of truth and scope
 

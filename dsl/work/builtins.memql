@@ -23,6 +23,17 @@
 @executor("integration.work.skillCatalog")
 builtin workSkillCatalog {}
 
+/// Record an external evaluator's artifact verdicts for the human caller's
+/// finished run. MemQL verifies ownership and call receipts, not local files.
+/// Model calls cannot publish their own evaluation. Repeated identities are
+/// idempotent only for identical evidence; changed claims are refused.
+@sdk
+@executor("integration.work.recordGoalEvaluation")
+builtin workRecordGoalEvaluation {
+  scenario object!
+  result object!
+}
+
 /// Select and freeze reviewed context for the trusted current owned step.
 /// A public caller cannot supply the run context or the content to record.
 @executor("integration.work.selectSkills")
@@ -55,6 +66,9 @@ builtin workApprovalDiscussionState { approvalId string! }
 @sdk
 @executor("integration.work.createGoal")
 builtin createGoal {
+  noPaidProviders bool @description("Human-selected execution ceiling: no federation provider may serve any call of this goal, including embeddings, step overrides and fallback. Child goals inherit it and cannot relax it.")
+  source        string   @description("The human caller's routing choice, using the same source grammar as Ask. A pinned fleet source never falls back to a paid provider. Child/model calls cannot replace their inherited choice.")
+  level         enum("fast", "strong", "reasoning") @description("Optional human-selected intelligence level for this goal's steps; compiler calls retain their own levels.")
   spine         string   @description("Installed Spine template name. Defaults to defaultWorkSpine. Its templates, pure logic, scoped actions and selected phase recipes are frozen onto this run before compilation.")
   statement     string!  @description("The goal in the person's own words.")
   input         object   @description("The typed input object: the shape the chosen template's args declare.")

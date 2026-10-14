@@ -85,3 +85,62 @@ Use the same setup identifier in the result and its worked example, so a
 reader can move from an aggregate result to the individual issues, changes
 and checks supporting it. Software development is the initial area; other
 skill areas remain Coming soon until their own cases and evaluations exist.
+
+## Running local goal evaluations
+
+The manual goal runner is part of `memql-bench`. Its installed
+`runGoalEvaluation` automation orders fixture preparation, submission through
+the ordinary authenticated work API, observation, independent verification and
+publication. The evaluator supplies no implementation or regression test.
+
+Run `go run ./cmd/memql-bench --do=goal-plan` from a source checkout to inspect
+the selected matrix and its prerequisites without connecting to a cluster or
+calling a model. The catalog and matrix live in `test/proving/goals`.
+
+The first executable local cases cover investigation/reproduction, a regression
+before a fix, implementation with checks, behavior-preserving refactoring and
+recovery from a failing regression. The other nine catalog cases retain their
+contracts but require additional injection or GitHub adapters. They are recorded
+as **not run**, never pooled into a measured success rate. Monthly execution
+remains disabled.
+
+For a manual run, commit the harness, supply `MEMQL_EVALUATION_TOKEN` through
+the environment, and use the cluster's normal TLS front door:
+
+```bash
+go run ./cmd/memql-bench --do=goal-run \
+  --endpoint=https://api.example.com \
+  --engine-commit=<full-connected-engine-commit> \
+  --output=<new-evidence-directory>
+```
+
+Use `--ca-file=<trusted-ca.pem>` for an operator-provided CA. The connection
+checks TLS normally and compares the server's build identity with the supplied
+commit. A clean, committed harness is required. Release a shared model from
+other active tests before starting; the runner does not change cluster routing,
+worker consent or another goal's permissions.
+
+This initial runner accepts an exact fleet model and a zero paid-provider
+allowance. It pins that source on the goal so planner and agent calls inherit
+the same refusal-to-fallback rule. A separate persisted no-paid-provider ceiling
+also guards embeddings, step overrides and call-time fallback. Preflight
+requires an active fleet embedder for asynchronous indexing and records its
+binding separately; it never changes that binding. Zero is not passed as an engine cost ceiling,
+where it would mean unset. Model-call and time allowances remain bounded.
+Any request for additional authority is preserved as a blocker; cancellation
+must settle before the evaluator snapshots the checkout.
+
+Every case has a unique checkout and evidence directory. Independent tests run
+on a separate captured tree. Regression evidence requires a behavioral failure
+against the original implementation and a pass against the final tree; a build
+failure does not qualify. Tracked, dirty and untracked unrelated work is checked
+for preservation. The runner retains raw submissions, goal/run identities,
+model and work receipts, oracle outputs and the result, including failures.
+An uncertain submission is never retried automatically.
+
+Training receives the completed result through an owner-scoped publication
+operation. MemQL checks ownership and every reported model-call identity;
+artifact verdicts are attributed to the external harness, which inspected the
+operator's files. Model runs cannot publish their own evaluation. Usage without
+complete attribution remains unavailable; visible-text counts do not become
+provider totals. Preserve the local evidence alongside any shared case study.

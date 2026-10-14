@@ -1664,6 +1664,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// conjunct to narrow by, and adding one would hide the catalog the
 		// concept exists to describe. `ownerUserId` on these rows is
 		// provenance, never a scope.
+		// Shared installed seed content has no actor.userId scope. A caller
+		// may propose a private candidate, but cannot impersonate a release.
+		{Path: "skills/mutations.memql", Name: "createSkill"}:     true,
 		{Path: "skills/mutations.memql", Name: "createSkillEdge"}: true,
 		{Path: "skills/mutations.memql", Name: "commitSkillEdge"}: true,
 		{Path: "skills/mutations.memql", Name: "setSkillScripts"}: true,

@@ -100,6 +100,20 @@ func (i *Integration) handleCreateGoal(ctx context.Context, args map[string]any,
 	goalId := newRowId(goalConcept)
 	runId := newRowId(runConcept)
 	owner := strings.TrimSpace(ac.UserId)
+	// API callers have the same explicit route choice as Ask. A model or
+	// child run cannot replace its inherited routing authority through args.
+	if source, level := argString(args, "source"), argString(args, "level"); source != "" || level != "" || args["noPaidProviders"] == true {
+		if rc, ok := common.RunFromContext(ctx); ok && rc.IsRun() {
+			return nil, fmt.Errorf("work: a child goal cannot replace its inherited route")
+		}
+		choice, err := memql.ParseRouteChoice(source, level)
+		if err != nil {
+			return nil, err
+		}
+		choice.By = owner
+		choice.NoPaidProviders = args["noPaidProviders"] == true
+		ctx = memql.ContextWithGoalRouteChoice(ctx, choice)
+	}
 	input := argMap(args, "input")
 	ceilings := argMap(args, "ceilings")
 	// The owner's routing choice: the request's own (Ask's route picker) or
@@ -310,6 +324,7 @@ func goalRouting(ctx context.Context, owner string) (common.RouteChoice, error) 
 		return common.RouteChoice{}, fmt.Errorf("work: %w", err)
 	}
 	parsed.By = routing.By
+	parsed.NoPaidProviders = routing.NoPaidProviders
 	return parsed, nil
 }
 

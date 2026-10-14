@@ -116,6 +116,7 @@ export function EvaluationsSection() {
         }) : <tr><th scope="row">MemQL · {matrix.setups[0]!.name}</th><td>{matrix.setups[0]!.reasoningModel}</td><td>Routing snapshot pending</td><td>{ready ? "Not run" : "Not read"}</td></tr>}</tbody>
       </table>
       <Caption>Each setup includes the harness and its routing configuration. Open a goal to inspect actual model calls and evidence. Monthly runs are off.</Caption>
+      <Caption>The manual runner supports five local cases. Conflict, feedback, tool interruption, checkpoint and GitHub cases need their declared execution adapters before they can be measured.</Caption>
       <Subhead>Software development</Subhead>
       <RecordList as="ul" label="Goal scenarios">{catalog.scenarios.map((s) => <RecordRow key={s.id} name={s.title}
         secondary={matching(s)[0]?.setup?.name ?? `Scenario ${s.version}`} state={!ready ? "Not read" : evaluationOutcome(matching(s)[0])} onOpen={() => { select(s); selectRun(""); }} />)}</RecordList>
