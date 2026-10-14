@@ -4,10 +4,61 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
+	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+// A socket deadline and a context deadline have separate timers. Model the
+// interval after the deadline has elapsed but before Err() is published, so
+// this regression does not depend on winning that race on a busy test runner.
+type gateWaitUnpublishedDeadline struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c gateWaitUnpublishedDeadline) Deadline() (time.Time, bool) { return c.deadline, true }
+
+func TestGateWaitClassifiesTheDeadlineBeforeItsContextTimerPublishes(t *testing.T) {
+	before := time.Now().Add(-time.Hour)
+	after := time.Now().Add(time.Hour)
+	expired := gateWaitUnpublishedDeadline{Context: context.Background(), deadline: before}
+	if expired.Err() != nil {
+		t.Fatal("fixture must model a deadline whose context timer has not published")
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want error
+	}{
+		{"elapsed deadline without Err", expired, context.DeadlineExceeded},
+		{"future deadline", gateWaitUnpublishedDeadline{Context: context.Background(), deadline: after}, nil},
+		{"no deadline", context.Background(), nil},
+		{"no context", nil, nil},
+		{"published cancellation takes precedence", gateWaitUnpublishedDeadline{Context: cancelled, deadline: before}, context.Canceled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, reported := range []error{&net.OpError{Op: "read", Err: os.ErrDeadlineExceeded}, io.EOF} {
+				got := gateWaitError(reported, tc.ctx)
+				if tc.want == nil {
+					if got != reported || IsWriteGateBusy(got) {
+						t.Errorf("live wait changed %v into %v", reported, got)
+					}
+				} else if !errors.Is(got, ErrWriteGateBusy) || !errors.Is(got, tc.want) {
+					t.Errorf("ended wait answered %v, want busy and %v", got, tc.want)
+				}
+			}
+		})
+	}
+	if got := gateWaitError(ErrWriteGatePoolUnsuitable, expired); got != ErrWriteGatePoolUnsuitable {
+		t.Errorf("an elapsed deadline hid an unsuitable pool: %v", got)
+	}
+}
 
 func TestVersionTimeAfterPreservesOrderingAcrossClockSkew(t *testing.T) {
 	prior := time.Date(2030, 1, 1, 0, 0, 0, 123456789, time.UTC)

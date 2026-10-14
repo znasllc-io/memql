@@ -86,6 +86,9 @@ const maintenanceUserIdPrefix = "system:maintenance:"
 // maintenanceAutomations maps each automation that runs under the cluster's
 // maintenance principal to WHY it needs one.
 var maintenanceAutomations = map[string]string{
+	"retireDeclaredConceptVersions": "the engine-owned hourly sweep applies each graph concept's declared retention across every owner, " +
+		"verifying required archives before physical deletion. Its native handler requires a cluster owner even for a dry run; " +
+		"the ordinary scheduled reader actor is refused before any policy can run",
 	"pollPackageUpstreams": "engine-owned repository polling across every owner's active sources. " +
 		"The package composite tier hides user-owned sources from the default reader actor, so the " +
 		"poll otherwise succeeds with checked=0 and never discovers a new revision. Discovery must " +
