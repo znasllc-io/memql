@@ -28,8 +28,7 @@ import (
 // for this work run and step.
 //
 // DB-GATED: it skips without a database, and fails under MEMQL_REQUIRE_DB=1.
-func TestAPipelineFileIsARowTheRealLibraryReadsBack(t *testing.T) {
-	engine := workTemplateDBEngine(t)
+func testAPipelineFileIsARowTheRealLibraryReadsBack(t *testing.T, engine *memql.MemQLEngine) {
 	a := &App{engine: engine, Logger: quietLogger()}
 	up := &pipelinesFakeUploader{}
 	store := a.pipelinesLibraryStoreFor(up, "memql")

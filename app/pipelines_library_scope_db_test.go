@@ -46,10 +46,10 @@ func pipelineScopeSQLStore(t *testing.T) (*pipelinesLibraryStore, *sql.DB) {
 	return s, db
 }
 
-func TestPipelineScopeDBFenceBeforeFirstUploadSurvivesReplacement(t *testing.T) {
+func testPipelineScopeDBFenceBeforeFirstUploadSurvivesReplacement(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineStreamFake{}
-	one, _, _ := pipelineStreamDBStore(t, u)
-	two, _, db := pipelineStreamDBStore(t, u)
+	one, _, _ := newStore(t, u)
+	two, _, db := newStore(t, u)
 	f := pipelineStreamFile(id.NewShortId(), "data")
 	ctx, scope := pipelineLifecycleScope(f)
 	if _, err := two.ReadFencedRunFileIntents(ctx, scope, ""); err == nil {
@@ -108,10 +108,10 @@ func (u *pipelineScopeLostUploadReply) CreateVerifiedStream(ctx context.Context,
 	return azureblob.VerifiedBlob{}, errors.New("lost response after provider commit")
 }
 
-func TestPipelineScopeDBDiscoversLostUploadAndRetiresWithoutReceipt(t *testing.T) {
+func testPipelineScopeDBDiscoversLostUploadAndRetiresWithoutReceipt(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineScopeLostUploadReply{}
-	one, _, _ := pipelineStreamDBStore(t, u)
-	two, _, db := pipelineStreamDBStore(t, u)
+	one, _, _ := newStore(t, u)
+	two, _, db := newStore(t, u)
 	f := pipelineStreamFile(id.NewShortId(), "data")
 	if got, err := one.StoreRunFileStream(context.Background(), f); err == nil || got.Receipt != nil {
 		t.Fatal("injected lost upload response returned a receipt", got, err)
