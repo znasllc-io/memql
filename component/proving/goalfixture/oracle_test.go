@@ -149,7 +149,7 @@ func TestMatrixRefusesSpendAndUndeclaredTargets(t *testing.T) {
 	for name, change := range map[string]func(*goaleval.Matrix){
 		"paid budget": func(m *goaleval.Matrix) { m.PaidProviderBudgetUSD = 1 },
 		"paid route": func(m *goaleval.Matrix) {
-			m.Setups = append([]SetupRequest{}, m.Setups...)
+			m.Setups = append([]goaleval.SetupRequest{}, m.Setups...)
 			m.Setups[0].ReasoningModel = "policy:localFirst"
 		},
 		"unbounded calls":       func(m *goaleval.Matrix) { m.MaxModelCalls = 0 },
@@ -176,4 +176,20 @@ func catalog(t *testing.T) goaleval.Catalog {
 		t.Fatal(err)
 	}
 	return c
+}
+
+func TestRefactorRequiresModelAuthoredTestsBeyondHiddenOracles(t *testing.T) {
+	w := prepared(t, "refactor-preserve-behavior")
+	s := scenarioByID(t, "refactor-preserve-behavior")
+	assertions, err := w.Verify(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdicts := map[string]string{}
+	for _, a := range assertions {
+		verdicts[a.CriterionID] = a.Verdict
+	}
+	if verdicts["correctness"] != "pass" || verdicts["checks"] != "fail" {
+		t.Fatalf("hidden behavior checks cannot substitute for model-authored tests: %v", verdicts)
+	}
 }

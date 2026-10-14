@@ -53,7 +53,7 @@ export function EvaluationsSection() {
   const groups = new Map<string, Evaluation[]>();
   for (const r of compatible) { const key = setupKey(r); const group = groups.get(key); if (group) group.push(r); else groups.set(key, [r]); }
   const setups = Array.from(groups.values(), (group) => group[0]!);
-  const roles = Array.from(new Set(["reasoning", ...setups.flatMap((r) => r.setup.routes.map((route) => route.role))]));
+  const roles = setups.length ? Array.from(new Set(setups.flatMap((r) => r.setup.routes.map((route) => route.role)))) : ["reasoning"];
   return <div className="os-app-stack">
     <AutoRefresh onRefresh={reload} busy={busy} enabled={connection !== null} />
     <Head title={selected?.title ?? "Evaluations"} meta={selected ? `Version ${selected.version}` : `Catalog ${catalog.version}`}

@@ -185,6 +185,12 @@
           "required": true
         },
         {
+          "id": "checks",
+          "claim": "Relevant checks are recorded and pass.",
+          "oracle": "Read command receipts and independently run the final package tests.",
+          "required": true
+        },
+        {
           "id": "preservation",
           "claim": "Unrelated tracked and untracked work is unchanged.",
           "oracle": "Compare exact before/after bytes and Git status of the preserved files.",
