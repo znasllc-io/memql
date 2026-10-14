@@ -121,6 +121,19 @@ it("keeps discussion, investigation and guidance separate with an editable compo
   expect(screen.queryByRole("button", { name: "Approve" })).toBeNull(); expect(transport.approvalGuidance).not.toHaveBeenCalled(); session.dispose();
 });
 
+it("offers only guidance for an expired access request that can still continue", async () => {
+  const { transport, session } = setup();
+  transport.discussApproval.mockResolvedValue({ ...context, approval: { ...context.approval, kind: "scopeElevation", status: "expired" }, canAskAdvisor: false });
+  await session.discussApproval("approval"); mount(session, transport);
+  expect(screen.getByText("Send guidance to the waiting work. This does not grant access.")).toBeTruthy();
+  fireEvent.change(screen.getByRole("textbox", { name: "Ask" }), { target: { value: "Please request fresh read-only permission." } });
+  expect(screen.queryByRole("button", { name: "Ask another agent" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Send discussion message" })).toHaveProperty("disabled", true);
+  fireEvent.click(screen.getByRole("button", { name: "Send guidance" }));
+  await waitFor(() => expect(transport.approvalGuidance).toHaveBeenCalledExactlyOnceWith("approval", "Please request fresh read-only permission."));
+  expect(transport.approvalMessage).not.toHaveBeenCalled(); expect(transport.ask).not.toHaveBeenCalled(); session.dispose();
+});
+
 it("keeps guidance refusal and composed text visible", async () => {
   const { transport, session } = setup(); await session.discussApproval("approval");
   transport.approvalGuidance.mockRejectedValueOnce(new Error("This approval has already been decided.")); mount(session, transport);

@@ -107,6 +107,9 @@ func TestApprovalDiscussionFindsDelegatedOriginAndReloadsGuidanceWithoutAnalysis
 	require.False(t, reopened["canAskAdvisor"].(bool))
 	_, err = b.eng.Execute(actorCtx("unrelated-owner"), "builtin "+call("askApprovalDiscussion", map[string]any{"approvalId": approvalID}))
 	require.Error(t, err)
+	t.Run("expired native scope", func(t *testing.T) {
+		testExpiredScopeDiscussionResumesCheckpointWithoutGrant(t, a, b)
+	})
 }
 
 func TestApprovalDiscussionAdmissionAndAnalysisSurviveReplicaChanges(t *testing.T) {

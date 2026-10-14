@@ -19,7 +19,7 @@ const approvals = [
 ];
 const saved = [approvalRow({ id: "saved-directory", decision: "approved", decidedAt: "2026-09-01T09:04:00Z", subject: { computerPermission: directory }, answer: { permissionMode: "always" } }), approvalRow({ id: "saved-command", decision: "approved", subject: { computerPermission: command }, answer: { permissionMode: "always" } })];
 type Frame = ComponentType<{ fallback: string; children: ReactNode }>;
-function NexusApprovalWindow({ frame: Frame, approvalId, advice }: { frame: Frame; approvalId?: string; advice?: "running" | "done" | "recorded" }) {
+function NexusApprovalWindow({ frame: Frame, approvalId, advice, expired = false }: { frame: Frame; approvalId?: string; advice?: "running" | "done" | "recorded"; expired?: boolean }) {
   const [section, setSection] = useState("approvals");
   const [store] = useState(() => new LocalNexusSettingsStore(null));
   const [transport] = useState<AskTransport>(() => {
@@ -29,8 +29,8 @@ function NexusApprovalWindow({ frame: Frame, approvalId, advice }: { frame: Fram
     let guidanceToResume: string | undefined;
     return {
       ask: () => ({ cancel() {} }),
-      discussApproval: async id => ({ conversationId: "original-conversation", approval: { id, runId: "run-1", kind: "planReview", question: "How should this work continue?", summary: "Context checkpoint did not free space; originals were retained.", status: canSendGuidance ? "pending" : "answered" }, canSendGuidance, canAskAdvisor: canSendGuidance, guidanceToResume }),
-      approvalGuidance: async (approvalId, feedback) => { canSendGuidance = false; guidanceToResume = feedback; if (!turns.some(turn => turn.id === "guidance")) turns.push({ id: "guidance", approvalId, prompt: `Guidance sent:\n${feedback}`, answer: "", answerOnly: true, state: "done", startedAt: "2026-10-12T19:17:00Z", endedAt: "2026-10-12T19:17:00Z", activity: [] }); return { runResumed: false, resumeError: "The planner is temporarily unavailable." }; },
+      discussApproval: async id => ({ conversationId: "original-conversation", approval: { id, runId: "run-1", kind: expired ? "scopeElevation" : "planReview", question: expired ? "Read the repository on Studio Mac" : "How should this work continue?", summary: expired ? "The access request expired. Guidance can help this work request fresh permission." : "Context checkpoint did not free space; originals were retained.", status: canSendGuidance ? expired ? "expired" : "pending" : "answered" }, canSendGuidance, canAskAdvisor: !expired && canSendGuidance, guidanceToResume }),
+      approvalGuidance: async (approvalId, feedback) => { canSendGuidance = false; guidanceToResume = expired ? undefined : feedback; if (!turns.some(turn => turn.id === "guidance")) turns.push({ id: "guidance", approvalId, prompt: `Guidance sent:\n${feedback}`, answer: "", answerOnly: true, state: "done", startedAt: "2026-10-12T19:17:00Z", endedAt: "2026-10-12T19:17:00Z", activity: [] }); return expired ? { runResumed: true } : { runResumed: false, resumeError: "The planner is temporarily unavailable." }; },
       approvalMessage: async request => ({ conversationId: request.conversationId, turnId: request.requestId, runId: "advice-run", status: "queued" }),
       conversations: { list: async () => [{ id: "original-conversation", title: "Introduce the repository" }], create: async () => ({ id: "unused", title: "Unused" }), read: async () => turns },
     };
@@ -61,6 +61,14 @@ export function nexusApprovalScenes(frame: Frame) {
     render: () => <NexusApprovalWindow frame={frame} approvalId={detail ? "budget-resume" : undefined} />,
   });
   return {
+    "nexus-approval-expired-scope": {
+      ...view(),
+      connect: () => fakeConnection({
+        approvals: [approvalRow({ id: "expired-scope", runId: "run-1", stepKey: "inspectRepository", kind: "scopeElevation", question: "Read the repository on Studio Mac", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: directory } })],
+        runs: [runRow({ id: "run-1", workTitle: "Introduce the repository", status: "waiting", waitingOn: { kind: "approval", subject: "expired-scope" } })],
+      }),
+      render: () => <NexusApprovalWindow frame={frame} approvalId="expired-scope" expired />,
+    },
     "nexus-budget-resume": budgetResume(true), "nexus-budget-resume-list": budgetResume(false),
     "nexus-approvals": view(), "nexus-approvals-empty": view(undefined, true),
     "nexus-approval-failure": view("failure"), "nexus-approval-directory": view("directory"),
