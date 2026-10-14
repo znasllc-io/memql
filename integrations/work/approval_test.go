@@ -532,6 +532,59 @@ func TestReleasingAnApprovalThatIsNotAFailureQuestionWritesNoRequest(t *testing.
 	}
 }
 
+// Ordinary text/choice/multi answers release a pause without creating an
+// execution generation, even when the person is already running a new version.
+func TestOrdinaryFeedbackAnswerPreservesCurrentRequest(t *testing.T) {
+	for _, kind := range []string{"text", "choice", "multi"} {
+		for _, request := range []string{"", "existing-request"} {
+			t.Run(kind+"/"+request, func(t *testing.T) {
+				i, eng, store := newActsIntegration(t)
+				addVersion(store, actRunId, "fetch", 0, 1, "done", nil, nil)
+				addVersion(store, actRunId, "draft", 1, 2, "waiting", nil, nil)
+				options := []map[string]any{{"label": "Use the reviewed input", "value": "selected"}}
+				subject := map[string]any{"question": "Which input?", "kind": kind, "options": options}
+				raw, err := json.Marshal(map[string]any{
+					"id": "v1:work:approval:a1", "runId": actRunId, "ownerUserId": actOwner, "stepKey": "draft",
+					"kind": "feedback", "subject": subject, "options": options, "artifactHash": work.ArtifactHash(subject),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var approval map[string]any
+				if err := json.Unmarshal(raw, &approval); err != nil {
+					t.Fatal(err)
+				}
+				eng.reply("workApprovalsForOwner", approval)
+				run := actRunRow(runStatusWaiting, "fetch", "draft")
+				run["waitingOn"] = map[string]any{"kind": "approval", "subject": "v1:work:approval:a1", "approvalKind": "feedback"}
+				if request != "" {
+					run["rerun"] = map[string]any{"requestId": request, "stepKey": "draft", "reason": rerunReasonRerun, "versions": map[string]any{"draft": 2}}
+				}
+				eng.reply("workRunForOwner", run)
+				answer := map[string]any{"text": "Use the reviewed input"}
+				if kind == "choice" {
+					answer = map[string]any{"value": "selected"}
+				}
+				if kind == "multi" {
+					answer = map[string]any{"values": []any{"selected"}}
+				}
+				if _, err := i.handleDecideApproval(callerContext(actOwner), map[string]any{"approvalId": "v1:work:approval:a1", "decision": "answered", "answer": answer}, 0); err != nil {
+					t.Fatal(err)
+				}
+				update := argsOf(t, eng, "updateWorkRun")
+				if update["status"] != runStatusRunning || update["humanResumeId"] != "a1" {
+					t.Fatalf("ordinary answer did not release its exact pause: %v", update)
+				}
+				for _, field := range []string{"rerun", "staleSteps", "head", "spent"} {
+					if value, changed := update[field]; changed {
+						t.Fatalf("ordinary answer changed %s=%v", field, value)
+					}
+				}
+			})
+		}
+	}
+}
+
 // TestDecideApprovalRefusesAnApprovalTheCallerCannotSee. The caller's own
 // pending list IS the ownership check.
 func TestDecideApprovalRefusesAnApprovalTheCallerCannotSee(t *testing.T) {
