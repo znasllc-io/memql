@@ -691,3 +691,12 @@ builtin customDomainReconcileDoor { doorId string! }
 /// Bounded operation inside an authorized domain reconciliation scope.
 @executor("integration.customDomain.customDomainRequireReservations")
 builtin customDomainRequireReservations {  }
+
+/// Expire graph versions according to each concept's @retention declaration.
+/// The handler requires a cluster owner, verifies required archives and bounds
+/// each batch. Dry runs read one page per concept and never advance progress.
+@executor("integration.retention.sweep")
+@args(profile="object")
+builtin conceptRetentionSweep {
+  dryRun bool
+}

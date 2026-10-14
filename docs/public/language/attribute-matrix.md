@@ -63,6 +63,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@mirroredTo`](#mirroredto) | strings |  |  |  |
 | [`@origin`](#origin) | string |  |  |  |
 | [`@relationship`](#relationship) | keywords, in the body |  |  |  |
+| [`@retention`](#retention) | keywords |  |  |  |
 | [`@row`](#row) |  | flag |  |  |
 | [`@rowAuthz`](#rowauthz) | keywords |  |  |  |
 | [`@scope`](#scope) |  |  |  | string |
@@ -221,6 +222,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@mirroredTo`](#mirroredto) | one or more strings | `@mirroredTo("shopify")` |
 | [`@origin`](#origin) | one string | `@origin("memql")` |
 | [`@relationship`](#relationship) | keyword arguments, repeatable, in the body | `@relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")` |
+| [`@retention`](#retention) | keyword arguments | `@retention(ttl="30d", keepLatest=true, archive="required")` |
 | [`@rowAuthz`](#rowauthz) | keyword arguments | `@rowAuthz(owner="ownerUserId", clusterOwner)` |
 | [`@serverWritten`](#serverwritten) | no arguments | `@serverWritten` |
 | [`@type`](#type) | one string | `@type("collection")` |
@@ -1025,6 +1027,22 @@ Require explicit user confirmation before the tool executes.
 
 - On a query, a mutation or a logic: The actor-rank FLOOR: only a caller holding this role, or one ranked above it, may invoke the construct -- @requiresRank("developer") (epic memql#4832, D6). ENFORCED at execution and VALIDATED AT LOAD against the role ladder in dsl/rbac, so a typo refuses boot rather than gating on rank 0 and admitting everyone. This is the server-side counterpart to MemQL OS's per-surface role requirement: the shell keeps hiding what a caller cannot reach (hiding an action beats letting them click it and reading a refusal) and this makes the hidden surface a REFUSED one. Declared on the CONSTRUCT because a surface is a set of constructs and an app id from a browser is a claim, not a fact. It gates WHO MAY CALL; @rowAuthz still decides WHICH ROWS come back.
 - On a tool: The person-rank FLOOR on a tool: a call is admitted only when the person it is for -- the authenticated user over MCP, or the user an agent acts for in its tool loop -- holds this role or one ranked above it, and a tool above the caller's rank is not listed to them either. VALIDATED AT LOAD against the role ladder in dsl/rbac exactly as on a query, mutation or logic, and resolved at call time through the same ladder, so a custom role is admitted by its rank. It judges the PERSON and never the agent -- @requiresAgentRole is that gate -- and it replaces the person half of the deprecated @allowedRoles.
+
+### @retention
+
+| On | Written as | Example |
+|---|---|---|
+| [concept](#concept) | keyword arguments | `@retention(ttl="30d", keepLatest=true, archive="required")` |
+
+`@retention` takes these keys, each written as `key=value`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `ttl` | string | Version lifetime, e.g. 30d or 24h. Required; 1 second to 36500 days. |
+| `keepLatest` | bool | Preserve the newest version of each record, including a tombstone. Default true. |
+| `archive` | string | required (default): verify a recoverable archive before deletion; none: explicitly disposable history. |
+
+Expire versions older than ttl, measured from their stored createdAt. Keep the newest version by default, including tombstones. Require a verified archive unless archive="none" explicitly marks disposable history. Undeclared concepts retain their current behavior. The logLine store requires whole days, keepLatest=false and archive="required".
 
 ### @row
 

@@ -1,0 +1,13 @@
+{
+  "cases": [
+    {
+      "file": "declared-policy.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "invalid-ttl.memql",
+      "verdict": "refuse_load",
+      "message": "@retention ttl must be between 1s and 36500d"
+    }
+  ]
+}

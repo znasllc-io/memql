@@ -133,6 +133,10 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		}
 	}
 
+	if err := validateRetentionStore(conceptName, parsed.retention); err != nil {
+		return nil, err
+	}
+
 	version := parsed.version
 	if version == "" {
 		// Absent @version means 1.0.0 (#2613), stored in the same
@@ -151,6 +155,7 @@ func BuildConceptFromDecl(decl *parser.ConceptDecl, conceptName string) (*Concep
 		Relationships: parsed.relationships,
 		DisplayCard:   parsed.displayCard,
 		Composable:    parsed.composable,
+		Retention:     parsed.retention,
 		RowAuthz:      parsed.rowAuthz,
 		ServerWritten: parsed.serverWritten,
 		Origin:        parsed.origin,
@@ -430,6 +435,7 @@ type parsedConcept struct {
 	// Nil means unmarked, which is most concepts and which is not the
 	// same statement as "not composable" (epic memql#4977, design D2).
 	composable *Composable
+	retention  *RetentionPolicy
 
 	// rowAuthz is the optional row-authorization tier declared via
 	// `@rowAuthz(...)`. Like displayCard, the `owner="<field>"` form
@@ -1137,6 +1143,12 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		return nil
 	}
 	switch attr.Name {
+	case "retention":
+		p, err := parseRetentionAttr(attr)
+		if err != nil {
+			return err
+		}
+		c.retention = p
 	case "serverWritten":
 		c.serverWritten = true
 	case "description":

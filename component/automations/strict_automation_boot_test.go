@@ -232,7 +232,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 164 -> 165: owned task retrieval of reviewed Training lessons.
 // 165 -> 166: bounded provider-call recovery before any proposed tool dispatch.
 // 166 -> 168: explicit release knowledge publication and scheduled indexing.
-const shippedAutomationCount = 168
+// 168 -> 169: hourly declared-concept retention, integrated with the above.
+const shippedAutomationCount = 169
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

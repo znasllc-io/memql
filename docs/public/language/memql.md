@@ -624,6 +624,43 @@ are independent: an edge is `child` because of what the engine did with it, and
 `assignedTo` because of what its author said it means. `as` is additive, so a
 client that ignores it sees exactly the previous contract.
 
+### Version retention
+
+Declare version lifetime on the concept:
+
+<!-- corpus: 2026/examples/memql/retention/policy.memql -->
+```memql
+@retention(ttl="30d", keepLatest=true, archive="required")
+concept reading {
+  value float
+}
+```
+
+`ttl` is required and measures each stored version's `createdAt`, independent
+of payload dates. Use whole days (`30d`) or a duration such as `24h`; the range
+is one second through 36500 days. `keepLatest` defaults to `true`: older
+versions may expire, but the newest version of each record, including a deletion
+marker, stays. Set `keepLatest=false` when the record itself may expire.
+
+`archive` defaults to `"required"`. The engine uploads complete versions,
+including their historical schema, then reads back and compares the archive
+before deleting only unchanged, exact version keys. Missing or failed archive
+verification preserves the rows. Use `archive="none"` explicitly for disposable
+history. Concepts without the annotation keep their existing behavior, including
+any existing specialized retention policy.
+
+The hourly `retireDeclaredConceptVersions` automation runs bounded batches and
+stores progress in the shared database. Another replica can continue after a
+restart. The cluster-owner builtin `conceptRetentionSweep(dryRun: true)` previews
+one page per concept and table without deleting or advancing progress. Expiry is
+asynchronous; TTL is eligibility for maintenance, not a query visibility filter.
+
+`observability.logLine` uses the same annotation through its chunk-aware nightly
+sweeper. Logs require whole days, `keepLatest=false` and `archive="required"`.
+Its declaration takes precedence over `MEMQL_LOGS_RETENTION_DAYS`; the environment
+setting remains the fallback when a supplied log concept has no annotation.
+
+
 ## Expressions
 
 A `.memql` file writes every expression in one language: a query's `filter` and

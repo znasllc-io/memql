@@ -160,6 +160,9 @@ type (
 		// epic memql#4977's design record, section D.
 		Composable *Composable `json:"composable,omitempty"`
 
+		// Retention is an opt-in physical version-retirement policy.
+		Retention *RetentionPolicy `json:"retention,omitempty"`
+
 		// RowAuthz carries the row-authorization tier declared via
 		// `@rowAuthz(...)`: who may see this concept's rows, stated
 		// once on the concept instead of as an `actor.*` term each

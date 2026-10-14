@@ -97,6 +97,8 @@ automation adjust { row.status = row.label }`},
 	{"before write excludes event", false, `@trigger(before="write", event="probe", concept="v1:probe:ticket")
 automation adjust { row.status = row.label }`},
 
+	{"concept retention", true, `@retention(ttl="30d", keepLatest=true, archive="required")
+concept probe { a string }`},
 	{"concept decl", true, `concept probe {
   a string
 }`},

@@ -6,7 +6,7 @@
 /// expired day to blob storage, then delete it -- and never the second
 /// without the first. The work is builtin logsSweep in component/logstore;
 /// this automation only decides when it is asked. Retention is
-/// MEMQL_LOGS_RETENTION_DAYS (default 30).
+/// declared on logLine through @retention.
 @trigger(schedule="0 20 3 * * *")
 automation logsRetentionSweep {
   sweep := builtin logsSweep()

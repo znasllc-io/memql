@@ -61,6 +61,11 @@ const PluginContractVersion = 2
 type PluginContext struct {
 	Logger *slog.Logger
 
+	// Concepts exposes the live declaration registry to storage maintenance.
+	Concepts memorynodes.Registry
+	// InvalidateConcept evicts reads on every replica after physical retirement.
+	InvalidateConcept func(string)
+
 	// Engine provides DSL execution, AI invocation and tool dispatch. Use
 	// this for anything that speaks to the MemQL engine surface. It carries
 	// no provider lookup: a model is reached through the router, and the two

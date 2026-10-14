@@ -16,6 +16,33 @@ The earlier audit/safety jobs remain count observations; this central job is now
 the actual archive/delete path. Worker soft deletion remains a UI lifecycle step;
 physical retention measures from the latest version, including that tombstone.
 
+## Declared concept retention
+
+`@retention(ttl="30d", keepLatest=true, archive="required")` opts a graph
+concept into the shared version-retirement sweep. The required archive uses
+`MEMQL_AZURE_BLOB_CONTAINER`; `archive="none"` explicitly makes the selected
+history disposable. Unmarked concepts keep their current policies.
+
+The hourly platform automation invokes `integration.retention.sweep` under
+cluster-owner authority. Each page scans at most 100 versions, has a 20-second
+deadline and a 32 MiB archive budget, and compares downloaded bytes before an
+exact-key delete. Each deletion also compares the archived row's contents and
+rechecks keep-latest. A row changed since selection stays. Oversized individual
+versions stay and are counted; smaller rows continue. Public and secret row
+tables both use the policy, and physical deletions invalidate cached reads across
+the cluster. Row admission failures preserve the batch.
+
+`concept_retention_progress` stores the cursor and a generation-fenced, expiring
+claim. A replacement never needs the previous process's memory. A complete walk
+resets its cursor so previously protected or backdated rows get another pass;
+a policy change has its own cursor. Dry runs change neither rows nor progress.
+Archive objects under `retention/concepts/` contain gzip NDJSON with the source
+`table` and the complete stored row, including schema and provenance.
+
+The existing log sweep reads logLine's retention declaration and verifies each
+archive before dropping a day's chunks. It continues to use
+`MEMQL_LOGS_ARCHIVE_CONTAINER` (falling back to `MEMQL_AZURE_BLOB_CONTAINER`).
+
 ## Shared row schemas
 
 `MemoryNodes` and `SecretMemoryNodes` store an immutable schema reference and
