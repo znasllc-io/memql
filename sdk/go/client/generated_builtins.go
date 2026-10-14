@@ -4596,6 +4596,26 @@ func RecordFeedbackBuild(args RecordFeedbackArgs) string {
 	return b.String()
 }
 
+// RefreshComputerPermission -- Refresh the caller's pending computer-access review without approving it.
+type RefreshComputerPermissionArgs struct {
+	ApprovalId string
+}
+
+// RefreshComputerPermission calls the engine builtin refreshComputerPermission.
+func (qc *QueryClient) RefreshComputerPermission(ctx context.Context, args RefreshComputerPermissionArgs) (*Result, error) {
+	call := RefreshComputerPermissionBuild(args)
+	return qc.executeNamed(ctx, "refreshComputerPermission", call)
+}
+
+func RefreshComputerPermissionBuild(args RefreshComputerPermissionArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin refreshComputerPermission(")
+	b.WriteString("approvalId: ")
+	b.WriteString(quoteMemQL(args.ApprovalId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ReleaseApproveCandidate -- Separately approve the exact reviewed candidate after fresh verification.
 type ReleaseApproveCandidateArgs struct {
 	CandidateId string

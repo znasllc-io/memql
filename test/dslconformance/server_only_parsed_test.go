@@ -1617,6 +1617,9 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// Callers cannot consume or revoke a receipt by invoking these writers.
 		{Path: "work/mutations.memql", Name: "useWorkComputerPermission"}:    true,
 		{Path: "work/mutations.memql", Name: "revokeWorkComputerPermission"}: true,
+		// Ownership cannot prove a fresh interactive review or hold its decision
+		// lease; the native gate verifies the fingerprint and exact parked run.
+		{Path: "work/mutations.memql", Name: "refreshWorkComputerPermission"}: true,
 
 		// THE PROVING SUITE'S PUBLISHED RECORD (epic memql#4993, design section
 		// G). Caller-scoping is not available even in principle, for the reason
