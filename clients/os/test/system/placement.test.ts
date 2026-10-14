@@ -35,11 +35,16 @@ describe("placement", () => {
     expect(rects.a!.w).toBe(900);
   });
 
-  it("fullscreen covers the desk area while the sibling keeps its half", () => {
-    const rects = placeWindows([win("a", "fullscreen"), win("b")], VIEW, T);
-    const area = deskArea(VIEW, T);
+  it("maximizes above the dock", () => {
+    const rects = placeWindows([win("a", "maximized")], VIEW, T);
     expect(rects.a).toEqual({ x: 0, y: 0, w: VIEW.w, h: VIEW.h - T.dockReserve });
-    expect(rects.b!.w).toBeLessThan(area.w);
+  });
+
+  it("fills the entire viewport in fullscreen, including after a resize", () => {
+    for (const viewport of [VIEW, { w: 390, h: 844 }]) {
+      const rects = placeWindows([win("a", "fullscreen")], viewport, T);
+      expect(rects.a).toEqual({ x: 0, y: 0, w: viewport.w, h: viewport.h });
+    }
   });
 
   it("keeps every rect inside the desk area", () => {

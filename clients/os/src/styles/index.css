@@ -376,6 +376,7 @@ button:not(:disabled):active {
   z-index: 20;
   box-shadow: var(--os-shadow-window);
 }
+.os-window[data-maximized],
 .os-window[data-fullscreen] {
   z-index: 25;
   border-radius: var(--os-radius-sm);
@@ -559,6 +560,7 @@ button:not(:disabled):active {
 }
 
 /* ---- dock ---- */
+.os-dock[hidden] { display: none; }
 .os-dock {
   position: absolute;
   left: 50%;
@@ -15312,7 +15314,7 @@ button.os-cluster-mesh-peer:focus-visible {
 .os-window-nav-item { padding: 9px 10px; border-radius: 0; border-bottom: 2px solid transparent; font-size: var(--os-text-sm); white-space: nowrap; }
 .os-window-nav-item[aria-current="page"] { background: transparent; border-bottom-color: var(--os-accent); }
 .os-window-more-nav { display: none; min-width: 0; margin: 4px 0 4px auto; max-width: 180px; color: var(--os-ink); background: var(--os-glass-solid); border: 1px solid var(--os-line); border-radius: var(--os-radius-xs); padding: 4px 8px; font: inherit; }
-.os-window[data-fullscreen] { border-radius: 0; }
+.os-window[data-maximized], .os-window[data-fullscreen] { border-radius: 0; }
 .os-window[data-os-window="fleet"] .os-window-content { padding: 0; overflow: hidden; }
 .fleet-app { height: 100%; min-height: 0; }
 /* ONE WINDOW RHYTHM. Fleet zeroes `.os-window-content`'s padding so its pages

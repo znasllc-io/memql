@@ -117,13 +117,56 @@ describe("windows and desks (spec K bullets 2-3)", () => {
     expect(document.querySelector("[data-os-window='files']")).not.toBeNull();
   });
 
-  it("full-screens and closes", () => {
+  it("cycles through maximized and fullscreen, then restores the original window and split", () => {
+    renderShell();
+    openFromLauncher("Files");
+    openFromLauncher("Fleet");
+    const original = screen.getByRole("dialog", { name: "Files" });
+    const originalStyle = original.getAttribute("style");
+    const origin = original.getAttribute("data-os-window-desk");
+    fireEvent.click(screen.getByRole("button", { name: "Maximize Files on its own desktop" }));
+    expect(original.hasAttribute("data-maximized")).toBe(true);
+    expect(screen.getByRole("button", { name: "Launcher" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Desks" })).toBeTruthy();
+    const maximizedHeight = parseFloat(original.style.height);
+    const dedicated = original.getAttribute("data-os-window-desk");
+    fireEvent.click(screen.getByRole("button", { name: "Make Files full screen" }));
+    expect(original.hasAttribute("data-fullscreen")).toBe(true);
+    expect(parseFloat(original.style.height)).toBeGreaterThan(maximizedHeight);
+    expect(original.getAttribute("data-os-window-desk")).toBe(dedicated);
+    expect(screen.queryByRole("button", { name: "Launcher" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Desks" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Restore Files to previous desktop" }));
+    expect(screen.getByRole("dialog", { name: "Files" })).toBe(original);
+    expect(original.getAttribute("style")).toBe(originalStyle);
+    expect(original.getAttribute("data-os-window-desk")).toBe(origin);
+    expect(screen.getByRole("dialog", { name: "Fleet" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Launcher" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Desks" })).toBeTruthy();
+  });
+
+  it("shows the dock on other desks and after minimizing or closing a fullscreen window", () => {
     renderShell();
     openFromLauncher("Files");
     fireEvent.click(screen.getByRole("button", { name: "Maximize Files on its own desktop" }));
-    expect(document.querySelector("[data-os-window='files']")?.hasAttribute("data-fullscreen")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Make Files full screen" }));
+    const original = screen.getByRole("dialog", { name: "Files" });
+    fireEvent.keyDown(window, { key: "ArrowLeft", ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole("button", { name: "Launcher" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Desks" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "ArrowRight", ctrlKey: true, shiftKey: true });
+    expect(screen.queryByRole("button", { name: "Launcher" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Minimize Files" }));
+    expect(screen.getByRole("navigation", { name: "Desks" })).toBeTruthy();
+    const dock = document.querySelector("[data-os-dock]") as HTMLElement;
+    fireEvent.click(within(dock).getByRole("button", { name: "Files (running)" }));
+    expect(screen.getByRole("dialog", { name: "Files" })).toBe(original);
+    expect(original.hasAttribute("data-fullscreen")).toBe(true);
+    expect(screen.queryByRole("button", { name: "Launcher" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Close Files" }));
     expect(document.querySelector("[data-os-window='files']")).toBeNull();
+    expect(screen.getByRole("button", { name: "Launcher" })).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "Desks" })).toBeTruthy();
   });
 
   it("switches desks from the keyboard", () => {
@@ -391,7 +434,7 @@ it("switches through registry apps without remounting the prior window or losing
   chooseOption(screen.getByRole("combobox", { name: "Switch app from Files" }), "Fleet");
   expect(document.querySelector("[data-os-window='fleet']")).toBe(original);
   expect(original?.hasAttribute("hidden")).toBe(false);
-  expect(original?.hasAttribute("data-fullscreen")).toBe(true);
+  expect(original?.hasAttribute("data-maximized")).toBe(true);
   expect(within(original as HTMLElement).getByRole("button", { name: "Model library" }).getAttribute("aria-current")).toBe("page");
 });
 

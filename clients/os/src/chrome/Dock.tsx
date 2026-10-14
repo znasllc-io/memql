@@ -284,15 +284,18 @@ function AvatarMenu({ onSignOut }: { onSignOut: () => void }) {
 export function Dock({
   onOpenLauncher,
   onSignOut,
+  hidden = false,
 }: {
   onOpenLauncher: () => void;
   onSignOut: () => void;
+  hidden?: boolean;
 }) {
   const { state, actions, registry, accessEpoch, notice } = useOs();
   const { openAsk, availability } = useAsk();
   const connection = useConnectionStatus();
   const connectionTone = connectionDotTone(connection, availability);
   const [menu, setMenu] = useState<{ x: number; y: number; appId: AppId } | null>(null);
+  useEffect(() => { if (hidden) setMenu(null); }, [hidden]);
 
   // `accessEpoch` in the deps for the launcher's reason (memql#4857):
   // fixturesFor reads the effective capability set out of band, so a fixture
@@ -462,7 +465,7 @@ export function Dock({
   }
 
   return (
-    <footer className="os-dock" data-os-dock>
+    <footer className="os-dock" data-os-dock hidden={hidden}>
       <button
         type="button"
         className="os-dock-app os-dock-launcher"
@@ -532,7 +535,7 @@ export function Dock({
         <Clock />
         <AvatarMenu onSignOut={onSignOut} />
       </div>
-      {menu ? (
+      {!hidden && menu ? (
         <ContextMenu
           x={menu.x}
           y={menu.y}

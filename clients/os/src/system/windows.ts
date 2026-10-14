@@ -6,7 +6,7 @@ export type AppId = string;
 export type WindowId = string;
 export type DeskId = string;
 
-export type WindowMode = "normal" | "minimized" | "fullscreen";
+export type WindowMode = "normal" | "minimized" | "maximized" | "fullscreen";
 
 /**
  * A consumable instruction carried to an app by its window (epic memql#4842,
@@ -34,8 +34,8 @@ export interface OsWindow {
   sectionTrail?: string[];
   sectionNavigation?: { origin: "peer" | "content" | "back"; revision: number };
   /** Session-only return location for an app on its dedicated MemQL desktop. */
-  fullscreenReturn?: { deskId: DeskId; index: number };
-  minimizedFrom?: "normal" | "fullscreen";
+  expandedReturn?: { deskId: DeskId; index: number };
+  minimizedFrom?: Exclude<WindowMode, "minimized">;
   /** A standing instruction the app has not yet consumed. */
   intent?: WindowIntent;
 }

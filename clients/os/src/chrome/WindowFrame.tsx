@@ -4,7 +4,7 @@ import { TrailRow } from "../kit/TrailRow";
 import { WindowSearchContext, useWindowSearchHost } from "../kit/windowSearch";
 import { useDraggable } from "@dnd-kit/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { X, Search, ListFilter, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
+import { X, Search, ListFilter, Maximize, Maximize2, Minimize2, Minus, Settings2 } from "lucide-react";
 
 import { useDrivingCue } from "../ask/useDrivingCue";
 import { useAsk } from "../ask/AskProvider";
@@ -133,6 +133,11 @@ export function WindowFrame({
   const contextTag = `app:${manifest.id}${current ? ` section:${current.id}` : ""}`;
   // What the app noted rides on this window's Ask button; noting never opens.
   const windowAsk = useWindowAsk(contextTag);
+  const sizeAction = win.mode === "fullscreen"
+    ? `Restore ${manifest.name} to previous desktop`
+    : win.mode === "maximized"
+      ? `Make ${manifest.name} full screen`
+      : `Maximize ${manifest.name} on its own desktop`;
 
   const style: React.CSSProperties = {
     left: rect.x,
@@ -151,6 +156,7 @@ export function WindowFrame({
       data-os-window-desk={deskId}
       hidden={hidden}
       data-focused={focused || undefined}
+      data-maximized={win.mode === "maximized" || undefined}
       data-fullscreen={win.mode === "fullscreen" || undefined}
       data-dragging={isDragging || undefined}
       style={style}
@@ -233,13 +239,11 @@ export function WindowFrame({
           <button
             type="button"
             className="os-icon-button"
-            aria-label={
-              win.mode === "fullscreen" ? `Restore ${manifest.name} to previous desktop` : `Maximize ${manifest.name} on its own desktop`
-            }
-            title={win.mode === "fullscreen" ? `Restore ${manifest.name}` : `Maximize ${manifest.name} on its own desktop`}
-            onClick={() => actions.toggleFullscreen(win.id)}
+            aria-label={sizeAction}
+            title={sizeAction}
+            onClick={() => actions.cycleWindowMode(win.id)}
           >
-            {win.mode === "fullscreen" ? <Minimize2 size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
+            {win.mode === "fullscreen" ? <Minimize2 size={14} aria-hidden /> : win.mode === "maximized" ? <Maximize size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
           </button>
           <button type="button" className="os-icon-button os-window-close" aria-label={`Close ${manifest.name}`} title={`Close ${manifest.name}`} onClick={() => actions.closeWindow(win.id)}><X size={14} aria-hidden /></button>
           </div>
@@ -349,7 +353,7 @@ export function WindowFrame({
       </div>
       {menu ? <ContextMenu x={menu.x} y={menu.y} label={`${manifest.name} window actions`} onClose={() => setMenu(null)} entries={[
         ...(ownDesk && ownDesk.windows.length > 1 ? [{ id: "swap", label: "Swap sides", onSelect: () => actions.swapSides(ownDesk.id) }] : []),
-        ...state.shell.desks.filter(d => d.id !== ownDesk?.id).map((d) => ({ id: `move:${d.id}`, label: `Move to Desk ${state.shell.desks.indexOf(d) + 1}`, disabled: d.windows.length >= 2 || d.windows.some(id => !!state.shell.windows[id]?.fullscreenReturn), onSelect: () => { actions.throwToDesk(win.id, d.id); } })),
+        ...state.shell.desks.filter(d => d.id !== ownDesk?.id).map((d) => ({ id: `move:${d.id}`, label: `Move to Desk ${state.shell.desks.indexOf(d) + 1}`, disabled: d.windows.length >= 2 || d.windows.some(id => !!state.shell.windows[id]?.expandedReturn), onSelect: () => { actions.throwToDesk(win.id, d.id); } })),
         { id: "new-desk", label: "Move to a new desktop", onSelect: () => { actions.throwToDesk(win.id, "new"); } },
         ...(logs ? [{ id: "logs", label: "Logs", onSelect: () => actions.navigateSection(win.id, logs.id) }] : []),
       ]} /> : null}
