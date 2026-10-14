@@ -1,15 +1,10 @@
 package knowledge
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
-	"io/fs"
 	"sync"
 
-	"github.com/znasllc-io/memql/component/automations"
-	"github.com/znasllc-io/memql/component/automations/workflowhost"
-	"github.com/znasllc-io/memql/dsl"
+	"github.com/znasllc-io/memql/integrations/knowledge/seeddata"
 )
 
 type seedCatalog struct {
@@ -32,29 +27,7 @@ type seedCatalog struct {
 // freeze it before those packs mount. The catalog runs on the same interpreter
 // with no native operations and cannot perform effects.
 var shippedSeedCatalog = sync.OnceValue(func() seedCatalog {
-	source, err := fs.ReadFile(dsl.Tree(), "knowledge/catalog/automations.memql")
-	if err != nil {
-		panic(err)
-	}
-	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(string(source), "knowledge/catalog/automations.memql")
-	if err != nil {
-		panic(err)
-	}
-	value, err := workflowhost.Run(context.Background(), "knowledgeSeedCatalog", nil, workflowhost.Options{
-		Load: func(name string) (*automations.Automation, error) {
-			if name != a.Name {
-				return nil, fmt.Errorf("seed catalog cannot call %s", name)
-			}
-			return a, nil
-		},
-	})
-	if err != nil {
-		panic(err)
-	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		panic(err)
-	}
+	data := seeddata.CatalogJSON()
 	var encoded struct {
 		Domains   []StandardDomain
 		Wikipedia []struct {

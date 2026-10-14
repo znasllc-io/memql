@@ -8637,7 +8637,8 @@
         "served": [
           "journal",
           "live",
-          "local"
+          "local",
+          "subscription"
         ]
       }
     },

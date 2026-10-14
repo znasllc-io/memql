@@ -10,7 +10,7 @@ import { useAccountOptions } from "../accounts/tie";
 import { formatFreshness } from "../../kit/format";
 import { useNow } from "../../kit/useNow";
 import { useOsConnection } from "../../live/connection";
-import { CORPUS_GROUP_LABEL, REJECTED, UNVALIDATED, VALIDATED } from "./concepts";
+import { REJECTED, UNVALIDATED, VALIDATED } from "./concepts";
 import { chunkFromRow, groupChunksByDocument, type Chunk, type DomainMeta, type DomainRollup } from "./rows";
 
 /** The "no client" option's value. Not "" -- that is "any client". */
@@ -249,8 +249,8 @@ function DomainDetail({ domainId }: { domainId: string }) {
       )}
 
       {groups.map((group) => (
-        <section key={group.id === "" ? "corpus" : group.id} aria-label={group.label}>
-          <Subhead meta={!busy && !error ? `${group.chunks.length} loaded` : undefined}>{group.id === "" ? CORPUS_GROUP_LABEL : group.label}</Subhead>
+        <section key={group.id} aria-label={group.label}>
+          <Subhead meta={!busy && !error ? `${group.chunks.length} loaded` : undefined}>{group.label}</Subhead>
           <RecordList as="ul" label={`Chunks from ${group.label}`}>
             {group.chunks.map((chunk) => (
               <RecordRow key={chunk.id}

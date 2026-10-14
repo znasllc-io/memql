@@ -283,10 +283,7 @@ var rules = []rule{
 			// The worker's whole-call limit survives local and forwarded error
 			// wrappers as text. Unlike idle/network timeouts, waiting and sending
 			// the same workload again does not change this fixed envelope.
-			_, rest, found := strings.Cut(lower(s.ErrorMessage), "worker: model call exceeded its ")
-			limit, _, ceiling := strings.Cut(rest, " ceiling")
-			duration, err := time.ParseDuration(limit)
-			return found && ceiling && err == nil && duration > 0
+			return IsModelCallCeiling(s.ErrorMessage)
 		},
 	},
 	{
@@ -476,4 +473,13 @@ func ApprovalKindForVerdict(a Act, ev Evidence) string {
 		return ApprovalKindBudget
 	}
 	return ApprovalKindFor(a)
+}
+
+// IsModelCallCeiling recognizes the worker protocol's whole-call failure, not
+// arbitrary tool timeout prose. Its recovery safety depends on the call site.
+func IsModelCallCeiling(message string) bool {
+	_, rest, found := strings.Cut(lower(message), "worker: model call exceeded its ")
+	limit, _, ceiling := strings.Cut(rest, " ceiling")
+	duration, err := time.ParseDuration(limit)
+	return found && ceiling && err == nil && duration > 0
 }

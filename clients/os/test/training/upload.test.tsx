@@ -23,6 +23,7 @@ import {
   UNREADABLE_FILE,
   UNREADABLE_RUN,
   click,
+  chunkRow,
   domainLiteRow,
   domainRow,
   emit,
@@ -32,6 +33,7 @@ import {
   settle,
   withSession,
   type FakeConnection,
+  type FakeSeed,
 } from "./harness";
 
 // The Teach section, through the real LiveCollection.
@@ -89,7 +91,7 @@ function fakeUploads() {
 
 function mount(
   connection: FakeConnection,
-  opts: { section?: string; uploads?: UploadProvider; navigate?: () => void } = {},
+  opts: { section?: string; uploads?: UploadProvider; navigate?: () => void; role?: string } = {},
 ) {
   h.connection = connection;
   return render(
@@ -101,7 +103,7 @@ function mount(
         store={memStore()}
         {...(opts.uploads ? { uploads: opts.uploads } : {})}
       />,
-      { userId: "u-me" },
+      { userId: "u-me", role: opts.role },
     ),
   );
 }
@@ -293,6 +295,148 @@ describe("teaching a domain", () => {
     const teach = within(rowFor("handbook.docx")).getByRole("button", { name: "Teach" });
     expect(teach.hasAttribute("disabled")).toBe(true);
     expect(connection.callsNamed("libraryTrainFile").length).toBe(0);
+  });
+
+  it("lets an owner teach the first domain, trimming the exact key and refusing whitespace", async () => {
+    const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN] });
+    await open(connection);
+    const input = screen.getByRole("textbox", { name: /Knowledge domain/ });
+    const teach = screen.getByRole("button", { name: "Teach" });
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(teach).toHaveProperty("disabled", true);
+    expect(connection.callsNamed("libraryTrainFile")).toHaveLength(0);
+    fireEvent.change(input, { target: { value: "  software-development  " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await settle();
+    expect(connection.callsNamed("libraryTrainFile")).toEqual(['builtin libraryTrainFile(fileId: "file-1", domainId: "software-development")']);
+    expect(screen.getByText("Teaching recorded. New passages await review.")).toBeTruthy();
+    expect(connection.callsNamed("setChunkValidationStatus")).toHaveLength(0);
+    expect(connection.callsNamed("createKnowledgeDomain")).toHaveLength(0);
+  });
+
+  it("keeps the known-domain picker and lets an owner return to it after entering a domain", async () => {
+    const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN], domainCatalog: [domainRow({ id: "domain-sales", name: "Sales" })] });
+    await open(connection);
+    expect(screen.getByRole("combobox", { name: /Knowledge domain/ })).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: /Knowledge domain/ })).toBeNull();
+    await click(screen.getByRole("button", { name: "Enter a domain" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Knowledge domain/ }), { target: { value: "unsubmitted" } });
+    await click(screen.getByRole("button", { name: "Choose a domain" }));
+    expect(screen.getByRole("combobox", { name: /Knowledge domain/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Teach" })).toHaveProperty("disabled", true);
+    expect(connection.callsNamed("libraryTrainFile")).toHaveLength(0);
+  });
+
+  it.each(["admin", "developer", "writer", ""])("does not offer first-domain entry to role %s", async role => {
+    const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN] });
+    mount(connection, { role }); await settle();
+    await click(screen.getByRole("button", { name: "Teach a domain" }));
+    expect(screen.queryByRole("textbox", { name: /Knowledge domain/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Teach" })).toBeNull();
+    await click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Teach a domain" })).toBeTruthy();
+    expect(connection.callsNamed("libraryTrainFile")).toHaveLength(0);
+  });
+
+  it("preserves the entered domain and displays the server refusal without publishing", async () => {
+    const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN], trainError: "Embedding service is unavailable." });
+    await open(connection);
+    fireEvent.change(screen.getByRole("textbox", { name: /Knowledge domain/ }), { target: { value: "software-development" } });
+    await click(screen.getByRole("button", { name: "Teach" }));
+    expect(screen.getByText("Embedding service is unavailable.")).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: /Knowledge domain/ })).toHaveProperty("value", "software-development");
+    expect(screen.queryByText("Teaching recorded. New passages await review.")).toBeNull();
+    expect(connection.callsNamed("setChunkValidationStatus")).toHaveLength(0);
+  });
+
+  it("keeps a non-owner's known-domain choice subject to the existing server authorization", async () => {
+    const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN], domainCatalog: [domainRow({ id: "domain-sales", name: "Sales" })], trainError: "Not authorized to write to this domain." });
+    mount(connection, { role: "writer" }); await settle();
+    await click(screen.getByRole("button", { name: "Teach a domain" }));
+    expect(screen.queryByRole("button", { name: "Enter a domain" })).toBeNull();
+    await click(screen.getByRole("combobox", { name: /Knowledge domain/ }));
+    await click(screen.getByRole("option", { name: "Sales" }));
+    await click(screen.getByRole("button", { name: "Teach" }));
+    expect(connection.callsNamed("libraryTrainFile")).toHaveLength(1);
+    expect(screen.getByText("Not authorized to write to this domain.")).toBeTruthy();
+    expect(connection.callsNamed("setChunkValidationStatus")).toHaveLength(0);
+  });
+
+  it("withdraws free entry when the owner role changes before submission", async () => {
+    const connection = fakeConnection({ files: [READY_FILE], runs: [READY_RUN] });
+    const view = mount(connection); await settle();
+    await click(screen.getByRole("button", { name: "Teach a domain" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Knowledge domain/ }), { target: { value: "software-development" } });
+    view.rerender(withSession(<TrainingApp sectionId="upload" navigate={vi.fn()} askContext={vi.fn()} store={memStore()} />, { role: "writer" }));
+    expect(screen.queryByRole("textbox", { name: /Knowledge domain/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Teach" })).toBeNull();
+    expect(connection.callsNamed("libraryTrainFile")).toHaveLength(0);
+  });
+
+  it("records repeated teaching without claiming new pending chunks", async () => {
+    const connection = fakeConnection({ files: [TRAINED_FILE], domainCatalog: [domainRow({ id: "domain-sales", name: "Sales" })], domainRows: [domainLiteRow("domain-sales", "validated")] });
+    mount(connection); await settle();
+    await click(screen.getByRole("button", { name: "Teach another" }));
+    await click(screen.getByRole("combobox", { name: /Knowledge domain/ }));
+    await click(screen.getByRole("option", { name: "Sales" }));
+    await click(screen.getByRole("button", { name: "Teach" }));
+    expect(connection.callsNamed("libraryTrainFile")).toHaveLength(1);
+    expect(screen.getByText("Teaching recorded. New passages await review.")).toBeTruthy();
+    expect(connection.callsNamed("documentChunksForDomain")).toHaveLength(0);
+    expect(connection.callsNamed("setChunkValidationStatus")).toHaveLength(0);
+  });
+
+  it("disables another file's Teach action while a teaching request is in flight", async () => {
+    const connection = fakeConnection({ files: [READY_FILE, { ...READY_FILE, id: "file-2", name: "second.md" }], runs: [READY_RUN] });
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    const calls = vi.mocked(connection.query.executeNamed);
+    const execute = calls.getMockImplementation()!;
+    calls.mockImplementation(async (name, call, opts) => {
+      if (call.startsWith("builtin libraryTrainFile(")) await waiting;
+      return execute(name, call, opts);
+    });
+    mount(connection); await settle();
+    await click(within(rowFor("handbook.docx")).getByRole("button", { name: "Teach a domain" }));
+    await click(within(rowFor("second.md")).getByRole("button", { name: "Teach a domain" }));
+    const first = within(rowFor("handbook.docx"));
+    const second = within(rowFor("second.md"));
+    fireEvent.change(first.getByRole("textbox"), { target: { value: "software-development" } });
+    fireEvent.change(second.getByRole("textbox"), { target: { value: "software-development" } });
+    await click(first.getByRole("button", { name: "Teach" }));
+    expect(second.getByRole("button", { name: "Teach" })).toHaveProperty("disabled", true);
+    fireEvent.keyDown(second.getByRole("textbox"), { key: "Enter" });
+    expect(calls.mock.calls.filter(([, call]) => call.startsWith("builtin libraryTrainFile("))).toHaveLength(1);
+    await act(async () => { release(); }); await settle();
+    expect(second.getByRole("button", { name: "Teach" })).toHaveProperty("disabled", false);
+  });
+
+  it("refreshes the first pending chunks and offers Review without making a decision", async () => {
+    const seed: FakeSeed = { files: [READY_FILE], runs: [READY_RUN], domainRows: [] };
+    const connection = fakeConnection(seed);
+    const navigate = vi.fn();
+    const view = mount(connection, { navigate }); await settle();
+    await click(screen.getByRole("button", { name: "Teach a domain" }));
+    fireEvent.change(screen.getByRole("textbox", { name: /Knowledge domain/ }), { target: { value: "software-development" } });
+    seed.domainRows = [domainLiteRow("software-development", "unvalidated")];
+    seed.chunkPages = { "software-development": [[chunkRow({ id: "lesson", domainId: "software-development", source: "fileUpload", sourceRef: "artifact:lesson", text: "Prove persisted workflow metadata through the real schema.", validationStatus: "unvalidated" })]] };
+    const reads = connection.callsNamed("allDocumentChunkDomains").length;
+    await click(screen.getByRole("button", { name: "Teach" }));
+    expect(connection.callsNamed("allDocumentChunkDomains").length).toBeGreaterThan(reads);
+    await click(screen.getByRole("button", { name: "Review" }));
+    expect(navigate).toHaveBeenCalledWith("review");
+    view.rerender(withSession(<TrainingApp sectionId="review" navigate={navigate} askContext={vi.fn()} store={memStore()} />));
+    await settle();
+    expect(screen.getByText("Prove persisted workflow metadata through the real schema.")).toBeTruthy();
+    expect(screen.getByText("artifact:lesson")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Approve chunk lesson" })).toBeTruthy();
+    expect(connection.callsNamed("setChunkValidationStatus")).toHaveLength(0);
+    view.rerender(withSession(<TrainingApp sectionId="upload" navigate={navigate} askContext={vi.fn()} store={memStore()} />));
+    await settle();
+    await click(screen.getByRole("button", { name: "Teach a domain" }));
+    expect(screen.getByRole("combobox", { name: /Knowledge domain/ })).toBeTruthy();
+    expect(connection.callsNamed("setChunkValidationStatus")).toHaveLength(0);
   });
 });
 

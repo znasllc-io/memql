@@ -18,6 +18,8 @@ import (
 const Contract = "workerHost.computer_permission"
 const Version = 1
 
+const defaultCommandTimeoutSeconds = 60
+
 // Scope is produced by the server, never copied from a model's approval subject.
 type Scope struct {
 	Version        int      `json:"version"`
@@ -132,7 +134,7 @@ func CommandInput(args map[string]any) (command, cwd string, seconds int, err er
 	}
 	command, _ = args["cmd"].(string)
 	cwd, _ = args["cwd"].(string)
-	seconds = 60
+	seconds = defaultCommandTimeoutSeconds
 	if strings.TrimSpace(command) == "" || !CleanAbsolute(cwd) {
 		return "", "", 0, fmt.Errorf("command permission needs an exact command and explicit working directory")
 	}
@@ -156,7 +158,26 @@ func (s Scope) Matches(req Request, mode string) bool {
 	}
 	if s.Kind == "exact_command" {
 		cmd, cwd, timeout, err := CommandInput(req.Args)
-		return err == nil && req.Action == s.Action && h == s.ArgsHash && cmd == s.Command && cwd == s.CWD && timeout == s.TimeoutSeconds
+		if err != nil || req.Action != s.Action || cmd != s.Command || cwd != s.CWD || timeout != s.TimeoutSeconds {
+			return false
+		}
+		if h == s.ArgsHash {
+			return true
+		}
+		// Only the optional timeout's two encodings have the same meaning.
+		// CommandInput has rejected every other key and invalid value, and
+		// both the reviewed scope and this invocation resolve to the default.
+		// Keep Hash and dispatch args raw: Cockpit still verifies the exact
+		// bytes sent, and older replicas can only refuse this equivalence.
+		if timeout != defaultCommandTimeoutSeconds {
+			return false
+		}
+		equivalent := map[string]any{"cmd": cmd, "cwd": cwd}
+		if _, explicit := req.Args["timeoutSec"]; !explicit {
+			equivalent["timeoutSec"] = defaultCommandTimeoutSeconds
+		}
+		equivalentHash, err := Hash(req.Tool, req.Action, equivalent)
+		return err == nil && equivalentHash == s.ArgsHash
 	}
 	p, _ := req.Args["path"].(string)
 	if !ReadAction(req.Action) || !Within(s.Directory, p) {

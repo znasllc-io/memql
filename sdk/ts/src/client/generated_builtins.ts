@@ -98,6 +98,35 @@ QueryClient.prototype.askConversationSnapshot = function (this: QueryClient, arg
   return this.executeNamed("askConversationSnapshot", buildAskConversationSnapshot(args), opts);
 };
 
+/** Record guidance for owned running work in its existing conversation. This starts no goal and grants no permission; the existing agent receives the message at its next safe reasoning boundary. Retries reuse requestId. */
+export interface AskGuideWorkArgs {
+  targetEpoch: string;
+  runId: string;
+  conversationId: string;
+  requestId: string;
+  prompt: string;
+}
+
+export function buildAskGuideWork(args: AskGuideWorkArgs): string {
+  const parts: string[] = [];
+  parts.push("targetEpoch: " + renderMemQLValue(args.targetEpoch));
+  parts.push("runId: " + renderMemQLValue(args.runId));
+  parts.push("conversationId: " + renderMemQLValue(args.conversationId));
+  parts.push("requestId: " + renderMemQLValue(args.requestId));
+  parts.push("prompt: " + renderMemQLValue(args.prompt));
+  return "builtin askGuideWork(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    askGuideWork(args: AskGuideWorkArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.askGuideWork = function (this: QueryClient, args: AskGuideWorkArgs = {} as AskGuideWorkArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("askGuideWork", buildAskGuideWork(args), opts);
+};
+
 /** Open this owner's existing work in its Ask conversation, creating a private conversation for Nexus-originated work without starting another run. */
 export interface AskWorkConversationArgs {
   runId: string;
@@ -2079,6 +2108,27 @@ declare module "./query.js" {
 
 QueryClient.prototype.integrationStatus = function (this: QueryClient, args: IntegrationStatusArgs = {} as IntegrationStatusArgs, opts?: QueryCallOptions): Promise<Result> {
   return this.executeNamed("integrationStatus", buildIntegrationStatus(args), opts);
+};
+
+/** Install only selected registered capability manuals. Explicit cluster-owner operation; no domain catalog creation or generated content. Returns per-domain ready, preserved, embedded and olderPublished counts. */
+export interface KnowledgeInstallCapabilityCorporaArgs {
+  domainIds: string[];
+}
+
+export function buildKnowledgeInstallCapabilityCorpora(args: KnowledgeInstallCapabilityCorporaArgs): string {
+  const parts: string[] = [];
+  parts.push("domainIds: " + renderMemQLValue(args.domainIds));
+  return "builtin knowledgeInstallCapabilityCorpora(" + parts.join(", ") + ")";
+}
+
+declare module "./query.js" {
+  interface QueryClient {
+    knowledgeInstallCapabilityCorpora(args: KnowledgeInstallCapabilityCorporaArgs, opts?: QueryCallOptions): Promise<Result>;
+  }
+}
+
+QueryClient.prototype.knowledgeInstallCapabilityCorpora = function (this: QueryClient, args: KnowledgeInstallCapabilityCorporaArgs = {} as KnowledgeInstallCapabilityCorporaArgs, opts?: QueryCallOptions): Promise<Result> {
+  return this.executeNamed("knowledgeInstallCapabilityCorpora", buildKnowledgeInstallCapabilityCorpora(args), opts);
 };
 
 /** The MemQL line this cluster speaks, the forms it deprecates, and where the DSL it loaded still spells one. ONE row: language, edition, status (frozen or draft), grammarVersion, editorRelease, deprecationWindowMinors, and forms[] with rule, spelling, replacement, migrator, deprecatedIn, refusedFrom (a floor, not a date), state (deprecated | refused) and uses[] (file, line, column, text). The uses are the answering node's last load; every mesh node mounts the same tree, so any of them answers for the cluster. */

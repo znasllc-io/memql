@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -118,4 +119,65 @@ func TestServer_StopForcesAHeldStreamAfterTheGracefulBound(t *testing.T) {
 	}
 
 	stopWithin(t, srv, 3*time.Second)
+}
+
+// The explicit pre-database stop and the later dependency sweep may overlap.
+// A short/already-cancelled caller must not leave the captured server serving
+// until the independent five-second graceful timer fires.
+func TestServer_StopDeadlineClosesTransportBeforeReturning(t *testing.T) {
+	for _, cancelled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "deadline", true: "cancelled"}[cancelled], func(t *testing.T) {
+			held := make(chan struct{})
+			srv := newShutdownTestServer(t, func(_ any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, _ grpc.StreamHandler) error {
+				close(held)
+				<-ss.Context().Done()
+				return ss.Context().Err()
+			})
+			t.Cleanup(func() { srv.Stop(context.Background()) })
+			conn, err := grpc.NewClient(srv.listener.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			stream, err := memqlv1.NewMemqlServiceClient(conn).Stream(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-held:
+			case <-time.After(5 * time.Second):
+				t.Fatal("stream not admitted")
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+			defer cancel()
+			if cancelled {
+				cancel()
+			}
+			var stops sync.WaitGroup
+			for range 4 {
+				stops.Go(func() { srv.Stop(ctx) })
+			}
+			done := make(chan struct{})
+			go func() { stops.Wait(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("concurrent Stop exceeded the short caller bound")
+			}
+			received := make(chan error, 1)
+			go func() { _, err := stream.Recv(); received <- err }()
+			select {
+			case err := <-received:
+				if err == nil {
+					t.Fatal("stopped transport returned a successful frame")
+				}
+			case <-time.After(time.Second):
+				t.Fatal("Stop returned while the held transport was still open")
+			}
+			srv.Stop(context.Background()) // the ordinary dependency sweep is safe
+			if srv.IsRunning() {
+				t.Fatal("repeated Stop left the lifecycle running")
+			}
+		})
+	}
 }

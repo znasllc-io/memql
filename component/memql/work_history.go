@@ -36,13 +36,16 @@ func workHistoryPage(message any, search string, offset, limit int, explicitOffs
 		return nil, false
 	}
 	text := string(raw)
-	match := strings.Index(strings.ToLower(text), search)
+	match := 0
+	if search != "" {
+		match = workHistorySearchPosition(text, search)
+	}
 	if search != "" && match < 0 {
 		return nil, false
 	}
 	runes := []rune(text)
 	if !explicitOffset && search != "" {
-		offset = max(0, utf8.RuneCountInString(strings.ToLower(text)[:match])-120)
+		offset = max(0, utf8.RuneCountInString(text[:match])-120)
 	}
 	offset = min(max(0, offset), len(runes))
 	end := offset + min(limit, len(runes)-offset)

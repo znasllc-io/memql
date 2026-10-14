@@ -7,7 +7,6 @@ import {
   Fragment,
   isValidElement,
   useEffect,
-  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -826,23 +825,21 @@ export function Select({
   );
 }
 
-/** A quiet order menu, shared by lists. Settings still owns the default. */
+/** Two orders, one direct toggle. Settings still owns the default. */
 export function SortControl({ ascending, onToggle, descLabel = "Newest first", ascLabel = "Oldest first" }: {
   ascending: boolean;
   onToggle: () => void;
   descLabel?: string;
   ascLabel?: string;
 }) {
-  const id = useId();
   const Glyph = ascending ? ArrowUpWideNarrow : ArrowDownWideNarrow;
-  return <div className="os-sort">
+  const current = ascending ? ascLabel : descLabel;
+  const next = ascending ? descLabel : ascLabel;
+  return <button type="button" className="os-sort" onClick={onToggle}
+    aria-label={`Sort order: ${current}`} title={`Switch to ${next.toLowerCase()}`}>
     <Glyph size={14} aria-hidden />
-    <Select id={id} label="Sort order" value={ascending ? "ascending" : "descending"}
-      onChange={value => { if ((value === "ascending") !== ascending) onToggle(); }}>
-      <option value="descending">{descLabel}</option>
-      <option value="ascending">{ascLabel}</option>
-    </Select>
-  </div>;
+    <span>{current}</span>
+  </button>;
 }
 
 /** One active constraint shown while Refine is collapsed; removable in place. */

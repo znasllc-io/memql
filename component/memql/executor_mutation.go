@@ -915,9 +915,12 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	var organizationPrior map[string]any
 
 	id := strings.TrimSpace(mutation.ID)
+	// Knowledge publication and review must serialize with canonical-seed
+	// reconciliation, including ordinary client review writes. Otherwise a
+	// late repair could overwrite a rejection read on another replica.
 	// Observation and business writers share the same version fence. A pulse
 	// must never replace fields merged before another replica changed them.
-	if (len(rowVersionFences(ctx)) > 0 || memorynodes.HasLiveness(conceptMeta.Name) || conceptMeta.Name == inboundRequestConcept) && id != "" {
+	if (len(rowVersionFences(ctx)) > 0 || conceptMeta.Name == "v1:knowledge:documentChunk" || memorynodes.HasLiveness(conceptMeta.Name) || conceptMeta.Name == inboundRequestConcept) && id != "" {
 		var err error
 		ctx, err = e.fenceWriteTarget(ctx, conceptMeta.Name, id)
 		if err != nil {

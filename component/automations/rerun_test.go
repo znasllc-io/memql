@@ -774,7 +774,7 @@ func TestAReplayedOverrideNeverReachesAnotherStep(t *testing.T) {
 }
 
 // A failure retry can be planned before the downstream steps exist. After
-// recovery reaches human review, another replica must serve those newly
+// recovery reaches a later failed step, another replica must serve those newly
 // completed steps, not interpret their absent version floors as a fresh rerun.
 func TestPartialRerunPlanPreservesCompletedDownstreamSteps(t *testing.T) {
 	for _, status := range []string{"done", "skipped"} {
@@ -788,7 +788,7 @@ func TestPartialRerunPlanPreservesCompletedDownstreamSteps(t *testing.T) {
 			if status == "skipped" {
 				steps[1]["result"] = map[string]any{"stepId": "b", "status": "skipped"}
 			}
-			steps[2]["status"] = "waiting"
+			steps[2]["status"] = "failed"
 			probe, rec, _ := runAgain(t, run, steps)
 			if got := probe.callees(); !reflect.DeepEqual(got, []string{"publish"}) {
 				t.Fatalf("resumed calls %v: completed downstream steps must be served from their receipts", got)
@@ -798,6 +798,102 @@ func TestPartialRerunPlanPreservesCompletedDownstreamSteps(t *testing.T) {
 				if name == "createWorkStep" && (args["key"] == "a" || args["key"] == "b") {
 					t.Fatalf("a completed step received another intent: %s", c)
 				}
+			}
+		})
+	}
+}
+
+// Explicit rerun permission authorizes the new version, not repeated effects
+// after that version asks a person. Even a missing answer must fail closed.
+func TestWaitingRerunNeverFallsBackToRepeatedEffects(t *testing.T) {
+	for _, answer := range []string{"", "answered-but-no-native-proof"} {
+		t.Run(answer, func(t *testing.T) {
+			run, rows := finishedRun("waiting-rerun")
+			run["status"], run["rerun"], run["humanResumeId"] = "running", rerunRequest(RerunReasonRerun, "publish", nil), answer
+			rows[2]["status"] = "waiting"
+			probe := newRunContextProbe()
+			rec, execution, err := runAgainWith(t, probe, run, rows)
+			if !errors.Is(err, ErrNonRetryableStep) || execution != nil || len(probe.callees()) != 0 || len(rec.all()) != 0 {
+				t.Fatalf("unproven waiting version executed: execution=%v calls=%v writes=%v error=%v", execution, probe.callees(), rec.all(), err)
+			}
+		})
+	}
+}
+
+// A version floor distinguishes a new public rerun from an answered wait
+// inside that rerun. Missing or inconsistent proof must retain the checkpoint
+// gate, including branches whose floors belong to their source run.
+func TestNewRerunDistinguishesAnOlderWaitingVersion(t *testing.T) {
+	for _, mode := range []string{"new-version", "same-version", "unknown-version", "missing-floor", "missing-request", "different-request", "different-floor", "different-context", "retained-answer", "branch", "different-reason", "newer-attempt"} {
+		t.Run(mode, func(t *testing.T) {
+			run, rows := finishedRun("new-waiting-version")
+			request := rerunRequest(RerunReasonRerun, "b", map[string]any{"requestedBy": "u1"})
+			request["versions"] = map[string]any{"b": float64(2), "publish": float64(2)}
+			run["status"], run["rerun"] = "running", request
+			rows[1]["status"] = "waiting"
+			auto := statementAutomation(t, rerunSource)
+			journal, err := runJournalFromRows(run, rows)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resume, opts, err := PrepareRerun(journal, nil, auto)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Keep the selected step fixed to exercise admission itself, and
+			// make options independent of the persisted request.
+			spec := *opts.Rerun
+			spec.Versions = map[string]int{"b": 2, "publish": 2}
+			opts.Rerun, opts.FromStep = &spec, "b"
+			runContext := common.RunContext{RunId: journal.RunId, GoalId: journal.GoalId, OwnerUserId: journal.OwnerUserId, Mode: common.RunModeLive, RerunRequestId: spec.RequestId}
+			switch mode {
+			case "same-version":
+				state := resume.StepStates["b"]
+				state.Version = 2
+				resume.StepStates["b"] = state
+				resume.MaxAttempt["b"] = 2
+			case "unknown-version":
+				state := resume.StepStates["b"]
+				state.Version = 0
+				resume.StepStates["b"] = state
+			case "missing-floor":
+				delete(spec.Versions, "b")
+			case "missing-request":
+				spec.RequestId = ""
+			case "different-request":
+				spec.RequestId = "different"
+			case "different-floor":
+				spec.Versions["b"] = 3
+			case "different-context":
+				runContext.RerunRequestId = "different"
+			case "retained-answer":
+				resume.HumanResumeId = "old-answer"
+			case "branch":
+				spec.Reason, resume.Rerun.Reason = RerunReasonBranch, RerunReasonBranch
+			case "different-reason":
+				resume.Rerun.Reason = RerunReasonBranch
+			case "newer-attempt":
+				resume.MaxAttempt["b"] = 2
+			}
+			probe, rec := newRunContextProbe(), &journalRecorder{}
+			executor := NewExecutor(ExecutorOptions{StepRegistry: probe})
+			defer executor.Close()
+			executor.journal = newWorkJournal(rec, nil)
+			execution, err := executor.ResumeFrom(common.ContextWithRun(context.Background(), runContext), resume, auto, opts)
+			if mode != "new-version" {
+				if !errors.Is(err, ErrNonRetryableStep) || execution != nil || len(probe.callees()) != 0 || len(rec.all()) != 0 {
+					t.Fatalf("unproven new version executed: execution=%v calls=%v writes=%v error=%v", execution, probe.callees(), rec.all(), err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := probe.callees(); !reflect.DeepEqual(got, []string{"draft", "publish"}) {
+				t.Fatalf("new version calls=%v; completed prefix must remain served", got)
+			}
+			if got := stepVersion(intentOf(t, rec, "b")); got != 2 {
+				t.Fatalf("new version=%d, want 2", got)
 			}
 		})
 	}

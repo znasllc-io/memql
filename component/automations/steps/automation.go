@@ -121,10 +121,21 @@ func (e *AutomationExecutor) Execute(ctx context.Context, step *automations.Step
 	// A person's inputs for this version (epic memql#5414) replace the
 	// evaluated arguments they name, and may name one the call left out.
 	callArgs = withOverrideInputs(ctx, callArgs)
-	if len(callArgs) > 0 {
+	if stepCtx.ResumeChild != nil && stepCtx.ResumeChildStepID == step.ID {
+		execResult, err = stepCtx.ResumeChild(ctx, step.ID, automationName, callArgs)
+	} else if len(callArgs) > 0 {
+		if stepCtx.Execution != nil {
+			ctx = automations.ContextWithAutomationParent(ctx, stepCtx.Execution.ID)
+		}
 		execResult, err = stepCtx.AutomationTrigger.TriggerAutomationWithArgs(ctx, automationName, callArgs)
 	} else {
+		if stepCtx.Execution != nil {
+			ctx = automations.ContextWithAutomationParent(ctx, stepCtx.Execution.ID)
+		}
 		execResult, err = stepCtx.AutomationTrigger.TriggerAutomation(ctx, automationName)
+	}
+	if execResult != nil {
+		result.Metadata = map[string]any{"automation": automationName, "executionId": execResult.ID}
 	}
 	if err != nil {
 		result.Status = "failed"

@@ -341,12 +341,22 @@ func (i *Integration) revisionRequest(ctx context.Context, requestID string) (wo
 	if err != nil {
 		return ids, nil, nil, nil, err
 	}
+	if run == nil {
+		return ids, nil, nil, nil, fmt.Errorf("revision execution is unavailable")
+	}
 	approvals, err := i.revisionRows(ctx, "workApprovalsForOwnedRun", map[string]any{"runId": ids.RunID})
 	var approval map[string]any
 	ids.ApprovalID = ""
 	for _, candidate := range approvals {
 		subject := revisionMap(candidate["subject"])
 		if candidate["kind"] == workstate.ApprovalKindPlanReview && subject["reviewType"] == documentReviewType && subject["requestId"] == requestID {
+			// A rerun retains its earlier review receipts for audit. Select only the
+			// exact execution generation the current run owns, without guessing from
+			// timestamps or accepting an old answer as authority for fresh analysis.
+			expected := workstate.HumanQuestionID(memql.BareShortId(ids.RunID), asString(candidate["stepKey"]), workstate.ApprovalKindPlanReview, workstate.ArtifactHash(subject), asString(revisionMap(run["rerun"])["requestId"]))
+			if memql.BareShortId(asString(candidate["id"])) != expected {
+				continue
+			}
 			if approval != nil {
 				return ids, nil, nil, nil, fmt.Errorf("revision has conflicting approval receipts")
 			}

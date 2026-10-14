@@ -29,3 +29,22 @@ func TestAgentToolResultKeepsEvidenceWithoutProtocolEscaping(t *testing.T) {
 	_, err = agentToolResultText("malformed")
 	require.Error(t, err)
 }
+
+func TestAgentWorkerFailureKeepsOutputWithoutRetry(t *testing.T) {
+	text := `{"data":[{"worker-call:1":{"concept":"integration:worker:result","payload":{"ok":false,"errorCode":"exec_timeout","errorMessage":"Unknown outcome; inspect before repeating","output":{"stdout":"partial evidence"}}}}]}`
+	for _, marked := range []bool{false, true} {
+		raw, err := json.Marshal(memql.ToolCallResult{IsError: marked, Content: []memql.ToolResultContent{{Type: "text", Text: text}}})
+		require.NoError(t, err)
+		out, err := agentToolResultText(string(raw))
+		if !marked {
+			require.NoError(t, err, "ordinary data cannot manufacture an error")
+			require.Equal(t, text, out)
+			continue
+		}
+		require.Error(t, err)
+		require.Equal(t, text, out, "a failed operation may still have output to preserve")
+		failure := memql.ClassifyToolError(err)
+		require.False(t, failure.Retryable)
+		require.Contains(t, failure.JSON(), "partial evidence")
+	}
+}

@@ -43,7 +43,7 @@ func workTurnHistory(ctx context.Context, engine interface {
 		return nil, nil
 	}
 	call, _ := parser.RenderCall("workRunForOwner", map[string]any{"runId": run.RunId})
-	result, err := engine.Execute(ctx, "query "+call)
+	result, err := engine.Execute(memql.ContextWithFreshRead(ctx), "query "+call)
 	if err != nil {
 		return nil, err
 	}
@@ -86,10 +86,71 @@ func workTurnHistory(ctx context.Context, engine interface {
 		raw, _ := json.Marshal(map[string]any{"question": question["question"], "answer": question["answer"], "decidedAt": question["decidedAt"]})
 		history = append(history, &memqlv1.AgentTurnMessage{Role: "user", Content: "[Recorded answer for this run; continue using this answer without asking it again]\n" + string(raw)})
 	}
+	decision, err := workContinuationAnswer(ctx, engine, run, rows[0])
+	if err != nil {
+		return nil, err
+	}
+	if decision != nil {
+		history = append(history, decision)
+	}
 	for _, m := range memql.StepOverrideMessages(ctx) {
 		history = append(history, &memqlv1.AgentTurnMessage{Role: m.Role, Content: m.Content})
 	}
 	return history, nil
+}
+
+// Feedback questions have their own history query. A native permission or
+// budget continuation also needs its exact recorded decision in the model's
+// context. This receipt describes the answer; the continuation and worker
+// admission gates remain responsible for authorizing every operation.
+func workContinuationAnswer(ctx context.Context, engine interface {
+	Execute(context.Context, string) (*memql.ExecuteResult, error)
+}, run common.RunContext, row map[string]any) (*memqlv1.AgentTurnMessage, error) {
+	proof := run.Continuation
+	if proof == nil {
+		return nil, nil
+	}
+	if proof.ApprovalID == "" || proof.StepKey == "" || proof.StepKey != run.StepKey || !run.Override.Empty() ||
+		memql.BareShortId(asString(row["humanResumeId"])) != memql.BareShortId(proof.ApprovalID) {
+		return nil, fmt.Errorf("work context: the recorded decision does not match this continuation")
+	}
+	call, err := parser.RenderCall("workApprovalForOwner", map[string]any{"approvalId": proof.ApprovalID})
+	if err != nil {
+		return nil, err
+	}
+	result, err := engine.Execute(memql.ContextWithFreshRead(ctx), "query "+call)
+	if err != nil {
+		return nil, fmt.Errorf("work context: reading the continuation decision: %w", err)
+	}
+	decisions := memql.MaterializeRows(result)
+	if len(decisions) != 1 {
+		return nil, fmt.Errorf("work context: the continuation decision is unavailable")
+	}
+	a := decisions[0]
+	if memql.BareShortId(asString(a["id"])) != memql.BareShortId(proof.ApprovalID) ||
+		memql.BareShortId(asString(a["runId"])) != memql.BareShortId(run.RunId) || asString(a["stepKey"]) != run.StepKey {
+		return nil, fmt.Errorf("work context: the recorded decision belongs to another execution")
+	}
+	if a["kind"] == "feedback" && a["decision"] == "answered" {
+		return nil, nil // Already included by workQuestionsForOwnerRun above.
+	}
+	subject, _ := a["subject"].(map[string]any)
+	answer, _ := a["answer"].(map[string]any)
+	permissionGuidance := a["decision"] == "answered" &&
+		memql.BareShortId(asString(a["decidedBy"])) == memql.BareShortId(run.OwnerUserId) &&
+		memql.WorkPermissionGuidance(asString(a["kind"]), subject, answer, asString(a["artifactHash"]))
+	if !permissionGuidance && (a["decision"] != "approved" || (a["kind"] != "scopeElevation" && a["kind"] != "budget")) {
+		return nil, fmt.Errorf("work context: the continuation has no approval or typed-scope correction")
+	}
+	raw, err := json.Marshal(map[string]any{
+		"approvalId": proof.ApprovalID, "kind": a["kind"], "decision": a["decision"],
+		"question": a["question"], "subject": a["subject"], "answer": a["answer"], "decidedAt": a["decidedAt"],
+		"permissionUsedAt": a["permissionUsedAt"], "permissionRevokedAt": a["permissionRevokedAt"],
+	})
+	if err != nil {
+		return nil, fmt.Errorf("work context: encoding the continuation decision: %w", err)
+	}
+	return &memqlv1.AgentTurnMessage{Role: "user", Content: "[Recorded answer for this suspended step; this receipt does not grant additional permission or prove an operation executed. The platform still checks the exact scope, remaining use, revocation and budget before execution.]\n" + string(raw)}, nil
 }
 
 // descriptionGuidance renders the owner's earlier dislikes on this run's goal

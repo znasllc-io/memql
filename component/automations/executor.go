@@ -184,6 +184,11 @@ type AutomationTrigger interface {
 
 // StepContext holds the context for step execution.
 type StepContext struct {
+	// ResumeChild exists only for a proven suspended automation call. It never
+	// authorizes an ordinary invocation or a different child/argument set.
+	ResumeChildStepID string
+	ResumeChild       func(context.Context, string, string, map[string]any) (*AutomationExecution, error)
+
 	Logger            *slog.Logger
 	Engine            *memql.MemQLEngine
 	EventBus          *events.Bus
@@ -440,6 +445,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 
 	exec := NewExecution(automation.Name, triggeredBy)
+	exec.journalFingerprint = automation.DefinitionFingerprint(fingerprintEngine)
 	if adopt != nil {
 		exec.ID = adopt.RunId
 	}
@@ -932,6 +938,11 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		stepExecCtx = e.engine.ObserveWorkCalls(callContext, cancel)
 	}
 	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)
+	if errors.Is(err, memql.ErrWorkCheckpointRequired) {
+		// A failed mandatory budget receipt is not an authored step failure:
+		// retry/on-error-continue must never spend the exhausted allowance.
+		return nil, fmt.Errorf("%w: %v", ErrJournalRequired, err)
+	}
 	if isHumanWait(err) {
 		// The question is already persisted. Suspension is neither completion
 		// nor failure and must not trigger repair automations.
@@ -1020,6 +1031,10 @@ func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, ste
 	if run, ok := common.RunFromContext(ctx); ok {
 		if memql.BareShortId(run.RunId) == memql.BareShortId(exec.ID) {
 			run.StepKey = key
+			run.RerunRequestId = ""
+			if exec.rerun != nil {
+				run.RerunRequestId = exec.rerun.RequestId
+			}
 			if run.Continuation != nil && run.Continuation.StepKey != key {
 				run.Continuation = nil
 			}

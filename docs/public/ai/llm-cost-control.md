@@ -259,6 +259,29 @@ Verdict: no loop lacks a per-turn terminal condition. The agent / engine tool
 loops have no native cross-turn cap and rely on Layer 0 (process) and Layer 4
 (per plan-lineage / work run) for cumulative bounding.
 
+### Run usage across replicas
+
+Before admission, the run guard reads fresh, paged usage summaries and counts
+an identity-based union of durable model-call receipts and local charges.
+Returning to a replica that previously ran the same work does not lose calls
+completed on a peer. Each completed request shares one receipt ID between its
+charge and journal write; rereading that receipt does not charge it again.
+Metered, subscription and local tokens keep their separate buckets.
+
+A failed journal write and an unjournaled cache hit remain counted on the
+current process. They cannot be reconstructed on another process or after
+that run's in-memory entry is evicted. The guard retains at most 2,048 run
+entries and 4,096 receipt identities per entry; reaching the receipt bound or
+failing to read every summary page refuses further calls rather than dropping
+identities. These are completed-call counters, not distributed reservations:
+simultaneous calls can be admitted before either has completed.
+
+The model-call `served` enum includes `subscription` so covered calls can be
+journaled and recovered on another replica. After those rows are written,
+rolling back to an engine whose schema lacks that value is unsafe: its schema
+can reject writes involving those rows. Keep a compatible engine during
+rollback or prepare an explicit data migration first.
+
 ### Run time limits and approved continuation
 
 A run's wall-clock deadline is a budget boundary, including when it interrupts
@@ -274,6 +297,21 @@ intersects them with the current declared limits, so an older approval cannot
 undo a later tighter limit. Waiting for human input does not consume active
 work time. Continuing a long goal uses durable checkpoints and renewed explicit
 allowances, never an unbounded model call or a reset of prior usage.
+
+An agent tool loop saves its exact completed exchanges before publishing a budget
+question. Synchronous parent and child invocations then wait on that same question;
+the saved child links and checkpoint identify the continuation on another replica.
+An answer arriving before that unwind finishes is retained until the waiting
+receipts are ready. Raising a limit gives no tool permission and does not replay
+completed effects. A failed legacy step without those links, a missing or changed
+checkpoint, or an uncertain in-flight tool outcome cannot use this continuation.
+
+The same rule applies after a person chooses **Run again** with unchanged inputs.
+That act starts a new version, but a later native question pauses that version
+rather than starting it again. Its saved progress is bound to the exact rerun
+request and survives the hop to another replica. A missing or changed request,
+checkpoint, override, or child link is refused; an older question cannot authorize
+the newer version. Prior usage and the completed prefix remain intact.
 
 ## Layer 4 — subscription spend, counted but not charged (memql#4362)
 

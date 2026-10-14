@@ -754,6 +754,9 @@ type AutomationExecution struct {
 	// execution that journals no run of its own -- a logic's statements inside
 	// a caller's run -- and every method on a nil head is a no-op.
 	head *runHead
+
+	journalFingerprint string
+	cancelRecorded     bool
 }
 
 // NewExecution creates a new automation execution.

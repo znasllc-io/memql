@@ -40,10 +40,6 @@
             "name": "knowledgeSeedCorpusExists"
           },
           {
-            "kind": "builtin",
-            "name": "knowledgePurgeSeedCorpus"
-          },
-          {
             "args": {
               "source": "appStructure"
             },
@@ -98,10 +94,6 @@
           {
             "kind": "builtin",
             "name": "knowledgeSeedCorpusExists"
-          },
-          {
-            "kind": "builtin",
-            "name": "knowledgePurgeSeedCorpus"
           },
           {
             "args": {

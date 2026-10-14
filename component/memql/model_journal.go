@@ -50,11 +50,14 @@ import (
 
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/id"
 )
 
 // JournaledCall is one v1:work:modelCall row, in the shape this package can
 // speak without importing the row's writer.
 type JournaledCall struct {
+	// ReceiptID identifies this answered request in both accounting and its durable row.
+	ReceiptID     string
 	RunId         string
 	StepKey       string
 	RequestHash   string
@@ -67,9 +70,9 @@ type JournaledCall struct {
 	OutputTokens  int
 	Cost          float64
 	LatencyMs     int
-	// Served is one of work-spine's three: "live" (a provider answered),
+	// Served is "live" (a metered provider answered),
 	// "journal" (a recorded response was replayed), "local" (a fleet model
-	// answered).
+	// answered), or "subscription" (an app covered by the owner’s subscription).
 	Served string
 	// Response is the recorded answer. `text` carries the string form, which
 	// is what both covered seams return.
@@ -272,12 +275,14 @@ func (s *modelSeam) serve(
 	}
 
 	record := func(call JournaledCall) {
+		call.ReceiptID = id.NewShortId()
 		// ONE CHARGE PER ANSWER, and this is the only place an answer is
 		// recorded: a journal hit, a live success and a live failure all
 		// reach here exactly once. Charging beside the record is what keeps
 		// the run's counted spend and the journal a reader compares it
 		// against from drifting apart.
 		s.charge(ctx, ModelSpend{
+			ReceiptID:    call.ReceiptID,
 			Served:       call.Served,
 			InputTokens:  call.InputTokens,
 			OutputTokens: call.OutputTokens,

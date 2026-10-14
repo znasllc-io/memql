@@ -4,6 +4,9 @@ import { ConversationSession, type ApprovalDiscussion, type AskTurn } from "../.
 import { AskSurface } from "../../src/ask/AskSurface";
 
 afterEach(cleanup);
+function failedAdvice(advisor = false): AskTurn {
+  return { id: "failed-advice", approvalId: "approval", advisor, prompt: "Explain the saved evidence", answer: "", state: "error", error: "The advice timed out.", startedAt: "2026-10-12T20:00:00Z", activity: [] };
+}
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 const context: ApprovalDiscussion = { conversationId: "original", approval: { id: "approval", runId: "parent", kind: "planReview", question: "How should this work continue?", status: "pending" }, canAskAdvisor: true, canSendGuidance: true };
 function setup() {
@@ -243,4 +246,88 @@ it("reopens the exact request from persisted guidance after reload and recovers 
   await waitFor(() => expect(transport.approvalGuidance).toHaveBeenCalledExactlyOnceWith("approval", feedback));
   expect(session.getSnapshot().draft).toBe("My new note after reopening");
   expect(transport.ask).not.toHaveBeenCalled(); session.dispose();
+});
+
+it.each([false, true])("edits persisted failed advice only after reopening its request, preserving advisor=%s", async advisor => {
+  const { transport, session, setTurns } = setup(); setTurns([failedAdvice(advisor)]);
+  await session.select("original"); mount(session, transport);
+  const pending = deferred<ApprovalDiscussion>(); transport.discussApproval.mockReturnValueOnce(pending.promise);
+  fireEvent.click(screen.getByRole("button", { name: advisor ? "Edit and ask another agent" : "Edit and try again" }));
+  expect(transport.discussApproval).toHaveBeenCalledExactlyOnceWith("approval");
+  expect(session.getSnapshot().draft).toBe("");
+  expect(session.send("Do not execute", null)).toBe(false);
+  await act(async () => { pending.resolve(context); });
+  const input = screen.getByRole("textbox", { name: "Ask" });
+  await waitFor(() => expect(input).toHaveProperty("value", "Explain the saved evidence"));
+  fireEvent.change(input, { target: { value: "Review the saved evidence more briefly" } });
+  fireEvent.click(screen.getByRole("button", { name: advisor ? "Ask another agent" : "Send discussion message" }));
+  await waitFor(() => expect(transport.approvalMessage).toHaveBeenCalledWith(expect.objectContaining({ approvalId: "approval", conversationId: "original", prompt: "Review the saved evidence more briefly", advisor })));
+  expect(transport.ask).not.toHaveBeenCalled(); expect(transport.approvalGuidance).not.toHaveBeenCalled(); session.dispose();
+});
+
+it("keeps a failed approval reopen from becoming ordinary execution, including Enter", async () => {
+  const { transport, session, setTurns } = setup(); setTurns([failedAdvice()]); await session.select("original");
+  session.setDraft("Keep my new draft"); transport.discussApproval.mockRejectedValueOnce(new Error("This request is unavailable.")); mount(session, transport);
+  fireEvent.click(screen.getByRole("button", { name: "Edit and try again" }));
+  expect(await screen.findByText("This request is unavailable.")).toBeTruthy();
+  const input = screen.getByRole("textbox", { name: "Ask" });
+  expect(input).toHaveProperty("value", "Keep my new draft");
+  expect(screen.getByRole("button", { name: "Send discussion message" })).toHaveProperty("disabled", true);
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(session.send("Do not execute", null)).toBe(false);
+  await expect(session.beginVoice()).rejects.toThrow("Use typing or dictation");
+  expect(transport.ask).not.toHaveBeenCalled(); expect(transport.approvalMessage).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Return to conversation" }));
+  expect(screen.getByRole("button", { name: "Send" })).toHaveProperty("disabled", false); session.dispose();
+});
+
+it.each(["approval", "another"])("discards cached approval %s before a failed retry revalidation", async previousId => {
+  const { transport, session, setTurns } = setup(); setTurns([failedAdvice()]);
+  transport.discussApproval.mockResolvedValue({ ...context, approval: { ...context.approval, id: previousId } });
+  await session.discussApproval(previousId); session.setDraft("Keep my new draft");
+  transport.discussApproval.mockRejectedValueOnce(new Error("The selected request is unavailable.")); mount(session, transport);
+  fireEvent.click(screen.getByRole("button", { name: "Edit and try again" }));
+  expect(await screen.findByText("The selected request is unavailable.")).toBeTruthy();
+  expect(session.getSnapshot().discussion).toBeNull();
+  expect(screen.queryByRole("button", { name: "Ask another agent" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Send guidance" })).toBeNull();
+  expect(session.sendDiscussion("Do not advise on the old request", true)).toBe(false);
+  expect(await session.sendGuidance()).toBe(false); expect(session.send("Do not execute", null)).toBe(false);
+  expect(transport.approvalMessage).not.toHaveBeenCalled(); expect(transport.approvalGuidance).not.toHaveBeenCalled(); expect(transport.ask).not.toHaveBeenCalled(); session.dispose();
+});
+
+it("does not replace text written while an approval retry opens", async () => {
+  const { transport, session, setTurns } = setup(); setTurns([failedAdvice(true)]); await session.select("original"); mount(session, transport);
+  const pending = deferred<ApprovalDiscussion>(); transport.discussApproval.mockReturnValueOnce(pending.promise);
+  fireEvent.click(screen.getByRole("button", { name: "Edit and ask another agent" }));
+  const input = screen.getByRole("textbox", { name: "Ask" });
+  fireEvent.change(input, { target: { value: "My newer draft" } });
+  await act(async () => { pending.resolve(context); });
+  expect(input).toHaveProperty("value", "My newer draft");
+  expect(transport.ask).not.toHaveBeenCalled(); session.dispose();
+});
+
+it.each(["select", "new", "unmount"])("ignores a delayed retry draft after %s", async navigation => {
+  const { transport, session, setTurns } = setup(); setTurns([failedAdvice()]); await session.select("original"); const view = mount(session, transport);
+  const pending = deferred<ApprovalDiscussion>(); transport.discussApproval.mockReturnValueOnce(pending.promise);
+  fireEvent.click(screen.getByRole("button", { name: "Edit and try again" }));
+  await act(async () => {
+    if (navigation === "select") await session.select("other");
+    else if (navigation === "new") session.newConversation();
+    else view.unmount();
+    if (navigation !== "unmount") session.setDraft("My newer draft");
+    pending.resolve(context);
+  });
+  expect(session.getSnapshot().draft).toBe(navigation === "unmount" ? "" : "My newer draft");
+  if (navigation !== "unmount") expect(session.getSnapshot().discussion).toBeNull();
+  expect(transport.ask).not.toHaveBeenCalled(); expect(transport.approvalMessage).not.toHaveBeenCalled(); session.dispose();
+});
+
+it.each(["answered", "different approval"])("refuses an edited retry when reopening returns %s", async outcome => {
+  const { transport, session, setTurns } = setup(); setTurns([failedAdvice()]); await session.select("original"); session.setDraft("Keep this note");
+  transport.discussApproval.mockResolvedValue(outcome === "answered" ? { ...context, approval: { ...context.approval, status: "answered" }, canAskAdvisor: false, canSendGuidance: false } : { ...context, approval: { ...context.approval, id: "other" } });
+  mount(session, transport); fireEvent.click(screen.getByRole("button", { name: "Edit and try again" }));
+  await waitFor(() => expect(session.getSnapshot().discussionOpening).toBe(false));
+  expect(session.getSnapshot().draft).toBe("Keep this note"); expect(session.send("Do not execute", null)).toBe(false);
+  expect(transport.ask).not.toHaveBeenCalled(); expect(transport.approvalMessage).not.toHaveBeenCalled(); session.dispose();
 });

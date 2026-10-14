@@ -380,6 +380,19 @@ func (j *workJournal) write(ctx context.Context, name string, args map[string]an
 		return failure
 	}
 	defer func() { j.required.fail(name, err) }()
+	if writes, ok := ctx.Value(cancellationWriteVerifierKey{}).(*cancellationWrites); ok {
+		defer func() {
+			if err != nil && writes.err == nil {
+				writes.err = err
+			}
+		}()
+		if writes.err != nil {
+			return writes.err
+		}
+		if err := writes.verify(ctx); err != nil {
+			return err
+		}
+	}
 	query, err := journalArgs(name, args)
 	if err != nil {
 		j.warn(name, err)
@@ -570,11 +583,8 @@ func (j *workJournal) openRun(ctx context.Context, automation *Automation, exec 
 		return
 	}
 	args := j.openRunArgs(automation, exec, triggeringEvent, parent)
-	if caller, ok := common.RunFromContext(ctx); ok && caller.RunId != exec.ID {
-		args["parentRunId"] = caller.RunId
-		if parent.CausationId != "" {
-			args["parentRunId"] = parent.CausationId
-		}
+	if parentID, _ := ctx.Value(automationParentKey{}).(string); parentID != "" && parentID != exec.ID {
+		args["parentRunId"] = parentID
 	}
 	if j.hold != nil {
 		args["heartbeatAt"] = rfc3339(time.Now())
@@ -745,6 +755,11 @@ func (j *workJournal) stepFinishedRowOnly(ctx context.Context, exec *AutomationE
 		"durationMs":        result.Duration.Milliseconds(),
 	}
 	if status == "waiting" {
+		if step.Type == StepTypeAutomation && result.Metadata != nil {
+			if child, _ := result.Metadata["executionId"].(string); child != "" {
+				args["childRunId"] = child
+			}
+		}
 		delete(args, "finishedAt")
 		delete(args, "resultFingerprint")
 	}

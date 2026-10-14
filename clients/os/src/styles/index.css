@@ -452,6 +452,13 @@ button:not(:disabled):active {
   background: var(--os-hover);
   color: var(--os-ink);
 }
+/* Creation stays visible before hover in every app and theme. */
+.os-icon-button.os-add-button {
+  border: 1px solid color-mix(in srgb, var(--os-muted) 55%, transparent);
+}
+.os-icon-button.os-add-button:hover:not(:disabled) {
+  border-color: var(--os-muted);
+}
 .os-window-close:hover {
   background: var(--os-error);
   color: var(--os-glass-solid);
@@ -2041,26 +2048,30 @@ button.os-row.os-record-row:focus-visible { outline: 2px solid var(--os-accent);
   flex-wrap: wrap;
 }
 
-/* A quiet sort menu with a readable current order and a clear disclosure. */
+/* Two-state sorting stays quiet, with the current order visible. */
 .os-sort {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  color: var(--os-muted);
-}
-.os-sort .os-select {
-  min-width: 116px;
-  border-color: transparent;
+  gap: 6px;
+  min-height: var(--os-control-h);
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--os-radius-xs);
   background: transparent;
-  padding-left: 6px;
   color: var(--os-muted);
+  font: inherit;
+  font-size: var(--os-text-sm);
+  white-space: nowrap;
+  cursor: pointer;
 }
-.os-sort .os-select:hover,
-.os-sort .os-select-wrap[data-open] .os-select {
-  background: var(--os-hover);
-  color: var(--os-ink);
-}
+.os-sort:hover { background: var(--os-hover); color: var(--os-ink); }
+.os-sort:focus-visible { outline: 2px solid var(--os-accent); outline-offset: 2px; }
 .os-sort > svg { flex-shrink: 0; }
+
+/* Sibling destinations and their browsing controls share one line. */
+.os-local-tabs-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 22px; }
+.os-local-tabs-row > .os-local-tabs { flex: 1 1 auto; min-width: 0; margin-bottom: 0; }
+.os-local-tabs-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 
 /* Rule 2: the Refine affordance -- search and facets behind one control,
  * active constraints as removable chips beside it while collapsed. */
@@ -4265,8 +4276,15 @@ a.os-button {
 }
 .os-train-teach {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+.os-train-domain-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 34rem;
 }
 /* A domain name is short, so the picker is sized for one rather than for the
  * row. A select that fills the width reads as the row's main content, which
@@ -4278,6 +4296,20 @@ a.os-button {
 
 /* ---- the review queue ---- */
 
+.os-train-group,
+.os-train-cards,
+.os-train-card,
+.os-train-domain,
+.os-train-domain-detail,
+.os-train-domain-detail > section,
+.os-train-domain-detail .os-row-name {
+  min-width: 0;
+}
+.os-train-card .os-chip {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .os-train-group {
   display: flex;
   flex-direction: column;
@@ -4310,6 +4342,7 @@ a.os-button {
   line-height: 1.5;
   color: var(--os-ink);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .os-train-card-actions {
   display: flex;
@@ -15369,6 +15402,13 @@ button[data-ask-control="running"], [data-ask-control="running"] > button { outl
 .os-ask-work-body { flex: 1; min-width: 0; display: grid; gap: 4px; }
 .os-ask-work-body > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--os-text-sm); font-weight: 500; }
 .os-ask-work-card > svg:last-child { margin-left: auto; flex: none; color: var(--os-muted); }
+.os-ask-work-row { display: flex; align-items: center; gap: 8px; min-width: 0; border: 1px solid var(--os-line); border-radius: var(--os-radius-sm); background: var(--os-plate); }
+.os-ask-work-row > .os-ask-work-card { flex: 1; min-width: 0; border: 0; background: transparent; }
+.os-ask-work-row > .os-ask-work-card:hover { background: var(--os-hover); }
+.os-ask-work-guide { flex: none; margin: 0 12px 0 0; font-size: var(--os-text-sm); }
+.os-ask-work-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.os-ask-work-summary > button { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+
 
 .os-ask-message .os-ask-result-context { color: var(--os-muted); font-size: var(--os-text-sm); font-weight: 500; line-height: 1.5; margin: 0 0 8px; }
 

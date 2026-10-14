@@ -179,7 +179,7 @@ automation defaultWorkSpine {
   builtin spineAcknowledge()
  }
  route := logic workSpineRoute(triage: triage)
- if triage.requiresFile && route == "sectionable" {
+ if triage.requiresFile && !triage.hasEffects && route == "sectionable" {
   automation workSpineDocumentSections()
  }
  if route != "author" {

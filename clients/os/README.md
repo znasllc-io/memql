@@ -955,6 +955,20 @@ and then `libraryTrainFile(fileId, domainId)` ingests those into a domain as
 review queue is for. The surface says so, because hiding the second act is what
 made the first one look like it had done something.
 
+A cluster owner can enter a domain ID in the existing Teach form, including
+the first domain on an empty cluster. The picker still lists catalog and
+chunk-derived domains. Entry uses the same `libraryTrainFile` authorization and
+does not create a domain catalog row or approve knowledge. After teaching, the
+app re-reads its domains and offers Review; new passages remain pending until
+somebody explicitly approves or rejects them. Other roles keep the picker and
+the server's existing domain-write authorization.
+
+Review and Domains group chunks with a document back-reference by that document;
+other chunks use their declared provenance, keeping uploaded files, chat additions,
+Trainer Agent output and seeded content distinct. Source references remain intact.
+Review shows the complete passage before a decision; long text and references wrap
+within the Training window.
+
 **The section is a WORKLIST, not a log.** Every file is a row that says where it
 is and offers exactly the act legal from there -- rule 12 applied per row,
 because here the state is per row. `unreadable` (a photograph, a zip) offers
@@ -1630,8 +1644,16 @@ permission-scoped MemQL agent; test transports live under `test/ask`.
 
 Quick replies stay inline. Longer requests return a durable queue receipt, free
 the composer, and continue as independent Nexus runs. `AskWorkQueue` shows up to
-three cards above the composer, then a single count linked to the conversation's
-runs. A card opens its run; no new task is submitted by navigation or polling.
+three cards above the composer. With more cards, the count expands when work can
+receive guidance; Open Nexus still opens the conversation's runs. A card opens
+its run. Guide this work explicitly scopes the existing composer to a server-
+advertised active run and its opaque guidance epoch; Return to conversation exits guidance mode without
+losing the draft or retracting a message already sent. No new task is submitted by navigation,
+polling or guidance. `askGuideWork` records a human-only conversation receipt:
+queued until a reasoning call uses it, applied after use, or not received if the
+work ended or changed first. It never grants permission. Unknown write outcomes
+retry the original request ID, target epoch and text while preserving newer
+writing. Waiting approvals retain their separate approval discussion path.
 `askConversationSnapshot` projects progress from persisted runs on any replica.
 `conversationFeed` keeps the acceptance in place and places a completed result
 at its completion time with the original request's title. Polling must preserve

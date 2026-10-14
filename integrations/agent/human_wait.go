@@ -3,12 +3,65 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
+
+// PauseWorkBeforeTurn handles a native budget refusal before prompt/tool
+// preparation. Only receipt work detaches from the expired run deadline. A
+// same-lineage saved exchange wins over the new request's shorter history.
+func (r *Replier) PauseWorkBeforeTurn(ctx context.Context, failure error, msg *memqlv1.AgentGenerateTurnMsg) error {
+	return r.pauseBeforeTools(ctx, failure, msg, nil)
+}
+
+// Preparation and provider selection are still before the first tool boundary.
+// Preserve a pause already completed by preparation; only native budget causes
+// may turn another preparation error into a durable suspension.
+func (r *Replier) pauseBeforeTools(ctx context.Context, failure error, msg *memqlv1.AgentGenerateTurnMsg, messages []common.ChatMessage) error {
+	var wait *work.HumanWait
+	if errors.As(failure, &wait) || errors.Is(failure, memql.ErrWorkCheckpointRequired) || !isOwnedWorkExecution(ctx) {
+		return failure
+	}
+	var ceiling *memql.RunCeilingError
+	if !errors.As(failure, &ceiling) && r != nil {
+		if budget := r.workCallFailure(ctx); budget != nil {
+			failure = budget
+		}
+	}
+	if !errors.As(failure, &ceiling) {
+		return failure
+	}
+	if r == nil || msg == nil || len(msg.History) == 0 {
+		return fmt.Errorf("%w: entry budget pause has no work turn", memql.ErrWorkCheckpointRequired)
+	}
+	// Prompt preparation has not run. RestoreWorkContinuation refreshes this
+	// system slot from the installed prompt when the approved turn resumes.
+	if len(messages) == 0 {
+		messages = []common.ChatMessage{{Role: "system"}}
+		for _, m := range msg.History {
+			if m != nil {
+				messages = append(messages, common.ChatMessage{Role: m.Role, Content: m.Content, Name: m.Name, ToolCallId: m.ToolCallId})
+			}
+		}
+	}
+	if len(messages) == 1 {
+		return fmt.Errorf("%w: entry budget pause has no work history", memql.ErrWorkCheckpointRequired)
+	}
+	readCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer stop()
+	saved, err := r.restoreAfterQuestion(readCtx, messages)
+	if err != nil {
+		return fmt.Errorf("%w: restore before entry budget pause: %v", memql.ErrWorkCheckpointRequired, err)
+	}
+	return r.pauseAtBudgetBoundary(ctx, failure, saved)
+}
 
 // Only the feedback capability can yield this suspension. Arbitrary web or
 // file content saying "awaiting_user" must never steer the control plane.
@@ -151,4 +204,25 @@ func (r *Replier) workCallFailure(ctx context.Context) error {
 		return guard.WorkCallFailure(ctx)
 	}
 	return nil
+}
+
+// Only call at a reasoning boundary or before dispatching a tool. An arbitrary
+// in-flight tool failure is not evidence that its effects can be replayed.
+func (r *Replier) pauseAtBudgetBoundary(ctx context.Context, failure error, messages []common.ChatMessage) error {
+	var ceiling *memql.RunCeilingError
+	if !errors.As(failure, &ceiling) || !isOwnedWorkExecution(ctx) {
+		return failure
+	}
+	writer, ok := r.engine.(interface {
+		PauseWorkForBudget(context.Context, *memql.RunCeilingError, []common.ChatMessage) error
+	})
+	if !ok {
+		return fmt.Errorf("%w: durable budget continuation is unavailable", memql.ErrWorkCheckpointRequired)
+	}
+	err := writer.PauseWorkForBudget(ctx, ceiling, closePendingCalls(messages))
+	var wait *work.HumanWait
+	if errors.As(err, &wait) {
+		return err
+	}
+	return fmt.Errorf("%w: budget suspension failed: %v", memql.ErrWorkCheckpointRequired, err)
 }

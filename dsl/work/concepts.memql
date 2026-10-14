@@ -173,7 +173,7 @@ concept modelCall {
   outputTokens  int  @description("Tokens out.")
   cost          float  @description("Cost attributed to this call.")
   latencyMs     int  @description("Wall-clock latency of the call.")
-  served        enum("live", "journal", "local")!  @description("live = a provider answered; journal = served from a recorded response; local = a fleet model answered.")
+  served        enum("live", "journal", "local", "subscription")!  @description("live = a metered provider answered; journal = served from a recorded response; local = a fleet model answered; subscription = an app covered by the owner’s subscription answered.")
   response      object  @description("The response, structured output or text.")
   error         string  @description("The provider's error, when there was one.")
   routerCallId  string  @description("The v1:router:call row that records the attempt this call ended on -- the decision record behind it. Empty on a row served from the journal, where no source was asked, and on a call no router wrapped.")

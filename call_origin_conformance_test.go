@@ -836,6 +836,14 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		// returned -- asserted by integrations/pipelinesteps/internal_origin_test.go.
 		"integrations/pipelinesteps": "the pipelines executor's fleet half -- server-initiated, its one caller the agent's pipelines driver; the stamp is how the dispatcher admits the pipeline purpose from the engine's own Go and nothing else, applied inline on the one Dispatch call (epic memql#5478)",
 		"integrations/agent/worker":  "worker store, server-initiated",
+		// Owned-work turn preparation issues exactly two fixed native Training
+		// reads. Both revalidate the run/goal/source under the unchanged actor;
+		// neither accepts caller-supplied owner or run identifiers. Inline stamps
+		// die at those reads, never reaching authored calls, the model or tools.
+		// work_training_origin_test.go bounds the sites and work_training_test.go
+		// verifies client origin on every other preparation call. The real app
+		// Teach/turn hop test also refuses direct client calls to either reader.
+		"integrations/agent": "owned-work Training preparation only: two fixed native read calls, unchanged actor and fresh source authorization; no internal origin escapes to model/tool execution",
 		// THE WORK SPINE's entry points (epic memql#4966). SERVER-INITIATED,
 		// and not one of the request-derived exceptions -- stated rather than
 		// borrowed, because the createGoal and decideApproval paths DO begin at

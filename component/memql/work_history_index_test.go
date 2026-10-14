@@ -117,3 +117,66 @@ func TestWorkHistorySearchJumpsWithinAnExactCheckpointAcrossReplicas(t *testing.
 	require.NoError(t, json.Unmarshal(result[0].Payload, &response))
 	require.Empty(t, response.Matches)
 }
+
+func TestWorkHistoryDecodedSearchAcrossReplicasPreservesArchive(t *testing.T) {
+	a, _, _ := readMergeTestEngine(t)
+	b, _, _ := readMergeTestEngine(t)
+	ctx := contextTestRun(t, a)
+	needle := "first line\n\"quoted\" C:\\source\\file 🧪"
+	messages := []common.ChatMessage{{Role: "tool", Name: "readSource", Content: historySearchEnvelope(t, strings.Repeat("İ文 ", 2000)+needle+strings.Repeat(" tail", 100))}}
+	raw, err := json.Marshal(messages)
+	require.NoError(t, err)
+	hash := workContextHash("tool-v2", raw)
+	// Replica B reads before A writes, then must see the peer's fresh archive.
+	_, err = b.recallWorkHistoryBuiltin(ctx, map[string]any{"checkpoint": hash, "messageIndex": 0}, 0)
+	require.NoError(t, err)
+	require.NoError(t, a.saveWorkContextSource(ctx, hash, string(raw), ""))
+	args := map[string]any{"checkpoint": hash, "messageIndex": 0, "search": needle, "maxChars": 400}
+	result, err := b.recallWorkHistoryBuiltin(ctx, args, 0)
+	require.NoError(t, err)
+	var response struct {
+		Matches []struct {
+			Source     string
+			Offset     int
+			NextOffset int
+		}
+	}
+	require.NoError(t, json.Unmarshal(result[0].Payload, &response))
+	require.Len(t, response.Matches, 1)
+	require.Greater(t, response.Matches[0].Offset, 5000)
+	want, err := json.Marshal(messages[0])
+	require.NoError(t, err)
+	page := response.Matches[0]
+	require.Equal(t, string([]rune(string(want))[page.Offset:page.NextOffset]), page.Source)
+	// Searching changes only the starting page. Explicit pages still reconstruct
+	// the original serialized message, including every escape and metadata key.
+	var exact strings.Builder
+	args["maxChars"] = 4000
+	for offset := 0; ; {
+		args["offset"] = offset
+		result, err = b.recallWorkHistoryBuiltin(ctx, args, 0)
+		require.NoError(t, err)
+		response.Matches = nil
+		require.NoError(t, json.Unmarshal(result[0].Payload, &response))
+		require.Len(t, response.Matches, 1)
+		page = response.Matches[0]
+		require.Equal(t, offset, page.Offset)
+		exact.WriteString(page.Source)
+		if page.NextOffset == 0 {
+			break
+		}
+		require.Greater(t, page.NextOffset, offset)
+		offset = page.NextOffset
+	}
+	require.Equal(t, string(want), exact.String())
+	call, err := parser.RenderCall("workCheckpointForOwner", map[string]any{"fingerprint": hash})
+	require.NoError(t, err)
+	saved, err := b.Execute(ContextWithFreshRead(ctx), "query "+call)
+	require.NoError(t, err)
+	require.Equal(t, string(raw), MaterializeRows(saved.OutputPayload())[0]["data"].(map[string]any)["sourceMessages"])
+	args["search"] = `first line\n"quoted"`
+	result, err = b.recallWorkHistoryBuiltin(ctx, args, 0)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(result[0].Payload, &response))
+	require.Empty(t, response.Matches, "literal escape spelling must not match decoded newline")
+}

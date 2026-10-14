@@ -317,17 +317,29 @@ describe("the queue is live", () => {
     fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
     expect(await screen.findByText("Nothing needs your input.")).toBeTruthy();
   });
-  it("takes a decided approval off the list, which is the confirmation", async () => {
-    // Nothing is patched locally: the decision broadcasts and the row leaves
-    // the pending feed on its own update.
+  it("takes a decided approval off the list when its live row is updated", async () => {
     const conn = fakeConnection({ approvals: [approvalRow({ id: "a1" })] });
     mount(conn);
     await screen.findByText("Step sendInvoice");
 
     await act(async () => {
-      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "a1" }), "NODE_DELETED");
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "a1", decision: "approved", createdAt: "2026-09-01T13:00:00Z" }), "NODE_UPDATED");
     });
     await waitFor(() => expect(screen.queryByText("Step sendInvoice")).toBeNull());
+    expect(screen.getByText("Nothing needs your input.")).toBeTruthy();
+  });
+
+  it("keeps the decided detail as a receipt while Back returns to an empty queue", async () => {
+    const conn = fakeConnection({ approvals: [approvalRow({ id: "a1" })] });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Step sendInvoice"));
+    await act(async () => {
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "a1", decision: "approved", createdAt: "2026-09-01T13:00:00Z" }), "NODE_UPDATED");
+    });
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.getByRole("region", { name: "What is being asked" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Approvals" }));
+    expect(await screen.findByText("Nothing needs your input.")).toBeTruthy();
   });
 
   it("announces one that arrived while somebody was looking", async () => {
@@ -364,6 +376,12 @@ describe("a failure question", () => {
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "failed", decision: "answered", answer: { value: "retry" } }));
     fireEvent.click(screen.getByRole("button", { name: "Abandon" }));
     await waitFor(() => expect(conn.query.decideApproval).toHaveBeenCalledWith({ approvalId: "failed", decision: "answered", answer: { value: "abandon" } }));
+    await act(async () => {
+      conn.subscriptions.emit(APPROVAL, approvalRow({ id: "failed", kind, decision: "answered", answer: { value: "abandon" }, createdAt: "2026-09-01T13:00:00Z" }), "NODE_UPDATED");
+    });
+    expect(screen.getAllByText("Your response was recorded.").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/picked up from where it parked/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Abandon" })).toBeNull();
   });
 });
 
@@ -735,13 +753,14 @@ it("opens a typed question in Ask without sending a decision from Nexus", async 
 describe("a budget approval", () => {
   it("shows the allowance without exposing internal recovery metadata", async () => {
     const conn = fakeConnection({ approvals: [approvalRow({ id: "budget-replan", kind: "budget", question: "More calls needed", subject: {
-      ceiling: "modelCalls", limit: "48 calls", actual: "48 made", resumeKind: "replan", resumeReason: "internal recovery diagnostic",
+      ceiling: "modelCalls", limit: "48 calls", actual: "48 made", resumeKind: "checkpoint", resumeReason: "internal recovery diagnostic", continuationId: "continuation-private-receipt",
     } })] });
     mount(conn);
     fireEvent.click(await screen.findByText("More calls needed"));
     expect(screen.getByText("48 calls")).toBeTruthy();
     expect(screen.getByText("48 made")).toBeTruthy();
     expect(screen.queryByText("resumeKind")).toBeNull();
+    expect(screen.queryByText("continuation-private-receipt")).toBeNull();
     expect(screen.queryByText("internal recovery diagnostic")).toBeNull();
     fireEvent.change(screen.getByLabelText("New total model calls"), { target: { value: "96" } });
     // Raise limit just joined the bar, and a bar that has just changed takes no press for a moment.

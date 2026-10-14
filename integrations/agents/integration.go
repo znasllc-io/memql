@@ -194,7 +194,7 @@ func (i *Integration) Capabilities() []memql.IntegrationCapability {
 
 func factoryAndRecoveryOperations() map[string]workflowhost.Operation {
 	ops := (&factoryScope{}).operations()
-	for _, name := range []string{"agentRecoveryContext", "spineRetryHost", "spineObserveComputer", "spineRequestScope"} {
+	for _, name := range []string{"agentWorkTrainingFacts", "agentReadWorkTraining", "agentIndexWorkTraining", "agentRecoveryContext", "spineRetryHost", "spineObserveComputer", "spineRequestScope"} {
 		ops[name] = nil
 	}
 	return ops

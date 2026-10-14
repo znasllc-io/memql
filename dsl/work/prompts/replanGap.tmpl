@@ -65,8 +65,19 @@ Reusable catalog (constructs already available to compose -- prefer these):
 # How to reason
 
 1. Say plainly what is left to achieve, given what the completed steps
-   already produced. If the goal is already served, emit no steps and say
-   so -- a plan that adds work to a finished goal is worse than no plan.
+   already produced. goalAlreadyServed describes the recorded past, not what
+   your proposed repair will achieve. Set it to true only when the completed
+   steps already satisfy the current requested outcome and no unfinished
+   replacement or final reply remains. Emit no edits or new source in that
+   case. The runtime asks the person what to do; this flag does not finish
+   the run or install a replacement.
+
+   If any unfinished statement must change, set goalAlreadyServed to false.
+   Producing a final reply or returning a constant is still unfinished work,
+   even when it needs no tools or external effects. Guidance can redirect
+   the remaining work without granting permission or increasing a budget.
+   Follow that direction while preserving the completed prefix; do not
+   claim that an unperformed action succeeded.
 
 2. Read the failed step's symptom. If the plan was wrong because it
    assumed something the completed steps disproved, name that assumption
@@ -134,15 +145,19 @@ Reusable catalog (constructs already available to compose -- prefer these):
   "edits": [{"find": "<unique exact original source>", "replace": "<repaired source fragment>"}]
 }
 
-Use an empty edits array only if the goal is already served. Do not emit a
-source field. Edits are applied to the sealed original and checked by the
-compiler and the completed-prefix guard before installation.
+Set goalAlreadyServed to false whenever edits is nonempty. If it is true,
+edits must be empty. Do not emit a source field. Edits are applied to the
+sealed original and checked by the compiler and the completed-prefix guard
+before installation.
 {{ else }}
 {
   "abandonedAssumption": "<what the old plan believed that turned out false, or empty>",
   "goalAlreadyServed": true|false,
   "source": "<the complete .memql automation source for the NEW version, prefix included as already-completed steps>"
 }
+
+Set goalAlreadyServed to false when providing replacement source. If it is
+true, source must be an empty string.
 {{ end }}
 
 Return only this object. Keep the source concise, without a duplicate prose

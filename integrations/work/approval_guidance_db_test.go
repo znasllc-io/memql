@@ -8,8 +8,70 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/memql"
+	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
 )
+
+// A model can ask a human while its top-level step is still running. The
+// journal has admitted that step, but the run checkpoint contains only the
+// completed prefix until a receipt lands. A different replica must be able to
+// discuss and resume this real request without inventing or finishing a step.
+func TestGuidanceDBRecoversTheParkedJournalTailAcrossReplicas(t *testing.T) {
+	a, b := openActsDB(t), openActsDB(t)
+	b.owner = a.owner
+	template := installedReplanRun(t)
+	runID := a.openRun(t, map[string]any{"automationName": template["automationName"], "templateFingerprint": template["templateFingerprint"]})
+	a.writeVersion(t, runID, runID, "goalInput", 0, 1, nil, "original input", nil)
+	prefix := workstate.Head{"goalInput": {Version: 1}}.Object()
+	a.write(t, "updateWorkRun", map[string]any{"runId": runID, "stepOrder": []string{"goalInput"}, "head": prefix, "spent": map[string]any{"modelCalls": 2}})
+	person := actorCtx(a.owner)
+	// Prewarm the other replica before the admitted step and human wait exist.
+	_, err := b.i.readActRun(person, runID)
+	require.NoError(t, err)
+	a.write(t, "createWorkStep", map[string]any{
+		"stepId": bareRunId(runID) + "-reason", "runId": runID, "key": "reason", "seq": 1,
+		"stepType": "function", "kind": "reasoning", "call": map[string]any{"construct": "function", "name": "runAgentTurn"},
+		"status": "running", "attempt": 1, "version": 1, "idempotencyKey": runID + ":reason:1", "startedAt": rfc(time.Now()),
+	})
+	runContext := common.ContextWithRun(person, common.RunContext{RunId: runID, OwnerUserId: a.owner, StepKey: "reason", Mode: common.RunModeLive})
+	approvalID, err := a.i.AskFeedback(runContext, a.owner, runID, "Which synthetic label?", "choice", []map[string]any{{"label": "cedar", "value": "cedar"}, {"label": "birch", "value": "birch"}}, time.Time{})
+	require.NoError(t, err)
+	state, err := b.i.handleApprovalDiscussionState(person, map[string]any{"approvalId": approvalID}, 0)
+	require.NoError(t, err)
+	require.Equal(t, true, decodeReply(t, state)["canSendGuidance"])
+	// A receiving planner can already have read the approval wait before the
+	// other replica saves guidance. Its later context must read the new wait.
+	priorContext, err := a.i.LoadReplanContext(person, a.owner, runID, "reason")
+	require.NoError(t, err)
+	require.Nil(t, priorContext.FailedStep)
+	before := a.runRow(t, runID)
+	require.Equal(t, []string{"goalInput"}, rowStringSlice(before, "stepOrder"), "projection must not write the checkpoint")
+
+	reply, err := b.i.handleDecideApproval(person, map[string]any{"approvalId": approvalID, "decision": "answered", "answer": map[string]any{"feedback": "Use cedar and finish this synthetic test."}}, 0)
+	require.NoError(t, err)
+	require.Equal(t, true, decodeReply(t, reply)["runResumed"])
+	run, err := a.i.store().runForOwner(memql.ContextWithFreshRead(person), runID)
+	require.NoError(t, err)
+	require.Equal(t, waitKindReplan, rowString(rowMap(run, "waitingOn"), "kind"))
+	require.Equal(t, "reason", rowString(rowMap(run, "waitingOn"), "subject"))
+	require.Equal(t, []string{"goalInput", "reason"}, rowStringSlice(run, "stepOrder"))
+	require.Equal(t, rowMap(before, "head"), rowMap(run, "head"))
+	require.Equal(t, 2, rowInt(rowMap(run, "spent"), "modelCalls"))
+	replan, err := a.i.LoadReplanContext(person, a.owner, runID, "reason")
+	require.NoError(t, err)
+	require.Equal(t, "reason", rowString(replan.FailedStep, "key"))
+	require.Contains(t, rowString(replan.FailedStep, "errorMessage"), "Use cedar and finish this synthetic test.")
+	require.Len(t, replan.CompletedSteps, 1)
+	require.Equal(t, "goalInput", rowString(replan.CompletedSteps[0], "key"))
+	for _, step := range a.query(t, a.owner, "query "+call("workStepsForOwnerRun", map[string]any{"runId": runID})) {
+		if rowString(step, "key") == "goalInput" {
+			require.Equal(t, "done", rowString(step, "status"))
+			require.Equal(t, "original input", rowString(rowMap(step, "result"), "result"))
+		} else {
+			require.Equal(t, "running", rowString(step, "status"), "guidance must not fabricate a receipt")
+		}
+	}
+}
 
 func TestGuidanceDBRecoveryKeepsReceiptGateThroughCancelledCommit(t *testing.T) {
 	a, b := openActsDB(t), openActsDB(t)

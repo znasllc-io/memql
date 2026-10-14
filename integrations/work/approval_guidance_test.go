@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 	workstate "github.com/znasllc-io/memql/component/work"
 	"github.com/znasllc-io/memql/core/common"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
 )
 
 func TestGuidanceRecoveryVerifiesReceiptGateBeforeResuming(t *testing.T) {
@@ -237,4 +238,56 @@ func TestGuidanceLimitCountsCharactersAndProjectionDoesNotWrite(t *testing.T) {
 	approval["decision"] = "answered"
 	require.False(t, i.ApprovalGuidanceAvailable(ctx, approval))
 	require.Empty(t, mutationsIn(eng))
+}
+
+func TestGuidanceRequiresAnAdmittedContiguousJournalTail(t *testing.T) {
+	for _, scenario := range []string{"missing", "gap", "old position", "nested only", "foreign latest"} {
+		t.Run(scenario, func(t *testing.T) {
+			i, eng, store := newActsIntegration(t)
+			i.admitRow = ownerAdmits(actOwner)
+			approval := map[string]any{"id": "a-guidance", "ownerUserId": actOwner, "runId": actRunId, "stepKey": "draft", "kind": workstate.ApprovalKindFeedback}
+			run := actRunRow(runStatusWaiting, "fetch")
+			run["waitingOn"] = map[string]any{"kind": "approval", "subject": "a-guidance"}
+			eng.reply("workRunForOwner", run)
+			eng.reply("workApprovalsForOwner", approval)
+			addPristineRun(store, actRunId, "fetch")
+			switch scenario {
+			case "gap":
+				addVersion(store, actRunId, "draft", 2, 1, "running", nil, nil)
+			case "old position":
+				addVersion(store, actRunId, "draft", 0, 1, "running", nil, nil)
+			case "nested only":
+				addVersion(store, actRunId, "draft/inner", 1, 1, "running", nil, nil)
+			case "foreign latest":
+				addVersion(store, actRunId, "draft", 1, 1, "running", nil, map[string]any{"ownerUserId": "another-owner"})
+			}
+			ctx := callerContext(actOwner)
+			require.False(t, i.ApprovalGuidanceAvailable(ctx, approval))
+			_, err := i.handleDecideApproval(ctx, map[string]any{"approvalId": "a-guidance", "decision": "answered", "answer": map[string]any{"feedback": "Try a smaller step."}}, 0)
+			require.Error(t, err)
+			require.Empty(t, mutationsIn(eng))
+		})
+	}
+}
+
+func TestTypedPermissionGuidanceContinuesWithoutReplanningOrGranting(t *testing.T) {
+	i, eng, approval, _ := guidanceFixture(t, workstate.ApprovalKindScopeElevation)
+	hash, err := permission.Hash("workerHost", "exec", map[string]any{"cmd": "echo test", "cwd": "/fixture"})
+	require.NoError(t, err)
+	scope := permission.Scope{Version: 1, Kind: "exact_command", RegistrationID: "worker", MachineID: "machine", MachineLabel: "Test machine", Tool: "workerHost", Action: "exec", Command: "echo test", CWD: "/fixture", TimeoutSeconds: 60, ArgsHash: hash, AllowedModes: []string{"once", "always"}}
+	subject := rowMap(approval, "subject")
+	subject["computerPermission"] = scope.Map()
+	approval["artifactHash"] = workstate.ArtifactHash(subject)
+	nodes, err := i.handleDecideApproval(callerContext(actOwner), map[string]any{"approvalId": approval["id"], "decision": "answered", "answer": map[string]any{"feedback": "Correct the command and ask again; no approval."}}, 0)
+	require.NoError(t, err)
+	require.Equal(t, true, decodeReply(t, nodes)["runResumed"])
+	update := argsOf(t, eng, "updateWorkRun")
+	require.Equal(t, "running", update["status"])
+	require.Empty(t, update["waitingOn"])
+	require.NotContains(t, update, "rerun")
+	require.NotContains(t, update, "staleSteps")
+	require.NotContains(t, update, "spent")
+	decision := argsOf(t, eng, "decideWorkApproval")
+	require.Equal(t, "answered", decision["decision"])
+	require.Equal(t, map[string]any{"feedback": "Correct the command and ask again; no approval."}, decision["answer"])
 }

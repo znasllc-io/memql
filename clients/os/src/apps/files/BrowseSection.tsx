@@ -682,12 +682,45 @@ export function BrowseSection({
       }}
       onDrop={onDrop}
     >
-      {/* THE HEAD IS THE WHOLE TOP (DESIGN.md rules 1-3): the scope's name
-          and count, the quiet sort, one Refine affordance, the Upload
-          primary. The nine-control strip this replaces is the reason rule 2
-          exists. */}
       <div hidden={selected !== null}>
       <Head title={headTitle} breadcrumbs={headTrail} navigation={selected === null} back={filter.folderId ? {label: PLACE_TITLE[filter.place], onSelect: () => patch({folderId: tree.byId.get(filter.folderId!)?.folder.parentFolderId ?? ""})} : undefined} meta={listCount(list?.snapshot, listedCount)}>
+        {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
+            action). Uploading a file and making a folder are the same
+            question -- "put something here" -- and they were answered in two
+            places: a primary button up here and a rail ACTION wedged between
+            the Library tree and the Desktop place, where it read as a folder
+            you could open. The rail action is gone; the answers live on this
+            button, and each lands in the folder currently being looked at. */}
+        <AddMenu
+          disabled={connection === null}
+          destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
+          onUpload={() => pickRef.current?.click()}
+          onNewMarkdown={canOpen(registry, MATERIALIZER_APP_ID) ? () => actions.openApp(
+            MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
+              format: "markdown",
+              ...(destinationFolderId ? { folderId: destinationFolderId } : {}),
+              returnTo: { appId: "files", sectionId: "browse" },
+            }),
+          ) : undefined}
+          onNewFolder={() => void newFolderIn(destinationFolderId)}
+        />
+      </Head>
+      <input
+        ref={pickRef}
+        type="file"
+        multiple
+        hidden
+        aria-label="Pick files to upload"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = "";
+          if (files.length > 0) uploadFiles(files, destinationFolderId);
+        }}
+      />
+
+      <LocalTabs label="File locations" value={filter.place} onChange={place => { onSelect(""); patch({place, folderId:"", search:""}); }}
+        options={[["library","Library"],["desktop","Desktop"],["materializer","Materializer"],["bin","Bin"]]}
+        actions={<>
         <SortControl
           ascending={filter.sortAscending}
           onToggle={() => patch({ sortAscending: !filter.sortAscending })}
@@ -771,42 +804,7 @@ export function BrowseSection({
             </Select>
           )}
         </Refine>
-        {/* ONE WAY TO ADD SOMETHING (DESIGN.md rule 1: at most one primary
-            action). Uploading a file and making a folder are the same
-            question -- "put something here" -- and they were answered in two
-            places: a primary button up here and a rail ACTION wedged between
-            the Library tree and the Desktop place, where it read as a folder
-            you could open. The rail action is gone; the answers live on this
-            button, and each lands in the folder currently being looked at. */}
-        <AddMenu
-          disabled={connection === null}
-          destinationName={destinationFolderId === "" ? "Library" : folderNameOf(destinationFolderId)}
-          onUpload={() => pickRef.current?.click()}
-          onNewMarkdown={canOpen(registry, MATERIALIZER_APP_ID) ? () => actions.openApp(
-            MATERIALIZER_APP_ID, MATERIALIZER_COMPOSE_SECTION, composeIntent({
-              format: "markdown",
-              ...(destinationFolderId ? { folderId: destinationFolderId } : {}),
-              returnTo: { appId: "files", sectionId: "browse" },
-            }),
-          ) : undefined}
-          onNewFolder={() => void newFolderIn(destinationFolderId)}
-        />
-      </Head>
-      <input
-        ref={pickRef}
-        type="file"
-        multiple
-        hidden
-        aria-label="Pick files to upload"
-        onChange={(event) => {
-          const files = Array.from(event.target.files ?? []);
-          event.target.value = "";
-          if (files.length > 0) uploadFiles(files, destinationFolderId);
-        }}
-      />
-
-      <LocalTabs label="File locations" value={filter.place} onChange={place => { onSelect(""); patch({place, folderId:"", search:""}); }}
-        options={[["library","Library"],["desktop","Desktop"],["materializer","Materializer"],["bin","Bin"]]} />
+        </>} />
       {railNote ? <Caption>{railNote}</Caption> : null}
       <div className="os-files-body">
         <FileFolders folders={visibleFolders} counts={counts} loading={foldersState === "seeding"}

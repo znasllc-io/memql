@@ -40,6 +40,7 @@ func persistedArgs(t *testing.T, e *countingCompileEngine, name string) map[stri
 // reply, which is what a later section and the assembly must be handed.
 type sectionTurns struct {
 	prompts map[string]string
+	replies map[string]string
 }
 
 func (s *sectionTurns) Execute(ctx context.Context, step *automations.Step, sc *automations.StepContext) (*automations.StepResult, error) {
@@ -52,6 +53,11 @@ func (s *sectionTurns) Execute(ctx context.Context, step *automations.Step, sc *
 	for _, label := range []string{"summary", "notify", "archive"} {
 		if strings.Contains(prompt, "\nSection: "+label+"\n") {
 			answer = strings.ToUpper(label) + "_TEXT"
+		}
+	}
+	for label, reply := range s.replies {
+		if strings.Contains(prompt, "\nSection: "+label+"\n") {
+			answer = reply
 		}
 	}
 	s.prompts[answer] = prompt
@@ -90,9 +96,13 @@ func (d *draftMembers) TriggerAutomationWithArgs(ctx context.Context, name strin
 // and runs the headline with the goal's input, every agent turn answered by
 // sectionTurns.
 func runDraft(t *testing.T, e *countingCompileEngine, headline string, input map[string]any) (*sectionTurns, *draftMembers) {
+	return runDraftWithReplies(t, e, headline, input, nil)
+}
+
+func runDraftWithReplies(t *testing.T, e *countingCompileEngine, headline string, input map[string]any, replies map[string]string) (*sectionTurns, *draftMembers) {
 	t.Helper()
 	loader := automations.NewLoader(automations.LoaderOptions{})
-	turns := &sectionTurns{prompts: map[string]string{}}
+	turns := &sectionTurns{prompts: map[string]string{}, replies: replies}
 	reg := steps.NewRegistry()
 	reg.Register(automations.StepTypeFunction, turns)
 	members := &draftMembers{members: map[string]*automations.Automation{}, reg: reg, args: map[string]map[string]any{}}

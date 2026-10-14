@@ -663,6 +663,9 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 		if err != nil {
 			return nil, err
 		}
+		// Older agents recognize only scope and would otherwise widen this exact
+		// receipt during a rolling upgrade. Typed authority lives solely below.
+		delete(subject, "scope")
 		subject["computerPermission"] = permission.Map()
 		subject["target"] = permission.MachineLabel
 		target = permission.MachineLabel

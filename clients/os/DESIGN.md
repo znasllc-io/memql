@@ -28,7 +28,9 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    Pause hidden/offline views, avoid overlapping requests, and cancel stale reads.
    Explicit probes and writes stay deliberate actions; never repeat them on a timer.
    Creation actions use the shared icon-only `AddButton` (plus), with an
-   accessible label and tooltip. Do not replace it with a text button such as
+   accessible label, tooltip and visible border in light and dark. Keep that
+   border in the shared component’s style, including creation links; never
+   restyle it separately per app. Do not replace it with a text button such as
    "Connect GitHub account". A settings page is titled **Settings**; subjects
    such as **GitHub accounts** are sections beneath that title, with their Add
    control on the section heading (`kit` `Subhead` `actions`). Settings lists
@@ -39,13 +41,17 @@ and wallpaper values only (see `src/themes/`), so nothing here is themeable.
    and live-list wrappers; never add per-app row borders.
 
 2. **Filters are questions, not furniture.** Search and facet controls live
-   behind one affordance on the Head line (`kit` `Refine`): collapsed by
+   behind one affordance (`kit` `Refine`): collapsed by
    default, expanded while being asked, active constraints as removable
-   chips beside it. A section never shows filter chrome over no content.
+   chips beside it. Place it with sorting beside local tabs when present;
+   otherwise use the Head line. A section never shows filter chrome over no content.
 
-3. **Sort is a quiet menu.** `kit` `SortControl` shows the current order, a
-   direction icon and a chevron. Its menu exposes both orders and marks the
-   selected one. The default order stays an app-settings preference.
+3. **Sort is a quiet two-state toggle.** `kit` `SortControl` shows the current
+   order and direction icon. A press switches directly to the other order;
+   two choices need no menu. Place it at the right of the local tab row
+   (`LocalTabs.actions`), keeping the Head’s Add button by itself. Without
+   local tabs, use the right of the Head. The default order stays an
+   app-settings preference.
 
 4. **Micro-preferences live in the app's Settings section.** Show revoked,
    show deactivated, include archived, default sort -- preferences, not

@@ -228,8 +228,12 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // 157 -> 158: DSL-owned evidence limits for replanning completed work.
 // 158 -> 161: campaign journey proposal, drain and step workflows.
 // 161 -> 162: bounded initial Azure email installation workflow.
-// 163 -> 164: hourly declared-concept retention, measured by strict boot.
-const shippedAutomationCount = 164
+// 163 -> 164: explicit selected capability corpus installation recipe.
+// 164 -> 165: owned task retrieval of reviewed Training lessons.
+// 165 -> 166: bounded provider-call recovery before any proposed tool dispatch.
+// 166 -> 168: explicit release knowledge publication and scheduled indexing.
+// 168 -> 169: hourly declared-concept retention, integrated with the above.
+const shippedAutomationCount = 169
 
 //
 // 56 -> 57 in epic memql#5168 (the per-account front door):

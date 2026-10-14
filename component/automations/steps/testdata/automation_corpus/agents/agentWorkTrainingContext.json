@@ -1,0 +1,93 @@
+{
+  "automation": "agents/automations.memql agentWorkTrainingContext",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.agentWorkTrainingContext"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "agentWorkTrainingFacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "agentIndexWorkTraining"
+          },
+          {
+            "args": {
+              "limit": 3,
+              "maxTokens": 1200,
+              "minimumSimilarity": 0.6,
+              "text": "\nOverall goal: "
+            },
+            "kind": "builtin",
+            "name": "agentReadWorkTraining"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "limit": 3,
+              "maxTokens": 1200,
+              "minimumSimilarity": 0.6,
+              "text": "\nOverall goal: "
+            },
+            "builtin": "agentReadWorkTraining"
+          },
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {},
+          "topic": "automation.invocation.agentWorkTrainingContext"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "builtin",
+            "name": "agentWorkTrainingFacts"
+          },
+          {
+            "kind": "builtin",
+            "name": "agentIndexWorkTraining"
+          },
+          {
+            "args": {
+              "limit": 3,
+              "maxTokens": 1200,
+              "minimumSimilarity": 0.6,
+              "text": "\nOverall goal: "
+            },
+            "kind": "builtin",
+            "name": "agentReadWorkTraining"
+          }
+        ],
+        "result": {
+          "output": {
+            "args": {
+              "limit": 3,
+              "maxTokens": 1200,
+              "minimumSimilarity": 0.6,
+              "text": "\nOverall goal: "
+            },
+            "builtin": "agentReadWorkTraining"
+          },
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

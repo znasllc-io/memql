@@ -28,6 +28,9 @@ func init() {
 		}
 		i := NewIntegration(pctx.Engine, pctx.GateDB)
 		i.SetLogger(pctx.Logger)
+		if err := i.setTrainingReader(pctx); err != nil {
+			return nil, err
+		}
 		// The analysis pass's text extractor (memql#4342). Built from the
 		// SAME processor the attachment route uses, so "which types can
 		// this node read" has one answer rather than two.

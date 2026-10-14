@@ -11,6 +11,7 @@ import (
 // returning true is not a declaration that the capability may simply repeat.
 type CheckpointResumeRequest struct {
 	RunID, StepKey, ApprovalID string
+	RerunRequestID             string
 }
 
 type CheckpointResumePreparer interface {

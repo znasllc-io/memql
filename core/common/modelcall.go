@@ -62,6 +62,9 @@ type RunContext struct {
 	// RunId is v1:work:run.id. Empty means there is no run, whatever else is
 	// set.
 	RunId string
+	// RerunRequestId binds saved native progress to one explicit rerun. It is
+	// restored from the owned run row on every executing replica, not authority.
+	RerunRequestId string
 	// GoalId is the run's goal. It is carried because the cross-goal rule
 	// outranks the mode: a journal entry from another goal is never served,
 	// in any mode.

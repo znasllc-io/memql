@@ -122,6 +122,50 @@ func AskConversationSnapshotBuild(args AskConversationSnapshotArgs) string {
 	return b.String()
 }
 
+// AskGuideWork -- Record guidance for owned running work in its existing conversation. This starts no goal and grants no permission; the existing agent receives the message at its next safe reasoning boundary. Retries reuse requestId.
+type AskGuideWorkArgs struct {
+	TargetEpoch    string
+	RunId          string
+	ConversationId string
+	RequestId      string
+	Prompt         string
+}
+
+// AskGuideWork calls the engine builtin askGuideWork.
+func (qc *QueryClient) AskGuideWork(ctx context.Context, args AskGuideWorkArgs) (*Result, error) {
+	call := AskGuideWorkBuild(args)
+	return qc.executeNamed(ctx, "askGuideWork", call)
+}
+
+func AskGuideWorkBuild(args AskGuideWorkArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin askGuideWork(")
+	b.WriteString("targetEpoch: ")
+	b.WriteString(quoteMemQL(args.TargetEpoch))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("runId: ")
+	b.WriteString(quoteMemQL(args.RunId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("conversationId: ")
+	b.WriteString(quoteMemQL(args.ConversationId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("prompt: ")
+	b.WriteString(quoteMemQL(args.Prompt))
+	b.WriteString(")")
+	return b.String()
+}
+
 // AskWorkConversation -- Open this owner's existing work in its Ask conversation, creating a private conversation for Nexus-originated work without starting another run.
 type AskWorkConversationArgs struct {
 	RunId string
@@ -2689,6 +2733,26 @@ func IntegrationStatusBuild(args IntegrationStatusArgs) string {
 		b.WriteString("probe: ")
 		b.WriteString(fmt.Sprintf("%v", args.Probe))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// KnowledgeInstallCapabilityCorpora -- Install only selected registered capability manuals. Explicit cluster-owner operation; no domain catalog creation or generated content. Returns per-domain ready, preserved, embedded and olderPublished counts.
+type KnowledgeInstallCapabilityCorporaArgs struct {
+	DomainIds []string
+}
+
+// KnowledgeInstallCapabilityCorpora calls the engine builtin knowledgeInstallCapabilityCorpora.
+func (qc *QueryClient) KnowledgeInstallCapabilityCorpora(ctx context.Context, args KnowledgeInstallCapabilityCorporaArgs) (*Result, error) {
+	call := KnowledgeInstallCapabilityCorporaBuild(args)
+	return qc.executeNamed(ctx, "knowledgeInstallCapabilityCorpora", call)
+}
+
+func KnowledgeInstallCapabilityCorporaBuild(args KnowledgeInstallCapabilityCorporaArgs) string {
+	var b strings.Builder
+	b.WriteString("builtin knowledgeInstallCapabilityCorpora(")
+	b.WriteString("domainIds: ")
+	b.WriteString(renderMemQLValue(args.DomainIds))
 	b.WriteString(")")
 	return b.String()
 }

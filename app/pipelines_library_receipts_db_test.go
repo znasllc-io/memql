@@ -11,10 +11,10 @@ import (
 	"github.com/znasllc-io/memql/integrations/pipelinesteps"
 )
 
-func TestPipelineReceiptDBReadIsScopedOrderedAndIndependentOfLibrary(t *testing.T) {
+func testPipelineReceiptDBReadIsScopedOrderedAndIndependentOfLibrary(t *testing.T, newStore pipelineStoreFactory) {
 	u := &pipelineStreamFake{}
-	writer, _, db := pipelineStreamDBStore(t, u)
-	reader, _, _ := pipelineStreamDBStore(t, u)
+	writer, _, db := newStore(t, u)
+	reader, _, _ := newStore(t, u)
 	f := pipelineStreamFile(id.NewShortId(), "artifact")
 	first, err := writer.StoreRunFileStream(context.Background(), f)
 	if err != nil {

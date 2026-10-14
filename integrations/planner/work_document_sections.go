@@ -44,6 +44,9 @@ func (s *spineScope) refineSections(ctx context.Context, args map[string]any) (a
 	if !s.classified || s.prepared || s.sectionRefinements >= 2 || s.decision.RequiresFile == nil || !*s.decision.RequiresFile {
 		return nil, fmt.Errorf("document section refinement requires classification, precedes preparation and permits at most two attempts")
 	}
+	if s.decision.hasEffects() {
+		return nil, fmt.Errorf("text-only document refinement cannot replace sections with declared effects")
+	}
 	var config struct {
 		Prompt         string
 		MaxWords       int

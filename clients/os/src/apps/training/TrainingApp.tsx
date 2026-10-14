@@ -101,6 +101,7 @@ export function TrainingApp({
   const [settings, setSettings] = useState<TrainingSettings>(() => settingsStore.load());
 
   const authSource = useAuthSource();
+  const canEnterDomain = useSession().access?.role === "owner";
 
   // THE LIBRARY'S OWN PROVIDER, not a second one. Every upload in the OS
   // rides `EdgeUploadProvider` (the desk's drops, the Files browse,
@@ -302,6 +303,8 @@ export function TrainingApp({
       runsByFileId={runsByFileId}
       domains={domains}
       train={train}
+      canEnterDomain={canEnterDomain}
+      onReview={() => navigate("review")}
       onReseed={reseed}
       onAsk={askContext}
     />

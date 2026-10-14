@@ -392,3 +392,20 @@ func TestHumanResumeClaimMustMatchLatestPersistedAnswer(t *testing.T) {
 		}
 	}
 }
+
+func TestLeasedHumanResumeClaimCannotServeANewerAnswerOrRerun(t *testing.T) {
+	j := finishedDispatchJournal(nil)
+	j.HumanResumeId = "answer-2"
+	req := workspine.DispatchRequest{HumanResumeId: "answer-1", Recovery: true, HumanResumeRecovery: true}
+	if workRerunServable(req, j) {
+		t.Fatal("old answer lease served a newer answer")
+	}
+	req.HumanResumeId = "answer-2"
+	if !workRerunServable(req, j) {
+		t.Fatal("exact leased answer refused")
+	}
+	j.Rerun = &automations.RerunSpec{RequestId: "new-rerun"}
+	if workRerunServable(req, j) {
+		t.Fatal("answer lease served a new rerun")
+	}
+}

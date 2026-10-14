@@ -44,11 +44,45 @@ existing plan-review approval. There is no promise that every failure can be
 recovered automatically or that a language model can identify every platform
 bug correctly.
 
+A worker model call that reaches its whole-call time limit before a complete
+response is handled at the agent's reasoning boundary. The installed recovery
+recipe permits one automatic retry of that model call, with the exact completed
+tool exchanges retained. Each call still consumes the current model and time
+allowances. A partial streamed response is not retried automatically. If recovery
+is exhausted or the recipe requires a person, the run saves its checkpoint and
+asks **Retry** or **Abandon**. Retry continues the same suspended child from that
+checkpoint on any replica; it does not rewrite the workflow, replay completed
+tool effects, grant permission or replenish a budget. **Discuss in Ask** can
+supply guidance instead; the same checkpoint continues with that recorded
+feedback in its context, without a structural replan or an access grant.
+In-flight tool failures cannot enter this path. Missing or changed checkpoints and failures to save the
+suspension stop execution. Older failed runs without native waiting child links
+still require the existing explicit recovery controls; no links are inferred.
+
 If a plan failure exhausts automatic recovery, **Revise plan** authorizes one
 further replanning attempt for the unfinished work. It preserves the completed
 prefix and accumulated usage, and does not replenish automatic retries or
 raise resource limits. A transient failure's **Retry** instead repeats the
 failed step. Either decision is persisted for the cluster to resume safely.
+
+**Guide this work** adds a human message to the selected running work in its
+existing Ask conversation. It creates no second goal. The message is durably
+queued for the next safe boundary: an operation already in flight can finish,
+but unstarted calls from an older model response wait for reasoning with the
+new guidance. Completed effects and their results remain intact. A received
+receipt means a successful model call used the message, not that the task is
+finished or that the model followed the advice. If work ends or changes attempt before another
+boundary, its message is shown as not received. Waiting for a permission
+answer keeps it queued for the resumed work.
+
+The selected run and execution attempt are checked again when the message is
+saved. Replanning or an explicit rerun requires selecting the current work;
+ordinary steps and permission answers retain the selection. An uncertain send
+retries the same message identity and recovers its original receipt, even if
+work has since moved. Messages are limited to 4,000 characters each, with at
+most 16 messages and 16,000 characters per run. They do not grant permissions,
+raise budgets, reset retries, or approve a waiting request. A waiting request
+uses its own discussion and decision controls instead.
 
 **Discuss in Ask** opens the conversation that originated an approval. Work
 delegated to a child run follows its owned parent records back to that
@@ -74,6 +108,14 @@ the original Ask transcript, even when you send guidance without first asking
 for advice. The saved message retains a link to its request after reload. If saving succeeds but continuing is interrupted,
 retrying the same guidance resumes that saved decision; it does not create a
 second answer. Artifact-specific reviews retain their own decision contracts.
+
+For a typed computer-permission request raised inside a saved native turn,
+guidance continues that exact checkpoint with the correction in context instead
+of rewriting the workflow. The original request remains answered, not approved;
+a corrected command or directory request still needs its own applicable
+permission. Another replica rechecks the owner, question, execution lineage and
+saved exchange before continuing. A missing or changed checkpoint is refused,
+and a later failure request cannot borrow an earlier permission checkpoint.
 
 Replanning an existing sealed program uses structured, exact source edits so
 that repairing a small part does not require the model to repeat a large
@@ -288,6 +330,13 @@ Owned work uses the following layers:
    phrase inside that source. Omit `offset` for the initial match; an explicit
    offset still selects the exact page. This avoids scanning a long metadata
    record or bibliography to locate one fact.
+   Searches compare decoded JSON string text, including newlines, quotes and
+   literal backslashes, and map a match back to the unchanged serialized page.
+   Complete JSON object or array envelopes inside strings are searched through
+   at most four JSON layers (including the message), with an 8 MiB parsing
+   budget per message. Escape-looking prose is not decoded. Searches do not
+   span separate JSON values; a deeper or larger source may require exact
+   message paging without a search. The raw archive is never rewritten.
 
 The runtime bounds summarizer input and output, model calls per compaction,
 and recall excerpts. A single exchange too large for the summarizer is
@@ -328,6 +377,22 @@ receipts remain readable. The workbench's `http_fetch` is a UTF-8 text surface:
 binary responses return `unsupported_content` with source metadata, rather
 than putting image or file bytes into model context. Workflows acquire binary
 assets through their image or file capabilities.
+
+A computer permission approved inside a synchronous child automation resumes
+that saved child invocation. The engine verifies the owner, parent link,
+definition, arguments and exact suspended tool receipt across replicas.
+Completed parent and child steps stay complete; the approval grants no blanket
+permission to repeat their effects. If an answer arrives before the waiting
+receipt is saved, dispatch waits briefly without consuming its claim. The
+recovery sweep can deliver the saved answer later under the same claim identity.
+The existing stale-executor abandonment policy still applies after a claimant
+stops responding.
+
+On resumption, the model receives the exact recorded permission or budget
+decision alongside its saved exchanges. This includes the approved scope and
+any recorded use or revocation. The receipt is context, not authorization:
+dispatch still checks the current permission and budget before an operation
+can execute. It does not claim that an approved operation has already run.
 
 Active context and retrieval pages are bounded. The durable journal grows
 with actual work; that is retained evidence, not an in-process cache. Retention

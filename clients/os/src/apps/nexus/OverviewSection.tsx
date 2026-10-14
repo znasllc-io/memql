@@ -7,7 +7,7 @@ import { InfoDetail } from "../../kit/InfoDetail";
 import { absent, figureOf, type Figure } from "../../kit/measure";
 import { Overview, OverviewBreakdown, type OverviewMetric } from "../../kit/Overview";
 import { anyLabelled, reuseTally } from "./reuse";
-import { approvalFromRow, goalFromRow, runFromRow, runIsTerminal } from "./rows";
+import { approvalFromRow, approvalIsPending, goalFromRow, runFromRow, runIsTerminal } from "./rows";
 import { useReusableAfter } from "./useInterventions";
 import { reuseWord } from "./words";
 
@@ -62,7 +62,7 @@ export function OverviewSection({
     [runs.rows],
   );
   const waiting = useMemo(
-    () => approvals.rows.map(approvalFromRow).filter((approval) => approval.id !== "").length,
+    () => approvals.rows.map(approvalFromRow).filter((approval) => approval.id !== "" && approvalIsPending(approval)).length,
     [approvals.rows],
   );
   const tally = useMemo(

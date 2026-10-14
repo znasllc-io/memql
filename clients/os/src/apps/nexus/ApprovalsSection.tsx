@@ -43,6 +43,7 @@ import { BindingCounts } from "./ProcedurePage";
 import {
   approvalFingerprint,
   approvalFromRow,
+  approvalIsPending,
   approvalSubjectLine,
   idTail,
   runTitle,
@@ -148,6 +149,7 @@ export function ApprovalsSection({
     const projected = rows
       .map(approvalFromRow)
       .filter((approval) => approval.id !== "")
+      .filter(approvalIsPending)
       .filter((approval) =>
         needle === ""
           ? true
@@ -470,7 +472,7 @@ function ApprovalDetail({
       ? []
       : Object.entries(approval.subject ?? {}).filter(
           ([key]) => (shutDoors === null || (key !== "doors" && key !== "code"))
-            && (approval.kind !== "budget" || (key !== "resumeKind" && key !== "resumeReason")),
+            && (approval.kind !== "budget" || (key !== "resumeKind" && key !== "resumeReason" && key !== "continuationId")),
         );
 
   return (

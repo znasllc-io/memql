@@ -197,6 +197,31 @@ func TestArtifactHash_StableAndSensitive(t *testing.T) {
 	}
 }
 
+func TestHumanQuestionIDPreservesOriginalAndRerunReceiptBytes(t *testing.T) {
+	// These are the persisted IDs from the native question writer before its
+	// identity calculation was shared with receipt readers.
+	for _, tc := range []struct{ rerun, want string }{
+		{"", "question-af479953cf4f4651f36f143ddfaf2455"},
+		{"rerun-1", "question-bb5c9b677737f6a03b28e0c1ea39e03a"},
+	} {
+		if got := HumanQuestionID("run-1", "review", "planReview", "artifact-1", tc.rerun); got != tc.want {
+			t.Fatalf("rerun %q: got %s, want preserved receipt %s", tc.rerun, got, tc.want)
+		}
+	}
+	base := HumanQuestionID("run-1", "review", "planReview", "artifact-1", "rerun-1")
+	for name, got := range map[string]string{
+		"run":      HumanQuestionID("run-2", "review", "planReview", "artifact-1", "rerun-1"),
+		"step":     HumanQuestionID("run-1", "other", "planReview", "artifact-1", "rerun-1"),
+		"kind":     HumanQuestionID("run-1", "review", "feedback", "artifact-1", "rerun-1"),
+		"artifact": HumanQuestionID("run-1", "review", "planReview", "artifact-2", "rerun-1"),
+		"rerun":    HumanQuestionID("run-1", "review", "planReview", "artifact-1", "rerun-2"),
+	} {
+		if got == base {
+			t.Errorf("a changed %s reused the original question", name)
+		}
+	}
+}
+
 // LegacyFailureHashes reproduces the hash the failure path raised its
 // questions with before memql#5664, for each run-id spelling it is given, from
 // the stored subject alone -- so an edited failure no longer reproduces it.

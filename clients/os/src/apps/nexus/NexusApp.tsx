@@ -387,7 +387,6 @@ export function NexusApp({
         runs={runs.source}
         conversationId={conversationId}
         onClearConversation={() => setConversationId("")}
-        goalsById={goalsById}
         showFinished={settings.showFinishedRuns}
         onOpenRun={openRun}
       />

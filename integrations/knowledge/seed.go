@@ -14,9 +14,9 @@ import (
 
 // StandardDomain is a seed record for a knowledge domain shipped with
 // MemQL. Seeding is idempotent: the seedStandardDomains capability only
-// creates domains that don't already exist, so re-running on every
-// startup is safe and manual overrides (admin-edited domain rows) are
-// preserved.
+// creates domains that don't already exist when invoked by a catalog
+// installation workflow; manual overrides are preserved. Engine startup
+// separately repairs only existing exact canonical chunks.
 type StandardDomain struct {
 	ID                  string
 	Name                string
@@ -185,8 +185,9 @@ var retiredSeedCorpusPairs = shippedSeedCatalog().Retired
 // seedStandardDomainsHandler creates the shipped knowledge domains
 // (engine catalog + any pack-registered seed domains) and ingests their
 // seed corpora. Idempotent: skips any domain whose id is already present;
-// re-ingests corpus chunks whose content has changed (different text ->
-// different chunk id).
+// ingests missing current corpus chunks and retains earlier review history.
+// Different text produces a different chunk id; older chunks are not implicitly
+// re-approved or superseded by this pass.
 func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
 	if i.engine == nil {
 		return nil, fmt.Errorf("knowledge.seedStandardDomains: engine not configured")
@@ -240,15 +241,22 @@ func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[s
 			return nil, err
 		},
 		"knowledgeSeedCorpusExists": func(ctx context.Context, a map[string]any) (any, error) {
-			return i.chunkExistsById(ctx, stringArg(a, "key")), nil
-		},
-		"knowledgePurgeSeedCorpus": func(ctx context.Context, a map[string]any) (any, error) {
 			key := stringArg(a, "key")
 			entry, ok := entries[key]
 			if !ok {
 				return nil, fmt.Errorf("corpus is outside the seed catalog")
 			}
-			return nil, i.purgeChunksForSource(ctx, entryDomains[key], entry.SourceRef)
+			allPresent := true
+			seeds := canonicalSeedChunks()
+			for seq, text := range Chunk(entry.Text, defaultChunkSize, defaultOverlap) {
+				chunkKey := chunkIdFor(entryDomains[key], entry.SourceRef, seq, text)
+				present, err := i.reconcileCanonicalSeed(ctx, seeds[chunkKey])
+				if err != nil {
+					return nil, err
+				}
+				allPresent = allPresent && present
+			}
+			return allPresent, nil
 		},
 		"knowledgeIngestSeedCorpus": func(ctx context.Context, a map[string]any) (any, error) {
 			key := stringArg(a, "key")
@@ -256,7 +264,7 @@ func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[s
 			if !ok {
 				return nil, fmt.Errorf("corpus is outside the seed catalog")
 			}
-			_, err := i.ingestHandler(ctx, map[string]any{"domainId": entryDomains[key], "text": entry.Text, "source": stringArg(a, "source"), "sourceRef": entry.SourceRef}, 0)
+			_, err := i.ingest(ctx, map[string]any{"domainId": entryDomains[key], "text": entry.Text, "source": "appStructure", "sourceRef": entry.SourceRef}, true)
 			if err == nil {
 				ingested++
 			}

@@ -182,3 +182,54 @@ func TestInFlightRunDeadlineResolvesCurrentSpendAndKeepsProviderTimeoutsSeparate
 		t.Fatalf("user cancellation was relabeled: %v", err)
 	}
 }
+
+// The router communicates a refused native admission through cancellation;
+// provider APIs consequently report context.Canceled rather than the guard's
+// typed error. Keep that exact proof without charging or re-reading a budget.
+func TestModelAdmissionCancellationRetainsItsNativeBudgetProof(t *testing.T) {
+	for _, modality := range []airoute.Modality{airoute.ModalityTools, airoute.ModalityStreamingTools} {
+		t.Run(string(modality), func(t *testing.T) {
+			guard := &fakeGuard{breach: &RunCeilingBreach{Ceiling: "modelCalls", Limit: "1", Actual: "1"}, spent: RunSpend{ModelCalls: 1}}
+			e := &MemQLEngine{modelSeam: &modelSeam{ceilings: guard}}
+			ctx, cancel := context.WithCancelCause(common.ContextWithRun(context.Background(), aRun()))
+			defer cancel(nil)
+			e.modelSeam.observeAgentSpend(ctx, cancel)(airoute.CallObservation{ID: "refused", Phase: "running", Modality: string(modality)})
+			if !errors.Is(ctx.Err(), context.Canceled) {
+				t.Fatal("provider was not cancelled")
+			}
+			cause := context.Cause(ctx)
+			if got := e.WorkCallFailure(ctx); got != cause {
+				t.Fatalf("native cause lost: %v instead of %v", got, cause)
+			}
+			if guard.admits != 1 || len(guard.charges) != 0 {
+				t.Fatalf("refusal was re-admitted or charged: %+v", guard)
+			}
+		})
+	}
+}
+
+func TestToolObserverChargeAndJournalShareReceiptIdentity(t *testing.T) {
+	guard, journal := &fakeGuard{}, newCountingJournal()
+	seam := &modelSeam{ceilings: guard, journal: journal}
+	rc := aRun()
+	ctx, cancel := context.WithCancelCause(common.ContextWithRun(context.Background(), rc))
+	defer cancel(nil)
+	observe := seam.observeAgentSpend(ctx, cancel)
+	call := airoute.CallObservation{ID: "tool-attempt", Phase: "running", Modality: string(airoute.ModalityTools), Billing: "subscription"}
+	observe(call)
+	call.Phase = "completed"
+	call.InputTokens = 12
+	call.OutputTokens = 4
+	observe(call)
+	observe(call)
+	rows := journal.rows[rc.RunId]
+	if len(rows) != 1 || len(guard.charges) != 1 {
+		t.Fatalf("one completion produced %d receipts/%d charges", len(rows), len(guard.charges))
+	}
+	if rows[0].ReceiptID == "" || rows[0].ReceiptID != guard.charges[0].ReceiptID {
+		t.Fatal("observer charge and receipt identities differ")
+	}
+	if rows[0].Served != ServedSubscription || guard.charges[0].Served != ServedSubscription {
+		t.Fatal("billing classification changed")
+	}
+}
