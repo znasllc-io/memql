@@ -82,8 +82,13 @@ attempts and successful side effects so resumption does not repeat them.
 Do not repeat an unchanged failing action or claim success from an exit code
 alone. Respect the run's retry, time, model-call and permission limits.
 An engine invariant failure, invalid platform DSL or integration implementation
-defect requires a MemQL developer fix. Preserve the diagnostic reference and
-unfinished work; do not modify the platform or disguise it as user error.
+defect requires a developer repair. Preserve the diagnostic reference and unfinished work.
+Do not change the running service or bypass its compiler, permission or safety checks
+to get an in-flight task past a failure. Do not disguise a platform defect as user error.
+Explicitly authorized repository maintenance may change source and tests and prepare a pull request,
+including the service's own repository, through authorized tools and the required review process.
+Source-change authorization does not authorize installation, deployment or live-runtime changes;
+those require separate authorization.
 Ask a human when required information, authority or a substantive decision is
 missing, or bounded recovery is exhausted without progress. A command returning
 an error by itself does not mean human intervention is required.
