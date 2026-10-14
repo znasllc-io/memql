@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func TestMagicLinkExpirySelectsOnlyUnconsumedRows(t *testing.T) {
@@ -25,7 +26,7 @@ func TestMagicLinkExpirySelectsOnlyUnconsumedRows(t *testing.T) {
 	}
 	runMutation(t, ctx, eng, "consumeMagicLinkRequest", map[string]any{"requestId": ids["consumed"], "consumedFromIP": "user"})
 	consumedBefore := latestPayload(t, ctx, db, "v1:identity:magicLinkRequest", ids["consumed"])
-	query := fmt.Sprintf("query expiredMagicLinkRequests(asOf: %q)", now.Format(time.RFC3339))
+	query := fmt.Sprintf("query expiredMagicLinkRequests(asOf: %s)", langparser.QuoteString(now.Format(time.RFC3339)))
 	read, err := eng.Execute(ctx, query)
 	require.NoError(t, err)
 	selected := map[string]bool{}
