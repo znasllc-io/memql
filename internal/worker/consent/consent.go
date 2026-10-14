@@ -112,6 +112,10 @@ type CursorPoint struct {
 // Exposed via the IPC `status` op and the TUI's would-be Workers
 // pane.
 type Status struct {
+	// DirectoryReadsPaused is an explicit local stop, independent of the
+	// temporary window. A fresh, scoped owner receipt is still required
+	// when false; this field does not grant access to any directory.
+	DirectoryReadsPaused bool `json:"directory_reads_paused"`
 	// Granted reports whether a window is open at the time of the
 	// snapshot. Equivalent to (ExpiresAt.After(now)).
 	Granted bool `json:"granted"`
@@ -139,10 +143,13 @@ type Status struct {
 // arbitrary goroutine contention. The single-writer transitions
 // take an exclusive lock; readers take the shared one.
 type Manager struct {
-	mu        sync.RWMutex
-	expiresAt time.Time
-	window    time.Duration
-	strict    bool
+	mu                   sync.RWMutex
+	directoryReadsPaused bool
+	statePath            string
+	stateErr             error
+	expiresAt            time.Time
+	window               time.Duration
+	strict               bool
 	// region is the optional strict-mode in-region exemption rect.
 	// Nil = no region (strict gates every high-risk call).
 	region *Region
@@ -259,6 +266,11 @@ func (m *Manager) Grant(window time.Duration, strict bool, region *Region) (time
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := m.saveDirectoryPause(false); err != nil {
+		return time.Time{}, fmt.Errorf("consent: cannot save access state: %w", err)
+	}
+	m.directoryReadsPaused = false
+	m.stateErr = nil
 	exp := m.now().Add(window)
 	m.expiresAt = exp
 	m.window = window
@@ -281,16 +293,19 @@ func (m *Manager) Grant(window time.Duration, strict bool, region *Region) (time
 	return exp, nil
 }
 
-// Revoke closes any active window IMMEDIATELY. No-op when no
-// window is open. Always emits a `revoked` event so subscribers
-// can show the operator intent.
+// Revoke closes any active window and pauses scoped directory reads,
+// including after a restart. Always emits a revoked event. A storage
+// failure is reported while keeping this process blocked.
 //
 // In strict mode this also denies every in-flight per-action
 // approval -- the operator pulling the kill switch should mean
 // no pending strict call can sneak through, even if the modal
 // was already on screen and the timeout hadn't fired yet.
-func (m *Manager) Revoke() {
+func (m *Manager) Revoke() error {
 	m.mu.Lock()
+	m.directoryReadsPaused = true
+	err := m.saveDirectoryPause(true)
+	m.stateErr = err
 	m.expiresAt = time.Time{}
 	m.window = 0
 	m.strict = false
@@ -301,6 +316,30 @@ func (m *Manager) Revoke() {
 	// queue.
 	m.broadcast(Event{At: m.now(), Kind: EventRevoked})
 	m.cancelAllPending("consent revoked while strict-mode approval was pending")
+	if err != nil {
+		return fmt.Errorf("access stopped, but the stop could not be saved; stop Cockpit before restarting it: %w", err)
+	}
+	return nil
+}
+
+// AllowsDirectoryRead is called only AFTER the dispatcher validates the
+// engine's scoped receipt. Expiry of a broad control window cannot revoke
+// that independent approval. An explicit local stop always can.
+func (m *Manager) AllowsDirectoryRead(action string) Decision {
+	m.mu.RLock()
+	paused, stateErr := m.directoryReadsPaused, m.stateErr
+	m.mu.RUnlock()
+	dec := Decision{Allowed: true, Reason: "approved directory read"}
+	switch {
+	case action != "fs_read" && action != "fs_list" && action != "fs_stat":
+		dec = Decision{Reason: "directory approval allows only file reads, listings and metadata"}
+	case stateErr != nil:
+		dec = Decision{Reason: "Cannot verify this machine's saved access state. Check Cockpit locally before retrying."}
+	case paused:
+		dec = Decision{Reason: fmt.Sprintf("Directory access was stopped on this machine. Run `%s` locally to resume approved access.", m.grantCommand())}
+	}
+	m.recordDispatch("workerHost", action, Classify("workerHost", action), dec)
+	return dec
 }
 
 // Allows decides whether a single (tool, action) call may run
@@ -397,14 +436,15 @@ func (m *Manager) Snapshot() Status {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.expiresAt.IsZero() || !m.now().Before(m.expiresAt) {
-		return Status{Granted: false}
+		return Status{Granted: false, DirectoryReadsPaused: m.directoryReadsPaused || m.stateErr != nil}
 	}
 	return Status{
-		Granted:   true,
-		ExpiresAt: m.expiresAt,
-		Window:    m.window,
-		Strict:    m.strict,
-		Region:    m.region,
+		DirectoryReadsPaused: m.directoryReadsPaused || m.stateErr != nil,
+		Granted:              true,
+		ExpiresAt:            m.expiresAt,
+		Window:               m.window,
+		Strict:               m.strict,
+		Region:               m.region,
 	}
 }
 

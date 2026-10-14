@@ -114,6 +114,7 @@ func handleConsentGrant(args []string) {
 	}
 	fmt.Printf("Consent granted%s. Window: %s. Expires at: %s.\n",
 		forHome(resp.Home), *window, resp.Status.ExpiresAt.Local().Format(time.RFC3339))
+	fmt.Println("Approved directory reads are resumed until you stop access or revoke the saved permission in Nexus.")
 	if *strict {
 		fmt.Println("Strict mode: ON (per-action approval ships under #64 follow-up).")
 	}
@@ -218,6 +219,7 @@ func renderConsentStatus(resp consent.Response, now time.Time) string {
 			st, home = resp.Homes[0].Status, resp.Homes[0].Home
 		}
 		multi := len(resp.Homes) > 1
+		fmt.Fprintf(&b, "Approved directory reads%s: %s\n", forHome(home), directoryReadsStatus(st))
 		if !st.Granted {
 			fmt.Fprintf(&b, "Consent%s: NOT GRANTED\n", forHome(home))
 			cmd := "memql worker consent grant --window=<duration>"
@@ -263,9 +265,19 @@ func renderConsentStatus(resp consent.Response, now time.Time) string {
 		fmt.Fprintln(&b, strings.TrimRight(line, " "))
 	}
 	fmt.Fprintln(&b)
+	for _, h := range resp.Homes {
+		fmt.Fprintf(&b, "Approved directory reads for %s: %s\n", h.Home, directoryReadsStatus(h.Status))
+	}
 	fmt.Fprintln(&b, "Open a window:  memql worker consent grant --window=<duration> --cluster <cluster>")
 	fmt.Fprintln(&b, "Close them all: memql worker consent revoke")
 	return b.String()
+}
+
+func directoryReadsStatus(st consent.Status) string {
+	if st.DirectoryReadsPaused {
+		return "paused on this machine"
+	}
+	return "available with a matching Nexus approval"
 }
 
 func handleConsentWatch(args []string) {

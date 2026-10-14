@@ -24,14 +24,24 @@ import (
 // direction, and a person reaching for it should not first have to
 // remember which cluster they opened a window for.
 type Homes struct {
-	mu   sync.Mutex
-	ids  []string
-	byID map[string]*Manager
-	now  func() time.Time
+	mu       sync.Mutex
+	ids      []string
+	byID     map[string]*Manager
+	now      func() time.Time
+	stateDir string
 }
 
 // NewHomes builds an empty registry on the live clock.
 func NewHomes() *Homes { return NewHomesWithClock(nil) }
+
+// NewPersistentHomes retains explicit local stops across worker restarts.
+// Time-limited windows and directory grants are never persisted here:
+// the engine freshly checks the owner's grant on every scoped dispatch.
+func NewPersistentHomes(stateDir string) *Homes {
+	h := NewHomes()
+	h.stateDir = stateDir
+	return h
+}
 
 // NewHomesWithClock is the test-friendly constructor; nil is the live
 // clock.
@@ -52,6 +62,9 @@ func (h *Homes) For(id string) *Manager {
 	m := NewManagerWithClock(h.now)
 	m.home = id
 	m.peers = h.count
+	if h.stateDir != "" {
+		m.loadDirectoryPause(h.stateDir, id)
+	}
 	h.byID[id] = m
 	h.ids = append(h.ids, id)
 	return m

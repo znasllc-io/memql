@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -204,7 +205,7 @@ func runConfiguredWorker(clusterURL, token, name string, logger *slog.Logger) er
 
 	// One consent window per cluster, as `worker run` has (memql-cockpit
 	// #433).
-	consentHomes := consent.NewHomes()
+	consentHomes := consent.NewPersistentHomes(filepath.Join(filepath.Dir(policyPath), "consent"))
 	consentSrv := consent.NewServer(consentHomes, consent.DefaultSocketPath(), logger)
 	consentCtx, consentCancel := context.WithCancel(context.Background())
 	if err := consentSrv.Listen(consentCtx); err != nil {

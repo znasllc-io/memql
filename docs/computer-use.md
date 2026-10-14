@@ -107,9 +107,22 @@ The engine binds each receipt to the person, agent, enrollment and machine.
 Once permits one exact dispatch and is durably consumed by the replica
 holding that machine's stream. Always permits matching calls until the
 person revokes it under **Nexus → Approvals → Saved permissions**. A saved
-permission never opens Cockpit's local consent window, overrides a local
-deny rule, or raises the machine's consent ceiling. When local consent is
-closed, enable computer access on that machine before retrying the action.
+permission never opens Cockpit's broader computer-control window or
+overrides a local deny rule. From Cockpit 0.18.3, a directory approval is
+sufficient for its bounded read: it does not require a second, temporary
+window. Always remains effective across window expiry, worker restarts and
+new requests until revoked. The engine checks the saved permission afresh
+before each dispatch; Cockpit does not cache it. Exact shell commands still
+require the local control window.
+
+`memql worker consent revoke` also pauses approved directory reads on every
+connected cluster (`--cluster <id>` limits the stop to one cluster). This
+local stop survives Cockpit restarts. A local `consent grant --window=1h`
+resumes approved directory reads and opens the broader window for one hour;
+the directory approval remains independent of that window's expiry.
+`consent status` shows both states. Pausing or removing the cluster
+connection also prevents dispatch. Damaged access-state files fail closed;
+storage failures are reported instead of claiming the stop was saved.
 
 Directory permissions cover only `fs_read`, `fs_list` and `fs_stat` under
 the reviewed absolute directory. Cockpit opens path components without
@@ -186,10 +199,11 @@ bypassed by decomposition. A strict grant may carry a screen region;
 a `mouse_click` whose live cursor falls inside it skips the approval
 modal. See the consent section below.
 
-Note: both consent classes require an open consent window -- observe
+Note: ordinary calls in both consent classes require an open consent window -- observe
 vs interact drives the audit stream and strict-mode behavior, not the
 basic gate decision. Unknown (tool, action) pairs classify as
 `unknown` and are treated like interact (deny-by-default).
+Scoped directory reads use the independent approval described above.
 
 ### Per-action arguments and results
 

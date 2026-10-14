@@ -10,8 +10,9 @@ import (
 	permission "github.com/znasllc-io/memql/core/computerpermission"
 )
 
-// A typed engine receipt constrains a call; it never opens the machine's own
-// consent window or changes local policy. The runner separately binds enrollment.
+// A typed engine receipt authorizes only its bounded directory read. It never
+// opens the broader computer-control window or changes local policy. The runner
+// separately binds enrollment. Exact commands still require the local window.
 func (d *Dispatcher) dispatchComputerPermission(ctx context.Context, dispatch *memqlv1.ToolDispatch, args map[string]any) (*memqlv1.Success, *memqlv1.Failure) {
 	c := dispatch.GetComputerPermission()
 	hash, err := permission.Hash(dispatch.GetTool(), dispatch.GetAction(), args)
@@ -27,10 +28,16 @@ func (d *Dispatcher) dispatchComputerPermission(ctx context.Context, dispatch *m
 		if !permission.ReadAction(dispatch.GetAction()) || !permission.Within(c.GetDirectory(), p) {
 			return nil, failure("computer_permission_refused", "This permission covers only reads inside the approved directory.")
 		}
+		if dec := d.consent.AllowsDirectoryRead(dispatch.GetAction()); !dec.Allowed {
+			return nil, failure("consent_required", dec.Reason)
+		}
 		return runScopedRead(ctx, dispatch.GetAction(), p, args, d.policy)
 	case "exact_command":
 		if dispatch.GetAction() != "exec" || c.GetDirectory() != "" {
 			return nil, failure("computer_permission_refused", "This permission covers only the exact approved command.")
+		}
+		if dec := d.consent.Allows(dispatch.GetTool(), dispatch.GetAction()); !dec.Allowed {
+			return nil, failure("consent_required", dec.Reason)
 		}
 		_, cwd, _, inputErr := permission.CommandInput(args)
 		if inputErr != nil {

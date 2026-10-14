@@ -343,7 +343,7 @@ func handleRun(args []string) {
 	// supervisor, and one window PER CLUSTER behind it (memql-cockpit
 	// #433): each home's dispatcher asks its own home's Manager, so a
 	// window opened for one cluster admits nothing another dispatches.
-	consentHomes := consent.NewHomes()
+	consentHomes := consent.NewPersistentHomes(filepath.Join(policyDir, "consent"))
 	consentSrv := consent.NewServer(consentHomes, consent.DefaultSocketPath(), logger)
 	consentCtx, consentCancel := context.WithCancel(context.Background())
 	if err := consentSrv.Listen(consentCtx); err != nil {
