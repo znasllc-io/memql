@@ -1866,6 +1866,11 @@ three came with epic memql#5414 (versions, verdicts and the reuse ratio).
   **Allow for this work**. Saved permissions are nested under Approvals and can
   be revoked individually.
 
+  An expired computer-access request keeps **Discuss in Ask** while its run
+  still waits on that exact request. Guidance can resume the saved work to
+  request fresh permission; it does not renew the expired grant. Approval
+  and advisor actions remain unavailable on the expired request.
+
   **Discuss in Ask** reuses the request's conversation. Discussion messages and
   explicit **Ask another agent** investigations are read-only child work;
   neither decides the request. The composer remains editable during advice.

@@ -60,9 +60,28 @@ func approvalPending(approval map[string]any) bool {
 	return true
 }
 
-func approvalDiscussionPending(approval, run map[string]any) bool {
+func approvalDiscussionWaiting(approval, run map[string]any) bool {
 	waiting, _ := run["waitingOn"].(map[string]any)
-	return approvalPending(approval) && run["status"] == "waiting" && run["cancelRequested"] != true && waiting["kind"] == "approval" && BareShortId(stringArg(waiting, "subject")) == BareShortId(stringArg(approval, "id"))
+	return stringArg(approval, "decision") == "" && run["status"] == "waiting" && run["cancelRequested"] != true && waiting["kind"] == "approval" && BareShortId(stringArg(waiting, "subject")) == BareShortId(stringArg(approval, "id"))
+}
+
+func approvalDiscussionPending(approval, run map[string]any) bool {
+	return approvalPending(approval) && approvalDiscussionWaiting(approval, run)
+}
+
+func approvalDiscussionGuidancePending(approval, run map[string]any) bool {
+	if !approvalDiscussionWaiting(approval, run) {
+		return false
+	}
+	if approvalPending(approval) {
+		return true
+	}
+	// Expiry prevents granting access, but the same native scope question can
+	// still take a correction. The work adapter and continuation receiver retain
+	// their owner, admitted-step and exact-checkpoint checks. Advice remains
+	// subject to the ordinary pending gate.
+	subject, _ := approval["subject"].(map[string]any)
+	return workPermissionGuidanceSubject(stringArg(approval, "kind"), subject, stringArg(approval, "artifactHash"))
 }
 
 func askValue(value any) ([]memorynodes.MemoryNode, error) {
@@ -107,7 +126,7 @@ func (e *MemQLEngine) askApprovalDiscussionBuiltin(ctx context.Context, args map
 		return nil, err
 	}
 	stateRows := MaterializeRows(state.OutputPayload())
-	canSend := pending && len(stateRows) == 1 && stateRows[0]["canSendGuidance"] == true
+	canSend := approvalDiscussionGuidancePending(approval, run) && len(stateRows) == 1 && stateRows[0]["canSendGuidance"] == true
 	response := map[string]any{
 		"conversationId": BareShortId(stringArg(row, "id")),
 		"approval":       map[string]any{"id": BareShortId(stringArg(approval, "id")), "runId": BareShortId(stringArg(run, "id")), "kind": approval["kind"], "question": boundedMemoryText(stringArg(approval, "question"), 4000), "status": status, "summary": boundedMemoryText(summary, 2000)},

@@ -393,6 +393,46 @@ const scopedComputerRequest = (kind = "directory_read") => ({
 });
 
 describe("computer permission choices", () => {
+  it("opens an expired scope request in its conversation without granting access", async () => {
+    const conn = fakeConnection({
+      approvals: [approvalRow({ id: "expired-scope", runId: "parked-run", kind: "scopeElevation", question: "Inspect the repository", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })],
+      runs: [runRow({ id: "parked-run", status: "waiting", waitingOn: { kind: "approval", subject: "expired-scope" } })],
+    });
+    h.connection = conn;
+    const discussApproval = vi.fn(async () => ({ conversationId: "original-conversation", approval: { id: "expired-scope", runId: "parked-run", kind: "scopeElevation", question: "Inspect the repository", status: "expired" }, canSendGuidance: true, canAskAdvisor: false }));
+    const transport = { ask: vi.fn(), discussApproval, conversations: { list: async () => [], read: async () => [], create: async () => ({ id: "unused", title: "Unused" }) } };
+    render(withSession(<AskProvider transport={transport}><NexusApp sectionId="approvals" navigate={() => {}} askContext={() => {}} /></AskProvider>));
+    fireEvent.click(await screen.findByText("Inspect the repository"));
+    expect(screen.getByText("This request has expired.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Reject this/ })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Discuss in Ask" }));
+    await waitFor(() => expect(discussApproval).toHaveBeenCalledWith("expired-scope"));
+    expect(conn.query.decideApproval).not.toHaveBeenCalled();
+    expect(transport.ask).not.toHaveBeenCalled();
+    await act(async () => {
+      conn.subscriptions.emit("v1:work:run", runRow({ id: "parked-run", status: "waiting", waitingOn: { kind: "approval", subject: "replacement" } }), "NODE_UPDATED");
+    });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Discuss in Ask" })).toBeNull());
+  });
+
+  it.each([
+    { status: "waiting", cancelRequested: true, waitingOn: { kind: "approval", subject: "expired-scope" } },
+    { status: "succeeded", waitingOn: { kind: "approval", subject: "expired-scope" } },
+    { status: "waiting", waitingOn: { kind: "approval", subject: "another-request" } },
+  ])("offers no expired-scope recovery when the run no longer waits: %j", async state => {
+    const conn = fakeConnection({
+      approvals: [approvalRow({ id: "expired-scope", runId: "parked-run", kind: "scopeElevation", question: "Inspect the repository", expiresAt: "2020-01-01T00:00:00Z", subject: { computerPermission: scopedComputerRequest() } })],
+      runs: [runRow({ id: "parked-run", ...state })],
+    });
+    mount(conn);
+    fireEvent.click(await screen.findByText("Inspect the repository"));
+    expect(screen.queryByRole("button", { name: "Discuss in Ask" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    expect(conn.query.decideApproval).not.toHaveBeenCalled();
+  });
+
   it.each(["directory_read", "exact_command"])("shows the exact %s scope and sends one dispatch by default", async kind => {
     const scope = scopedComputerRequest(kind);
     const conn = fakeConnection({ approvals: [approvalRow({ id: "permission", kind: "scopeElevation", question: "Inspect the repository", subject: { computerPermission: scope } })] });

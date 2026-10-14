@@ -512,6 +512,7 @@ function approvalDiscussionStatus(state: ConversationState, exchanges: AskTurn[]
   if (exchanges.some(turn => turn.approvalId === discussion.approval.id && ["queued", "waiting", "streaming"].includes(turn.state))) return "Advice is being prepared. You can keep writing.";
   if (discussion.canSendGuidance) {
     if (deferred) return discussion.savedGuidance ? "Guidance saved. Work stays paused until you raise the limit." : "Discuss here, or save guidance to use after you raise the limit.";
+    if (!discussion.canAskAdvisor) return "Send guidance to the waiting work. This does not grant access.";
     return "Send a message to discuss, or send your guidance to the waiting work.";
   }
   return discussion.canAskAdvisor ? "Send a message to discuss this request." : "This request is no longer waiting. Return to conversation to continue.";

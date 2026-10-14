@@ -242,6 +242,13 @@ export function ApprovalsSection({
       : freeText.trim() !== ""
     : true;
 
+  // Expiry removes the permission decision, not the person's route back to
+  // the work it parked. Ask revalidates guidance against the owned checkpoint.
+  const selectedRun = selected ? runsById.get(idTail(selected.runId)) : undefined;
+  const canDiscussExpiredScope = selected !== null && selected.decision === "" && lapsed
+    && selected.kind === "scopeElevation" && !failure && selectedRun !== undefined
+    && runWaitsForApproval(selectedRun, selected.id);
+
   const acts: Act[] = [];
   if (budgetResume) {
     acts.push({ label: "Resume work", tone: "primary", busy: decide.deciding === idTail(budgetResume.approvalId),
@@ -291,6 +298,8 @@ export function ApprovalsSection({
         onAct: () => decideIt("approved"),
       });
     }
+  } else if (canDiscussExpiredScope && selected && onDiscussInAsk) {
+    acts.push({ label: "Discuss in Ask", text: true, onAct: () => onDiscussInAsk(selected.id) });
   }
 
   const showingDetail = selectedApprovalId !== "";
