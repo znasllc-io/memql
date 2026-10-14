@@ -72,4 +72,15 @@ func TestReconcileObservationsKeepCadenceAndFreshnessWithoutHistory(t *testing.T
 	require.Equal(t, 1, writes)
 	runMutation(t, ctx, second, "upsertSyncState", syncArgs)
 	require.Equal(t, 1, writes, "an identical failure is a no-op")
+	syncArgs["lastAttemptAt"] = "2026-10-13T00:05:00Z"
+	runMutation(t, ctx, second, "upsertSyncState", syncArgs)
+	for _, id := range []string{syncID, domainID} {
+		var count int
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM memory_liveness WHERE id=?`, id).Scan(&count))
+		require.Equal(t, 1, count)
+		_, err = db.ExecContext(ctx, `DELETE FROM "MemoryNodes" WHERE id=?`, id)
+		require.NoError(t, err)
+		require.NoError(t, db.QueryRowContext(ctx, `SELECT count(*) FROM memory_liveness WHERE id=?`, id).Scan(&count))
+		require.Zero(t, count, "retirement must prune reconciliation observations too")
+	}
 }

@@ -56,13 +56,9 @@ BEGIN
 END
 $$;
 
-CREATE OR REPLACE FUNCTION memory_node_prune_liveness() RETURNS trigger
-LANGUAGE plpgsql SET search_path FROM CURRENT AS $$
-BEGIN
- DELETE FROM memory_liveness l USING (
-   SELECT DISTINCT id FROM old_rows WHERE concept IN
-     ('v1:worker:registration','v1:cluster:node','v1:platform:moduleReadiness','v1:platform:customDomain','v1:platform:syncState')
- ) gone WHERE l.id=gone.id AND NOT EXISTS (SELECT 1 FROM "MemoryNodes" n WHERE n.id=l.id);
- RETURN NULL;
-END
-$$;
+-- Extend the compression-compatible cleanup trigger to the new observations.
+DROP TRIGGER memory_node_prune_liveness ON "MemoryNodes";
+CREATE TRIGGER memory_node_prune_liveness AFTER DELETE ON "MemoryNodes"
+ FOR EACH ROW WHEN (OLD.concept IN
+   ('v1:worker:registration','v1:cluster:node','v1:platform:moduleReadiness','v1:platform:customDomain','v1:platform:syncState'))
+ EXECUTE FUNCTION memory_node_prune_liveness();

@@ -42,6 +42,8 @@ func TestSeedSelfAccountThenConfigureWithRealEngine(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	_, err = db.ExecContext(ctx, `CREATE TEMP TABLE "MemoryNodes" (LIKE public."MemoryNodes" INCLUDING ALL)`)
 	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `CREATE TEMP TABLE memory_liveness (LIKE public.memory_liveness INCLUDING ALL)`)
+	require.NoError(t, err)
 	_, err = memql.LoadUnifiedConcepts(nil)
 	require.NoError(t, err)
 	eng, err := memql.New(db)
