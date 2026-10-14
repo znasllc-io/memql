@@ -117,6 +117,18 @@ following symlinks and reads through the held descriptor, including list
 metadata. A link or alias is refused with an instruction to request the
 real directory. Local workspace and filesystem deny rules still apply.
 
+`fs_read` accepts `{path, maxBytes?}` and returns a prefix from the beginning
+of the file; it does not accept offsets or line ranges. The default is 5 MiB,
+and scoped reads require `maxBytes` between 1 and 5,242,880. The result keeps
+`path`, `content` and `size` (bytes returned), and also reports `fileSize`
+(the opened file's byte size) and `truncated` (the returned prefix is shorter
+than that size). An exact-size read reports `truncated: false`. These are byte
+counts, not character counts. Metadata comes from the same opened descriptor
+before the read; it is not a snapshot guarantee if another process changes
+the file concurrently. The same result fields apply to ordinary host reads.
+The bounded output preview also ends with returned bytes, file size and
+truncation status, so archived result previews retain these facts.
+
 Command permissions accept only `cmd`, an explicit canonical absolute
 `cwd`, and optional integer `timeoutSec` from 1 to 600 (default 60).
 Nexus shows all three resolved values. Environment overrides, stdin and

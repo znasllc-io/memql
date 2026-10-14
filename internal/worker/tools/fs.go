@@ -3,11 +3,13 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
@@ -21,6 +23,9 @@ func runFsRead(_ context.Context, args map[string]any, policy *Policy) (*memqlv1
 	if err := policy.CheckPath(path); err != nil {
 		return nil, failure("fs_denied", err.Error())
 	}
+	if refusal := validateFsReadArgs(args); refusal != nil {
+		return nil, refusal
+	}
 	maxBytes := argInt(args, "maxBytes", 5*1024*1024)
 	f, err := os.Open(expandHome(path))
 	if err != nil {
@@ -30,17 +35,48 @@ func runFsRead(_ context.Context, args map[string]any, policy *Policy) (*memqlv1
 		return nil, failure("fs_failed", err.Error())
 	}
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, failure("fs_failed", err.Error())
+	}
 	limited := io.LimitReader(f, int64(maxBytes))
 	body, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, failure("fs_failed", err.Error())
 	}
-	preview := truncate(string(body), 1024)
 	return successJSON(map[string]any{
-		"path":    path,
-		"content": string(body),
-		"size":    len(body),
-	}, 0, 0, len(body), preview), nil
+		"path":      path,
+		"content":   string(body),
+		"size":      len(body),
+		"fileSize":  info.Size(),
+		"truncated": info.Size() > int64(len(body)),
+	}, 0, 0, len(body), fileReadPreview(body, info.Size())), nil
+}
+
+// Never turn an unsupported range or misspelled limit into a successful full
+// read. Both read paths call this after their existing gates, before opening.
+func validateFsReadArgs(args map[string]any) *memqlv1.Failure {
+	for key := range args {
+		if key != "path" && key != "maxBytes" {
+			return failure("bad_request", "fs_read supports only path and optional maxBytes. Line ranges, offsets, search and other arguments are not supported.")
+		}
+	}
+	return nil
+}
+
+// Keep completeness at the end of the bounded preview, so a retained result
+// tail still distinguishes a file prefix from a complete read.
+func fileReadPreview(body []byte, fileSize int64) string {
+	metadata := fmt.Sprintf("\n[File read: returnedBytes=%d fileSize=%d truncated=%t]", len(body), fileSize, fileSize > int64(len(body)))
+	limit := 1024 - len(metadata)
+	// Inspect at most one rune beyond the preview boundary. A partial file
+	// read may itself end mid-rune, and protobuf string fields require UTF-8.
+	preview := strings.ToValidUTF8(string(body[:min(len(body), limit+utf8.UTFMax)]), "\uFFFD")
+	preview = truncate(preview, limit)
+	for !utf8.ValidString(preview) {
+		preview = preview[:len(preview)-1]
+	}
+	return preview + metadata
 }
 
 // runFsWrite implements workerHost.fs_write.

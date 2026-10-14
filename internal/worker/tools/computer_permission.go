@@ -63,6 +63,11 @@ func runScopedRead(ctx context.Context, action, p string, args map[string]any, p
 	if err := permissionLocalPath(policy, p); err != nil {
 		return nil, failure("fs_denied", err.Error())
 	}
+	if action == "fs_read" {
+		if refusal := validateFsReadArgs(args); refusal != nil {
+			return nil, refusal
+		}
+	}
 	f, err := openPermissionPath(p, action == "fs_list")
 	if err != nil {
 		return nil, failure("computer_permission_path_refused", fmt.Sprintf("Cannot read this path without following a link. Request access using its real directory path: %v", err))
@@ -85,7 +90,13 @@ func runScopedRead(ctx context.Context, action, p string, args map[string]any, p
 		if err != nil {
 			return nil, failure("fs_failed", err.Error())
 		}
-		return successJSON(map[string]any{"path": p, "content": string(body), "size": len(body)}, 0, 0, len(body), truncate(string(body), 1024)), nil
+		return successJSON(map[string]any{
+			"path":      p,
+			"content":   string(body),
+			"size":      len(body),
+			"fileSize":  info.Size(),
+			"truncated": info.Size() > int64(len(body)),
+		}, 0, 0, len(body), fileReadPreview(body, info.Size())), nil
 	case "fs_list":
 		entries, err := f.ReadDir(-1)
 		if err != nil {
