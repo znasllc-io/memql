@@ -23,14 +23,44 @@ func fullComputerSubject() map[string]any {
 	s["target"] = "Laptop"
 	return s
 }
-func TestComputerPermissionDBFullSubjectAcrossReplicas(t *testing.T) {
+
+// Boot the two independent engines once. Every case gets fresh integration
+// instances, decision pools, owners and runs; no in-memory authority is shared.
+func TestComputerPermissionDBRecovery(t *testing.T) {
+	a, b := openActsDB(t), openActsDB(t)
+	cases := []struct {
+		name string
+		run  func(*testing.T, actsDB, actsDB)
+	}{
+		{"full subject across replicas", testComputerPermissionDBFullSubjectAcrossReplicas},
+		{"interrupted resume", testComputerPermissionDBRecoverInterruptedResume},
+		{"legacy request and expiry", testComputerPermissionDBRepairStuckRequestAndExpiry},
+		{"fresh review", testComputerPermissionDBRenewalRequiresFreshReview},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { first, second := computerPermissionCase(t, a, b); c.run(t, first, second) })
+	}
+}
+
+func computerPermissionCase(t *testing.T, a, b actsDB) (actsDB, actsDB) {
+	t.Helper()
+	owner := newRowId("v1:identity:user")
+	for _, fixture := range []*actsDB{&a, &b} {
+		fixture.owner = owner
+		fixture.i = New(fixture.eng, testLogger())
+		fixture.i.bunDB = func() *bun.DB { return fixture.db }
+		fixture.i.SetGateDB(testGates(t))
+		fixture.i.admitRow = memql.AdmitSourceRow
+	}
+	return a, b
+}
+
+func testComputerPermissionDBFullSubjectAcrossReplicas(t *testing.T, first, second actsDB) {
 	for _, mode := range []string{"once", "always"} {
 		t.Run(mode, func(t *testing.T) {
-			a := openActsDB(t)
+			a, peer := computerPermissionCase(t, first, second)
 			run := a.openRun(t, nil)
-			peer := workHeadsPeer(t, a.db)
-			b := New(dispatchDBEngine(t, peer), testLogger(), func() *bun.DB { return peer })
-			b.SetGateDB(testGates(t))
+			b := peer.i
 			person := actorCtx(a.owner)
 			ctx := common.ContextWithRun(person, common.RunContext{RunId: run, OwnerUserId: a.owner, StepKey: "read"})
 			id, err := a.i.AskComputerScope(ctx, a.owner, run, fullComputerSubject())
@@ -118,9 +148,7 @@ func (e *interruptedComputerResume) Execute(ctx context.Context, q string) (*mem
 	return e.Engine.Execute(ctx, q)
 }
 
-func TestComputerPermissionDBRecoverInterruptedResume(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
-	b.owner = a.owner
+func testComputerPermissionDBRecoverInterruptedResume(t *testing.T, a, b actsDB) {
 	run := a.openRun(t, nil)
 	a.writeVersion(t, run, run, "read", 0, 1, nil, "", map[string]any{"status": "running"})
 	person := actorCtx(a.owner)
@@ -141,9 +169,7 @@ func TestComputerPermissionDBRecoverInterruptedResume(t *testing.T) {
 	_, err = b.i.handleDecideApproval(person, args, 0)
 	require.Error(t, err)
 }
-func TestComputerPermissionDBRepairStuckRequestAndExpiry(t *testing.T) {
-	a, b := openActsDB(t), openActsDB(t)
-	b.owner = a.owner
+func testComputerPermissionDBRepairStuckRequestAndExpiry(t *testing.T, a, b actsDB) {
 	run := a.openRun(t, nil)
 	a.writeVersion(t, run, run, "read", 0, 1, nil, "", map[string]any{"status": "running"})
 	s := fullComputerSubject()
@@ -202,11 +228,10 @@ func TestComputerPermissionDecisionStates(t *testing.T) {
 
 // A renewal is a new review, not a transfer of the old decision. This includes
 // an already-recorded decision whose continuation failed before the deadline.
-func TestComputerPermissionDBRenewalRequiresFreshReview(t *testing.T) {
+func testComputerPermissionDBRenewalRequiresFreshReview(t *testing.T, first, second actsDB) {
 	for _, scenario := range []string{"expired once", "revoked always", "new enrollment"} {
 		t.Run(scenario, func(t *testing.T) {
-			a, b := openActsDB(t), openActsDB(t)
-			b.owner = a.owner
+			a, b := computerPermissionCase(t, first, second)
 			person := actorCtx(a.owner)
 			run := a.openRun(t, nil)
 			a.writeVersion(t, run, run, "read", 0, 1, nil, "", map[string]any{"status": "running"})
