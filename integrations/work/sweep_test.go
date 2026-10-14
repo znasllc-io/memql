@@ -122,7 +122,7 @@ func TestLastHeartbeatFallsBackAndRefusesToGuess(t *testing.T) {
 }
 
 // TestAbandonedMessageDoesNotClaimTheRunFailed. The sweep knows the node
-// stopped answering; whether the work was about to succeed is not something it
+// stopped reporting progress; whether the node is healthy or the work was about to succeed is not something it
 // can see, and an append-only row cannot be corrected.
 func TestAbandonedMessageDoesNotClaimTheRunFailed(t *testing.T) {
 	last := time.Date(2026, 9, 5, 11, 0, 0, 0, time.UTC)
@@ -133,8 +133,8 @@ func TestAbandonedMessageDoesNotClaimTheRunFailed(t *testing.T) {
 	if !strings.Contains(msg, last.Format(time.RFC3339)) {
 		t.Errorf("the message does not say when the run was last heard from: %q", msg)
 	}
-	if !strings.Contains(msg, "lost the node") {
-		t.Errorf("an executing run's abandon message should name node loss: %q", msg)
+	if !strings.Contains(msg, "stopped reporting progress") || strings.Contains(msg, "lost the node") {
+		t.Errorf("an execution heartbeat must not be reported as node loss: %q", msg)
 	}
 	for _, banned := range []string{"failed", "error", "crashed"} {
 		if strings.Contains(strings.ToLower(msg), banned) {

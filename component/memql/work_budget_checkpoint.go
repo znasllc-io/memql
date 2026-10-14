@@ -30,7 +30,7 @@ func (e *MemQLEngine) PauseWorkForBudget(ctx context.Context, ceiling *RunCeilin
 	ac, _ := auth.AccessFromContext(ctx)
 	if !ok || ac == nil || run.GoalId == "" || run.OwnerUserId == "" || run.StepKey == "" || ceiling == nil || len(messages) == 0 ||
 		BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) || BareShortId(ceiling.RunId) != BareShortId(run.RunId) ||
-		ceiling.StepKey != run.StepKey || !run.Override.Empty() || run.Mode == common.RunModeReplay {
+		ceiling.StepKey != run.StepKey || run.Mode == common.RunModeReplay {
 		return fmt.Errorf("budget checkpoint requires the unchanged owned execution")
 	}
 	writer, ok := e.IntegrationByName("work").(interface {

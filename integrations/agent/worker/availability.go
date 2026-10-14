@@ -26,6 +26,8 @@ type Availability struct {
 // and older workers that can serve inference but cannot honor typed approval.
 // The selector is the enrollment identity, never an operator-editable label.
 type MachineAvailability struct {
+	HomeDirectory               string            `json:"homeDirectory,omitempty"`
+	NativePlatform              string            `json:"platform,omitempty"`
 	Name                        string            `json:"name"`
 	RequireLabels               map[string]string `json:"requireLabels,omitempty"`
 	HeadlessOnline              bool              `json:"headlessOnline"`
@@ -62,7 +64,7 @@ func (r *Router) Availability(ctx context.Context, owner string) (Availability, 
 				if !exists {
 					index = len(out.Machines)
 					indexes[candidate.RegistrationId] = index
-					machine := MachineAvailability{Name: candidate.Label(), ComputerPermissionSupported: candidate.ActionContracts.Supports(permission.Contract, permission.Version)}
+					machine := MachineAvailability{Name: candidate.Label(), HomeDirectory: candidate.HomeDirectory, NativePlatform: candidate.NativePlatform, ComputerPermissionSupported: candidate.ActionContracts.Supports(permission.Contract, permission.Version)}
 					if candidate.MachineId != "" {
 						machine.RequireLabels = map[string]string{"machineId": candidate.MachineId}
 					}

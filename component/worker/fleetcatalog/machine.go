@@ -14,6 +14,7 @@ import (
 // -- a candidate may be held by another replica, in which case this node has
 // no handle for it at all and dispatch goes over the forward.
 type Candidate struct {
+	HomeDirectory    string
 	NativePlatform   string
 	ActionContracts  workerservice.ActionContracts
 	RepositoryScopes workerservice.RepositoryScopes

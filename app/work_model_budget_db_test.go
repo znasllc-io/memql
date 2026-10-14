@@ -130,17 +130,17 @@ func TestWorkDBBudgetGuidanceSurvivesRepeatedRaises(t *testing.T) {
 	testModelBudgetBoundaries(t, []string{"guidance"})
 }
 func TestWorkDBNativeBudgetContinuesTheExplicitRerun(t *testing.T) {
-	testModelBudgetBoundaries(t, []string{"legacy-rerun"})
+	testModelBudgetBoundaries(t, []string{"legacy-rerun", "repair-rerun", "model-rerun"})
 }
 func TestWorkDBEntryBudgetContinuesTheExplicitRerun(t *testing.T) {
-	testModelBudgetBoundaries(t, []string{"entry-rerun", "entry-rerun-failure", "entry-rerun-tail"})
+	testModelBudgetBoundaries(t, []string{"entry-rerun", "entry-rerun-failure", "entry-rerun-tail", "model-rerun-tail"})
 }
 func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 	for _, background := range []bool{false, true} {
 		for _, boundary := range boundaries {
-			tail := boundary == "entry-rerun-tail"
+			tail := boundary == "entry-rerun-tail" || boundary == "model-rerun-tail"
 			entry := strings.HasPrefix(boundary, "entry-rerun") && !tail
-			rerun := boundary == "legacy-rerun" || entry || tail
+			rerun := boundary == "legacy-rerun" || boundary == "repair-rerun" || boundary == "model-rerun" || entry || tail
 			t.Run(fmt.Sprintf("background=%v/%s", background, boundary), func(t *testing.T) {
 				writer, db := workTemplateDBEngineAndDB(t)
 				reader := workTemplateDBEngine(t)
@@ -268,7 +268,17 @@ func testModelBudgetBoundaries(t *testing.T, boundaries []string) {
 						require.NoError(t, work.NewModelJournal(writer).Record(person, owner, memql.JournaledCall{RunId: runID, StepKey: "prior", RequestHash: "another-completed-call", PromptRef: "fixture", Served: memql.ServedLocal}))
 						write("updateWorkGoal", map[string]any{"goalId": goalID, "ceilings": map[string]any{"maxModelCalls": 1, "wallClockMs": 3600000}})
 					}
-					act("rerunStep", map[string]any{"runId": runID, "stepKey": legacy.FailedStep})
+					rerunArgs := map[string]any{"runId": runID, "stepKey": legacy.FailedStep}
+					if boundary == "model-rerun" || boundary == "model-rerun-tail" {
+						rerunArgs["level"] = "strong"
+					}
+					act("rerunStep", rerunArgs)
+					if boundary == "repair-rerun" {
+						// Automatic contract repair persists this same guidance on the request.
+						repaired := load(reader, runID)
+						recorded := map[string]any{"requestId": repaired.Rerun.RequestId, "stepKey": repaired.Rerun.StepKey, "reason": "rerun", "versions": repaired.Rerun.Versions, "override": map[string]any{"guidance": map[string]any{"reason": "The prior turn did not produce a valid completion or durable question."}}}
+						write("updateWorkRun", map[string]any{"runId": runID, "rerun": recorded})
+					}
 					j := load(reader, runID)
 					require.NotNil(t, j.Rerun)
 					require.Empty(t, j.HumanResumeId)

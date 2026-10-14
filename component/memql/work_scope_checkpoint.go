@@ -20,7 +20,7 @@ import (
 func (e *MemQLEngine) BindWorkScopeCheckpoint(ctx context.Context, args, subject map[string]any) (map[string]any, error) {
 	run, ok := common.RunFromContext(ctx)
 	ac, _ := auth.AccessFromContext(ctx)
-	if !ok || run.GoalId == "" || run.StepKey == "" || !run.Override.Empty() || run.Mode == common.RunModeReplay {
+	if !ok || run.GoalId == "" || run.StepKey == "" || run.Mode == common.RunModeReplay {
 		return subject, nil
 	}
 	if ac == nil || BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) {
@@ -51,7 +51,7 @@ func (e *MemQLEngine) BindWorkScopeCheckpoint(ctx context.Context, args, subject
 		return subject, nil
 	}
 	data, _ := rows[0]["data"].(map[string]any)
-	if stringField(data, "rerunRequestId") != run.RerunRequestId {
+	if !continuationExecutionMatches(run, data) {
 		return subject, nil
 	}
 	messages, err := decodeWorkContinuation(data)

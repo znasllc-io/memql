@@ -17,13 +17,13 @@
       "domainId": "computer-use",
       "sourceRef": "computerUse:headlessFirst",
       "catalog": "computerUse",
-      "sha256": "b07df7d59439d9156b678d14958a7bc481286e5422aa90c3161eab0bff283b85"
+      "sha256": "5b83ab80ff5fa6be1027533516291bdb6f14a033de88f16ec0ff17b520d342fd"
     },
     {
       "domainId": "computer-use",
       "sourceRef": "computerUse:machineSelection",
       "catalog": "computerUse",
-      "sha256": "5b0cbed21e42727f5e000385aec8f7c97159e42e1241598cd37f82f831755e6e"
+      "sha256": "0730acffee18b7570c4aaed7d986f04a6c81301d934265b9604e6f38d6919e65"
     },
     {
       "domainId": "computer-use",

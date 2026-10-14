@@ -336,7 +336,7 @@ import (
 //
 // Before-write field statements and trigger timing coexist with the retirement
 // of error(). error("message") remains live; no statement has an onError context.
-const GrammarVersion = "2026.10-concept-retention-bd219665"
+const GrammarVersion = "2026.10-tool-object-fields-9d8f76de"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

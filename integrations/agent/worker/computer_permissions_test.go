@@ -260,3 +260,30 @@ func TestComputerPermissionDefaultTimeoutKeepsExactWireHashAcrossHop(t *testing.
 		})
 	}
 }
+
+func TestMalformedComputerPermissionIdentifiesTheRepairField(t *testing.T) {
+	for _, tc := range []struct{ name, operation, field string }{
+		{"missing tool", `{"action":"fs_list","args":{"path":"/home"}}`, "operation.tool"},
+		{"missing args", `{"tool":"workerHost","action":"fs_list"}`, "operation.args"},
+		{"missing directory", `{"tool":"workerHost","action":"fs_list","args":{"path":"/home/person"}}`, "operation.directory"},
+		{"relative path", `{"tool":"workerHost","action":"fs_list","args":{"path":"~"},"directory":"/home/person"}`, "operation.args.path"},
+		{"outside directory", `{"tool":"workerHost","action":"fs_list","args":{"path":"/etc"},"directory":"/home/person"}`, "operation.args.path"},
+		{"root cwd", `{"tool":"workerHost","action":"exec","args":{"cmd":"ls -la ~","cwd":"/"}}`, "operation.args"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var operation map[string]any
+			if err := json.Unmarshal([]byte(tc.operation), &operation); err != nil {
+				t.Fatal(err)
+			}
+			// No router or authority: malformed input must fail before either is used.
+			_, _, err := (&Dispatcher{}).prepareComputerPermission(context.Background(), "owner", "agent", "run", operation, nil)
+			var structured *memql.StructuredError
+			if !errors.As(err, &structured) {
+				t.Fatalf("not an actionable argument error: %v", err)
+			}
+			if structured.Details["field"] != tc.field {
+				t.Fatalf("field = %v; want %s", structured.Details, tc.field)
+			}
+		})
+	}
+}

@@ -110,7 +110,8 @@ func workContinuationAnswer(ctx context.Context, engine interface {
 	if proof == nil {
 		return nil, nil
 	}
-	if proof.ApprovalID == "" || proof.StepKey == "" || proof.StepKey != run.StepKey || !run.Override.Empty() ||
+	overrideKey, overrideErr := common.StepOverrideFingerprint(run.Override)
+	if overrideErr != nil || overrideKey != proof.OverrideKey || proof.ApprovalID == "" || proof.StepKey == "" || proof.StepKey != run.StepKey ||
 		memql.BareShortId(asString(row["humanResumeId"])) != memql.BareShortId(proof.ApprovalID) {
 		return nil, fmt.Errorf("work context: the recorded decision does not match this continuation")
 	}

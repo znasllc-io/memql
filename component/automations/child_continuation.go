@@ -57,15 +57,29 @@ func (e *Executor) prepareCheckpoint(ctx context.Context, journal *RunJournal, a
 	if depth == 0 && key != request.StepKey {
 		return ctx, nil, fmt.Errorf("checkpoint target changed")
 	}
-	if journal.StepStates[key].Status != "waiting" || !journal.StepOverrides[key].Empty() {
+	if journal.StepStates[key].Status != "waiting" {
 		return ctx, nil, fmt.Errorf("checkpoint step is not an unchanged suspension")
 	}
 	if journal.Rerun != nil {
-		if depth != 0 || request.RerunRequestID == "" || journal.Rerun.RequestId != request.RerunRequestID || !journal.Rerun.Override.Empty() || journal.Rerun.Snapshot != nil {
+		if depth != 0 || request.RerunRequestID == "" || journal.Rerun.RequestId != request.RerunRequestID || journal.Rerun.Snapshot != nil {
 			return ctx, nil, fmt.Errorf("checkpoint rerun request changed")
 		}
 	} else if depth == 0 && request.RerunRequestID != "" {
 		return ctx, nil, fmt.Errorf("checkpoint rerun request is unavailable")
+	}
+	// Restore the exact recorded override before proving a native checkpoint.
+	// A repair is still the same suspended execution; new inputs are not.
+	if depth == 0 {
+		run.Override = journal.StepOverrides[key]
+		if journal.Rerun.targets(key) {
+			if !common.SameStepOverride(run.Override, journal.Rerun.Override) {
+				return ctx, nil, fmt.Errorf("checkpoint step override changed")
+			}
+			run.Override = journal.Rerun.Override
+		}
+		ctx = common.ContextWithRun(ctx, run)
+	} else if !journal.StepOverrides[key].Empty() {
+		return ctx, nil, fmt.Errorf("nested checkpoint override changed")
 	}
 	var step *Step
 	for _, candidate := range auto.Steps {

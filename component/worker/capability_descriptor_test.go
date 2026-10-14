@@ -239,3 +239,22 @@ func TestDecodeRegistrationCapabilityDescriptor(t *testing.T) {
 		t.Fatalf("empty stored object must decode to nil, got %+v", oldRow.CapabilityDescriptor)
 	}
 }
+
+func TestCapabilityDescriptorHomeDirectoryIsMetadataNotALabel(t *testing.T) {
+	for _, home := range []string{"/home/person", "/Users/Person With Spaces", "", "/", "~", "/home/../etc"} {
+		raw, _ := json.Marshal(map[string]any{"schemaVersion": 1, "platform": "linux", "displayServer": "none", "actions": []string{}, "homeDirectory": home})
+		descriptor, err := ParseCapabilityDescriptor(string(raw))
+		if home == "/" || home == "~" || home == "/home/../etc" {
+			if err == nil {
+				t.Fatalf("invalid home accepted: %q", home)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := HomeDirectoryFromMap(descriptor.AsMap()); got != home {
+			t.Fatalf("home metadata lost: %q != %q", got, home)
+		}
+	}
+}

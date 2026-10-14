@@ -2,7 +2,9 @@
 /// computerUseOnline means desktop control with a display is available;
 /// headlessOnline means host tools are available. Neither grants permission.
 /// machines lists names, exact requireLabels selectors and scoped-permission
-/// support. Ask the person to choose when the intended target is unclear.
+/// support, platform and the worker account's homeDirectory when reported.
+/// Missing homeDirectory means unknown; ask for the path or update Cockpit.
+/// Ask the person to choose when the intended target is unclear.
 @handler(type="function", name="agentworkerStatus")
 @requiresAgentRole("assistant", "specialist")
 tool workerStatus {
@@ -17,7 +19,18 @@ tool workerStatus {
 @handler(type="function", name="agentworkerRequestScope")
 @requiresAgentRole("assistant", "specialist")
 tool requestComputerUseScope {
- operation object @description("Supply {tool: workerHost, action, args, directory?}. For fs_read, fs_list and fs_stat, operation.directory is required: an explicit absolute directory containing the exact absolute args.path. For exec, directory is not required; args must contain the exact cmd and absolute cwd, with optional timeoutSec (1-600). Environment overrides, stdin and extra command options are refused rather than hidden. The server selects and binds one machine, and Nexus offers once or always. Never substitute broader scope when this request is refused.")
+ operation object @description("Supply this for a headless read or exact command. Copy paths from the selected machine's homeDirectory or the person; do not guess. Never replace a refused operation with broader access.") {
+  tool enum("workerHost")!
+  action enum("fs_read", "fs_list", "fs_stat", "exec")!
+  args object! {
+   path string @description("Required for reads: exact absolute path. For home listing copy workerStatus.machines[].homeDirectory.")
+   cmd string @description("Required for exec: exact command to approve and run.")
+   cwd string @description("Required for exec: explicit absolute working directory other than /. Do not use ~ or environment variables.")
+   timeoutSec integer @description("Optional command timeout, 1-600 seconds.")
+   maxBytes integer @description("Optional file read limit, 1-5242880 bytes.")
+  }
+  directory string @description("Required for reads: absolute directory containing args.path. For fs_list use the same directory as args.path.")
+ }
  intent string!
  requestedScope enum("observe", "full")!
  summary string!

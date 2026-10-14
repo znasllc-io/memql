@@ -3,6 +3,7 @@ package worker
 import (
 	"encoding/json"
 	"fmt"
+	permission "github.com/znasllc-io/memql/core/computerpermission"
 	"regexp"
 )
 
@@ -17,6 +18,7 @@ import (
 // field: this struct serialized as JSON. Unknown JSON fields are
 // tolerated (additive evolution does not bump schemaVersion).
 type CapabilityDescriptor struct {
+	HomeDirectory        string           `json:"homeDirectory,omitempty"`
 	Architecture         string           `json:"architecture,omitempty"`
 	ActionContracts      ActionContracts  `json:"actionContracts,omitempty"`
 	RepositoryScopes     RepositoryScopes `json:"repositoryScopes,omitempty"`
@@ -100,6 +102,9 @@ func ParseCapabilityDescriptor(raw string) (*CapabilityDescriptor, error) {
 		return nil, fmt.Errorf("capability descriptor: unknown inferenceServe %q (want %s|%s)",
 			d.InferenceServe, InferenceServeOwner, InferenceServeCluster)
 	}
+	if d.HomeDirectory != "" && !permission.CleanAbsolute(d.HomeDirectory) {
+		return nil, fmt.Errorf("capability descriptor: homeDirectory must be a canonical absolute directory other than root")
+	}
 	if d.Architecture != "" && !capabilityNamePattern.MatchString(d.Architecture) {
 		return nil, fmt.Errorf("capability descriptor: invalid architecture %q", d.Architecture)
 	}
@@ -144,6 +149,7 @@ func (d *CapabilityDescriptor) AsMap() map[string]any {
 	}
 	out := map[string]any{
 		"platform":             d.Platform,
+		"homeDirectory":        d.HomeDirectory,
 		"displayServer":        d.DisplayServer,
 		"computerUseAvailable": d.ComputerUseAvailable,
 		"actions":              actions,
@@ -203,4 +209,15 @@ func (d *CapabilityDescriptor) NativePlatform() string {
 func NativePlatformFromMap(value any) string {
 	m, _ := value.(map[string]any)
 	return capabilityDescriptorFromMap(m).NativePlatform()
+}
+
+// HomeDirectoryFromMap reads machine metadata only from the registered descriptor,
+// never from operator labels. An older worker reports no path, not a guess.
+func HomeDirectoryFromMap(value any) string {
+	m, _ := value.(map[string]any)
+	home, _ := m["homeDirectory"].(string)
+	if permission.CleanAbsolute(home) {
+		return home
+	}
+	return ""
 }

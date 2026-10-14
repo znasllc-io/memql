@@ -1971,6 +1971,7 @@ func (*ToolDecl) node() {}
 // @description(\"...\") @enum(\"a\", \"b\") @default(\"x\")
 // @autoInjected`.
 type ToolFieldDecl struct {
+	Fields       []ToolFieldDecl // Explicit object fields; nil means an open object.
 	Name         string
 	Type         string   // "string" / "integer" / "int" / "number" / "float" / "boolean" / "bool" / "object" / "array"
 	Required     bool     // @required flag

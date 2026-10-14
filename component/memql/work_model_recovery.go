@@ -26,7 +26,7 @@ func (e *MemQLEngine) RecoverWorkModelCall(ctx context.Context, failure string, 
 	run, ok := common.RunFromContext(ctx)
 	ac, _ := auth.AccessFromContext(ctx)
 	if !ok || ac == nil || run.GoalId == "" || run.OwnerUserId == "" || run.StepKey == "" ||
-		BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) || !run.Override.Empty() || run.Mode == common.RunModeReplay ||
+		BareShortId(ac.UserId) != BareShortId(run.OwnerUserId) || run.Mode == common.RunModeReplay ||
 		!work.IsModelCallCeiling(failure) || len(messages) == 0 || attempt < 0 || maxRetries < 0 || maxRetries > 3 {
 		return false, fmt.Errorf("model recovery requires the unchanged owned execution and a provider failure")
 	}

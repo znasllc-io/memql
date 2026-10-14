@@ -173,6 +173,7 @@ func TestWorkDBBudgetCheckpointResumesNestedAgentOnAnotherReplica(t *testing.T) 
 					require.False(t, ready, "answer cannot precede durable unwind")
 				}
 			}
+			t.Setenv("MEMQL_NODE_ID", "agent-origin")
 			ex := triggers[0].executor()
 			defer ex.Close()
 			execution, err := ex.ExecuteAdopted(ctx, triggers[0].template.members["parent"], automations.RunAdoption{RunId: runID})
@@ -259,6 +260,7 @@ func TestWorkDBBudgetCheckpointResumesNestedAgentOnAnotherReplica(t *testing.T) 
 				require.Zero(t, effects["continued"])
 				insertWorkRow(t, db, approvalID, "v1:work:approval", time.Now().UTC(), original)
 			}
+			t.Setenv("MEMQL_NODE_ID", "agent-resumer")
 			resume := triggers[1].executor()
 			defer resume.Close()
 			done, err := resume.ResumeFrom(ctx, journal, triggers[1].template.members["parent"], nil)
@@ -283,6 +285,9 @@ func TestWorkDBBudgetCheckpointResumesNestedAgentOnAnotherReplica(t *testing.T) 
 			require.NoError(t, err)
 			require.Equal(t, "completed", done.Status)
 			require.Equal(t, map[string]int{"parent": 1, "middle": 1, "leaf": 1, "tool": 1, "continued": 1, "leaf-tail": 1, "parent-tail": 1}, effects)
+			var resumedNode string
+			require.NoError(t, db.NewRaw(`SELECT payload->>'nodeId' FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, "v1:work:run:"+runID).Scan(person, &resumedNode))
+			require.Equal(t, "agent-resumer", resumedNode, "resume must name the replica doing the work")
 			var raw string
 			require.NoError(t, db.NewRaw(`SELECT payload->'spent' FROM "MemoryNodes" WHERE id=? ORDER BY "createdAt" DESC LIMIT 1`, "v1:work:run:"+runID).Scan(person, &raw))
 			require.Contains(t, raw, `"retries": 2`)
